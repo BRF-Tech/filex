@@ -25,9 +25,10 @@ import { fileURLToPath } from 'node:url';
 
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
-import type { AuthProvider, AuthProviderField, AuthProviderTestResult } from '@/api/types';
+import type { AuthProvider, AuthProviderField, AuthProviderTestAccount, AuthProviderTestResult } from '@/api/types';
+import { useToastStore } from '@/stores/toast';
 
-const testCall = vi.fn<[string, Record<string, unknown>], Promise<AuthProviderTestResult>>();
+const testCall = vi.fn<[string, Record<string, unknown>, AuthProviderTestAccount?], Promise<AuthProviderTestResult>>();
 const updateCall = vi.fn();
 
 const LDAP_FIELDS: AuthProviderField[] = [
@@ -88,7 +89,7 @@ vi.mock('@/api/auth-providers', () => ({
       secretKey: fx.secretKey,
     })),
     update: (...a: unknown[]) => updateCall(...a),
-    test: (id: string, draft: Record<string, unknown>) => testCall(id, draft),
+    test: (id: string, draft: Record<string, unknown>, account?: AuthProviderTestAccount) => testCall(id, draft, account),
   },
 }));
 
@@ -111,7 +112,6 @@ function mountPage(locale: 'en' | 'tr'): VueWrapper {
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
-  document.body.innerHTML = '';
   fx.providers = defaultProviders();
   fx.secretKey = true;
 });
@@ -171,6 +171,28 @@ describe('Test now', () => {
     expect(connect.text()).toContain(tr.authProviders.technicalDetailIs.replace('{detail}', 'dial tcp: connection refused'));
     expect(connect.text()).not.toMatch(/^connect: fail/);
     expect(w.find('[data-testid="auth-provider-check-required"]').text()).toContain(tr.authProviders.checks.required.ok);
+  });
+});
+
+describe('a step the server worded itself', () => {
+  it('shows the server’s hint as the sentence, not the step’s name', async () => {
+    testCall.mockResolvedValue({
+      testable: true,
+      ok: false,
+      checks: [
+        { id: 'sudo', status: 'ok' },
+        { id: 'pamtester', status: 'fail', params: { reason: 'missing', hint: 'pamtester is not installed at /usr/bin/pamtester. Install it.' } },
+      ],
+    });
+    const w = mountPage('en');
+    await flushPromises();
+    await w.find('[data-testid="auth-provider-test-button-ldap"]').trigger('click');
+    await flushPromises();
+    const bad = w.find('[data-testid="auth-provider-check-pamtester"]');
+    expect(bad.attributes('data-status')).toBe('fail');
+    expect(bad.text()).toContain('pamtester is not installed at /usr/bin/pamtester. Install it.');
+    expect(bad.text()).not.toContain('pamtester: fail');
+    expect(w.find('[data-testid="auth-provider-check-sudo"]').text()).toContain(en.authProviders.checks.sudo.ok);
   });
 });
 
@@ -343,5 +365,350 @@ describe('the words for every step the server can answer', () => {
     expect(missing).toEqual([]);
     const words = bundle.authProviders.reasons as Record<string, string>;
     expect(reasons.filter((r) => !words[r])).toEqual([]);
+  });
+});
+
+// ── the fields and the names the server's schema can send ─────────────────
+//
+// The form is drawn from the server's schema (authsetup.Schema): a field the
+// catalogue has no label for is drawn with its raw key ("pamtester_path") —
+// read out of the Go source, so a new field without words fails here.
+describe('the words for every field and provider the page manages', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const PAGE = fs.readFileSync(path.resolve(here, '../../../backend/internal/authsetup/page.go'), 'utf8');
+  const schema = /var Schema = map\[string\]\[\]Field\{[\s\S]*?\n\}/.exec(PAGE)?.[0] ?? '';
+  const keys = [...new Set([...schema.matchAll(/\{Key: "([a-z_]+)"/g)].map((m) => m[1]))];
+  const managed = [...(/var Managed = \[\]string\{([^}]*)\}/.exec(PAGE)?.[1] ?? '').matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+
+  it('finds the schema at all', () => {
+    expect(keys).toContain('pamtester_path');
+    expect(keys).toContain('group_attr');
+    expect(managed).toEqual(expect.arrayContaining(['windows', 'pam']));
+  });
+
+  it.each([
+    ['en', en],
+    ['tr', tr],
+  ])('%s has a label for each field and a name for each provider', (_lang, bundle) => {
+    const fields = bundle.authProviders.fields as Record<string, string>;
+    expect(keys.filter((k) => !fields[k])).toEqual([]);
+    const names = bundle.authProviders.providers as Record<string, string>;
+    expect(managed.filter((n) => !names[n])).toEqual([]);
+  });
+});
+
+// ── operating-system providers: the test account ───────────────────────────
+//
+// windows and pam are proved by signing a real account in (#128). The card
+// asks for that account beside its buttons; the account goes with the one
+// request that tests or saves; a failing test is never confirmed away; the
+// account that passed becomes a super administrator; and the password is
+// emptied the moment its request is answered — it is kept nowhere.
+describe('an operating-system provider', () => {
+  const PAM_FIELDS: AuthProviderField[] = [
+    { key: 'pamtester_path', kind: 'text', default: '/usr/bin/pamtester' },
+    { key: 'service', kind: 'text', default: 'filex' },
+    { key: 'use_sudo', kind: 'bool', default: 'true' },
+    { key: 'timeout_seconds', kind: 'text', default: '10' },
+    { key: 'max_concurrent', kind: 'text', default: '4' },
+    { key: 'email_domain', kind: 'text' },
+    { key: 'auto_create', kind: 'bool', default: 'false' },
+  ];
+  const WINDOWS_FIELDS: AuthProviderField[] = [
+    { key: 'auto_create', kind: 'bool', default: 'false' },
+    { key: 'allowed_groups', kind: 'text' },
+    { key: 'domain', kind: 'text' },
+  ];
+  const SECRET = 'Hunter2-never-kept!';
+
+  function osProviders(): AuthProvider[] {
+    return [
+      ...defaultProviders(),
+      provider('windows', {
+        managed: true,
+        testable: true,
+        test_account_required: true,
+        enabled: false,
+        state: 'off',
+        status: 'disabled',
+        fields: WINDOWS_FIELDS,
+      }),
+      provider('pam', {
+        managed: true,
+        testable: true,
+        test_account_required: true,
+        enabled: false,
+        state: 'off',
+        status: 'disabled',
+        fields: PAM_FIELDS,
+      }),
+    ];
+  }
+
+  async function typeAccount(w: VueWrapper, id: string, username: string, password: string) {
+    await w.find(`input[name="auth-test-account-${id}-username"]`).setValue(username);
+    await w.find(`input[name="auth-test-account-${id}-password"]`).setValue(password);
+  }
+
+  async function switchOn(w: VueWrapper, id: string) {
+    const toggle = w.find(`button#auth-provider-enabled-${id}`);
+    expect(toggle.attributes('aria-checked')).toBe('false');
+    await toggle.trigger('click');
+  }
+
+  function passwordBox(w: VueWrapper, id: string): HTMLInputElement {
+    return w.find(`input[name="auth-test-account-${id}-password"]`).element as HTMLInputElement;
+  }
+
+  /** ⚠ The password must be nowhere once its request is answered. */
+  function expectForgotten(w: VueWrapper, id: string, logged: ReturnType<typeof vi.spyOn>[]) {
+    expect(passwordBox(w, id).value).toBe('');
+    expect(w.html()).not.toContain(SECRET);
+    expect(document.body.innerHTML).not.toContain(SECRET);
+    expect(JSON.stringify({ ...localStorage })).not.toContain(SECRET);
+    expect(JSON.stringify({ ...sessionStorage })).not.toContain(SECRET);
+    expect(JSON.stringify(useToastStore().toasts)).not.toContain(SECRET);
+    for (const spy of logged) expect(JSON.stringify(spy.mock.calls)).not.toContain(SECRET);
+  }
+
+  function spyLogs() {
+    return (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
+  }
+
+  beforeEach(() => {
+    // clearAllMocks keeps a queued mockResolvedValueOnce: start from nothing.
+    updateCall.mockReset();
+    testCall.mockReset();
+    fx.providers = osProviders();
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  it('labels every field in the reader’s language and names the provider — never a raw key', async () => {
+    const w = mountPage('tr');
+    await flushPromises();
+    const card = w.find('[data-testid="auth-provider-pam"]');
+    expect(card.find('h2').text()).toContain(tr.authProviders.providers.pam);
+    for (const f of PAM_FIELDS) {
+      expect(card.text()).toContain((tr.authProviders.fields as Record<string, string>)[f.key]);
+    }
+    // An empty box says what it means: the server's default.
+    expect(w.find('input[name="auth-field-pam-pamtester_path"]').attributes('placeholder')).toBe('/usr/bin/pamtester');
+    // Whole numbers kept as text: a numeric keyboard and the range said.
+    const timeout = w.find('input[name="auth-field-pam-timeout_seconds"]');
+    expect(timeout.attributes('type')).toBe('text');
+    expect(timeout.attributes('inputmode')).toBe('numeric');
+    expect(card.text()).toContain(tr.authProviders.fieldHints.timeout_seconds);
+    expect(card.text()).toContain(tr.authProviders.fieldHints.max_concurrent);
+  });
+
+  it('asks for a test account beside its buttons, and only where a test signs somebody in', async () => {
+    const w = mountPage('en');
+    await flushPromises();
+    for (const id of ['windows', 'pam']) {
+      const box = w.find(`[data-testid="auth-provider-test-account-${id}"]`);
+      expect(box.exists()).toBe(true);
+      expect(box.text()).toContain(en.authProviders.testAccount.about);
+      const pw = box.find(`input[name="auth-test-account-${id}-password"]`);
+      expect(pw.attributes('type')).toBe('password');
+      // Never filled in by the browser (its "off" is ignored on a password box).
+      expect(pw.attributes('autocomplete')).toBe('new-password');
+      expect(box.find(`input[name="auth-test-account-${id}-username"]`).attributes('autocomplete')).toBe('off');
+    }
+    expect(w.find('[data-testid="auth-provider-test-account-ldap"]').exists()).toBe(false);
+    expect(w.find('[data-testid="auth-provider-test-account-oidc"]').exists()).toBe(false);
+  });
+
+  it('tests with the account, then forgets the password', async () => {
+    const logged = spyLogs();
+    testCall.mockResolvedValue({ testable: true, ok: true, checks: [{ id: 'test_account', status: 'ok', params: { account: 'alex' } }] });
+    const w = mountPage('en');
+    await flushPromises();
+    await typeAccount(w, 'pam', '  alex ', SECRET);
+    await w.find('[data-testid="auth-provider-test-button-pam"]').trigger('click');
+    await flushPromises();
+
+    expect(testCall).toHaveBeenCalledTimes(1);
+    const [id, draft, account] = testCall.mock.calls[0];
+    expect(id).toBe('pam');
+    expect(draft.service).toBe('');
+    expect(account).toEqual({ username: 'alex', password: SECRET });
+    // The name stays for the next try; the password does not.
+    expect((w.find('input[name="auth-test-account-pam-username"]').element as HTMLInputElement).value).toBe('  alex ');
+    expectForgotten(w, 'pam', logged);
+  });
+
+  it('forgets the password when the test request fails too', async () => {
+    const logged = spyLogs();
+    testCall.mockRejectedValue(Object.assign(new Error('Network Error'), { isAxiosError: true }));
+    const w = mountPage('en');
+    await flushPromises();
+    await typeAccount(w, 'windows', 'alex', SECRET);
+    await w.find('[data-testid="auth-provider-test-button-windows"]').trigger('click');
+    await flushPromises();
+    expect(testCall).toHaveBeenCalledTimes(1);
+    expectForgotten(w, 'windows', logged);
+  });
+
+  it('a test without an account is still sent — the server names the step that needs one', async () => {
+    testCall.mockResolvedValue({ testable: true, ok: false, checks: [] });
+    const w = mountPage('en');
+    await flushPromises();
+    await w.find('[data-testid="auth-provider-test-button-pam"]').trigger('click');
+    await flushPromises();
+    expect(testCall).toHaveBeenCalledTimes(1);
+    expect(testCall.mock.calls[0][2]).toBeUndefined();
+  });
+
+  it('switching it on without an account is said on the card, and nothing is sent', async () => {
+    const w = mountPage('tr');
+    await flushPromises();
+    await switchOn(w, 'windows');
+    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
+    await flushPromises();
+    expect(updateCall).not.toHaveBeenCalled();
+    expect(w.find('[data-testid="auth-provider-refusal-windows"]').text()).toBe(tr.authProviders.testAccount.needed);
+
+    // A name without its password is no account either.
+    await typeAccount(w, 'windows', 'alex', '');
+    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
+    await flushPromises();
+    expect(updateCall).not.toHaveBeenCalled();
+  });
+
+  it('a save that leaves it off needs no account and is not sent one', async () => {
+    updateCall.mockResolvedValue({ status: 'saved', provider: null, checks: [], testOk: false, superAdmin: false });
+    const w = mountPage('en');
+    await flushPromises();
+    await typeAccount(w, 'pam', 'alex', SECRET);
+    await w.find('[data-testid="auth-provider-save-pam"]').trigger('click');
+    await flushPromises();
+    expect(updateCall).toHaveBeenCalledTimes(1);
+    expect(updateCall.mock.calls[0][1].enabled).toBe(false);
+    expect(updateCall.mock.calls[0][1].test_account).toBeUndefined();
+  });
+
+  it('a failing test is never confirmed away: no "switch on anyway", the steps and the fix instead', async () => {
+    const logged = spyLogs();
+    const hint = 'sudo asks for a password when filex runs pamtester. Run `sudo visudo -f /etc/sudoers.d/filex` and put in it the line `filex ALL=(root) NOPASSWD: /usr/bin/pamtester filex *`, then test again.';
+    updateCall.mockResolvedValue({
+      status: 'test_failed',
+      message: 'The test did not pass, so it was not switched on.',
+      failed: ['sudo'],
+      confirmAllowed: false,
+      strict: true,
+      checks: [
+        { id: 'config', status: 'ok' },
+        { id: 'pamtester', status: 'ok', params: { path: '/usr/bin/pamtester' } },
+        { id: 'sudo', status: 'fail', params: { reason: 'password_required', hint, detail: 'sudo: a password is required' } },
+      ],
+    });
+    const w = mountPage('en');
+    await flushPromises();
+    await switchOn(w, 'pam');
+    await typeAccount(w, 'pam', 'alex', SECRET);
+    await w.find('[data-testid="auth-provider-save-pam"]').trigger('click');
+    await flushPromises();
+
+    expect(updateCall).toHaveBeenCalledTimes(1);
+    const body = updateCall.mock.calls[0][1];
+    expect(body.enabled).toBe(true);
+    expect(body.test_account).toEqual({ username: 'alex', password: SECRET });
+    expect(body.confirm_failed_test).toBeUndefined();
+
+    // The question is never asked (the dialog stays closed, with nothing in it).
+    expect(w.find('[data-testid="auth-provider-confirm"]').exists()).toBe(false);
+    expect(w.find('dialog').attributes('open')).toBeUndefined();
+    expect(w.find('[data-testid="auth-provider-refusal-pam"]').text()).toBe('The test did not pass, so it was not switched on.');
+
+    const sudo = w.find('[data-testid="auth-provider-check-sudo"]');
+    expect(sudo.attributes('data-status')).toBe('fail');
+    // The server's sentence, with what is to be typed as <code>, copyable whole.
+    const code = sudo.findAll('code');
+    expect(code.map((c) => c.text())).toEqual([
+      'sudo visudo -f /etc/sudoers.d/filex',
+      'filex ALL=(root) NOPASSWD: /usr/bin/pamtester filex *',
+    ]);
+    expect(code[0].classes()).toContain('select-all');
+    expect(code[0].attributes('dir')).toBe('ltr');
+    expect(sudo.text()).toContain('sudo asks for a password when filex runs pamtester. Run sudo visudo');
+    expect(sudo.text()).not.toContain('`');
+    expect(w.find('[data-testid="auth-provider-check-pamtester"]').text()).toContain('/usr/bin/pamtester');
+    expectForgotten(w, 'pam', logged);
+  });
+
+  it('says the account that passed was made a super administrator', async () => {
+    const logged = spyLogs();
+    updateCall.mockResolvedValue({
+      status: 'saved',
+      provider: null,
+      checks: [{ id: 'test_account', status: 'ok', params: { account: 'alex' } }],
+      testOk: true,
+      superAdmin: true,
+    });
+    const w = mountPage('tr');
+    await flushPromises();
+    await switchOn(w, 'pam');
+    await typeAccount(w, 'pam', 'alex', SECRET);
+    await w.find('[data-testid="auth-provider-save-pam"]').trigger('click');
+    await flushPromises();
+
+    const said = useToastStore().toasts.map((x) => x.message);
+    expect(said).toContain(tr.authProviders.savedApplied);
+    expect(said).toContain(tr.authProviders.testAccount.madeSuperAdmin.replace('{account}', 'alex'));
+    expectForgotten(w, 'pam', logged);
+  });
+
+  it('says nothing about an administrator when the server made none', async () => {
+    updateCall.mockResolvedValue({ status: 'saved', provider: null, checks: [], testOk: true, superAdmin: false });
+    const w = mountPage('en');
+    await flushPromises();
+    await switchOn(w, 'windows');
+    await typeAccount(w, 'windows', 'alex', SECRET);
+    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
+    await flushPromises();
+    const said = useToastStore().toasts.map((x) => x.message);
+    expect(said).toEqual([en.authProviders.savedApplied]);
+  });
+
+  it.each(['test_account_disabled', 'test_account_not_platform'])('%s is said on the card, in the server’s words', async (code) => {
+    const logged = spyLogs();
+    updateCall.mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 409'), {
+        isAxiosError: true,
+        response: { status: 409, data: { error: code, message: `the server’s sentence for ${code}` } },
+      }),
+    );
+    const w = mountPage('en');
+    await flushPromises();
+    await switchOn(w, 'windows');
+    await typeAccount(w, 'windows', 'alex', SECRET);
+    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-testid="auth-provider-refusal-windows"]').text()).toContain(`the server’s sentence for ${code}`);
+    expect(w.find('[data-testid="auth-provider-confirm"]').exists()).toBe(false);
+    expectForgotten(w, 'windows', logged);
+  });
+
+  it('on a server that is not Windows, the test says so in words', async () => {
+    testCall.mockResolvedValue({ testable: true, ok: false, checks: [{ id: 'unsupported_os', status: 'fail' }] });
+    const w = mountPage('tr');
+    await flushPromises();
+    await w.find('[data-testid="auth-provider-test-button-windows"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-testid="auth-provider-check-unsupported_os"]').text()).toContain(tr.authProviders.checks.unsupported_os.fail);
+  });
+
+  it('a provider that stopped starting shows the server’s command as <code> in its reason', async () => {
+    fx.providers = osProviders().map((p) =>
+      p.id === 'pam'
+        ? { ...p, enabled: true, state: 'failed', status: 'misconfigured', last_error: 'pam: setup check "pamtester" failed (missing): Install it: `sudo apt install pamtester`' }
+        : p,
+    );
+    const w = mountPage('en');
+    await flushPromises();
+    const err = w.find('[data-testid="auth-provider-error-pam"]');
+    expect(err.find('code').text()).toBe('sudo apt install pamtester');
+    expect(err.text()).toContain('pam: setup check "pamtester" failed (missing): Install it: sudo apt install pamtester');
   });
 });

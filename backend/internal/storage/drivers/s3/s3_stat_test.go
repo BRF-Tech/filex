@@ -75,7 +75,7 @@ func statStub(t *testing.T, contents map[string][]string) *Driver {
 // ErrNotFound for every folder.
 //
 // WebDAV is where that surfaced: OpenFile stats the parent before a PUT and
-// maps a miss to 409, and PROPFIND on the folder 404'd. olivov could write
+// maps a miss to 409, and PROPFIND on the folder 404'd. A multi-tenant deployment could write
 // to a storage root but not into any subfolder (H3, 2026-08-05).
 func TestStat_FolderIsADirectory(t *testing.T) {
 	d := statStub(t, map[string][]string{

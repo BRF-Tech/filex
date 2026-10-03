@@ -361,3 +361,70 @@ func TestThemes_TenantAdminRefused(t *testing.T) {
 	sctx := tenant.WithScope(ctx, &tenant.Scope{ProviderID: 1, Slug: "root", IsSupertenant: true})
 	require.Equal(t, 200, putTheme(t, th, sctx, "ok", handlers.ExportTheme(sampleTheme("ok", "OK"))).Code)
 }
+
+// ─────────────────── the outward-facing pages (#74) ───────────────────
+
+// A theme MAY define its share and sign-in pages. The five colours are
+// optional - a theme without them is still complete, and gets them in its own
+// tones in the browser - and they are checked like every other colour,
+// because they are printed into the same <style> block.
+func TestThemes_PageColoursAreOptionalAndChecked(t *testing.T) {
+	ctx := context.Background()
+	_, store := testutil.NewTestDB(t)
+	th := handlers.NewThemes(store, handlers.NewAppearanceSource(store))
+
+	require.Equal(t, 200, putTheme(t, th, ctx, "plain", handlers.ExportTheme(sampleTheme("plain", "Plain"))).Code,
+		"a theme that defines no page of its own is complete")
+
+	doc := handlers.ExportTheme(sampleTheme("pages", "Pages"))
+	doc.Light["--fe-ppage-ground-1"] = "#f1e9e4"
+	doc.Light["--fe-ppage-ground-2"] = "#e4d6cd"
+	doc.Light["--fe-ppage-card"] = "#fffdfb"
+	doc.Light["--fe-login-ground"] = "#efe6e0"
+	doc.Light["--fe-login-card"] = "#fffefc"
+	doc.Dark["--fe-ppage-card"] = "#2a2220"
+	rec := putTheme(t, th, ctx, "pages", doc)
+	require.Equal(t, 200, rec.Code, rec.Body.String())
+
+	stored, err := store.GetCustomTheme(ctx, "pages")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, "#fffdfb", stored.TokensLight["--fe-ppage-card"])
+	require.Equal(t, "#efe6e0", stored.TokensLight["--fe-login-ground"])
+	require.Equal(t, "#2a2220", stored.TokensDark["--fe-ppage-card"])
+
+	bad := handlers.ExportTheme(sampleTheme("badpage", "Bad"))
+	bad.Light["--fe-ppage-card"] = "url(https://evil.example/x)"
+	require.Equal(t, http.StatusBadRequest, putTheme(t, th, ctx, "badpage", bad).Code,
+		"a page colour is a colour: anything else is refused")
+	gone, err := store.GetCustomTheme(ctx, "badpage")
+	require.NoError(t, err)
+	require.Nil(t, gone)
+}
+
+// The page a browser with no JavaScript gets (handlers/share.go, the `--px-*`
+// set) wears the theme's own share page when the instance default defines
+// one, and its palette for what it leaves out - the same values the SPA's
+// share page wears.
+func TestThemes_NoJSPublicPageWearsTheThemesOwnPage(t *testing.T) {
+	ctx := context.Background()
+	sharH, src, store, token := brandingShareFixture(t)
+	app := handlers.NewAppearanceSource(store)
+	src.AttachAppearance(app)
+	th := handlers.NewThemes(store, app)
+
+	doc := handlers.ExportTheme(sampleTheme("pages", "Pages"))
+	doc.Light["--fe-ppage-ground-1"] = "#f1e9e4"
+	doc.Light["--fe-ppage-card"] = "#fffdfb"
+	require.Equal(t, 200, putTheme(t, th, ctx, "pages", doc).Code)
+	require.NoError(t, store.UpsertSetting(ctx, handlers.DefaultThemeSettingKey, "custom:pages"))
+	app.Invalidate()
+	src.Invalidate()
+
+	rec := getSharePage(t, sharH, token)
+	require.Equal(t, 200, rec.Code)
+	body := rec.Body.String()
+	require.Contains(t, body, "--px-bg1:#f1e9e4", "the page ground the theme defines")
+	require.Contains(t, body, "--px-card:#fffdfb", "the card the theme defines")
+	require.Contains(t, body, "--px-bg2:#123456", "what it leaves out comes from its palette, as before")
+}

@@ -100,7 +100,7 @@ func TestLiveBusyPairWaitsAndTheOthersSync(t *testing.T) {
 	if roots != "docs://other" {
 		t.Fatalf("a busy pair must not be watched on the server: roots %q", roots)
 	}
-	want := "p1: lock: busy — another filex on this computer is syncing this pair (process 4242, C:\\Store\\filex.exe)\n"
+	want := "p1: lock: busy - another filex on this computer is syncing this pair (process 4242, C:\\Store\\filex.exe)\n"
 	if got := strings.Count(r.out.String(), "p1: lock: busy"); got != 1 || !strings.Contains(r.out.String(), want) {
 		t.Fatalf("want the busy line exactly once:\n%s", r.out.String())
 	}
@@ -144,7 +144,7 @@ func TestReporter_ABusyPairIsItsOwnLineNotAFailure(t *testing.T) {
 	r := newPassReporter(&out, &errOut)
 	busy := &filesync.BusyError{Pair: "pair-1", Holder: filesync.LockHolder{PID: 7}}
 	r.pass(p1, false, filesync.Result{}, fmt.Errorf("wrapped: %w", busy))
-	require.Equal(t, "pair-1: lock: busy — another filex on this computer is syncing this pair (process 7)\n", errOut.String())
+	require.Equal(t, "pair-1: lock: busy - another filex on this computer is syncing this pair (process 7)\n", errOut.String())
 	require.Empty(t, out.String())
 	require.False(t, r.failing["pair-1"], "busy is not a failed pass")
 }
@@ -152,7 +152,7 @@ func TestReporter_ABusyPairIsItsOwnLineNotAFailure(t *testing.T) {
 func TestExitCodeForBusyPairs(t *testing.T) {
 	err := &exitError{code: exitPairBusy, err: errPairsBusy([]string{"pair-1", "pair-3"})}
 	require.Equal(t, 4, exitCode(err))
-	require.Equal(t, "2 pairs were not synced (pair-1, pair-3): another filex on this computer is syncing them — "+
+	require.Equal(t, "2 pairs were not synced (pair-1, pair-3): another filex on this computer is syncing them - "+
 		"run again once that one has stopped (in the desktop app: Pause sync, or quit it)", err.Error())
 }
 
@@ -233,7 +233,7 @@ func TestSyncRun_TwoEnginesOnOnePair(t *testing.T) {
 	var ee *exitError
 	require.True(t, errors.As(err, &ee), "want an exit status, got %v\nstdout: %s\nstderr: %s", err, out, errOut)
 	require.Equal(t, exitPairBusy, ee.code)
-	require.Contains(t, errOut, fmt.Sprintf("pair-1: lock: busy — another filex on this computer is syncing this pair (process %d, ", a.Process.Pid))
+	require.Contains(t, errOut, fmt.Sprintf("pair-1: lock: busy - another filex on this computer is syncing this pair (process %d, ", a.Process.Pid))
 	require.NotContains(t, out, "pair-1:", "no pass may have run for the busy pair: %s", out)
 	require.Contains(t, out, "pair-2:", "the other pair must have synced")
 	require.Equal(t, "other\n", read(filepath.Join(mirror2, "o.txt")))
@@ -259,7 +259,7 @@ func TestSyncRun_TwoEnginesOnOnePair(t *testing.T) {
 		}
 	})
 	waitUntil(t, 10*time.Second, "engine B to report pair-1 busy", func() bool {
-		return strings.Contains(bOut.String(), "pair-1: lock: busy — ")
+		return strings.Contains(bOut.String(), "pair-1: lock: busy - ")
 	})
 	ls.saveText(t, "main://proj/note.txt", "while A still holds it\n")
 	waitUntil(t, 10*time.Second, "engine A to sync its own pair", func() bool {

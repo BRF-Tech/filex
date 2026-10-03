@@ -8,6 +8,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -135,21 +136,42 @@ func (h *Manager) SyncSoftDelete(ctx context.Context, storageID int64, src, tras
 	h.removeFromIndex(ctx, existing.ID)
 }
 
-// SyncHardDelete flags the node deleted when the driver couldn't move the
-// file to trash and deleted the bytes outright. Mirrors vfDelete's no-mover
-// branch.
+// SyncHardDelete drops the rows of an item whose bytes are gone for good: the
+// driver could not trash them and deleted them outright, they were already
+// missing, or a move across storages took them away. Mirrors vfDelete's
+// branches for the same three cases (dropGoneRows).
+//
+// ⚠⚠ Issue #104: it used to soft-delete the one row WHERE IT STOOD. That row
+// had no bytes in `.filex-trash/`, so it was a trash entry nothing could
+// restore (issue #74's shape, written by filex itself), and for a folder only
+// the folder's row was touched: its contents stayed live under a deleted
+// parent, still counted, still found by search, until a scan noticed.
 func (h *Manager) SyncHardDelete(ctx context.Context, storageID int64, src string) {
 	origClean := normalizeDBPath(src)
-	origHash := pathkey.Hash(storageID, origClean)
 	defer emitFolderChange(storageID, path.Dir(origClean), realtime.ChangeEvent{
 		Action: "delete", Name: path.Base(origClean),
 	})
-	if existing, err := h.Store.GetNodeByPath(ctx, storageID, origHash); err == nil && existing != nil {
-		_ = h.Store.SoftDeleteNode(ctx, existing.ID)
-		h.removeFromIndex(ctx, existing.ID)
+	if name, ok := h.dropGoneRows(ctx, storageID, src); ok {
 		/* bag:b3 event — only when the index actually reflected the file */
-		writehook.OnFileDeleted(ctx, storageID, origClean, path.Base(origClean), writehook.OriginOps)
+		writehook.OnFileDeleted(ctx, storageID, origClean, name, writehook.OriginOps)
 	}
+}
+
+// dropGoneRows removes from the catalogue, for good, the row at rel and every
+// row below it, once their bytes are gone from the storage
+// (protocolsync.DeleteRows: deepest first, each file's quota released, the
+// search index and the snapshots under `.versions/` with them). It reports
+// the item's name and whether there was a row.
+func (h *Manager) dropGoneRows(ctx context.Context, storageID int64, rel string) (string, bool) {
+	st, err := h.Store.GetStorage(ctx, storageID)
+	if err != nil || st == nil {
+		slog.Warn("manager: drop rows: storage lookup",
+			slog.Int64("storage", storageID), slog.String("path", rel))
+		return "", false
+	}
+	return protocolsync.New(h.Store, h.Index, nil, writehook.OriginManager).
+		WithResolver(h.StorageResolver).
+		DeleteRows(ctx, st, rel)
 }
 
 // SyncCopy inserts a DB node for a freshly written copy, cloning the source

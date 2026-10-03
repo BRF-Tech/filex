@@ -153,6 +153,21 @@ export function pathOf(origin: string): string {
 }
 
 /**
+ * The name a password-carrying client signs in with, from the account's e-mail
+ * and — on a multi-tenant server, for a tenant's account — its realm
+ * (`/api/auth/me` → `realm`): `acme/alice@example.com`. A protocol that carries no
+ * address a tenant could be told by needs the realm written in front
+ * (docs/PROTOCOLS.md), and on the tenant's own address it names the same
+ * tenant, so it is always correct to print it. No realm: the e-mail alone,
+ * exactly as before.
+ */
+export function guideUser(email: string, realm?: string | null): string {
+  const e = String(email ?? '').trim();
+  const r = String(realm ?? '').trim();
+  return e && r ? `${r}/${e}` : e;
+}
+
+/**
  * The username a client should be given. Falls back to a placeholder so a
  * guide rendered before `/api/auth/me` answers is still readable rather
  * than showing `undefined` in the middle of a command line.

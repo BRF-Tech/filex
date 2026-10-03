@@ -96,6 +96,18 @@ test('the login item runs the portable exe or the AppImage, not the extraction',
   assert.equal(loginItemExecutable({ APPIMAGE: '/home/a/filex.AppImage' }, '/tmp/.mount_x/filex'), '/home/a/filex.AppImage');
 });
 
+test('Linux: the sign-in entry starts the launcher, not the Electron binary behind it', () => {
+  // The .deb and the .rpm: process.execPath is the binary the launcher started.
+  assert.equal(loginItemExecutable({}, '/opt/filex/filex-app-bin'), '/opt/filex/filex-app');
+  // The snap: the same pair, inside $SNAP.
+  assert.equal(loginItemExecutable({ SNAP: '/snap/filex-app/x1' }, '/snap/filex-app/x1/filex-app-bin'), '/snap/filex-app/x1/filex-app');
+  // The AppImage: the image itself, as before (the launcher is inside it).
+  assert.equal(loginItemExecutable({ APPIMAGE: '/home/a/Apps/filex-desktop-x86_64.AppImage' }, '/tmp/.mount_a/filex-app-bin'), '/home/a/Apps/filex-desktop-x86_64.AppImage');
+  // Only that exact name: anything else that ends in -bin is left alone.
+  assert.equal(loginItemExecutable({}, '/opt/other/tool-bin'), '/opt/other/tool-bin');
+  assert.equal(loginItemExecutable({}, '/opt/filex/filex-app'), '/opt/filex/filex-app');
+});
+
 // ── Linux: the autostart entry across the rename to filex-app ──────────────
 
 /** Exactly what setLinuxAutostart (main.ts) wrote before the rename. */

@@ -165,8 +165,12 @@ const recentSyncs = computed(() => sync.items.slice(0, RECENT_SYNCS));
     <!-- ⚠ Persistent, not dismissible: see OnlyOfficeSecretAlert. -->
     <OnlyOfficeSecretAlert />
 
-    <!-- Stats grid -->
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <!-- Stats grid. Six in a row from 1280 px (xl); three below it. At 1024
+         six cards are ~107 px each and a size in the hundreds with its unit
+         ("999,9 Go") fits only in a narrow face like Segoe UI: with Arial's
+         metrics (Linux, the 0.50 test machine) it was cut, and so were the
+         longer Turkish labels. -->
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
       <StatCard
         :label="t('dashboard.stats.storages')"
         :value="storages.count"
@@ -176,7 +180,7 @@ const recentSyncs = computed(() => sync.items.slice(0, RECENT_SYNCS));
       />
       <StatCard
         :label="t('dashboard.stats.users')"
-        :value="stats?.user_count ?? '—'"
+        :value="stats?.user_count ?? '-'"
         :icon="Users"
         icon-tone="sky"
         :loading="loading"
@@ -328,7 +332,7 @@ const recentSyncs = computed(() => sync.items.slice(0, RECENT_SYNCS));
             {{ auditTargetLabel(row.target_type, row.target_id, t, te, row.target_name) }}
           </span>
         </template>
-        <template #cell-user_email="{ row }">{{ personName({ name: row.user_name, email: row.user_email }) || '—' }}</template>
+        <template #cell-user_email="{ row }">{{ personName({ name: row.user_name, email: row.user_email }) || '-' }}</template>
         <template #cell-at="{ row }">{{ formatRelative(row.at, locale) }}</template>
       </DataTable>
 

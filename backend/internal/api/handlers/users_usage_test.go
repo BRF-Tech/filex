@@ -19,7 +19,7 @@ import (
 // users.usage_bytes and users.quota_bytes have existed since migration
 // 00003. Only the caller's own /quota/me could see them.
 //
-// olivov needs both in one call to fill a table (G3 + G2, 2026-08-04).
+// A multi-tenant deployment needs both in one call to fill a table (G3 + G2, 2026-08-04).
 func TestAdminUsers_ExposeUsageAndQuota(t *testing.T) {
 	srv, client, store := testutil.NewTestServer(t)
 	ctx := context.Background()

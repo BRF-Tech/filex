@@ -43,9 +43,10 @@
  * them. Nothing here carries a colour of its own — every value is a `--fe-*`
  * token, so every table follows the palette the person picked.
  */
-import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { useSystemDark } from '../composables/useSystemDark';
 import {
   createColumnStore,
   memoryBacking,
@@ -567,7 +568,7 @@ function cellValue(row: any, id: string): unknown {
 function cellText(row: any, id: string): string {
   const c = colById.value.get(id);
   const v = c?.format ? c.format(row) : row?.[id];
-  if (v === null || v === undefined || v === '') return '—';
+  if (v === null || v === undefined || v === '') return '-';
   return String(v);
 }
 
@@ -575,7 +576,7 @@ function cellTitle(row: any, id: string): string | undefined {
   const c = colById.value.get(id);
   if (c?.title) return c.title(row);
   const text = cellText(row, id);
-  return text === '—' ? undefined : text;
+  return text === '-' ? undefined : text;
 }
 
 function rowClasses(row: any, i: number) {
@@ -873,14 +874,10 @@ const colMenuY = ref(0);
 let colMenuAnchor = 0;
 const colMenuEl = ref<HTMLElement | null>(null);
 
-const prefersDark = ref(false);
-onMounted(() => {
-  try {
-    prefersDark.value = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-  } catch {
-    /* jsdom / no matchMedia */
-  }
-});
+/* The OS mode for `auto`, and every time it changes while the table is on
+   screen - composables/useSystemDark, the one shared listener (#74). It was
+   read once on mount here, so the column menu kept the mode it first saw. */
+const prefersDark = useSystemDark();
 /** ⚠ The menu is teleported to <body>, outside the `.fe` ancestor that scopes
  *  the explorer's tokens, so it carries the theme class `variables.css`
  *  re-applies dark values under — the same reason ContextMenu takes one. */
@@ -1001,7 +998,7 @@ const rangeLabel = computed(() => {
   if (props.total != null && props.pageSize != null && props.total > 0) {
     const from = (currentPage.value - 1) * props.pageSize + 1;
     const to = Math.min(currentPage.value * props.pageSize, props.total);
-    return `${from} – ${to} / ${props.total}`;
+    return `${from} - ${to} / ${props.total}`;
   }
   return '';
 });

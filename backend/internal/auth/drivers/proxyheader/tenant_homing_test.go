@@ -82,9 +82,9 @@ func phRequest(host, user string) *http.Request {
 // ProviderID == the supertenant even though the request Host named a tenant.
 func TestProxyHeader_HostHomesTheAccountInItsTenant(t *testing.T) {
 	d, store := initDriverWithStore(t, map[string]any{"multi_tenant": true})
-	tenantID := phSeedProvider(t, store, "diyetlif", "diyetlif.example.com")
+	tenantID := phSeedProvider(t, store, "globex", "globex.example.com")
 
-	u, err := d.Authenticate(phRequest("diyetlif.example.com", "ayse@diyetlif.example.com"))
+	u, err := d.Authenticate(phRequest("globex.example.com", "ayse@globex.example.com"))
 	require.NoError(t, err)
 	require.NotNil(t, u.ProviderID)
 	assert.Equal(t, tenantID, *u.ProviderID)
@@ -95,7 +95,7 @@ func TestProxyHeader_HostHomesTheAccountInItsTenant(t *testing.T) {
 // TestProxyHeader_UnmappedHostRefusesToProvision — no tenant, no account.
 func TestProxyHeader_UnmappedHostRefusesToProvision(t *testing.T) {
 	d, store := initDriverWithStore(t, map[string]any{"multi_tenant": true})
-	phSeedProvider(t, store, "diyetlif", "diyetlif.example.com")
+	phSeedProvider(t, store, "globex", "globex.example.com")
 
 	u, err := d.Authenticate(phRequest("nowhere.example.com", "mallory@nowhere.example.com"))
 	require.Error(t, err)
@@ -113,11 +113,11 @@ func TestProxyHeader_UnmappedHostRefusesToProvision(t *testing.T) {
 func TestProxyHeader_PinnedProviderCoversAnUnmappedHost(t *testing.T) {
 	d, store := initDriverWithStore(t, map[string]any{
 		"multi_tenant": true,
-		"provider":     "diyetlif",
+		"provider":     "globex",
 	})
-	tenantID := phSeedProvider(t, store, "diyetlif", "diyetlif.example.com")
+	tenantID := phSeedProvider(t, store, "globex", "globex.example.com")
 
-	u, err := d.Authenticate(phRequest("proxy.internal", "ayse@diyetlif.example.com"))
+	u, err := d.Authenticate(phRequest("proxy.internal", "ayse@globex.example.com"))
 	require.NoError(t, err)
 	require.NotNil(t, u.ProviderID)
 	assert.Equal(t, tenantID, *u.ProviderID)
@@ -145,14 +145,14 @@ func TestProxyHeader_SingleTenantUnaffected(t *testing.T) {
 // TestProxyHeader_ExistingAccountIsNeverRehomed — homing happens at CREATE.
 func TestProxyHeader_ExistingAccountIsNeverRehomed(t *testing.T) {
 	d, store := initDriverWithStore(t, map[string]any{"multi_tenant": true})
-	mine := phSeedProvider(t, store, "diyetlif", "diyetlif.example.com")
-	phSeedProvider(t, store, "arasboya", "arasboya.example.com")
+	mine := phSeedProvider(t, store, "globex", "globex.example.com")
+	phSeedProvider(t, store, "initech", "initech.example.com")
 
-	u1, err := d.Authenticate(phRequest("diyetlif.example.com", "ayse@diyetlif.example.com"))
+	u1, err := d.Authenticate(phRequest("globex.example.com", "ayse@globex.example.com"))
 	require.NoError(t, err)
 	require.Equal(t, mine, *u1.ProviderID)
 
-	u2, err := d.Authenticate(phRequest("arasboya.example.com", "ayse@diyetlif.example.com"))
+	u2, err := d.Authenticate(phRequest("initech.example.com", "ayse@globex.example.com"))
 	require.NoError(t, err)
 	assert.Equal(t, u1.ID, u2.ID)
 	require.NotNil(t, u2.ProviderID)

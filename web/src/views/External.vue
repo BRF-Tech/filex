@@ -109,9 +109,21 @@ async function save(s: ExternalService) {
 }
 
 async function test(s: ExternalService) {
+  const d = ensureDraft(s);
+  if (urlError(d.url) || (callsBack(s) && urlError(d.callback_url))) return;
   testingId.value = s.id;
   try {
-    const server = await ext.test(s.id);
+    // ⚠ What is in the boxes, not what was saved (issue #80): an operator who
+    // typed a new address and pressed Test was told about the old one. The
+    // values are tested WITHOUT saving them - saving is what switches every
+    // open editor over, and an address nobody has checked yet must not reach
+    // them because somebody pressed Test. The result says so (unsavedTests).
+    const server = await ext.test(s.id, {
+      url: d.url,
+      enabled: d.enabled,
+      jwt_secret: d.jwt_secret || undefined,
+      ...(callsBack(s) ? { callback_url: d.callback_url } : {}),
+    });
     const browser = ext.browserProbes[s.id];
     if (server.serverReachable && browser?.state === 'ok' && !hasWarning(s.id)) {
       toast.success(t('external.testOk'));
@@ -119,6 +131,12 @@ async function test(s: ExternalService) {
       // ⚠ The sentence that would have saved two rounds: the two probes
       // disagree, and the browser is the one that opens the editor.
       toast.warn(t('external.legs.disagree'));
+    } else if (server.serverReachable) {
+      // The health check passed; what is wrong is on the card (a warning,
+      // the way back to filex). "Health check failed" said otherwise under a
+      // card that said reachable (measured against ONLYOFFICE Docs 9.4 with
+      // JWT off, e2e/realenv issue #80 S2).
+      toast.warn(t('external.testWarn'));
     } else {
       toast.warn(server.error || server.serverDetail || t('external.testFail'));
     }
@@ -285,6 +303,18 @@ function serviceName(id: string): string {
   if (id === 'drawio') return 'draw.io';
   return id;
 }
+
+/**
+ * The environment variable that pins a service (the server's
+ * externalEnvVar). The card names it: a change here, switching the service
+ * off included, lasts only until filex restarts, and removing the variable is
+ * how an operator switches it off for good (0.50).
+ */
+function envVarOf(id: string): string {
+  if (id === 'onlyoffice') return 'FILEX_ONLYOFFICE_URL';
+  if (id === 'drawio') return 'FILEX_DRAWIO_URL';
+  return `FILEX_${id.toUpperCase()}_URL`;
+}
 </script>
 
 <template>
@@ -348,8 +378,12 @@ function serviceName(id: string): string {
                 {{ t('external.envManaged') }}
               </Badge>
             </h2>
-            <p v-if="s.env_managed" class="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-              {{ t('external.envManagedHint') }}
+            <p
+              v-if="s.env_managed"
+              class="text-xs text-amber-600 dark:text-amber-400 mt-0.5"
+              :data-testid="`env-managed-hint-${s.id}`"
+            >
+              {{ t('external.envManagedHint', { env: envVarOf(s.id) }) }}
             </p>
             <p
               v-if="
@@ -449,6 +483,13 @@ function serviceName(id: string): string {
             :data-testid="`disagree-${s.id}`"
           >
             {{ t('external.legs.disagree') }}
+          </p>
+          <p
+            v-if="ext.unsavedTests[s.id]"
+            class="text-sky-700 dark:text-sky-400 pt-1"
+            :data-testid="`tested-unsaved-${s.id}`"
+          >
+            {{ t('external.testedUnsaved') }}
           </p>
         </div>
 

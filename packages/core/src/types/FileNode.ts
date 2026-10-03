@@ -6,6 +6,9 @@
  */
 import type { AppLock } from './Plugins';
 
+/** Why a file has no thumbnail, when the reason is the file's own (`thumb_note`). */
+export type ThumbNote = 'corrupt' | 'encrypted' | 'too_large';
+
 export interface FileNode {
   /** DB node ID — needed by the per-user meta routes (starred, tags,
    *  recently-opened). Backend's projectFileNodes() emits it for every
@@ -37,6 +40,22 @@ export interface FileNode {
   mime_type?: string;
   /** Optional thumbnail URL (backend may inline). */
   thumb_url?: string | null;
+  /**
+   * Why the file has no thumbnail, when the reason is the file's own (0.50):
+   * damaged, encrypted (an office password, a zip's, or filex's end-to-end
+   * encryption) or over a size limit. The views mark the type icon with it
+   * (lib/thumbNote, ThumbTile). Absent when there is a picture, while one is
+   * being drawn, and for a failure that may pass (it is drawn again).
+   */
+  thumb_note?: ThumbNote | null;
+  /**
+   * A folder's newest files (0.50): up to three of the files directly in it,
+   * newest first by the later of when each came in and when it last changed,
+   * each with its stamped thumbnail URL when one is ready (else the views
+   * draw its type icon). Absent for a folder with no files of its own, and
+   * while folder previews are off (docs/thumbnails.md → Folder previews).
+   */
+  preview?: { name: string; thumb_url?: string }[] | null;
   /** Visibility: private | public. */
   visibility?: 'private' | 'public';
   /** File count for directories. */
@@ -108,6 +127,14 @@ export interface FileNode {
    *  case — and for a state a newer server invents — instead of dropping the
    *  row back into silence. */
   link_state?: string;
+  /** Issue #104 - an entry the STORAGE COULD NOT ANSWER FOR: the sync asked
+   *  whether it still exists and got neither "yes" nor "not found". It is
+   *  listed so it does not just vanish, and nothing can be done with it, or
+   *  with anything inside it: the server refuses every operation with 409
+   *  `ENTRY_UNAVAILABLE`. Read through `lib/unavailable`. */
+  unavailable?: boolean;
+  /** What the storage answered (its own words, usually English). */
+  unavailable_reason?: string;
   /** Generic — any additional fields the backend wants to inline. */
   [k: string]: unknown;
 }
@@ -180,6 +207,10 @@ export interface NewDocType {
 export type ArchiveCreateFormat = 'zip' | '7z' | 'tar' | 'tar.gz' | 'tar.bz2' | 'tar.xz';
 
 export interface Capabilities {
+  /** Folder previews are on (Settings; default on): pictures on folder
+   *  cards and the list of what a folder holds when the pointer rests on it.
+   *  Absent (an older server): on. */
+  folder_previews?: boolean;
   /** Which filex answered (`0.47.0`) — the line the account menu ends with. */
   version?: string;
   /** The public demo: nothing a visitor changes may be saved (the settings
@@ -198,7 +229,6 @@ export interface Capabilities {
   drafts?: { limit: number };
   ffmpeg?: boolean;
   ghostscript?: boolean;
-  libreoffice?: boolean;
   onlyoffice_url?: string | null;
   drawio_url?: string | null;
   max_chunk_mb?: number;

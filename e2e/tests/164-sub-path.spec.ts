@@ -18,6 +18,7 @@ import { loginAs } from '../helpers/auth';
 import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
 import { setAccountViewMode } from '../helpers/prefs';
 import { settled } from '../helpers/stable';
+import { nextHandedFile } from '../helpers/download';
 import { BASE_PATH as BASE } from '../helpers/base';
 
 const STAMP = Date.now();
@@ -91,12 +92,14 @@ test.describe.serial('Sub-path deployment — every journey stays under the base
     await one.dispose();
     const menu = page.getByRole('menu').first();
     await expect(menu).toBeVisible();
+    // One file opens its body in a new tab (helpers/download: and WebKit
+    // shows a text file there rather than saving it).
     const [dl] = await Promise.all([
-      page.waitForEvent('download'),
+      nextHandedFile(page),
       menu.getByRole('menuitem', { name: /^(Download|İndir)$/ }).click(),
     ]);
-    expect(new URL(dl.url()).pathname.startsWith(`${BASE}/`), dl.url()).toBe(true);
-    expect(dl.suggestedFilename()).toBe(names[0]);
+    expect(new URL(dl.url).pathname.startsWith(`${BASE}/`), dl.url).toBe(true);
+    expect(dl.filename).toBe(names[0]);
 
     // The selection as one ZIP: minted by the API, fetched from a /z/ ticket —
     // both under the base (the ticket is the address that used to lose it).
@@ -135,8 +138,10 @@ test.describe.serial('Sub-path deployment — every journey stays under the base
     await anon.goto(link);
     expect(new URL(anon.url()).pathname).toBe(`${BASE}/s/${body.token}`);
     await expect(anon.getByText(`a-${STAMP}.txt`).first()).toBeVisible({ timeout: 15_000 });
-    const [dl] = await Promise.all([anon.waitForEvent('download'), anon.getByTestId('public-share-download').click()]);
-    expect(new URL(dl.url()).pathname.startsWith(`${BASE}/s/`), dl.url()).toBe(true);
+    // The button navigates this page (helpers/download: WebKit shows a text
+    // file there rather than saving it).
+    const [dl] = await Promise.all([nextHandedFile(anon), anon.getByTestId('public-share-download').click()]);
+    expect(new URL(dl.url).pathname.startsWith(`${BASE}/s/`), dl.url).toBe(true);
     await stranger.close();
   });
 
@@ -149,11 +154,19 @@ test.describe.serial('Sub-path deployment — every journey stays under the base
     expect(m.start_url).toBe(`${BASE}/admin/`);
     expect(m.scope).toBe(`${BASE}/`);
 
-    const reg = await page.evaluate(async () => {
-      const r = await navigator.serviceWorker.ready;
-      return { scope: r.scope, script: (r.active ?? r.waiting ?? r.installing)?.scriptURL ?? '' };
-    });
-    expect(new URL(reg.scope).pathname).toBe(`${BASE}/admin/`);
-    expect(new URL(reg.script).pathname).toBe(`${BASE}/admin/sw.js`);
+    /* ⚠ The REGISTRATION is the claim, not its activation. `serviceWorker.ready`
+       waits until the worker has precached every asset, and Firefox under load
+       was still writing that cache when the test's 30 s ran out (0.50 run 3,
+       on a disk with seconds of write latency). Where the worker was
+       registered, and from which script, is known the moment it registers. */
+    const reg = () =>
+      page.evaluate(async () => {
+        const r = await navigator.serviceWorker.getRegistration();
+        const w = r && (r.active ?? r.waiting ?? r.installing);
+        return r && w ? { scope: new URL(r.scope).pathname, script: new URL(w.scriptURL).pathname } : null;
+      });
+    await expect
+      .poll(reg, { timeout: 20_000 })
+      .toEqual({ scope: `${BASE}/admin/`, script: `${BASE}/admin/sw.js` });
   });
 });

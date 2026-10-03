@@ -118,12 +118,20 @@ export function wslMirrorCd(dir) {
  * nothing changes: a native toolchain builds for its own host, and the WSL
  * branch builds windows/amd64, because that is the host node runs on.
  *
+ * `buildmode` is passed as `-buildmode=<it>` when set: an app module is
+ * `goos: 'wasip1', goarch: 'wasm', buildmode: 'c-shared'` (a reactor whose
+ * `//go:wasmexport` functions are the module's exports).
+ *
  * Returns `{ out, toolchain }`, where toolchain says which branch was taken.
  */
-export function goBuild({ cwd, pkg, out, ldflags = '-s -w', trimpath = true, log = () => {}, goos = '', goarch = '' }) {
+export function goBuild({ cwd, pkg, out, ldflags = '-s -w', trimpath = true, log = () => {}, goos = '', goarch = '', buildmode = '' }) {
   const outAbs = path.resolve(out);
   mkdirSync(path.dirname(outAbs), { recursive: true });
-  const flags = [...(trimpath ? ['-trimpath'] : []), ...(ldflags ? [`-ldflags=${ldflags}`] : [])];
+  const flags = [
+    ...(trimpath ? ['-trimpath'] : []),
+    ...(ldflags ? [`-ldflags=${ldflags}`] : []),
+    ...(buildmode ? [`-buildmode=${buildmode}`] : []),
+  ];
 
   const native = nativeGo();
   if (native) {

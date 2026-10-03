@@ -66,7 +66,7 @@ func (s *staged) wasmPath() string {
 // of app that rewrites every string a visitor reads.
 func (r *Registry) stagePack(m *Manifest, in *InstallInput) (*staged, error) {
 	if in.Wasm != nil {
-		return nil, installErr(ErrCodeManifestInvalid, "this manifest is a language pack — it declares no action, screen, public page, setting or permission, so there is nothing a module could run and filex does not take one. Install the manifest alone, or declare what the module does.")
+		return nil, installErr(ErrCodeManifestInvalid, "this manifest is a language pack - it declares no action, screen, public page, setting or permission, so there is nothing a module could run and filex does not take one. Install the manifest alone, or declare what the module does.")
 	}
 	// "manifest": a pack has no module, so the pin and the signature are over
 	// the manifest's own bytes — exactly as uploaded or fetched.

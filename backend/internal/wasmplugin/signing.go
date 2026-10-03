@@ -343,7 +343,68 @@ func (r *Registry) ImportCA(ctx context.Context, tenantID int64, certPEM, keyPEM
 	sum := sha256.Sum256(cert.Raw)
 	r.log.Info("app-plugins: signing CA imported", "tenant", tenantID, "id", row.ID,
 		"subject", cert.Subject.String(), "fingerprint", hex.EncodeToString(sum[:]))
+	for _, n := range caNotes(cert) {
+		r.log.Warn("app-plugins: imported signing CA: "+n.Message, "tenant", tenantID, "code", n.Code)
+	}
 	return row, nil
+}
+
+// CANote is something an operator should know about an authority they
+// imported. It is said at import (the answer's `warnings`, and the log); it
+// never refuses the import - the authority is theirs to choose.
+type CANote struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// NoteCANotForDocumentsOnly: the imported authority may sign more than
+// documents (no extendedKeyUsage, or other purposes beside document signing).
+const NoteCANotForDocumentsOnly = "ca_not_limited_to_document_signing"
+
+// documentPurposes are the extended key usages that mean "documents" and
+// nothing else: RFC 9336's id-kp-documentSigning, Adobe's Authentic Documents
+// Trust and Microsoft's Document Signing.
+var documentPurposes = map[string]bool{
+	"1.3.6.1.5.5.7.3.36":      true,
+	"1.2.840.113583.1.1.5":    true,
+	"1.3.6.1.4.1.311.10.3.12": true,
+}
+
+// ImportNotes says what importing the authority in certPEM means beyond "it
+// can sign" (CANote); nil when there is nothing to say or it does not parse.
+func ImportNotes(certPEM []byte) []CANote {
+	cert, err := firstCertOf(string(certPEM))
+	if err != nil {
+		return nil
+	}
+	return caNotes(cert)
+}
+
+// caNotes is ImportNotes on a parsed certificate.
+//
+// ⚠ An organization's general-purpose authority - the one its mail clients,
+// browsers and code-signing checks trust - is exactly what an operator
+// reaches for, and importing it hands filex a key every one of those trusts.
+// filex issues only document-signing certificates from it (wire.SignerEKUs),
+// but in any name and address an app with `sign` asks for, and the key now
+// lives on this server. A dedicated intermediate, restricted to document
+// signing by its own extendedKeyUsage (and to the organization's domains by
+// name constraints), keeps both inside what filex is for.
+func caNotes(cert *x509.Certificate) []CANote {
+	dedicated := len(cert.ExtKeyUsage) == 0 && len(cert.UnknownExtKeyUsage) > 0
+	for _, o := range cert.UnknownExtKeyUsage {
+		if !documentPurposes[o.String()] {
+			dedicated = false
+		}
+	}
+	if dedicated {
+		return nil
+	}
+	return []CANote{{Code: NoteCANotForDocumentsOnly, Message: "This authority is not limited to document signing: its certificate has no " +
+		"extendedKeyUsage, or names other purposes too. Whatever trusts it for email, websites or code now trusts a key this filex " +
+		"holds, and filex issues document signing certificates under it in any name an app with the sign permission asks for. " +
+		"Prefer an intermediate authority made for filex alone: extendedKeyUsage 1.3.6.1.5.5.7.3.36 (document signing) and " +
+		"1.2.840.113583.1.1.5 (Adobe), with name constraints for your own domains."}}
 }
 
 // parsePrivateKey reads the three shapes a PEM private key comes in.
@@ -490,9 +551,10 @@ func hfCertIssue(ctx context.Context, s *Scope, in json.RawMessage) (any, error)
 		NotBefore:    now.Add(-5 * time.Minute),
 		NotAfter:     now.AddDate(0, 0, days),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
-		// 1.3.6.1.5.5.7.3.36 (id-kp-documentSigning) is what PDF readers look for.
-		UnknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 3, 6, 1, 5, 5, 7, 3, 36}},
+		// Documents and nothing else (wire.SignerEKUs says why): never
+		// emailProtection, which made this an S/MIME certificate in a name
+		// and an address the app chose.
+		UnknownExtKeyUsage: signerEKUs(),
 	}
 	if e := strings.TrimSpace(req.Email); e != "" && len(e) < 200 {
 		tpl.EmailAddresses = []string{e}
@@ -507,6 +569,32 @@ func hfCertIssue(ctx context.Context, s *Scope, in json.RawMessage) (any, error)
 	}
 	s.plugin.log("info", "certificate issued for "+cn+" ("+row.ID[:8]+"…)")
 	return map[string]any{"key_ref": row.ID, "cert_pem": row.CertPEM, "chain_pem": caCert2PEM(caCert), "not_after": tpl.NotAfter}, nil
+}
+
+// signerEKUs is wire.SignerEKUs as object identifiers: the extended key
+// usage of every certificate the host issues for signing.
+func signerEKUs() []asn1.ObjectIdentifier {
+	out := make([]asn1.ObjectIdentifier, 0, len(wire.SignerEKUs))
+	for _, o := range wire.SignerEKUs {
+		out = append(out, append(asn1.ObjectIdentifier(nil), o...))
+	}
+	return out
+}
+
+// hasSignerEKUs reports whether a certificate carries exactly the signing
+// usages and nothing else - how a kept seal issued by an older filex (with
+// emailProtection) is told apart from one that may stay.
+func hasSignerEKUs(c *x509.Certificate) bool {
+	want := signerEKUs()
+	if len(c.ExtKeyUsage) != 0 || len(c.UnknownExtKeyUsage) != len(want) {
+		return false
+	}
+	for i := range want {
+		if !c.UnknownExtKeyUsage[i].Equal(want[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func caCert2PEM(c *x509.Certificate) string {

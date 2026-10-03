@@ -1,6 +1,6 @@
 # Lazy catalogue (local storages)
 
-> Issue [#45](https://github.com/BRF-Tech/filex/issues/45) — idea by Alex
+> Issue [#45](https://github.com/BRF-Tech/filex/issues/45) - idea by Alex
 > (@ahjephson). Design note for `sync_mode: lazy`; the operator-facing summary
 > lives in [STORAGE.md](STORAGE.md#lazy-catalogue) and the settings in
 > [CONFIGURATION.md](CONFIGURATION.md#lazy-catalogue-settings).
@@ -20,7 +20,7 @@ it (behaviour B).
 
 ## The two behaviours
 
-| | A — click first, fill in the background (default) | B — only on open |
+| | A - click first, fill in the background (default) | B - only on open |
 |---|---|---|
 | Config | `lazy_fill: background` | `lazy_fill: on_open` |
 | Opened folder | listed from disk now, catalogued first | the same |
@@ -38,7 +38,7 @@ Migration `00059_catalogue_folders` adds one table (SQLite, PostgreSQL, MySQL):
 |---|---|
 | `storage_id`, `path_hash` | the folder (primary key). `path_hash` is `pathkey.Hash(storage, path)`, the same key `nodes` uses; the storage root is `/`. |
 | `path`, `depth` | the folder's canonical path (`/a/b`, `/` for the root) and its depth (root = 0). The filler walks the frontier shallowest first. |
-| `state` | `uncatalogued` — discovered in a parent's listing, never listed itself (the filler's frontier). `catalogued` — its listing has been applied. `watched` — catalogued and under an fsnotify watch in this process. |
+| `state` | `uncatalogued` - discovered in a parent's listing, never listed itself (the filler's frontier). `catalogued` - its listing has been applied. `watched` - catalogued and under an fsnotify watch in this process. |
 | `reconciled_at` | when the last complete listing of this folder was applied to the catalogue. |
 | `visited_at` | the last time a person opened it (the watch LRU's clock, and the "visited" of behaviour B). |
 | `watched_at` | when the current watch was placed; `NULL` = no watch. |
@@ -57,7 +57,7 @@ written once per driver, and the duplication gate
 two copies.
 
 `watched` describes this process. At start every `watched` row is demoted to
-`catalogued` with `reconcile_on_open` set — the watches died with the old
+`catalogued` with `reconcile_on_open` set - the watches died with the old
 process, and changes made while nobody was watching are exactly what a reconcile
 is for.
 
@@ -81,29 +81,29 @@ its row and every row under it.
 
 1. **Refuse** a path the storage's scan rule skips (filex's own trees, `scan_exclude`).
 2. **Ensure the folder's own row** and its ancestors' (`protocolsync.EnsureDirChain`,
-   quietly — see "Change frames").
+   quietly - see "Change frames").
 3. **List** the folder from disk (`driver.List`, one directory, never recursive).
    A failed listing changes nothing.
 4. **Apply** the listing with the scan's own per-entry code (`catalogueEntry`,
    through `applyListing`, which the full scan's `sync.walk` uses too): create
-   rows for new entries (size, mime, etag, **mtime** — a row without one
+   rows for new entries (size, mime, etag, **mtime** - a row without one
    drifts later and makes the desktop re-download it), update drifted ones,
    settle landed staged uploads, repair a row left behind by a folder move. The
    encrypted-folder marker is applied first. Child folders are **not**
    entered; each gets an `uncatalogued` row.
 5. **Record** the folder `catalogued` (or keep it `watched`) with `reconciled_at`.
 6. **Delete pass** (see the invariant), which reads that record back.
-7. **Hand off**, once 4–6 have committed: the new and changed rows go to the
+7. **Hand off**, once 4-6 have committed: the new and changed rows go to the
    search index in one batch (content extraction is queued per file, as
    before), new or changed files to the antivirus.
 
 ### One transaction per folder
 
-Steps 4–6 are **one database transaction** (issue #70; `Store.WithTx`, on
+Steps 4-6 are **one database transaction** (issue #70; `Store.WithTx`, on
 SQLite, PostgreSQL and MySQL alike): the folder's rows, the folders it
 revealed, its state row and its removals commit together or not at all. A
 folder of more than 500 entries is written in transactions of 500, the last of
-which carries steps 5 and 6 — on SQLite a transaction holds the database's only
+which carries steps 5 and 6 - on SQLite a transaction holds the database's only
 connection, and every other request waits until it commits.
 
 - The transaction travels in the context. Every statement of every driver asks
@@ -115,11 +115,11 @@ connection, and every other request waits until it commits.
   transaction, and on SQLite an enqueue from inside would wait for ever for the
   connection the transaction holds. That is why the search index (whose content
   hook enqueues extraction) and the antivirus are told in step 7, after the
-  commit — and so never hear of a row that was rolled back.
+  commit - and so never hear of a row that was rolled back.
 - A store method that commits on its own (`LinkNodeTags`, the app-plugin
   writes) refuses to run inside one (`db.ErrNestedTx`) instead of waiting.
-- A transaction that fails — an INSERT refused because another writer holds the
-  key (on PostgreSQL that ends the transaction), a refused commit — is rolled
+- A transaction that fails - an INSERT refused because another writer holds the
+  key (on PostgreSQL that ends the transaction), a refused commit - is rolled
   back, and the folder is applied again one statement at a time: the per-entry
   path exactly as it was, where a row another writer won is re-read and carried
   on with.
@@ -127,7 +127,7 @@ connection, and every other request waits until it commits.
 The full scan applies each directory the same way, and only then walks into its
 subfolders. Why it matters is under "Measured".
 
-It never takes the storage-wide run lock (`runMu`) — a full scan and any number
+It never takes the storage-wide run lock (`runMu`) - a full scan and any number
 of folder reconciles run side by side. Two reconciles of the SAME folder never
 do: a per-folder lock dedupes them, and a request that arrives while one runs
 marks it dirty so it runs once more afterwards.
@@ -155,8 +155,8 @@ Concretely:
   nothing in a catalogue that is deliberately not walked.
 - `deletePass(dir, listing)` refuses to run unless the folder's state row says
   it was reconciled by **this** listing (`reconciled_at` equals the listing's
-  timestamp). A caller that reaches it any other way — an event handler, a
-  cleanup, a future refactor — removes nothing. It runs inside the folder's
+  timestamp). A caller that reaches it any other way - an event handler, a
+  cleanup, a future refactor - removes nothing. It runs inside the folder's
   transaction, after that row was written in it: its removals commit only
   together with the listing that justified them, and a transaction rolled back
   removed nothing (its search-index deletions wait for the commit too).
@@ -164,20 +164,20 @@ Concretely:
   subtree goes with it only when the candidate itself is confirmed gone; rows in
   a child folder that still exists are never candidates, whatever state that
   child is in.
-- Each candidate is confirmed with `Stat` (`ErrNotFound` only — any other error
+- Each candidate is confirmed with `Stat` (`ErrNotFound` only - any other error
   keeps it), for folders as well as files (the full scan skips the Stat for
   folders; lazy mode does not).
 - Never a row the scan rule skips, never an unstored (in-flight) upload.
 - **Guard:** the root that lists empty while the catalogue holds children is the
   signature of an unmounted mount point, and removes nothing. Otherwise, when 10
   or more children vanish at once and the listing saw fewer than 70% of them,
-  nothing is removed (the full scan's ratio, per folder — a readdir that came
+  nothing is removed (the full scan's ratio, per folder - a readdir that came
   back short from a network filesystem). The folder records `held_back`, is
   listed from disk until a later reconcile clears it, and the admin page counts
   it. A handful of files deleted outside filex is ordinary life and goes through.
 - A removed row is **dropped from the catalogue** through the tombstone pass's
-  own `dropRows` — deepest first, a folder only once nothing names it as its
-  parent — and never put in the trash, which holds none of its bytes (issue
+  own `dropRows` - deepest first, a folder only once nothing names it as its
+  parent - and never put in the trash, which holds none of its bytes (issue
   #74). The storage is never touched.
 - An fsnotify event saying a watched folder itself went away does **not** delete
   it: the watch is dropped and the parent's next reconcile decides.
@@ -194,11 +194,11 @@ catalogue cannot vouch for it:
 
 - the storage is `lazy` and the folder is not currently watched, or its last
   reconcile held deletions back;
-- **any** storage whose first scan has not finished (`last_sync_at` unset) — a
+- **any** storage whose first scan has not finished (`last_sync_at` unset) - a
   partly catalogued folder used to show only what had been catalogued so far.
 
-The overlay keeps what only the catalogue knows — id, owner, thumbnail, tags,
-app badges — for every entry that has a row. An entry whose row has drifted
+The overlay keeps what only the catalogue knows - id, owner, thumbnail, tags,
+app badges - for every entry that has a row. An entry whose row has drifted
 (`sync.ObjectDrift`) shows the disk's size and date. A row that is not on disk
 is dropped, unless it is an upload whose bytes are still on their way. A listing
 from disk also asks for the folder to be catalogued (see next section). When
@@ -224,7 +224,7 @@ One `fsnotify` watcher per lazy storage, on **visited** folders only:
 - An evicted or expired watch sets `reconcile_on_open`; the rows stay. The next
   open reconciles before the folder is trusted again.
 - A burst of events for a folder becomes one reconcile of that folder after a 2 s
-  quiet period — never a full scan (fsnotify mode walks the whole storage per
+  quiet period - never a full scan (fsnotify mode walks the whole storage per
   burst).
 - A kernel refusal (`ENOSPC`, inotify's own limit) is logged once and treated as
   a full budget.
@@ -234,7 +234,7 @@ One `fsnotify` watcher per lazy storage, on **visited** folders only:
 One goroutine per storage, resumable because its work list is the table:
 
 1. The root, if it was never catalogued.
-2. The frontier — `uncatalogued` rows, shallowest first, a batch at a time.
+2. The frontier - `uncatalogued` rows, shallowest first, a batch at a time.
 3. Once the frontier is empty the storage is **converged**: its `last_sync_at`
    is stamped and folder sizes are recomputed. From then on the filler refreshes
    catalogued folders that are not watched and whose `reconciled_at` is older
@@ -259,13 +259,13 @@ A pair needs its whole subtree in the catalogue: the upload precondition the
 engine sends (`expect=<size>:<mtime>`) is checked against the catalogue row. So:
 
 - a recursive `watch` (the desktop's change stream) on a lazy storage queues its
-  subtree for cataloguing, ahead of the filler — breadth-first, folder by folder,
+  subtree for cataloguing, ahead of the filler - breadth-first, folder by folder,
   skipping folders reconciled within the refresh interval;
 - while the desktop stays connected, the subtree is walked the same way again
   every refresh interval (the storage's `sync_interval_s`, at least 30 s). The
   engine asks the realtime hub which roots are watched right now
-  (`Hub.WatchedRoots`). A paired folder nobody opens is not fsnotify-watched —
-  the watch budget is for folders people visit — so without this, behaviour B
+  (`Hub.WatchedRoots`). A paired folder nobody opens is not fsnotify-watched -
+  the watch budget is for folders people visit - so without this, behaviour B
   would never see a change made outside filex inside a pair;
 - the precondition falls back to the file on disk when there is no row, or when
   the row has drifted, so an engine that planned from a disk listing is judged
@@ -284,8 +284,8 @@ is announced is per folder, after the reconcile:
 
 | the reconcile… | frame |
 |---|---|
-| catalogued the folder for the first time | derived `modify` — explorers re-list, `tree_change` watchers and the `action=changes` log ignore it |
-| found entries added, changed or removed in a folder it had catalogued before | `modify` — a real change, for everyone |
+| catalogued the folder for the first time | derived `modify` - explorers re-list, `tree_change` watchers and the `action=changes` log ignore it |
+| found entries added, changed or removed in a folder it had catalogued before | `modify` - a real change, for everyone |
 | found nothing | none |
 
 The change log (`action=changes`) now skips derived events altogether: they
@@ -295,7 +295,7 @@ fetch.
 ## Coverage in the UI
 
 The listing, search and drive-usage responses carry a `coverage` object for a
-storage whose catalogue is incomplete — a lazy storage that has not converged
+storage whose catalogue is incomplete - a lazy storage that has not converged
 (A), any lazy storage in behaviour B, or any storage still on its first scan:
 
 ```json
@@ -318,8 +318,8 @@ search responses carry `coverage` per storage in `storage_info`; the explorer
 keeps the last answer, so a content search (which does not carry it) still gets
 the strip.
 
-Every folder whose subtree is not fully catalogued carries `size_partial` — its
-size is drawn as a lower bound (`≥ 1.2 GB`) or `—` when nothing below it is
+Every folder whose subtree is not fully catalogued carries `size_partial` - its
+size is drawn as a lower bound (`≥ 1.2 GB`) or `-` when nothing below it is
 known, with a hover that says why. One helper (`useLocale.formatNodeSize`)
 formats sizes for the list and the inspector's selection total, so they cannot
 disagree. Home's drive card says **at least … used** when its figure is partial
@@ -329,15 +329,15 @@ beside the figure).
 An administrator sees **Catalog everything** on the strip in behaviour B. It
 starts the ordinary full sync (`POST /api/admin/storages/{id}/sync`; the id is
 looked up at click time, so the listing never carries it) and says so once the
-server has answered — "already running" when a scan held the storage before the
+server has answered - "already running" when a scan held the storage before the
 press (the server starts no second walk and answers `status: "running"`). It
 then follows the scan to its end the way the admin panel's **Sync now** does,
 through the same follower (`lib/storageWatch`): the storage list's `running`
 flag (`GET /api/admin/storages`) until it drops, then `last_sync_state` for how
-it ended — one read of the list per tick for every storage followed. Meanwhile
+it ended - one read of the list per tick for every storage followed. Meanwhile
 the strip says that storage is being cataloged and its button reads
 "Cataloging…" (other storages' buttons are not held); the end is a notice that
-stays up long enough to read — done (and the listing is read again), failed
+stays up long enough to read - done (and the listing is read again), failed
 (why is under the storage's sync runs in the admin panel), stopped, the storage
 removed meanwhile, or, when the list could not be read for a minute, where the
 admin panel shows how it ends.
@@ -345,7 +345,7 @@ admin panel shows how it ends.
 ## Admin and observability
 
 - The storage form (web admin, new and edit) offers the sync mode for every
-  storage — it offered none before — and `lazy` only for a driver whose
+  storage - it offered none before - and `lazy` only for a driver whose
   descriptor carries `lazy_fields` (the admin descriptor endpoint adds them for
   `model.LazyDrivers`, today `local`). For `lazy` it draws the behaviour and the
   two watch knobs with the same field renderer as every other storage setting
@@ -360,7 +360,7 @@ admin panel shows how it ends.
 - `GET /api/admin/storages` and `/{id}` carry `coverage` (any storage whose
   figures are partial) and, for a lazy storage, a `catalogue` block:
   folders catalogued / pending / watched (and the budget), the filler's state
-  (`filling`, `paused` — somebody is active, `converged`, `refreshing`, `off`),
+  (`filling`, `paused` - somebody is active, `converged`, `refreshing`, `off`),
   folders held back, reconciles since start. The storage page shows it.
 - Prometheus: `filex_lazy_folders{storage,state}`, `filex_lazy_watches{storage}`,
   `filex_lazy_reconciles_total{storage,reason}`,
@@ -376,10 +376,10 @@ Playwright, on a Windows 11 development machine with SQLite (2026-09-25):
 
 | | behaviour A | behaviour B | `poll`, during its first sync |
 |---|---|---|---|
-| root, from the click to the rows on screen | 1.1 s | 1.6 s | 1.6 s — all 60 entries (it used to be the few the sync had reached) |
-| a folder, from the double click to its rows (100 files) | 0.2 – 0.35 s | 0.2 – 0.4 s | — |
-| the same while the filler works | 0.25 – 0.35 s | — | — |
-| the opened folder catalogued (its rows get ids) | 1.0 s after it was on screen | the same | — |
+| root, from the click to the rows on screen | 1.1 s | 1.6 s | 1.6 s - all 60 entries (it used to be the few the sync had reached) |
+| a folder, from the double click to its rows (100 files) | 0.2 - 0.35 s | 0.2 - 0.4 s | - |
+| the same while the filler works | 0.25 - 0.35 s | - | - |
+| the opened folder catalogued (its rows get ids) | 1.0 s after it was on screen | the same | - |
 | strip | "still cataloging (N % …)" | "Only the folders people open …" + **Catalog everything** | "first sync has not finished" |
 
 Server side, 36 listings (from disk, merged, and from the catalogue) took
@@ -399,17 +399,17 @@ after the other on the same Windows 11 machine with SQLite by
 `scripts/measure-catalogue-rate.mjs`: behaviour A with the storage's figures
 polled every second until it converges, then, on the same server, a `poll`
 storage's first sync (2026-09-25). The machine was busier than for the figures
-above — the old filler made 34 files/s here, not 43 — so compare within the
+above - the old filler made 34 files/s here, not 43 - so compare within the
 table:
 
 | | before | after | |
 |---|---|---|---|
-| behaviour A, the filler to convergence | 2,923 s — 34 files/s | 1,056 s — 95 files/s | 2.8× |
+| behaviour A, the filler to convergence | 2,923 s - 34 files/s | 1,056 s - 95 files/s | 2.8× |
 | full scan (`poll`, first sync), its first 60 s | 59 files/s | 118 files/s | 2× |
-| full scan, the whole run | 2,163 s — 46 files/s | 617 s — 162 files/s | 3.5× |
+| full scan, the whole run | 2,163 s - 46 files/s | 617 s - 162 files/s | 3.5× |
 
-Where the time went: a folder's rows were written one statement at a time — on
-SQLite an fsync per commit — and every new row was indexed on its own, one
+Where the time went: a folder's rows were written one statement at a time - on
+SQLite an fsync per commit - and every new row was indexed on its own, one
 Bleve write that waits for the disk each: about 10 ms a file on this machine,
 most of the cost. The reconcile alone on 1,000 files made 85 files/s before
 and 539 with no search index at all.
@@ -418,7 +418,7 @@ What bounds the catalogue now is the content extraction it queues for every new
 file (as before): four queue workers, each job a Bleve write and commits of its
 own on the same database. With `FILEX_SEARCH_CONTENT=0` the new filler
 converged in 213 s (470 files/s). With extraction on, the catalogue finishes
-first and extraction catches up behind it — 53,680 jobs were still queued at
+first and extraction catches up behind it - 53,680 jobs were still queued at
 convergence, and the new binary's full scan above ran while they were being
 worked through.
 

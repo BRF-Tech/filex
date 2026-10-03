@@ -42,3 +42,21 @@ func HolderRole(r *model.PermissionRule, set Set) string {
 func RoleHolder(r *model.PermissionRule) string {
 	return HolderRole(r, RoleSet(r))
 }
+
+// PreviewHolderRole is RoleHolder for a role still being edited: the body as
+// the role editor has it now, which may not be valid yet (no name, a path
+// half typed). It answers what the role's people would be on if the body were
+// saved as it stands — with the folder conditions a save stores (a blank path
+// names no folder) — and refuses nothing. The custom role editor asks it
+// (POST /api/admin/roles/preview) for each app permission's "Default"
+// instead of keeping its own copy of this rule, which 0.49.0's did.
+func PreviewHolderRole(r model.PermissionRule) string {
+	r.Conditions = model.PermRuleConditions{
+		StorageIDs: append([]int64(nil), r.Conditions.StorageIDs...),
+		Paths:      append([]string(nil), r.Conditions.Paths...),
+	}
+	// A body normalizeConditions refuses cannot be saved at all; the answer
+	// is then for its conditions as written.
+	_ = normalizeConditions(&r)
+	return RoleHolder(&r)
+}

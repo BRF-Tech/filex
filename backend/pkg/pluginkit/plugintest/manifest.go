@@ -52,9 +52,9 @@ func InspectManifest(m wire.Manifest) Report {
 			// Refused by the host too (internal/wasmplugin/permissions.go):
 			// nothing delivers a file event to an app yet, so the grant would
 			// mean nothing to the administrator who approved it.
-			r = r.err(w, "filex does not deliver file events to apps yet, so %q would grant nothing — leave it out", p)
+			r = r.err(w, "filex does not deliver file events to apps yet, so %q would grant nothing - leave it out", p)
 		default:
-			r = r.err(w, "unknown permission %q — the set is closed, and a grant the administrator cannot read is not a grant", p)
+			r = r.err(w, "unknown permission %q - the set is closed, and a grant the administrator cannot read is not a grant", p)
 		}
 	}
 
@@ -83,7 +83,7 @@ func InspectManifest(m wire.Manifest) Report {
 			r = r.err("manifest.ui_locales", "%q is not a language tag", tag)
 		}
 		if len(keys) == 0 {
-			r = r.err(w, "an empty language pack adds a language the interface cannot speak — the host refuses it")
+			r = r.err(w, "an empty language pack adds a language the interface cannot speak - the host refuses it")
 		}
 		size := 0
 		for k, v := range keys {
@@ -264,7 +264,7 @@ func InspectRegistered(p *pluginkit.Plugin) Report {
 	m := p.Manifest
 	for _, a := range m.Actions {
 		if p.Actions[a.ID] == nil {
-			r = r.err("plugin.actions", "the manifest offers the action %q, but nothing is registered under that id — the menu row would fail on every file", a.ID)
+			r = r.err("plugin.actions", "the manifest offers the action %q, but nothing is registered under that id - the menu row would fail on every file", a.ID)
 		}
 	}
 	for id := range p.Actions {
@@ -284,7 +284,7 @@ func InspectRegistered(p *pluginkit.Plugin) Report {
 	}
 	for _, pg := range m.PublicPages {
 		if p.Pages[pg.ID] == nil {
-			r = r.err("plugin.pages", "the manifest declares the public page %q, but nothing is registered to draw it — the link would open on nothing", pg.ID)
+			r = r.err("plugin.pages", "the manifest declares the public page %q, but nothing is registered to draw it - the link would open on nothing", pg.ID)
 		}
 	}
 	for id := range p.Pages {

@@ -9,14 +9,10 @@
 //
 // The dialog also used to ignore a name with a slash in it, or "." / "..",
 // without a word.
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import RenameModal from '@brftech/filex-core/src/modals/RenameModal.vue';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 function errorText(): string | null {
   return document.body.querySelector('[data-testid="rename-error"]')?.textContent?.trim() ?? null;

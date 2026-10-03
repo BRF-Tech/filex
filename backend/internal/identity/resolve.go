@@ -90,6 +90,115 @@ func Resolve(ctx context.Context, l Lookup, identifier string) (*model.User, err
 	return u, nil
 }
 
+// Tenant limits an account lookup to one tenant: the realm a sign-in is for on
+// a multi-tenant install (auth.LoginRealm builds it). A nil *Tenant is "no
+// tenants" — ResolveIn is then exactly Resolve.
+type Tenant struct {
+	// ProviderID is the tenant's row; 0 only for a platform with no
+	// supertenant row at all.
+	ProviderID int64
+	// Realm is the tenant's realm for derived addresses (DeriveEmail); "" for
+	// the platform's own tenant.
+	Realm string
+	// Main: this is the platform's own tenant, and an account with no tenant
+	// (provider_id NULL — a bootstrap or legacy row) belongs to it.
+	Main bool
+	// Token is the installation's e-mail token (EmailToken; "" = default).
+	Token string
+}
+
+// Owns reports whether an account belongs to the tenant.
+func (t *Tenant) Owns(u *model.User) bool {
+	if u == nil {
+		return false
+	}
+	if t == nil {
+		return true
+	}
+	if u.ProviderID == nil || *u.ProviderID == 0 {
+		return t.Main
+	}
+	return t.ProviderID != 0 && *u.ProviderID == t.ProviderID
+}
+
+// ResolveIn is Resolve for a sign-in that names a tenant (its realm): the
+// lookup never leaves that tenant — an account of another tenant is not found,
+// whatever the identifier. The order (the owner's decision):
+//
+//  1. the address the provider would have derived for a login name in this
+//     realm (`alex` in realm acme → `alex@acme.local`, DeriveEmail) — what a
+//     directory or operating-system account is keyed by;
+//  2. the username, inside the tenant (usernames stay unique across the whole
+//     platform, so a tenant's `alex` may hold `alex2`; step 1 is what finds it
+//     by the name the person knows);
+//  3. the address as typed, when an address was typed (step 1 and 3 are then
+//     the same lookup).
+//
+// ⚠ A candidate in another tenant is SKIPPED, not returned and not an error:
+// "that name is somebody else's in another tenant" and "no such account" must
+// read the same to whoever typed it.
+func ResolveIn(ctx context.Context, l Lookup, t *Tenant, identifier string) (*model.User, error) {
+	if t == nil {
+		return Resolve(ctx, l, identifier)
+	}
+	id := Normalize(identifier)
+	if id == "" {
+		return nil, ErrNotFound
+	}
+	if LooksLikeEmail(id) {
+		u, err := lookup(l.GetUserByEmail(ctx, id))
+		return ownedOrNotFound(t, u, err)
+	}
+	u, err := lookup(l.GetUserByEmail(ctx, DeriveEmail(id, "", t.Realm, t.Token)))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if t.Owns(u) {
+		return u, nil
+	}
+	if p := Check(id); p != nil && p.Kind != ProblemReserved {
+		return nil, ErrNotFound
+	}
+	u, err = lookup(l.GetUserByUsername(ctx, id))
+	return ownedOrNotFound(t, u, err)
+}
+
+// lookup folds a store answer into (user, ErrNotFound | error | nil).
+func lookup(u *model.User, err error) (*model.User, error) {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && u == nil) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+func ownedOrNotFound(t *Tenant, u *model.User, err error) (*model.User, error) {
+	if err != nil {
+		return nil, err
+	}
+	if !t.Owns(u) {
+		return nil, ErrNotFound
+	}
+	return u, nil
+}
+
+// NamesIn is Names in a realm: the identifier may also be the login name the
+// account's derived address was made from there (`alex` names
+// `alex@acme.local` in realm acme). realm and token are read as DeriveEmail
+// reads them.
+func NamesIn(u *model.User, identifier, realm, token string) bool {
+	if Names(u, identifier) {
+		return true
+	}
+	id := Normalize(identifier)
+	if u == nil || id == "" || LooksLikeEmail(id) {
+		return false
+	}
+	return DeriveEmail(id, "", realm, token) == Normalize(u.Email)
+}
+
 // Names reports whether the identifier addresses this account — as its e-mail
 // or as its username, case-insensitively.
 //

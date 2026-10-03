@@ -173,12 +173,28 @@ async function createEncryptedFolder(page: Page, name: string, level: 'content' 
   return key;
 }
 
+/**
+ * Upload one file and wait until the explorer has taken it in: the upload's
+ * answer, then the row in the listing the explorer reloads after it.
+ *
+ * ⚠ Not just the file on the disk (pollDisk). The disk has the file before the
+ * upload answers, and the explorer reloads the folder it was in only after the
+ * answer: a breadcrumb click in that gap was undone by the late reload of the
+ * folder being left (two listings in flight, the last to answer wins), and the
+ * next row was looked for in the wrong folder (seen in the 0.50 integration
+ * run under load: "alt" not found, the view still in Eski/alt).
+ */
 async function uploadFile(page: Page, name: string, body: string) {
+  const answered = page.waitForResponse(
+    (r) => r.request().method() === 'POST' && new URL(r.url()).searchParams.get('action') === 'upload',
+  );
   await page.locator('input[type="file"]').first().setInputFiles({
     name,
     mimeType: 'text/plain',
     buffer: Buffer.from(body, 'utf8'),
   });
+  await answered;
+  await expect(row(page, name)).toBeVisible({ timeout: 15_000 });
 }
 
 async function newFolderHere(page: Page, name: string) {

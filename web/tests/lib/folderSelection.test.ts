@@ -33,7 +33,9 @@ function body(signature: string): string {
 }
 
 describe('load() settles the selection when the folder changes', () => {
-  const load = body('async function load(path?: string) {');
+  // The listing itself is loadListing; load() follows the newest of them
+  // (lib/listingTickets `follow`, tests/lib/listingTickets.test.ts).
+  const load = body('async function loadListing(path?: string) {');
 
   it('clears BOTH the selection and the rows it resolves against', () => {
     const helper = load.match(/const arriveAt = \(to: string\) => \{([\s\S]*?)\n {2}\};/);

@@ -64,7 +64,7 @@ func (s *Service) Apply(ctx context.Context, target Release) error {
 		return fmt.Errorf("release %s has no build for %s/%s", target.Version, runtime.GOOS, runtime.GOARCH)
 	}
 	if asset.SHA256 == "" {
-		return fmt.Errorf("release %s asset has no sha256 — refusing to install unverified bytes", target.Version)
+		return fmt.Errorf("release %s asset has no sha256 - refusing to install unverified bytes", target.Version)
 	}
 
 	exePath, err := os.Executable()
@@ -139,13 +139,13 @@ func (s *Service) RestartRequired() bool {
 func (s *Service) restart(ctx context.Context) error {
 	unit := systemdUnit()
 	if unit == "" {
-		slog.Info("new version installed — restart filex to activate it")
+		slog.Info("new version installed - restart filex to activate it")
 		return nil
 	}
 	slog.Info("restarting via systemd", "unit", unit)
 	cmd := exec.CommandContext(ctx, "systemctl", "restart", unit)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		slog.Warn("systemctl restart failed — restart manually", "unit", unit, "err", err, "out", string(out))
+		slog.Warn("systemctl restart failed - restart manually", "unit", unit, "err", err, "out", string(out))
 	}
 	return nil
 }
@@ -282,7 +282,7 @@ func smokeTest(ctx context.Context, path, wantVersion string) error {
 	got := strings.TrimSpace(string(out))
 	trimmed := strings.TrimPrefix(wantVersion, "v")
 	if !strings.Contains(got, trimmed) {
-		return fmt.Errorf("new binary reports %q, expected %s — refusing to install", got, wantVersion)
+		return fmt.Errorf("new binary reports %q, expected %s - refusing to install", got, wantVersion)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,8 +10,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Providers handles /api/admin/providers — the tenant lifecycle API
@@ -24,10 +27,18 @@ import (
 //   - the supertenant cannot be deleted, disabled, or directly un-flagged;
 //   - deleting a tenant with users requires ?force=1 and then cascades its
 //     users and storage LINKS. Storage rows and file data are never touched —
-//     unlinking is reversible, deleting files is not.
+//     unlinking is reversible, deleting files is not;
+//   - a tenant's REALM is given when it is created (the slug by default) and
+//     never changes: an update that names another realm is refused
+//     (realm_immutable), and the store never writes the column again.
 type Providers struct {
 	Store       db.Store
 	MultiTenant bool
+	// DemoMode marks a public playground: every write is refused here too.
+	// api.DemoGuard already refuses writes under /api/admin and /api/ai/admin,
+	// but the admin MCP tools call this handler in-process and never pass that
+	// middleware, so the handler holds its own lock.
+	DemoMode bool
 }
 
 // NewProviders constructs the handler.
@@ -46,8 +57,25 @@ func (h *Providers) requireSupertenant(w http.ResponseWriter, r *http.Request) b
 	return requireSupertenant(w, r, "tenants are managed by the platform operator")
 }
 
+// mayWrite is requireSupertenant for a change: it also refuses every write on
+// a public demo (see DemoMode).
+func (h *Providers) mayWrite(w http.ResponseWriter, r *http.Request) bool {
+	if !h.requireSupertenant(w, r) {
+		return false
+	}
+	if h.DemoMode {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "demo_read_only"})
+		return false
+	}
+	return true
+}
+
 type providerReq struct {
-	Slug             *string `json:"slug"`
+	Slug *string `json:"slug"`
+	// Realm is read on CREATE only (default: the slug). On an update it may be
+	// sent back unchanged — the panel round-trips the object — and anything
+	// else is refused: see realmChange.
+	Realm            *string `json:"realm"`
 	Name             *string `json:"name"`
 	Host             *string `json:"host"`
 	AuthType         *string `json:"auth_type"`
@@ -60,6 +88,28 @@ type providerReq struct {
 	CookieDomain     *string `json:"cookie_domain"`
 	IsSupertenant    *bool   `json:"is_supertenant"`
 	Enabled          *bool   `json:"enabled"`
+	// OIDCTrustEmail is the tenant's own OIDC's "trust this provider's email
+	// addresses" (docs/SSO.md): written by its own statement
+	// (setTrustEmail), never by UpdateProvider.
+	OIDCTrustEmail *bool `json:"oidc_trust_email"`
+}
+
+// setTrustEmail writes the trust setting when the request carries it, and
+// records it in the request's audit row; a value saved by somebody is no
+// longer the upgrade's (authsetup.ForgetTrustUpgradeTenant).
+func (h *Providers) setTrustEmail(r *http.Request, p *model.Provider, req *providerReq) error {
+	if req.OIDCTrustEmail == nil {
+		return nil
+	}
+	if err := h.Store.SetProviderOIDCTrustEmail(r.Context(), p.ID, *req.OIDCTrustEmail); err != nil {
+		return err
+	}
+	authsetup.ForgetTrustUpgradeTenant(r.Context(), h.Store, p.ID)
+	if *req.OIDCTrustEmail != p.OIDCTrustEmail {
+		auth.AddAuditDetail(r.Context(), "oidc_trust_email_before", p.OIDCTrustEmail)
+		auth.AddAuditDetail(r.Context(), "oidc_trust_email_after", *req.OIDCTrustEmail)
+	}
+	return nil
 }
 
 func (req *providerReq) apply(p *model.Provider) {
@@ -92,10 +142,15 @@ type providerOut struct {
 	*model.Provider
 	StorageIDs []int64 `json:"storage_ids"`
 	UserCount  int     `json:"user_count"`
+	// OIDCClientSecretSet says whether the tenant's OIDC client secret is
+	// stored. The secret itself is never sent (model.Provider has it as `-`),
+	// so a form can say "set - type a new one to replace it".
+	OIDCClientSecretSet bool `json:"oidc_client_secret_set"`
 }
 
 func (h *Providers) out(r *http.Request, p *model.Provider) providerOut {
-	o := providerOut{Provider: p}
+	o := providerOut{Provider: p, OIDCClientSecretSet: p.OIDCClientSecret != ""}
+	p.OIDCTrustEmailByUpgrade = p.OIDCTrustEmail && authsetup.ReadTrustUpgrade(r.Context(), h.Store).Tenant(p.ID)
 	o.StorageIDs, _ = h.Store.ListProviderStorageIDs(r.Context(), p.ID)
 	if users, err := h.Store.ListUsersByProvider(r.Context(), p.ID); err == nil {
 		o.UserCount = len(users)
@@ -120,9 +175,59 @@ func (h *Providers) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out, "multi_tenant": h.MultiTenant})
 }
 
+// Get returns one provider (tenant) with its storage links and user count.
+func (h *Providers) Get(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSupertenant(w, r) {
+		return
+	}
+	p := h.load(w, r)
+	if p == nil {
+		return
+	}
+	writeJSON(w, http.StatusOK, h.out(r, p))
+}
+
+// realmSuggestionTries bounds how many `-2`, `-3`, … variants RealmSuggestion
+// looks at before it gives up on a free realm.
+const realmSuggestionTries = 20
+
+// RealmSuggestion answers GET /api/admin/providers/realm-suggestion?slug= with
+// the realm the tenant screen offers for a tenant being created
+// (tenant.SuggestRealm), the first variant of it that is valid, not reserved
+// and not taken: {realm, base, available}. `realm` is "" when the slug holds
+// nothing realm-shaped. Nothing is reserved by asking: the realm is settled
+// by POST, and a second tenant created in between is refused there
+// (`realm_taken`).
+//
+// ⚠ One rule for every client: the screen and the MCP tool ask here rather
+// than each carrying its own transliteration.
+func (h *Providers) RealmSuggestion(w http.ResponseWriter, r *http.Request) {
+	if !h.requireSupertenant(w, r) {
+		return
+	}
+	slug := r.URL.Query().Get("slug")
+	base := tenant.SuggestRealm(slug)
+	out := map[string]any{"realm": "", "base": base, "available": false}
+	for _, c := range tenant.RealmCandidates(slug, realmSuggestionTries) {
+		if tenant.CheckRealm(c) != nil {
+			continue
+		}
+		taken, err := h.Store.GetProviderByRealm(r.Context(), c)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if taken == nil {
+			out["realm"], out["available"] = c, true
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // Create provisions a tenant.
 func (h *Providers) Create(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSupertenant(w, r) {
+	if !h.mayWrite(w, r) {
 		return
 	}
 	var req providerReq
@@ -133,12 +238,28 @@ func (h *Providers) Create(w http.ResponseWriter, r *http.Request) {
 	p := &model.Provider{AuthType: model.AuthTypeOIDC, Enabled: true}
 	req.apply(p)
 	if p.Slug == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug required", "field": "slug"})
+		return
+	}
+	if !h.freeSlugAndHost(w, r, p) {
+		return
+	}
+	if req.IsSupertenant != nil && *req.IsSupertenant {
+		// The platform's own tenant has no realm: an empty realm is how a
+		// person signs in to it. Created flagged, so the store leaves the
+		// column empty; transferSupertenant below un-flags the previous one.
+		p.IsSupertenant = true
+	} else if !h.newRealm(w, r, &req, p) {
 		return
 	}
 	created, err := h.Store.CreateProvider(r.Context(), p)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	auth.SetAuditTarget(r.Context(), strconv.FormatInt(created.ID, 10), created.Slug)
+	if err := h.setTrustEmail(r, created, &req); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if req.IsSupertenant != nil && *req.IsSupertenant {
@@ -156,7 +277,7 @@ func (h *Providers) Create(w http.ResponseWriter, r *http.Request) {
 
 // Update edits a tenant; flag changes go through the transfer guard.
 func (h *Providers) Update(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSupertenant(w, r) {
+	if !h.mayWrite(w, r) {
 		return
 	}
 	p := h.load(w, r)
@@ -168,9 +289,10 @@ func (h *Providers) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
+	auth.SetAuditTarget(r.Context(), "", p.Slug)
 	if p.IsSupertenant {
 		if req.IsSupertenant != nil && !*req.IsSupertenant {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot un-flag the supertenant — transfer it by setting is_supertenant on another provider"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot un-flag the supertenant - transfer it by setting is_supertenant on another provider"})
 			return
 		}
 		if req.Enabled != nil && !*req.Enabled {
@@ -178,9 +300,28 @@ func (h *Providers) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if realmChange(&req, p) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "realm_immutable",
+			"field":   "realm",
+			"message": "a tenant's realm is chosen when it is created and never changes: it is part of its accounts' addresses and of the user names its people saved in their clients",
+		})
+		return
+	}
 	req.apply(p)
+	if p.Slug == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug required", "field": "slug"})
+		return
+	}
+	if !h.freeSlugAndHost(w, r, p) {
+		return
+	}
 	if err := h.Store.UpdateProvider(r.Context(), p); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := h.setTrustEmail(r, p, &req); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	if req.IsSupertenant != nil && *req.IsSupertenant && !p.IsSupertenant {
@@ -194,6 +335,80 @@ func (h *Providers) Update(w http.ResponseWriter, r *http.Request) {
 		fresh = p
 	}
 	writeJSON(w, http.StatusOK, h.out(r, fresh))
+}
+
+// freeSlugAndHost refuses a slug or a host another provider already has
+// (409 slug_taken / host_taken, with the field). p is the row about to be
+// written; its own id is skipped, so an update that keeps them passes.
+//
+// ⚠ The host is the one that matters: providers.host carries no unique index
+// (migration 00014), and GetProviderByHost answers ONE row, so a second tenant
+// on the same address would make sign-ins, cookies and minted links of one
+// tenant land in the other, depending on which row the database returns
+// first. A disabled tenant's host counts too: resuming it must not create the
+// clash.
+func (h *Providers) freeSlugAndHost(w http.ResponseWriter, r *http.Request, p *model.Provider) bool {
+	all, err := h.Store.ListProviders(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(p.Host))
+	for _, o := range all {
+		if o == nil || o.ID == p.ID {
+			continue
+		}
+		if strings.EqualFold(o.Slug, p.Slug) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "slug_taken", "field": "slug", "message": "another tenant already has this slug"})
+			return false
+		}
+		if host != "" && strings.EqualFold(strings.TrimSpace(o.Host), host) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "host_taken", "field": "host", "message": "another tenant already has this address"})
+			return false
+		}
+	}
+	return true
+}
+
+// newRealm settles the realm of a tenant about to be created: the one asked
+// for, else the slug, validated (tenant.CheckRealm) and free. It writes the
+// refusal and answers false when there is one.
+func (h *Providers) newRealm(w http.ResponseWriter, r *http.Request, req *providerReq, p *model.Provider) bool {
+	realm := p.Slug
+	if req.Realm != nil && strings.TrimSpace(*req.Realm) != "" {
+		realm = *req.Realm
+	}
+	realm = tenant.NormalizeRealm(realm)
+	if err := tenant.CheckRealm(realm); err != nil {
+		reason := "realm_invalid"
+		switch {
+		case errors.Is(err, tenant.ErrRealmReserved):
+			reason = "realm_reserved"
+		case errors.Is(err, tenant.ErrRealmEmpty):
+			reason = "realm_empty"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": reason, "field": "realm", "message": err.Error()})
+		return false
+	}
+	if taken, err := h.Store.GetProviderByRealm(r.Context(), realm); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return false
+	} else if taken != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "realm_taken", "field": "realm", "message": "another tenant already has this realm"})
+		return false
+	}
+	p.Realm = realm
+	return true
+}
+
+// realmChange reports whether an update asks for a realm other than the
+// tenant's own. Sending the same realm back (the panel round-trips the whole
+// object) is not a change.
+func realmChange(req *providerReq, p *model.Provider) bool {
+	if req.Realm == nil {
+		return false
+	}
+	return tenant.NormalizeRealm(*req.Realm) != tenant.NormalizeRealm(p.Realm)
 }
 
 // transferSupertenant moves the platform flag to p, un-flagging the previous
@@ -216,13 +431,15 @@ func (h *Providers) transferSupertenant(r *http.Request, p *model.Provider) erro
 // Delete removes a tenant. Users require ?force=1 (then cascade); storage
 // LINKS are removed but storage rows + file data are never touched.
 func (h *Providers) Delete(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSupertenant(w, r) {
+	if !h.mayWrite(w, r) {
 		return
 	}
 	p := h.load(w, r)
 	if p == nil {
 		return
 	}
+	// The row is gone by the time anybody reads the log: its name goes with it.
+	auth.SetAuditTarget(r.Context(), "", p.Slug)
 	if p.IsSupertenant {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the supertenant"})
 		return
@@ -234,7 +451,7 @@ func (h *Providers) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(users) > 0 && r.URL.Query().Get("force") != "1" {
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":      "tenant still has users — pass ?force=1 to delete them too",
+			"error":      "tenant still has users - pass ?force=1 to delete them too",
 			"user_count": len(users),
 		})
 		return
@@ -264,7 +481,7 @@ func (h *Providers) Delete(w http.ResponseWriter, r *http.Request) {
 
 // LinkStorage links a storage to the tenant (POST {storage_id}).
 func (h *Providers) LinkStorage(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSupertenant(w, r) {
+	if !h.mayWrite(w, r) {
 		return
 	}
 	p := h.load(w, r)
@@ -286,12 +503,14 @@ func (h *Providers) LinkStorage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	auth.SetAuditTarget(r.Context(), "", p.Slug)
+	auth.AddAuditDetail(r.Context(), "storage_id", req.StorageID)
 	writeJSON(w, http.StatusOK, h.out(r, p))
 }
 
 // UnlinkStorage removes a storage link (never the storage itself).
 func (h *Providers) UnlinkStorage(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSupertenant(w, r) {
+	if !h.mayWrite(w, r) {
 		return
 	}
 	p := h.load(w, r)
@@ -307,6 +526,8 @@ func (h *Providers) UnlinkStorage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	auth.SetAuditTarget(r.Context(), "", p.Slug)
+	auth.AddAuditDetail(r.Context(), "storage_id", sid)
 	writeJSON(w, http.StatusOK, h.out(r, p))
 }
 

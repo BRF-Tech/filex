@@ -126,7 +126,6 @@ function testRouter() {
 
 beforeEach(() => {
   setActivePinia(createPinia());
-  document.body.innerHTML = '';
 });
 
 describe('the app page', () => {

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/assoc"
+	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
@@ -112,6 +114,12 @@ type ViewRow struct {
 type ActionsAnswer struct {
 	Actions []ActionRow `json:"actions"`
 	Views   []ViewRow   `json:"views"`
+	// OpenRules are the administrator's rules for which handler opens a kind
+	// of file (internal/assoc, capability open), by kind: the order handlers
+	// are offered in and the ones switched off. A kind without a rule keeps
+	// the default order - the apps' viewers, then filex's own. The explorer
+	// applies them exactly as assoc.Apply does (packages/core lib/appViewer).
+	OpenRules map[string]assoc.Rule `json:"open_rules,omitempty"`
 }
 
 // ActionsFor lists what the caller may see: running plugins, enabled
@@ -299,6 +307,60 @@ func (r *Registry) catalogueInput(ctx context.Context, p *Installed, storageID i
 // JobOutput is one committed output, as the ops row reports it.
 type JobOutput struct {
 	Path string `json:"path"`
+	// Open marks the output the finished job sends its person to, and the
+	// app's own screen to start there (openAfter). At most one output of a
+	// job carries it; kept in the job row's outputs, so no column of its own.
+	Open *JobOpen `json:"open,omitempty"`
+}
+
+// JobOpen is the screen a finished job asked for on one of its outputs: an
+// action or a view of the app that ran it, or neither (just open the file).
+type JobOpen struct {
+	Action string `json:"action,omitempty"`
+	View   string `json:"view,omitempty"`
+}
+
+// openAfter reads a finished job's `surface.open` (ActionRunOutput.Surface,
+// the only part of a job result's surface the host acts on) and marks the
+// committed output it names. It answers why it dropped the request, or "".
+//
+// ⚠⚠ Why a job and not only a screen may say "go there". A screen's `open`
+// can name a file that already exists; a job's result is a file that did not
+// exist when the screen was drawn, and only the host knows the name it was
+// committed under (a free name beside the source, another storage). The
+// signing app's "Convert to PDF" queued a conversion and its page then sat on
+// "the job is queued" for good: nothing said when the PDF landed, and the
+// person had to find it and ask for signatures again (filex #78).
+//
+// The path is the app's own REF for one of its outputs (`file_create`'s
+// answer), or empty for the first one. Nothing else: a job may send its
+// person to a file it produced for them, never to any other, so a path that
+// is not one of this job's outputs is dropped. The screen it names is
+// checked like a screen's `open` (CheckOpen): this app's own, not both.
+func openAfter(p *Installed, out *wire.ActionRunOutput, committed []JobOutput) string {
+	if out == nil || out.Surface == nil || out.Surface.Open == nil {
+		return ""
+	}
+	o := out.Surface.Open
+	if err := CheckOpen(p, &wire.Surface{Open: o}); err != nil {
+		return err.Error()
+	}
+	at := -1
+	if ref := strings.TrimSpace(o.Path); ref == "" {
+		at = 0
+	} else {
+		for i, w := range out.Outputs {
+			if w.Ref == ref {
+				at = i
+				break
+			}
+		}
+	}
+	if at < 0 || at >= len(committed) {
+		return "open names " + o.Path + ", which is not a file this job produced"
+	}
+	committed[at].Open = &JobOpen{Action: o.Action, View: o.View}
+	return ""
 }
 
 // ── ops integration ────────────────────────────────────────────────────
@@ -370,6 +432,11 @@ func classifyJobError(status, text string) (code, engine string) {
 	}
 	if m := engineMissingRe.FindStringSubmatch(text); m != nil {
 		return "engine_missing", m[1]
+	}
+	// The office engine is not installed but CONNECTED: a document server the
+	// administrator sets up under External services (office.go).
+	if m := officeUnconfiguredRe.FindStringSubmatch(text); m != nil {
+		return "office_unconfigured", enginebin.Canonical(m[1])
 	}
 	switch text {
 	case msgJobTimeout:
@@ -494,7 +561,7 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 		JobID: job.ID, ActionID: job.ActionID, Params: params, Inputs: scope.Inputs(),
 		Output: action.Output,
 		Actor:  r.wireActor(ctx, p, actor, ""),
-		Locale: job.Locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p),
+		Locale: job.Locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(ctx, p),
 		ShareMaxTTLDays: r.linkCeiling(ctx, p),
 	}
 	inb, _ := json.Marshal(in)
@@ -520,6 +587,9 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 		return nil, words, &CallError{Code: CodePluginError, Message: msg}
 	}
 	if action.Output.Mode == "none" || len(out.Outputs) == 0 {
+		if out.Surface != nil && out.Surface.Open != nil {
+			p.log("warn", "action "+job.ActionID+": open dropped - the job kept no output to open")
+		}
 		return []JobOutput{}, words, nil
 	}
 	if r.sink == nil {
@@ -606,6 +676,11 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 		// mailed to somebody else.
 		r.keepPromisedShares(context.WithoutCancel(ctx), scope, p, job.StorageID, o.Ref, rel)
 		r.keepPromisedLock(context.WithoutCancel(ctx), scope, p, job.StorageID, o.Ref, rel)
+	}
+	// Only now, with every output committed under the name it really got:
+	// the file the person is sent to is one that exists.
+	if why := openAfter(p, &out, committed); why != "" {
+		p.log("warn", "action "+job.ActionID+": open dropped - "+why)
 	}
 	return committed, words, nil
 }
@@ -730,10 +805,17 @@ func outputName(pattern, firstInput, suggested string) string {
 	return safeName(out)
 }
 
-func (r *Registry) enginesFor(p *Installed) map[string]bool {
+// enginesFor is the engine map a call carries (CallContext.Engines): each
+// engine present AND granted. An engine's old name is in it too, with the
+// same answer: an app built for LibreOffice reads `libreoffice` and is told
+// about the office engine.
+func (r *Registry) enginesFor(ctx context.Context, p *Installed) map[string]bool {
 	out := map[string]bool{}
-	for name, present := range r.engines.Available() {
+	for name, present := range r.engines.Available(ctx) {
 		out[name] = present && p.Grants.HasEngine(name)
+		for _, alias := range enginebin.AliasesOf(name) {
+			out[alias] = out[name]
+		}
 	}
 	return out
 }
@@ -779,8 +861,8 @@ func (r *Registry) DecorateOps(ctx context.Context, rows []*ops.Op) {
 				op.Error = JobText(j.Message, lang)
 			}
 		}
-		var outs []ops.OpOutput
-		_ = json.Unmarshal([]byte(j.OutputsJSON), &outs)
+		var kept []JobOutput
+		_ = json.Unmarshal([]byte(j.OutputsJSON), &kept)
 		// Outputs are reported adapter-qualified (`docs://x/y.pdf`), the form
 		// the explorer navigates by; the job row keeps them storage-relative.
 		name, ok := names[j.StorageID]
@@ -790,9 +872,22 @@ func (r *Registry) DecorateOps(ctx context.Context, rows []*ops.Op) {
 			}
 			names[j.StorageID] = name
 		}
-		for i := range outs {
-			if name != "" && !strings.Contains(outs[i].Path, "://") {
-				outs[i].Path = name + "://" + strings.TrimPrefix(outs[i].Path, "/")
+		var outs []ops.OpOutput
+		if kept != nil {
+			outs = make([]ops.OpOutput, 0, len(kept))
+		}
+		for _, k := range kept {
+			p := k.Path
+			if name != "" && !strings.Contains(p, "://") {
+				p = name + "://" + strings.TrimPrefix(p, "/")
+			}
+			outs = append(outs, ops.OpOutput{Path: p})
+			// Where the finished job sends the person who queued it (openAfter).
+			// ⚠ Only on a job that FINISHED: the mark is written with the
+			// outputs, and a row that says "go there" while the job is still
+			// running, or after it failed, would send somebody to nothing.
+			if k.Open != nil && op.Open == nil && j.Status == model.AppPluginJobOK && strings.Contains(p, "://") {
+				op.Open = &ops.OpOpen{Path: p, Action: k.Open.Action, View: k.Open.View}
 			}
 		}
 		op.Outputs = outs
@@ -853,7 +948,7 @@ func (r *Registry) ViewEvent(ctx context.Context, plugin, view string, storageID
 	}
 	defer scope.Close()
 	in.ViewID = view
-	in.Context = wire.CallContext{Inputs: scope.Inputs(), Locale: locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p),
+	in.Context = wire.CallContext{Inputs: scope.Inputs(), Locale: locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(ctx, p),
 		ShareMaxTTLDays: r.linkCeiling(ctx, p)}
 	// Where a result goes when it cannot go beside its source — asked only
 	// for an app that can put one elsewhere (it costs a look at every

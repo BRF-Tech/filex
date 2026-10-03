@@ -18,14 +18,14 @@ filex reads plain ZIP, the TAR family and gzip/bzip2 itself, so those work on
 every install. Everything else needs 7-Zip **25.01 or newer**: filex checks the
 version and refuses an older or unidentifiable binary (25.00 and 25.01 fixed
 symlink handling during extraction and crashes in the ZIP, RAR5 and
-compound-document readers — CVE-2025-11001/11002, CVE-2025-53816/53817,
+compound-document readers - CVE-2025-11001/11002, CVE-2025-53816/53817,
 CVE-2025-55188). The full Docker image ships it (Alpine 3.24, 7-Zip 26.01).
 The slim image deliberately does not; install a provider alongside filex or
 point filex at one with the environment variables below. A server without 7-Zip
 offers only ZIP in the create dialog and no password fields.
 
-RAR extraction needs a 7-Zip built with RAR support. Alpine's `7zip` package —
-the one in the full image — is built without it (the unRAR licence), so the
+RAR extraction needs a 7-Zip built with RAR support. Alpine's `7zip` package -
+the one in the full image - is built without it (the unRAR licence), so the
 image does not extract RAR; the official 7-Zip Linux build from 7-zip.org
 (`7zz`) does, and `FILEX_ARCHIVE_7Z_BIN` can point at it. **Settings →
 Archives** lists RAR among the extraction formats only when the 7-Zip in use
@@ -43,7 +43,7 @@ archive passwords; use ZIP or 7z when encryption is required. A ZIP password
 can use ASCII characters only (7-Zip refuses anything else); 7z takes any.
 
 The create dialog exposes 7z's solid mode and a bounded dictionary-size
-selection (4–256 MiB). Larger dictionaries can improve compression for some
+selection (4-256 MiB). Larger dictionaries can improve compression for some
 data, but require more memory both when creating and extracting the archive.
 The bounds are enforced by the API as well as the browser; arbitrary 7-Zip
 switches are never accepted from a request.
@@ -53,9 +53,9 @@ file-operation queue, in a lane of their own: one archive operation at a time,
 never in front of copies, moves, deletes and upload commits. Once the request
 has been validated, the dialog closes and the operations center opens on the
 job: its name, a progress bar and Cancel. Creating an archive moves the bar in
-bytes through each phase — reading the source files off their storage
-(0–45%), compressing (45–90%) and writing the archive to the destination
-(90–99%) — so a job whose time goes to a remote storage does not sit at 0%.
+bytes through each phase - reading the source files off their storage
+(0-45%), compressing (45-90%) and writing the archive to the destination
+(90-99%) - so a job whose time goes to a remote storage does not sit at 0%.
 Completion and failure use the same in-app feedback as copy, move and delete
 operations. Creation emits one `archive.created` notification and
 extraction emits one `archive.extracted` notification, rather than reporting
@@ -94,7 +94,7 @@ database: an archive that is being unpacked fills the workspace first.
 
 How the limits hold while an archive is unpacked depends on who reads it:
 
-- **TAR, TAR.GZ, TAR.BZ2, gzip, bzip2 — and TAR.XZ/XZ, whose xz layer alone
+- **TAR, TAR.GZ, TAR.BZ2, gzip, bzip2 - and TAR.XZ/XZ, whose xz layer alone
   7-Zip decompresses into a pipe:** filex reads every member itself. A member
   is counted before it is created and every byte goes through a writer that
   refuses the first one past the limit, so an archive whose headers lie about
@@ -109,8 +109,8 @@ How the limits hold while an archive is unpacked depends on who reads it:
   (possible in RAR5) is refused. While 7-Zip runs, filex also walks the
   workspace (every 100 ms, slowing to at most every 2 s on a large tree) and
   stops 7-Zip if either limit is crossed, then checks once more at the end.
-  That walk is a backstop — it can be passed by what 7-Zip writes between two
-  looks (measured on a gzip whose trailer lies: 5–20 MiB past the limit) —
+  That walk is a backstop - it can be passed by what 7-Zip writes between two
+  looks (measured on a gzip whose trailer lies: 5-20 MiB past the limit) -
   which is why the formats filex can read itself never rely on it.
 
 ## Safety model
@@ -126,7 +126,7 @@ How the limits hold while an archive is unpacked depends on who reads it:
 - Member paths are validated before and after extraction; absolute paths and
   traversal are rejected. So is the whole archive when it holds a link
   (symbolic, hard, or a RAR5 file copy) or a special file (FIFO, device,
-  socket) — whether 7-Zip lists it as a link or only by its file mode.
+  socket) - whether 7-Zip lists it as a link or only by its file mode.
 - Declared sizes and entry counts are checked before extraction; the limits
   hold while extracting as described above.
 - Every member lands through the same gate as any other write: ACL, app locks

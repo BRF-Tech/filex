@@ -1227,16 +1227,20 @@ filex-explorer {
 }
 
 /* Chromeless — used by the standalone /files/edit route. Drops the
- * dialog frame entirely so the viewport belongs to the viewer. */
+ * dialog frame entirely so the viewport belongs to the viewer.
+ * The viewport less the host's strips: `--fe-overlay-top` (the desktop's
+ * document-window bar) and `--fe-overlay-bottom` (its open-with note) - the
+ * host states them on `:root` and the viewer fits between (variables.css). */
 .fe-modal__backdrop--chromeless {
   background: transparent;
   padding: 0;
+  bottom: var(--fe-overlay-bottom, 0px);
 }
 .fe-modal__card--chromeless {
   max-width: none;
   width: 100vw;
-  height: calc(100vh - var(--fe-overlay-top, 0px));
-  max-height: calc(100vh - var(--fe-overlay-top, 0px));
+  height: calc(100vh - var(--fe-overlay-top, 0px) - var(--fe-overlay-bottom, 0px));
+  max-height: calc(100vh - var(--fe-overlay-top, 0px) - var(--fe-overlay-bottom, 0px));
   border-radius: 0;
   box-shadow: none;
 }
@@ -6133,6 +6137,284 @@ filex-explorer {
   gap: var(--fe-gap-sm);
 }
 
+/* Folder previews (0.50, docs/thumbnails.md): a folder card grows the file
+   card's 184x108 box when any folder in the view has pictures inside
+   (GridView `has-folder-previews`), so a row of folders stays one height. The
+   box holds the folder drawn large (FolderMosaic): its back, up to three of
+   its pictures rising out of it like prints, each turned a little, and its
+   front over their lower half; with no pictures, the same folder, empty. A
+   view with no pictured folder, or folder previews turned off (Settings),
+   keeps the compact 56px cards. */
+.fe-grid.has-folder-previews .fe-grid__card--folder {
+  min-height: 166px;
+}
+.fe-grid__card--folder .fe-grid__thumb--folder {
+  flex: 0 0 108px;
+  height: 108px;
+  margin: 0;
+  overflow: hidden;
+  border-radius: calc(var(--fe-radius-md) - 1px) calc(var(--fe-radius-md) - 1px) 0 0;
+  background: var(--fe-bg-elev);
+}
+.fe-fmosaic {
+  /* The folder's two tones: its own colour in front, a deeper one behind. */
+  --fmosaic-front: var(--fe-icon-folder);
+  --fmosaic-back: color-mix(in srgb, var(--fe-icon-folder) 70%, #6b3f00);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+.fe-fmosaic__stage {
+  position: relative;
+  flex: none;
+}
+.fe-fmosaic__back,
+.fe-fmosaic__front {
+  position: absolute;
+  display: block;
+  inset-inline: 0;
+  width: 100%;
+}
+.fe-fmosaic__back {
+  inset-block: 0;
+  height: 100%;
+  fill: var(--fmosaic-back);
+  /* The tab sits on the inline-start side, mirrored for right-to-left. */
+  transform: scaleX(var(--filex-dir-x, 1));
+}
+.fe-fmosaic__front {
+  z-index: 2;
+  inset-block-end: 0;
+  fill: var(--fmosaic-front);
+  /* It casts a little shadow up onto the prints, which is what puts them
+     inside the folder rather than on top of it. */
+  filter: drop-shadow(0 -1px 2px rgba(0, 0, 0, 0.22));
+}
+/* A print: one file from inside, its picture or its type icon on white, in a
+   white border. Its place and turn come from --x / --y / --r (by count and
+   slot, below), mirrored for right-to-left. The newest is the middle one. */
+.fe-fmosaic__print {
+  --x: 0px;
+  --y: 0px;
+  --r: 0deg;
+  --lift: 0px;
+  position: absolute;
+  inset-inline-start: 50%;
+  /* A type icon (ThumbTile's slot, no wrapper) sits in the middle. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 2px solid #fff;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  transform: translate(calc(var(--x) * var(--filex-dir-x, 1)), calc(var(--y) + var(--lift))) /* rtl-physical: mirrored by --filex-dir-x */
+    rotate(calc(var(--r) * var(--filex-dir-x, 1)));
+  transition: transform 160ms ease;
+}
+.fe-fmosaic--1 .fe-fmosaic__print--1 { --r: -4deg; }
+.fe-fmosaic--2 .fe-fmosaic__print--1 { --x: -15px; --y: 2px; --r: -8deg; }
+.fe-fmosaic--2 .fe-fmosaic__print--2 { --x: 15px; --r: 6deg; }
+.fe-fmosaic--3 .fe-fmosaic__print--1 { --x: -25px; --y: 5px; --r: -11deg; }
+.fe-fmosaic--3 .fe-fmosaic__print--2 { --y: -1px; --r: -1deg; z-index: 1; }
+.fe-fmosaic--3 .fe-fmosaic__print--3 { --x: 25px; --y: 4px; --r: 10deg; }
+@media (prefers-reduced-motion: reduce) {
+  .fe-fmosaic__print { transition: none; }
+}
+.fe-fmosaic__img {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* A file with no picture: its type icon, small, on the white print. */
+.fe-fmosaic__icon {
+  display: inline-flex;
+  font-size: 20px;
+  line-height: 0;
+}
+.fe-fmosaic__glyph {
+  align-self: center;
+  width: 100%;
+  height: 100%;
+  font-size: 44px;
+}
+
+/* peek: the grid card's 184x108 box, the folder 120x88 at its foot. */
+.fe-fmosaic--peek {
+  padding-block-end: 8px;
+}
+.fe-fmosaic--peek .fe-fmosaic__stage {
+  width: 120px;
+  height: 88px;
+}
+.fe-fmosaic--peek .fe-fmosaic__front {
+  height: 50px;
+}
+.fe-fmosaic--peek .fe-fmosaic__print {
+  inset-block-start: 4px;
+  width: 64px;
+  height: 48px;
+  margin-inline-start: -32px;
+}
+/* Pointing at the folder lifts its files a little out of it. */
+.fe-grid__card--folder:hover .fe-fmosaic--peek .fe-fmosaic__print {
+  --lift: -4px;
+}
+
+/* fan: the gallery's square tile. The folder drawn large behind, and up to
+   three prints fanned out from their foot in front of it, the newest in
+   the middle and on top. */
+.fe-fmosaic--fan {
+  align-items: center;
+}
+.fe-fmosaic--fan .fe-fmosaic__stage {
+  width: 132px;
+  height: 97px;
+  margin-block-start: 12px;
+}
+.fe-fmosaic--fan .fe-fmosaic__front {
+  z-index: 0;
+  height: 55px;
+}
+.fe-fmosaic--fan .fe-fmosaic__print {
+  z-index: 1;
+  inset-block-end: 14px;
+  width: 92px;
+  height: 69px;
+  margin-inline-start: -46px;
+  border-width: 3px;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transform-origin: 50% 100%;
+}
+.fe-fmosaic--fan .fe-fmosaic__icon {
+  font-size: 30px;
+}
+.fe-fmosaic--fan.fe-fmosaic--1 .fe-fmosaic__print--1 { --r: -3deg; }
+.fe-fmosaic--fan.fe-fmosaic--2 .fe-fmosaic__print--1 { --x: -12px; --y: 0px; --r: -9deg; }
+.fe-fmosaic--fan.fe-fmosaic--2 .fe-fmosaic__print--2 { --x: 12px; --r: 7deg; z-index: 2; }
+.fe-fmosaic--fan.fe-fmosaic--3 .fe-fmosaic__print--1 { --x: -16px; --y: 0px; --r: -14deg; }
+.fe-fmosaic--fan.fe-fmosaic--3 .fe-fmosaic__print--3 { --x: 16px; --y: 0px; --r: 12deg; }
+.fe-fmosaic--fan.fe-fmosaic--3 .fe-fmosaic__print--2 { --y: 0px; --r: -1deg; z-index: 2; }
+.fe-gal__card:hover .fe-fmosaic--fan .fe-fmosaic__print {
+  --lift: -3px;
+}
+
+/* mini: the list row's 24px icon, the newest file rising out of the folder. */
+.fe-fmosaic--mini {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+}
+.fe-fmosaic--mini .fe-fmosaic__stage {
+  width: 24px;
+  height: 19px;
+}
+.fe-fmosaic--mini .fe-fmosaic__front {
+  height: 11px;
+  filter: drop-shadow(0 -0.5px 1px rgba(0, 0, 0, 0.25));
+}
+.fe-fmosaic--mini .fe-fmosaic__print {
+  inset-block-start: 0;
+  width: 15px;
+  height: 11px;
+  margin-inline-start: -7.5px;
+  border-width: 1px;
+  border-radius: 1.5px;
+  box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.3);
+}
+.fe-fmosaic--mini .fe-fmosaic__icon {
+  font-size: 8px;
+}
+
+/* The folder peek (FolderPeek): a glance, not a menu. It takes no pointer, so
+   it can never catch the click meant for the folder under it. Placed and
+   layered by the component (el.style), sized here. */
+.fe-fpeek {
+  position: fixed;
+  width: 264px;
+  max-width: calc(100vw - 16px);
+  padding: var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg);
+  box-shadow: var(--fe-shadow);
+  color: var(--fe-text);
+  font-family: var(--fe-font);
+  font-size: var(--fe-text-sm);
+  pointer-events: none;
+}
+.fe-fpeek__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--fe-gap-sm);
+  margin: 0 0 var(--fe-gap-xs);
+  min-width: 0;
+}
+.fe-fpeek__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.fe-fpeek__count,
+.fe-fpeek__loading,
+.fe-fpeek__more {
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  white-space: nowrap;
+}
+.fe-fpeek__loading,
+.fe-fpeek__more {
+  margin: var(--fe-gap-xs) 0 0;
+}
+.fe-fpeek__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fe-fpeek__row {
+  display: flex;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  min-width: 0;
+  padding-block: 2px;
+}
+.fe-fpeek__tile {
+  /* The corner a page's type badge sits in (ThumbTile, .fe-thumb__type). */
+  position: relative;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--fe-radius-sm);
+  font-size: 18px;
+}
+.fe-fpeek__img {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+}
+.fe-fpeek__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The 24px type tile in the row (lib/fileIcons sizes itself from font-size).
    A folder gets the same box and the untiled solid glyph inside it. */
 .fe-grid__tile {
@@ -7053,6 +7335,8 @@ filex-explorer {
   min-height: 0;
   background: var(--fe-bg);
   color: var(--fe-text);
+  /* The edge chevrons' size and inset are tokens (variables.css); narrow
+     screens set them smaller below. */
 }
 
 /* ---- Drafts (issue #71) ----
@@ -7355,8 +7639,8 @@ filex-explorer {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: var(--fe-h-lg);
-  height: var(--fe-h-lg);
+  width: var(--fe-viewer-chev-size);
+  height: var(--fe-viewer-chev-size);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7373,8 +7657,16 @@ filex-explorer {
   background: var(--fe-bg-hover);
   color: var(--fe-text);
 }
-.fe-viewer__chev--prev { inset-inline-start: var(--fe-gap); }
-.fe-viewer__chev--next { inset-inline-end: var(--fe-gap); }
+.fe-viewer__chev--prev { inset-inline-start: var(--fe-viewer-chev-inset); }
+.fe-viewer__chev--next { inset-inline-end: var(--fe-viewer-chev-inset); }
+/* #110: a stage that fills the screen keeps a gutter on each side for the
+   chevrons, so they stand beside the surface instead of on it (an app's
+   interface, an editor, a document viewer: PreviewModal's FILL_KINDS). The
+   same on both sides whichever chevron is drawn, so stepping to the first or
+   the last file does not move the surface. */
+.fe-viewer__stage--gutter {
+  padding-inline: calc(var(--fe-viewer-chev-size) + var(--fe-viewer-chev-inset) * 2);
+}
 
 /* ---- Zoom pill ---- */
 .fe-viewer__zoom {
@@ -7448,8 +7740,13 @@ filex-explorer {
     gap: var(--fe-gap-sm);
     padding: 0 var(--fe-gap-sm);
   }
-  .fe-viewer__chev--prev { inset-inline-start: var(--fe-gap-xs); }
-  .fe-viewer__chev--next { inset-inline-end: var(--fe-gap-xs); }
+  /* The chevrons come off the edges and get smaller, and the gutter shrinks
+     with them: at 375px wide a full-size gutter would take a quarter of the
+     screen from the surface. */
+  .fe-viewer {
+    --fe-viewer-chev-size: var(--fe-h-md);
+    --fe-viewer-chev-inset: var(--fe-gap-xs);
+  }
 }
 /* === /gorunum:v1-viewer === */
 
@@ -8494,6 +8791,15 @@ filex-explorer {
 }
 .fe-share__av--dim {
   background: var(--fe-bg-hover);
+  color: var(--fe-text-muted);
+}
+/* A group: squared, so it reads as "many people" beside the round avatars. */
+.fe-share__av--group {
+  border-radius: var(--fe-radius-sm, 4px);
+}
+.fe-share__kind {
+  margin-inline-start: var(--fe-gap-sm);
+  font-size: var(--fe-text-xs);
   color: var(--fe-text-muted);
 }
 .fe-share__person {
@@ -10461,6 +10767,64 @@ filex-explorer {
    is. Same rule the grid and the gallery already apply to a page thumbnail. */
 .fe-list__icon--img.fe-thumb--page {
   object-position: 50% 0;
+}
+
+/* 0.50: the type badge on a list thumbnail drawn on paper.
+ *
+ * Real pages reached the list in 0.50 (0.49 drew a coloured card with the
+ * extension on it), and at 24px the first page of a .docx is a white square
+ * on a white row: the row looked as if it had lost its icon. So the picture
+ * carries a small badge naming its kind (DOCX, PDF, ZIP) in its inline-end
+ * corner: lib/filePreview decides which files get one (drawsOnPaper) and
+ * ThumbTile draws it only while the picture is there. No frame around the
+ * picture (the owner's call).
+ *
+ * ⚠ The badge sets NO background: it is filled by the `fe-ftile--<family>`
+ * class it also carries, the type tile's own colour from `--fe-icon-<family>`
+ * (light and dark). A background here, later in the file, would win the tie
+ * and paint every badge one colour.
+ *
+ * Logical insets only: under dir="rtl" the badge moves to the opposite corner
+ * by itself. Absolutely placed against `.fe-list__thumb`, which is exactly the
+ * tile's box, so the row's height does not change.
+ *
+ * ⚠ INSIDE the corner (insets 0), never hanging over it: the list cell clips
+ * (`:where(.fe-list__cell) { overflow: hidden }`, which the name's ellipsis
+ * needs) and the folder peek's tile clips to its rounded corners. The first
+ * version hung 3px below the tile, and the v0.50.0 release shots showed every
+ * badge in the list with its lower edge and the bottom of its letters cut off
+ * flat. */
+.fe-list__thumb {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+.fe-thumb__type {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  /* ⚠ Never wider than the tile. A wider badge (it was capped at 30px on a
+     24px tile) grew out of the tile's other side, and the list cell clipped
+     that edge: the v0.50.0 release shot drew "BOARD" with its B cut off. A
+     name longer than four letters is set smaller (--long) and, past what fits
+     even then, ends at the tile's edge. */
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 2px;
+  border-radius: 2px;
+  color: #ffffff;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fe-thumb__type--long {
+  padding-inline: 1px;
+  font-size: 5.5px;
+  letter-spacing: 0;
 }
 
 /* === gezinti:g3 — the header follows the panel, in BOTH states =============
@@ -13897,11 +14261,34 @@ filex-explorer {
   color: var(--fe-warning);
 }
 
+/* issue #104 - an entry the storage could not answer for: "!" on the row. The
+ * same chip as the lock and link badges, in the warning colour: nothing about
+ * this entry can be trusted, or done, until the storage answers again
+ * (lib/unavailable). */
+.fe-unavailable {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  border: 1px solid var(--fe-warning);
+  background: var(--fe-bg-elev);
+  color: var(--fe-warning);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
 /* One notice box, two names: an app's hold on a file and a link that cannot be
  * opened are the same shape of fact — the thing above the panel's facts that
  * explains why the facts alone mislead. */
 .fe-inspector__lock,
-.fe-inspector__linknote {
+.fe-inspector__linknote,
+.fe-inspector__unavailable {
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -14039,4 +14426,90 @@ filex-explorer {
     width: 100%;
     opacity: 0.6;
   }
+}
+
+/* === 0.50: the thumbnail note (ThumbTile, lib/thumbNote) ===================
+ * A file whose thumbnail will not come because of the file itself (damaged,
+ * encrypted, too large) keeps its type tile, and a small round marker with
+ * an icon sits in the tile's block-end, inline-end corner; resting the
+ * pointer on it, or tapping it, shows the sentence. INSIDE the corner, like
+ * the list's type badge: the list cell and the tiles clip. The marker takes
+ * its own clicks (ThumbTile stops them), so a tap never opens the file. */
+.fe-thumb__note {
+  position: absolute;
+  inset-block-end: 6px;
+  inset-inline-end: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  box-shadow: var(--fe-shadow-sm);
+  cursor: help;
+  line-height: 0;
+}
+.fe-thumb__note svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fe-thumb__note--corrupt {
+  color: var(--fe-danger);
+}
+.fe-thumb__note--encrypted {
+  color: var(--fe-primary);
+}
+.fe-thumb__note--too_large {
+  color: var(--fe-warning);
+}
+/* The list's tile is 24 pixels: a small marker in its very corner. */
+.fe-list__thumb .fe-thumb__note {
+  inset-block-end: 0;
+  inset-inline-end: 0;
+  width: 12px;
+  height: 12px;
+  box-shadow: none;
+}
+.fe-list__thumb .fe-thumb__note svg {
+  width: 8px;
+  height: 8px;
+  stroke-width: 2.6;
+}
+/* The gallery's tile is several times a grid card's: the marker scales, and
+ * it stays above the size-and-date line a resting pointer slides up from the
+ * tile's bottom edge (.fe-gal__meta), which used to cover it. */
+.fe-gal__thumb .fe-thumb__note {
+  inset-block-end: 8px;
+  inset-inline-end: 8px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+}
+.fe-gal__thumb .fe-thumb__note svg {
+  width: 16px;
+  height: 16px;
+}
+/* The sentence: teleported to <body> and placed by ThumbTile along the
+ * inline axis (insetInlineStart, top). It takes no clicks. */
+.fe-thumb__note-tip {
+  position: fixed;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 6px 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  box-shadow: var(--fe-shadow-sm);
+  font-family: var(--fe-font);
+  font-size: var(--fe-text-sm);
+  line-height: 1.4;
+  pointer-events: none;
 }

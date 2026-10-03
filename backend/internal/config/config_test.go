@@ -182,6 +182,28 @@ func TestPluginEnv(t *testing.T) {
 	}
 }
 
+// FILEX_PLUGIN_LOOPBACK_SOURCES is off unless it says 1/true: it opens this
+// machine to plugin downloads, which only development and tests want.
+func TestPluginLoopbackSourcesEnv(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PluginLoopbackSources {
+		t.Fatal("off by default")
+	}
+	for v, want := range map[string]bool{"1": true, "true": true, "TRUE": true, "0": false, "yes": false} {
+		t.Setenv("FILEX_PLUGIN_LOOPBACK_SOURCES", v)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.PluginLoopbackSources != want {
+			t.Fatalf("%q: got %v, want %v", v, cfg.PluginLoopbackSources, want)
+		}
+	}
+}
+
 // TestPluginEnvRejectsNonsense — a ceiling of zero or garbage keeps the
 // default rather than silently allowing no concurrent operation at all.
 func TestPluginEnvRejectsNonsense(t *testing.T) {

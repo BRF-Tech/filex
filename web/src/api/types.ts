@@ -26,6 +26,14 @@ export interface User {
   created_at: string;
   updated_at: string;
   last_login_at?: string | null;
+  /** Switched on: the account may sign in (absent from older servers = on). */
+  enabled?: boolean;
+  /** Why the SERVER switched it off: `pending_approval` for an account an SSO
+   *  sign-in opened whose identity provider did not confirm the address; an
+   *  administrator switching it on approves it (docs/SSO.md). */
+  disabled_reason?: string;
+  /** Bound to the SSO identity it first signed in with (docs/SSO.md). */
+  sso_linked?: boolean;
 }
 
 export interface MeResponse {
@@ -50,11 +58,24 @@ export interface LoginRequest {
   password: string;
   remember?: boolean;
   totp?: string;
+  /** The tenant realm (multi-tenant installs only; empty = the platform's own
+   *  tenant, or the one the address names). */
+  realm?: string;
+}
+
+/** A sign-in typed on the platform's address for a tenant that has an address
+ *  of its own ends there: the browser carries `code` (one use, a minute) to
+ *  that address's sign-in page, which redeems it (`AuthApi.handoff`). */
+export interface LoginHandoff {
+  origin: string;
+  code: string;
 }
 
 export interface LoginResponse {
-  user: User;
+  /** Absent when the answer is a handoff. */
+  user?: User;
   token?: string; // optional bearer if cookie auth disabled
+  handoff?: LoginHandoff;
 }
 
 /** Driver names the backend registers. Not a closed set in practice —
@@ -282,8 +303,15 @@ export interface Capabilities {
   build: string;
   ffmpeg: boolean;
   imagemagick: boolean;
+  /** That ImageMagick decodes a HEIC photo: measured by the server with a
+   *  sample (0.50), since libheif can be there without its HEVC decoder.
+   *  Absent on an older server. */
+  heic?: boolean;
   ghostscript: boolean;
-  libreoffice: boolean;
+  /** What each kind of thumbnail has (the server's nested snapshot). `office`
+   *  is OnlyOffice being configured (0.50): office documents get their
+   *  thumbnails from it and from nothing else. Absent on an older server. */
+  thumbs?: { office?: boolean };
   onlyoffice_url?: string | null;
   drawio_url?: string | null;
   monaco: boolean;
@@ -296,6 +324,16 @@ export interface Capabilities {
   oidc_auto_redirect?: boolean;
   /** Password sign-in is off, but the bootstrap administrator may still use it (recovery). */
   auth_recovery_login?: boolean;
+  /** The sign-in form's Realm field. Present on a multi-tenant install only
+   *  (absent: no field). On a tenant's own address `locked_realm` is that
+   *  tenant's realm and the field is filled in and read-only; on the
+   *  platform's address it is null and the field is free (empty = the
+   *  platform's own tenant). */
+  realm?: { enabled: boolean; locked_realm: string | null };
+  /** The sign-in page's SSO buttons for this address (the tenant it names,
+   *  else the platform's own): `id` goes back as `?instance=`. Absent on an
+   *  older server, where `auth_drivers` holding `oidc` is one button. */
+  auth_sso?: LoginSSO[];
   demo_mode?: boolean;
   demo_user?: string;
   /** Demo password (FILEX_DEMO_PASS). Sent by the server only when
@@ -326,6 +364,21 @@ export interface Capabilities {
   /** The caller could configure the instance (the server's answer — the
    *  same checks the admin routes apply, supertenant included). */
   caller_admin?: boolean;
+}
+
+/** One SSO button of the sign-in page (docs/TENANT-ADMIN.md). */
+export interface LoginSSO {
+  /** The instance to start: a provider's slug, or "tenant" for a tenant's own OIDC. */
+  id: string;
+  /** What the button says; "" = the page's own words. */
+  label: string;
+}
+
+/** How a sign-in for a realm may go (GET /api/auth/methods). */
+export interface LoginMethods {
+  password: boolean;
+  recovery: boolean;
+  sso: LoginSSO[];
 }
 
 export interface SettingsMap {
@@ -385,7 +438,22 @@ export interface ExternalService {
 }
 
 export interface AuthProvider {
-  id: 'local' | 'oidc' | 'ldap' | 'proxy-header' | 'api-token';
+  /**
+   * The provider's slug (docs/TENANT-ADMIN.md): the driver's name for its
+   * first instance (`ldap`, `oidc`…), so a driver's first provider is still
+   * addressed by it; any other instance's own name (`ldap-2`, `acme-sso`).
+   */
+  id: string;
+  /** What it is: oidc, ldap, pam, windows, proxy-header, local, api-token. */
+  driver: 'local' | 'oidc' | 'ldap' | 'proxy-header' | 'windows' | 'pam' | 'api-token' | string;
+  /** Its row (0 for `local` and API tokens, which are not instances). */
+  instance_id?: number;
+  /** What the sign-in page calls it ("" = the page's own words). */
+  label?: string;
+  /** The tenant a tenant's own provider belongs to. */
+  owner_provider_id?: number | null;
+  /** The tenants that sign in through it (multi-tenant installs only). */
+  tenants?: number[];
   enabled: boolean;
   config: Record<string, unknown>;
   config_redacted?: Record<string, unknown>;
@@ -395,8 +463,8 @@ export interface AuthProvider {
   testable?: boolean;
   /** The page may change it (not defined by the environment). */
   managed?: boolean;
-  /** Where it is configured: the environment, this page, or built in. */
-  origin?: 'environment' | 'page' | 'builtin';
+  /** Where it is configured: the environment, this page, a tenant's administrator, or built in. */
+  origin?: 'environment' | 'page' | 'tenant' | 'builtin';
   /** Where an environment provider is defined (FILEX_AUTH_DRIVERS, a config file…). */
   from?: string;
   state?: 'running' | 'failed' | 'off';
@@ -408,19 +476,54 @@ export interface AuthProvider {
   secrets_set?: Record<string, boolean>;
   /** The fields the page may set (server-side schema). */
   fields?: AuthProviderField[];
+  /**
+   * The test signs a real account in (an operating-system provider): the test
+   * and a save that switches it on carry `test_account`, and a failing test
+   * can never be confirmed away.
+   */
+  test_account_required?: boolean;
+  /** Fields whose value the upgrade to 0.50 chose and nobody saved since
+   *  (`trust_email` of an OIDC that existed before it): the form says so. */
+  set_by_upgrade?: string[];
+}
+
+/**
+ * The account an operating-system provider's test signs in with. ⚠ Sent on
+ * the one request that tests or saves, never kept: the page clears the
+ * password as soon as that request is answered.
+ */
+export interface AuthProviderTestAccount {
+  username: string;
+  password: string;
 }
 
 /** One field of a provider the page manages (authsetup.Field). */
 export interface AuthProviderField {
   key: string;
-  kind: 'text' | 'secret' | 'bool';
+  /** `multiline` keeps its line breaks (a pasted PEM certificate). */
+  kind: 'text' | 'secret' | 'bool' | 'multiline';
   required?: boolean;
   default?: string;
+}
+
+/** A tenant as the provider bindings list it. */
+export interface AuthProviderTenant {
+  id: number;
+  name: string;
+  /** "" for the platform's own tenant. */
+  realm: string;
+  is_supertenant: boolean;
 }
 
 /** `GET /api/admin/auth-providers`, read whole. */
 export interface AuthProvidersOverview {
   providers: AuthProvider[];
+  /** FILEX_MULTI_TENANT: providers are bound to tenants. */
+  multiTenant: boolean;
+  /** The upgrade bound every provider to every tenant; the operator has not reviewed it yet. */
+  reviewPending: boolean;
+  /** Every tenant, for the bindings (multi-tenant installs only). */
+  tenants: AuthProviderTenant[];
   /** The password form answers (password sign-in or the recovery sign-in). */
   passwordSignIn: boolean;
   /** The installation administrator's recovery sign-in is on. */

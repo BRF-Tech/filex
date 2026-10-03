@@ -22,6 +22,14 @@ interface Props {
   max?: number | string;
   step?: number | string;
   name?: string;
+  /**
+   * For a caller that writes the box's hint or error ITSELF, outside this
+   * block (AddressListEditor puts them under a row that also holds a button):
+   * the id of that line, and whether it is an error. Its own `hint`/`error`
+   * win when given.
+   */
+  describedby?: string;
+  invalid?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -85,13 +93,13 @@ const padding = computed(() => {
       :min="min"
       :max="max"
       :step="step"
-      :aria-invalid="shownError ? 'true' : undefined"
-      :aria-describedby="shownError ? `${inputId}-err` : hint ? `${inputId}-hint` : undefined"
+      :aria-invalid="shownError || invalid ? 'true' : undefined"
+      :aria-describedby="shownError ? `${inputId}-err` : hint ? `${inputId}-hint` : describedby || undefined"
       :class="[
         'input-base',
         padding,
         monospace && 'font-mono',
-        shownError && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
+        (shownError || invalid) && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
       ]"
       @invalid="(e) => (nativeError = onFieldInvalid(e))"
       @input="onInput"

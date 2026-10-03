@@ -60,17 +60,21 @@ export const VIEWER_MATRIX: Record<string, ExtMatch> = {
   py: { primary: '.fe-preview__code-editor, .fe-preview__pre' },
   go: { primary: '.fe-preview__code-editor, .fe-preview__pre' },
 
-  // Office — OnlyOffice spawns `iframe[name^="frameEditor"]` inside the
-  // `.fe-preview__office` mount via api.js. When capability is off (or
-  // documentServerUrl probe fails) PreviewModal swaps in
-  // `.fe-preview__fallback` with an "OnlyOffice yapılandırması yok"
-  // message + İndir button — accepted as a documented degradation.
-  docx: { primary: '.fe-preview__office iframe', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
-  xlsx: { primary: '.fe-preview__office iframe', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
-  pptx: { primary: '.fe-preview__office iframe', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
-  odt:  { primary: '.fe-preview__office iframe', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
-  ods:  { primary: '.fe-preview__office iframe', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
-  odp:  { primary: '.fe-preview__office iframe', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
+  // Office — OnlyOffice's api.js REPLACES the `.fe-preview__office` mount
+  // with its own `iframe[name="frameEditor"]`: the div is gone, so nothing is
+  // ever "inside" it. ⚠ The old `.fe-preview__office iframe` could only fail
+  // where a document server is reachable - measured in the 0.50 final run
+  // against ONLYOFFICE Docs 9.4: the document open and drawn, and all five
+  // office cases red on "neither the viewer nor the fallback". When the
+  // capability is off (or the probe fails) PreviewModal swaps in
+  // `.fe-preview__fallback` with the "not set up" message + Download button —
+  // accepted as a documented degradation.
+  docx: { primary: 'iframe[name^="frameEditor"]', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
+  xlsx: { primary: 'iframe[name^="frameEditor"]', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
+  pptx: { primary: 'iframe[name^="frameEditor"]', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
+  odt:  { primary: 'iframe[name^="frameEditor"]', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
+  ods:  { primary: 'iframe[name^="frameEditor"]', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
+  odp:  { primary: 'iframe[name^="frameEditor"]', fallback: '.fe-preview__fallback', timeoutMs: 20_000 },
 
   // Drawio — diagrams.net iframe; operator-disabled fallback shows the
   // viewer chrome but no <iframe> child.

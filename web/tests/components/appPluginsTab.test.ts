@@ -35,6 +35,13 @@ vi.mock('@/api/client', () => ({
   },
 }));
 
+// A redrawn list re-reads the languages the instance offers (an app may add
+// one): GET /api/public/branding. Answered here — the tab only has to ask.
+vi.mock('@/i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/i18n')>()),
+  loadOfferedLocales: vi.fn(async () => undefined),
+}));
+
 import AppPluginsTab from '@/components/plugins/AppPluginsTab.vue';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
@@ -116,6 +123,51 @@ describe('AppPluginsTab', () => {
     await flushPromises();
     expect(w.text()).toContain('e-İmza');
     expect(w.text()).toContain('2 izin');
+  });
+
+  // Task #110: the intro said every app is a WebAssembly module that adds
+  // file-menu rows and runs as a job. An app may be only an interface (draw.io,
+  // filextext: nothing runs on the server) or only a language (a language
+  // pack), and both sit in this very list, so the page described them wrongly.
+  it('the intro names every kind of app, not only a module that runs as a job', async () => {
+    for (const [locale, words] of [
+      ['en', { iface: /interface of (its|their) own/i, lang: /language/i, old: /^WebAssembly apps that add rows/ }],
+      ['tr', { iface: /kendi arayüz/i, lang: /(?<!\p{L})dil(?!\p{L})/iu, old: /^Dosya menüsüne satır ekleyen ve iş olarak çalışan WebAssembly/ }],
+    ] as const) {
+      const w = mountTab(locale);
+      await flushPromises();
+      const intro = w.find('[data-testid="app-plugins-intro"]');
+      expect(intro.exists(), `${locale}: the intro is drawn`).toBe(true);
+      const text = intro.text();
+      expect(text, `${locale}: an app with only an interface`).toMatch(words.iface);
+      expect(text, `${locale}: a language pack`).toMatch(words.lang);
+      expect(text, `${locale}: not the old "every app is a job" sentence`).not.toMatch(words.old);
+      w.unmount();
+    }
+  });
+
+  // Task #110, what the intro left behind: on a processor the engine cannot
+  // run on the banner said "no app can start here" as if every app were a
+  // module, and the empty state said the GitHub install "fetches the module it
+  // names". An interface (draw.io, filextext) is a package and a language is
+  // its manifest alone; the platform is off for all of them on such a host.
+  it('the processor warning and the empty state name every kind of app', async () => {
+    listAnswer = { runtime: { enabled: false, arch_ok: false, disabled_reason: '', requires_signature: false, engines: {} }, plugins: [] };
+    for (const [locale, words] of [
+      ['en', { iface: /\binterface\b/i, lang: /\blanguage\b/i, pkg: /interface package/i, oldBanner: /so no app can start here/, oldEmpty: /fetches the module it names and/ }],
+      ['tr', { iface: /arayüz/i, lang: /(?<!\p{L})dil(?!\p{L})/iu, pkg: /arayüz paketi/i, oldBanner: /burada hiçbir uygulama başlayamaz/, oldEmpty: /adını verdiği modülü indirir/ }],
+    ] as const) {
+      const w = mountTab(locale);
+      await flushPromises();
+      const banner = w.find('[data-testid="app-plugins-runtime"]').text();
+      expect(banner, `${locale}: an interface app is off too`).toMatch(words.iface);
+      expect(banner, `${locale}: a language is off too`).toMatch(words.lang);
+      expect(banner, `${locale}: not the module-only sentence`).not.toMatch(words.oldBanner);
+      const page = w.text();
+      expect(page, `${locale}: the install fetches an interface package too`).toMatch(words.pkg);
+      expect(page, `${locale}: not "fetches the module" alone`).not.toMatch(words.oldEmpty);
+      w.unmount();
+    }
   });
 
   it('shows the off banner, the reason, and the empty state that explains the GitHub install', async () => {

@@ -30,6 +30,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"golang.org/x/net/webdav"
@@ -38,15 +39,18 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/davlock"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storageref"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -170,8 +174,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, ok := h.authenticate(r)
-	if !ok {
+	p, err := h.authenticate(r)
+	if err != nil {
+		// Too many wrong passwords: 429 says so, with when to come back. Every
+		// other failure stays the one indistinguishable 401.
+		if t, ok := protocolauth.AsThrottled(err); ok {
+			secs := loginguard.RetryAfterSeconds(t.Verdict.RetryAfter)
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			lang := srvtext.Pick(srvtext.FromAcceptLanguage(r.Header.Get("Accept-Language")))
+			http.Error(w, t.Verdict.Message(lang), http.StatusTooManyRequests)
+			return
+		}
 		w.Header().Set("WWW-Authenticate", `Basic realm="`+h.cfg.Realm+`", charset="UTF-8"`)
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
@@ -181,7 +194,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// itself, so it never ran auth.Middleware: without the user a PUT produced
 	// a node owned by nobody (bytes uncounted, file event actorless), and
 	// without the scope the root collection listed every tenant's storages — a
-	// tenant admin who mapped /dav got all ten olivov tenants read-write (H4,
+	// tenant admin who mapped /dav got all ten tenants of a multi-tenant deployment read-write (H4,
 	// 2026-08-05). Both halves come from protocolauth now, so a protocol
 	// cannot attach one and forget the other.
 	r = r.WithContext(p.WithContext(r.Context()))
@@ -234,21 +247,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //     user with that e-mail. Tokens carrying a `root:` confinement scope are
 //     refused: /dav has no confine middleware, accepting them would turn a
 //     subtree-limited credential into whole-tree access.
-func (h *Handler) authenticate(r *http.Request) (*principal, bool) {
+//
+// The error is protocolauth.ErrUnauthorized for every ordinary refusal and a
+// *protocolauth.ThrottledError when a sign-in limit lock is what refused it.
+func (h *Handler) authenticate(r *http.Request) (*principal, error) {
 	ident, secret, ok := r.BasicAuth()
 	if !ok || secret == "" || strings.TrimSpace(ident) == "" {
-		return nil, false
+		return nil, protocolauth.ErrUnauthorized
 	}
-	p, err := h.auth.Any(r.Context(), ident, secret)
+	// The address is the one every surface shares (internal/clientip), and it
+	// is what the sign-in limit counts by: the peer's, or the forwarded one
+	// only when the peer is a trusted proxy.
+	ctx := protocolauth.WithSource(r.Context(), loginguard.ProtoDAV, clientip.FromRequest(r))
+	// The address the client reached names the tenant on a multi-tenant
+	// install — the same Host the web page resolves (docs/PROTOCOLS.md): a
+	// drive mapped to a tenant's own address needs no realm in the user name,
+	// and `beta/alex` there is refused.
+	ctx = auth.WithRequestLoginHost(ctx, r)
+	p, err := h.auth.Any(ctx, ident, secret)
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	// access.webdav (package perm). WebDAV re-authenticates every request,
 	// so taking it away ends the mapped drive at its next request.
 	if p, err = h.auth.Admit(r.Context(), p, perm.AccessWebDAV, "webdav"); err != nil {
-		return nil, false
+		return nil, protocolauth.ErrUnauthorized
 	}
-	return &principal{Principal: p}, true
+	return &principal{Principal: p}, nil
 }
 
 // ───────────────────────────── authorization ──────────────────────────────

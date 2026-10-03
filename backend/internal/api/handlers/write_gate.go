@@ -26,7 +26,19 @@ import (
 // Locks are read fresh for the storage (acl.Resolver.Locks), not from the
 // caller's permission set: they bind everyone, the administrator included,
 // and a lock taken a second ago counts.
+//
+// A request an AI door runs (ai_doors.go: an MCP tool or /api/ai route that
+// reuses this handler) holds no encryption key, so its plain writes are judged
+// as the AI surface's own (aiOps.gate): syspath.Keyless, which adds an
+// encrypted folder's key file to the refused names. Without it a copy, a
+// restore or a version rollback through the AI surface could write the one
+// file the AI surface's own tools never may.
 func gate(w http.ResponseWriter, r *http.Request, resolver *acl.Resolver, storageID int64, targets ...writegate.Target) bool {
+	if keylessDoor(r.Context()) {
+		for i := range targets {
+			targets[i] = keyless(targets[i])
+		}
+	}
 	return answerGate(w, writegate.Check(liveLocks(r, resolver, storageID), 0, targets...))
 }
 

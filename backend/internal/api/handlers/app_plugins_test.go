@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/api"
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/capability"
@@ -59,6 +60,8 @@ type appFixture struct {
 	// NOTHING has to be able to look, and counting the rows is the only
 	// reading that cannot be fooled by a job row whose ops row failed.
 	sql *sql.DB
+	// assoc is Default apps (internal/assoc), over the same registry.
+	assoc *assoc.Service
 	// extra are storages a test added after the first (addStorage); the
 	// resolver the router and the registry share reads them.
 	extra map[int64]storage.Driver
@@ -137,12 +140,18 @@ func newAppFixture(t *testing.T, cfgMutate func(*config.Config)) *appFixture {
 		Store: store, Share: shareSvc,
 		Dir: filepath.Join(t.TempDir(), "app-plugins"), SecretKey: "0123456789abcdef0123456789abcdef",
 		StorageResolver: resolver, Demo: cfg.Demo.Mode,
+		// The install sources these tests serve are loopback httptest
+		// servers: the guarded client reaches them only with this on (the
+		// FILEX_PLUGIN_LOOPBACK_SOURCES the e2e run sets too).
+		LoopbackSources: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { reg.Close(context.Background()) })
 	reg.SetPublicURL(cfg.PublicURL)
 	opsSvc.SetPluginRunner(reg)
 	opsSvc.SetDecorator(reg.DecorateOps)
+	assocSvc := assoc.New(store)
+	assocSvc.SetSource(reg)
 
 	srv := httptest.NewServer(api.BuildRouter(&api.Deps{
 		Cfg:             cfg,
@@ -154,6 +163,7 @@ func newAppFixture(t *testing.T, cfgMutate func(*config.Config)) *appFixture {
 		StorageResolver: resolver,
 		Ops:             opsSvc,
 		AppPlugins:      reg,
+		Assoc:           assocSvc,
 		LocalAuth:       localDrv,
 	}))
 	t.Cleanup(srv.Close)
@@ -161,7 +171,7 @@ func newAppFixture(t *testing.T, cfgMutate func(*config.Config)) *appFixture {
 	client := freshClient(t)
 	email, pw := testutil.SeedAdmin(t, store)
 	testutil.LoginAs(t, srv, client, email, pw)
-	return &appFixture{srv: srv, admin: client, store: store, reg: reg, ops: opsSvc, st: st, root: root, sql: sqlDB, extra: extra}
+	return &appFixture{srv: srv, admin: client, store: store, reg: reg, ops: opsSvc, st: st, root: root, sql: sqlDB, extra: extra, assoc: assocSvc}
 }
 
 func (f *appFixture) writeFile(t *testing.T, rel, content string) {
@@ -302,7 +312,13 @@ func TestAppPlugins_AdminInstall_UserRuns_OutputLandsWithBookkeeping(t *testing.
 	assert.Contains(t, list.Runtime.Engines, "ffmpeg")
 	// Every engine with the name a person reads, so the panel keeps no list
 	// of its own (it printed "libreoffice" beside the review's "LibreOffice").
-	assert.Equal(t, "LibreOffice", list.Runtime.EngineNames["libreoffice"])
+	// 0.50: the office engine is ONLYOFFICE, under its old name too (an app
+	// built before 0.50 still asks for `engines:libreoffice`), and it is
+	// listed once, as `office`.
+	assert.Equal(t, "ONLYOFFICE", list.Runtime.EngineNames["office"])
+	assert.Equal(t, "ONLYOFFICE", list.Runtime.EngineNames["libreoffice"])
+	assert.Contains(t, list.Runtime.Engines, "office")
+	assert.NotContains(t, list.Runtime.Engines, "libreoffice")
 	assert.Equal(t, "librsvg", list.Runtime.EngineNames["rsvg"])
 	require.Len(t, list.Plugins, 1)
 	assert.Equal(t, "echo", list.Plugins[0].Name)

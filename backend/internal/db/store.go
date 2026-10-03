@@ -11,6 +11,14 @@ import (
 // NodeAgg is a lightweight node row used for folder-size aggregation
 // (internal/sync.RecomputeFolderSizes): just enough to walk the tree and sum
 // descendant file sizes into each folder's cached size.
+// UserPrefsDoc is one stored preference document (00047): the surface it
+// belongs to, the JSON and when it was last written.
+type UserPrefsDoc struct {
+	Surface   string
+	Doc       string
+	UpdatedAt time.Time
+}
+
 type NodeAgg struct {
 	ID       int64
 	ParentID *int64
@@ -123,6 +131,15 @@ type Store interface {
 	// CountChildRows counts the rows, live or deleted, whose parent_id is
 	// parentID: what the parent_id cascade would take with that row.
 	CountChildRows(ctx context.Context, parentID int64) (int, error)
+	// MarkNodeUnavailable records that the storage could not answer for the
+	// live row id (migration 00078, issue #104), and reports whether that
+	// changed the row. See NodeUnavailableSQL.
+	MarkNodeUnavailable(ctx context.Context, id int64, reason string) (bool, error)
+	// ClearNodeUnavailable lifts that mark, reporting whether there was one.
+	ClearNodeUnavailable(ctx context.Context, id int64) (bool, error)
+	// UnavailableAt returns the row that makes rel unavailable - rel's own, or
+	// a folder's above it - or nil.
+	UnavailableAt(ctx context.Context, storageID int64, rel string) (*UnavailableEntry, error)
 	// ListStaleNodesUnder is ListStaleNodes bounded to the rows strictly BELOW
 	// dir (the folder's own row excluded), matched exactly as ListNodesUnder
 	// matches — the tombstone candidates of a folder rescan.
@@ -215,7 +232,19 @@ type Store interface {
 	// Multi-tenancy (docs/MULTI-TENANCY.md): look a user up within one provider
 	// (tenant); re-home a user to a provider + record its OIDC subject (JIT).
 	GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error)
+	// SetUserProvider re-homes a user. An empty oidcSubject also drops the
+	// account's SSO identity (its issuer, migration 00079): an account moved
+	// to another tenant is bound to nobody there.
 	SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error
+	// The SSO identity an account is bound to (migration 00079, OIDCIdentitySQL):
+	// lookups that never leave one tenant, the bind, and the server's own
+	// reason for an account it opened switched off.
+	GetUserByOIDCIdentity(ctx context.Context, t UserTenant, issuer, subject string) (*model.User, error)
+	GetUserInTenantByEmail(ctx context.Context, t UserTenant, email string) (*model.User, error)
+	SetUserOIDCIdentity(ctx context.Context, userID int64, issuer, subject string) error
+	ClearUserOIDCIdentity(ctx context.Context, userID int64) (bool, error)
+	SetProviderOIDCTrustEmail(ctx context.Context, providerID int64, trust bool) error
+	SetUserDisabledReason(ctx context.Context, userID int64, reason string) error
 	ListUsersByProvider(ctx context.Context, providerID int64) ([]*model.User, error)
 	ListUsers(ctx context.Context) ([]*model.User, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -231,7 +260,7 @@ type Store interface {
 	TouchLastLogin(ctx context.Context, id int64) error
 	// DeleteUser removes the account AND, in the same transaction, the public
 	// links it opened (`shares.created_by` = the account): download links and
-	// file requests (Burak, 2026-09-28: "Kapansın"). Every door that deletes
+	// file requests (the maintainer, 2026-09-28: "Kapansın"). Every door that deletes
 	// an account — an administrator, a tenant deletion, a rolled-back
 	// provisioning — goes through here, so none of them can leave a working
 	// link behind. It used to keep the rows and clear `created_by` (ON DELETE
@@ -476,6 +505,42 @@ type Store interface {
 	SetUserCustomRole(ctx context.Context, userID, roleID int64) error
 	ListUserCustomRoles(ctx context.Context) (map[int64]int64, error)
 
+	// Groups (migration 00074, internal/group). One implementation for every
+	// engine: db.GroupSQL, embedded in each driver's Store. GetGroup and
+	// GetGroupFileGrant return sql.ErrNoRows for an unknown id. Deleting a
+	// group takes its memberships and grants along; deleting a role leaves
+	// its groups with none (ReassignGroupRole first to move them).
+	ListGroups(ctx context.Context) ([]*model.Group, error)
+	GetGroup(ctx context.Context, id int64) (*model.Group, error)
+	CreateGroup(ctx context.Context, g *model.Group) (*model.Group, error)
+	UpdateGroup(ctx context.Context, g *model.Group) error
+	DeleteGroup(ctx context.Context, id int64) error
+	ReassignGroupRole(ctx context.Context, from, to int64) error
+	ListGroupMembers(ctx context.Context, groupID int64) ([]*model.GroupMember, error)
+	ListUserGroupMemberships(ctx context.Context, userID int64) ([]*model.GroupMember, error)
+	ListAllGroupMembers(ctx context.Context) ([]*model.GroupMember, error)
+	AddGroupMember(ctx context.Context, groupID, userID int64) error
+	RemoveGroupMember(ctx context.Context, groupID, userID int64) error
+	SetUserLinkedGroups(ctx context.Context, userID int64, source string, groupIDs []int64) (added, removed []int64, err error)
+	DropForeignMemberships(ctx context.Context, userID, providerID int64) error
+
+	// The built-in level an account had before a group's role moved it
+	// (user_group_levels), so leaving the group can put it back.
+	GetUserGroupLevel(ctx context.Context, userID int64) (string, bool, error)
+	SetUserGroupLevel(ctx context.Context, userID int64, level string) error
+	DeleteUserGroupLevel(ctx context.Context, userID int64) error
+
+	// A group's folder grants (group_file_grants). Rows come back as
+	// model.FileGrant with GroupID set and UserID zero.
+	ListGroupFileGrantsByStorage(ctx context.Context, storageID int64) ([]*model.FileGrant, error)
+	ListGroupFileGrantsByStorageUser(ctx context.Context, storageID, userID int64) ([]*model.FileGrant, error)
+	ListGroupFileGrantsByGroup(ctx context.Context, groupID int64) ([]*model.FileGrant, error)
+	ListAllGroupFileGrants(ctx context.Context) ([]*model.FileGrant, error)
+	GetGroupFileGrant(ctx context.Context, id int64) (*model.FileGrant, error)
+	CreateGroupFileGrant(ctx context.Context, g *model.FileGrant) (*model.FileGrant, error)
+	UpdateGroupFileGrantLevel(ctx context.Context, id int64, level string) error
+	DeleteGroupFileGrant(ctx context.Context, id int64) error
+
 	// Shares
 	CreateShare(ctx context.Context, share *model.Share) (*model.Share, error)
 	GetShareByID(ctx context.Context, id int64) (*model.Share, error)
@@ -613,6 +678,25 @@ type Store interface {
 
 	// Thumbnails
 	GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error)
+	// GetThumbnails is GetThumbnail for many nodes in batched queries: what a
+	// listing asks once instead of once per file. Nodes without a row are
+	// absent from the map.
+	GetThumbnails(ctx context.Context, ids []int64) (map[int64]*model.Thumbnail, error)
+	// ListThumbnailProblems lists the files whose thumbnail failed or was
+	// skipped - and those drawn only after an earlier handler failed (a ready
+	// row with more than one attempt, 0.50) - most recently attempted first,
+	// at most limit of them. nil storageIDs is every storage; an empty slice
+	// is none. Trashed files and end-to-end encrypted skips (nothing to
+	// repair there) are left out.
+	ListThumbnailProblems(ctx context.Context, storageIDs []int64, limit int) ([]*model.ThumbnailProblem, error)
+	// ListPreviewCandidates answers, for each folder in parentIDs, the
+	// perFolder live FILES directly in it that came in last: newest first by
+	// the later of the row's creation (when the file entered the catalogue)
+	// and the file's own modification time, then by name. Subfolders are
+	// never looked into, and a folder that holds only folders is absent. What
+	// a folder's card is drawn from (docs/thumbnails.md, Folder previews).
+	// ONE query for a whole listing's folders.
+	ListPreviewCandidates(ctx context.Context, storageID int64, parentIDs []int64, perFolder int) (map[int64][]*model.Node, error)
 	UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error
 	SetThumbnailState(ctx context.Context, nodeID int64, state, errMsg string) error
 	// DeleteThumbnail drops the row for one node. The cached JPEG on disk is
@@ -650,7 +734,8 @@ type Store interface {
 	IncrementUserUsage(ctx context.Context, userID int64, delta int64) error
 	SetUserQuota(ctx context.Context, userID int64, bytes int64) error
 	// SetUserEnabled flips the account on/off (migration 00022). A disabled
-	// user cannot start a session; nothing they own is touched.
+	// user cannot start a session; nothing they own is touched. It clears the
+	// server's disabled reason (migration 00079): the administrator decided.
 	SetUserEnabled(ctx context.Context, userID int64, enabled bool) error
 	RecomputeUserUsage(ctx context.Context, userID int64) (int64, error)
 
@@ -741,6 +826,10 @@ type Store interface {
 	// error: nothing chosen yet is every account's first day.
 	GetUserPrefs(ctx context.Context, userID int64, surface string) (string, error)
 	SetUserPrefs(ctx context.Context, userID int64, surface, doc string) error
+	// ListUserPrefs is every document one person stored, each with when it
+	// was last written (0.50: an account's "open with" choices are adopted
+	// once from the most recently written surface document).
+	ListUserPrefs(ctx context.Context, userID int64) ([]UserPrefsDoc, error)
 	// Operator-defined themes (00051): a name plus two `--fe-*` token maps,
 	// served to every browser beside the built-in palettes. Instance-wide —
 	// the table has no tenant column, which is exactly why the admin routes
@@ -909,6 +998,42 @@ type Store interface {
 	// while the stored row is still pending (ok = it was written).
 	UpdatePluginRequest(ctx context.Context, r *model.PluginRequest, onlyIfPending bool) (bool, error)
 
+	// File associations (migration 00077, internal/assoc): the administrator's
+	// rule per kind of file and capability, and each app's thumbnail limits.
+	// Written once for every engine (FileAssocSQL).
+	ListFileAssociations(ctx context.Context) ([]*model.FileAssociation, error)
+	PutFileAssociation(ctx context.Context, a *model.FileAssociation) error
+	// DeleteFileAssociation: ok = there was a rule.
+	DeleteFileAssociation(ctx context.Context, capability, ext string) (bool, error)
+	// GetAppThumbLimits answers (nil, nil) when the app has none stored.
+	GetAppThumbLimits(ctx context.Context, pluginID int64) (*model.AppThumbLimits, error)
+	PutAppThumbLimits(ctx context.Context, l *model.AppThumbLimits) error
+	DeleteAppThumbLimits(ctx context.Context, pluginID int64) error
+	// ThumbnailGenerators counts the ready thumbnails by who drew them
+	// (thumbnails.generator; "" for rows from before 0.50 and placeholder
+	// cards). nil storageIDs is every storage; an empty slice is none.
+	ThumbnailGenerators(ctx context.Context, storageIDs []int64) (map[string]int64, error)
+
+	// Sign-in attempt counters (migration 00072, internal/loginguard): how many
+	// wrong attempts an account identifier or an address has made, and until
+	// when it is locked. Written once for every engine (LoginThrottleSQL).
+	// GetLoginThrottle answers (nil, nil) when nothing was counted.
+	GetLoginThrottle(ctx context.Context, scope, subject string) (*model.LoginThrottle, error)
+	// SaveLoginThrottle creates or overwrites the counter for (Scope, Subject).
+	SaveLoginThrottle(ctx context.Context, t *model.LoginThrottle) error
+	// DeleteLoginThrottle removes one counter; ok = there was one.
+	DeleteLoginThrottle(ctx context.Context, scope, subject string) (bool, error)
+	// ListLoginThrottles: one scope ("" = all), only rows locked at lockedAt
+	// when it is non-nil, most recently active first, at most limit.
+	ListLoginThrottles(ctx context.Context, scope string, lockedAt *time.Time, limit int) ([]*model.LoginThrottle, error)
+	// LoadLoginThrottles returns every counter PruneLoginThrottles(since)
+	// would keep (a failure at or after since, or a lock running past it),
+	// most recently active first, at most limit (<= 0: no limit). It is how
+	// the limiter fills its memory at start.
+	LoadLoginThrottles(ctx context.Context, since time.Time, limit int) ([]*model.LoginThrottle, error)
+	// PruneLoginThrottles drops counters idle since before; n = rows removed.
+	PruneLoginThrottles(ctx context.Context, before time.Time) (int64, error)
+
 	// Providers (tenants). See docs/MULTI-TENANCY.md. Inert while multi-tenant
 	// mode is off; a single "default" provider always exists (migration 00014).
 	CreateProvider(ctx context.Context, p *model.Provider) (*model.Provider, error)
@@ -917,7 +1042,12 @@ type Store interface {
 	// GetProviderByHost resolves a request Host to its tenant; returns nil if no
 	// enabled provider claims that host.
 	GetProviderByHost(ctx context.Context, host string) (*model.Provider, error)
+	// GetProviderByRealm resolves a realm (migration 00073) to its tenant, or
+	// nil. The realm is compared normalised (package tenant); "" is nobody's.
+	GetProviderByRealm(ctx context.Context, realm string) (*model.Provider, error)
 	ListProviders(ctx context.Context) ([]*model.Provider, error)
+	// UpdateProvider writes every column EXCEPT realm: a realm is set when the
+	// tenant is created (CreateProvider) and never changes (package tenant).
 	UpdateProvider(ctx context.Context, p *model.Provider) error
 	DeleteProvider(ctx context.Context, id int64) error
 	// GetSupertenant returns the single is_supertenant provider, or nil.
@@ -938,6 +1068,35 @@ type Store interface {
 	// (default) nothing touches these methods.
 	SetProviderPlan(ctx context.Context, providerID int64, plan, limitsJSON, billingRef string) error
 	GetProviderPlan(ctx context.Context, providerID int64) (plan, limitsJSON, billingRef string, err error)
+
+	// Tenant self-service (migration 00076, docs/TENANT-ADMIN.md; TenantAuthSQL,
+	// one implementation for every engine).
+	//
+	// Sign-in provider instances and which tenant signs in through which.
+	ListAuthInstances(ctx context.Context) ([]*model.AuthInstance, error)
+	GetAuthInstance(ctx context.Context, id int64) (*model.AuthInstance, error)
+	GetAuthInstanceBySlug(ctx context.Context, slug string) (*model.AuthInstance, error)
+	CreateAuthInstance(ctx context.Context, a *model.AuthInstance) (*model.AuthInstance, error)
+	// UpdateAuthInstance writes label, enabled, legacy, configuration and
+	// promoted scopes; never the slug, driver, origin or owner.
+	UpdateAuthInstance(ctx context.Context, a *model.AuthInstance) error
+	DeleteAuthInstance(ctx context.Context, id int64) error
+	ListAuthBindings(ctx context.Context) ([]*model.AuthBinding, error)
+	BindAuthInstance(ctx context.Context, providerID, instanceID int64, source string) error
+	UnbindAuthInstance(ctx context.Context, providerID, instanceID int64) error
+	// SetProviderAllowInsecureAuth is the operator's per-tenant switch;
+	// UpdateProvider never writes the column.
+	SetProviderAllowInsecureAuth(ctx context.Context, providerID int64, allow bool) error
+
+	// A tenant's own domains (one tenant per domain).
+	ListProviderDomains(ctx context.Context, providerID int64) ([]*model.ProviderDomain, error)
+	GetProviderDomain(ctx context.Context, domain string) (*model.ProviderDomain, error)
+	GetProviderDomainByID(ctx context.Context, id int64) (*model.ProviderDomain, error)
+	CreateProviderDomain(ctx context.Context, d *model.ProviderDomain) (*model.ProviderDomain, error)
+	SetProviderDomainStatus(ctx context.Context, id int64, status string, why model.DomainCheck, checkedAt time.Time) error
+	SetProviderDomainCert(ctx context.Context, id int64, certPEM, keySealed string, notAfter *time.Time) error
+	DeleteProviderDomain(ctx context.Context, id int64) error
+	ProviderIDByActiveDomain(ctx context.Context, domain string) (int64, error)
 }
 
 // TrashTally is one storage's share of the trash a purge sweep will walk.

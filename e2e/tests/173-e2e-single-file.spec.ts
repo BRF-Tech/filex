@@ -123,18 +123,68 @@ async function shot(page: Page, name: string) {
  * write path is the product's; the stub only answers the dialog. Records
  * every save (name, how many writes, bytes).
  */
-async function installSaveStub(page: Page) {
-  await page.addInitScript(() => {
+/**
+ * The save dialog, stubbed: what Chromium's streamed save writes goes into the
+ * origin private file system, where the test reads it back.
+ *
+ * `ends: true` keeps only the first MiB and the last 2 MiB in memory instead
+ * (window.__fxeSaveEnds), for the file over 1 GiB. ⚠ The private file system
+ * of a Playwright context is held to the browser's quota for a profile that is
+ * not on disk, which Chromium sizes from the machine's memory: on a 14 GB
+ * test machine the 1.14 GB save failed with "would cause the application to
+ * exceed its storage quota" (the 0.50 integration run), a limit of the test's
+ * stub, not of the save. What that test measures - streamed chunk by chunk,
+ * whole, the right bytes at both ends - needs only the ends.
+ */
+async function installSaveStub(page: Page, { ends = false }: { ends?: boolean } = {}) {
+  await page.addInitScript((keepEnds: boolean) => {
     const w = window as unknown as Record<string, unknown>;
     w.__nativeSaveDialog = typeof (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
     const saves: Array<{ name: string; writes: number; bytes: number; closed: boolean; aborted: boolean }> = [];
     w.__fxeSaves = saves;
+    const kept: Record<string, { size: number; first: Uint8Array; tail: Uint8Array }> = {};
+    w.__fxeSaveEnds = kept;
+    const HEAD = 1 << 20;
+    const TAIL = 2 << 20;
     w.showSaveFilePicker = async (opts?: { suggestedName?: string }) => {
       const name = opts?.suggestedName ?? 'download';
-      const root = await navigator.storage.getDirectory();
-      const handle = await root.getFileHandle(name, { create: true });
       const rec = { name, writes: 0, bytes: 0, closed: false, aborted: false };
       saves.push(rec);
+      if (keepEnds) {
+        const end = { size: 0, first: new Uint8Array(0), tail: new Uint8Array(0) };
+        kept[name] = end;
+        const join = (a: Uint8Array, b: Uint8Array) => {
+          const out = new Uint8Array(a.byteLength + b.byteLength);
+          out.set(a, 0);
+          out.set(b, a.byteLength);
+          return out;
+        };
+        return {
+          async createWritable() {
+            return {
+              write: async (d: Uint8Array) => {
+                rec.writes++;
+                rec.bytes += d.byteLength;
+                end.size += d.byteLength;
+                if (end.first.byteLength < HEAD) end.first = join(end.first, d.subarray(0, HEAD - end.first.byteLength));
+                const tail = join(end.tail, d);
+                end.tail = tail.byteLength > TAIL ? tail.slice(tail.byteLength - TAIL) : tail;
+              },
+              close: async () => {
+                rec.closed = true;
+              },
+              abort: async () => {
+                rec.aborted = true;
+              },
+            };
+          },
+          remove: async () => {
+            delete kept[name];
+          },
+        };
+      }
+      const root = await navigator.storage.getDirectory();
+      const handle = await root.getFileHandle(name, { create: true });
       return {
         async createWritable() {
           const inner = await (handle as unknown as { createWritable(): Promise<WritableStreamDefaultWriter & { write(d: unknown): Promise<void>; close(): Promise<void>; abort(r?: unknown): Promise<void> }> }).createWritable();
@@ -157,7 +207,7 @@ async function installSaveStub(page: Page) {
         remove: () => root.removeEntry(name),
       };
     };
-  });
+  }, ends);
 }
 
 /** SHA-256 of a file the stub saved, read back from the private file system. */
@@ -245,8 +295,13 @@ async function rawDownload(page: Page, act: () => Promise<void>): Promise<Downlo
   ]);
 }
 
-async function openStorage(page: Page, store = STORE, who?: { email: string; password: string }) {
-  if (isChromium()) await installSaveStub(page);
+async function openStorage(
+  page: Page,
+  store = STORE,
+  who?: { email: string; password: string },
+  { saveEnds = false }: { saveEnds?: boolean } = {},
+) {
+  if (isChromium()) await installSaveStub(page, { ends: saveEnds });
   await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));
   await loginAs(page, who?.email, who?.password);
   await setAccountViewMode(page.request, 'list');
@@ -717,6 +772,8 @@ test.describe.serial('E2E single encrypted files — what the server keeps', () 
       h.update(piece);
       left -= piece.length;
     }
+    // Flushed now, for the same reason as the 1.1 GB fixture below.
+    fs.fsyncSync(fd);
     fs.closeSync(fd);
     bigSha = h.digest('hex');
 
@@ -922,15 +979,24 @@ test.describe.serial('E2E single encrypted files — a password change is announ
   const PWC_BODY = 'içerik: parolası değişen sözleşme\n'.repeat(30);
   let api: APIRequestContext;
 
+  let pwcPrefsBefore: Record<string, unknown> = {};
+
   test.beforeAll(async ({ playwright, baseURL }) => {
     test.setTimeout(120_000);
     api = await newAuthedRequest(playwright, baseURL ?? '');
+    // The menu verbs below are English: the language is pinned on the account
+    // and put back, as in this file's other groups (lesson #616).
+    const got = await api.get(PREFS);
+    const doc = got.ok() ? (await got.json()).prefs : {};
+    pwcPrefsBefore = doc && typeof doc === 'object' && !Array.isArray(doc) ? doc : {};
+    expect((await api.put(PREFS, { data: { prefs: { ...pwcPrefsBefore, locale: 'en' } } })).ok()).toBe(true);
     await dropStorageByName(api, PWC_STORE);
     await seedLocalStorage(api, PWC_STORE, PWC_MOUNT);
     await putFileTo(api, PWC_STORE, '', `${PWC_NAME}.fxe`, await fxeOf(PWC_NAME, Buffer.from(PWC_BODY, 'utf8'), PW));
   });
 
   test.afterAll(async () => {
+    await api?.put(PREFS, { data: { prefs: pwcPrefsBefore } }).catch(() => undefined);
     await dropStorageByName(api, PWC_STORE).catch(() => undefined);
     await api?.dispose();
   });
@@ -1162,12 +1228,22 @@ test.describe.serial('E2E single encrypted files — over the in-memory limit', 
     const created = await core.createFxe(HUGE_NAME, HUGE_SIZE, src, PW);
     const fd = fs.openSync(hugeFile, 'w');
     for await (const piece of created.stream as unknown as AsyncIterable<Uint8Array>) fs.writeSync(fd, piece);
+    /* ⚠⚠ FLUSHED HERE, not by the kernel later. 1.1 GB of dirty pages on the
+       disk the server's SQLite lives on is written back some 30 s after this
+       loop, and the server's next fsync (a sign-in inserts a session) waits
+       behind all of it: measured in the 0.50 three-engine run, Firefox's
+       sign-in hung 30 s, `user lookup failed: context canceled`, and the test
+       went red on a login that had nothing to do with the feature. */
+    fs.fsyncSync(fd);
     fs.closeSync(fd);
     expect(fs.statSync(hugeFile).size).toBe(created.size);
     await seedLocalStorage(api, BIG_STORE, BIG_MOUNT);
   });
 
   test.afterAll(async () => {
+    // Room for dropStorageByName's retries: this storage left behind is
+    // what every later spec would see.
+    test.setTimeout(120_000);
     await dropStorageByName(api, BIG_STORE).catch(() => undefined);
     await api?.dispose();
     if (hugeFile) fs.rmSync(hugeFile, { force: true });
@@ -1175,7 +1251,8 @@ test.describe.serial('E2E single encrypted files — over the in-memory limit', 
 
   test('Firefox and Safari say so before asking for the password, and hand over the encrypted file and the command; Chromium streams it', async ({ page }) => {
     test.setTimeout(900_000);
-    await openStorage(page, BIG_STORE);
+    // Only the ends of the 1.14 GB save are kept (installSaveStub's note).
+    await openStorage(page, BIG_STORE, undefined, { saveEnds: true });
     await expect(row(page, `${HUGE_NAME}.fxe`)).toBeVisible({ timeout: 60_000 });
 
     if (isChromium()) {
@@ -1197,16 +1274,16 @@ test.describe.serial('E2E single encrypted files — over the in-memory limit', 
       await expect(page.getByTestId('e2e-too-big')).toHaveCount(0);
       const got = await page.evaluate(
         async ({ n, mib }) => {
-          const root = await navigator.storage.getDirectory();
-          const file = await (await root.getFileHandle(n)).getFile();
-          const hex = async (b: Blob) =>
-            Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await b.arrayBuffer())), (x) => x.toString(16).padStart(2, '0')).join('');
-          const lastStart = Math.floor((file.size - 1) / mib) * mib;
+          const end = (window as unknown as { __fxeSaveEnds: Record<string, { size: number; first: Uint8Array<ArrayBuffer>; tail: Uint8Array<ArrayBuffer> }> }).__fxeSaveEnds[n];
+          const hex = async (b: Uint8Array<ArrayBuffer>) =>
+            Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', b)), (x) => x.toString(16).padStart(2, '0')).join('');
+          const lastStart = Math.floor((end.size - 1) / mib) * mib;
+          const tailStart = end.size - end.tail.byteLength;
           const saves = (window as unknown as { __fxeSaves: Array<{ name: string; writes: number }> }).__fxeSaves;
           return {
-            size: file.size,
-            first: await hex(file.slice(0, mib)),
-            last: await hex(file.slice(lastStart)),
+            size: end.size,
+            first: await hex(end.first.subarray(0, mib)),
+            last: await hex(end.tail.subarray(lastStart - tailStart)),
             writes: saves.filter((s) => s.name === n).pop()?.writes ?? 0,
           };
         },
@@ -1216,7 +1293,6 @@ test.describe.serial('E2E single encrypted files — over the in-memory limit', 
       expect(got.first).toBe(firstSha);
       expect(got.last).toBe(lastSha);
       expect(got.writes, 'written chunk by chunk, never held whole').toBeGreaterThan(1000);
-      await page.evaluate(async (n) => (await navigator.storage.getDirectory()).removeEntry(n), HUGE_NAME);
       return;
     }
 

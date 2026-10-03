@@ -67,6 +67,11 @@ async function openLogin(page: Page, theme: 'light' | 'dark') {
     const body = await res.json();
     const drivers: string[] = body.auth_drivers ?? [];
     if (!drivers.includes('oidc')) body.auth_drivers = [...drivers, 'oidc'];
+    // Since the per-realm SSO buttons (#130) the page draws one button per
+    // entry of `auth_sso`, the address's own providers, and `auth_drivers`
+    // only for a server that sends no list. One provider with no label of
+    // its own: the button that wears the operator's label and accent.
+    if (!Array.isArray(body.auth_sso) || body.auth_sso.length === 0) body.auth_sso = [{ id: '', label: '' }];
     await route.fulfill({ response: res, json: body });
   });
   await page.goto('/admin/login?local=1');

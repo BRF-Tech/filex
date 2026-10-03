@@ -78,7 +78,7 @@ const (
 func (m *Manifest) IsLanguagePack() bool {
 	return len(m.UILocales) > 0 && m.Wasm == nil && m.UI == nil &&
 		len(m.Actions) == 0 && len(m.Views) == 0 && len(m.PublicPages) == 0 &&
-		len(m.Settings) == 0 && len(m.Permissions) == 0
+		len(m.Settings) == 0 && len(m.Permissions) == 0 && m.Thumbnails == nil
 }
 
 // UILocaleKeyOK reports whether k may be a key of a language pack: dotted

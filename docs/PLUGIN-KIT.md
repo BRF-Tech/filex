@@ -13,7 +13,7 @@ for what has been measured).
 ```
 my-app/
   filex-app.json      the manifest (what the app is, what it asks for, what it offers)
-  main.go             registers actions / views / pages with pluginkit.Run — from init()
+  main.go             registers actions / views / pages with pluginkit.Run - from init()
   plugin.wasm         the build: GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared
 ```
 
@@ -22,7 +22,7 @@ GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags="-s -w" -buildmode=c-shared 
 sha256sum plugin.wasm     # goes into filex-app.json → wasm.sha256 for URL installs
 ```
 
-Stock Go 1.25+ is enough — no TinyGo (the SDK lives in filex's own module,
+Stock Go 1.25+ is enough - no TinyGo (the SDK lives in filex's own module,
 which declares `go 1.25.0`, so an older toolchain refuses to build against
 it). `-buildmode=c-shared` turns the
 `//go:wasmexport` functions into module exports and makes the module a
@@ -90,7 +90,7 @@ function.
   "icon": "sign",
   "homepage": "https://github.com/BRF-Tech/filex-sign",
   "filex": ">=0.47.0",
-  "permissions": ["files:read", "files:write", "sign", "public_pages", "mail:send", "notify:send", "users:lookup", "state", "engines:libreoffice"],
+  "permissions": ["files:read", "files:write", "sign", "public_pages", "mail:send", "notify:send", "users:lookup", "state"],
   "permission_reasons": { "mail:send": { "en": "To invite outside signers by email." } },
   "languages": ["en", "tr"],
   "settings": [
@@ -99,7 +99,7 @@ function.
   ],
   "actions": [
     { "id": "sign", "label": { "en": "Sign…", "tr": "İmzala…" }, "icon": "sign",
-      "applies": { "kind": "file", "ext": ["pdf"], "engine_ext": { "libreoffice": ["docx", "odt"] } },
+      "applies": { "kind": "file", "ext": ["pdf"] },
       "view": "sign-wizard", "min_role": "editor",
       "output": { "mode": "sibling", "name": "{stem}-signed{ext}" },
       "limits": { "timeout_s": 300 } }
@@ -122,42 +122,42 @@ function.
 
 | Field | Meaning |
 |---|---|
-| `name` | `[a-z0-9][a-z0-9_-]{0,31}`, unique per instance; names the directory and every menu key (`plugin:<name>/<action>`). Not `cache`, `spool`, `public` or `assets` — the host's own directories beside the apps' |
-| `version` | a [semantic version](https://semver.org) (`1.2.0`): the update check moves an installed app only to a HIGHER one, and never to a pre-release (`1.3.0-rc.1`) — see [Publishing so updates are found](#publishing-so-updates-are-found) |
-| `filex` | the filex versions the app works with, a range: `">=0.47.0"`, `">=0.47.0 <0.60.0"` — see [Which filex it works with](#which-filex-it-works-with). Absent = any |
+| `name` | `[a-z0-9][a-z0-9_-]{0,31}`, unique per instance; names the directory and every menu key (`plugin:<name>/<action>`). Not `cache`, `spool`, `public` or `assets` - the host's own directories beside the apps' |
+| `version` | a [semantic version](https://semver.org) (`1.2.0`): the update check moves an installed app only to a HIGHER one, and never to a pre-release (`1.3.0-rc.1`) - see [Publishing so updates are found](#publishing-so-updates-are-found) |
+| `filex` | the filex versions the app works with, a range: `">=0.47.0"`, `">=0.47.0 <0.60.0"` - see [Which filex it works with](#which-filex-it-works-with). Absent = any |
 | `min_filex` | the older, lower-bound-only form: `"0.43.0"` means `>=0.43.0`. Honoured together with `filex` |
 | `label`, `description` | `Text` = `{en, tr, …}`; `en` is required everywhere a Text appears, other languages fall back to it |
 | `permissions` | the closed list below; anything else is refused at install |
-| `permission_reasons` | shown beside each permission in the install review — say why |
-| `user_permissions` | **since 0.49.0** — permissions of your app's own that the administrator hands out per role and per person (`[{id, label, description?, default}]`), named by an action's or a view's `requires`; see [User permissions](#user-permissions-what-an-administrator-hands-out). Not to be confused with `permissions`, which is what your *code* may do |
-| `languages` | the languages the plugin promises to speak, e.g. `["en", "tr"]` (empty = `["en"]`). **Every `Text` it returns must carry all of them** — the host refuses to install one whose `describe` answer is missing a language, and `pluginkit/plugintest` checks the screens too |
-| `ui_locales` | languages for **filex itself**: `{"es": {"ctx.download": "Descargar", …}}` by filex's own keys (both catalogues, one flat namespace). They join the language list every picker offers (public pages included) and leave with the app; a missing key falls back to English. A manifest with `ui_locales` and nothing that runs is a **language pack** and needs no module — see [Writing a language pack](#writing-a-language-pack) |
-| `settings` | the storage-driver field shape (`key, type, label, help, required, secret, default, placeholder, options, min, max`, plus `multi` / `show_when` / `required_when` — see *Fields*); `type` is `string \| password \| int \| bool \| select \| text \| date`; `secret` fields are sealed and only readable through `settings_get`. `label`, `help`, `placeholder` and an option's `label` may be **one string or a `Text`** (`{en, tr, …}`); a `Text` must carry every declared language, a plain string is shown as it is (every manifest written before v0.43 keeps installing). ⚠ `advanced` is **gone** — a setting that matters is on the form |
-| `actions[]` | menu rows: `applies` (`kind` file/dir/any, `ext` lower-case no dot, `mime` exact or `image/*`, `multi`, `min`, `max`, **`state` / `no_state`** — bare keys you keep with `StateSet`; the row is offered only where one of `state` is set and none of `no_state` is), optional `view` opened first, `confirm` text, `min_role` viewer/editor/owner, `danger`, `output.mode` sibling/version/none with `output.name` pattern (`{stem}`, `{ext}`, `{name}`), `limits.timeout_s`, **`hidden`** (never in a menu — only a surface's `job` or a page starts it: the second half of a flow), **`requires`** (since 0.49.0: the id of one of your `user_permissions` — only people who hold it see and run the action). **`applies.engine_ext`** `{engine: [ext…]}` adds extensions that apply only while that engine is installed and granted (office documents only where LibreOffice is); it adds to a non-empty `ext`/`mime` list |
-| `views[]` | screens: `placement` modal (dialog) / **page** (full page in a new tab — a wizard with the document beside it) / inspector (details panel, needs `applies`) / home (side bar). **`requires`** (since 0.49.0), as on an action: the screen — its opening, its events and every job it queues — is refused to people without that user permission |
-| `public_pages[]` | the screens an outside participant may be sent to: `pin` optional/required/none, TTL default and ceiling in days. Opening one mints a **share** (`/s/<token>`, see *Public links, end to end*); a page you never declare cannot be opened. **`purpose`** `{label, revoke, section}` names what its links are in My shares / Shares ("Signing request"), what revoking one does, and the section of your `home` view that shows it. `ShareCreate` takes the same `Purpose` for one link — it wins over the page's, and a page-less link (a plain share of a file) has no other way to say what it is |
+| `permission_reasons` | shown beside each permission in the install review - say why |
+| `user_permissions` | **since 0.49.0** - permissions of your app's own that the administrator hands out per role and per person (`[{id, label, description?, default}]`), named by an action's or a view's `requires`; see [User permissions](#user-permissions-what-an-administrator-hands-out). Not to be confused with `permissions`, which is what your *code* may do |
+| `languages` | the languages the plugin promises to speak, e.g. `["en", "tr"]` (empty = `["en"]`). **Every `Text` it returns must carry all of them** - the host refuses to install one whose `describe` answer is missing a language, and `pluginkit/plugintest` checks the screens too |
+| `ui_locales` | languages for **filex itself**: `{"es": {"ctx.download": "Descargar", …}}` by filex's own keys (both catalogues, one flat namespace). They join the language list every picker offers (public pages included) and leave with the app; a missing key falls back to English. A manifest with `ui_locales` and nothing that runs is a **language pack** and needs no module - see [Writing a language pack](#writing-a-language-pack) |
+| `settings` | the storage-driver field shape (`key, type, label, help, required, secret, default, placeholder, options, min, max`, plus `multi` / `show_when` / `required_when` - see *Fields*); `type` is `string \| password \| int \| bool \| select \| text \| date`; `secret` fields are sealed and only readable through `settings_get`. `label`, `help`, `placeholder` and an option's `label` may be **one string or a `Text`** (`{en, tr, …}`); a `Text` must carry every declared language, a plain string is shown as it is (every manifest written before v0.43 keeps installing). ⚠ `advanced` is **gone** - a setting that matters is on the form |
+| `actions[]` | menu rows: `applies` (`kind` file/dir/any, `ext` lower-case no dot, `mime` exact or `image/*`, `multi`, `min`, `max`, **`state` / `no_state`** - bare keys you keep with `StateSet`; the row is offered only where one of `state` is set and none of `no_state` is), optional `view` opened first, `confirm` text, `min_role` viewer/editor/owner, `danger`, `output.mode` sibling/version/none with `output.name` pattern (`{stem}`, `{ext}`, `{name}`), `limits.timeout_s`, **`hidden`** (never in a menu - only a surface's `job` or a page starts it: the second half of a flow), **`requires`** (since 0.49.0: the id of one of your `user_permissions` - only people who hold it see and run the action). **`applies.engine_ext`** `{engine: [ext…]}` adds extensions that apply only while that engine is installed and granted (office documents only where LibreOffice is); it adds to a non-empty `ext`/`mime` list |
+| `views[]` | screens: `placement` modal (dialog) / **page** (full page in a new tab - a wizard with the document beside it) / inspector (details panel, needs `applies`) / home (side bar). **`requires`** (since 0.49.0), as on an action: the screen - its opening, its events and every job it queues - is refused to people without that user permission |
+| `public_pages[]` | the screens an outside participant may be sent to: `pin` optional/required/none, TTL default and ceiling in days. Opening one mints a **share** (`/s/<token>`, see *Public links, end to end*); a page you never declare cannot be opened. **`purpose`** `{label, revoke, section}` names what its links are in My shares / Shares ("Signing request"), what revoking one does, and the section of your `home` view that shows it. `ShareCreate` takes the same `Purpose` for one link - it wins over the page's, and a page-less link (a plain share of a file) has no other way to say what it is |
 | `limits` | `memory_pages` (default 1024 = 64 MiB, ceiling 4096), `call_timeout_s` for screens (default 15, ceiling 60); jobs default 300 s, ceiling 900 |
 | `messages` | texts filex says on your behalf long after the call is over, in each reader's language: `{"lock.collecting": {"en": …, "tr": …}}`. A file lock's reason is kept as a key plus arguments (`pluginkit.FileLockMessage`) and read back on the admin page and in the `423` a refused write gets. Every declared language is required, and a key the manifest does not declare is refused |
-| `wasm` | where an installer fetches the module (`{tag}` = the ref) and its sha256 — required for GitHub/URL installs of an app with a module; absent for a language pack |
+| `wasm` | where an installer fetches the module (`{tag}` = the ref) and its sha256 - required for GitHub/URL installs of an app with a module; absent for a language pack |
 
 Unknown fields are refused: a typo in `permisions` would otherwise install an
 app with no grants and every host call refused, which is a confusing failure.
 
 ### Which filex it works with
 
-`filex` says which filex versions the app works with — a range, written as a
+`filex` says which filex versions the app works with - a range, written as a
 small, standard subset of the npm/Cargo syntax:
 
 | You write | It means |
 |---|---|
 | `>=0.47.0` | 0.47.0 and every later filex |
-| `>=0.47.0 <0.60.0` | from 0.47.0 up to, not including, 0.60.0 — comparators joined by a space must **all** hold |
-| `>=0.47.0 <0.50.0 \|\| >=0.52.0` | either range — alternatives are joined by `\|\|` |
+| `>=0.47.0 <0.60.0` | from 0.47.0 up to, not including, 0.60.0 - comparators joined by a space must **all** hold |
+| `>=0.47.0 <0.50.0 \|\| >=0.52.0` | either range - alternatives are joined by `\|\|` |
 | `0.47.0` or `=0.47.0` | exactly 0.47.0 |
 
 Operators are `>=`, `>`, `<=`, `<`, `=`; versions are `MAJOR.MINOR.PATCH` (a
 leading `v` is fine). No `^`, `~` or `x` wildcards, and no pre-release
-versions — `^0.47.0` means `>=0.47.0 <0.48.0` in npm, which is rarely what an
+versions - `^0.47.0` means `>=0.47.0 <0.48.0` in npm, which is rarely what an
 author writing it for filex 0.47 means. A range that does not parse is
 refused at install (`manifest_invalid`).
 
@@ -167,7 +167,7 @@ What filex does with it:
   filex out (`incompatible`, with `requires` and `filex`); the review says so
   first.
 - **The update check** takes the newest version whose range lets the running
-  filex in — so you can publish a version for the next filex while servers
+  filex in - so you can publish a version for the next filex while servers
   that have not upgraded yet stay on the one before. Since 0.49.0 it also
   steps over a version whose manifest carries a field this filex does not
   know (or a newer `manifest_version`), and lists it as needing a newer filex
@@ -181,21 +181,21 @@ What filex does with it:
   source.
 
 ⚠ **filex before 0.47.0 does not know `filex`** and refuses a manifest that
-carries it (`manifest: json: unknown field "filex"` — unknown fields are
+carries it (`manifest: json: unknown field "filex"` - unknown fields are
 refused, above). Adding it to a manifest makes that version 0.47-and-later
 only. An app that must still install on an older filex says only
 `min_filex` (known since 0.43, honoured from 0.47), or leaves the range out.
 
 The same holds for every field added later: **filex before 0.49.0 refuses
 `user_permissions` and `requires`**, so a manifest that uses them says
-`"filex": ">=0.49.0"`. ⚠ 0.47 and 0.48 cannot read such a manifest at all —
-not even its range — so they do not say *needs a newer filex*: the install
+`"filex": ">=0.49.0"`. ⚠ 0.47 and 0.48 cannot read such a manifest at all -
+not even its range - so they do not say *needs a newer filex*: the install
 review answers `manifest_invalid` (`unknown field "user_permissions"`), and the
 update check steps over that release to an older one that fits, or, when there
 is none, says *Could not check* with the same reason. From 0.49.0 the update
 check reads a newer version's name, version and range even when the manifest
 carries fields it does not know, and says *needs a newer filex* for it; install
-and upgrade still refuse such a manifest — an unknown field may be a permission
+and upgrade still refuse such a manifest - an unknown field may be a permission
 this filex cannot enforce.
 
 ### Publishing so updates are found
@@ -206,23 +206,23 @@ source is read:
 
 - **An app with a module: GitHub releases.** Tag each release with its
   version (`v0.2.0`), with `filex-app.json` at the repository root **at that
-  tag** — `version` equal to the tag, `wasm.url` pointing at the release asset
+  tag** - `version` equal to the tag, `wasm.url` pointing at the release asset
   (`https://github.com/<owner>/<repo>/releases/download/{tag}/plugin.wasm`) and
-  `wasm.sha256` its hash — and attach `plugin.wasm` to the release. An app
+  `wasm.sha256` its hash - and attach `plugin.wasm` to the release. An app
   installed at a tag follows the repository's releases: the newest one that is
   not a draft or a pre-release and whose range fits. A tag with no *release*
   is not seen; a pre-release (a GitHub pre-release, or a `-rc.1` version) is
   never offered as an update. Do not move a tag after publishing it: servers
   pin the module by the hash the manifest said.
 - **A language pack: the branch.** Bump `version` and push `filex-app.json` to
-  the branch it is installed from (`main`) — that is the whole release. A pack
+  the branch it is installed from (`main`) - that is the whole release. A pack
   needs no release, no tag and no `wasm` block.
 - **By address:** keep serving `filex-app.json` at the same address; the
   module comes from the new manifest's `wasm.url` when it is a full address.
 - **Nothing arrives by itself.** Since 0.48 every newer version waits for an
   administrator's approval. One that keeps its permissions is listed as
-  *Update available*; one that asks for one more permission — or a pack that
-  grows a module — as *Needs approval*, and the review marks what is new.
+  *Update available*; one that asks for one more permission - or a pack that
+  grows a module - as *Needs approval*, and the review marks what is new.
 - **Say the range** (`filex`) when a version needs a newer filex than the one
   before it, so servers that have not upgraded keep the version that works.
 
@@ -235,18 +235,18 @@ the module and the manifest.
 | Permission | Unlocks |
 |---|---|
 | `files:read` | `file_open` / `file_read` / `file_close` on the call's inputs |
-| `files:write` | `file_create` / `file_write` — outputs a job may return |
-| `files:lock` | `file_lock` / `file_unlock` — freeze a file read-only for everyone (administrators included) until you lift it or the TTL passes; your own jobs still write into it |
-| `state` | `state_get` / `state_set` / `state_list` — small per-file records (≤ 64 KiB) keyed by the file; they move and vanish with it, and `state_list` finds them again |
-| `settings` | `settings_get` — the admin's values, secrets opened here only |
-| `engines:<name>` | `engine_run` / `engine_available` for `ffmpeg`, `imagemagick`, `libreoffice`, `ghostscript`, `poppler`, `rsvg` |
-| `users:lookup` | `users_lookup` — the caller's directory (tenant-scoped, ≤ 20 rows); also lets the `people-picker` screen part search |
-| `notify:send` | `notify_send` — a `plugin.notice` notification |
-| `mail:send` | `mail_send` — plain text through the server's SMTP, 60/hour |
+| `files:write` | `file_create` / `file_write` - outputs a job may return |
+| `files:lock` | `file_lock` / `file_unlock` - freeze a file read-only for everyone (administrators included) until you lift it or the TTL passes; your own jobs still write into it |
+| `state` | `state_get` / `state_set` / `state_list` - small per-file records (≤ 64 KiB) keyed by the file; they move and vanish with it, and `state_list` finds them again |
+| `settings` | `settings_get` - the admin's values, secrets opened here only |
+| `engines:<name>` | `engine_run` / `engine_available` for `ffmpeg`, `imagemagick`, `office`, `ghostscript`, `poppler`, `rsvg`. `office` is the connected ONLYOFFICE Document Server, and `libreoffice` (its name before 0.50) is the same engine and the same grant - see [The office engine](#the-office-engine) |
+| `users:lookup` | `users_lookup` - the caller's directory (tenant-scoped, ≤ 20 rows); also lets the `people-picker` screen part search |
+| `notify:send` | `notify_send` - a `plugin.notice` notification |
+| `mail:send` | `mail_send` - plain text through the server's SMTP, 60/hour |
 | `http:<host>` / `http:*.domain` | `http_request` to that host (private, loopback, link-local and shared 100.64.0.0/10 addresses refused after DNS), and `asset_fetch` of a pinned file from it. A wildcard covers the subdomains of a name with at least two labels; no port |
-| `public_pages` | `share_create` / `share_revoke` / `share_state` — open a real share link for an outside participant. (`public_page_create` / `_revoke` / `_state` are the older names for exactly these and still work.) |
+| `public_pages` | `share_create` / `share_revoke` / `share_state` - open a real share link for an outside participant. (`public_page_create` / `_revoke` / `_state` are the older names for exactly these and still work.) |
 | `sign` | `host_sign_info` / `cert_issue` / `host_sign` / `key_destroy` |
-| `schedule` | the `tick` export — filex wakes your app once an hour and runs the work you ask for at the minute you name. The only permission that makes your code run with nobody present; see *A scheduled wake-up* |
+| `schedule` | the `tick` export - filex wakes your app once an hour and runs the work you ask for at the minute you name. The only permission that makes your code run with nobody present; see *A scheduled wake-up* |
 
 The administrator grants the list exactly; there is no partial grant in v1.
 
@@ -255,7 +255,7 @@ The administrator grants the list exactly; there is no partial grant in v1.
 `permissions` above is what your **code** may do on the server. A **user
 permission** is the other direction: an action of your app that an
 organisation may want to allow to some people and not to others. The signing
-app is the model — anybody may sign what they were sent, but *sending a
+app is the model - anybody may sign what they were sent, but *sending a
 document round for signature* is something an administrator may keep to some
 roles. Declare it, and name it where it applies:
 
@@ -282,8 +282,8 @@ roles. Declare it, and name it where it applies:
 
 | Field | Meaning |
 |---|---|
-| `id` | `[a-z0-9][a-z0-9_-]{0,63}` — no dots; unique in the app. filex keys it as `app.<app>.<id>` (`app.sign.request`) |
-| `label`, `description` | a `Text` in **every** language the manifest declares (the description is optional, but complete when present) — the administrator reads them when deciding |
+| `id` | `[a-z0-9][a-z0-9_-]{0,63}` - no dots; unique in the app. filex keys it as `app.<app>.<id>` (`app.sign.request`) |
+| `label`, `description` | a `Text` in **every** language the manifest declares (the description is optional, but complete when present) - the administrator reads them when deciding |
 | `default` | who holds it until the administrator decides: `viewer` (every account), `user` (accounts that can change files) or `admin` (administrators only, until granted). Absent = `user` |
 
 An action's or a view's `requires` names the id; one that names an id not in
@@ -293,24 +293,24 @@ An action's or a view's `requires` names the id; one that names an id not in
   person's own exception, their custom role, their built-in role (User or
   Viewer) and last your `default`, first answer wins
   ([PERMISSIONS.md → App permissions](PERMISSIONS.md#app-permissions));
-- **hides** an action or a view the person does not hold — it is not in
+- **hides** an action or a view the person does not hold - it is not in
   `GET /api/files/plugins/actions`, so no menu row, details section or home
   screen is drawn for it;
-- **refuses** it on every door that starts your work for that person — the
+- **refuses** it on every door that starts your work for that person - the
   run, a view's opening and each event (and so the job a screen queues), your
-  interface's save and its `ui_call` — with `403 permission_denied` naming
+  interface's save and its `ui_call` - with `403 permission_denied` naming
   `app.<app>.<id>`. Your module is not called at all, so you need no check of
   your own.
 
-Declare only what an organisation would want to limit — an app with a
+Declare only what an organisation would want to limit - an app with a
 permission for everything is an app nobody can configure. Work with no
-signed-in person of this filex behind it — a scheduled wake-up (`schedule`),
-an outside participant's public page — is not asked.
+signed-in person of this filex behind it - a scheduled wake-up (`schedule`),
+an outside participant's public page - is not asked.
 
 **Your code is told what the person holds** (since 0.49.0). A job, a view
 event and your interface's `ui_call` carry `actor.permissions`: the ids of
 your `user_permissions` the person holds, decided by the same question filex
-asks at the door — an administrator holds every one. A public page's event
+asks at the door - an administrator holds every one. A public page's event
 and work nobody started carry no actor to ask about. Use it for what filex
 cannot do for you: a hint on ANOTHER screen that points at a gated action.
 The signing app's Verify screen says "…or Request signatures… to ask others"
@@ -324,7 +324,7 @@ if in.Context.Actor.Can("request") { // the id, not app.sign.request
 ```
 
 `Can` is false on a nil actor and on a filex that does not say, so an
-unknown answer leaves the hint out. It is a courtesy, not a gate — the door
+unknown answer leaves the hint out. It is a courtesy, not a gate - the door
 still decides, so never skip a check of your own because `Can` said yes.
 `plugintest` runs as an administrator and holds every permission you declare;
 set `h.Actor.Permissions` to test a screen for somebody who holds fewer.
@@ -337,59 +337,212 @@ JSON in Extism's buffers (`pluginkit` does the plumbing).
 
 | Export | Input | Output | When |
 |---|---|---|---|
-| `describe` | `{host_version, locale}` | the manifest | at install and every load; must match the installed manifest's `name`, `version`, `manifest_version`, and its permissions must be a subset — else the app is *refused* |
+| `describe` | `{host_version, locale}` | the manifest | at install and every load; must match the installed manifest's `name`, `version`, `manifest_version`, and its permissions must be a subset - else the app is *refused* |
 | `action_run` | `ActionRunInput` | `ActionRunOutput` | a queued job; the only export that may write files, create pages, issue certificates |
 | `view_event` | `ViewEventInput` | `Surface` | a screen event: `open`, `change`, `submit`, `action` |
 | `page_event` | `ViewEventInput` | `Surface` | the same for an outside participant on a public link (`data.page` carries `{subject, state, visits, visitor_ip}`) |
 | `tick` | `TickInput` | `TickOutput` | once an hour, if you asked for `schedule`. Nobody is waiting: the budget is your `call_timeout_s` capped at 30 s, and the call is READ-ONLY |
-| `ui_call` | `UICallInput` | `UICallOutput` | your own interface asked (`fx.call`) — [Writing an interface](#writing-an-interface); screen mode, no file writes |
-| `on_event` | — | — | reserved — nothing calls it yet, and the `events:<name>` permission that would gate it is **refused at install** until something does (a grant that does nothing is not a grant) |
+| `ui_call` | `UICallInput` | `UICallOutput` | your own interface asked (`fx.call`) - [Writing an interface](#writing-an-interface); screen mode, no file writes |
+| `thumbnail` | `ThumbnailInput` | `ThumbnailOutput` | filex draws a file of a kind your `thumbnails` block names (0.50) - [Drawing thumbnails](#drawing-thumbnails); handed that one file and nothing else |
+| `on_event` | - | - | reserved - nothing calls it yet, and the `events:<name>` permission that would gate it is **refused at install** until something does (a grant that does nothing is not a grant) |
 
 `ActionRunInput`: `job_id`, `action_id`, `params` (from the screen or the
-caller), `inputs[]` (`{ref, name, size, mime, path_rel, path, read_only}` — `ref` is an opaque,
+caller), `inputs[]` (`{ref, name, size, mime, path_rel, path, read_only}` - `ref` is an opaque,
 call-scoped handle like `in:0`; `path` is the adapter-qualified spelling a
 `pdf-fields`/`preview` node's `src.path` takes; `path_rel` is storage-relative;
-`read_only` is true when the file's storage takes no writes — refuse there, at
+`read_only` is true when the file's storage takes no writes - refuse there, at
 your first screen and in your first job, a flow that ENDS in a write: filex
 refuses a job that writes, not one that only leads to a write later), `output` (the action's
-mode and name pattern), `actor` (`{id, email, name, role, permissions}` —
+mode and name pattern), `actor` (`{id, email, name, role, permissions}` -
 `permissions` since 0.49.0, the ids of your `user_permissions` the person
 holds: [User permissions](#user-permissions-what-an-administrator-hands-out)), `locale`,
 `settings` (non-secret values), `engines` (which are present *and* granted),
 `share_max_ttl_days` (below).
 
-`share_max_ttl_days` — on `ActionRunInput` and on every view and page call's
-`context` — is the longest life, in days, this installation gives ANY new
+`share_max_ttl_days` - on `ActionRunInput` and on every view and page call's
+`context` - is the longest life, in days, this installation gives ANY new
 share link (Admin → Protection, `share.max_ttl_days`; 7 unless changed; `0` =
 no ceiling; absent for an app without `public_pages`). ⚠ `share_create`
 clamps a link to the lowest of that, the page's own `max_ttl_days` and 365,
 **silently**. A screen that offers a longer life promises something the link
-will not have — the signing app's wizard said "links valid 14 days" while its
-links lived 7 — so read it and offer no more.
+will not have - the signing app's wizard said "links valid 14 days" while its
+links lived 7 - so read it and offer no more.
 
-`ActionRunOutput`: `ok`, `outputs[]` (`{ref, name}` — refs you created with
+`ActionRunOutput`: `ok`, `outputs[]` (`{ref, name}` - refs you created with
 `file_create`, or artefacts an engine produced), `message` (Text; shown in the
-tray and as the job's result), optional `surface`.
+tray and as the job's result), optional `surface`, of which filex acts on
+`open` alone (0.50, below).
+
+**A job that sends its person on (0.50).** `surface.open` on a job's answer -
+`{path, action|view}` - sends the person who queued the job to one of the
+files it produced, with one of your screens on it, once the job has
+finished. `path` is the **ref** of one of this job's outputs (`file_create`'s
+answer), or empty for the first one: only the host knows the name an output
+was committed under (a free name beside the source, a folder the person
+chose), so you name the output and filex fills in where it landed. A job
+that makes a file the person works on next is the case: the conversion (or
+the export, the render) ends and your screen opens on what it wrote, instead
+of leaving the person to find the file and start again.
+The page that queued the job goes there in its own tab; an explorer whose
+dialog queued it opens the screen on the file. filex drops the request (the
+job still succeeds, your log says why) when the path is not one of this job's
+outputs - a job may send its person only to what it made - when the job kept
+no output (`output.mode: none`), and when the screen is not one of yours or
+names both an action and a view. `plugintest.CheckJobResult` says all of it
+before a module is built.
+
+```go
+ref, err := host.WriteOutput(stem+".pdf", pdf)
+if err != nil {
+	return nil, err
+}
+return &wire.ActionRunOutput{OK: true, Outputs: []wire.OutputRef{ref},
+	// "then": the screen of yours the person goes on to, on the file just written.
+	Surface: &wire.Surface{Open: &wire.OpenRequest{Path: ref.Ref, View: then}}}, nil
+```
 
 `Surface`: `title`, `size` (sm/md/lg/xl), `state` (opaque, echoed back on the
 next event), `nodes[]`, `actions[]` (footer buttons: `{id, label, primary,
-danger, disabled}` — **at most one `primary`**), `toast`, `done`, `job`
-(`{action_id, params}` — ask the host to queue an action; from a public link
-it runs as the link's creator), `errors` (`{field: Text}`), `open`, and — on a
-`home` screen — `sections` (`[{id, label, count?}]`) with `section`, the one
+danger, disabled}` - **at most one `primary`**), `toast`, `done`, `job`
+(`{action_id, params}` - ask the host to queue an action; from a public link
+it runs as the link's creator), `errors` (`{field: Text}`), `open`, and - on a
+`home` screen - `sections` (`[{id, label, count?}]`) with `section`, the one
 this surface drew. filex draws them as the page's tab strip and keeps the open
 one in the address (`?section=`), which arrives back as `data.section` on the
 next `open`.
 
-`Surface.open` — `{path, action|view}` — sends the person to a FILE and starts
+`Surface.open` - `{path, action|view}` - sends the person to a FILE and starts
 one of your screens on it (naming neither just opens the file). It is what
 makes a `home` screen a list of *documents* rather than a list of names: the
 row is clicked and the person lands where the work is. The host checks the
 screen is yours; the handler checks the path against the **asking person's**
 permissions, and drops the link rather than refusing the screen when it does
-not pass — you can offer a door, you cannot open one that was not theirs.
+not pass - you can offer a door, you cannot open one that was not theirs.
 ⚠ A public link's surface may not carry `open`: there is no explorer behind
 it.
+
+## Drawing thumbnails
+
+filex draws thumbnails of the kinds it knows (images, video, PDF, office
+documents, text, the archives it lists). For any other kind it shows a
+placeholder card - a `.jar`, an `.apk`, a `.7z`, your own format. Since 0.50
+an app can draw them: name the kinds in a `thumbnails` block, answer the
+`thumbnail` export, and filex hands your app each such file, one at a time,
+and draws your answer in every view, the same picture for everybody.
+
+```json
+{
+  "manifest_version": 1,
+  "name": "pkglist",
+  "version": "0.1.0",
+  "label": { "en": "Package contents", "tr": "Paket içeriği" },
+  "filex": ">=0.50.0",
+  "languages": ["en", "tr"],
+  "permissions": [],
+  "thumbnails": {
+    "applies": { "kind": "file", "ext": ["apk", "jar", "nupkg", "vsix", "whl", "xpi"] }
+  }
+}
+```
+
+- **`thumbnails.applies`** names the kinds: `ext` (lower-case, no dot) and/or
+  `mime` (a type, or a family like `image/*`; never `*/*`), kind `file`.
+  Nothing else (`multi`, `state`, `engine_ext`) - the rule names kinds of
+  file. An empty rule is refused: an app may not draw every file.
+- **Each kind is a permission** the install review shows, derived like an
+  interface's: `thumbnail:.jar` - *Draws the thumbnails of .jar files: it is
+  handed the bytes of every such file filex draws, on every storage, one at
+  a time*. Do not list them in `permissions`; an upgrade that names one more
+  kind asks the administrator again.
+- **`"filex": ">=0.50.0"`**: filex before 0.50 does not know the field and
+  refuses the manifest.
+- **The module must export `thumbnail`** (`pluginkit` does) and register a
+  `Thumbnail` func; a manifest with the block and no export is refused at
+  install, not at the first file.
+
+```go
+func init() {
+	pluginkit.Run(&pluginkit.Plugin{
+		Manifest: manifest,
+		Thumbnail: func(in *wire.ThumbnailInput) (*wire.ThumbnailOutput, error) {
+			src, err := pluginkit.ThumbnailSource(in) // the one file
+			if err != nil {
+				return nil, err
+			}
+			defer src.Close()
+			names, err := listMyFormat(src)
+			if err != nil {
+				return nil, err // filex asks the next handler
+			}
+			return thumbkit.PNG(thumbkit.ListCard("MYFMT - 12 files", names, 0))
+		},
+	})
+}
+```
+
+**What the call is handed.** `ThumbnailInput`: `file` (`{ref: "in:0", name,
+size, mime}` - **no path, no storage**), `ext`, `max_width` / `max_height`
+(320: what filex shows; drawing larger is wasted), `max_output_bytes`,
+`locale` (the instance's default - a thumbnail is everybody's), `settings`
+(non-secret). Nobody is signed in: there is no `actor`.
+
+**What the call may do.** Read that file (`file_open` / `file_read` on its
+ref - no `files:read` needed), read your settings (with `settings`), fetch
+your pinned assets (`asset_fetch`), ask `engine_available`, and make HTTP
+requests to a host you were granted (`http:<host>`). **Every other host
+function answers `permission_denied`**, whatever else your app holds: no
+other file, no writing, no state, no lock, no mail, no notification, no user
+lookup, no engine run, no link. Each call that made a request is written to
+the audit log (`app_plugin.thumbnail_sent`: your app, the hosts, the file) -
+an administrator sees which file went where.
+
+**What it answers.** `ThumbnailOutput{image}`: a **PNG or a JPEG**, at most
+**4 MiB** (`wire.ThumbnailMaxOutputBytes`) and **4096 x 4096**
+(`wire.ThumbnailMaxPixels`), read from its header before a pixel is decoded.
+filex scales it into 320 px, lays it on its transparency checkerboard and
+writes its own JPEG. A transparent PNG is fine; an opaque card is too.
+
+**When you cannot draw a file**, return an error. filex records
+`app_failed:<your app>` and asks the next handler in the administrator's
+list (filex's own drawer, another app), or keeps the file's type icon. A
+crash, an answer filex refuses and running out of memory count the same; your
+log in the admin panel says what happened.
+
+**Limits.** The administrator sets them per app on its page (*Thumbnails*):
+the largest file you are sent (32 MB by default - a larger one is never sent,
+`app_too_large`), the time you have per file (10 s - then the instance is
+closed, `app_timeout`), your memory (your manifest's `memory_pages` by
+default) and how many files you draw at once (2). Raising a limit draws the
+files it stopped again. Read a format's index rather than the whole file when
+you can: a zip's directory is at its end, a 7z's header is near its start.
+
+**Where you are in the order.** The administrator decides who draws a kind
+first ([APP-PLUGINS.md → Default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)).
+By default filex's own drawer comes first for a kind it draws, so an app that
+draws `.png` is asked only for the ones filex could not; for a kind filex
+does not draw your app is first. Who drew a thumbnail (with your version) is
+on its row, and an upgrade of your app draws its thumbnails again.
+
+**`thumbkit`** (`backend/pkg/pluginkit/thumbkit`) holds what most apps need:
+`PNG(img)` encodes an answer and refuses what filex would refuse, and
+`ListCard(header, lines, more)` draws a card of lines in the look filex's own
+archive thumbnails have (a 7x13 bitmap face, ASCII; small enough for every
+module to carry).
+
+**A complete example**: [`backend/examples/app-pkglist`](../backend/examples/app-pkglist/main.go)
+draws the contents of `.jar`, `.apk`, `.whl`, `.vsix`, `.nupkg` and `.xpi`
+packages - zip files under other names, which filex lists only as `.zip`. An
+app for `.7z` or `.rar` is that program with a 7z or rar reader in place of
+`archive/zip`; filex itself does not read either. Its tests run off-wasm: keep
+the drawing in a function that takes an `io.Reader`, and call it from the
+export.
+
+```bash
+cd backend
+go test ./examples/app-pkglist/
+GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o pkglist.wasm ./examples/app-pkglist
+# Admin → Plugins → Apps → Install an app → Upload files: pkglist.wasm + examples/app-pkglist/filex-app.json
+```
 
 ## A scheduled wake-up
 
@@ -400,14 +553,14 @@ both sides, and "the next time a human opens the status screen" is not 03:00.
 Ask for the `schedule` permission and filex wakes your app **once an hour**
 with one question: *what do you want done, and when?* You answer with items,
 each carrying a due time, and filex runs each one **at that time**. So the
-wake-up is hourly and the work is to the minute — not "some time this hour".
+wake-up is hourly and the work is to the minute - not "some time this hour".
 
 ```go
 pluginkit.Run(&pluginkit.Plugin{
     Manifest: manifest, // permissions: […, "schedule"]
     Actions: map[string]pluginkit.ActionFunc{
         // The work itself. `hidden: true` in the manifest, because nobody
-        // picks it from a menu — the schedule starts it.
+        // picks it from a menu - the schedule starts it.
         "expire": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
             _ = pluginkit.StateSet(in.Inputs[0].Ref, "pending", "")   // a job MAY write
             _, _ = pluginkit.NotifySend(pluginkit.Notice{ /* … */ })
@@ -434,7 +587,7 @@ pluginkit.Run(&pluginkit.Plugin{
             }
             items = append(items, wire.ScheduleItem{
                 // ⚠ Your name for this work, and it must match the key
-                // pattern — a PATH is not a key, it has slashes in it.
+                // pattern - a PATH is not a key, it has slashes in it.
                 Key:      "expire:" + envelope,
                 DueAt:    deadline,          // to the minute
                 ActionID: "expire",
@@ -449,7 +602,7 @@ pluginkit.Run(&pluginkit.Plugin{
 
 **The window.** `WindowStart` is now, `WindowEnd` is the next wake-up (the
 next hourly boundary). An item due inside it is scheduled; one due **after**
-it is quietly not — say it again at the wake-up whose window contains it, by
+it is quietly not - say it again at the wake-up whose window contains it, by
 which time you may have changed your mind. An item due in the **past** runs
 at once, because a wake-up that ran late should still close what has lapsed.
 After a restart at 03:37 the window is 03:37 to 04:00, shorter than an hour,
@@ -457,11 +610,11 @@ and `WindowEnd` says so.
 
 **The key is an idempotency key.** filex keeps at most one item per (app,
 key), so naming the same key again **moves** that item rather than adding a
-second one — a deadline extended by an hour is the same envelope closing
+second one - a deadline extended by an hour is the same envelope closing
 later, not two closures. It is also why a restart cannot run something twice.
-It must be 1–64 characters of `[A-Za-z0-9]` plus `_.:@-`; an item whose key
+It must be 1-64 characters of `[A-Za-z0-9]` plus `_.:@-`; an item whose key
 does not match is refused and counted in your log. ⚠ A file path is **not** a
-key — it has slashes in it. Key by something of your own (an envelope id, a
+key - it has slashes in it. Key by something of your own (an envelope id, a
 request id), which is also what makes the same work recognisable next hour.
 
 **What a wake-up may and may not do.** `tick` is **read-only**: the same
@@ -469,7 +622,7 @@ scope a screen gets. You may read settings, read your own state
 (`StateGet` / `StateList`), look people up, notify, send mail and make
 granted HTTP calls. You may **not** write files, write state, take locks,
 sign or open public links. Those belong in the action you schedule, which
-runs as a full job with a writable scope — which means a wake-up is also how
+runs as a full job with a writable scope - which means a wake-up is also how
 an app finally gets to write state *on its own schedule*, just not in the
 deciding call. Decide in `tick`, act in the action.
 
@@ -479,22 +632,22 @@ deciding call. Decide in `tick`, act in the action.
 |---|---|
 | Wake-up | once an hour, per app |
 | Call budget | your `limits.call_timeout_s`, capped at **30 s** (tighter than a screen's 60: nobody is waiting, and a hang would hold up every other app) |
-| Items per wake-up | `in.MaxItems` (64). Extras are dropped — put the urgent ones first |
+| Items per wake-up | `in.MaxItems` (64). Extras are dropped - put the urgent ones first |
 | Files per item | `in.MaxPaths` (16), all on **one** storage, each adapter-qualified, **at least one** (a job runs on files) |
 | `params` | JSON, ≤ 16 KiB |
 | Due time | inside `[WindowStart, WindowEnd]` |
-| Action | one of **yours**, and not one the administrator switched off — re-checked when it runs, not only when you asked |
+| Action | one of **yours**, and not one the administrator switched off - re-checked when it runs, not only when you asked |
 
 **When it goes wrong.** A `tick` that traps, times out or returns an error
 costs your app that hour and nothing else: it is logged where the
 administrator reads it, and the next wake-up asks again. An item that cannot
-be queued is marked failed and is **not** retried — the next wake-up is the
+be queued is marked failed and is **not** retried - the next wake-up is the
 retry. Nothing loops inside the hour.
 
 **Where to watch it.** A scheduled item becomes an ordinary job: an ops row
 with `kind: plugin-action`, your action, your message, your outputs. The
 actor is SYSTEM, because nobody asked for it. What each wake-up decided is in
-your app's log in the admin panel — including a `note` you can put there
+your app's log in the admin panel - including a `note` you can put there
 yourself.
 
 ## Host functions
@@ -502,27 +655,82 @@ yourself.
 Every host function is JSON in / JSON out and answers a failure **in band**:
 `{"error": {"code", "message"}}` with `permission_denied`, `not_found`,
 `too_large`, `timeout`, `unavailable`, `invalid`, `busy`, `internal`. A
-refused call is an error you can read, not a trap — degrade, tell the user.
+refused call is an error you can read, not a trap - degrade, tell the user.
 The Go wrappers return `*pluginkit.HostError`; `pluginkit.IsPermissionDenied`
 tells the one case apart.
 
 | Function | Go wrapper | Notes |
 |---|---|---|
-| `file_open {ref}` → `{handle, size}` · `file_read` (framed, ≤ 1 MiB) · `file_close` | `OpenInput(ref)` (an `io.ReadCloser`), `ReadInput(ref)` | inputs, engine artefacts, on a page the exposed copies (`pub:N`), and an `asset_fetch` ref (`asset:N`) — which needs no `files:read` |
+| `file_open {ref}` → `{handle, size}` · `file_read` (framed, ≤ 1 MiB) · `file_close` | `OpenInput(ref)` (an `io.ReadCloser`), `ReadInput(ref)` | inputs, engine artefacts, on a page the exposed copies (`pub:N`), and an `asset_fetch` ref (`asset:N`) - which needs no `files:read` |
 | `file_create {name}` → `{handle, ref}` · `file_write` (framed, ≤ 1 MiB) · `file_close` | `CreateOutput(name)` (an `io.WriteCloser` with `.Ref()`), `WriteOutput(name, bytes)` | jobs only; the name is a single path element |
 | `job_progress {done, total, message}` | `Progress(done, total, msg)` | draws the tray bar; the message is shown |
 | `settings_get {key}` → `{value, found}` | `Setting(key)` | secrets are opened here only |
 | `state_get {ref, key}` · `state_set {ref, key, value|null}` | `StateGet`, `StateSet`, `StateDelete` | per storage file; ≤ 64 KiB; `set` from jobs and public-link calls; the KEYS reach listings as `<app>:<key>` so `applies.state` can switch menu rows on them (keep marker keys short and value-free: `pending`, `done`) |
-| `state_list {key, limit}` → `{items[{path, name, key, value}]}` | `StateList(key, limit)` | **which files do I keep this on?** — the question a home screen is. Empty `key` = every key of yours; ≤ 500 rows (100 by default); `path` is adapter-qualified, ready for `Surface.open`. A deleted file drops out by itself, a file not yet indexed is still there, and every row passes the ASKING person's permissions — two people get two lists. ⚠ One exception: inside a `tick` there IS no asking person, so the app is told its own rows in full; a public-page call is person-less too and is NOT excepted — a visitor is told nothing |
-| `file_lock {ref|path, ttl_days, reason}` → `{until}` · `file_unlock {ref|path}` | `FileLock`, `FileLockPath`, `FileUnlock`, `FileUnlockPath` | jobs only; freezes the file read-only for everyone (admins too) and refuses renames/moves/deletes of it and of the folders above it; 0 = 30 days, at most 365, `LockUntilLifted` (-1) = no end; another app's lock → `busy`; your own jobs still write into the file; lift it when your flow ends — an administrator can force it, and a dated lock expires anyway. `ref` may be one of the job's OWN outputs: that lock is taken when the output is committed |
-| `engine_available {engine}` · `engine_run {engine, args[], inputs{name: ref}, outputs[], timeout_s}` → `{exit, stdout_tail, stderr_tail, outputs[{ref,name}], duration_ms}` | `EngineAvailable`, `EngineRun(EngineRequest)` | inputs are copied into a private run directory under the names you give; args are bare tokens (`-i in.mp4 -c:v libx264 out.mp4`), anything naming a path elsewhere is refused before the engine is looked up; new files in the directory come back as refs |
+| `state_list {key, limit}` → `{items[{path, name, key, value}]}` | `StateList(key, limit)` | **which files do I keep this on?** - the question a home screen is. Empty `key` = every key of yours; ≤ 500 rows (100 by default); `path` is adapter-qualified, ready for `Surface.open`. A deleted file drops out by itself, a file not yet indexed is still there, and every row passes the ASKING person's permissions - two people get two lists. ⚠ One exception: inside a `tick` there IS no asking person, so the app is told its own rows in full; a public-page call is person-less too and is NOT excepted - a visitor is told nothing |
+| `file_lock {ref|path, ttl_days, reason}` → `{until}` · `file_unlock {ref|path}` | `FileLock`, `FileLockPath`, `FileUnlock`, `FileUnlockPath` | jobs only; freezes the file read-only for everyone (admins too) and refuses renames/moves/deletes of it and of the folders above it; 0 = 30 days, at most 365, `LockUntilLifted` (-1) = no end; another app's lock → `busy`; your own jobs still write into the file; lift it when your flow ends - an administrator can force it, and a dated lock expires anyway. `ref` may be one of the job's OWN outputs: that lock is taken when the output is committed |
+| `engine_available {engine}` · `engine_run {engine, args[], inputs{name: ref}, outputs[], timeout_s}` → `{exit, stdout_tail, stderr_tail, outputs[{ref,name}], duration_ms}` | `EngineAvailable`, `EngineRun(EngineRequest)` | inputs are copied into a private run directory under the names you give; args are bare tokens (`-i in.mp4 -c:v libx264 out.mp4`), anything naming a path elsewhere is refused before the engine is looked up; new files in the directory come back as refs. The office engine reads a soffice `--convert-to` line instead of running a program - see [The office engine](#the-office-engine) |
 | `users_lookup {q}` → `{users[{user_id, email, name}]}` | `UsersLookup(q)` | empty `q` lists nobody |
-| `notify_send {title: Text, body: Text, severity, meta, to_user_id?, target?: {ref|path, action?, view?}}` → `{id}` | `NotifySend(Notice{…, ToUserID, Target: &NoticeTarget{…}})` | the bell; both languages are kept. `ToUserID` addresses one person (bell, push, and mail if they turned it on — so an internal signer needs no `mail_send`); `Target` makes the row clickable: the file plus, optionally, your action or view to open on it — "please sign" lands in the signing screen |
-| `mail_send {to, subject, body, lang?}` | `MailSend`, `MailSendIn(lang, …)` | plain text ≤ 64 KiB; filex appends "Sent by the *App* app on filex" — in `lang`, the language you wrote the mail in (`MailSendIn`), when this server speaks it (English, Turkish or a language pack's), else in the language the call runs in (empty on a scheduled wake-up: say it, or a reminder in the requester's language gets the instance's footer) |
+| `notify_send {title: Text, body: Text, severity, meta, to_user_id?, target?: {ref|path, action?, view?}}` → `{id}` | `NotifySend(Notice{…, ToUserID, Target: &NoticeTarget{…}})` | the bell; both languages are kept. `ToUserID` addresses one person (bell, push, and mail if they turned it on - so an internal signer needs no `mail_send`); `Target` makes the row clickable: the file plus, optionally, your action or view to open on it - "please sign" lands in the signing screen |
+| `mail_send {to, subject, body, lang?}` | `MailSend`, `MailSendIn(lang, …)` | plain text ≤ 64 KiB; filex appends "Sent by the *App* app on filex" - in `lang`, the language you wrote the mail in (`MailSendIn`), when this server speaks it (English, Turkish or a language pack's), else in the language the call runs in (empty on a scheduled wake-up: say it, or a reminder in the requester's language gets the instance's footer) |
 | `http_request {method, url, headers, body_b64, timeout_s}` → `{status, headers, body_b64}` | `HTTPDo(HTTPRequest)` | GET/POST/PUT/PATCH/DELETE/HEAD; 8 MiB each way, 30 s; no cookies either way |
-| `asset_fetch {url, sha256, max_bytes}` → `{ref, size, cached}` | `AssetFetch(url, sha256, maxBytes)` → `*Asset{Ref, Size, Cached}`, then `OpenInput(a.Ref)` | a file your app needs (a font, a model, a dictionary) downloaded ONCE by the host into your app's cache and read like an input. `https` on a granted `http:` host; `sha256` is required and checked before you see a byte (`integrity`, nothing kept); `max_bytes` ≤ 32 MiB, and one app's cache is held under **256 MiB, least recently used first**, so a file fetched long ago may have to be fetched again; later calls are served from disk (`Cached`). Offline is `unavailable` — tried again after a minute, logged once per outage; a download slower than your call goes on without it and your call gets `timeout` ("still downloading"). Read it into a buffer of exactly `Size` — a growing one holds a large file twice. See APP-PLUGINS-API.md → `asset_fetch` |
-| `share_create {page_id, ref\|path, subject, pin, ttl_days, max_visits, state, files[{ref,name}], purpose{label, revoke?, section?}}` → `{token, url, pin?, expires_at}` · `share_revoke {token}` · `share_state {token?, state?}` | `ShareCreate`, `ShareRevoke`, `ShareState`, `ShareStateSet`, `ShareInfo` | jobs only for create. Opens a **real share** at `/s/<token>`, so the administrator revokes it in **Shares** like any link; the PIN comes back once — show it to the requester or send it by a second channel, never in the same mail as the link. `ref`/`path` names the document the link is about (empty = the job's first input) and must be one of the job's **inputs** (a page link may also name a file this app keeps state on) — or `ref` may name one of **this job's own outputs** — the link is answered at once and the row is written when that output is committed, which is how an app shares the file it has just made (a job that fails writes no row, so the token answers nothing). A ref that is neither an input nor an output is `not_found` by name, never the first input. The person the job runs for must hold **editor** on every input (the bar the Share dialog sets for a public link), else `permission_denied`. `purpose` wins over the page's and is the **only** way a page-less link — the finished document handed to everybody — says what it is. ⚠ `public_page_create` / `_revoke` / `_state` and the `PublicPage*` wrappers are the older spelling of these three, still bound, now deprecated |
-| `host_sign_info {}` → `{available, reason?, ca_cert_pem, ca_certs_pem, algorithm}` · `cert_issue {common_name, email, days}` → `{key_ref, cert_pem, chain_pem, not_after}` · `cert_issue {purpose: "platform"}` (the seal) · `host_sign {key_ref, hash: "sha256", digest_b64}` → `{signature_b64}` · `key_destroy {key_ref}` | `HostSignInfo`, `CertIssue`, `PlatformSeal`, `HostSign`, `KeyDestroy`, and `NewHostSigner(issued)` → a `crypto.Signer` | ECDSA P-256 over a 32-byte sha256 digest, DER-encoded; the certificate carries the document-signing EKU and the app's name as OU, and runs ten years by default; issue → sign → destroy per signer. ⚠ Build a verifier's root pool from **`ca_certs_pem`** — every authority the tenant ever signed with, retired ones included — not from `ca_cert_pem`, which is only the live one |
+| `asset_fetch {url, sha256, max_bytes}` → `{ref, size, cached}` | `AssetFetch(url, sha256, maxBytes)` → `*Asset{Ref, Size, Cached}`, then `OpenInput(a.Ref)` | a file your app needs (a font, a model, a dictionary) downloaded ONCE by the host into your app's cache and read like an input. `https` on a granted `http:` host; `sha256` is required and checked before you see a byte (`integrity`, nothing kept); `max_bytes` ≤ 32 MiB, and one app's cache is held under **256 MiB, least recently used first**, so a file fetched long ago may have to be fetched again; later calls are served from disk (`Cached`). Offline is `unavailable` - tried again after a minute, logged once per outage; a download slower than your call goes on without it and your call gets `timeout` ("still downloading"). Read it into a buffer of exactly `Size` - a growing one holds a large file twice. See APP-PLUGINS-API.md → `asset_fetch` |
+| `share_create {page_id, ref\|path, subject, pin, ttl_days, max_visits, state, files[{ref,name}], purpose{label, revoke?, section?}}` → `{token, url, pin?, expires_at}` · `share_revoke {token}` · `share_state {token?, state?}` | `ShareCreate`, `ShareRevoke`, `ShareState`, `ShareStateSet`, `ShareInfo` | jobs only for create. Opens a **real share** at `/s/<token>`, so the administrator revokes it in **Shares** like any link; the PIN comes back once - show it to the requester or send it by a second channel, never in the same mail as the link. `ref`/`path` names the document the link is about (empty = the job's first input) and must be one of the job's **inputs** (a page link may also name a file this app keeps state on) - or `ref` may name one of **this job's own outputs** - the link is answered at once and the row is written when that output is committed, which is how an app shares the file it has just made (a job that fails writes no row, so the token answers nothing). A ref that is neither an input nor an output is `not_found` by name, never the first input. The person the job runs for must hold **editor** on every input (the bar the Share dialog sets for a public link), else `permission_denied`. `purpose` wins over the page's and is the **only** way a page-less link - the finished document handed to everybody - says what it is. ⚠ `public_page_create` / `_revoke` / `_state` and the `PublicPage*` wrappers are the older spelling of these three, still bound, now deprecated |
+| `host_sign_info {}` → `{available, reason?, ca_cert_pem, ca_certs_pem, algorithm}` · `cert_issue {common_name, email, days}` → `{key_ref, cert_pem, chain_pem, not_after}` · `cert_issue {purpose: "platform"}` (the seal) · `host_sign {key_ref, hash: "sha256", digest_b64}` → `{signature_b64}` · `key_destroy {key_ref}` | `HostSignInfo`, `CertIssue`, `PlatformSeal`, `HostSign`, `KeyDestroy`, and `NewHostSigner(issued)` → a `crypto.Signer` | ECDSA P-256 over a 32-byte sha256 digest, DER-encoded; the certificate is for documents only - extendedKeyUsage document signing (RFC 9336) and Adobe's Authentic Documents Trust, never emailProtection, which `plugintest` issues too - and carries the app's name as OU, and runs ten years by default; issue → sign → destroy per signer. ⚠ Build a verifier's root pool from **`ca_certs_pem`** - every authority the tenant ever signed with, retired ones included - not from `ca_cert_pem`, which is only the live one |
+
+### The office engine
+
+Since 0.50 the office engine is the ONLYOFFICE Document Server filex is
+connected to - an administrator connects one under **External services**.
+filex ships no LibreOffice and runs none, not even one installed next to a
+bare binary. Ask for it as `engines:office`. `engines:libreoffice`, its name
+before 0.50, is the same engine and the same grant: an app built for
+LibreOffice installs, is told about it (`in.Context.Engines` carries both
+names with the same answer) and runs unchanged, and an update that moves from
+one name to the other asks the administrator for nothing new.
+
+`engine_run` takes the command line an app used to hand LibreOffice:
+
+```
+--convert-to <format>[:<filter>[:<options>]] <file> [<file> ...]
+```
+
+- `<format>` is the target extension (`pdf`, `docx`, `odt`, `rtf`, `txt`,
+  `html`, `epub`, `xlsx`, `ods`, `csv`, `pptx`, `odp`, ...). Each result lands
+  in the run directory under the name soffice gave it: the input's stem and
+  that extension (`in.docx` → `in.pdf`).
+- `<filter>` is read only for its options: LibreOffice's PDF option
+  `SelectPdfVersion` 1, 2 or 3 asks for PDF/A (the document server makes
+  PDF/A-2a, whichever was asked), and a CSV filter's options name the
+  separator and the character set.
+- `--headless`, `--norestore`, `--nologo`, `--nofirststartwizard`,
+  `--nodefault`, `--nolockcheck`, `--invisible`, `--minimized`, `-env:...`
+  and `--outdir .` are accepted and mean nothing. Anything else (`--cat`,
+  `--print-to-file`, `--infilter`, an `--outdir` other than `.`) is
+  `invalid` - on every host, before the engine's availability is asked, so
+  you find it in your own tests.
+
+What comes back:
+
+| Situation | Answer |
+|---|---|
+| converted | `exit 0`, the result among `outputs` |
+| the document server refuses: a format it does not make from that one, a damaged or password-protected file | `exit 1`, no output, the reason in `stderr_tail` (`converting in.xlsx to html failed: ONLYOFFICE does not convert xlsx to html (error -7)`) - the shape a failed soffice had |
+| no document server connected | `unavailable`, `engine office is not configured on this host: ...`; a job that fails on it is shown to people as "office documents are converted by ONLYOFFICE, and none is connected" (`office_unconfigured`) |
+| the job's clock, or the document server's own (its error -2) | `timeout` |
+| a result over the per-file limit, or a file over the document server's own limit (-10) | `too_large` |
+
+`engine_available`, the call's `engines` map and `applies.engine_ext` follow
+the connection live: connecting ONLYOFFICE turns office conversions on
+without restarting filex, and the install review says the office engine is a
+server to connect, not a program to install.
+
+**What ONLYOFFICE does not do that LibreOffice did** (measured on Document
+Server 9.4): HTML from a spreadsheet or a presentation (`-7`); one CSV per
+sheet (LibreOffice's `-1` sheet option - ONLYOFFICE writes the first sheet).
+A CSV it writes takes the separator the CSV options name (a semicolon was
+measured), in UTF-8; a text or CSV result starts with a UTF-8 byte order mark.
+It does read `.odg` drawings and EPUB books, and makes EPUB from a text
+document.
 
 ### Signing a PDF with the host key
 
@@ -549,7 +757,7 @@ panel yet).
 authority this tenant has signed with, retired ones included, because an
 operator may rotate or import their own and nothing is ever deleted. A
 verifier whose root pool holds only the live authority reports every
-signature made before the last rotation as untrusted — which is precisely
+signature made before the last rotation as untrusted - which is precisely
 what retiring rather than deleting was meant to avoid.
 
 ## Screens (surfaces)
@@ -561,22 +769,22 @@ contributes its fields *flat* under their keys.
 
 | Type | Props | Value |
 |---|---|---|
-| `text` | `{text: Text, tone?: muted|danger|info, heading?: bool}` | — |
-| `divider` · `row` | — · children side by side | — |
+| `text` | `{text: Text, tone?: muted|danger|info, heading?: bool}` | - |
+| `divider` · `row` | - · children side by side | - |
 | `form` | `{fields: Field[], values?}` | each field under its key; edits post `change` (debounced 300 ms). See *Fields*, below |
-| `steps` | `{items: [{id, label, state: done|active|todo}]}` | — |
+| `steps` | `{items: [{id, label, state: done|active|todo}]}` | - |
 | `list` | `{columns: [{key, label, width?, sortable?, align?, format?}], rows: [{id, cells, actions?, sort?}], empty?}` | a row action posts `event: "action"`, `action_id`, `data.row_id`. It is drawn by filex's one table, the explorer's, so a person resizes, sorts, hides and moves the columns; `format: "date"` / `"datetime"` prints an ISO value the way the explorer prints dates, and sorts by the value rather than the printed text |
-| `progress` | `{value: 0..100|null, label?}` | — |
+| `progress` | `{value: 0..100|null, label?}` | - |
 | `people-picker` | `{id, value: [{user_id?, email, name?}], multi?, allow_external?}` | the list; internal search needs `users:lookup`, otherwise free email only |
 | `pin-input` | `{id, length?: 4..8}` | the string |
 | `file-chooser` | `{id, kind: file|dir, value?}` | an adapter-qualified path `docs://a/b.pdf` |
-| `preview` | `{path}` or, on a public link, `{ref}` | — |
-| `pdf-fields` | `{id, src: {ref\|path}, mode: define\|place\|edit\|fill, fields[], signers?, signer?, types?, stamp_lines?}` | **define**: the boxes as cards, with no document (what is asked of whom); **place**: the document, and the boxes still waiting to be put on it; **edit**: the older one-screen form — each answers the whole `fields[]` (fractions of the page, origin top-left); **fill**: `{fields: [{id, value}]}`. Each field carries a **`label`** — what it is called, shown in the box, in the fill form and in the audit trail; without one a signer hunts for three identical boxes. A signature field says how it is signed (`style`) and which lines are printed under it (`lines`, from the surface's `stamp_lines`). In a `page` view the node fills the viewport |
-| `signature-pad` | `{id, modes?, width?, height?, label?, required?, font?, fonts?}` | `{png_b64, mode, font?}` — `label` and `required` draw it like any other form field, with the same `*`; `fonts` narrows the faces a typed signature may use (one face: no picker) and `font` is the one it opens in |
+| `preview` | `{path}` or, on a public link, `{ref}` | - |
+| `pdf-fields` | `{id, src: {ref\|path}, mode: define\|place\|edit\|fill, fields[], signers?, signer?, types?, stamp_lines?}` | **define**: the boxes as cards, with no document (what is asked of whom); **place**: the document, and the boxes still waiting to be put on it; **edit**: the older one-screen form - each answers the whole `fields[]` (fractions of the page, origin top-left); **fill**: `{fields: [{id, value}]}`. Each field carries a **`label`** - what it is called, shown in the box, in the fill form and in the audit trail; without one a signer hunts for three identical boxes. A signature field says how it is signed (`style`) and which lines are printed under it (`lines`, from the surface's `stamp_lines`). In a `page` view the node fills the viewport |
+| `signature-pad` | `{id, modes?, width?, height?, label?, required?, font?, fonts?}` | `{png_b64, mode, font?}` - `label` and `required` draw it like any other form field, with the same `*`; `fonts` narrows the faces a typed signature may use (one face: no picker) and `font` is the one it opens in |
 
 Footer buttons post `event: "submit"` when `primary`, else `"action"` with
 the button's id. Answer `{done: true}` to close, `{toast}` to say something,
-`{job}` to queue an action with the values you collected — and, when the
+`{job}` to queue an action with the values you collected - and, when the
 person chose where the result goes, `job.output: {mode, name}` (sibling /
 version / none, with the manifest's name pattern or a literal) to replace
 the action's manifest output for that one job. `Hidden` actions are queued
@@ -590,17 +798,17 @@ all; `place` draws the document and hands out the boxes that still need a
 place. Ask them as two steps:
 
 ```go
-// step 1 — what is wanted, of whom
+// step 1 - what is wanted, of whom
 wire.Node{ID: "fields", Type: "pdf-fields", Props: map[string]any{
     "src": doc, "mode": "define", "fields": fs, "signers": people}}
 
-// step 2 — where it goes
+// step 2 - where it goes
 wire.Node{ID: "fields", Type: "pdf-fields", Props: map[string]any{
     "src": doc, "mode": "place", "fields": fs, "signers": people}}
 ```
 
 A box that has been defined and not yet placed comes back with
-`"placed": false`. Refuse the final submit while any of them is waiting —
+`"placed": false`. Refuse the final submit while any of them is waiting -
 the wizard says so on the placing step, and the ACTION checks it again,
 because the job is the boundary and a box with nowhere to go would be
 stamped wherever it was born.
@@ -616,17 +824,17 @@ on a view or page event, `locale` on an action run. The host works it out from
 
 1. the caller's account language (`users.locale`), which the interface's own
    language switcher keeps up to date, and
-2. failing that, the request's `Accept-Language` — which filex's clients send
+2. failing that, the request's `Accept-Language` - which filex's clients send
    as **the language on screen**, not the browser's install language;
 3. then the instance default, then `en`.
 
-Each only when filex offers that language — English, Turkish, or one a
-[language pack](#writing-a-language-pack) adds — so the call's language is
+Each only when filex offers that language - English, Turkish, or one a
+[language pack](#writing-a-language-pack) adds - so the call's language is
 the language the screen is in: `es`, `de`, `pt-br` (a region is kept). It is
 the same rule the interface and the server's own text follow. A page opened
 from a public link is told the visitor's language the same way (the page
 sends the one it shows). Answer in it where you can; `Text.Get(lang)` falls
-back per string to the base language (`pt` for `pt-br`), then to English —
+back per string to the base language (`pt` for `pt-br`), then to English -
 so an app that ships Spanish is read in Spanish, and one that does not is
 read in English, never in another language it happens to carry.
 
@@ -634,7 +842,7 @@ read in English, never in another language it happens to carry.
 
 ⚠ A `Text` (`{en, tr}`) is resolved in the BROWSER, so both languages travel
 and a switch needs no round trip. A `Field.Label`, by contrast, is a plain
-string that YOU resolve with the call's language — which is why a language
+string that YOU resolve with the call's language - which is why a language
 chosen mid-screen re-asks the surface (`change`) rather than re-opening it:
 the answer comes back in the new language with the values still in it.
 
@@ -643,21 +851,21 @@ the answer comes back in the new language with the values still in it.
 Four manifest words, each saying something filex would otherwise have to
 guess (v0.43):
 
-- **`applies.writable: true`** — your flow ends in writing the file although
+- **`applies.writable: true`** - your flow ends in writing the file although
   the action's own output is `none` (a signing request: nothing now, the
   signed document at the end). filex does not offer the action on a
-  read-only storage — your first screen would only be able to refuse.
-- **`output.elsewhere: true`** (with `mode: "sibling"`) — the result may go
+  read-only storage - your first screen would only be able to refuse.
+- **`output.elsewhere: true`** (with `mode: "sibling"`) - the result may go
   into a folder the person chooses. On a read-only storage the action is
   still offered; your screen reads `input.read_only`, asks with a
   `file-chooser` (`kind: "dir"`, `value: context.home`), and answers the job
   with `Output{Mode: "folder", Dir: <the chosen folder>}`. filex checks the
   folder (the person must be able to write there) before the job is queued.
-- **Personal state** — `pluginkit.StateSet(ref, wire.PersonalState("todo",
+- **Personal state** - `pluginkit.StateSet(ref, wire.PersonalState("todo",
   userID), "1")` marks the file for ONE person; `applies.state:
   ["todo@me"]` offers the action to that person only. Nobody else's listing
   shows the key.
-- **`messages`** — texts filex says for you later, in each reader's
+- **`messages`** - texts filex says for you later, in each reader's
   language: `pluginkit.FileLockMessage(ref, ttl, "lock.collecting", nil)`
   instead of a plain reason string.
 
@@ -667,29 +875,29 @@ message the way filex does.
 
 ### Dates in your own words
 
-filex prints every date for a person one way — the explorer's: *22 Eyl 2026*,
+filex prints every date for a person one way - the explorer's: *22 Eyl 2026*,
 *Sep 22, 2026*, and with the time *22 Eyl 2026, 15:38* / *Sep 22, 2026,
 3:38 PM*. A table column gets that for nothing: send the ISO value with
 `format: "date"` (or `"datetime"`) on the `list` column and the host prints it.
-A date inside your OWN sentence — "the link is valid until …", a mail, a
-notice — is yours to write, and `pkg/pluginkit/humandate` writes it the same
+A date inside your OWN sentence - "the link is valid until …", a mail, a
+notice - is yours to write, and `pkg/pluginkit/humandate` writes it the same
 way in `en`, `tr`, `de`, `es` and `fr` (anything else in English):
 
 ```go
-humandate.Day(lang, t)         // "22 Eyl 2026" — t's UTC calendar day
-humandate.DayTime(lang, t)     // "22 Eyl 2026, 15:38" — UTC; say so beside it
+humandate.Day(lang, t)         // "22 Eyl 2026" - t's UTC calendar day
+humandate.DayTime(lang, t)     // "22 Eyl 2026, 15:38" - UTC; say so beside it
 humandate.Stamp(lang, stored)  // an RFC 3339 / YYYY-MM-DD value's day, else unchanged
 ```
 
 Use it; do not write a month table of your own. A server has no reader's
 clock, so a time is UTC. Keep ISO 8601 where a value must stay exact and
-machine-readable — an audit trail, a form field's value.
+machine-readable - an audit trail, a form field's value.
 
 ### Fields
 
-A `form` field is the storage-driver descriptor — `key`, `type`, `label`,
+A `form` field is the storage-driver descriptor - `key`, `type`, `label`,
 `help`, `required`, `secret`, `default`, `placeholder`, `options`, `min`,
-`max` — with `type` one of `string`, `password`, `int`, `bool`, `select`,
+`max` - with `type` one of `string`, `password`, `int`, `bool`, `select`,
 `text`, `date`. Three rules the renderer enforces, so they are not yours to
 get wrong:
 
@@ -701,11 +909,11 @@ get wrong:
 2. **There is no "advanced".** `Field.Advanced` is gone from the contract. A
    setting that matters belongs on the step; one that does not belongs
    nowhere.
-3. **One step asks one thing** — at most one `primary` footer button, plus
+3. **One step asks one thing** - at most one `primary` footer button, plus
    Back. `steps` is the spine of a multi-step screen.
 4. **`text` is the LONG field** and draws a text area; `string` is the
    one-line box. Ask for `text` whenever the answer can run to more than a
-   line — the signing app's list of signers is a `text` field, because its
+   line - the signing app's list of signers is a `text` field, because its
    help line says "one signer per line" and a one-line box would make that a
    lie.
 
@@ -721,7 +929,7 @@ wire.Field{Key: "new_name", Type: "string", Label: "Name of the new file",
 submit**: a value belonging to a hidden field is **dropped before your job
 runs**, so it cannot arrive as a surprise, and an empty `required_when` field
 refuses the job. A field that is `show_when`-hidden and unconditionally
-`required` can never be filled — use `required_when`.
+`required` can never be filled - use `required_when`.
 
 ⚠ `date` is a field **type**. The `date` *rule* on text fields is gone: two
 ways to ask for the same thing is how you get two answers, and a stamping
@@ -738,15 +946,15 @@ downloads, and why there is one PIN implementation rather than two.
 1. A job (the "Send for signature" action) exposes the document and opens
    the link: `ShareCreate{PageID: "signer", Subject: …, PIN: "auto",
    TTLDays: 14, State: envelope, Files: [{Ref: in.Inputs[0].Ref, Name: …}]}`.
-   It gets `{token, url, pin}` — the URL is `/s/<token>`; mail it
+   It gets `{token, url, pin}` - the URL is `/s/<token>`; mail it
    (`MailSend`), show the PIN to the requester (the job's message, a
    notification), and keep what you need with
    `StateSet(in.Inputs[0].Ref, …)` or in the link's own state.
    ⚠ Never put the PIN in the same mail as the link.
-2. The visitor opens `/s/<token>` in the public shell — your instance's
-   branding, the PIN gate, the expiry — enters the PIN, and filex calls your
+2. The visitor opens `/s/<token>` in the public shell - your instance's
+   branding, the PIN gate, the expiry - enters the PIN, and filex calls your
    `page_event` with `open`: read the document copy (`ReadInput("pub:0")`),
-   your record (`ShareState("", &st)`), and answer a surface — a
+   your record (`ShareState("", &st)`), and answer a surface - a
    `pdf-fields` in fill mode plus a `signature-pad`, and a **Sign** button.
 3. On `submit`, record what was signed (`ShareStateSet`, `StateSet`) and
    answer `{job: {action_id: "apply", params: {...}}}`. filex queues that
@@ -758,13 +966,13 @@ downloads, and why there is one PIN implementation rather than two.
      administrators, unless the person who opened the link is one), and the
      link's creator must still hold the ACL the action needs on the document.
      So a link stops working when its creator's access to the document goes
-     away — by design, because the job would otherwise run under rights its
+     away - by design, because the job would otherwise run under rights its
      owner no longer has. Treat a `403`/`409` on the visitor's submit as *this
      envelope is over*, not as something to retry, and let the surface say so.
    - ⚠ If the creator's ACCOUNT is switched off or deleted, the link dies one
      step earlier: `page_event` is not called at all and the visitor gets the
      dead-link screen (**410**). Your app therefore never sees a visit on such
-     a link — do not treat the silence as abandonment; a disabled account is a
+     a link - do not treat the silence as abandonment; a disabled account is a
      pause, and every one of its links resumes when the account comes back.
      ⚠ A page your `tick` opened has no account behind it at all (a wake-up
      runs with no actor) and is never stopped this way.
@@ -776,9 +984,9 @@ files: an anonymous visitor has no explorer and no storage. Ask for a job.
 
 A **language pack** is an app that adds a language to filex itself and does
 nothing else. It is a manifest and nothing more: **no module, no Go, no
-build** — a translator writes JSON. It translates the whole interface — the
+build** - a translator writes JSON. It translates the whole interface - the
 file explorer, the admin panel, the settings dialog and the public pages a
-share link opens — and the text the server writes: emails, notifications,
+share link opens - and the text the server writes: emails, notifications,
 the no-JavaScript pages behind a link and the install review's permission
 sentences. The fastest start is the template repository,
 [BRF-Tech/filex-lang-template](https://github.com/BRF-Tech/filex-lang-template),
@@ -790,8 +998,8 @@ A manifest that has `ui_locales` and **none** of `actions`, `views`,
 `public_pages`, `settings`, `permissions` or `wasm` is a language pack
 (`wire.Manifest.IsLanguagePack`). filex installs it from the manifest alone,
 never starts a runtime for it, lists it in **Plugins → Apps** as a *Language
-pack*, and refuses a module uploaded with it. Anything more — one permission,
-one action — and it is an ordinary app that needs its module.
+pack*, and refuses a module uploaded with it. Anything more - one permission,
+one action - and it is an ordinary app that needs its module.
 
 ```json
 {
@@ -826,7 +1034,7 @@ ONE flat object of dotted keys:
 |---|---|---|---|
 | **explorer** | `packages/core/src/locales/en.ts` | as written: `ctx.download` | the explorer, its dialogs, the public pages |
 | **admin** | `web/src/locales/en.json` (nested) | the dotted path: `appPlugins.wizard.title` | the admin panel and the settings dialog |
-| **both** | 55 keys in both (`storages.driver.*`, `storages.fields.*`, `storages.fieldHelp.*`, `home.title`) | the same key | both, with the same English — one translation serves both |
+| **both** | 55 keys in both (`storages.driver.*`, `storages.fields.*`, `storages.fieldHelp.*`, `home.title`) | the same key | both, with the same English - one translation serves both |
 | **server** | `backend/internal/srvtext/locales/en.json` and the notification phrases of `packages/core/src/lib/notificationText.ts` | everything under `server.`: `server.mail.greeting` | the server: emails, notifications, the no-JavaScript pages, the install review ([Text the server writes](#text-the-server-writes)) |
 
 It is one namespace because no key of one table is a dotted prefix of a key
@@ -836,7 +1044,7 @@ only the server's keys start with `server.`
 file per language holds all of it: a translator never has to know which
 program prints a string, only which grammar its table follows.
 
-**Get the catalogue** — every key, its English, and which table it belongs to:
+**Get the catalogue** - every key, its English, and which table it belongs to:
 
 - `filex-catalogue-en.json` + `filex-catalogue-context.json` attached to every
   [release](https://github.com/BRF-Tech/filex/releases);
@@ -847,8 +1055,8 @@ program prints a string, only which grammar its table follows.
 `filex-catalogue-en.json` is **exactly** the shape of `ui_locales["<lang>"]`:
 copy it and translate the values. The context file says per key `in`
 (explorer / admin / both / server), `syntax`, the Turkish reference (`tr`),
-the source files that use it (`where`) — for a server key instead, which
-email or page shows it (`about`) and what each placeholder holds (`vars`) —
+the source files that use it (`where`) - for a server key instead, which
+email or page shows it (`about`) and what each placeholder holds (`vars`) -
 and `plural: true` on a sentence about a count. Its top level carries
 `plural_categories`: the [plural categories](#plural-forms) of ~60 languages;
 `node scripts/i18n-export.mjs --lang <tag>` adds any other. `filex` names the
@@ -856,8 +1064,8 @@ version: a running server writes its own there.
 
 ### One word per concept
 
-filex uses one term for each thing on screen — "API key", never also "token";
-"PIN", never also "code"; "storage", never also "disk" — and writes labels in
+filex uses one term for each thing on screen - "API key", never also "token";
+"PIN", never also "code"; "storage", never also "disk" - and writes labels in
 sentence case. A pack keeps that property in its own language: pick one word
 for each row of the glossary in
 [CONTRIBUTING.md → Words: one term per concept](CONTRIBUTING.md#words-one-term-per-concept)
@@ -865,27 +1073,38 @@ and use it in every string, and address the reader the same way throughout
 (Turkish uses the polite "siz"). A person reading two names for one thing
 assumes two things.
 
+**A plain hyphen, never a long dash.** filex writes `-` where a text would
+reach for an em dash (U+2014) or an en dash (U+2013): ` - ` between two
+clauses, `3-60` or `a-z` for a range, a lone `-` for "nothing", `-1` for a
+negative number. Nor a character that passes for a hyphen: a non-breaking
+hyphen (U+2011), a typographic hyphen (U+2010), a figure dash (U+2012), a
+horizontal bar (U+2015) or a minus sign (U+2212) - they look like `-` and a
+search for the word misses them. The minus sign is accepted only as a whole
+label on its own (a zoom-out button). A pack follows the same rule in every
+table, whatever its language's own typography says; the validator refuses
+each of these (`DASH`, naming the character).
+
 ### The grammar depends on the table
 
 | | explorer (`plain`) | admin (`vue-i18n`) | both (`shared`) | server (`server`) |
 |---|---|---|---|---|
-| a value | `{name}` — the same names as the English | `{name}` (and `{0}`) — the same names as the English | `{name}` | `{name}` — **exactly** the names of the English: one left out is an error, not a warning |
-| a plural | separate keys by category: `<key>_zero` … `<key>_many`, the plain `<key>` is `other` ([Plural forms](#plural-forms)) | forms in one string split by a bar, one per category in CLDR order ([Plural forms](#plural-forms)) | — | as the explorer, the count is `{count}` |
-| `@` | an ordinary character | starts a linked message — write `{'@'}` | not allowed | an ordinary character |
-| the bar `\|` | an ordinary character | splits plural forms — write `{'\|'}` | not allowed | an ordinary character |
+| a value | `{name}` - the same names as the English | `{name}` (and `{0}`) - the same names as the English | `{name}` | `{name}` - **exactly** the names of the English: one left out is an error, not a warning |
+| a plural | separate keys by category: `<key>_zero` … `<key>_many`, the plain `<key>` is `other` ([Plural forms](#plural-forms)) | forms in one string split by a bar, one per category in CLDR order ([Plural forms](#plural-forms)) | - | as the explorer, the count is `{count}` |
+| `@` | an ordinary character | starts a linked message - write `{'@'}` | not allowed | an ordinary character |
+| the bar `\|` | an ordinary character | splits plural forms - write `{'\|'}` | not allowed | an ordinary character |
 | `{` `}` | only around a placeholder | write `{'{'}` / `{'}'}` | only around a placeholder | only around a placeholder |
-| `%` right before `{` | an ordinary character | ⚠ `%{x}` is vue-i18n's old *modulo* form and **eats the `%`** (`%{percent}` renders `97`, not `%97`) — write `{'%'}{percent}` | not allowed | an ordinary character (`%s` is **not** a placeholder: it prints as written) |
-| `{'…'}` | printed **as written** — never use it | the literal: `{'@'}` and friends | not allowed | printed as written — never use it |
+| `%` right before `{` | an ordinary character | ⚠ `%{x}` is vue-i18n's old *modulo* form and **eats the `%`** (`%{percent}` renders `97`, not `%97`) - write `{'%'}{percent}` | not allowed | an ordinary character (`%s` is **not** a placeholder: it prints as written) |
+| `{'…'}` | printed **as written** - never use it | the literal: `{'@'}` and friends | not allowed | printed as written - never use it |
 
 Placeholders may move and repeat; every form of a plural is handed the same
 values. A placeholder the English does not have prints wrong (literally in the
-explorer and the server's text, empty in the panel) — the validator refuses
+explorer and the server's text, empty in the panel) - the validator refuses
 it.
 
 ### Plural forms
 
 filex picks a plural form by the **CLDR category** of the count in the
-reader's language — `Intl.PluralRules` in the browser, the same Unicode rules
+reader's language - `Intl.PluralRules` in the browser, the same Unicode rules
 on the server: `zero`, `one`, `two`, `few`, `many`, `other`. A language has
 the categories its counts fall into: English and Spanish `one`, `other`;
 Russian, Ukrainian and Polish `one`, `few`, `many`, `other`; Arabic and Welsh
@@ -897,7 +1116,7 @@ lists `many` for Spanish, French, Italian, Portuguese and Catalan, but it only
 means an exact million ("1 millón de archivos"); filex treats those languages
 as `one` / `other`.
 
-**Explorer and server keys** — each form is its own key. The plain key is the
+**Explorer and server keys** - each form is its own key. The plain key is the
 `other` form and the fallback; there is no `_other`:
 
 ```json
@@ -909,13 +1128,13 @@ as `one` / `other`.
 "toast.restored":      "تمت استعادة {n} عنصر"
 ```
 
-A form your language lacks shows **your plain form** — never the English
+A form your language lacks shows **your plain form** - never the English
 singular inside your sentence; only a key you have not translated at all shows
 the English. A form for a category your language does not have is never read
 (the validator says `UNUSED`). The count is the call's `{count}`, `{n}` or
 `{days}` (the server: always `{count}`).
 
-**Admin-panel strings** — the forms are written inside one string, split by
+**Admin-panel strings** - the forms are written inside one string, split by
 `|`, in CLDR order of **your language's** categories:
 
 | Your language has | Write |
@@ -929,9 +1148,9 @@ the English. A form for a category your language does not have is never read
 is refused.
 
 **The number as a word.** In a category that holds exactly one number in your
-language — English and Spanish `one`; Arabic `zero`, `one`, `two` — the form
+language - English and Spanish `one`; Arabic `zero`, `one`, `two` - the form
 may leave the count out and say the number as a word (*يوم واحد*, "one day").
-Where a category holds several numbers — Russian `one` is also 21, 31, 101 —
+Where a category holds several numbers - Russian `one` is also 21, 31, 101 -
 the count must stay, or 21 would read "one"; the validator warns (explorer)
 or refuses (server).
 
@@ -941,42 +1160,42 @@ Everything under `server.` is written by the server, not drawn by a screen:
 
 | Keys | What | In whose language |
 |---|---|---|
-| `server.mail.share.*`, `server.mail.label.*`, `server.mail.valid_days`, `server.mail.no_expiry`, `server.mail.greeting` | the email with a share link (Share dialog → *Send by email*, or an invite to an address with no account) | the **sender's** — the language their screen is in |
+| `server.mail.share.*`, `server.mail.label.*`, `server.mail.valid_days`, `server.mail.no_expiry`, `server.mail.greeting` | the email with a share link (Share dialog → *Send by email*, or an invite to an address with no account) | the **sender's** - the language their screen is in |
 | `server.mail.drop_invite.*` | the email asking somebody to upload files (a file-request link) | the sender's |
 | `server.mail.grant.*` | an existing account was given access | the **recipient's** account language, else the sender's |
-| `server.mail.account.*` | an administrator created the recipient's account while inviting them | the inviting administrator's — the new account starts in it too |
+| `server.mail.account.*` | an administrator created the recipient's account while inviting them | the inviting administrator's - the new account starts in it too |
 | `server.mail.drop_received.*`, `server.drop.note_from` | files arrived through a file-request link: the owner's email, the notification's stored title, and the first line of `NOT.txt` beside the files | the folder **owner's** account language |
 | `server.mail.smtp_test.*` | the mail settings' *Send test* | that administrator's |
 | `server.mail.cloud_verify.*` | filex cloud sign-up verification | the visitor's browser language |
 | `server.mail.app_footer` | the line under every mail an installed app sends | the language the app wrote the mail in (`MailSendIn`) when the server speaks it, else the language its call runs in |
-| `server.notify.*` | the notification phrases — the bell, the browser pop-up | the **reader's** screen language (each reader's own: two people read one notification) |
+| `server.notify.*` | the notification phrases - the bell, the browser pop-up | the **reader's** screen language (each reader's own: two people read one notification) |
 | `server.public.*` | the pages a share or file-request link opens without JavaScript, the PIN gate, the error pages, the sign-in hop | the visitor's browser language (`?lang=` wins) |
 | `server.perm.*` | Plugins → Apps → the install review: what a permission lets an app do | the administrator's |
 
-In every case the language is one the server *speaks* — English, Turkish, or
-one an installed pack adds — else the instance default
+In every case the language is one the server *speaks* - English, Turkish, or
+one an installed pack adds - else the instance default
 (`FILEX_DEFAULT_LOCALE`), else English; per key, a string your pack lacks is
 English. ⚠ At run time the server re-checks each translation it uses: one
-whose placeholders differ from the English is **not used** — the recipient
+whose placeholders differ from the English is **not used** - the recipient
 gets the English line with the link or the PIN in it, rather than your line
 without it. Run the validator and it will not come to that.
 
 Emails are plain text, one key per line or paragraph (a mail is assembled
-from the facts it has — a PIN or none, a size or none), so every key is a
+from the facts it has - a PIN or none, a size or none), so every key is a
 whole sentence. A subject is one line. filex labels each mail with its
 language (`Content-Language`) and encodes a non-ASCII subject for the mail
-system; a right-to-left language needs nothing more — plain text carries no
+system; a right-to-left language needs nothing more - plain text carries no
 direction, and mail clients lay each paragraph out by its own letters.
 
 The public pages escape your text; the one piece of markup is the footer's
-`{filex}`, which becomes the link to filex.sh — keep it exactly once.
+`{filex}`, which becomes the link to filex.sh - keep it exactly once.
 
 ### Right-to-left languages
 
 A pack in Arabic, Hebrew, Persian, Urdu … needs nothing extra: the interface
 is laid out right to left in its language by itself (the server's one list,
-`wire.IsRTL`). What a translator should know about mixed-direction text —
-names, paths and numbers inside a sentence — is in [RTL.md](RTL.md).
+`wire.IsRTL`). What a translator should know about mixed-direction text -
+names, paths and numbers inside a sentence - is in [RTL.md](RTL.md).
 
 ### What is not in the catalogue yet
 
@@ -988,7 +1207,7 @@ names, paths and numbers inside a sentence — is in [RTL.md](RTL.md).
 The limits are bytes, sized from the catalogue. Measured on v0.43.0: **3 593
 keys**, 190 KiB of keys + values in English (226 KiB as the exported
 `filex-catalogue-en.json`). The packs written for this release came out at
-**223–286 KB**, and a right-to-left language whose letters are two bytes each
+**223-286 KB**, and a right-to-left language whose letters are two bytes each
 measured about **300 KB**. Every ceiling below therefore has room: the longest English string
 is 606 bytes against the 4 KiB per-string limit, the longest key 52 bytes
 against 128, and a complete two-byte-script language is about 300 KiB against
@@ -1004,13 +1223,13 @@ the 1 MiB per-language limit.
 
 ### Coverage and fallback
 
-Every key a pack lacks shows in **English** — never as a raw key. An empty
+Every key a pack lacks shows in **English** - never as a raw key. An empty
 value is *untranslated*, not "translate as nothing". A key filex does not have
 (a typo, or a string a newer filex removed) is ignored; a plural form of a key
 filex has (`toast.restored_few`) is not a typo, and counts neither way.
 **Plugins → Apps** shows each language's coverage of the catalogue of the
-filex that is running — the server's `server.*` keys included —
-*Español — 97% translated · the rest shows in English* — floor-rounded, so
+filex that is running - the server's `server.*` keys included -
+*Español - 97% translated · the rest shows in English* - floor-rounded, so
 only a complete language reads 100%. Coverage is measured against the running
 version, so a pack written for an older filex honestly reports what it misses
 after an upgrade.
@@ -1031,11 +1250,12 @@ node scripts/validate.mjs translations/es.json                  # in the templat
 node scripts/i18n-validate.mjs filex-app.json --complete --missing
 ```
 
-It checks every rule above against the catalogue — key shape and byte limits,
+It checks every rule above against the catalogue - key shape and byte limits,
 unknown and missing keys (coverage), placeholders (exact for `server.*`),
 plural forms against your language's categories (`UNUSED` for a category it
 does not have, the count kept where a category holds several numbers), the
-`@`, bar, `{'…'}` and `%{` rules per table, one-line subjects — and exits 1
+`@`, bar, `{'…'}` and `%{` rules per table, one-line subjects, no em or en
+dash and no character that passes for a hyphen - and exits 1
 on an error. It compiles admin-panel strings with vue-i18n's own parser when
 that is installed and falls back to a built-in checker that the filex tests
 hold to the same answers. `--complete` makes a missing key an error;
@@ -1044,34 +1264,38 @@ form for one of your categories.
 
 ### Install
 
-- **GitHub** — push the manifest as `filex-app.json` at the repository root;
+- **GitHub** - push the manifest as `filex-app.json` at the repository root;
   **Install → GitHub** with `owner/name` (and a tag or branch). No release and
   no `wasm` block: the manifest is the whole distribution.
-- **Files** — **Install → Files**, the manifest alone.
-- **URL** — the manifest URL, the module URL left empty; a SHA-256, if given,
+- **Files** - **Install → Files**, the manifest alone.
+- **URL** - the manifest URL, the module URL left empty; a SHA-256, if given,
   pins the **manifest**.
 - On an instance that only accepts signed apps (`FILEX_PLUGIN_TRUSTED_KEYS`),
   sign the manifest's sha256 (hex, lower-case) the way you would a module's.
 
 To publish a new version, bump `version` and push `filex-app.json`: a pack
 installed from GitHub or an address finds it at the next update check (once a
-day, or **Check for updates** on the Apps tab — see
+day, or **Check for updates** on the Apps tab - see
 [Publishing so updates are found](#publishing-so-updates-are-found)) and shows
 *Update available*; it moves when an administrator approves it with **Review
-update** — since 0.48 nothing updates itself, a language pack included. One
+update** - since 0.48 nothing updates itself, a language pack included. One
 installed from a file is upgraded with **Upgrade** on its row.
 Removing the pack removes its languages at once; a person who had chosen one
 falls back to their next choice (and gets it back if the pack returns).
 
 ## Writing an interface
 
-An app may bring its **own interface** — HTML, CSS and JavaScript you write
-with whatever you like — instead of, or beside, the screens filex draws from
+An app may bring its **own interface** - HTML, CSS and JavaScript you write
+with whatever you like - instead of, or beside, the screens filex draws from
 your surfaces. An app can be a module, an interface, or both; an interface
 with nothing for a module to do (a diagram editor, a text editor for a format
 of your own) needs **no module and no Go at all**. The contract, message by
 message, is [APP-PLUGINS-API.md → An app's own interface](APP-PLUGINS-API.md#an-apps-own-interface-v4);
-this is how to build one.
+this is how to build one. Two such apps are public and worth reading whole:
+[filextext](https://github.com/BRF-Tech/filextext-app), the end-to-end
+encrypted `.fxtxt` workspace (the examples below borrow its extension), and
+[filex-drawio](https://github.com/BRF-Tech/filex-drawio), draw.io packaged
+with `ui:package-fetch`.
 
 ```
 my-editor/
@@ -1102,8 +1326,8 @@ my-editor/
 - **No `wasm` block, no module.** An app whose views are all interfaces, whose
   actions only open them and whose permissions are `files:read`,
   `files:write` and `settings` installs from the manifest and the bundle
-  alone. Anything that needs a module — an action that runs, a surface view,
-  a public page, `schedule`, an engine, `http:` — refuses the install and
+  alone. Anything that needs a module - an action that runs, a surface view,
+  a public page, `schedule`, an engine, `http:` - refuses the install and
   says which line needs it.
 - **Don't list `ui` permissions yourself.** `ui`, `ui:eval`, `ui:wasm-eval`,
   `ui:package-fetch`, `ui:download`, `ui-net:<as>:<url>`, `ui-viewer:<kind>`
@@ -1120,13 +1344,13 @@ my-editor/
   most. Without a click filex asks them first.
 - **Your interface loads its own files at run time?** Say
   `"ui": { …, "package_fetch": true }`. `fetch('stencils/basic.xml')` and a
-  (synchronous) `XMLHttpRequest` then reach the package's own files — this
+  (synchronous) `XMLHttpRequest` then reach the package's own files - this
   version's, nothing else. Without it every connection is refused.
 - **`placement: "viewer"`** opens files of the types in `applies` the way
   filex's own viewers do (and adds **Open with** to the file menu). Name
   them: a viewer's `applies` needs an `ext` or `mime` list (`image/*` is
-  fine, `*/*` is not) — one with no rule is refused, because it would open
-  every file — and each kind is a line of the review. `modal`,
+  fine, `*/*` is not) - one with no rule is refused, because it would open
+  every file - and each kind is a line of the review. `modal`,
   `page`, `inspector` and `home` work as for surfaces, with your interface in
   the frame.
 - **Build and pin:** `cd ui && zip -r ../ui.zip . && sha256sum ../ui.zip`.
@@ -1165,7 +1389,7 @@ person picks in filex's own dialog), `dirty()`, `title()`, `toast()`,
 `submit(action, params)` (queue one of your actions), `state.get/set` (a small
 per-person store), `on(event)`. By default it paints filex's colours
 (`--fe-bg`, `--fe-text`, `--fe-primary`…), `lang`, `dir` and `data-theme` onto
-your `<html>` and keeps them current — style with those variables and the
+your `<html>` and keeps them current - style with those variables and the
 interface looks like the explorer around it, in light and dark.
 
 ### What the frame allows, and what it does not
@@ -1175,7 +1399,7 @@ your package can widen it.
 
 - **Scripts only from your package**, as files: `<script src>` and
   `<script type="module">` both work. **No inline script, no `onclick=""`
-  attribute, no `javascript:` link** — they are refused. (filex's own
+  attribute, no `javascript:` link** - they are refused. (filex's own
   bootstrap is the one inline script on the page.) `eval` and `new Function`
   only with `"csp": ["unsafe-eval"]`; WebAssembly compiled in the page only
   with `"wasm-unsafe-eval"`.
@@ -1191,11 +1415,11 @@ your package can widen it.
   worker from a URL cannot start on an opaque origin.
 - **No frames, forms, pop-ups or top-level navigation.** One page: build a
   single-page interface. ⚠ If your page navigates itself to another page,
-  filex closes the channel — the second page gets no connection.
+  filex closes the channel - the second page gets no connection.
 - **Keys stay yours.** filex does not see the keys pressed in your frame;
   Ctrl+S reaches your `onSave` through the SDK.
 - **External files.** A font or a stylesheet from a CDN: name it in
-  `ui.external` with its `sha256` and filex mirrors it — download it once at
+  `ui.external` with its `sha256` and filex mirrors it - download it once at
   install and serve it from your package as `ext/<host>/<path>`, so write
   `<link rel="stylesheet" href="ext/cdn.example.net/katex@0.16.9/katex.min.css">`.
   Without `sha256` the address is *live*: the reader's browser fetches it,
@@ -1225,15 +1449,17 @@ pluginkit.Run(&pluginkit.Plugin{
 })
 ```
 
-It runs like a screen event — the files the interface was opened with as
-refs, settings, state, `http:` — and may not write a file (the interface
+It runs like a screen event - the files the interface was opened with as
+refs, settings, state, `http:` - and may not write a file (the interface
 saves; a job writes). `&pluginkit.UIError{Text: wire.Text{…}}` refuses with a
 sentence in every language you speak. Test it with `plugintest`:
-`h.UICall("editor", "wordcount", nil, plugintest.File{Name: "a.fxtxt", Data: …})`.
+`h.UICall("editor", "wordcount", nil, plugintest.File{Name: "a.fxtxt", Data: …})`
+(the `.fxtxt` here is the example's; the real
+[filextext](https://github.com/BRF-Tech/filextext-app) has no module).
 
 ⚠ **A module app with an interface describes the interface too.** Put the
-same `ui` block — the bundle's `sha256`, the `csp` exceptions, the `external`
-addresses — into the `Manifest` your module embeds. On an instance that only
+same `ui` block - the bundle's `sha256`, the `csp` exceptions, the `external`
+addresses - into the `Manifest` your module embeds. On an instance that only
 runs signed apps (`FILEX_PLUGIN_TRUSTED_KEYS`) your signature covers the
 module, so the module's describe is what vouches for the interface: a module
 that declares no interface, or another one, is refused there. Anywhere, a
@@ -1248,7 +1474,7 @@ answers the questions that matter **before `plugin.wasm` exists**:
 
 - does the action do the right thing, and degrade when a permission is
   missing or an engine is absent?
-- is every screen drawable — known node types, a readable choice instead of
+- is every screen drawable - known node types, a readable choice instead of
   a dropdown, one primary button per step, conditions pointing at fields
   that exist?
 - does every string carry every language the manifest promises?
@@ -1259,7 +1485,7 @@ answers the questions that matter **before `plugin.wasm` exists**:
 The host functions in `pluginkit` only answer inside wasm; off-wasm they
 return `ErrNotWasm`. So a plugin that calls `pluginkit.ReadInput` directly
 can only be tested by building the module and installing it. Take the calls
-you use as a small interface instead — `plugintest.Host` satisfies it
+you use as a small interface instead - `plugintest.Host` satisfies it
 method-for-method, with the same names and signatures as `pluginkit`'s own
 functions:
 
@@ -1385,8 +1611,8 @@ func TestTheWholeFlow(t *testing.T) {
 
 ### The fake host
 
-`plugintest.Host` is filex's host side in memory — files, settings, per-file
-state, locks, engines, signing, notifications, mail, HTTP and shares — and it
+`plugintest.Host` is filex's host side in memory - files, settings, per-file
+state, locks, engines, signing, notifications, mail, HTTP and shares - and it
 answers with the **same codes the real host returns** (`permission_denied`,
 `not_found`, `too_large`, `timeout`, `unavailable`, `invalid`, `busy`,
 `internal`). It refuses a call the manifest never asked for, and refuses from
@@ -1399,8 +1625,10 @@ a kit that lies.
 | `h.Host.InstallEngine("ffmpeg")` | what this server *has* (the grant is the manifest's) |
 | `h.Host.SetSetting`, `AddUser`, `MailPerHour`, `SignBudget`, `MaxInputBytes`, `SignUnavailable` | the rest of the instance |
 | `h.Host.EngineFn` / `HTTPFn` | script an engine's or an endpoint's answer, including failures |
-| `h.Host.Network[url] = bytes`, `h.Host.Offline`, `h.Host.Downloads` | what `asset_fetch` can download, an installation with no internet (the cache still answers), and every URL actually downloaded — a cached call adds nothing, so "fetched once" is one line to assert |
+| `h.Host.InstallEngine("office")` + `h.Host.OfficeFn` | a connected document server: `OfficeFn` gets each file of a `--convert-to` line the kit has already read the way filex does (`From`, `To` - `pdfa` for PDF/A -, `Delimiter`, `CodePage`, the bytes) and answers the result, or `&plugintest.OfficeRefusal{Code: -7}` for a refusal (a failed run, as on filex). Without `InstallEngine` the office engine is `unavailable` with filex's sentence |
+| `h.Host.Network[url] = bytes`, `h.Host.Offline`, `h.Host.Downloads` | what `asset_fetch` can download, an installation with no internet (the cache still answers), and every URL actually downloaded - a cached call adds nothing, so "fetched once" is one line to assert |
 | `h.Select(files…)`, `h.Open` / `Change` / `Submit` / `Act`, `h.Do`, `h.Queue`, `h.Page` | drive the plugin |
+| `h.Press(view, screen, button, values)` | press a footer button **the way filex does** (0.50): the primary one arrives as `submit`, every other as `action`, with the screen's `state` and the values its forms hold. It refuses what filex never sends - a button the screen does not draw, a disabled one, the primary one while a visible required field is empty. Prefer it to `Submit` / `Act` for anything a person clicks: those let the test pick the event, and filex-sign 0.1.0 shipped primary buttons that listened for `action` only and stayed green because their tests pressed them with `Act` |
 | `h.Host.Bytes(ref)`, `Outputs()`, `ProgressLog`, `Notices`, `Mails`, `Engines`, `Shares()`, `State()`, `Locked()` | read back what it did |
 | `h.Host.CertIssue` → `h.Host.NewSigner(issued)` · `h.Host.PlatformSeal` | a real P-256 CA, so a signature a test makes actually verifies; the seal is the host's own key, is never destroyed, and comes back from the same fake |
 
@@ -1413,12 +1641,14 @@ a kit that lies.
 | `CheckRegistered` | a menu row that opens a screen nobody wrote, and the reverse |
 | `CheckLanguages` | a `Text` missing a language the manifest promised, or carrying one it did not declare; the same words under two languages (a missing translation reads exactly like that) |
 | `CheckLocaleParity` | the screen drawn once per language: a section only one language has, a string blank in one, a string identical in both |
+| `CheckJobResult` | a job's answer whose `surface.open` filex would drop: a path that is not the ref of one of the job's outputs, a job with nothing to open, a screen the app does not have, an action and a view both; the rest of a job's `surface` (never drawn) is a warning |
 | `Golden` | the stored shape of a screen; `-update` rewrites it, `git diff` is the review |
 
 Findings come back as a `Report` when you want to look rather than fail
-(`InspectSurface`, `InspectLanguages`, `InspectLocaleParity`, …): errors fail
+(`InspectSurface`, `InspectLanguages`, `InspectLocaleParity`,
+`InspectJobResult`, …): errors fail
 the test, warnings are logged. `LangOpts{SameAllowed: […]}` is for the strings
-that are the same in every language on purpose — format names, brands, units.
+that are the same in every language on purpose - format names, brands, units.
 
 ### Testing a wake-up
 
@@ -1439,7 +1669,7 @@ require.Equal(t, "expire:7f3a", out.Items[0].Key)
 ```
 
 `Wake`/`Tick` run with the **read-only** scope the host uses, so a `StateSet`
-from your tick fails here exactly as it would at 03:00 — the kit refuses what
+from your tick fails here exactly as it would at 03:00 - the kit refuses what
 the host refuses, or it would be teaching you the wrong thing.
 
 `CheckSchedule` applies filex's published bounds (`wire.Schedule*`, the same
@@ -1447,8 +1677,8 @@ numbers `TickInput` carries) and reports **every** complaint at once: a key
 that does not match, an action your manifest does not declare, a due time
 past `WindowEnd` that will quietly not be scheduled, an item with no files,
 a path that is not adapter-qualified, two storages in one item, more items
-than will be kept. It is a warning, not the enforcement — the host is what
-refuses — but it is the difference between finding out in `go test` and
+than will be kept. It is a warning, not the enforcement - the host is what
+refuses - but it is the difference between finding out in `go test` and
 finding out an hour later in a log.
 
 Both refuse to run at all if the manifest does not ask for `schedule`, or if
@@ -1493,7 +1723,7 @@ Measured on v0.43.0: a Rust app on `extism-pdk` 1.4, built for
 `wasm32-unknown-unknown` (no WASI), exporting `describe` and `action_run` and
 calling `file_open` / `file_read` / `file_create` / `file_write` /
 `file_close`, installs through the permission review and runs from the file
-menu, a multi-megabyte input read chunk by chunk —
+menu, a multi-megabyte input read chunk by chunk -
 [`examples/rust-minimal`](https://github.com/BRF-Tech/filex-app-template/tree/main/examples/rust-minimal)
 in the template. No other language has been tried yet, and neither have
 screens (`view_event`) outside Go; without the Go SDK there is no

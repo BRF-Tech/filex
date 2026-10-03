@@ -54,6 +54,9 @@ e2e/fixtures/**  -text -eol
 # long-name sidecar and a plaintext stray whose SHA-256 is pinned — one
 # converted line ending and the round trip reports corruption.
 backend/internal/e2edecrypt/testdata/folders/** -text -eol
+# The same, written the other way round: folders the Go writer (`filex
+# encrypt`) made, which the browser code is tested against.
+backend/internal/e2edecrypt/testdata/folders-go/** -text -eol
 
 # ── Binaries ──────────────────────────────────────────────────────────────
 # `text=auto` already guesses these correctly, but a guess is a thing that can
@@ -64,6 +67,11 @@ backend/internal/e2edecrypt/testdata/folders/** -text -eol
 *.gif   binary
 *.webp  binary
 *.tiff  binary
+# The HEIC the server decodes at boot (enginebin/heic_probe.heic) is compiled
+# into the binary: one converted byte and every install reads "cannot decode".
+*.heic  binary
+*.heif  binary
+*.avif  binary
 *.ico   binary
 *.psd   binary
 *.pdf   binary

@@ -46,8 +46,9 @@ const props = defineProps<{
   userId: number;
   /** The built-in role the server holds for the account. */
   role: string;
-  /** The custom role it holds, if any (its id lets the grid name it too). */
-  customRole?: (NamedRole & { id?: number }) | null;
+  /** The custom role in force, if any (its id lets the grid name it too) —
+   *  its own, or (group set) the one a group gives it. */
+  customRole?: (NamedRole & { id?: number; group?: string | null }) | null;
 }>();
 
 const { t, locale } = useI18n();
@@ -148,7 +149,7 @@ const customRoleName = computed(() => roleName(props.customRole, locale.value));
 
 onMounted(load);
 // The role is changed above; when it is saved, redraw what it means here.
-watch(() => [props.userId, props.role, props.customRole?.name], load);
+watch(() => [props.userId, props.role, props.customRole?.name, props.customRole?.group], load);
 </script>
 
 <template>
@@ -170,11 +171,13 @@ watch(() => [props.userId, props.role, props.customRole?.name], load);
       <template v-else>
         <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('permissions.card.subtitle') }}</p>
         <p class="text-sm" data-testid="user-role-line">
-          {{ t('permissions.card.builtinRole', { role: customRole ? customRoleName : t(`users.roles.${role}`) }) }}
+          <template v-if="customRole?.group">{{ t('permissions.card.groupRole', { role: customRoleName, group: customRole.group }) }}</template>
+          <template v-else>{{ t('permissions.card.builtinRole', { role: customRole ? customRoleName : t(`users.roles.${role}`) }) }}</template>
         </p>
         <p v-if="role === 'viewer' && !customRole" class="text-xs text-amber-700 dark:text-amber-400">{{ t('permissions.card.viewerNote') }}</p>
         <p v-if="role === 'viewer' && customRole" class="text-xs text-amber-700 dark:text-amber-400" data-testid="read-only-role-note">
-          {{ t('permissions.card.readOnlyRoleNote', { role: customRoleName }) }}
+          <template v-if="customRole.group">{{ t('permissions.card.groupReadOnlyNote', { role: customRoleName, group: customRole.group }) }}</template>
+          <template v-else>{{ t('permissions.card.readOnlyRoleNote', { role: customRoleName }) }}</template>
         </p>
 
         <h3 class="text-sm font-medium pt-2">{{ t('permissions.card.exceptionsTitle') }}</h3>

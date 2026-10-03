@@ -12,10 +12,21 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* ⚠ The theme's ground, ink and face, not Tailwind's. A page that paints
+     no ground of its own (My shares, the standalone pages) showed the
+     browser's white or black under a palette that was neither, and the admin
+     shell kept Tailwind's sans under a theme with a face of its own
+     (Terminal's monospace) while the explorer inside it took the theme's.
+     The stock `--fe-font` lists the same faces as `fontFamily.sans`, in the
+     same order (Inter, then the system face), so the default look is
+     unchanged; Tailwind's list stays the fallback for a host page that
+     loads no core tokens. */
   body {
     margin: 0;
     min-height: 100vh;
-    font-family: theme('fontFamily.sans');
+    font-family: var(--fe-font, theme('fontFamily.sans'));
+    background: var(--fe-bg);
+    color: var(--fe-text);
   }
 
   /* Hide native dialog backdrop noise; we paint our own. */

@@ -388,7 +388,7 @@ export function buildCatalogue(root, { where = true, langs = [] } = {}) {
     context: {
       filex: buildVersion(root),
       about:
-        "Every key filex has — the interface and the text the server writes. `in`: explorer (plain {name} placeholders, @ | literal) · admin (vue-i18n: write {'@'} for @) · both (no @, | or {'…'} at all) · server (emails, public pages, notifications: {name} only, and exactly the placeholders of the English). `plural`: the key takes plural forms — explorer/server: extra keys <key>_zero|_one|_two|_few|_many for the categories your language has (the plain key is `other`); admin: `|`-separated forms, one per category, in CLDR order. `plural_categories`: which categories a language has. `tr`: the Turkish reference. docs: https://docs.filex.sh/PLUGIN-KIT#writing-a-language-pack",
+        "Every key filex has - the interface and the text the server writes. `in`: explorer (plain {name} placeholders, @ | literal) · admin (vue-i18n: write {'@'} for @) · both (no @, | or {'…'} at all) · server (emails, public pages, notifications: {name} only, and exactly the placeholders of the English). `plural`: the key takes plural forms - explorer/server: extra keys <key>_zero|_one|_two|_few|_many for the categories your language has (the plain key is `other`); admin: `|`-separated forms, one per category, in CLDR order. `plural_categories`: which categories a language has. `tr`: the Turkish reference. docs: https://docs.filex.sh/PLUGIN-KIT#writing-a-language-pack",
       plural_categories: plural,
       keys: ctx,
     },

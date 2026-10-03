@@ -355,7 +355,7 @@ func TestLiveNoWatcherIsReportedPerPair(t *testing.T) {
 	r.loop.notePairsFile()
 	r.next(time.Second)
 	for _, id := range []string{"p1", "p2"} {
-		want := id + ": local: poll-only — unavailable — too many open files\n"
+		want := id + ": local: poll-only - unavailable - too many open files\n"
 		if !strings.Contains(r.out.String(), want) {
 			t.Fatalf("missing %q in:\n%s", want, r.out.String())
 		}

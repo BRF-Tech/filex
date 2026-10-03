@@ -1,7 +1,7 @@
 # Contributing to filex
 
-Thanks for considering a contribution. This is a small, opinionated codebase
-— before opening a sizeable PR please file an issue describing what you're
+Thanks for considering a contribution. This is a small, opinionated codebase -
+before opening a sizeable PR please file an issue describing what you're
 about to do.
 
 - [Development setup](#development-setup)
@@ -22,7 +22,9 @@ Requirements:
 - Go 1.25+ (`backend/go.mod` declares 1.25.0; the images build on golang:1.25)
 - Node.js 20+
 - pnpm 9+
-- (optional) Docker, ffmpeg, ghostscript, libreoffice for thumbnail dev
+- (optional) Docker, ffmpeg, ghostscript for thumbnail dev; an ONLYOFFICE
+  Document Server (the `onlyoffice/documentserver` image) for office
+  thumbnails and the apps' office engine - filex runs no LibreOffice
 
 ```bash
 git clone https://github.com/brf-tech/filex.git
@@ -31,7 +33,7 @@ cd filemanager
 pnpm install            # all workspace packages
 pnpm run dev            # parallel: package watch + admin Vite dev server
 
-# In another shell — Go backend
+# In another shell - Go backend
 # once, on a fresh clone: the binary embeds these two directories, and
 # `go build` refuses a //go:embed pattern that matches nothing
 mkdir -p backend/embed/admin backend/embed/web
@@ -51,11 +53,11 @@ ships in the binary), use `pnpm run build:all`.
 ### Running with hot-reload
 
 ```bash
-# Terminal 1 — Go (recompiles on save with air)
+# Terminal 1 - Go (recompiles on save with air)
 go install github.com/air-verse/air@latest
 cd backend && air
 
-# Terminal 2 — admin SPA + packages
+# Terminal 2 - admin SPA + packages
 pnpm run dev
 ```
 
@@ -66,18 +68,18 @@ pnpm run dev
 1. **Fork** + create a feature branch off `main`.
 2. **Code** + write tests.
 3. **Lint locally**: `pnpm run lint` and `cd backend && go vet ./... && staticcheck ./...`.
-4. **Test locally**: `pnpm run test` and `cd backend && go test -race ./...`.
+4. **Test locally**: `pnpm run test` and `cd backend && go test -race -timeout 30m ./...`.
 5. **Open MR** against `main`. CI runs lint + test + build.
 6. **Address review** + squash if asked.
-7. **Merge** — maintainer squashes; commit message becomes a CHANGELOG line.
+7. **Merge** - maintainer squashes; commit message becomes a CHANGELOG line.
 
 ---
 
 ## Branches
 
-- `main` — protected, always green.
-- `feat/<short-name>`, `fix/<short-name>`, `chore/<short-name>` — feature branches.
-- `release/v0.X.Y` — short-lived branch only used to cut a release.
+- `main` - protected, always green.
+- `feat/<short-name>`, `fix/<short-name>`, `chore/<short-name>` - feature branches.
+- `release/v0.X.Y` - short-lived branch only used to cut a release.
 
 We don't run a `develop` branch. Trunk-based development with feature flags
 when something needs to land partially.
@@ -137,8 +139,8 @@ BREAKING CHANGE: the Vue event name changed. See docs/API.md.
 
 ```bash
 cd backend
-go test -race ./...
-go test -race -cover ./...      # with coverage
+go test -race -timeout 30m ./...        # internal/api/handlers alone is ~9 min, past the default 10m under -race
+go test -race -timeout 30m -cover ./... # with coverage
 go test -run TestStorageS3 -v ./internal/storage/s3
 ```
 
@@ -159,36 +161,84 @@ pnpm --filter='@brftech/filex-core' test
 
 Vitest with happy-dom.
 
+**A unit test never reaches the network, and it does not tidy up after
+itself.** `web/tests/setup.ts` refuses every request a test did not mock
+(`fetch`, `XMLHttpRequest`, `WebSocket`/`EventSource` and happy-dom's own
+loads underneath them) and fails that test with the address, even when the
+page swallows the error; mock the API module (`vi.mock('@/api/…')`) or stub
+`fetch`, and in the rare file that truly needs the network say why with
+`allowNetwork('…')` from `web/tests/helpers/noNetwork.ts`. An `<iframe src>`
+stays a blank frame there (its `contentWindow` works, nothing is fetched). A
+file whose tests write a preference (a theme, a density, an app frame
+opening) calls `answerAccountPrefs()` from `web/tests/helpers/accountPrefs.ts`:
+the account's copy is written 400 ms later, so unanswered it fails only on a
+loaded run.
+After every test the same setup lets in-flight work land, unmounts every
+page `mount()` returned and only then empties `<body>`
+(`web/tests/helpers/teardown.ts`), so a test does not keep a list of what it
+mounted and never writes `document.body.innerHTML = ''` on its own - wiping
+`<body>` under a page that is still mounted is what made a late answer draw
+into missing DOM and fail the v0.49.0 release run with every test green. A
+test that starts over half-way calls `unmountAll()`; an `afterEach` that
+takes mocks away (`vi.restoreAllMocks`, `vi.unstubAllGlobals`, real timers)
+calls `await teardownDom()` first, so what is still in flight lands on the
+mocks.
+
 ### Browser suites
 
 There are two, and both run against a throwaway instance this repo starts for
-them — never against a live host, never with a secret:
+them - never against a live host, never with a secret:
 
 ```bash
 bash scripts/build-wasm-fixture.sh   # once: the app-plugin fixture 95-app-plugins installs (skips without it)
-node e2e/run.mjs local      # Playwright — e2e/tests/*.spec.ts
-node e2e/run.mjs cypress    # Cypress   — web/cypress/e2e/*.cy.ts
+node e2e/run.mjs local      # Playwright - e2e/tests/*.spec.ts
+node e2e/run.mjs cypress    # Cypress   - web/cypress/e2e/*.cy.ts
 ```
 
 Add `--build` on the first run (it builds the packages, the admin UI, the embed
 assets and the Go binary); afterwards a binary in `bin/` is enough.
+
+A new Playwright spec is named `<number>-<words>.spec.ts` with the highest
+number in use + 1 - counted across the other open branches too, when you cut
+yours - and no letter after the number (`web/tests/quality/e2eSpecNumbers.test.ts`
+refuses a number used twice). Specs run in the file names' plain sort
+(`126-` before `95-`), so a spec never relies on running after another.
 
 **Which one do I add a test to?**
 
 | | Playwright (`e2e/`) | Cypress (`web/cypress/`) |
 |---|---|---|
 | Shape | one user journey per spec, end to end | many small cases per surface |
-| Best at | flows that cross screens — upload → trash → restore, share → open with a PIN, pair a desktop app | HTTP contracts, admin screens, envelope shapes, "every route answers" sweeps |
+| Best at | flows that cross screens - upload → trash → restore, share → open with a PIN, pair a desktop app | HTTP contracts, admin screens, envelope shapes, "every route answers" sweeps |
 | Reaches | the UI a person sees | the UI **and** the API underneath it, in the same file |
 | Gates | the release (`docs/CONTRIBUTING.md` → Release process) | every push and PR (`.github/workflows/ci.yml`) |
 
 Rule of thumb: **if you can describe it as a story ("a user does X, then Y, and
 sees Z"), it is Playwright. If you can describe it as a rule ("this endpoint
 answers 503 when the integration is off"), it is Cypress.** A regression in a
-shared package usually deserves one of each — the contract in Cypress, the
+shared package usually deserves one of each - the contract in Cypress, the
 journey in Playwright.
 
 `e2e/README.md` and `web/cypress/README.md` carry the traps for each.
+
+### Against the real servers
+
+Both suites stub or fake the servers filex talks to. A third one,
+`e2e/realenv/`, runs filex against the real ones in Docker: an ACME authority
+(Pebble) for `FILEX_TLS_MODE=acme`, Caddy for `FILEX_TLS_MODE=proxy`, Keycloak
+and OpenLDAP for sign-in, the ONLYOFFICE Document Server for issue #80's S2
+and S5:
+
+```bash
+e2e/realenv/run.sh            # every stage; or: tls, sso, office
+```
+
+Linux with Docker only. A stage whose images are not on the machine is skipped
+with the image named (`REALENV_PULL=1` pulls them), and so is every stage on a
+machine without Docker, so it is safe to call anywhere. What each stage
+starts, and how the pieces trust each other, is in `e2e/realenv/README.md`.
+A change to ACME, the TLS hooks, OIDC/LDAP sign-in or the document server's
+diagnosis is measured there before a release.
 
 ### What needs tests
 
@@ -196,7 +246,7 @@ journey in Playwright.
   every config knob.
 - **Encouraged**: new UI components (Vitest `mount`).
 - **Optional but appreciated**: an end-to-end scenario when the flow spans many
-  components — see the table above for which suite it belongs in.
+  components - see the table above for which suite it belongs in.
 
 ---
 
@@ -216,12 +266,12 @@ journey in Playwright.
 - ESLint with `eslint-plugin-vue` recommended config.
 - Strict TypeScript: `noImplicitAny`, `strictNullChecks`.
 - Prefer composables for reusable logic; SFC for components.
-- No default exports (named only) — easier IDE refactor.
+- No default exports (named only) - easier IDE refactor.
 
 ### Do not write the same logic twice
 
 Anything repeated is added in one place and managed from one place. This is not
-a style preference — it is the rule this codebase has broken most often, and
+a style preference - it is the rule this codebase has broken most often, and
 every time it was found by a person looking at a screen: a 464-line second
 listing pane, one `mime_type === 'inode/storage'` test in three view
 components, the brand mark hand-typed into five files (one still painted the
@@ -230,14 +280,14 @@ screen. The second copy always gets written because the first is inconvenient
 to reach, nothing notices, and the two drift.
 
 **The gate:** `web/tests/quality/duplication.test.ts`, running
-`scripts/dup-scan.mjs`. Run it yourself with `node scripts/dup-scan.mjs` — it
+`scripts/dup-scan.mjs`. Run it yourself with `node scripts/dup-scan.mjs` - it
 prints a ranked report and takes about two seconds. It checks three things:
 
 | | what it catches | threshold |
 |---|---|---|
-| **fragments — verbatim** | a block copy-pasted with its names intact | ≥ 100 contiguous tokens (~15 lines) |
-| **fragments — renamed** | a block re-typed, or copied and adapted, so no name matches | ≥ 140 tokens of identical structure, ≥ 14 distinct keywords/operators |
-| **concepts** | a second implementation of something that has one home — byte formatting, date formatting, the storage-row test, the logo | any occurrence outside its home |
+| **fragments - verbatim** | a block copy-pasted with its names intact | ≥ 100 contiguous tokens (~15 lines) |
+| **fragments - renamed** | a block re-typed, or copied and adapted, so no name matches | ≥ 140 tokens of identical structure, ≥ 14 distinct keywords/operators |
+| **concepts** | a second implementation of something that has one home - byte formatting, date formatting, the storage-row test, the logo | any occurrence outside its home |
 | **listing surfaces** | a component that renders the view components but hand-rolls the breadcrumb / filter row / view switch | any missing shared piece |
 
 Scope is `packages/core/src`, `web/src`, `backend/internal`, `desktop/src`.
@@ -245,56 +295,56 @@ Tests, locale catalogues, generated files and build output are out of scope.
 
 **When it fires: extract the shared thing and call it from both places.** That
 is the answer nearly every time, and it is usually smaller than it looks.
-Adding a second copy *and* an allowlist entry is not an answer — it is the
+Adding a second copy *and* an allowlist entry is not an answer - it is the
 failure this gate exists to stop, written down.
 
 **To declare a legitimate twin,** add an entry to the right register in the
 test file, with a reason **about this code**. "Known issue" is rejected by the
 gate; so is anything under 60 characters.
 
-- `LEGITIMATE_TWINS` — the duplication is the design and will not be removed
+- `LEGITIMATE_TWINS` - the duplication is the design and will not be removed
   (the Postgres and SQLite drivers are two dialects of one interface). No
   ceiling: these grow on purpose.
-- `KNOWN_DUPLICATION` — debt. Real, pre-existing, owed. Carries a `maxTokens`
+- `KNOWN_DUPLICATION` - debt. Real, pre-existing, owed. Carries a `maxTokens`
   ceiling, so the area cannot quietly grow a *bigger* copy than it already has.
-- `CONCEPT_EXEMPTIONS` / `COMPOSITION_DEBT` — the same, per concept and per
+- `CONCEPT_EXEMPTIONS` / `COMPOSITION_DEBT` - the same, per concept and per
   surface.
 
 **The registers are kept honest by going stale loudly.** An entry that no
 longer matches anything *fails*. So when you fix a duplicate the build turns
-red and tells you to delete its entry — that is intended, and the fix is one
+red and tells you to delete its entry - that is intended, and the fix is one
 line. An allowlist nobody prunes becomes the place the next duplicate hides.
 
 Two limits worth knowing, so you do not mistake silence for absence: the
 fragment passes only see duplication that is still *shaped* like the original
-(a re-implementation with a different structure — which is what the old
-`SecondaryPane` was, before one `FilePane` replaced both halves of the split —
+(a re-implementation with a different structure - which is what the old
+`SecondaryPane` was, before one `FilePane` replaced both halves of the split -
 is caught by the listing-surface rule instead, not by tokens), and Vue
 `<template>` and `<style>` blocks are not scanned at all.
 
 ### UI rules
 
-#### One table — the explorer's — and nothing else draws one
+#### One table - the explorer's - and nothing else draws one
 
 **filex has exactly one table: `DataTable`
 (`packages/core/src/components/DataTable.vue`), which is the explorer's own
 list view with the files taken out of it.** The explorer's listing renders
-through it, and so does every other table in the product — every admin page,
+through it, and so does every other table in the product - every admin page,
 the connection panels, My shares, the notifications list, an archive's or a
 spreadsheet's preview, and an app's `list` node. **If something is tabular, it
 is a `DataTable`.** No `<table>`, no table roles, no copy of the `fe-list`
-markup, no second table component — anywhere in `web/src` or
+markup, no second table component - anywhere in `web/src` or
 `packages/core/src`.
 
 The owner, 2026-09-21: *"Artık explore tablomuz bizim her yerde kullanacağımız
 tablo yapısıdır; bir yere tablo gerekiyorsa bu tabloyu koymak zorundayız. Bunu
 kural olarak yazalım, çok önemli bir kural."* ("From now on the explorer's
 table is the table we use everywhere; wherever a table is needed, this is the
-table that goes there. Write it down as a rule — a very important one.")
+table that goes there. Write it down as a rule - a very important one.")
 
 **Why it is a rule and not a preference.** The round before it built
 `ui/Table.vue`: *one* admin table, with the explorer's frozen edges and its
-Actions menu — an **imitation**. It had exactly the parts somebody remembered
+Actions menu - an **imitation**. It had exactly the parts somebody remembered
 to copy. Resizing a column, sorting, the column menu, reordering and
 remembering the arrangement all live in the explorer's code, and none of them
 reached the admin panel. Nothing failed; the owner opened the Users page and
@@ -305,18 +355,18 @@ do, and keeps getting whatever is added to it next. A look-alike never does.
 
 What every table gets, whoever draws it:
 
-- **resizable columns** — drag the edge, arrow keys on the focused handle,
+- **resizable columns** - drag the edge, arrow keys on the focused handle,
   double-click for the shipped width;
-- **sorting** — click a header, click again to reverse. ⚠ Over one page of a
+- **sorting** - click a header, click again to reverse. ⚠ Over one page of a
   server-paged list the headers **close and say why** instead of re-ordering
   25 rows of 300 and calling it sorted; a caller whose server can sort passes a
   controlled `sort` and handles `@sort`;
-- **the column menu** — the header's ⋮ or a right-click on the header: show,
+- **the column menu** - the header's ⋮ or a right-click on the header: show,
   hide, step left/right, reset; plus dragging a header to move its column;
-- **remembered** — per table, on the person's account (`table-id`, stored in
+- **remembered** - per table, on the person's account (`table-id`, stored in
   the per-person view document under `t`). The explorer's listing is
   remembered per folder instead;
-- **the frozen lead and ONE Actions control** — the column that says which row
+- **the frozen lead and ONE Actions control** - the column that says which row
   this is stays on the left, the row's verbs are one labelled control on the
   right (`:row-actions`), and the table scrolls sideways rather than dropping a
   column. ⚠ Either is frozen only while it leaves room to scroll: a sticky
@@ -324,7 +374,7 @@ What every table gets, whoever draws it:
   in the details panel is ~265px) it would cover the very columns it was
   frozen to keep company. Below that nothing is pinned, the row scrolls as
   one piece, and the lead falls to its own minimum instead of taking the
-  whole pane — still without hiding anything.
+  whole pane - still without hiding anything.
 
 How to use it:
 
@@ -349,16 +399,16 @@ How to use it:
   `:table-id="undefined"` and says why beside it.
 - A cell slot is a flex row: **wrap a cell that stacks two lines in one
   `<div>`**, or the lines sit side by side. A `mt-1` on a second root node of
-  the slot is a margin on a flex ITEM — it does not start a line, it pushes
+  the slot is a margin on a flex ITEM - it does not start a line, it pushes
   the box down ON TOP of the one beside it (v0.43.0 QA: the Apps table's
   Label cell drew the "Language pack" badge over the label and the coverage
   line over the badge, at every width). `.tbl-sub` as a direct child is the
   one shape the stylesheet handles on its own.
 - A list the server pages: pass `:page`, `:page-size` and `:total` (or
   `:pages`). ⚠ Pass `:total` even when there is **no pager** and the endpoint
-  answers "the first N of M" — that is what tells the table the rows on screen
+  answers "the first N of M" - that is what tells the table the rows on screen
   are not the whole list.
-- Language and light/dark reach every table from the host once (`TABLE_ENV` —
+- Language and light/dark reach every table from the host once (`TABLE_ENV` -
   `web/src/lib/tableEnv.ts`, and the explorer provides its own); a page does not
   pass them. A unit test that mounts a page on its own provides `TABLE_ENV` if
   it asserts translated table text.
@@ -369,14 +419,14 @@ markup outside `DataTable.vue`, on a `DataTable` without a `table-id` or with a
 duplicate one, on a `RowActions` drawn anywhere but inside the table, and on a
 `#cell-*` slot whose second root node carries a top or bottom margin (the
 overlap above). There
-are **no exemptions** — the earlier version of this rule let the file previews
+are **no exemptions** - the earlier version of this rule let the file previews
 keep tables of their own "because they render foreign content", and an
 exemption list is where the next second table hides.
 
 #### A service that is not there: disabled with a reason, or not offered
 
-For an action that needs an optional external service — ONLYOFFICE, draw.io,
-the converter, outgoing mail — that is not configured (or not answering):
+For an action that needs an optional external service - ONLYOFFICE, draw.io,
+the converter, outgoing mail - that is not configured (or not answering):
 **an administrator sees the action greyed, with a sentence that says what is
 missing and where to set it up; everybody else is not offered it at all.**
 Nobody is ever shown a raw HTTP status or a JSON body. The owner, after
@@ -402,7 +452,7 @@ reading two names assumes two things.
 | The secret a share link can require | PIN | PIN | code, kod |
 | A place filex keeps files (an admin adds it under Storages) | storage | depo | disk, drive, sürücü; "bucket / kova" only for the S3 bucket behind or in front of one |
 | What an API key is allowed to do (the checkboxes on the key, the column that lists them afterwards) | permission | izin | scope, kapsam, yetki, "can do". A **provider's** `scope` parameter (`authProviders.fields.scopes`) is OIDC's word and stays |
-| A GitHub (or other code) repository | repository | repo | depo — that is a storage |
+| A GitHub (or other code) repository | repository | repo | depo - that is a storage |
 | Deleted files, until they expire | Trash | Çöp kutusu | Çöp Kutusu, çöp |
 | What something is called | name | ad (display name: görünen ad) | isim |
 | What a person signs in with | password | parola | şifre (şifreleme is *encryption* and stays) |
@@ -412,7 +462,7 @@ reading two names assumes two things.
 | The short name a person signs in with | username | kullanıcı adı | login name, giriş adı |
 | An electronic mail address, or a message | email | e-posta | e-mail, mail |
 | filex reading a storage to bring its catalogue up to date (Sync runs, Sync now, Last sync) | sync | senkron (noun), senkronize et (verb) | eşitleme, senkronizasyon |
-| The desktop app keeping a copy of folders on a computer, both ways (folder sync, "Syncing…") — and any other tool that does the same | folder sync, sync | klasör eşitleme, eşitle | klasör senkronu, senkronizasyon |
+| The desktop app keeping a copy of folders on a computer, both ways (folder sync, "Syncing…") - and any other tool that does the same | folder sync, sync | klasör eşitleme, eşitle | klasör senkronu, senkronizasyon |
 | A replica write mode: wait for the replica, or don't | synchronous / asynchronous | eşzamanlı / eşzamansız | Sync / Async, senkron / asenkron |
 | When a file last changed (column, filter, sort, details) | Modified | Değiştirilme | Tarih, Değiştirildi |
 | Who a file belongs to (column and filter) | Owner | Sahibi | People, Kişiler |
@@ -423,12 +473,12 @@ reading two names assumes two things.
 | A role an administrator made. Its name is theirs and is never translated | custom role | özel rol | rule, kural |
 | One thing a role allows (Download, Rename, Share links…) | permission | izin | yetki, hak |
 | An Allow or Deny an administrator sets for one person alone, beating their role | exception | istisna | override, geçersiz kılma, "set for this account" |
-| What a permission check answered, beside each permission on a person's page | Allowed / Denied | İzin var / İzin yok | Allow / Deny — those are the buttons that set an exception |
+| What a permission check answered, beside each permission on a person's page | Allowed / Denied | İzin var / İzin yok | Allow / Deny - those are the buttons that set an exception |
 | A ready-made set of ticks (Standard user, Read-only, Upload-only, Guest) | preset | hazır ayar | template, şablon |
-| One file or folder opened to a person (Share → People), and the admin page listing them all | grant; the page is **Folder access** | yetki; the page is **Klasör erişimi** | permission, izin — since 0.49 those are a role's words |
+| One file or folder opened to a person (Share → People), and the admin page listing them all | grant; the page is **Folder access** | yetki; the page is **Klasör erişimi** | permission, izin - since 0.49 those are a role's words |
 
 **Spelling is American English.** color, license, favorite, center, gray,
-behavior, organize, analyze, catalog, defense, customize — never colour,
+behavior, organize, analyze, catalog, defense, customize - never colour,
 licence, favourite, centre, grey, behaviour, organise, catalogue. (v0.43.0:
 "Colour palette", "your own colours", "the colour palette" and macFUSE's
 "licence" survived the sweep beside "Accent color" and "License: {license}" on
@@ -441,19 +491,19 @@ name quoted from another program's screen). `web/tests/i18n/labelCase.test.ts`
 fails a label written twice in two cases and a short label in Title Case.
 
 **Turkish is written in the "siz" form.** A sentence that addresses the reader
-says "Tekrar deneyin", "hesabınızla", "görebilirsiniz" — never "Tekrar dene",
-"hesabınla", "görebilirsin", never "sen". A command — a button, a menu item, a
-placeholder — is the bare verb, as every Turkish interface writes it: "Kaydet",
+says "Tekrar deneyin", "hesabınızla", "görebilirsiniz" - never "Tekrar dene",
+"hesabınla", "görebilirsin", never "sen". A command - a button, a menu item, a
+placeholder - is the bare verb, as every Turkish interface writes it: "Kaydet",
 "Yeni sekmede aç", "Ara…". That is not the "sen" form, and it is not changed.
 
-**Turkish is written with its own letters** — ı İ ş Ş ğ Ğ ü Ü ö Ö ç Ç — in
+**Turkish is written with its own letters** - ı İ ş Ş ğ Ğ ü Ü ö Ö ç Ç - in
 every string, examples and sample folder names included: "Arşiv", never
 "Arsiv". (0.49's role editor shipped "ör. Arsiv veya
 Musteriler/*/Sozlesmeler".) The gate knows the words interface text keeps
 reaching for; the rest is review.
 
 The machine-checkable part of this table is `web/tests/i18n/vocabulary.test.ts`:
-it reads every catalogue — explorer, admin, and the server's `server.*` text —
+it reads every catalogue - explorer, admin, and the server's `server.*` text -
 and fails on a word from the right-hand column. A technical name that is
 somebody else's (the OIDC *token* endpoint, an HTTP header, a webhook target's
 *Bearer token*) is listed there by key, with the reason. Add a row here and a
@@ -461,8 +511,8 @@ pattern there together.
 
 #### A person is named one way
 
-Wherever filex shows a person — the Owner column, the details panel, the share
-dialog, the account menu, an admin table, a notification — it prints **their
+Wherever filex shows a person - the Owner column, the details panel, the share
+dialog, the account menu, an admin table, a notification - it prints **their
 display name, else their username, else their email address**. In the browser
 that is `personName()` (`packages/core/src/lib/personName.ts`); on the server
 it is `model.PersonLabel` (`backend/internal/model/user.go`), which the Owner
@@ -473,17 +523,17 @@ admin table, a tooltip) it is the second line, never the first.
 #### Dates and numbers: the explorer's format, everywhere
 
 A date a person reads is the explorer's: "Sep 21, 2026, 2:50 PM",
-"21 Eyl 2026, 14:50" — `formatWhen()` from `@brftech/filex-core`, in the
+"21 Eyl 2026, 14:50" - `formatWhen()` from `@brftech/filex-core`, in the
 viewer's language and the viewer's chosen time zone. The admin panel's
 `formatDate()` (`web/src/lib/format.ts`) and every share line call it; nothing
 builds its own `Intl.DateTimeFormat`. A byte count is `formatByteSize()`, with
 the catalogue's unit words (`unit.*`) and the viewer's number format, so
 Turkish reads "1,96 KB" and French "1,96 Ko". ISO 8601 is for machines only: a
-log line, an export, an API document — never a label.
+log line, an export, an API document - never a label.
 
 ### General
 
-- **Line endings are LF, and `.gitattributes` enforces it** — you do not need to
+- **Line endings are LF, and `.gitattributes` enforces it** - you do not need to
   set `core.autocrlf`, and setting it will not override the repository. Every
   text file is stored and checked out LF on every platform; `*.bat`, `*.cmd` and
   `*.ps1` are the deliberate CRLF exceptions and `e2e/fixtures/**` is never
@@ -493,7 +543,7 @@ log line, an export, an API document — never a label.
   directory`, which is what the repository shipped until 2026-09-05.
 - ASCII characters by default. Add comments in English even if the codebase
   is bilingual.
-- No `console.log` left over — use `import.meta.env.DEV` guards in dev-only
+- No `console.log` left over - use `import.meta.env.DEV` guards in dev-only
   code paths.
 
 ---
@@ -511,7 +561,7 @@ Doc updates live alongside code changes in the same PR. The pattern:
   shipped, and contradicted a paragraph on its own page.
 - New external service → all of the above.
 - New **webhook event** → [NOTIFICATIONS.md](NOTIFICATIONS.md), and add the
-  constant to the backend catalogue — `backend/internal/notify/catalog_test.go`
+  constant to the backend catalogue - `backend/internal/notify/catalog_test.go`
   refuses an inline `EventType("x.y")` and
   `web/tests/webhooks/eventCatalog.test.ts` fails if the UI's mirror or either
   translation is missing.
@@ -523,6 +573,23 @@ Doc updates live alongside code changes in the same PR. The pattern:
   the page that owns the feature.
 - Behaviour change → CHANGELOG entry under `## [Unreleased]`.
 
+**A plain hyphen, never a long dash.** Documentation, the changelog, filex.sh,
+store listings and package descriptions write `-` where a text would reach for
+an em dash or an en dash, code blocks included: ` - ` between two clauses,
+`3-60` for a range, a lone `-` for "nothing", `-1` for a negative number and
+`a - b` for arithmetic. Nor a character that passes for a hyphen - U+2010,
+U+2011 (non-breaking), U+2012, U+2015, U+2212 (minus sign): they look like `-`,
+and a search for the word does not find them (389 non-breaking hyphens sat in
+the docs until 0.50). The one exception is the interface's minus sign as a
+whole label on its own, the zoom-out button beside "+"; the docs have none. A
+sentence that wraps with the dash first on its line puts it at the end of the
+line before, or the line turns into a list item.
+`web/tests/i18n/noLongDashesDocs.test.ts` fails on one (the interface code and
+the translations have `noLongDashes.test.ts`); both read the rule from
+`dashProblem` in `scripts/i18n-validate.mjs`, the language pack validator's. A heading's
+anchor changes with its dash: `node scripts/check-doc-anchors.mjs` names every
+link that has to follow it.
+
 ---
 
 ## Screenshots
@@ -532,12 +599,12 @@ that changed under a picture that did not is wrong information in the README,
 not missing information.
 
 1. **Take them with `pnpm shots`.** A screen with no picture yet gets one in the
-   `e2e/shots/` script that owns it, or in a new script there — the command
+   `e2e/shots/` script that owns it, or in a new script there - the command
    runs every file in that directory that imports `@playwright/test`, so a new
    script cannot be left out.
 2. **Look at the contact sheet it prints** (`e2e/.artifacts/shots/contact-sheet.html`):
    every picture of the run with its path and the script that took it. Each one
-   must be in English, show what its name says, and have nothing across it — no
+   must be in English, show what its name says, and have nothing across it - no
    onboarding tour, no install banner, no dialog caught mid-fade.
 3. **Commit the pictures** in `docs/screenshots/<release>/` with the code.
 
@@ -545,7 +612,7 @@ What the command does, so a red run can be read: builds
 `build:packages → build:web → sync:embed → go build` (Go native, or through WSL
 on Windows); boots the binary and **refuses to shoot unless it serves `web/dist`
 byte for byte** (`scripts/check-embed.mjs`; source maps only have to exist, their
-bytes are not reproducible — a binary built without `sync:embed` carries an older
+bytes are not reproducible - a binary built without `sync:embed` carries an older
 UI and still passes every API check); runs every script, the
 E2E-escrow instance and its throwaway key pair included; syncs `site/assets`;
 fails on a picture in the release folder that no script wrote; and ends every
@@ -558,27 +625,31 @@ CI runs the same command on every tag and on demand (GitLab `shots`, GitHub
 longer fits the product turns a job red instead of a release night.
 
 **The app scenes are taken locally.** `apps.mjs` and `signing.mjs` photograph
-the two apps filex ships alongside itself, and their builds are not in this
-repository: they come from sibling checkouts of
+e-Signature and Convert, two of the apps filex ships alongside itself, and their
+builds are not in this repository: they come from sibling checkouts of
 [filex-sign](https://github.com/BRF-Tech/filex-sign) and
 [filex-convert](https://github.com/BRF-Tech/filex-convert) (`../filex-sign/dist`,
 `../filex-convert`), or from `FILEX_SIGN_APP_DIR` / `FILEX_CONVERT_APP_DIR`.
 Without one, `pnpm shots` stops before it builds anything and says which. In CI
-(`CI` is set) those two scenes are **left out** instead — named in the log, the
-verdict and the contact sheet, and their folders spared the leftover check —
+(`CI` is set) those two scenes are **left out** instead - named in the log, the
+verdict and the contact sheet, and their folders spared the leftover check -
 because at a tag there may be no app release to fetch yet, and the converter
 scene needs Docker, which the GitLab runner does not have. `--with-apps` puts
 them back; `--without-apps` leaves them out anywhere.
 
 **The converter picture needs the conversion engines.** Its wizard lists what
-the server found and names every missing engine *Not installed on this server*
-— not a picture for the README. When the host lacks one (a Windows workstation
+the server found and names every missing engine *Not installed on this server* -
+not a picture for the README. When the host lacks one (a Windows workstation
 lacks all of them), `apps.mjs` runs **this tree's build inside the full image**
 (`ghcr.io/brf-tech/filex:full`, which carries ffmpeg, ImageMagick, Ghostscript,
-poppler, LibreOffice and rsvg) with Docker — nothing is installed on the host,
+poppler and rsvg) with Docker - nothing is installed on the host,
 the image is pulled once, and the container's UI is checked byte for byte
 against `web/dist` like the host binary's. `SHOTS_ENGINES=host|container`
-forces one side. The scene refuses to take the picture while anything on it
+forces one side. The office engine is not in the image: since 0.50 it is the
+ONLYOFFICE Document Server filex is connected to, so the scene points the
+instance at `SHOTS_ONLYOFFICE_URL` / `SHOTS_ONLYOFFICE_JWT` when they are set,
+and otherwise at a placeholder that marks the engine connected for a picture
+that converts nothing. The scene refuses to take the picture while anything on it
 says an engine is missing. To rehearse a scene without replacing its pictures:
 `SHOTS_DRY_RUN=1 node e2e/shots/apps.mjs` walks to every picture and writes
 none.
@@ -591,10 +662,10 @@ Maintainer-only. Reproducible, automated by CI.
 
 **Cut it with `pnpm release X.Y.Z`.** The steps below are what that command
 does, in this order, and every step it can check is a gate that stops the
-release when it is red — there is no option to skip one, and an option it does
+release when it is red - there is no option to skip one, and an option it does
 not know is refused rather than ignored. It never signs, pushes or deploys: at
 those steps it stops, prints the exact commands, and on `--resume` reads back
-what was done — each tag's signature and target, what both remotes now hold (a
+what was done - each tag's signature and target, what both remotes now hold (a
 public tag naming a private commit is refused out loud), and what the servers,
 the update feeds and docs.filex.sh actually serve. The two judgements no script
 can make are a person's to confirm: the README, screenshot and documentation
@@ -618,21 +689,21 @@ pnpm release 0.45.0 --status    # where the recorded run got to
 > skipped anyway.
 
 1. **Re-read `README.md` against what actually shipped since the last tag.**
-   Run `git log --oneline vPREVIOUS..HEAD`, then ask of every new surface — a
-   client, a feature, a docs page — whether it appears in the intro, *Why
+   Run `git log --oneline vPREVIOUS..HEAD`, then ask of every new surface - a
+   client, a feature, a docs page - whether it appears in the intro, *Why
    filex*, *Features* and *Documentation*. The README is the page most readers
    see and the one nobody remembers to touch: a feature documented only under
    `docs/` does not exist as far as a new reader is concerned. Update
    `docs/README.md` (the index) in the same pass.
 
    > Why this is step 1: by 2026-08-13 the desktop app, folder sync, the CLI,
-   > trash & versioning, E2E folders and self-update had all shipped — six
-   > minor releases' worth — and not one of them had reached the README.
+   > trash & versioning, E2E folders and self-update had all shipped - six
+   > minor releases' worth - and not one of them had reached the README.
 
 2. **Retake the screenshots and look at them.** Bump `SHOTS_RELEASE` in
-   `e2e/shots/release.mjs` to the release being cut — each release's pictures go
+   `e2e/shots/release.mjs` to the release being cut - each release's pictures go
    in a new `docs/screenshots/vX.Y.Z/`, and older folders are never retaken,
-   moved or deleted — point the README and docs at the new folder, then run
+   moved or deleted - point the README and docs at the new folder, then run
 
    ```bash
    pnpm shots
@@ -643,8 +714,8 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    says what the command checks on the way.
 
    > Why this is a numbered step: by 2026-08-14 `share-modal.png` showed a
-   > share dialog with no download limit — a control that had shipped two
-   > releases earlier — and `viewer-markdown.png` had Turkish buttons in it.
+   > share dialog with no download limit - a control that had shipped two
+   > releases earlier - and `viewer-markdown.png` had Turkish buttons in it.
    > The v0.41.0 set then had to be taken three times by hand: scripts that no
    > longer fit the UI, and a binary carrying a 16-hour-old interface that
    > passed every API check. `pnpm shots` exists so neither happens again.
@@ -653,7 +724,7 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    pass above is one leg of it; a feature can be finished, tested and shipped and
    still not exist for anybody who did not write it.
 
-   ⚠⚠ **Do not work from a fixed list** — a list looks complete, and the surface
+   ⚠⚠ **Do not work from a fixed list** - a list looks complete, and the surface
    that is not on it gets skipped. The rule is *every text that describes the
    product or explains how to use it*. Find them first:
 
@@ -668,28 +739,28 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    | Surface | Why it counts |
    |---|---|
    | `README.md` | step 1 above |
-   | **`site/index.html`** | the **filex.sh landing page** — the first thing anyone reads about the product, and it drifted two months and a dozen features out of date while it lived only on the static host. Deployed with `scripts/sync-site.sh`. Both live in the maintainers checkout only; the page is this project own site, not part of what you install |
-   | **`web/src/views/Login.vue`** (`demo.*` in `web/src/locales/*.json`) | the **demo.filex.sh landing page** — rendered by the app when `FILEX_DEMO_MODE=true`, so it looks like code and gets audited like nothing. It went untouched from 2026-05-07 to 2026-09-05 still selling *"5 Storage drivers"*. Ships in the release image; see `docs/DEPLOY_BRF.md` §4b |
-   | `docs/*.md` | the new feature has a page — **and the old pages are still true** |
+   | **`site/index.html`** | the **filex.sh landing page** - the first thing anyone reads about the product, and it drifted two months and a dozen features out of date while it lived only on the static host. Deployed with `scripts/sync-site.sh`. Both live in the maintainers checkout only; the page is this project own site, not part of what you install |
+   | **`web/src/views/Login.vue`** (`demo.*` in `web/src/locales/*.json`) | the **demo.filex.sh landing page** - rendered by the app when `FILEX_DEMO_MODE=true`, so it looks like code and gets audited like nothing. It went untouched from 2026-05-07 to 2026-09-05 still selling *"5 Storage drivers"*. Ships in the release image; see `docs/DEPLOY_BRF.md` §4b |
+   | `docs/*.md` | the new feature has a page - **and the old pages are still true** |
    | `docs/README.md` | every `docs/*.md` is in the index |
-   | **`docs/index.md`** | the docs site's **home page** — its hero line and feature cards are the first thing a visitor reads |
+   | **`docs/index.md`** | the docs site's **home page** - its hero line and feature cards are the first thing a visitor reads |
    | `docs-site/.vitepress/config.mts` | the new page is in the **sidebar** |
-   | `packages/*/README.md` | these are the **npm pages** — an export nobody documents does not exist for anybody installing the package |
+   | `packages/*/README.md` | these are the **npm pages** - an export nobody documents does not exist for anybody installing the package |
    | `desktop/README.md` | what the app actually does |
    | `deploy/*/README.md` | install instructions per target |
-   | `deploy/umbrel/*/umbrel-app.yml`, `deploy/casaos/*` (`x-casaos.description`), `deploy/runtipi/*/metadata/description.md` | **app-store listings** — public product copy. Three stores, and the Runtipi one is a whole markdown page rather than one line, which is exactly why it is the one that rots |
+   | `deploy/umbrel/*/umbrel-app.yml`, `deploy/casaos/*` (`x-casaos.description`), `deploy/runtipi/*/metadata/description.md` | **app-store listings** - public product copy. Three stores, and the Runtipi one is a whole markdown page rather than one line, which is exactly why it is the one that rots |
    | `deploy/helm/*/Chart.yaml` | shown by `helm search` |
    | `package.json` descriptions | shown on npm |
    | `deploy/compose/*.yml` | new env vars and **published ports** with the traps beside them |
 
    > ⚠ The dangerous case is not a missing page, it is a **page that lies**.
    > On 2026-08-17 `STORAGE.md` still said *"There is no `nfs` or `smb` driver,
-   > and there doesn't need to be"* — the `smb` driver had shipped in that very
+   > and there doesn't need to be"* - the `smb` driver had shipped in that very
    > release.
 
    > ⚠ A surface does not have to be a `.md` file. The demo landing page is
    > markup and translation strings, so it reads as code and slipped every
-   > documentation pass for four months — while being, for anyone who clicks
+   > documentation pass for four months - while being, for anyone who clicks
    > *Try the live demo*, the **first** description of the product they meet.
    > Ask what a text *does*, not what extension it has.
 
@@ -697,7 +768,7 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > every file under `srcDir`, so it is reachable by URL and indexable whether
    > or not anything links to it. To actually keep a page off the site, add it to
    > **`srcExclude`**. On 2026-08-17 five pages were live but unreachable from the
-   > nav, and `CLOUD.md` — whose own first line says *"NOT a live service"* — was
+   > nav, and `CLOUD.md` - whose own first line says *"NOT a live service"* - was
    > being published.
 
    Five commands finish the step, all required:
@@ -715,12 +786,12 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    # run it by hand if you are looking at a tree it did not just build.
    node scripts/check-links.mjs /path/to/filex-export
 
-   # the site must BUILD — VitePress fails the build on a dead link
+   # the site must BUILD - VitePress fails the build on a dead link
    # ⚠ a subshell: the two commands after this one are repo-root-relative,
    # and for a while this line was a bare `cd docs-site` that left them inside
    # docs-site. The YAML command below then globbed `deploy/**` from there,
    # matched nothing, and printed `yaml ok` without opening a single file.
-   # This build writes NOTHING — see the note below. `git status` must be as
+   # This build writes NOTHING - see the note below. `git status` must be as
    # clean after it as it was before.
    (cd docs-site && npm run build)
 
@@ -730,7 +801,7 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    # It reads the ids out of the HTML the build just produced, so run it after.
    node scripts/check-doc-anchors.mjs
 
-   # every YAML you touched still parses — breaking a store listing is silent
+   # every YAML you touched still parses - breaking a store listing is silent
    python3 -c "import yaml,glob; [yaml.safe_load(open(f,encoding='utf-8')) \
      for f in glob.glob('deploy/**/*.yml', recursive=True)]; print('yaml ok')"
 
@@ -743,7 +814,7 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > The site uses GitHub's heading-id rule (`docs-site/.vitepress/github-slug.mjs`),
    > adopted on 2026-09-05 because these pages are read on two surfaces and the
    > in-page links were correct *GitHub* anchors. The cost of that switch was
-   > measured rather than guessed — both commits built, the emitted `id=`
+   > measured rather than guessed - both commits built, the emitted `id=`
    > attributes diffed page by page: **245 of 666 headings changed spelling**,
    > and **none disappeared**. Every heading holding an `&`, a `/`, a `.`, an
    > apostrophe, an em dash or a leading digit moved: `#backup-restore` →
@@ -755,23 +826,23 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    >
    > **No aliases were added, deliberately.** The old spellings existed only on
    > the site and only for the seven weeks it used VitePress's rule; every link
-   > written against the GitHub rendering — the repo README, both npm package
-   > READMEs, every in-page TOC — was already correct, which is why the *rule*
+   > written against the GitHub rendering - the repo README, both npm package
+   > READMEs, every in-page TOC - was already correct, which is why the *rule*
    > was changed instead of the 98 links; and an unmatched fragment lands the
    > reader at the top of the right page, not on a 404. 245 hand-maintained
    > `<a id>` aliases would need their own check to stay honest and would clutter
    > markdown that is also read on GitHub, where those spellings never existed.
    >
    > ⚠ A URL fragment is **never sent to the server**, so a Caddy rule, a
-   > VitePress `rewrite` or a `_redirects` file cannot rescue an old anchor —
+   > VitePress `rewrite` or a `_redirects` file cannot rescue an old anchor -
    > only a per-heading `<a id>` or client-side JS can. If the rule is ever
    > changed again, re-run the measurement (build at both commits, diff the
    > emitted `id=` attributes per page) before deciding what it costs.
 
    > ⚠⚠ **This gate does not refresh `RELEASES.md`, and that is deliberate.**
    > `npm run build` used to be `npm run releases && vitepress build`, so every
-   > person running this mandatory step came away with two modified files —
-   > `docs/RELEASES.md` and `docs-site/data/releases.json` — belonging to
+   > person running this mandatory step came away with two modified files -
+   > `docs/RELEASES.md` and `docs-site/data/releases.json` - belonging to
    > nobody's change. On 2026-09-06 three agents hit it in one day, each
    > reverted it by hand, and one release nearly swept the churn into an
    > unrelated commit. A gate that dirties the tree it is gating is a trap.
@@ -779,18 +850,18 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > The build now runs `docs-site/scripts/check-releases.mjs` instead: it
    > asserts the generated page is present and lists at least one release,
    > offline, writing nothing. Refreshing is **step 10**, run on purpose after
-   > the release exists. The generator is idempotent too — running
+   > the release exists. The generator is idempotent too - running
    > `npm run releases` when nothing has changed leaves both files untouched
    > rather than restamping today's date on them.
 
    ⚠ A relative link to a page that is in `srcExclude` is a dead link *on the
-   site* even though it resolves in the repo — link those by full GitHub URL.
+   site* even though it resolves in the repo - link those by full GitHub URL.
    That is how the "not published" list in `docs/README.md` broke the build the
    first time it was written.
 
-4. Update `CHANGELOG.md` — move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
+4. Update `CHANGELOG.md` - move `[Unreleased]` to a dated `[vX.Y.Z]` heading.
 5. **Every release updates every packaged deployment target. No exceptions.**
-   (Burak's rule, 2026-08-29: *"her yeni tag'de versiyonda helm zorunlu"*.) Bump
+   (the maintainer's rule, 2026-08-29: *"her yeni tag'de versiyonda helm zorunlu"*.) Bump
    the `package.json` versions across all packages, then the deploy targets:
    ```bash
    pnpm -r exec npm version X.Y.Z --no-git-tag-version
@@ -800,16 +871,16 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    Umbrel's `releaseNotes` from the `## [X.Y.Z]` section of `CHANGELOG.md`, and
    exits 2 saying so when that section does not exist yet. Those notes are
    generated rather than typed because a hand-written "what's new" carries no
-   version number — a stale one describes a release the user is not getting and
+   version number - a stale one describes a release the user is not getting and
    nothing about it looks wrong.
-   ⚠ None of these are labels — each decides which image a real installation
+   ⚠ None of these are labels - each decides which image a real installation
    pulls. The chart's `values.yaml` ships `tag: ""` and the image helper
    resolves that to `.Chart.appVersion`; the three store manifests pin the tag
    outright and compare their `version` field to decide an update exists.
 
    ⚠⚠ It has gone wrong twice, the same way, because nothing failed when it
    drifted. The chart sat at `v0.4.0` for twenty-three releases (found
-   2026-08-29). The fix covered only the chart — so on 2026-09-06 the three
+   2026-08-29). The fix covered only the chart - so on 2026-09-06 the three
    **store manifests were still at `v0.4.0`, twenty-nine behind**, and anyone
    installing filex from CasaOS, Umbrel or Runtipi got a build from February.
    `web/tests/deploy/deployVersions.test.ts` now fails the build if any of the
@@ -820,14 +891,15 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    everything, which is exactly why it must not be written blind:
 
    ```bash
-   git status --porcelain | grep '^??' && echo "untracked files — commit them or move them to their branch"
+   git status --porcelain | grep '^??' && echo "untracked files - commit them or move them to their branch"
    pnpm -s --filter ./web build      # vue-tsc + vite, the gate nothing else runs
    (cd web && npx vitest run)        # the unit suite on your clock…
    (cd web && TZ=UTC npx vitest run) # …and on CI's, which is UTC
    docker build --platform linux/amd64 -f docker/Dockerfile      -t filex:release-check .
    docker build --platform linux/amd64 -f docker/Dockerfile.slim -t filex:release-check-slim .
    node e2e/run.mjs cypress          # the suite release.yml waits for, run BEFORE the tag is public
-   node e2e/run.mjs local            # Playwright — the journeys Cypress does not walk
+   node e2e/run.mjs local            # Playwright - the journeys Cypress does not walk
+   (cd desktop && pnpm run build && node scripts/fetch-cli.mjs --platform win32 && pnpm e2e:store)  # Windows, Developer Mode: the Store package as a Store copy; no window comes on screen (--keep-windows-hidden), only a test toast
    ```
 
    Measured 2026-09-24, on v0.43.0: **the npm packages and the GitHub Release
@@ -836,7 +908,7 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    two files from `scripts/`; `vite build` failed on every attempt, and
    nothing local had ever built an image. `web/tests/deploy/dockerFrontendInputs.test.ts`
    now fails if the build reaches a file the images do not copy, but only a
-   real `docker build` proves the rest of the recipe — so both images are built
+   real `docker build` proves the rest of the recipe - so both images are built
    here, before the tag. v0.43.0's CI also failed a unit test that passed on
    the UTC+3 machine it was cut on; the suite runs under `TZ=UTC` here too, so
    the clock of whoever cuts the release cannot hide one again.
@@ -844,13 +916,13 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    Measured 2026-09-14, on v0.41.0: the explorer had been rebuilt and every
    account now landed on Home instead of the dashboard. Nothing local had run
    either end-to-end suite during the cycle, and both still waited for
-   `/admin/dashboard` after signing in — so every spec behind the login helpers
+   `/admin/dashboard` after signing in - so every spec behind the login helpers
    would have gone red in the tag's own CI run, after the tag was public, and
    held back every binary, image and package. Fourteen Cypress failures were
    stale selectors, not product bugs; that is only knowable by running them.
 
    Measured 2026-09-12, on v0.38.1: `git add -A` swept in two work-in-progress
-   files from a feature branch — an admin page with no route, no menu entry and
+   files from a feature branch - an admin page with no route, no menu entry and
    no translations. `vue-tsc` refused them, the release's own test suite failed,
    and binaries, images and npm were all skipped. Nothing shipped, so the tag
    was deleted from both remotes and re-cut on the corrected commit; the version
@@ -858,21 +930,21 @@ pnpm release 0.45.0 --status    # where the recorded run got to
 
    The backend suite and every documentation gate above pass without compiling
    a single line of frontend, so the admin build is the only local check that
-   would have caught it — CI catches it afterwards, when the tag is already
+   would have caught it - CI catches it afterwards, when the tag is already
    public.
    ⚠⚠ **The tag is now gated on the test suite, and it did not used to be.**
-   `release.yml`'s first job calls `ci.yml`, and everything that publishes —
-   binaries, images, npm, the installers — waits for it. Before this, CI ran on
+   `release.yml`'s first job calls `ci.yml`, and everything that publishes -
+   binaries, images, npm, the installers - waits for it. Before this, CI ran on
    the branch push and the release on the tag pushed two seconds later, in
    parallel and unaware of each other, with no required status check anywhere
    in the repository. Measured 2026-09-06: **CI had been red since v0.31.0 and
    four tags shipped over it.** The failure was real (a user who had chosen
    Turkish saw an English admin panel on any second device) and none of the
-   steps above would ever have caught it — they check README, screenshots,
+   steps above would ever have caught it - they check README, screenshots,
    links, anchors and version manifests, and never run a test.
    ⚠⚠ **The gate builds both images, and cannot be told not to.** Until
    v0.43.2 the release called `ci.yml` with `skip_docker: true` ("the release's
-   own docker job builds the same image") — but `binaries`, `docker` and `npm`
+   own docker job builds the same image") - but `binaries`, `docker` and `npm`
    start *beside* one another once the gate passes, so when v0.43.0's images
    failed, npm and the Release were already public. The input is gone, the
    image job has no `if:`, and `web/tests/deploy/releaseGatesImages.test.ts`
@@ -880,7 +952,7 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    (It reads `.github/workflows`; in a checkout without them, point
    `FILEX_WORKFLOWS_DIR` at the published ones.)
 
-7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"` — **signed**, and `git tag -v vX.Y.Z`
+7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"` - **signed**, and `git tag -v vX.Y.Z`
    must answer `Good signature` before you push. Releases up to and including
    v0.27.5 are plain annotated tags: the instruction said `-s` for months while
    no signing key existed, so nobody could follow it and nobody noticed. The
@@ -892,7 +964,7 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    `--tags`: this checkout accumulates local tags, and `--tags` publishes
    every one of them, including any you were not ready to release.
 
-   > ⚠ Steps 6-8 happen in the checkout whose `origin` is **GitHub** — that is
+   > ⚠ Steps 6-8 happen in the checkout whose `origin` is **GitHub** - that is
    > what `release.yml` watches. Development happens on GitLab; the public tree
    > is produced by `scripts/export-public.sh`, and the signed tag is made
    > there, on the commit that is actually published.
@@ -900,8 +972,8 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > ⚠⚠ **That checkout refuses a push that could publish the private history.**
    > On 2026-08-27 a `git push … main --tags` from the *private* repository
    > sent 47 of its release tags to GitHub: `main` was refused (unrelated
-   > histories), the tags were not, and each one made a private commit — with
-   > its whole history — reachable by SHA. Deleting a tag does not take that
+   > histories), the tags were not, and each one made a private commit - with
+   > its whole history - reachable by SHA. Deleting a tag does not take that
    > back; GitHub and every fork keep the objects. So the public checkout has a
    > pre-push gate, `scripts/hooks/export-pre-push.sh`, installed with
    > `bash scripts/hooks/install-export-hook.sh /path/to/public/checkout` and
@@ -910,10 +982,10 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > re-run it after changing the gate). It refuses:
    >
    > * a tag on a commit that is not on `main`, moving a published tag, and
-   >   deleting one — a published tag is permanent; fix forward with a new
+   >   deleting one - a published tag is permanent; fix forward with a new
    >   version;
    > * a `main` that does not fast-forward, and deleting `main`;
-   > * any ref whose new commits bring in a root commit — a history that does
+   > * any ref whose new commits bring in a root commit - a history that does
    >   not grow out of the public one, which is exactly what the private
    >   repository is;
    > * new commits in which gitleaks finds a secret or a private name: its
@@ -933,35 +1005,35 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > ⚠ On Windows, a hook that is **killed by a signal** reads to git as
    > success: MSYS reports the signal in the high byte of the exit code and git
    > keeps only the low one. So `git push … | head -30` once published a commit
-   > the gate had just refused — `head` closed the pipe, the gate died of
+   > the gate had just refused - `head` closed the pipe, the gate died of
    > SIGPIPE, and git sent the push (2026-09-28). The gate now ignores SIGPIPE,
    > runs itself as a child, and passes a push only when that child reached its
    > verdict. Still: run a push into a file or straight to the terminal, not into
    > `head`, and judge it by what the remote holds afterwards.
    >
    > **Never push with `--no-verify`.** There is no case where it is the right
-   > answer: a refusal means something about to become public should not —
+   > answer: a refusal means something about to become public should not -
    > stop and tell the maintainer first.
 
 CI does the rest (GitHub Actions `release.yml`: the `test` gate above, then
 five jobs):
-- `binaries` (needs `test`) — goreleaser: multi-arch binaries → the GitHub
+- `binaries` (needs `test`) - goreleaser: multi-arch binaries → the GitHub
   Release. It is what *creates* the Release, so `desktop` below depends on it.
-- `docker` (needs `test`, nothing else) — a **matrix**, one native runner per
+- `docker` (needs `test`, nothing else) - a **matrix**, one native runner per
   architecture (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), each
-  pushing by digest. ⚠ It does **not** wait for `binaries` — it builds its own
+  pushing by digest. ⚠ It does **not** wait for `binaries` - it builds its own
   binary and never wanted the release. arm64 used to run under QEMU behind
   `needs: binaries` and took 20-30 minutes; on a native runner the whole
   critical path is about seven.
-- `docker-manifest` (needs `docker`) — joins the two digests into the tags
+- `docker-manifest` (needs `docker`) - joins the two digests into the tags
   people pull: `:vX.Y.Z`, `:slim-vX.Y.Z`, `:full-vX.Y.Z`, `:latest`, `:slim`,
   `:full`.
-- `desktop` (needs `binaries`, **not** `docker`) — one matrix job per OS,
+- `desktop` (needs `binaries`, **not** `docker`) - one matrix job per OS,
   attached to the Release while the images are still building. Before v0.25.0
-  it waited for the docker builds it never needed — ~25 idle minutes a release.
+  it waited for the docker builds it never needed - ~25 idle minutes a release.
   ⚠ The upload step globs `desktop/release/*.exe` (and `*.AppImage`, `*.deb`,
   `*.dmg`, `*.zip`, `latest*.yml`) rather than naming files, which is why the
-  Windows portable `.exe` needed no workflow change — but it also means a
+  Windows portable `.exe` needed no workflow change - but it also means a
   target that silently stops producing an artifact shows up as a shorter
   release, not as a failure. The `What was produced` step exists to make that
   readable in the log.
@@ -969,7 +1041,7 @@ five jobs):
   *Settings → Updates* **Download** button points into it. Put
   `filex-desktop-portable-x64.exe` there with the installer, or that button
   leads to a file that is not on the server.
-- `npm` (needs `test`, nothing else) — publishes every package under
+- `npm` (needs `test`, nothing else) - publishes every package under
   `packages/`: `@brftech/filex-core`, `@brftech/filex`, `@brftech/filex-react`
   and (since 0.48) `@brftech/filex-app-ui`, the SDK an app's own interface
   bundles. ⚠ The core package depends on the SDK at run time, so a release
@@ -979,21 +1051,21 @@ five jobs):
    artifact to the GitHub Release; it publishes **neither feed**, and a feed is
    the only place an installed copy ever looks. Both live on the static host and
    are deliberately excluded from `scripts/sync-site.sh` (so a website deploy
-   cannot delete them) — which also means nothing refreshes them but you.
+   cannot delete them) - which also means nothing refreshes them but you.
 
-   - `filex.sh/updates/stable.json` — **the server and CLI**. Every install with
+   - `filex.sh/updates/stable.json` - **the server and CLI**. Every install with
      `AUTO_UPGRADE` reads this and nothing else. Generate it, do not hand-edit
      it: `python3 scripts/gen-update-manifest.py --repo-dir <the export checkout>
      --previous <the live stable.json> --out stable.json` lists every published
      release with its digests, derives `migrations` from the tags, and carries
-     over what a person decided in the live file — a kill switch, a security
+     over what a person decided in the live file - a kill switch, a security
      flag, a `min_version`, hand-written notes (`--no-auto vX.Y.Z` pulls a
      release out of automatic upgrades). Without `--previous` those decisions
      are silently undone. Point `--repo-dir` at the checkout the signed tags
      were made in: a release it has no tag for stops the generator rather than
      publishing a guessed `migrations: false`. Diff the result against the live
      file before you upload it.
-   - `filex.sh/desktop/` — the desktop app. Upload the installers, the
+   - `filex.sh/desktop/` - the desktop app. Upload the installers, the
      AppImage/deb, the dmg/zip, the portable `.exe`, and all three
      `latest*.yml`.
 
@@ -1017,10 +1089,10 @@ five jobs):
    > ⚠ This is the same failure as v0.29.0's, one layer out: there, a fix
    > shipped that no existing install could see. Here, releases shipped that no
    > existing install was told about. A release that reaches nobody is not a
-   > release, and neither gate is automatic — check the feeds, do not assume.
+   > release, and neither gate is automatic - check the feeds, do not assume.
 
 10. **Refresh the generated Releases page and commit it.** The GitHub Release
-    now exists, so `docs/RELEASES.md` can finally include it — which is why
+    now exists, so `docs/RELEASES.md` can finally include it - which is why
     this is here and not back at step 3. Write the release's one-paragraph
     summary first, then regenerate:
 
@@ -1037,17 +1109,18 @@ five jobs):
     `nothing to do` is a run you can ignore rather than revert.
 
     > ⚠ Without the `release-highlights.json` entry the generator renders the
-    > "Latest" blurb from the commit subjects, or as a bare em dash. That file
+    > "Latest" blurb from the commit subjects, or as a bare `-`. That file
     > is hand-written from this repository's own `CHANGELOG.md`.
     >
     > ⚠ If GitHub is unreachable the generator keeps the committed cache, says
-    > so loudly on stderr, and exits 0 — it never publishes an empty page. In
+    > so loudly on stderr, and exits 0 - it never publishes an empty page. In
     > that case the new release is simply not on the page yet; run it again
     > later.
 
 11. **Push the documentation prose to docs.filex.sh.** A cron on the server
-    (`/root/filex-docs-refresh.sh`, versioned here as
-    `docs-site/scripts/refresh-on-main.sh`) rebuilds and republishes the site —
+    (`/root/filex-docs-refresh.sh`, versioned in the source repository as
+    `docs-site/scripts/refresh-on-main.sh`, which the export leaves out)
+    rebuilds and republishes the site -
     but it reads a **snapshot** at `/root/filex-docs-src`, and it deliberately
     refreshes only `RELEASES.md` inside it. Everything else in `docs/` reaches
     the site when a person copies it there, and nothing scripted does that.
@@ -1068,11 +1141,11 @@ five jobs):
     ssh main 'bash /root/filex-docs-refresh.sh'
     ```
 
-    Then read the live page back — a page that builds is not a page that
+    Then read the live page back - a page that builds is not a page that
     published:
 
     ```bash
-    curl -s https://docs.filex.sh/RELEASES | grep -o 'Latest — v[0-9.]*'
+    curl -s https://docs.filex.sh/RELEASES | grep -o 'Latest - v[0-9.]*'
     ```
 
     > ⚠ Keep `docs-site/node_modules` on the server: the refresh script builds
@@ -1081,7 +1154,7 @@ five jobs):
     >
     > Why this is a numbered step: measured 2026-09-05, hours after v0.32.0 was
     > tagged and deployed, `/root/filex-docs-src/docs/index.md` was still the
-    > 4 September copy — the whole release's documentation round, including a
+    > 4 September copy - the whole release's documentation round, including a
     > new feature card and a change to how every heading id is spelled, had not
     > reached the site. The cron had been running the whole time and was working
     > exactly as designed; the step it does not do is this one.
@@ -1089,33 +1162,33 @@ five jobs):
     > ⚠ Step 10 above must already have happened: this copies `docs/` to the
     > server, and the refresh script there deliberately regenerates only
     > `RELEASES.md`. A `release-highlights.json` that never reached the server
-    > gives the Latest blurb as a bare em dash.
+    > gives the Latest blurb as a bare `-`.
 
-12. **Check the shop window — what a stranger touches before they trust us.**
+12. **Check the shop window - what a stranger touches before they trust us.**
     Everything above audits the product from the inside: prose, screenshots,
     links, anchors, version manifests, and a test suite that runs against code.
     This step looks at the surfaces a first-time reader actually receives.
 
     ```bash
-    # before the tag — needs a binary, no network
+    # before the tag - needs a binary, no network
     pnpm run build:backend
     node scripts/check-shop-window.mjs --instance --boot bin/filex
 
-    # after step 11 — needs the network, nothing else
+    # after step 11 - needs the network, nothing else
     node scripts/check-shop-window.mjs --published
     ```
 
     Three exit codes, and the last two are the point: **0** everything checked
     passed, **1** a defect is present and the release does not go out, **2**
-    something *could not be checked* — no binary, no network, a GitHub rate
+    something *could not be checked* - no binary, no network, a GitHub rate
     limit, a fixture that is not set up. ⚠ Exit 2 is deliberately not 1: a gate
     that turns an outage into a failed build is an outage of its own. It is
-    also not 0 — the run says out loud which check did not happen, and you
+    also not 0 - the run says out loud which check did not happen, and you
     re-run it before you tag rather than assuming.
 
-    The third of this gate that needs neither a server nor the network —
+    The third of this gate that needs neither a server nor the network -
     the URL grammar, the quickstart command, the publish paths that carry no
-    converter — is `web/tests/deploy/shopWindow.test.ts`, so it runs on every
+    converter - is `web/tests/deploy/shopWindow.test.ts`, so it runs on every
     push and in `pnpm test`, and step 6's CI gate already blocks the tag on it.
     Nothing to run by hand.
 
@@ -1127,7 +1200,7 @@ five jobs):
     `ok` on anything its fixture does not cover.
 
     > Why this is a numbered step: on 2026-09-07, hours before the public
-    > launch, a person looking at filex from outside found seven defects — and
+    > launch, a person looking at filex from outside found seven defects - and
     > **not one had been caught by a test, a lint, or any of the eleven steps
     > above**. Several had been shipping for months. A dead `Issues` link on
     > **104 of the 105** published release pages, because the export translated
@@ -1149,13 +1222,13 @@ five jobs):
 
     The exhaustive half of the demo check is a **Go test**, not this script:
     `backend/internal/api/shop_window_route_table_test.go` walks the whole chi
-    route table — 359 entries — and classifies every state-changing one by
+    route table - 359 entries - and classifies every state-changing one by
     asking the running server whether a role gate stands in front of it
     (anonymous 401, signed-in non-admin 403). Every operator surface it finds
     must be refused on a demo, and no route an ordinary user may use may be.
     The six routes this script probes are the smoke test that the guard is
     installed at all; the Go test is what makes a **fourth** guarded prefix
-    impossible to add unnoticed — it found `/metrics` on its first run. It runs
+    impossible to add unnoticed - it found `/metrics` on its first run. It runs
     in `go test ./...`, so step 6 already blocks the tag on it. ⚠ Nothing in it
     names a route, and it has to stay that way: the moment it becomes a list it
     stops covering the surface nobody has written yet.
@@ -1163,9 +1236,9 @@ five jobs):
     > ⚠ What this gate does **not** cover, so that nobody reads a green run as
     > more than it is:
     >
-    > * **It does not look at a picture.** It compares commit dates — a
+    > * **It does not look at a picture.** It compares commit dates - a
     >   screenshot older than the code that draws it cannot be showing that
-    >   code — and it fails only once a picture has been left behind through
+    >   code - and it fails only once a picture has been left behind through
     >   six released versions, which is the distance `admin-plugins.png` had
     >   actually drifted. A comment added to a component counts as a change; a
     >   theme, font or browser change counts as nothing; and a picture that was
@@ -1184,9 +1257,9 @@ five jobs):
     >   step for it: the check prints the exact line and a person pastes it into
     >   Settings → General → Description.
     >
-    > The demo host's own corpus **is** covered now — `--published` signs in to
+    > The demo host's own corpus **is** covered now - `--published` signs in to
     > demo.filex.sh with the credentials the demo publishes and types the
-    > queries the splash advertises — but only when the demo is reachable. An
+    > queries the splash advertises - but only when the demo is reachable. An
     > unreachable demo is a `2`, and a `2` means nobody proved anything.
 
-If something fails, fix forward — never delete a published tag.
+If something fails, fix forward - never delete a published tag.

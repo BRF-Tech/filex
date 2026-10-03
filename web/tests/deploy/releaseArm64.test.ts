@@ -159,7 +159,10 @@ describe('the release ships arm64', () => {
     const s = step(code('release.yml'), 'The binaries inside are the architecture on the label');
     expect(s).toMatch(/arch-of\.mjs/);
     expect(s).toMatch(/win-arm64-unpacked/);
-    expect(s).toMatch(/linux-arm64-unpacked\/filex-app" "\$r\/linux-arm64-unpacked\/resources\/bin\/filex" --expect arm64/);
+    // Linux: the Electron binary is filex-app-bin; `filex-app` is the launcher (0.50).
+    expect(s).toMatch(/linux-arm64-unpacked\/filex-app-bin" "\$r\/linux-arm64-unpacked\/resources\/bin\/filex" --expect arm64/);
+    expect(s).toMatch(/linux-unpacked\/filex-app-bin" "\$r\/linux-unpacked\/resources\/bin\/filex" --expect amd64/);
+    expect(s).toMatch(/head -1 "\$r\/linux-unpacked\/filex-app" \| grep -qx '#!\/bin\/sh'/);
     expect(s).toMatch(/resources\/bin\/filex\.exe" --expect "\$a"/);
     expect(cond(s), 'every row checks').toBe('');
   });
@@ -191,15 +194,75 @@ describe('the release ships arm64', () => {
 
   it.runIf(!!DIR)('installs and opens the arm64 desktop packages on arm64 machines', () => {
     const check = job(code('release.yml'), 'desktop-arm64-check');
-    expect(check).toMatch(/os: ubuntu-24\.04-arm/);
-    expect(check).toMatch(/os: windows-11-arm/);
-    expect(check).toMatch(/apt-get install -y \.\/pkg\/filex-desktop-arm64\.deb/);
-    expect(check).toMatch(/desktop-look\.mjs --exe \/usr\/bin\/filex-app/);
-    expect(check).toMatch(/filex-desktop-arm64\.AppImage/);
+    expect(check).toMatch(/os: ubuntu-24\.04-arm, label: linux-arm64, artifact: desktop-arm64-linux-arm64/);
+    expect(check).toMatch(/os: windows-11-arm, label: windows, artifact: desktop-arm64-windows/);
+    expect(check).toMatch(/name: \$\{\{ matrix\.artifact \}\}/);
+    expect(check).toMatch(/linux-arm64\) ARCH=arm64; DEB=arm64; IMG=arm64; SNAP=arm64 ;;/);
+    expect(check).toMatch(/apt-get install -y "\.\/pkg\/filex-desktop-\$DEB\.deb"/);
+    expect(check).toMatch(/look --exe \/usr\/bin\/filex-app --out/);
+    expect(check).toMatch(/cp "pkg\/filex-desktop-\$IMG\.AppImage" "\$img"/);
     expect(check).toMatch(/Start-Process \$setup -ArgumentList '\/S', '\/currentuser'/);
     expect(check).toMatch(/desktop-look\.mjs" --exe \$app/);
     expect(check).toMatch(/filex-desktop-portable-arm64\.exe/);
     expect(check).toMatch(/desktop-arm64-screenshots/);
+  });
+
+  // 0.50: the 0.49 AppImage and snap opened windows with Chromium's sandbox
+  // off, and the release check accepted them (it even retried the AppImage
+  // with --no-sandbox). Now every Linux package, x64 and arm64, is opened with
+  // the sandbox checked, and the two cases that cannot build it on Ubuntu
+  // 24.04 must refuse with the launcher's message.
+  it.runIf(!!DIR)('opens every Linux package with the sandbox on, and checks the two refusals', () => {
+    const release = code('release.yml');
+    const check = job(release, 'desktop-arm64-check');
+    expect(check).toMatch(/os: ubuntu-24\.04, label: linux-x64, artifact: desktop-x64-linux/);
+    const keep = step(release, 'Keep the x64 Linux packages for the check');
+    expect(cond(keep)).toBe("matrix.label == 'linux'");
+    expect(keep).toMatch(/name: desktop-x64-linux/);
+    for (const f of ['x86_64.AppImage', 'amd64.deb', 'amd64.snap']) expect(keep).toContain(`desktop/release/*${f}`);
+    const linux = step(release, '.deb, AppImage and snap on Linux, sandboxed');
+    expect(cond(linux)).toBe("startsWith(matrix.label, 'linux')");
+    // Never --no-sandbox: not as a retry, not as an argument. The one line
+    // that names it checks the AppImage's menu entry does NOT carry it.
+    const mentions = check.split('\n').filter((l) => l.includes('--no-sandbox'));
+    expect(mentions.map((l) => l.trim())).toEqual([
+      `if grep -q -- '--no-sandbox' "$RUNNER_TEMP"/squashfs-root/*.desktop; then echo "the AppImage's menu entry turns the sandbox off" >&2; exit 1; fi`,
+    ]);
+    // Every opening is checked for the sandbox: the .deb, the AppImage (twice:
+    // as itself and as its own menu entry), the snap.
+    const opens = [...linux.matchAll(/^\s*look --exe .*$/gm)].map((m) => m[0]);
+    expect(opens).toHaveLength(4);
+    for (const o of opens) expect(o).toMatch(/--expect-sandbox$/);
+    // The refusals run with no display, so no dialog waits for a click.
+    expect(linux).toMatch(/refuses\(\) \{ env -u DISPLAY -u WAYLAND_DISPLAY node "\$CI_SCRIPTS"\/desktop-look\.mjs "\$@" --expect-refusal; \}/);
+    const order = ['refuses --exe "$img"', 'apparmor_parser -r /etc/apparmor.d/filex-appimage', 'look --exe "$img" --out', 'refuses --exe /snap/bin/filex-app', 'snap connect filex-app:browser-sandbox', 'look --exe /snap/bin/filex-app'];
+    const at = order.map((o) => linux.indexOf(o));
+    for (const [i, a] of at.entries()) expect(a, order[i]).toBeGreaterThan(0);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    // The restriction is on whatever the runner image says.
+    expect(linux).toMatch(/sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=1/);
+    // The AppImage's own menu entry carries the harmless switch, not --no-sandbox.
+    expect(linux).toMatch(/grep -qx 'Exec=AppRun --filex-desktop-entry %U'/);
+    expect(check).toMatch(/node "\$CI_SCRIPTS"\/arch-of\.mjs \/opt\/filex\/filex-app-bin/);
+  });
+
+  it.runIf(!!DIR)('installs the AppArmor profile docs/DESKTOP.md gives, word for word', () => {
+    const linux = step(code('release.yml'), '.deb, AppImage and snap on Linux, sandboxed');
+    const profile = (text: string) => /profile filex-appimage [^\n]+\{\n\s*userns,\n\s*include if exists <local\/filex-appimage>\n\s*\}/.exec(text)?.[0].replace(/^\s+/gm, '');
+    const desktop = fs.readFileSync(path.join(REPO, 'docs', 'DESKTOP.md'), 'utf8');
+    const launcher = fs.readFileSync(path.join(REPO, 'desktop', 'build', 'linux', 'launcher.sh'), 'utf8').replace(/^\s*"\s*|"\s*\\?$/gm, '');
+    expect(profile(linux)).toBeTruthy();
+    expect(profile(desktop)).toBe(profile(linux));
+    expect(profile(launcher)).toBe(profile(linux));
+  });
+
+  it.runIf(!!DIR)('a snap waiting for the Snap Store review does not fail the release', () => {
+    const s = step(code('release.yml'), 'Upload to the Snap Store');
+    expect(s).toMatch(/out=\$\(snapcraft upload --release=stable "\$snap" 2>&1\)/);
+    expect(s).toMatch(/grep -qi 'manual review'/);
+    expect(s).toMatch(/::warning title=Snap Store: manual review::/);
+    // Anything else still fails the step.
+    expect(s).toMatch(/exit "\$rc"/);
   });
 
   it.runIf(!!DIR)('names the arm64 installer in the winget manifest', () => {
@@ -439,6 +502,46 @@ releaseDate: '2026-09-28T10:05:00.000Z'
     expect(errors[0]).toMatch(/no x64 installer/);
     expect(errors[1]).toMatch(/different versions/);
     expect(errors[2]).toMatch(/unexpected line/);
+  });
+
+  it.runIf(!!DIR)("tells a sandboxed app from one running without it, from /proc", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'look-proc-'));
+    try {
+      const proc = (pid: number, argv: string[], nspid: string, joined = false) => {
+        fs.mkdirSync(path.join(tmp, String(pid)));
+        // Chromium rewrites a zygote child's title: ONE string, words joined by spaces.
+        fs.writeFileSync(path.join(tmp, String(pid), 'cmdline'), joined ? argv.join(' ') + '\0' : argv.join('\0') + '\0');
+        fs.writeFileSync(path.join(tmp, String(pid), 'status'), `Name:\tx\nNSpid:\t${nspid}\n`);
+      };
+      const bin = '/opt/filex/filex-app-bin';
+      proc(10, [bin, '--remote-debugging-port=9333'], '10');
+      proc(11, [bin, '--type=zygote'], '11');
+      proc(12, [bin, '--type=renderer', '--lang=en'], '12 4', true);
+      proc(13, ['/usr/bin/other', '--type=renderer'], '13');
+      const sandboxed = inNode<{ types: string[]; problems: string[] }>(
+        'desktop-look.mjs',
+        `const ps = m.appProcesses(${JSON.stringify(tmp)}); return { types: ps.map((p) => p.type).sort(), problems: m.sandboxProblems(ps) };`,
+      );
+      expect(sandboxed.types).toEqual(['browser', 'renderer', 'zygote']);
+      expect(sandboxed.problems).toEqual([]);
+      // The same app with --no-sandbox: the renderer shares the browser's PID namespace.
+      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.mkdirSync(tmp);
+      proc(20, [bin, '--no-sandbox'], '20');
+      proc(21, [bin, '--type=renderer', '--no-sandbox'], '21', true);
+      const open = inNode<string[]>('desktop-look.mjs', `return m.sandboxProblems(m.appProcesses(${JSON.stringify(tmp)}));`);
+      expect(open.join('\n')).toMatch(/pid 20 \(browser\) runs with --no-sandbox/);
+      expect(open.join('\n')).toMatch(/renderer 21 shares the browser's PID namespace/);
+      // Nothing of the app at all.
+      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.mkdirSync(tmp);
+      expect(inNode<string[]>('desktop-look.mjs', `return m.sandboxProblems(m.appProcesses(${JSON.stringify(tmp)}));`)).toEqual([
+        'no browser process of filex-app-bin found',
+        'no renderer process found',
+      ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it.runIf(!!DIR)('reads the architecture from ELF, PE and Mach-O headers', () => {

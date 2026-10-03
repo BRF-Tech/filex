@@ -71,7 +71,9 @@ import { underApiBase } from './lib/appBase';
 import { provideTableEnv } from './lib/tableEnv';
 import { gateOnService, isOfficeExt } from './lib/serviceGate';
 import { canShareAny, sharingHeld, type SharingHeld } from './lib/sharingHeld';
+import { publicLinksOff } from './lib/e2eLinks';
 import { opFailure, sayFailure } from './lib/errorWords';
+import { jobOpenOf } from './lib/jobOpen'; /* filex #78 - a finished job's `open` */
 import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
 import {
@@ -103,6 +105,7 @@ import {
 import ShortcutsHelp from './components/ShortcutsHelp.vue';
 /* /cila:c wiring */
 import { coverageByStorage, coverageNotice, type CatalogCoverage } from './lib/catalogCoverage';
+import { listingTickets } from './lib/listingTickets';
 import { needsMeasuredDrives, storageLine, type MeasuredDrive } from './lib/storageLine'; /* surucu:d1 — which number the storage line prints */
 /* wiring:c1 — tema galerisi */
 import ThemeGallery from './components/ThemeGallery.vue';
@@ -229,13 +232,15 @@ import {
   hydrateTrashRow as hydrateTrashRowShared,
 } from './lib/listing';
 import { nodeRowToFileNode as nodeRowToFileNodePure } from './lib/nodeRow'; /* Recent / Starred / tag / Home rows — one shape, with `perm` + `read_only` */
+import { fallbackRowLevel, withListingLevel } from './lib/rowLevel'; /* #103 - a row keeps the level it was listed with */
 import { iconFamilyFor, isStorageRow } from './lib/fileIcons'; /* pane:p1 — the storage-row predicate's one home */
 import { openSurface } from './lib/openSurface';
 import { actionIconSvg } from './lib/actionIcons'; /* inceleme:r1 — the drop overlay's mark, off the emoji font */
-import { isPluginActionKey, pluginActionKey, pluginMenuRows } from './lib/pluginMenu'; /* App plugins — the menu block, pure */
+import { gatedNeedWords, isPluginActionKey, pluginActionKey, pluginMenuRows } from './lib/pluginMenu'; /* App plugins - the menu block, pure */
 import { isPagePlacement, pluginPageUrl } from './lib/pluginPage'; /* App plugins — a `page` view opens in a new tab */
 import { lockOf, lockWords, lockedRefusal } from './lib/appLock'; /* App plugins — an app's hold on a file */
 import { linkWordsFor } from './lib/symlink'; /* issue #34 — a link the server will not follow */
+import { isUnavailable, unavailableWordsFor } from './lib/unavailable'; /* issue #104 - an entry the storage could not answer for */
 import { labelOf as pluginLabelOf } from './lib/pluginLabel';
 import type { PluginActionRow, PluginSurface, PluginViewRow } from './types/Plugins';
 import type { NavApp } from './components/SideNav.vue';
@@ -283,7 +288,15 @@ import PreviewModal from './modals/PreviewModal.vue';
 import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App plugins */
 import AppFrameModal from './components/plugin/AppFrameModal.vue'; /* App plugins — an app's own interface */
 import { appliesItemOf, appliesMatches } from './lib/pluginApplies';
-import { appViewersFor as appViewersForView, pickAppViewer } from './lib/appViewer';
+import {
+  openHandlersFor,
+  openKindOf,
+  pickAppViewer,
+  pickOpenHandler,
+  type OpenHandler,
+} from './lib/appViewer';
+import { followOpenWithChoices, openWithChoice, setOpenWithChoice } from './lib/openWith';
+import OpenWithDialog from './modals/OpenWithDialog.vue';
 import PluginConfirmModal from './components/plugin/PluginConfirmModal.vue';
 import PermissionsModal from './modals/PermissionsModal.vue';
 import DestinationPickerModal from './modals/DestinationPickerModal.vue'; /* tasi:m1 */
@@ -541,6 +554,18 @@ const pendingOps = usePendingOps(props.config, api, {
     } else if (op.op_type === 'plugin') {
       /* App plugins — the job's own last words, else "<label> finished". */
       flashToast(op.message || t('plugin.done', { label: pluginOpLabel(op) }));
+      /* ...and where the job's result sends the person who queued it: one of
+       * its outputs, with the app's screen on it (`surface.open`, filex #78 -
+       * a conversion carries its person on to what it wrote). The folder
+       * is opened by onSurfaceOpen, so the listing is not read twice. ⚠ Not
+       * over a screen the person has opened since: the job does not get to
+       * take that one away. */
+      const go = jobOpenOf(op, { busy: !!pluginView.value || !!appFrameView.value });
+      if (go) {
+        void onSurfaceOpen(go.plugin, go.open);
+        void splitPaneRef.value?.reload();
+        return;
+      }
     } else if (op.op_type === 'rename') {
       flashToast(t('toast.renamed'));
     } else if (op.op_type === 'restore') {
@@ -573,6 +598,13 @@ const rootPathProp = (props.config.rootPath || '').trim(); // qualified `<adapte
 const rootFloor = rootPathProp.replace('://', '/').replace(/^\/+|\/+$/g, '');
 const initialFloorPath = rootFloor || props.config.initialPath || '';
 const currentPath = ref<string>(initialFloorPath);
+/* ⚠⚠ One listing at a time is the one on screen: the NEWEST asked for, and
+ * a reload with no path goes where the newest folder load is going
+ * (lib/listingTickets - the measured case, a breadcrumb click undone by the
+ * late reload of the folder being left, is written there). Declared beside
+ * the address it guards, before anything in setup can call a loader. */
+const tickets = listingTickets();
+const isNewestLoad = (ticket: number) => tickets.isNewest(ticket);
 const adapter = ref<string>(props.config.defaultAdapter || 'brf');
 const dirname = ref<string>(initialFloorPath);
 const files = ref<FileNode[]>([]);
@@ -1091,6 +1123,22 @@ async function onPreviewNav(delta: number) {
   }
   previewTarget.value = next;
 }
+/**
+ * #110: the viewer saved the file in view (an app's interface, the code or
+ * Markdown editor). Its row says the new size and time at once, here and in
+ * the listing behind the viewer, instead of what the file was when it was
+ * opened; the next listing of the folder brings the server's own numbers.
+ */
+function onPreviewSaved(saved: { path: string; size?: number }): void {
+  const at = Date.now();
+  const rows = new Set<FileNode>([...files.value, ...displayOrder.value]);
+  if (previewTarget.value) rows.add(previewTarget.value);
+  for (const n of rows) {
+    if (n.path !== saved.path) continue;
+    if (typeof saved.size === 'number') n.size = saved.size;
+    n.last_modified = at;
+  }
+}
 const selection = useSelection(() => (displayOrder.value.length ? displayOrder.value : files.value));
 watch(
   () => [...selection.selected.value],
@@ -1575,32 +1623,83 @@ function appFrameFiles(targets: FileNode[]) {
  *  for which app opens a file is lib/appViewer's, shared with the editor tab. */
 const pluginViewList = computed<PluginViewRow[]>(() => (pluginsEnabled.value ? pluginActions.views.value : []));
 
-/** The app interfaces that open this file, in the server's order. An
- *  encrypted folder's files open only in filex's own (decrypting) viewer. */
-function appViewersFor(n: FileNode | null | undefined): PluginViewRow[] {
-  if (e2eActive.value) return [];
-  return appViewersForView(pluginViewList.value, n);
+/** 0.50 - the administrator's open rules, by kind (Default apps). */
+const pluginOpenRules = computed(() => (pluginsEnabled.value ? pluginActions.openRules.value : {}));
+
+/** The handlers that open a file (lib/appViewer): on, in the administrator's
+ *  order, and off. Inside an encrypted folder only filex's own (decrypting)
+ *  viewer opens anything. */
+function openHandlersOf(n: FileNode | null | undefined) {
+  if (e2eActive.value) return { on: n && n.type === 'file' ? [{ id: 'builtin', view: null }] : [], off: [], custom: false };
+  return openHandlersFor(pluginViewList.value, n, pluginOpenRules.value);
+}
+
+/** The person's "always open with" choice for a file's kind (lib/openWith). */
+function personalOpenChoice(n: FileNode | null | undefined): string | null {
+  return n ? openWithChoice(openKindOf(n)) : null;
 }
 
 /**
- * Which app opens the file being previewed: what "Open with" chose, else
- * the first app installed for the type, else none (the built-in viewer).
- * `builtin` is "Open with" choosing filex's own viewer over an app.
+ * Which app opens the file being previewed: what "Open with" chose, else the
+ * person's own choice for the kind, else the first handler the administrator
+ * left on (lib/appViewer) - each only while it is on. `builtin` is filex's
+ * own viewer.
  */
 const previewAppChoice = ref<string | null>(null);
 const previewAppViewer = computed<PluginViewRow | null>(() =>
-  e2eActive.value ? null : pickAppViewer(pluginViewList.value, previewTarget.value, previewAppChoice.value),
+  e2eActive.value
+    ? null
+    : pickAppViewer(pluginViewList.value, previewTarget.value, previewAppChoice.value, pluginOpenRules.value, personalOpenChoice(previewTarget.value)),
 );
 
-/** "Open with" rows for one file: each app that opens it. */
+/** A handler as the file menu names it. */
+function openWithLabel(h: OpenHandler): string {
+  if (!h.view) return t('ctx.open_with_builtin');
+  return t('ctx.open_with', { app: pluginLabelOf(h.view.label, locale.value) || h.view.plugin });
+}
+
+/**
+ * "Open with" rows for one file: every handler that is on for its kind, and
+ * "Choose an app…" (the dialog that can make one the default) - only when
+ * there is more than one way to open it.
+ */
 function openWithRows(sel: FileNode[]): ContextAction[] {
   if (sel.length !== 1) return [];
-  return appViewersFor(sel[0]).map((v) => ({
-    key: `open-with:${v.plugin}/${v.id}`,
-    label: t('ctx.open_with', { app: pluginLabelOf(v.label, locale.value) || v.plugin }),
-    icon: 'open',
-  }));
+  const { on } = openHandlersOf(sel[0]);
+  if (on.length < 2) return [];
+  return [
+    ...on.map((h) => ({ key: `open-with:${h.id}`, label: openWithLabel(h), icon: 'open', testid: `ctx-open-with-${h.id}` })),
+    { key: 'open-with-choose', label: t('ctx.open_with_choose'), icon: 'open', testid: 'ctx-open-with-choose' },
+  ];
 }
+
+/* ── "Choose an app…" (OpenWithDialog) ───────────────────────────────── */
+const openWithTarget = ref<FileNode | null>(null);
+const openWithHandlers = computed<OpenHandler[]>(() => openHandlersOf(openWithTarget.value).on);
+const openWithKind = computed(() => (openWithTarget.value ? openKindOf(openWithTarget.value) : ''));
+const openWithCurrent = computed(() => {
+  const n = openWithTarget.value;
+  if (!n) return null;
+  return pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n))?.id ?? null;
+});
+
+/** Open the file with the chosen handler; with `always`, keep it for the kind. */
+function openWithChosen(id: string, always: boolean): void {
+  const n = openWithTarget.value;
+  if (!n) return;
+  // ⚠ The kind is read off the FILE, not off openWithKind: that one is
+  // computed from openWithTarget, which is cleared on the next line, so it
+  // already answers '' here and "Always" would be dropped without a word.
+  const kind = openKindOf(n);
+  openWithTarget.value = null;
+  if (always && kind) setOpenWithChoice(kind, id);
+  previewNode(n);
+  previewAppChoice.value = id;
+  if (id !== 'builtin' && nodeCanEdit(n)) previewMode.value = 'edit';
+}
+
+const stopFollowingOpenWith = followOpenWithChoices();
+onBeforeUnmount(stopFollowingOpenWith);
 
 /** The `inspector` views, for the details panel; `[]` while the feature is off. */
 const pluginInspectorViews = computed<PluginViewRow[]>(() =>
@@ -1668,9 +1767,7 @@ function pluginActionRows(sel: FileNode[]): ContextAction[] {
     hasIcon: (name) => actionIconSvg(name) !== '',
     // Greyed rows with the reason are an ADMINISTRATOR's (the server sends
     // `gated` to them only; asked here too, so no other caller draws one).
-    needWords: callerAdmin.value
-      ? (need) => (need.kind === 'engine' ? t('plugin.needs_engine', { name: need.name }) : t('plugin.needs_other', { name: need.name }))
-      : undefined,
+    needWords: callerAdmin.value ? (need) => gatedNeedWords(need, t) : undefined,
   });
 }
 
@@ -1903,7 +2000,7 @@ async function openAppTarget(p: {
   await loadCapabilities();
   if (!pluginsEnabled.value) {
     emit('error', {
-      message: 'app plugins are off on this instance — deep link ignored',
+      message: 'app plugins are off on this instance - deep link ignored',
       context: { what: 'openAppTarget', plugin: p.plugin, path: p.path },
     });
     return false;
@@ -1934,8 +2031,13 @@ async function openAppTarget(p: {
   // knows, and guessing "page" for everything would take a dialog-sized
   // screen into a tab of its own.
   const owner = pluginActions.actions.value.find((a) => a.plugin === p.plugin && a.view === p.view);
-  if (owner && isPagePlacement(owner.view_placement)) {
-    return openPluginPage(owner, [node]);
+  // ⚠ A page that could not get its tab - a host that keeps no page address
+  // (`pluginPageBase`), or a browser that blocked a tab nobody clicked for
+  // (a finished job's `open` arrives with no click behind it) - opens in the
+  // dialog below, as the "new tab was blocked" toast says it will and as a
+  // menu click already did (runPluginAction). It used to stop there.
+  if (owner && isPagePlacement(owner.view_placement) && openPluginPage(owner, [node])) {
+    return true;
   }
   try {
     const res = await api.pluginView(p.plugin, p.view, p.path);
@@ -3274,6 +3376,9 @@ async function loadHome() {
 /** Open one of the panel views in the main pane. */
 async function loadNavView(kind: Exclude<NavView, ''>) {
   closeNavDrawer();
+  // Every panel view supersedes a folder listing still out (the ticket note
+  // at load()): Home and Drafts draw their own state, the others their rows.
+  const ticket = tickets.view();
   if (kind === 'home') {
     // ⚠ The mode is set BEFORE the fetch, unlike the listing views below: Home
     // renders its own sections with their own loading line, so there is
@@ -3354,18 +3459,21 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
   dirname.value = NAV_VIEW_DIRNAME[kind];
   currentPath.value = NAV_VIEW_DIRNAME[kind];
   try {
-    files.value = await fetchNavRows(kind);
+    const rows = await fetchNavRows(kind);
+    if (!isNewestLoad(ticket)) return;
+    files.value = rows;
     // These three span every storage, so the crumb reads "/ > Starred", not
     // "/ > My files > Starred", which would name a storage half the rows are
     // not in. Trash keeps its storage crumb: trash IS per-storage.
     adapter.value = '';
   } catch (err) {
+    if (!isNewestLoad(ticket)) return;
     const msg = err instanceof Error ? err.message : String(err);
     files.value = [];
     emit('error', { message: msg, context: { op: `nav-view:${kind}` } });
     flashToast(msg);
   } finally {
-    loading.value = false;
+    if (isNewestLoad(ticket)) loading.value = false;
   }
 }
 
@@ -3384,6 +3492,7 @@ async function loadTagView(tag: string, kind: TagKind | '' = '') {
   closeNavDrawer();
   const name = String(tag ?? '').trim();
   if (!name) return;
+  const ticket = tickets.view();
   loading.value = true;
   if (!navView.value) navViewOrigin.value = currentPath.value ?? '';
   navView.value = 'tag';
@@ -3411,18 +3520,21 @@ async function loadTagView(tag: string, kind: TagKind | '' = '') {
       200,
       kind,
     );
-    files.value = await e2eNames.decorate(
+    const shown = await e2eNames.decorate(
       rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null),
     );
+    if (!isNewestLoad(ticket)) return;
+    files.value = shown;
     // Spans every storage, like Starred/Recent/Shared — so no storage crumb.
     adapter.value = '';
   } catch (err) {
+    if (!isNewestLoad(ticket)) return;
     const msg = err instanceof Error ? err.message : String(err);
     files.value = [];
     emit('error', { message: msg, context: { op: `nav-view:tag:${kind ? `${kind}:` : ''}${name}` } });
     flashToast(msg);
   } finally {
-    loading.value = false;
+    if (isNewestLoad(ticket)) loading.value = false;
   }
 }
 
@@ -3589,10 +3701,14 @@ const inVirtualView = computed(() => !!navView.value && navView.value !== 'trash
 /** The row's own level; the folder's when the row has none. In a virtual view
  *  a row without a level (a server older than `handlers/meta.go`'s `perm`)
  *  is ungated — the server enforces, this only shapes the menu — rather than
- *  gated by an empty folder level that would hide every write verb. */
+ *  gated by an empty folder level that would hide every write verb.
+ *  ⚠ #103: and so is such a row while NO folder level is known (`dirPerm`
+ *  is `''` between leaving a view and the folder's answer). A folder's own
+ *  rows never get here: `load()` hands them the folder's level when it
+ *  commits them (lib/rowLevel). */
 function rowPerm(n: FileNode): string | undefined {
   if (typeof n.perm === 'string') return n.perm;
-  return inVirtualView.value ? undefined : dirPerm.value;
+  return fallbackRowLevel(inVirtualView.value, dirPerm.value);
 }
 /** The row sits on a read-only storage: its own `read_only` (nav/tag rows),
  *  else the host's storage list — a folder listing's rows carry no flag of
@@ -3990,10 +4106,21 @@ function refreshAll() {
   emit('refresh');
 }
 
-async function load(path?: string) {
+/**
+ * Load a folder (or a view's sentinel) and resolve when the explorer shows the
+ * newest listing asked for - this one, or one that overtook it on its way
+ * (lib/listingTickets `follow`). A caller that awaits this and then reads the
+ * rows or the address reads what is on screen.
+ */
+function load(path?: string): Promise<void> {
+  return tickets.follow(() => loadListing(path));
+}
+
+async function loadListing(path?: string) {
   // Whatever an earlier search said about ITS answer, this listing has not
   // answered yet (the "more results than shown" strip reads this).
   searchTruncated.value = false;
+  const { ticket, want } = tickets.begin(path, currentPath.value ?? '');
   /* === etiket:t1 — a sentinel is a VIEW, not a folder ===================
    * A restored tab, a reload on `#.trash` / `#.starred` / `#.tag~invoices`,
    * or the breadcrumb crumb for the view you are standing in all arrive here
@@ -4021,7 +4148,7 @@ async function load(path?: string) {
    * ⚠ No recursion: neither loader calls load(), and the fallback passes '',
    * which is not a sentinel.
    */
-  const asView = virtualViewOf(path ?? currentPath.value ?? '');
+  const asView = virtualViewOf(want);
   if (asView) {
     const reachable =
       asView.kind === 'trash' ? props.config.trashVisible !== false : sideNavEnabled.value;
@@ -4069,7 +4196,8 @@ async function load(path?: string) {
   navView.value = '';
   navTag.value = '';
   navTagKind.value = '';
-  let requested = path ?? currentPath.value ?? '';
+  let requested = want;
+  tickets.going(want);
   try {
     notFoundPath.value = '';
     loadError.value = '';
@@ -4133,6 +4261,13 @@ async function load(path?: string) {
     resp.files = await e2eNames.decorate(resp.files, {
       root: typeof resp.e2e_root === 'string' && resp.e2e_root ? resp.e2e_root : null,
     });
+    // A newer load was asked for while this one was out: its answer is the
+    // one to show, and this one touches nothing (the ticket note above).
+    if (!isNewestLoad(ticket)) return;
+    /* #103 - every row takes the folder's level now, with the rows, rather
+       than reading `dirPerm` whenever it is clicked: by then the explorer
+       may be showing (or loading) something else (lib/rowLevel). */
+    resp.files = withListingLevel(resp.files, resp.perm);
     // A search that matched more than it returned says so (banner strip). The
     // server's `truncated` is the answer; an older server that does not send
     // it leaves the full-page guess the advanced search count always made.
@@ -4168,6 +4303,8 @@ async function load(path?: string) {
     }
     currentPath.value = arrived;
   } catch (err) {
+    // A failure of a superseded load is not the person's folder failing.
+    if (!isNewestLoad(ticket)) return;
     const e = err instanceof Error ? err.message : String(err);
     const status = (err as { status?: number }).status;
     if (status === 404 || status === 403) {
@@ -4189,7 +4326,10 @@ async function load(path?: string) {
     emit('error', { message: e, context: { path } });
     if (files.value.length > 0) flashToast(e);
   } finally {
-    loading.value = false;
+    // Only the newest load ends the loading state: an older one finishing
+    // while a newer is out says nothing about the screen.
+    if (isNewestLoad(ticket)) loading.value = false;
+    tickets.end(ticket);
   }
 }
 
@@ -4384,6 +4524,7 @@ async function emptyTrash() {
 }
 
 async function loadTrash() {
+  const ticket = tickets.view();
   loading.value = true;
   trashOrigin.value = adapter.value || '';
   trashMode.value = true;
@@ -4436,15 +4577,18 @@ async function loadTrash() {
     );
     /* wiring:e2 names — a trashed item keeps its stored name; decrypt it the
        way its folder would, and keep the long-name sidecars out of sight. */
-    files.value = await e2eNames.decorate(trashRows);
+    const shown = await e2eNames.decorate(trashRows);
+    if (!isNewestLoad(ticket)) return;
+    files.value = shown;
     dirname.value = '.trash';
     currentPath.value = '.trash';
   } catch (err) {
+    if (!isNewestLoad(ticket)) return;
     const msg = err instanceof Error ? err.message : String(err);
     emit('error', { message: msg, context: { op: 'trash-list' } });
     flashToast(msg);
   } finally {
-    loading.value = false;
+    if (isNewestLoad(ticket)) loading.value = false;
   }
 }
 
@@ -5151,6 +5295,15 @@ function openNode(n: FileNode) {
     showToast({ message: link.why }, 8000);
     return;
   }
+  /* issue #104 - an entry the storage could not answer for: not opened, not
+     navigated into. Refused here, through the same funnel and the same toast,
+     because the server would refuse it too (409 ENTRY_UNAVAILABLE) and only
+     this side shows the sentence beside the storage's own answer. */
+  const gone = unavailableWordsFor(n, { t });
+  if (gone) {
+    showToast({ message: gone.full }, 8000);
+    return;
+  }
   if (n.type === 'dir') {
     // Multi-storage virtual rows have a bare path (`s3-test`); pass
     // them straight to load() which will treat them as the wire form
@@ -5222,8 +5375,11 @@ function openNode(n: FileNode) {
     ? previewModeForExt(ext)
     : 'view';
   previewAppChoice.value = null;
-  // An app's interface for this type edits it (unless this person may not).
-  if (appViewersFor(n).length && nodeCanEdit(n)) previewMode.value = 'edit';
+  // An app's interface for this type edits it (unless this person may not):
+  // the one the person's choice or the administrator's order opens it with.
+  if (!e2eActive.value && pickAppViewer(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n)) && nodeCanEdit(n)) {
+    previewMode.value = 'edit';
+  }
   previewTarget.value = n;
   showPreview.value = true;
   emit('file-opened', { path: n.path, basename: n.basename });
@@ -5810,7 +5966,15 @@ function offeredOn(key: string, targets: FileNode[]): boolean {
 }
 
 function selectionActionList(sel: FileNode[]): ContextAction[] {
-  return gateByPermissions(selectionActionListAll(sel), sel);
+  const list = gateByPermissions(selectionActionListAll(sel), sel);
+  /* issue #104 - an entry the storage could not answer for: the server
+     refuses every operation on it (409 ENTRY_UNAVAILABLE), so the menu, the
+     toolbar and the keyboard (offeredOn) offer none, for a selection that
+     holds one. Its details stay: they say why. */
+  if (sel.some(isUnavailable)) {
+    return list.map((a) => (a.divider || a.key === 'details' ? a : { ...a, disabled: true }));
+  }
+  return list;
 }
 
 function selectionActionListAll(sel: FileNode[]): ContextAction[] {
@@ -5899,7 +6063,7 @@ function selectionActionListAll(sel: FileNode[]): ContextAction[] {
     {
       key: 'access',
       label: accessLabel,
-      hidden: !any || !w || e2eActive.value /* wiring:e2 — sharing is off in the MVP (the link would serve ciphertext) */,
+      hidden: !any || !w || publicLinksOff(sel, e2eActive.value) /* wiring:e2 - never for an encrypted folder or anything in it, the folder's own row included (lib/e2eLinks; the server answers 409 E2E_ENCRYPTED) */,
       disabled: !single,
       title: single ? undefined : t('ctx.access.one_only'),
     },
@@ -6031,11 +6195,19 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
     await onPluginAction(key, targets);
     return;
   }
-  /* v4 — "Open with <app>": the preview, in that app's interface. */
+  /* v4 - "Open with <app>": the preview, in that app's interface (or, with
+     `builtin`, filex's own viewer). 0.50: "Choose an app…" asks first. */
+  if (key === 'open-with-choose') {
+    if (targets[0]) openWithTarget.value = targets[0];
+    return;
+  }
   if (key.startsWith('open-with:')) {
-    if (targets[0]) {
-      previewNode(targets[0]);
-      previewAppChoice.value = key.slice('open-with:'.length);
+    const n = targets[0];
+    if (n) {
+      const id = key.slice('open-with:'.length);
+      previewNode(n);
+      previewAppChoice.value = id;
+      if (id !== 'builtin' && nodeCanEdit(n)) previewMode.value = 'edit';
     }
     return;
   }
@@ -6958,9 +7130,9 @@ async function uploadFiles(list: File[]) {
   // when its turn came — so browsing while the first file was on its way sent
   // the rest of the batch into whatever folder was open by then.
   const target = qualify(currentPath.value);
-  /* wiring:e2 — uploads into an encrypted folder are encrypted transparently.
-     No upload while locked (that would be a plaintext-leak door); anything
-     over 200MB hits the MVP single-shot limit and is skipped with a warning. */
+  /* wiring:e2 - uploads into an encrypted folder are encrypted transparently.
+     No upload while locked (that would be a plaintext-leak door); a file over
+     200 MB is encrypted as a STREAM (0x02) while it is sent. */
   if (e2eLocked.value) {
     flashToast(t('e2e.upload.locked'));
     return;
@@ -7043,7 +7215,7 @@ async function legacyUpload(file: File, dest?: string) {
     // Tell the USER, not just the embedding app. `emit('error')` alone left a
     // standalone deployment silent: the progress bar ran to 100% (the bytes
     // do go out — the server rejects them afterwards), the row flipped to an
-    // error state carrying no message, and nothing else appeared. olivov lost
+    // error state carrying no message, and nothing else appeared. A multi-tenant deployment lost
     // ten days of uploads to that silence (H2, 2026-08-05).
     const message = (err as Error).message;
     patch({ status: 'error', error: message });
@@ -8313,7 +8485,14 @@ const activePaneId = computed(() => (paneIsActive.value ? 'split' : 'main'));
  *      a panel describing a file that is gone is worse than an empty one, so
  *      `heldValid` drops it the moment its own pane's listing no longer has it.
  */
-const heldSelection = ref<{ nodes: FileNode[]; pane: 'main' | 'split'; path: string } | null>(null);
+const heldSelection = ref<{ nodes: FileNode[]; pane: 'main' | 'split'; path: string; inEncrypted: boolean } | null>(null);
+
+/** wiring:e2 - is a pane's folder an end-to-end encrypted one (or inside one)?
+ *  The main pane's answer is the explorer's own e2eActive; the split pane
+ *  reads the `e2e_root` of its own listing. */
+function paneInEncrypted(pane: 'main' | 'split'): boolean {
+  return pane === 'split' ? !!splitPaneRef.value?.e2eRoot() : e2eActive.value;
+}
 
 /** The focused pane's location, user-path form. */
 const activePanePath = computed(() =>
@@ -8342,6 +8521,9 @@ watch(
         nodes,
         pane: activePaneId.value as 'main' | 'split',
         path: activePanePath.value,
+        // Where the item was when it was selected: a held item keeps the
+        // folder it came from, whatever folder the pane shows now.
+        inEncrypted: paneInEncrypted(activePaneId.value as 'main' | 'split'),
       };
     }
   },
@@ -8383,6 +8565,15 @@ const inspectorSharing = computed<SharingHeld | undefined>(() => {
   const nodes = inspectorNodes.value;
   return nodes.length === 1 && heldPermissions.value ? sharingAt([nodes[0].path]) : undefined;
 });
+/** wiring:e2 - is the panel's item inside an end-to-end encrypted folder? Its
+ *  "Create link" asks the rule the Share row asks (lib/e2eLinks
+ *  publicLinksOff): a live selection by its pane's folder, a held one by the
+ *  folder it was selected in. */
+const inspectorInEncrypted = computed(() =>
+  activeTargets().length
+    ? paneInEncrypted(activePaneId.value as 'main' | 'split')
+    : heldValid.value && heldSelection.value?.inEncrypted === true,
+);
 /** Where the held item lives — named, so "this is not what is selected in front
  *  of you" is never a guess. Empty while a live selection is shown. */
 const inspectorHeldIn = computed(() =>
@@ -9590,6 +9781,9 @@ const e2eConvRunning = ref(false);
 const e2eConvErr = ref('');
 const e2eConvProgress = ref<ConvertProgress | null>(null);
 let e2eConvStop = false;
+let e2eConvAbort: AbortController | null = null;
+/** The large file being converted right now, and how far its upload is. */
+const e2eConvLarge = ref<{ name: string; percent: number } | null>(null);
 const e2eConvPending = computed(() => {
   void e2eRingVer.value;
   return conversionPending(e2eMarker.value);
@@ -9695,6 +9889,10 @@ async function e2eRunConversion() {
   e2eConvRunning.value = true;
   e2eConvErr.value = '';
   e2eConvStop = false;
+  /* wiring:e2 convert - Stop also ends a large file's upload in flight; its
+     plaintext stays whole on the server until a write commits. */
+  const abort = new AbortController();
+  e2eConvAbort = abort;
   e2eConvProgress.value = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
   const prog = e2eConvProgress.value;
   try {
@@ -9713,6 +9911,20 @@ async function e2eRunConversion() {
           );
         },
         encrypt: (data) => encryptFile(fmk, data),
+        /* wiring:e2 convert - over 200 MB: STREAM (0x02), streamed both ways. */
+        writeLarge: async (_dir, row, expect) => {
+          e2eConvLarge.value = { name: row.basename, percent: 0 };
+          try {
+            return await e2eFiles.convertLarge(row, fmk, expect, {
+              signal: abort.signal,
+              onProgress: (f) => {
+                e2eConvLarge.value = { name: row.basename, percent: Math.floor(f * 100) };
+              },
+            });
+          } finally {
+            e2eConvLarge.value = null;
+          }
+        },
         stopped: () => e2eConvStop,
       },
       prog,
@@ -9720,6 +9932,10 @@ async function e2eRunConversion() {
     );
     if (e2eConvStop) {
       flashToast(t('e2e.convert.stopped', { n: prog.done }));
+      return;
+    }
+    if (prog.tooBig > 0 && prog.failed === 0) {
+      e2eConvErr.value = t('e2e.convert.too_large_here', { n: prog.tooBig });
       return;
     }
     if (prog.failed + prog.tooBig > 0) {
@@ -9750,8 +9966,15 @@ async function e2eRunConversion() {
     emit('error', { message: (err as Error).message, context: { op: 'e2e-convert' } });
   } finally {
     e2eConvRunning.value = false;
+    e2eConvAbort = null;
     await load();
   }
+}
+
+/** The strip's Stop: between files, and a large file's upload in flight. */
+function e2eStopConversion() {
+  e2eConvStop = true;
+  e2eConvAbort?.abort();
 }
 
 /** From the settings: the password dialog, or the escrow way back. */
@@ -10309,6 +10532,7 @@ function closeRecoveryKey() {
       :selected="selection.selected.value"
       :filters="driveFilters"
       :thumb-src="thumbs.src"
+      :folder-previews="capabilitiesData?.folder_previews !== false"
       :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
       :starred-ids="starredIds"
       :star-enabled="identitySurfaces"
@@ -10514,10 +10738,13 @@ function closeRecoveryKey() {
             })
           }}
         </p>
+        <p v-if="e2eConvLarge" class="fe-e2e-upgrade__progress" data-testid="e2e-convert-large">
+          {{ t('e2e.convert.large_progress', { name: e2eConvLarge.name, percent: e2eConvLarge.percent }) }}
+        </p>
         <p v-if="e2eConvErr" class="fe-form__error" role="alert">{{ e2eConvErr }}</p>
       </div>
       <div class="fe-e2e-upgrade__actions">
-        <button v-if="e2eConvRunning" type="button" class="fe-btn" data-testid="e2e-convert-stop" @click="e2eConvStop = true">
+        <button v-if="e2eConvRunning" type="button" class="fe-btn" data-testid="e2e-convert-stop" @click="e2eStopConversion">
           {{ t('e2e.names.stop') }}
         </button>
         <button
@@ -10904,6 +11131,7 @@ function closeRecoveryKey() {
       :filters="splitFilters"
       :folder-key="splitFolderKey"
       :thumb-src="thumbs.src"
+      :folder-previews="capabilitiesData?.folder_previews !== false"
       :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
       :starred-ids="starredIds"
       :star-enabled="identitySurfaces"
@@ -10956,6 +11184,7 @@ function closeRecoveryKey() {
       :narrow="isNarrow"
       :caller-admin="callerAdmin /* the Node ID row is an administrator's (InspectorPanel) */"
       :sharing="inspectorSharing /* its Create link / Manage buttons (lib/sharingHeld) */"
+      :in-encrypted="inspectorInEncrypted /* wiring:e2 - no Create link in an encrypted folder (lib/e2eLinks) */"
       :thumb-src="thumbs.src"
       :api-base="props.config.apiBase ?? '' /* etiket:t1 — the details panel's
              Tags section mounts the same TagPicker the context menu opens, and
@@ -11394,8 +11623,10 @@ function closeRecoveryKey() {
            SAME dialog the menu opens. It shipped disabled because nothing was
            listening; an icon that does nothing is worse than no icon. Off inside
            an encrypted folder, where a link would serve ciphertext. */"
-      @share="() => {
-        const n = previewTarget;
+      @share="(f: FileNode) => {
+        /* #85: the viewer names the file it shows - after a draft's Save the
+           saved file, where previewTarget is still the draft it was opened on. */
+        const n = f ?? previewTarget;
         if (n) { permTarget = n; permInitialTab = undefined; showPerm = true; }
       }"
       :api-base="props.config.apiBase ?? ''"
@@ -11408,7 +11639,22 @@ function closeRecoveryKey() {
       @nav="onPreviewNav"
       @draft-saved="onPreviewDraftSaved"
       @draft-discarded="onPreviewDraftDiscarded"
+      @saved="onPreviewSaved"
       @close="showPreview = false"
+    />
+    <!-- 0.50 - "Choose an app…": the handlers the administrator left on, and
+         "always use this one for the kind" (lib/openWith). -->
+    <OpenWithDialog
+      :open="!!openWithTarget"
+      :locale="locale"
+      :theme="themeMode"
+      :name="openWithTarget?.basename ?? ''"
+      :kind="openWithKind"
+      :handlers="openWithHandlers"
+      :current="openWithCurrent"
+      :remembered="openWithTarget ? personalOpenChoice(openWithTarget) : null"
+      @cancel="openWithTarget = null"
+      @open="openWithChosen"
     />
     <!-- Drafts (issue #71): the Drafts view's Save, when the name is taken. -->
     <DraftConflictModal
@@ -11533,7 +11779,7 @@ function closeRecoveryKey() {
         <div class="fe-modal__card fe-modal__card--md" @click.stop>
           <header class="fe-modal__head">
             <h2 class="fe-modal__title">
-              {{ t('tags.title') }} — {{ tagPickerNode.basename }}
+              {{ t('tags.title') }} - {{ tagPickerNode.basename }}
             </h2>
             <button class="fe-modal__close" :aria-label="t('tags.close')" @click="showTagPicker = false">×</button>
           </header>

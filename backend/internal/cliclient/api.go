@@ -23,59 +23,14 @@ import (
 // used here already exists on the server — the CLI adds no new API.
 const managerPath = "/api/files/manager"
 
-// ───────────────────────── login ─────────────────────────
-
-// LoginResponse is the subset of POST /api/auth/login the CLI needs.
-type LoginResponse struct {
-	Token string `json:"token"`
-	Raw   []byte `json:"-"`
-}
-
-// Login exchanges email+password (and an optional TOTP code) for a
-// session token. Call on a token-less Client.
-func (c *Client) Login(ctx context.Context, email, password, totp string) (*LoginResponse, error) {
-	body, err := json.Marshal(map[string]string{
-		"email":    email,
-		"password": password,
-		"totp":     totp,
-	})
-	if err != nil {
-		return nil, err
-	}
-	req, err := c.newRequest(ctx, http.MethodPost, "/api/auth/login", nil, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	raw, err := c.doJSON(req)
-	if err != nil {
-		var ae *APIError
-		if errors.As(err, &ae) {
-			var extra struct {
-				TotpRequired bool `json:"totp_required"`
-			}
-			_ = json.Unmarshal(ae.Body, &extra)
-			if extra.TotpRequired {
-				return nil, fmt.Errorf("%w (this account has two-factor auth — pass --totp <code>)", err)
-			}
-		}
-		return nil, err
-	}
-	var lr LoginResponse
-	if err := json.Unmarshal(raw, &lr); err != nil {
-		return nil, fmt.Errorf("parse login response: %w", err)
-	}
-	if lr.Token == "" {
-		return nil, errors.New("login response carried no token")
-	}
-	lr.Raw = raw
-	return &lr, nil
-}
-
 // ───────────────────────── ls ─────────────────────────
 
 // ListEntry is one row of a directory listing (server FileNode shape).
 type ListEntry struct {
+	// ID is the server's catalogue id (versions and tags are addressed by it);
+	// 0 when the folder was listed straight from the storage, before a scan
+	// catalogued it.
+	ID           int64  `json:"id,omitempty"`
 	Path         string `json:"path"`
 	Basename     string `json:"basename"`
 	Type         string `json:"type"` // "file" | "dir"
@@ -83,6 +38,9 @@ type ListEntry struct {
 	Size         int64  `json:"size"`
 	MimeType     string `json:"mime_type"`
 	LastModified int64  `json:"last_modified"` // Unix millis; 0 = unknown
+	// E2E is true on a folder that is an end-to-end encrypted folder (it
+	// holds a key file).
+	E2E bool `json:"e2e,omitempty"`
 }
 
 // ListResult is GET /api/files/manager?action=index.
@@ -92,7 +50,10 @@ type ListResult struct {
 	Dirname  string      `json:"dirname"`
 	ReadOnly bool        `json:"read_only"`
 	Files    []ListEntry `json:"files"`
-	Raw      []byte      `json:"-"`
+	// E2ERoot is the encrypted folder the listed folder is in, or at the
+	// root of (adapter://rel); "" when it is in none.
+	E2ERoot string `json:"e2e_root,omitempty"`
+	Raw     []byte `json:"-"`
 }
 
 // List returns the directory listing at remote (`adapter://rel`). An
@@ -146,7 +107,7 @@ func (c *Client) Upload(ctx context.Context, localPath, remote string) (RemotePa
 		return RemotePath{}, nil, err
 	}
 	if fi, err := os.Stat(localPath); err == nil && fi.IsDir() {
-		return RemotePath{}, nil, fmt.Errorf("%s is a directory — upload takes a single file (pass -r/--recursive to upload the folder)", localPath)
+		return RemotePath{}, nil, fmt.Errorf("%s is a directory - upload takes a single file (pass -r/--recursive to upload the folder)", localPath)
 	}
 
 	destDir := rp
@@ -238,7 +199,11 @@ func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, 
 		return nil, err
 	}
 	defer f.Close()
+	return c.uploadReader(ctx, destDir, name, f, expect)
+}
 
+// uploadReader is the multipart POST of one body read from r.
+func (c *Client) uploadReader(ctx context.Context, destDir RemotePath, name string, r io.Reader, expect string) ([]byte, error) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
 	go func() {
@@ -251,11 +216,17 @@ func (c *Client) uploadMultipart(ctx context.Context, destDir RemotePath, name, 
 					return err
 				}
 			}
+			// wiring:e2 convert - an in-place E2E conversion write (e2e.go).
+			if isConversionWrite(ctx) {
+				if err := mw.WriteField("e2e_convert", "1"); err != nil {
+					return err
+				}
+			}
 			part, err := mw.CreateFormFile("file[]", name)
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(part, c.UpLimit.Reader(ctx, f)); err != nil {
+			if _, err := io.Copy(part, c.UpLimit.Reader(ctx, r)); err != nil {
 				return err
 			}
 			return mw.Close()
@@ -457,62 +428,9 @@ func (c *Client) Remove(ctx context.Context, remote string) ([]byte, error) {
 }
 
 // ───────────────────────── mv ─────────────────────────
-
-// Move implements Unix-mv semantics on top of the server's move/rename
-// verbs. dst may be an existing directory (item moves into it, keeping
-// its name) or a target path (rename, or move+rename across dirs — two
-// wire calls, the manager API has no combined verb). Cross-adapter moves
-// are rejected client-side; the server refuses them anyway.
-func (c *Client) Move(ctx context.Context, src, dst string) (RemotePath, []byte, error) {
-	sp, err := ParseRemotePath(src)
-	if err != nil {
-		return RemotePath{}, nil, err
-	}
-	dp, err := ParseRemotePath(dst)
-	if err != nil {
-		return RemotePath{}, nil, err
-	}
-	if sp.Adapter != dp.Adapter {
-		return RemotePath{}, nil, errors.New("cross-adapter move is not supported by the server")
-	}
-	if sp.IsRoot() {
-		return RemotePath{}, nil, errors.New("cannot move a storage root")
-	}
-
-	// Destination directory form: root, trailing slash, or an existing dir.
-	if dp.IsRoot() || strings.HasSuffix(dst, "/") || c.remoteIsDir(ctx, dp) {
-		raw, err := c.moveInto(ctx, sp, dp)
-		return dp.Join(sp.Base()), raw, err
-	}
-
-	// Same parent → pure rename.
-	if dp.Dir().Rel == sp.Dir().Rel {
-		raw, err := c.rename(ctx, sp, dp.Base())
-		return dp, raw, err
-	}
-
-	// Different parent + different target name → move, then rename.
-	raw, err := c.moveInto(ctx, sp, dp.Dir())
-	if err != nil {
-		return RemotePath{}, raw, err
-	}
-	moved := dp.Dir().Join(sp.Base())
-	if moved.Base() != dp.Base() {
-		raw, err = c.rename(ctx, moved, dp.Base())
-		if err != nil {
-			return moved, raw, fmt.Errorf("moved to %s but rename failed: %w", moved.String(), err)
-		}
-	}
-	return dp, raw, nil
-}
-
-// moveInto issues the manager move verb (dest keeps the item basename).
-func (c *Client) moveInto(ctx context.Context, item, destDir RemotePath) ([]byte, error) {
-	return c.postManager(ctx, "move", map[string]any{
-		"path":  destDir.String(),
-		"items": []map[string]string{{"path": item.String()}},
-	})
-}
+//
+// Move and Copy live in ops.go: everything but a rename in place goes through
+// the operations queue.
 
 // rename issues the manager rename verb (same-dir name change).
 func (c *Client) rename(ctx context.Context, item RemotePath, newName string) ([]byte, error) {

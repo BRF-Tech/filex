@@ -13,6 +13,9 @@ import (
 
 	ftpserver "github.com/fclairamb/ftpserverlib"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/clientip"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
@@ -110,7 +113,17 @@ func (d *driver) AuthUser(cc ftpserver.ClientContext, user, pass string) (ftpser
 			slog.String("remote", cc.RemoteAddr().String()))
 		return nil, errAuth
 	}
-	p, err := d.srv.cfg.Auth.Any(context.Background(), user, pass)
+	// The peer's address is the client's: FTP has no forwarded headers. It is
+	// what the sign-in limit counts by.
+	ctx := protocolauth.WithSource(context.Background(), loginguard.ProtoFTP, clientip.PeerOf(cc.RemoteAddr().String()))
+	// The name the client connected to, from the TLS handshake (SNI —
+	// VerifyConnection kept it): on a multi-tenant install a tenant's own
+	// address names the tenant, exactly as the web page's Host does. A client
+	// that sent none is asked for `realm/name` instead (docs/PROTOCOLS.md).
+	if sni, _ := cc.Extra().(serverName); sni != "" {
+		ctx = auth.WithLoginHost(ctx, string(sni))
+	}
+	p, err := d.srv.cfg.Auth.Any(ctx, user, pass)
 	if err == nil {
 		// access.ftp (package perm) — the "that account may not use this
 		// protocol" case below, now also decided per account.
@@ -150,6 +163,28 @@ func (d *driver) AuthUser(cc ftpserver.ClientContext, user, pass string) (ftpser
 }
 
 var errAuth = errors.New("authentication failed")
+
+// serverName is the TLS SNI the control connection was opened with.
+type serverName string
+
+// VerifyConnection (ftpserverlib's MainDriverExtensionTLSVerifier) runs at USER,
+// on the control connection's TLS: it keeps the name the client connected to
+// (SNI) for AuthUser, and asks for the password as usual (nil, nil). It never
+// authenticates anybody by itself — no client certificates here.
+//
+// ⚠ Why SNI: FTP has no Host header, and on a multi-tenant install the address
+// is what tells two tenants' `alex` apart without a realm in the user name.
+// The TLS handshake is the one place an FTPS client says which name it dialled.
+func (d *driver) VerifyConnection(cc ftpserver.ClientContext, _ string, tlsConn *tls.Conn) (ftpserver.ClientDriver, error) {
+	if tlsConn != nil {
+		if name := strings.ToLower(strings.TrimSuffix(tlsConn.ConnectionState().ServerName, ".")); name != "" {
+			cc.SetExtra(serverName(name))
+		}
+	}
+	return nil, nil
+}
+
+var _ ftpserver.MainDriverExtensionTLSVerifier = (*driver)(nil)
 
 // GetTLSConfig hands the library the certificate.
 func (d *driver) GetTLSConfig() (*tls.Config, error) { return d.srv.tls, nil }

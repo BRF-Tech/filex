@@ -221,19 +221,22 @@ func newMTFix(t *testing.T, multiTenant bool) *mtFix {
 		UserA: userA, UserB: userB,
 		MultiTenant: multiTenant,
 	}
-	f.A = mtLogin(t, srv, "member@alpha.test", mtUserPass)
-	f.B = mtLogin(t, srv, "member@bravo.test", mtUserPass)
-	f.AdminA = mtLogin(t, srv, adminAEmail, adminAPass)
-	f.Super = mtLogin(t, srv, superEmail, superPass)
+	// A tenant's people sign in with their realm (the slug by default) — on
+	// the platform's page an empty realm is the platform's own tenant. A
+	// single-tenant fixture ignores it.
+	f.A = mtLogin(t, srv, "alpha", "member@alpha.test", mtUserPass)
+	f.B = mtLogin(t, srv, "bravo", "member@bravo.test", mtUserPass)
+	f.AdminA = mtLogin(t, srv, "alpha", adminAEmail, adminAPass)
+	f.Super = mtLogin(t, srv, "", superEmail, superPass)
 	return f
 }
 
-func mtLogin(t *testing.T, srv *httptest.Server, email, pw string) *http.Client {
+func mtLogin(t *testing.T, srv *httptest.Server, realm, email, pw string) *http.Client {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	require.NoError(t, err)
 	c := &http.Client{Jar: jar}
-	testutil.LoginAs(t, srv, c, email, pw)
+	testutil.LoginAsIn(t, srv, c, realm, email, pw)
 	return c
 }
 

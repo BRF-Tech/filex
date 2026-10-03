@@ -11,7 +11,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
-	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -361,7 +360,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			/* wiring:e2 — the marker file stays hidden in name search too, and so
 			   does everything in filex's own directories (syspath.Hidden: the
 			   desktop's open-with working copies were found by name, 2026-09-21) */
-			if n.Name == e2e.MarkerName || syspath.Hidden(n.Path) {
+			if syspath.Unlisted(n.Name) || syspath.Hidden(n.Path) {
 				continue
 			}
 			if !withinRoot(n.StorageID, n.Path) {
@@ -383,7 +382,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 				/* wiring:e2 — the marker file stays hidden in name search too, and so
 				   does everything in filex's own directories (syspath.Hidden: the
 				   desktop's open-with working copies were found by name, 2026-09-21) */
-				if n.Name == e2e.MarkerName || syspath.Hidden(n.Path) {
+				if syspath.Unlisted(n.Name) || syspath.Hidden(n.Path) {
 					continue
 				}
 				if !withinRoot(n.StorageID, n.Path) {
@@ -421,7 +420,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 				/* wiring:e2 — the marker file stays hidden in name search too, and so
 				   does everything in filex's own directories (syspath.Hidden: the
 				   desktop's open-with working copies were found by name, 2026-09-21) */
-				if n.Name == e2e.MarkerName || syspath.Hidden(n.Path) {
+				if syspath.Unlisted(n.Name) || syspath.Hidden(n.Path) {
 					continue
 				}
 				if !plan.Accepts(n.Name, n.Path) || !tagFilterAccepts(tagFilter, n.ID) {

@@ -11,9 +11,12 @@
  * each Default / Allow / Deny, kept in `settings.apps`. "Default" is what the
  * role's people get without a decision here: the built-in role they are on
  * (User or Viewer — perm.HolderRole, from the ticks above) decides, then the
- * app's own default.
+ * app's own default. ⚠ Which of the two it is, the SERVER says
+ * (`RolesApi.previewHolder`, asked again a moment after the ticks change),
+ * and so does what the app's default gives that role (the catalogue's
+ * `default_for`); the editor keeps no copy of either rule.
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import {
@@ -27,7 +30,7 @@ import {
 import type { StorageRef } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
-import { builtinAppDefault, holderRole } from '@/lib/appPermissions';
+import { HOLDER_PREVIEW_DELAY_MS, builtinAppDefaults } from '@/lib/appPermissions';
 import PermissionGrid from '@/components/PermissionGrid.vue';
 import RoleNameTranslations from '@/components/RoleNameTranslations.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -90,12 +93,51 @@ const appEffects = computed({
   get: () => form.value.settings.apps ?? {},
   set: (v: Record<string, PermEffect>) => (form.value.settings = { ...form.value.settings, apps: v }),
 });
+/**
+ * The built-in role this role's people would be on — the server's answer
+ * (perm.HolderRole) for the ticks as they stand. null while it is not known
+ * (not asked yet, or the server cannot say): "Default" then says only
+ * "Default", never a guess.
+ */
+const holder = ref<BuiltinRole | null>(null);
+let holderAsked = '';
+let holderSeq = 0;
+let holderTimer: ReturnType<typeof setTimeout> | undefined;
+function holderBody() {
+  const { permissions, effects, conditions } = form.value;
+  return { permissions, effects, conditions };
+}
+async function askHolder() {
+  if (!(props.catalogue.apps ?? []).length) return;
+  const body = holderBody();
+  const key = JSON.stringify(body);
+  if (key === holderAsked) return;
+  holderAsked = key;
+  const seq = ++holderSeq;
+  try {
+    const role = await RolesApi.previewHolder(body);
+    if (seq === holderSeq) holder.value = role;
+  } catch {
+    if (seq === holderSeq) holder.value = null;
+  }
+}
+// Ticking changes the answer: ask again once the ticks rest.
+watch(
+  () => [form.value.permissions, form.value.effects, form.value.conditions],
+  () => {
+    if (!props.modelValue) return;
+    clearTimeout(holderTimer);
+    holderTimer = setTimeout(() => void askHolder(), HOLDER_PREVIEW_DELAY_MS);
+  },
+  { deep: true },
+);
+onBeforeUnmount(() => clearTimeout(holderTimer));
+
 /** "Default" for each app permission, for the people this role would have. */
 const appDefaults = computed<Record<string, boolean>>(() => {
-  const holder = holderRole(form.value, props.catalogue.permissions);
-  return Object.fromEntries(
-    (props.catalogue.apps ?? []).map((a) => [a.key, builtinAppDefault(a, holder, builtinApps.value[holder])]),
-  );
+  const h = holder.value;
+  if (!h) return {};
+  return builtinAppDefaults(props.catalogue.apps, h, builtinApps.value[h]);
 });
 
 watch(
@@ -106,7 +148,10 @@ watch(
       ? JSON.parse(JSON.stringify({ ...r, permissions: r.permissions ?? [], conditions: r.conditions ?? {}, settings: r.settings ?? {} }))
       : blank();
     maxUploadMB.value = form.value.settings.max_upload_bytes ? form.value.settings.max_upload_bytes / MB : null;
+    holder.value = null;
+    holderAsked = '';
     void loadBuiltinApps();
+    void askHolder();
   },
   { immediate: true },
 );
@@ -281,6 +326,9 @@ async function save() {
       <section class="space-y-1">
         <ChipInput v-model="ssoGroups" :label="t('permissions.rules.ssoGroups')" data-testid="role-sso-groups" />
         <p class="text-xs text-zinc-500">{{ t('permissions.rules.ssoGroupsHint') }}</p>
+        <p class="text-xs text-amber-700 dark:text-amber-400" data-testid="role-starting-legacy">
+          {{ t('permissions.rules.startingRoleLegacy') }}
+        </p>
       </section>
     </form>
 

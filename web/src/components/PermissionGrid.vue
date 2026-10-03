@@ -205,9 +205,17 @@ function defaultWord(row: Row): 'allowed' | 'denied' | 'unknown' {
   return d === true ? 'allowed' : d === false ? 'denied' : 'unknown';
 }
 
-/** The words on a choice: an app permission's Default says what it comes to. */
+/** The words on a choice: an app permission's Default says what it comes to.
+ *
+ * ⚠ An app permission's Allow / Deny are keys of their OWN
+ * (`permissions.apps.effect.*`), the same words today as the catalogue's
+ * `permissions.effect.*`. The owner's call (2026-09-29): renaming the apps'
+ * Deny (to "Block", say) must not rename every Deny in the role editors. So
+ * they are deliberately NOT in a vocabulary "one concept, one label" group. */
 function choiceLabel(row: Row, opt: Choice): string {
-  if (row.kind === 'app' && opt === 'inherit') {
+  if (row.kind === 'app') {
+    if (opt === 'allow') return t('permissions.apps.effect.allow');
+    if (opt === 'deny') return t('permissions.apps.effect.deny');
     const d = defaultWord(row);
     if (d === 'allowed') return t('permissions.apps.defaultAllowed');
     if (d === 'denied') return t('permissions.apps.defaultDenied');
@@ -236,7 +244,9 @@ function groupAll(g: Group, on: boolean) {
   }
 }
 function groupAllLabel(g: Group, on: boolean): string {
-  if (props.mode === 'set' && g.id !== 'apps') return on ? t('permissions.all') : t('permissions.none');
+  // The Apps group's shortcuts say what its rows say (choiceLabel).
+  if (g.id === 'apps') return on ? t('permissions.apps.effect.allow') : t('permissions.apps.effect.deny');
+  if (props.mode === 'set') return on ? t('permissions.all') : t('permissions.none');
   return on ? t('permissions.effect.allow') : t('permissions.effect.deny');
 }
 function groupEditable(g: Group): boolean {
@@ -262,7 +272,10 @@ function sourceText(src: PermSource | undefined): string {
   if (!src) return '';
   if (src.kind === 'rule' || src.kind === 'role_off') {
     const rule = props.rules.find((r) => r.id != null && r.id === src.rule_id);
-    return t(`permissions.source.${src.kind}`, { name: rule ? roleName(rule, locale.value) : (src.rule_name ?? `#${src.rule_id}`) });
+    const name = rule ? roleName(rule, locale.value) : (src.rule_name ?? `#${src.rule_id}`);
+    // A role the account holds through a group says which group.
+    if (src.group_name) return t(`permissions.source.${src.kind}_group`, { name, group: src.group_name });
+    return t(`permissions.source.${src.kind}`, { name });
   }
   return t(`permissions.source.${src.kind}`);
 }

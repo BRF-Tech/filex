@@ -41,7 +41,7 @@ func secondMember(t *testing.T, f *mtFix) *http.Client {
 		provider = super.ID
 	}
 	seedUserIn(t, f.Store, provider, "second@alpha.test")
-	return mtLogin(t, f.Srv, "second@alpha.test", mtUserPass)
+	return mtLogin(t, f.Srv, "alpha", "second@alpha.test", mtUserPass)
 }
 
 func TestOpsList_AMemberSeesOnlyTheOpsTheyQueued(t *testing.T) {

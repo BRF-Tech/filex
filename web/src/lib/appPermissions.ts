@@ -4,60 +4,60 @@
  * person — `app.<app>.<id>`, allow or deny, and when nobody has decided, the
  * app's own default.
  *
- * The SERVER decides every answer; this file only says, on an editor, what
- * the "Default" choice of a ROLE would come to, so the choice reads
- * "Default (allowed)" rather than a bare "Default". A person's editor does not
- * use it: the server answers that one itself (`effective.apps[].inherited`).
+ * The SERVER decides every answer; this file only reads, on an editor, what
+ * the "Default" choice of a ROLE comes to, so the choice reads "Default
+ * (allowed)" rather than a bare "Default". A person's editor does not use it:
+ * the server answers that one itself (`effective.apps[].inherited`).
+ *
+ * ⚠ No rule is worked out here. Which built-in role a CUSTOM role's people
+ * are on (perm.HolderRole) is asked of the server (`RolesApi.previewHolder`),
+ * and what an app's default comes to on a built-in role (the last layer of
+ * perm.Result.AppAllowed) is the catalogue's `default_for`. 0.49.0 kept a copy
+ * of both in this file; a change on one side would have made the editor say
+ * "allowed" where the server answers 403.
  */
-import type { AppPermDef, AppPermDefault, BuiltinRole, PermDef, PermEffect, PermKey, PermissionRuleInput } from '@/api/roles';
-
-/**
- * The app's default for an account on a built-in role — the last layer of
- * perm.Result.AppAllowed: `viewer` is everybody's, `user` is the User role's
- * (accounts that can change files), `admin` nobody's until granted.
- */
-export function appDefaultHolds(def: AppPermDefault, role: BuiltinRole): boolean {
-  if (def === 'viewer') return true;
-  if (def === 'user') return role === 'user';
-  return false;
-}
+import type { AppPermDef, BuiltinRole, PermEffect } from '@/api/roles';
 
 /**
  * What "Default" comes to for a built-in role's people, given the decisions
  * the built-in role itself has made (`decisions`, what the Roles page edits
- * for User and Viewer): the role's decision, else the app's default.
+ * for User and Viewer): the role's decision, else what the catalogue says the
+ * app's default gives that role (`default_for`). `undefined` when the
+ * catalogue does not say: the editor then shows a plain "Default", never a
+ * guess.
  */
 export function builtinAppDefault(
   def: AppPermDef,
   role: BuiltinRole,
   decisions: Record<string, PermEffect> | undefined,
-): boolean {
+): boolean | undefined {
   const d = decisions?.[def.key];
   if (d === 'allow') return true;
   if (d === 'deny') return false;
-  return appDefaultHolds(def.default, role);
+  return def.default_for?.[role];
 }
 
 /**
- * The built-in role the people holding a custom role get — perm.HolderRole:
- * User when the role can add, change, delete or share anything (everywhere,
- * or allowed in some folders), otherwise Viewer. A custom role's "Default"
- * for an app permission is that built-in role's answer.
+ * `builtinAppDefault` for every app permission of the catalogue, keyed by
+ * permission — the `appDefaults` a PermissionGrid takes. A permission the
+ * catalogue says nothing about is left out ("Default", not a guess).
  */
-export function holderRole(
-  rule: Pick<PermissionRuleInput, 'permissions' | 'effects' | 'conditions'>,
-  catalogue: PermDef[],
-): BuiltinRole {
-  const capped = new Set<PermKey>(catalogue.filter((d) => d.viewer_capped).map((d) => d.key));
-  if ((rule.permissions ?? []).some((k) => capped.has(k))) return 'user';
-  const hasPlace = (rule.conditions?.storage_ids?.length ?? 0) > 0 || (rule.conditions?.paths?.length ?? 0) > 0;
-  if (hasPlace) {
-    for (const [k, eff] of Object.entries(rule.effects ?? {})) {
-      if (eff === 'allow' && capped.has(k)) return 'user';
-    }
+export function builtinAppDefaults(
+  apps: AppPermDef[] | undefined,
+  role: BuiltinRole,
+  decisions?: Record<string, PermEffect>,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const a of apps ?? []) {
+    const v = builtinAppDefault(a, role, decisions);
+    if (v !== undefined) out[a.key] = v;
   }
-  return 'viewer';
+  return out;
 }
+
+/** How long the custom role editor waits after the last tick before it asks
+ *  the server again which built-in role the role's people would be on. */
+export const HOLDER_PREVIEW_DELAY_MS = 250;
 
 /** Splits a person's exceptions into the catalogue's and the apps' (app.*). */
 export function isAppKey(key: string): boolean {

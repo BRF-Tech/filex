@@ -14,6 +14,7 @@ import {
   buildGuide,
   buildWebdavGuide,
   guideProtocols,
+  guideUser,
   GUIDE_NAMES,
   hostOf,
   isPlainHttp,
@@ -146,5 +147,30 @@ describe('helpers', () => {
   it('detects cleartext', () => {
     expect(isPlainHttp('http://x.local')).toBe(true);
     expect(isPlainHttp('https://x.local')).toBe(false);
+  });
+});
+
+// A tenant's account on a multi-tenant server signs in to the password-carrying
+// protocols as `realm/name` where no address names its tenant (#128); the guide
+// prints it that way. A server with no realms is unchanged.
+describe('guideUser', () => {
+  it('puts a tenant account realm in front of the e-mail', () => {
+    expect(guideUser('alice@example.com', 'acme')).toBe('acme/alice@example.com');
+  });
+  it('is the e-mail alone with no realm', () => {
+    expect(guideUser('alice@example.com', null)).toBe('alice@example.com');
+    expect(guideUser('alice@example.com', '')).toBe('alice@example.com');
+    expect(guideUser('alice@example.com')).toBe('alice@example.com');
+  });
+  it('invents nothing without an e-mail', () => {
+    expect(guideUser('', 'acme')).toBe('');
+  });
+  it('reaches the WebDAV guide as its user name', () => {
+    const t = (k: string) => k;
+    const g = buildWebdavGuide(
+      { origin: 'https://files.acme.test', user: guideUser('alice@example.com', 'acme'), storages: ['main'] } as GuideContext,
+      t,
+    );
+    expect(JSON.stringify(g)).toContain('acme/alice@example.com');
   });
 });

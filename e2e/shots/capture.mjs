@@ -677,6 +677,19 @@ async function run() {
     const ppage = await pctx.newPage();
     await ppage.goto(`${URL}/s/${shareToken}`);
     await ppage.waitForSelector('[data-testid="public-share-download"]', { timeout: 20_000 });
+    /* ⚠ The picture of aurora.png is an <img> that loads after the card is
+       drawn: shot as soon as Download is there, it can still be missing. The
+       v0.50.0 release run took this README picture with a dot where the
+       picture should be (the run before it had the picture). Wait for the
+       picture itself to be decoded. */
+    await ppage.waitForFunction(
+      () => {
+        const imgs = [...document.querySelectorAll('[data-testid="public-share-file"] img')];
+        return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0);
+      },
+      null,
+      { timeout: 20_000 },
+    );
     await ppage.mouse.move(0, 0);
     await sleep(700);
     await shot(ppage, 'public-share.png');
@@ -698,7 +711,20 @@ async function run() {
     // The CARD, not its body: the viewer's title bar and its actions are part
     // of what the picture is claiming to show.
     await page.waitForSelector('.fe-modal__card', { timeout: 15_000 });
-    await sleep(2000);
+    /* ⚠ The card is drawn before the file is read: a fixed two seconds after
+       it appears is not enough on a busy machine. The v0.50.0 release run took
+       this README picture of a card that said "Loading…" and nothing else.
+       Wait for the rendered Markdown itself (README.md opens with a heading)
+       and for the loading line to be gone. */
+    await page.waitForFunction(
+      () => {
+        const card = document.querySelector('.fe-modal__card');
+        return !!card && !!card.querySelector('.fe-preview__md h1') && !card.querySelector('.fe-preview__fallback');
+      },
+      null,
+      { timeout: 20_000 },
+    );
+    await sleep(700);
     await shot(page.locator('.fe-modal__card').first(), 'viewer-markdown.png');
     await page.keyboard.press('Escape');
 

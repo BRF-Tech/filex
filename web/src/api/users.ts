@@ -15,6 +15,11 @@ export interface UserUpdateRequest {
   password?: string;
   locale?: string;
   timezone?: string;
+  /** Switch the account on or off; on approves one waiting for approval. */
+  enabled?: boolean;
+  /** Remove the account's SSO bind: its next SSO sign-in is matched by its
+   *  email address again (docs/SSO.md). */
+  sso_unlink?: boolean;
 }
 
 export interface UserListParams {
@@ -57,8 +62,10 @@ export const UsersApi = {
     return data;
   },
 
-  async update(id: number, payload: UserUpdateRequest): Promise<User> {
-    const { data } = await api.patch<User>(`/admin/users/${id}`, payload);
+  // The server answers {ok: true}: the account is read again with get()
+  // (stores/users.ts update).
+  async update(id: number, payload: UserUpdateRequest): Promise<{ ok: boolean }> {
+    const { data } = await api.patch<{ ok: boolean }>(`/admin/users/${id}`, payload);
     return data;
   },
 

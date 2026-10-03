@@ -47,10 +47,7 @@ import { tr } from '@brftech/filex-core/src/locales/tr';
 const CORE_SRC = path.resolve(__dirname, '../../../packages/core/src');
 
 beforeEach(() => resetAllShortcuts());
-afterEach(() => {
-  resetAllShortcuts();
-  document.body.innerHTML = '';
-});
+afterEach(() => resetAllShortcuts());
 
 // ---------------------------------------------------------------------------
 // 1. Behaviour: the surface follows the binding

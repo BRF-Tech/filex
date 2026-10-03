@@ -56,7 +56,7 @@ export function versionProblems(version, previous) {
   // ⚠ Lesson #468. The Microsoft Store package carries 0.x as
   // 1.0.(minor*100+patch).0, so a 1.0.x release would sort BELOW every 0.x the
   // Store has already accepted, and the Store only takes a higher number.
-  // 0.x goes straight to 1.1.0 (Burak's decision, 2026-09-24).
+  // 0.x goes straight to 1.1.0 (the maintainer's decision, 2026-09-24).
   if (v.major === 1 && v.minor === 0) {
     out.push(`${version}: there is no 1.0.x — the Store version of 1.0.x sorts below every 0.x already published. The step after 0.x is 1.1.0.`);
   }

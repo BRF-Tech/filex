@@ -81,8 +81,8 @@ func TestPermissionLabels_InThePacksLanguage(t *testing.T) {
 	assert.Equal(t, "Runs the server's conversion engine: FFmpeg", Permission("engines:ffmpeg").Label("es"),
 		"a translation that lost {engine} is refused: the administrator must still read WHICH engine")
 	assert.Equal(t, "Sends filex notifications to users", PermNotifySend.Label("es"), "untranslated: English")
-	assert.Equal(t, "Seçtiğiniz dosyaların içeriğini okur", PermFilesRead.Label("tr"))
-	assert.Equal(t, "Reads the contents of the files you pick", PermFilesRead.Label("de"), "no pack: English, not Turkish")
+	assert.Equal(t, "Açıldığı ya da çalıştırıldığı dosyaların ve kayıt tuttuğu dosyaların içeriğini okur", PermFilesRead.Label("tr"))
+	assert.Equal(t, "Reads the contents of the files it is opened or run on, and of the files it keeps records about", PermFilesRead.Label("de"), "no pack: English, not Turkish")
 
 	rows := PermissionRows(&Manifest{Perms: []Permission{PermUsersLookup}}, "es")
 	require.Len(t, rows, 1)

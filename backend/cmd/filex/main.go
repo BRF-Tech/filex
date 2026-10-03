@@ -51,7 +51,7 @@ var configPath string
 func main() {
 	root := &cobra.Command{
 		Use:     "filex",
-		Short:   "filex — self-hosted file manager",
+		Short:   "filex - self-hosted file manager",
 		Version: version.String(),
 	}
 	root.PersistentFlags().StringVar(&configPath, "config", os.Getenv("FILEX_CONFIG"), "path to config.yaml (default: $FILEX_CONFIG or ~/.filex/config.yaml)")
@@ -68,6 +68,7 @@ func main() {
 		selfUpdateCmd(),
 		e2eEscrowCmd(),
 		decryptCmd(),
+		encryptCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -368,7 +369,7 @@ func storageScanCollisions(only, root string) error {
 			// process has no manager, so "unknown driver" here is expected
 			// and says nothing useful on its own — say the useful thing.
 			if strings.HasPrefix(st.Driver, plugin.DriverPrefix) {
-				fmt.Printf("%-20s  SKIP (%s is provided by a plugin, which only runs inside the server — use the admin API or the web UI for this storage)\n", st.Name, st.Driver)
+				fmt.Printf("%-20s  SKIP (%s is provided by a plugin, which only runs inside the server - use the admin API or the web UI for this storage)\n", st.Name, st.Driver)
 				continue
 			}
 			fmt.Printf("%-20s  SKIP (%v)\n", st.Name, err)
@@ -455,15 +456,59 @@ func validateStorageInput(driver, configJSON string) error {
 	}
 	if d, ok := storage.DescriptorFor(driver); ok {
 		if missing := d.MissingRequired(cfgMap); len(missing) > 0 {
-			fmt.Fprintf(os.Stderr, "warning: %s config is missing %s — the driver will fail to start unless it can pick them up elsewhere\n",
+			fmt.Fprintf(os.Stderr, "warning: %s config is missing %s - the driver will fail to start unless it can pick them up elsewhere\n",
 				driver, strings.Join(missing, ", "))
 		}
 	}
 	return nil
 }
 
+// storageAddSync works out the sync settings `filex storage add` writes: the
+// mode (validated as the admin API validates it - `lazy` for local storages
+// only), the scan interval, and the lazy catalogue's settings, written into
+// the storage's config under the keys the admin form writes (lazy_fill,
+// lazy_max_watches, lazy_watch_ttl) and held to the same bounds. lazy carries
+// only the lazy flags that were given; one given without `--sync-mode lazy` is
+// refused rather than stored for a mode that never reads it.
+func storageAddSync(driver, mode string, intervalS int, configJSON string, lazy map[string]any) (model.SyncMode, int, string, error) {
+	m := model.SyncMode(strings.TrimSpace(mode))
+	if m == "" {
+		m = model.SyncModePoll
+	}
+	if err := model.ValidateSyncModeFor(m, driver); err != nil {
+		return "", 0, "", err
+	}
+	if intervalS <= 0 {
+		return "", 0, "", fmt.Errorf("--sync-interval must be a positive number of seconds")
+	}
+	if len(lazy) > 0 && m != model.SyncModeLazy {
+		return "", 0, "", fmt.Errorf("--lazy-fill, --lazy-max-watches and --lazy-watch-ttl apply to --sync-mode lazy only")
+	}
+	if m != model.SyncModeLazy {
+		return m, intervalS, configJSON, nil
+	}
+	cfg := map[string]any{}
+	if strings.TrimSpace(configJSON) != "" {
+		if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+			return "", 0, "", fmt.Errorf("--config is not a JSON object: %w", err)
+		}
+	}
+	for k, v := range lazy {
+		cfg[k] = v
+	}
+	if err := storage.ValidateLazyConfig(cfg); err != nil {
+		return "", 0, "", err
+	}
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		return "", 0, "", err
+	}
+	return m, intervalS, string(out), nil
+}
+
 func storageAddCmd() *cobra.Command {
-	var name, driver, mount, configJSON string
+	var name, driver, mount, configJSON, syncMode, lazyFill string
+	var syncInterval, lazyMaxWatches, lazyWatchTTL int
 	c := &cobra.Command{
 		Use:   "add",
 		Short: "Add a new storage row",
@@ -475,6 +520,20 @@ func storageAddCmd() *cobra.Command {
 			// the sync worker tripped over it. Same validation as the API
 			// now, from the same driver descriptors.
 			if err := validateStorageInput(driver, configJSON); err != nil {
+				return err
+			}
+			lazy := map[string]any{}
+			if cmd.Flags().Changed("lazy-fill") {
+				lazy[storage.LazyFillKey] = lazyFill
+			}
+			if cmd.Flags().Changed("lazy-max-watches") {
+				lazy[storage.LazyMaxWatchesKey] = lazyMaxWatches
+			}
+			if cmd.Flags().Changed("lazy-watch-ttl") {
+				lazy[storage.LazyWatchTTLKey] = lazyWatchTTL
+			}
+			mode, interval, cfgJSON, err := storageAddSync(driver, syncMode, syncInterval, configJSON, lazy)
+			if err != nil {
 				return err
 			}
 			cfg, err := loadConfig()
@@ -495,9 +554,9 @@ func storageAddCmd() *cobra.Command {
 				Name:          name,
 				Driver:        driver,
 				MountPath:     mount,
-				ConfigJSON:    []byte(configJSON),
-				SyncMode:      model.SyncModePoll,
-				SyncIntervalS: 900,
+				ConfigJSON:    []byte(cfgJSON),
+				SyncMode:      mode,
+				SyncIntervalS: interval,
 				Enabled:       true,
 			}
 			created, err := store.CreateStorage(context.Background(), st)
@@ -512,6 +571,11 @@ func storageAddCmd() *cobra.Command {
 	c.Flags().StringVar(&driver, "driver", "", "driver: "+strings.Join(storage.Names(), " | "))
 	c.Flags().StringVar(&mount, "mount", "/", "logical mount path")
 	c.Flags().StringVar(&configJSON, "config", "{}", "JSON object with driver-specific options")
+	c.Flags().StringVar(&syncMode, "sync-mode", string(model.SyncModePoll), "how the catalogue follows the storage: poll | fsnotify | ondemand | lazy (lazy: local storages only)")
+	c.Flags().IntVar(&syncInterval, "sync-interval", 900, "seconds between two scans")
+	c.Flags().StringVar(&lazyFill, "lazy-fill", "", "lazy: "+storage.LazyFillBackground+" (catalogue the rest in the background) | "+storage.LazyFillOnOpen+" (only the folders people open)")
+	c.Flags().IntVar(&lazyMaxWatches, "lazy-max-watches", storage.LazyMaxWatchesDefault, "lazy: the most visited folders watched at once")
+	c.Flags().IntVar(&lazyWatchTTL, "lazy-watch-ttl", storage.LazyWatchTTLDefault, "lazy: minutes a visited folder stays watched after it was last opened")
 	return c
 }
 
@@ -562,22 +626,29 @@ func thumbCmd() *cobra.Command {
 	return c
 }
 
-// thumbBackfillCmd walks every persisted file node and (re)dispatches the
-// thumbnail pipeline. Useful after deploying a new image with extra deps
-// (e.g. ffmpeg / ghostscript / libreoffice) so existing rows produce thumbs.
+// thumbBackfillCmd walks the file nodes in scope and draws the thumbnails
+// that are missing, left pending or stale (the file changed after its
+// render). Useful after deploying a new image with extra deps (e.g. ffmpeg /
+// ghostscript) or connecting OnlyOffice, so existing rows produce thumbs. It is the same
+// walk as Admin → Tools → Thumbnail repair (server.BackfillThumbs).
 //
-//	filex thumb backfill                      — every enabled storage
-//	filex thumb backfill --storage local      — single storage by name
-//	filex thumb backfill --storage 2          — single storage by id
-//	filex thumb backfill --limit 100          — first 100 files (across all storages)
-//	filex thumb backfill --retry-failed       — re-run rows in state=failed
-//	filex thumb backfill --concurrency 8      — wider worker pool
+//	filex thumb backfill                          — every enabled storage
+//	filex thumb backfill --storage local          — single storage by name
+//	filex thumb backfill --storage 2              — single storage by id
+//	filex thumb backfill --storage 2 --path /Pics — one folder (and everything in it) or one file
+//	filex thumb backfill --limit 100              — first 100 files (across all storages)
+//	filex thumb backfill --retry-failed           — re-run rows in state=failed
+//	filex thumb backfill --rebuild                — draw every file again
+//	filex thumb backfill --concurrency 8          — wider worker pool
 func thumbBackfillCmd() *cobra.Command {
 	var (
 		storageRef    string
 		limit         int
 		retryFailed   bool
 		retrySkipped  bool
+		stale         bool
+		rebuild       bool
+		pathRef       string
 		concurrency   int
 		progressEvery int
 	)
@@ -618,6 +689,9 @@ func thumbBackfillCmd() *cobra.Command {
 				Limit:         limit,
 				RetryFailed:   retryFailed,
 				RetrySkipped:  retrySkipped,
+				Stale:         stale,
+				All:           rebuild,
+				Path:          pathRef,
 				Concurrency:   concurrency,
 				ProgressEvery: progressEvery,
 				OnProgress: func(st server.BackfillStats) {
@@ -657,6 +731,9 @@ func thumbBackfillCmd() *cobra.Command {
 	c.Flags().IntVar(&limit, "limit", 0, "stop after N files (0 = unlimited)")
 	c.Flags().BoolVar(&retryFailed, "retry-failed", false, "re-run thumbnails currently in state=failed")
 	c.Flags().BoolVar(&retrySkipped, "retry-skipped", false, "re-run thumbnails currently in state=skipped (use after the pipeline gains coverage for previously-skipped kinds)")
+	c.Flags().BoolVar(&stale, "stale", true, "also draw again thumbnails whose file changed after they were drawn (--stale=false to skip them)")
+	c.Flags().BoolVar(&rebuild, "rebuild", false, "draw every file in scope again, whatever state its thumbnail is in")
+	c.Flags().StringVar(&pathRef, "path", "", "limit to one file, or one folder and everything in it (storage-relative, e.g. /Photos/2024); needs --storage")
 	c.Flags().IntVar(&concurrency, "concurrency", 4, "worker pool size")
 	c.Flags().IntVar(&progressEvery, "progress-every", 25, "emit a progress line every N processed files (0 = silent)")
 	return c

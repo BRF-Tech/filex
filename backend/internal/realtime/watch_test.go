@@ -127,7 +127,7 @@ func TestWatchIgnoresDerivedSizeRefreshes(t *testing.T) {
 // never be sent one.
 func TestWatcherIsInvisibleInPresence(t *testing.T) {
 	h := fastHub()
-	w := NewClient(1, "Burak (filex desktop)", 16)
+	w := NewClient(1, "Alice (filex desktop)", 16)
 	h.Watch(w, []WatchRoot{{StorageID: 1, Dir: "proj", Display: "docs://proj"}})
 	viewer := NewClient(2, "Ayşe", 16)
 	h.Subscribe(viewer, 1, "proj", "docs://proj")

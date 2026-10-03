@@ -123,6 +123,13 @@ describe("this repository's release plan", () => {
     expect(gate.script.indexOf('go test')).toBeGreaterThan(fixture);
   });
 
+  it('tags the Go module under the directory it lives in (backend/vX.Y.Z)', () => {
+    // stages.mjs signs and pushes `${plan.backendTagPrefix}${tag}`; a plan
+    // without the prefix had the 0.50 sign stage look for "undefinedv0.50.0".
+    expect(p.backendTagPrefix).toBe('backend/');
+    expect(fs.existsSync(path.join(REPO, p.backendTagPrefix, 'go.mod')), 'no Go module under the tag prefix').toBe(true);
+  });
+
   it('signs with the maintainer key and keeps only the contact addresses public', () => {
     expect(p.signingKeys).toEqual(['EFA3B1262FD992800DBBB5E3A8FEBA97FF786513']);
     expect(p.privateHosts.forbid.length).toBeGreaterThanOrEqual(2);

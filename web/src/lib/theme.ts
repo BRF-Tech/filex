@@ -141,3 +141,16 @@ if (typeof window !== 'undefined' && window.matchMedia) {
     if (getStoredTheme() === 'auto') applyStoredTheme();
   });
 }
+
+// ...and to another tab of this browser choosing a mode: the whole window
+// repaints, so `liveTheme` (and every screen handed it) turns with it.
+// ⚠ This used to be done by hand in three views (Explore, Connections,
+// Editor), each with its own `storage` listener and its own MutationObserver
+// on `<html>` - and the listener set only the view's local copy, so the
+// explorer turned dark inside a shell that stayed light. One listener here,
+// next to the one writer of `<html class="dark">` (#74).
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === KEY) applyStoredTheme();
+  });
+}

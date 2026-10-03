@@ -38,9 +38,22 @@ func thumbServable(t *model.Thumbnail) bool {
 // stamps the other instance's endpoint cannot verify, and the failure is
 // invisible: every in-repo client falls back to its authenticated fetch and
 // only a bare <img> in an embed goes blank.
-func thumbURL(signer *thumb.Signer, id int64) string {
+//
+// `v` is the render's time (0.50). The endpoint answers with a one-day
+// private cache, so a URL that did not change when the picture did kept the
+// old picture on screen for a day after a re-render; the explorer's own
+// thumbnail cache is keyed on it for the same reason. The signature does not
+// cover it: it names a version of a picture the caller may already see.
+func thumbURL(signer *thumb.Signer, id int64, t *model.Thumbnail) string {
 	u := "/api/files/thumb/" + strconv.FormatInt(id, 10)
-	if q := signer.Query(id); q != "" {
+	q := signer.Query(id)
+	if t != nil && t.GeneratedAt != nil {
+		if q != "" {
+			q += "&"
+		}
+		q += "v=" + strconv.FormatInt(t.GeneratedAt.UnixMilli(), 10)
+	}
+	if q != "" {
 		u += "?" + q
 	}
 	return u

@@ -3,21 +3,21 @@
 //
 // In multi-tenant mode each provider row may carry its own OIDC config
 // (issuer/client/secret — e.g. one Keycloak realm per tenant, each on its own
-// host). The dispatcher resolves the request Host → provider → a lazily
-// initialised, cached oidc.Driver pinned to that provider (SetProviderID), so
-// the JIT upsert stamps users with the right tenant. Hosts that resolve to no
-// provider — or to a provider without OIDC config — fall back to the
-// config-file driver (the single-tenant/supertenant realm), so the flag being
-// on never breaks the operator's own login.
+// host). TenantDriver builds a lazily initialised, cached oidc.Driver pinned
+// to that provider (SetProviderID): it signs people in to that tenant only.
 //
-// The OIDC callback arrives on the same host that started the flow (each
-// tenant's redirect URL lives on its own host), so StartFlow and
-// HandleCallback resolve to the same provider by construction.
+// ⚠ A sign-in is started and finished through authsetup's flows
+// (oidcflow.go), which name the tenant it is for. The host dispatch below
+// (resolve, falling back to the config-file driver) is what EndSessionURL
+// uses; a callback without its flow is refused on a multi-tenant install,
+// never answered by the fallback (docs/SSO.md, "Which account an SSO sign-in
+// opens").
 package multioidc
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -83,10 +83,27 @@ func (m *Dispatcher) EndSessionURL(r *http.Request, idToken, postLogoutRedirect 
 	return lo.EndSessionURL(r, idToken, postLogoutRedirect)
 }
 
+// HasOwnOIDC reports whether a tenant's provider row carries an OIDC of its
+// own: the tenant's own SSO (docs/TENANT-ADMIN.md), started for that tenant
+// only.
+func HasOwnOIDC(p *model.Provider) bool {
+	return p != nil && p.AuthType == model.AuthTypeOIDC && p.OIDCIssuer != "" && p.OIDCClientID != ""
+}
+
+// TenantDriver is the driver of a tenant's own OIDC (its provider row), built
+// once per configuration and cached; host is the address the flow runs on, for
+// the default redirect URI.
+func (m *Dispatcher) TenantDriver(ctx context.Context, p *model.Provider, host string) (auth.OIDCDriver, error) {
+	if !HasOwnOIDC(p) {
+		return nil, errors.New("oidc: this tenant has no identity provider of its own")
+	}
+	return m.driverFor(ctx, p, host)
+}
+
 // resolve maps the request host to a tenant OIDC driver, or the fallback.
 func (m *Dispatcher) resolve(r *http.Request) (auth.OIDCDriver, error) {
 	p, _ := m.store.GetProviderByHost(r.Context(), RequestHost(r))
-	if p == nil || p.AuthType != model.AuthTypeOIDC || p.OIDCIssuer == "" || p.OIDCClientID == "" {
+	if !HasOwnOIDC(p) {
 		if m.fallback == nil {
 			return nil, errors.New("oidc: no identity provider for this host")
 		}
@@ -106,7 +123,7 @@ func (m *Dispatcher) driverFor(ctx context.Context, p *model.Provider, host stri
 		// (FILEX_BASE_PATH) every tenant host serves filex under it too.
 		redirect = "https://" + host + basepath.From(ctx) + "/api/auth/oidc/callback"
 	}
-	hash := strings.Join([]string{p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret, redirect, p.RoleClaim, p.AdminGroup}, "\x00")
+	hash := strings.Join([]string{p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret, redirect, p.RoleClaim, p.AdminGroup, fmt.Sprint(p.OIDCTrustEmail)}, "\x00")
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -121,6 +138,7 @@ func (m *Dispatcher) driverFor(ctx context.Context, p *model.Provider, host stri
 		"redirect_url":  redirect,
 		"role_claim":    p.RoleClaim,
 		"admin_group":   p.AdminGroup,
+		"trust_email":   p.OIDCTrustEmail,
 	}); err != nil {
 		return nil, err
 	}

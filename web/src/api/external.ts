@@ -119,7 +119,20 @@ export interface ExternalTestResult {
     url?: string;
     code?: number;
     detail?: string;
+    /** What to look at first after a failed download (`check_jwt`, `jwt_off`, `route`, `filex_refused`). */
+    advice?: string;
+    /**
+     * Did the document server refuse a request with no token? `false` means JWT
+     * is off on it (the `jwt_not_enforced` advisory says so on the card);
+     * absent means it could not be told.
+     */
+    jwtEnforced?: boolean;
   };
+  /**
+   * The result is about the values in the form, which are not saved: the
+   * server probed them and stored nothing (issue #80).
+   */
+  unsaved: boolean;
 }
 
 /**
@@ -181,7 +194,16 @@ export const ExternalApi = {
    * server's own attempt to fetch a one-shot URL from filex. The browser leg
    * is separate — see `probeExternalFromBrowser`.
    */
-  async test(id: ExternalService['id']): Promise<ExternalTestResult> {
+  async test(id: ExternalService['id'], draft?: ExternalServiceUpdate): Promise<ExternalTestResult> {
+    // ⚠ The form's values, when given: "Test now" tests what is in the boxes,
+    // without saving it (issue #80). An empty secret keeps the stored one.
+    const body: Record<string, unknown> = {};
+    if (draft) {
+      if (draft.enabled !== undefined) body.enabled = draft.enabled;
+      if (draft.url !== undefined) body.url = draft.url ?? '';
+      if (draft.jwt_secret) body.secret = draft.jwt_secret;
+      if (draft.callback_url !== undefined) body.callback_url = draft.callback_url ?? '';
+    }
     const { data } = await api.post<{
       ok: boolean;
       name: string;
@@ -203,8 +225,11 @@ export const ExternalApi = {
         url?: string;
         code?: number;
         detail?: string;
+        advice?: string;
+        jwt_enforced?: boolean;
       };
-    }>(`/admin/external/${id}/test`);
+      unsaved?: boolean;
+    }>(`/admin/external/${id}/test`, draft ? body : undefined);
     if (typeof data.public_url === 'string') lastPublicURL = data.public_url;
     return {
       service: id,
@@ -220,7 +245,10 @@ export const ExternalApi = {
         url: data.service_to_filex?.url,
         code: data.service_to_filex?.code,
         detail: data.service_to_filex?.detail,
+        advice: data.service_to_filex?.advice,
+        jwtEnforced: data.service_to_filex?.jwt_enforced,
       },
+      unsaved: data.unsaved === true,
     };
   },
 };

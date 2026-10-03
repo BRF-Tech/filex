@@ -1,6 +1,9 @@
 package smb
 
-import "github.com/brf-tech/filex/backend/internal/storage"
+import (
+	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
+)
 
 func intp(v int) *int { return &v }
 
@@ -12,7 +15,7 @@ func init() {
 		Driver:  "smb",
 		Label:   "SMB / CIFS (NAS)",
 		I18nKey: "storages.driver.smb",
-		Fields: []storage.Field{
+		Fields: append([]storage.Field{
 			{
 				Key:         "host",
 				Type:        storage.FieldString,
@@ -83,16 +86,20 @@ func init() {
 				Root:        true,
 				Aliases:     []string{"base_path", "path"},
 			},
-			{
-				Key:      "dial_timeout_s",
-				Type:     storage.FieldInt,
-				Label:    "Connect timeout (seconds)",
-				I18nKey:  "storages.fields.dialTimeout",
-				Default:  15,
-				Min:      intp(1),
-				Max:      intp(300),
-				Advanced: true,
-			},
-		},
+		}, timeoutFields()...),
 	})
+}
+
+// timeoutFields are the three timeout settings (issue #75, timeout.go): the
+// same words and bounds as FTP's and SFTP's. `dial_timeout_s`, the connect
+// timeout this driver had before, is the attempt timeout's old name - a
+// storage saved with it keeps its value.
+func timeoutFields() []storage.Field {
+	fields := defaults.Fields(stall.ServerTexts(stall.AttemptText))
+	for i := range fields {
+		if fields[i].Key == "attempt_timeout_s" {
+			fields[i].Aliases = []string{"dial_timeout_s"}
+		}
+	}
+	return fields
 }

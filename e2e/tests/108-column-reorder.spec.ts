@@ -284,10 +284,16 @@ test.describe('List view — moving a column', () => {
 
   test('a column can never be dropped past the star', async ({ page }) => {
     await openList(page);
+    /* ⚠ Past the star but INSIDE the window. At 1280 px the star ends ~50 px
+       from the right edge, so "60 px past it" was off-screen: Chromium and
+       WebKit deliver that move, headless Firefox drops it, and the next
+       reflow under the remembered pointer arrives as a synthetic move at
+       clientX 0 (measured 2026-10-01) — the marker went away for a reason no
+       person with a mouse produces. */
     const star = await page.evaluate(() => {
       const el = document.querySelector('.fe-list__head .fe-list__col--star')!;
       const r = el.getBoundingClientRect();
-      return { x: r.right + 60, y: r.top + r.height / 2 };
+      return { x: Math.min(r.right + 60, window.innerWidth - 4), y: r.top + r.height / 2 };
     });
     await dragHeader(page, 'type', star);
 

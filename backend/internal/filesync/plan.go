@@ -288,11 +288,11 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 				out = append(out, Action{Kind: ActionUpload, Rel: rel, Reason: "new file"})
 			case opts.FirstRun:
 				out = append(out, Action{Kind: ActionUpload, Rel: rel,
-					Reason: "first run — nothing is deleted"})
+					Reason: "first run - nothing is deleted"})
 			case b.Local != l.Signature():
 				// Deleted on the server, but edited here since. The edit wins.
 				out = append(out, Action{Kind: ActionUpload, Rel: rel,
-					Reason: "deleted on the server but edited here — kept"})
+					Reason: "deleted on the server but edited here - kept"})
 			default:
 				out = append(out, Action{Kind: ActionDeleteLocal, Rel: rel,
 					Reason: "deleted on the server"})
@@ -305,10 +305,10 @@ func Plan(local, remote Snapshot, base Baseline, opts Options) []Action {
 					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "new file on the server"})
 			case opts.FirstRun:
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "first run — nothing is deleted"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "first run - nothing is deleted"})
 			case b.Remote != r.Signature():
 				out = append(out, Action{Kind: ActionDownload, Rel: rel,
-					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "deleted here but edited on the server — kept"})
+					RemoteMod: r.ModMillis, RemoteSize: r.Size, Reason: "deleted here but edited on the server - kept"})
 			default:
 				out = append(out, Action{Kind: ActionDeleteRemot, Rel: rel,
 					Reason: "deleted locally"})

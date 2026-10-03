@@ -1,0 +1,106 @@
+{{- /*
+The bundled S3 server: Versity S3 Gateway, posix backend. It replaced the
+bundled MinIO, whose image (minio/minio) is no longer published.
+
+⚠ The old `minio` block is refused, not ignored. Its data is on the PVC
+<release>-minio-data, in MinIO's own format, and an upgrade that simply stops
+rendering that PVC makes Helm DELETE it. So a values file that still turns
+MinIO on stops the render and says how to keep the data first.
+*/ -}}
+{{- if .Values.minio.enabled }}
+{{- $old := printf "%s-minio" (include "filex.fullname" .) }}
+{{- fail (printf "minio.enabled: the bundled MinIO is gone (minio/minio is no longer published on Docker Hub); the bundled S3 server is now versitygw.*. Your data is on the PVC %s-data, which an upgrade that drops MinIO DELETES. Keep MinIO first, so it also goes on serving while you copy: kubectl annotate deployment/%s service/%s pvc/%s-data helm.sh/resource-policy=keep. Then upgrade with minio.enabled=false and versitygw.enabled=true, copy the bucket across with rclone and point the storage at the new server (docs/STORAGE.md, \"Moving off the bundled MinIO\"). Delete the three kept objects by hand when you are done." $old $old $old $old) }}
+{{- end }}
+{{- if .Values.versitygw.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "filex.fullname" . }}-versitygw
+  labels:
+    {{- include "filex.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: versitygw
+  ports:
+    - name: s3
+      port: 7070
+      targetPort: 7070
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "filex.fullname" . }}-versitygw-data
+  labels:
+    {{- include "filex.labels" . | nindent 4 }}
+  annotations:
+    # Never deleted by an upgrade or an uninstall: the objects (and, under
+    # versions/, their older versions) are the files themselves.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.versitygw.storage }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "filex.fullname" . }}-versitygw
+  labels:
+    {{- include "filex.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: versitygw
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: versitygw
+    spec:
+      containers:
+        - name: versitygw
+          image: {{ .Values.versitygw.image }}
+          # A bucket is a directory of the posix root: the default one is made
+          # before the gateway starts, so an s3 default storage seeds cleanly.
+          command: ["/bin/sh", "-c", "mkdir -p \"/data/root/$S3_BUCKET\" /data/versions && exec /usr/local/bin/docker-entrypoint.sh"]
+          env:
+            - name: ROOT_ACCESS_KEY
+              value: {{ .Values.versitygw.accessKey | quote }}
+            - name: ROOT_SECRET_KEY
+              value: {{ .Values.versitygw.secretKey | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.versitygw.bucket | quote }}
+            - name: VGW_BACKEND
+              value: posix
+            - name: VGW_BACKEND_ARG
+              value: /data/root
+            # S3 object versioning, per bucket (PutBucketVersioning); the
+            # older versions live outside the posix root, as the gateway needs.
+            - name: VGW_VERSIONING_DIR
+              value: /data/versions
+            - name: VGW_HEALTH
+              value: /health
+          ports:
+            - containerPort: 7070
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 7070
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "filex.fullname" . }}-versitygw-data
+{{- end }}

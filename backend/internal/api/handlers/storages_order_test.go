@@ -218,12 +218,12 @@ func TestStorageOrder_ATenantOrdersOnlyItsOwn(t *testing.T) {
 	srv, client, store := multiTenantServer(t)
 	ctx := context.Background()
 
-	minePID, email, pw := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
-	theirsPID, _, _ := seedTenant(t, store, "arasboya", "admin@arasboya.test", false)
-	m1 := seedStorageFor(t, store, minePID, "diyetlif-1")
-	m2 := seedStorageFor(t, store, minePID, "diyetlif-2")
-	t1 := seedStorageFor(t, store, theirsPID, "arasboya-1")
-	t2 := seedStorageFor(t, store, theirsPID, "arasboya-2")
+	minePID, email, pw := seedTenant(t, store, "globex", "admin@globex.test", false)
+	theirsPID, _, _ := seedTenant(t, store, "initech", "admin@initech.test", false)
+	m1 := seedStorageFor(t, store, minePID, "globex-1")
+	m2 := seedStorageFor(t, store, minePID, "globex-2")
+	t1 := seedStorageFor(t, store, theirsPID, "initech-1")
+	t2 := seedStorageFor(t, store, theirsPID, "initech-2")
 	require.NoError(t, store.SetStorageOrder(ctx, []int64{t2.ID, t1.ID}, nil))
 
 	testutil.LoginAs(t, srv, client, email, pw)
@@ -254,7 +254,7 @@ func TestStorageOrder_ATenantOrdersOnlyItsOwn(t *testing.T) {
 
 	// The tenant admin's list is their own storages, in their order.
 	names, _ := adminOrder(t, client, srv.URL)
-	require.Equal(t, []string{"diyetlif-2", "diyetlif-1"}, names)
+	require.Equal(t, []string{"globex-2", "globex-1"}, names)
 
 	// Resetting clears their own positions — and only theirs.
 	st, out = putOrder(t, client, srv.URL, map[string]any{"ids": []int64{}})

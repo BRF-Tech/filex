@@ -67,6 +67,26 @@ export type PluginMenuNode = AppliesNodeLike & {
   lock?: { plugin?: string } | null;
 };
 
+/**
+ * The sentence for a greyed row: what the server lacks and what an
+ * administrator does about it. A binary engine is installed (and filex
+ * restarted); the office engine (`kind: "office"`, since 0.50) is a document
+ * server CONNECTED under External services - "install it and restart" sent an
+ * administrator looking for a LibreOffice package filex no longer runs.
+ */
+export function gatedNeedWords(
+  need: PluginGatedRule['needs'],
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  switch (need.kind) {
+    case 'engine':
+      return t('plugin.needs_engine', { name: need.name });
+    case 'office':
+      return t('plugin.needs_office', { name: need.name });
+  }
+  return t('plugin.needs_other', { name: need.name });
+}
+
 /** The menu key for an action row: the server's, or `plugin:<plugin>/<id>`. */
 export function pluginActionKey(a: Pick<PluginActionRow, 'plugin' | 'id' | 'key'>): string {
   return a.key || `plugin:${a.plugin}/${a.id}`;
@@ -202,7 +222,8 @@ export function pluginMenuRows(
   // administrators, hidden for everybody else"). The server sends `gated`
   // to administrators only; here a row the selection would take once the
   // missing piece is installed is drawn disabled, saying what is missing
-  // ("LibreOffice is not installed on this server").
+  // ("FFmpeg is not installed on this server", "Office documents need
+  // ONLYOFFICE, which is not connected to this server").
   const greyed = new Map<PluginActionRow, string>();
   if (ctx.needWords) {
     for (const a of actions) {

@@ -1,14 +1,14 @@
 # filex — full stack (production-shaped) with toggleable integrations.
 #
 # Always-on core:  filex + PostgreSQL (DB) + Redis (queue) + Caddy (HTTPS proxy)
-# Opt-in add-ons:  ONLYOFFICE · draw.io · MinIO (S3)
+# Opt-in add-ons:  ONLYOFFICE · draw.io · S3 server (Versity S3 Gateway)
 #                  · ClamAV (antivirus — this image ships no scanner)
 #
 # ── Toggling add-ons ────────────────────────────────────────────────────
 # Every add-on is a Compose *profile*. Turn one on/off in your .env by editing
 # COMPOSE_PROFILES (comma list) together with the matching FILEX_*_URL:
 #
-#   COMPOSE_PROFILES=onlyoffice,drawio,minio,clamav
+#   COMPOSE_PROFILES=onlyoffice,drawio,versitygw,clamav
 #
 # To drop ONLYOFFICE tomorrow: remove `onlyoffice` from COMPOSE_PROFILES and
 # blank FILEX_ONLYOFFICE_URL, then:
@@ -21,9 +21,11 @@
 # 3. docker compose -f docker-compose.full.yml --env-file .env up -d
 # 4. docker compose -f docker-compose.full.yml logs -f filex   # first-run admin creds
 #
-# Then add an S3 storage in the admin UI backed by the bundled MinIO:
-#   driver=s3, endpoint=http://minio:9000, path_style=true, region=auto,
-#   bucket=<your bucket>, prefix=filex, access_key/secret_key = MINIO_ROOT_*.
+# Then add an S3 storage in the admin UI backed by the bundled S3 server:
+#   driver=s3, endpoint=http://versitygw:7070, path_style=true,
+#   region=us-east-1 (part of the signature: `auto` is refused),
+#   bucket=<your bucket>, prefix=filex, access_key/secret_key = S3_ACCESS_KEY /
+#   S3_SECRET_KEY. Or seed it as the default storage (.env, Option A).
 
 services:
   filex:
@@ -88,6 +90,23 @@ services:
       # Mint with: filex e2e-escrow keygen  (prints the private half ONCE
       # and stores it nowhere -- keep it where you keep a root password).
       FILEX_INSTALLATION_E2E_ESCROW_KEY: ${FILEX_INSTALLATION_E2E_ESCROW_KEY:-}
+      # Which peers may tell filex a client's address (X-Forwarded-For /
+      # X-Real-IP): the address the sign-in attempt limit counts by and the
+      # audit log records. Blank = "auto": this machine and the containers on
+      # filex's own networks - the caddy service on this compose network
+      # included - never a network's gateway, never the LAN.
+      # ⚠ A CDN in front of Caddy (Cloudflare's proxied DNS, say) is a PUBLIC
+      # hop: list its published ranges (https://www.cloudflare.com/ips/) or
+      # every visitor resolves to an edge address and shares its sign-in
+      # counter - ten wrong passwords from anyone lock out everybody who
+      # arrives through that edge. A list REPLACES the default, so keep auto:
+      #   FILEX_TRUSTED_PROXIES=auto,173.245.48.0/20,103.21.244.0/22,...
+      # ⚠ A proxy on the HOST instead of the caddy service reaches filex
+      # through a published port and arrives from this network's gateway: list
+      # it ("auto, <gateway>") only with the port published on 127.0.0.1.
+      # The Sign-in security admin page names such a peer, offers to add it,
+      # and wins once it saves a list. docs/CONFIGURATION.md -> "Trusted proxies".
+      FILEX_TRUSTED_PROXIES: ${FILEX_TRUSTED_PROXIES:-}
       # SFTP / FTPS / NFS each open a LISTENER, so they stay off until asked
       # for — and each needs its port published below and opened on the
       # firewall. ⚠ FTPS also needs the whole passive range, or transfers hang
@@ -136,9 +155,9 @@ services:
       FILEX_SITE_NAME: ${FILEX_SITE_NAME:-}
       FILEX_TRASH_RETENTION_DAYS: ${FILEX_TRASH_RETENTION_DAYS:-}
       # Default storage seeded on first boot. Default = a local folder on the
-      # ./files bind-mount. Switch to the bundled MinIO by setting DRIVER=s3 +
-      # the S3 vars in .env and enabling the minio profile (minio-init creates
-      # the bucket).
+      # ./files bind-mount. Switch to the bundled S3 server by setting
+      # DRIVER=s3 + the S3 vars in .env and enabling the versitygw profile (it
+      # makes the bucket itself on start).
       FILEX_DEFAULT_STORAGE_DRIVER: ${FILEX_DEFAULT_STORAGE_DRIVER:-local}
       FILEX_DEFAULT_STORAGE_PATH: ${FILEX_DEFAULT_STORAGE_PATH:-/srv/files}
       # Connect an existing external storage of any driver (sftp/webdav/ftp):
@@ -147,7 +166,7 @@ services:
       FILEX_DEFAULT_STORAGE_S3_BUCKET: ${FILEX_DEFAULT_STORAGE_S3_BUCKET:-}
       FILEX_DEFAULT_STORAGE_S3_PREFIX: ${FILEX_DEFAULT_STORAGE_S3_PREFIX:-files}
       FILEX_DEFAULT_STORAGE_S3_ENDPOINT: ${FILEX_DEFAULT_STORAGE_S3_ENDPOINT:-}
-      FILEX_DEFAULT_STORAGE_S3_REGION: ${FILEX_DEFAULT_STORAGE_S3_REGION:-auto}
+      FILEX_DEFAULT_STORAGE_S3_REGION: ${FILEX_DEFAULT_STORAGE_S3_REGION:-auto}   # us-east-1 for the bundled server
       FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY: ${FILEX_DEFAULT_STORAGE_S3_ACCESS_KEY:-}
       FILEX_DEFAULT_STORAGE_S3_SECRET_KEY: ${FILEX_DEFAULT_STORAGE_S3_SECRET_KEY:-}
       FILEX_DEFAULT_STORAGE_S3_PATH_STYLE: ${FILEX_DEFAULT_STORAGE_S3_PATH_STYLE:-true}
@@ -211,7 +230,6 @@ services:
       # you don't run that add-on — no public cert is requested for it.
       ONLYOFFICE_DOMAIN: ${ONLYOFFICE_DOMAIN:-onlyoffice.localhost}
       DRAWIO_DOMAIN: ${DRAWIO_DOMAIN:-drawio.localhost}
-      MINIO_CONSOLE_DOMAIN: ${MINIO_CONSOLE_DOMAIN:-minio.localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -256,30 +274,39 @@ services:
       - clamav-db:/var/lib/clamav
     restart: unless-stopped
 
-  minio:
-    image: minio/minio:latest
-    profiles: ["minio"]
-    command: ["server", "/data", "--console-address", ":9001"]
+  # The bundled S3 server (versitygw profile): Versity S3 Gateway, posix
+  # backend. Every object is a plain file under s3-data/<bucket>/<key>, and
+  # a bucket is a directory: the entrypoint makes the default one before the
+  # gateway starts, so an s3 default storage seeds cleanly.
+  # ⚠ The region is part of the signature: us-east-1 (filex signs a blank
+  #   region as `auto`, which the gateway refuses).
+  # Versioning is available (s3-versions holds the older versions; a bucket
+  # turns it on with PutBucketVersioning). filex keeps its own versions and
+  # does not need it; see docs/STORAGE.md, "A local S3 server".
+  # ⚠ This replaced the bundled MinIO (minio/minio is no longer published).
+  #   An old minio-data volume is in MinIO's own format: copy it across
+  #   first (docs/STORAGE.md, "Moving off the bundled MinIO").
+  versitygw:
+    image: versity/versitygw:v1.8.0
+    profiles: ["versitygw"]
+    entrypoint: ["/bin/sh", "-c", "mkdir -p \"/data/$$S3_BUCKET\" && exec /usr/local/bin/docker-entrypoint.sh"]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      ROOT_ACCESS_KEY: ${S3_ACCESS_KEY}
+      ROOT_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${FILEX_DEFAULT_STORAGE_S3_BUCKET:-filex}
+      VGW_BACKEND: posix
+      VGW_BACKEND_ARG: /data
+      VGW_VERSIONING_DIR: /versions
+      VGW_HEALTH: /health
     volumes:
-      - minio-data:/data
+      - s3-data:/data
+      - s3-versions:/versions
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7070/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
-
-  # One-shot: create the default bucket in the bundled MinIO so an s3 default
-  # storage seeds cleanly. Runs only with the minio profile.
-  minio-init:
-    image: minio/mc:latest
-    profiles: ["minio"]
-    depends_on:
-      - minio
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      BUCKET: ${FILEX_DEFAULT_STORAGE_S3_BUCKET:-filex}
-    entrypoint: ["/bin/sh", "-c", "until mc alias set m http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\"; do sleep 2; done; mc mb -p \"m/$$BUCKET\"; echo bucket ready"]
-    restart: "no"
 
 volumes:
   filex-data:
@@ -287,6 +314,7 @@ volumes:
   postgres-data:
   redis-data:
   onlyoffice-data:
-  minio-data:
+  s3-data:
+  s3-versions:
   caddy-data:
   caddy-config:

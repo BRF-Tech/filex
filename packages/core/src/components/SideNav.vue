@@ -994,7 +994,7 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
             </p>
             <ul
               class="fe-sidenav__group"
-              :aria-label="`${t('sidenav.tags')} — ${t(`sidenav.tags.${g.kind}`)}`"
+              :aria-label="`${t('sidenav.tags')} - ${t(`sidenav.tags.${g.kind}`)}`"
             >
               <li v-for="tag in g.visible" :key="`${tag.kind}:${tag.name}`">
                 <button
@@ -1106,12 +1106,12 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
               }"
               :title="
                 sharedSet.has(s.name)
-                  ? `${s.label || s.name} — ${t('sidenav.storage.shared')}`
+                  ? `${s.label || s.name} - ${t('sidenav.storage.shared')}`
                   : s.label || s.name
               "
               :aria-label="
                 sharedSet.has(s.name)
-                  ? `${s.label || s.name} — ${t('sidenav.storage.shared')}`
+                  ? `${s.label || s.name} - ${t('sidenav.storage.shared')}`
                   : s.label || s.name
               "
               :data-testid="`sidenav-storage-${s.name}`"

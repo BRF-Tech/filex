@@ -26,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/pluginlog"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/storage"
 
@@ -92,12 +93,17 @@ type Options struct {
 	Log       *slog.Logger
 	// MaxBinaryBytes caps an uploaded/downloaded plugin. 0 → 512 MiB.
 	MaxBinaryBytes int64
-	// HTTP downloads plugins from URLs. Nil → a guarded client with a
-	// timeout that refuses private, loopback and link-local targets (after
-	// DNS, and on every redirect hop) — a plugin URL must not become a probe
+	// HTTP downloads plugins from URLs. Nil → the shared guarded download
+	// client (netguard.DownloadClient) that refuses private, loopback and
+	// link-local targets (after DNS, and on every redirect hop) and a
+	// redirect from https to plain http - a plugin URL must not become a probe
 	// of the server's own network. Supplying a client lifts that guard; it
 	// exists for tests and for an embedder that has its own egress policy.
 	HTTP *http.Client
+	// LoopbackSources lets the guarded client reach this machine
+	// (FILEX_PLUGIN_LOOPBACK_SOURCES) - development and end-to-end tests
+	// only. Never the private network.
+	LoopbackSources bool
 	// Conformance is enforce (default), warn or off.
 	Conformance string
 	// MaxInFlight bounds concurrent operations per plugin (0 → the default).
@@ -124,9 +130,10 @@ type Manager struct {
 	conf        string
 	maxInFlight int
 	trusted     []ed25519.PublicKey
-	// guardDownloads is true when http is the guarded default client; the
-	// pre-dial literal-IP check in InstallFromURL follows the same switch.
-	guardDownloads bool
+	// guardDownloads is the address policy of the guarded default client,
+	// nil when the embedder supplied its own; the pre-dial literal-IP check
+	// in InstallFromURL follows the same switch.
+	guardDownloads *netguard.Policy
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -155,6 +162,14 @@ type entry struct {
 	state    string
 	stateErr string
 	stopFn   context.CancelFunc // remote checker / binary supervisor ctx
+
+	// logs is what the plugin's admin page shows (GET
+	// /api/admin/plugins/{id}/logs): its starts and failures, and the
+	// storage sync's answers it could not make sense of (issue #104). The same
+	// helper as the app plugins' log (internal/pluginlog): a repeated line is
+	// counted, not written again, and reaches the server log at most once
+	// every five minutes.
+	logs *pluginlog.Log
 }
 
 // Handle implementation ─────────────────────────────────────────────────────
@@ -206,9 +221,17 @@ func New(o Options) (*Manager, error) {
 	if o.MaxBinaryBytes <= 0 {
 		o.MaxBinaryBytes = 512 << 20
 	}
-	guardDownloads := o.HTTP == nil
-	if guardDownloads {
-		o.HTTP = newDownloadClient(10 * time.Minute)
+	// Absolute, because a launched plugin is handed its socket directory and
+	// runs in its own folder: a relative FILEX_DATA_DIR would put its socket
+	// somewhere else than where the handshake is held to.
+	if abs, err := filepath.Abs(o.Dir); err == nil {
+		o.Dir = abs
+	}
+	var guardDownloads *netguard.Policy
+	if o.HTTP == nil {
+		p := netguard.Policy{Loopback: o.LoopbackSources}
+		guardDownloads = &p
+		o.HTTP = p.DownloadClient(10 * time.Minute)
 	}
 	var trusted []ed25519.PublicKey
 	for _, k := range o.TrustedKeys {
@@ -235,6 +258,10 @@ func New(o Options) (*Manager, error) {
 
 // Dir is the plugins directory.
 func (m *Manager) Dir() string { return m.dir }
+
+// MaxBinaryBytes is the largest binary an install or upgrade accepts; the
+// admin handlers bound a request body by it.
+func (m *Manager) MaxBinaryBytes() int64 { return m.maxB }
 
 // ConformanceMode is enforce | warn | off.
 func (m *Manager) ConformanceMode() string { return m.conf }
@@ -266,6 +293,9 @@ func (m *Manager) Load(ctx context.Context) error {
 	if err := os.MkdirAll(m.dir, 0o755); err != nil {
 		return fmt.Errorf("plugin: mkdir %s: %w", m.dir, err)
 	}
+	// Copies left by a previous run that did not get to remove them: every
+	// start makes its own.
+	_ = os.RemoveAll(filepath.Join(m.dir, verifiedDir))
 	rows, err := m.store.ListPlugins(ctx)
 	if err != nil {
 		return err
@@ -333,7 +363,8 @@ func (m *Manager) ensureEntry(row *model.Plugin) *entry {
 		e.mu.Unlock()
 		return e
 	}
-	e := &entry{m: m, row: row, state: StateDisabled, lim: newLimiter(row.Name, m.maxInFlight)}
+	e := &entry{m: m, row: row, state: StateDisabled, lim: newLimiter(row.Name, m.maxInFlight),
+		logs: pluginlog.New().Mirror(m.log, slog.String("plugin", row.Name))}
 	m.entries[row.ID] = e
 	return e
 }
@@ -400,14 +431,29 @@ func (m *Manager) stop(e *entry) {
 // fails them is not "odd", it is a path that leaves the plugins directory.
 func rowError(row *model.Plugin) error {
 	if !validName(row.Name) {
-		return fmt.Errorf("plugin row %d has an invalid name %q — it will not be started; remove it", row.ID, row.Name)
+		return fmt.Errorf("plugin row %d has an invalid name %q - it will not be started; remove it", row.ID, row.Name)
 	}
 	if row.Kind != model.PluginKindRemote {
 		if row.Binary == "" || row.Binary != filepath.Base(row.Binary) || row.Binary == "." || row.Binary == ".." {
-			return fmt.Errorf("plugin %s has an invalid binary name %q — it will not be started; reinstall it", row.Name, row.Binary)
+			return fmt.Errorf("plugin %s has an invalid binary name %q - it will not be started; reinstall it", row.Name, row.Binary)
+		}
+		// ⚠ A short or non-hex sha256 (a hand-edited table) used to panic the
+		// start, slicing it for the "changed on disk" message - and with it
+		// the server's Load.
+		if !validSHA256(row.SHA256) {
+			return fmt.Errorf("plugin %s has an invalid sha256 %q - it will not be started; reinstall it", row.Name, short(row.SHA256))
 		}
 	}
 	return nil
+}
+
+// validSHA256 is 64 hex digits.
+func validSHA256(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 // runBinary verifies the file, then hands it to a Process.
@@ -433,6 +479,9 @@ func (m *Manager) runBinary(ctx context.Context, e *entry) {
 		Token:   token,
 		SockDir: filepath.Join(m.dir, row.Name, "run"),
 		Log:     m.log,
+		// Every start - each restart after a crash included - runs a copy
+		// verified at that start (verifiedCopy).
+		Prepare: func() (string, func(), error) { return m.verifiedCopy(row) },
 	}
 	proc.OnUp = func(ctx context.Context, c *Client) error {
 		return m.adopt(ctx, e, c)
@@ -577,6 +626,26 @@ func (m *Manager) adopt(ctx context.Context, e *entry, c *Client) error {
 		return err
 	}
 	driver := DriverPrefix + desc.Name
+
+	// ⚠⚠ The driver name is the plugin's own claim, and every storage on
+	// plugin:<name> hands its configuration - its credentials - to whichever
+	// plugin provides that name. So the name is the ROW's from the first time
+	// it was accepted: a plugin may not trade it for another one later (an
+	// upgrade, a remote that changed), and a plugin may not take a name
+	// another installed plugin holds, running or not. Before this, a second
+	// plugin claiming the name while the first was stopped was handed every
+	// storage built on the first.
+	e.mu.Lock()
+	pinned, rowID, rowName := e.row.Driver, e.row.ID, e.row.Name
+	e.mu.Unlock()
+	if pinned != "" && pinned != desc.Name {
+		return fmt.Errorf("plugin %q was accepted as driver %q and now describes itself as %q; a plugin keeps the driver name it was first accepted with (remove and reinstall it to change the name)", rowName, pinned, desc.Name)
+	}
+	if owner, err := m.driverHolder(ctx, desc.Name, rowID); err != nil {
+		return err
+	} else if owner != "" {
+		return fmt.Errorf("driver %q is already provided by plugin %q (remove that plugin to give the name to this one)", driver, owner)
+	}
 	m.mu.Lock()
 	if owner, taken := m.drivers[driver]; taken && owner != e.row.ID {
 		m.mu.Unlock()
@@ -651,7 +720,23 @@ func (m *Manager) adopt(ctx context.Context, e *entry, c *Client) error {
 	}
 	metrics.PluginUp.WithLabelValues(row.Name).Set(1)
 	m.log.Info("plugin up", slog.String("plugin", row.Name), slog.String("driver", driver), slog.String("version", desc.Version))
+	e.logs.Add("info", "plugin up: driver "+driver+", version "+desc.Version)
 	return nil
+}
+
+// driverHolder is the name of ANOTHER installed plugin whose row holds the
+// driver name, "" when none does.
+func (m *Manager) driverHolder(ctx context.Context, name string, self int64) (string, error) {
+	rows, err := m.store.ListPlugins(ctx)
+	if err != nil {
+		return "", fmt.Errorf("checking who holds driver %q: %w", name, err)
+	}
+	for _, r := range rows {
+		if r.ID != self && r.Driver == name {
+			return r.Name, nil
+		}
+	}
+	return "", nil
 }
 
 // verify runs the conformance probes against a throwaway instance the plugin
@@ -688,7 +773,7 @@ func (m *Manager) verify(ctx context.Context, c *Client, desc *DescribeResponse,
 		return rep, nil
 	}
 	if m.conf == ConformanceWarn {
-		m.log.Warn("plugin fails its own claims but FILEX_PLUGIN_CONFORMANCE=warn — registering anyway",
+		m.log.Warn("plugin fails its own claims but FILEX_PLUGIN_CONFORMANCE=warn - registering anyway",
 			slog.String("plugin", e.row.Name), slog.String("result", rep.Summary()))
 		return rep, nil
 	}
@@ -738,7 +823,37 @@ func (m *Manager) setFailed(e *entry, state string, err error) {
 	e.stateErr = err.Error()
 	e.mu.Unlock()
 	m.log.Warn("plugin", slog.String("plugin", e.row.Name), slog.String("state", state), slog.Any("err", err))
+	e.logs.Add("error", state+": "+err.Error())
 	m.persistError(e, err)
+}
+
+// Logs returns plugin id's log lines with a cursor above after, and the
+// cursor to ask with next.
+func (m *Manager) Logs(ctx context.Context, id, after int64) ([]pluginlog.Line, int64, error) {
+	e, err := m.entryFor(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	lines, next := e.logs.After(after)
+	return lines, next, nil
+}
+
+// LogFor returns the log of the plugin that serves driver ("plugin:<name>"),
+// or nil when no plugin does. A nil log takes lines and drops them.
+func (m *Manager) LogFor(driver string) *pluginlog.Log {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.drivers[driver]
+	if !ok {
+		return nil
+	}
+	if e, ok := m.entries[id]; ok {
+		return e.logs
+	}
+	return nil
 }
 
 func (m *Manager) persistError(e *entry, err error) {
@@ -772,9 +887,66 @@ func (m *Manager) checkBinary(path, want string) error {
 		return err
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, want) {
-		return fmt.Errorf("binary changed on disk since it was installed (sha256 %s, expected %s) — reinstall it", got[:12], want[:12])
+		return changedOnDisk(got, want)
 	}
 	return nil
+}
+
+func changedOnDisk(got, want string) error {
+	return fmt.Errorf("binary changed on disk since it was installed (sha256 %s, expected %s) - reinstall it", short(got), short(want))
+}
+
+// verifiedDir holds the copies a launched plugin actually runs from, one
+// directory per start (<plugins dir>/.verified/<name>-<random>/<binary>).
+// A plugin name cannot begin with a dot, so it never collides with one.
+const verifiedDir = ".verified"
+
+// verifiedCopy is what a start runs: the installed binary checked against its
+// row - the stored signature when keys are trusted, the sha256 always - and
+// copied, while it is hashed, to a file of its own. The copy IS the bytes
+// that were hashed, so what runs is what was checked whatever happens to the
+// installed file afterwards; checking the file and then executing it by name
+// left the time between the two to whoever could write there. done removes
+// the copy once the process is gone.
+func (m *Manager) verifiedCopy(row *model.Plugin) (string, func(), error) {
+	bin := filepath.Join(m.dir, row.Name, row.Binary)
+	if err := m.checkStoredSignature(bin, row.SHA256); err != nil {
+		return "", nil, err
+	}
+	src, err := os.Open(bin)
+	if err != nil {
+		return "", nil, fmt.Errorf("binary missing: %w", err)
+	}
+	defer src.Close()
+	root := filepath.Join(m.dir, verifiedDir)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", nil, err
+	}
+	sub, err := os.MkdirTemp(root, row.Name+"-")
+	if err != nil {
+		return "", nil, err
+	}
+	done := func() { _ = os.RemoveAll(sub) }
+	dst := filepath.Join(sub, row.Binary)
+	f, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		done()
+		return "", nil, err
+	}
+	h := sha256.New()
+	_, err = io.Copy(io.MultiWriter(f, h), src)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		done()
+		return "", nil, err
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, row.SHA256) {
+		done()
+		return "", nil, changedOnDisk(got, row.SHA256)
+	}
+	return dst, done, nil
 }
 
 // execName is the file name a plugin binary is stored under.
@@ -851,7 +1023,10 @@ func (m *Manager) install(ctx context.Context, name, filename string, r io.Reade
 		return nil, err
 	}
 	dst := filepath.Join(dir, filename)
-	sum, err := writeBinary(dst, r, m.maxB)
+	// ⚠ Staged private and non-executable (0600, writeBinary): the binary
+	// reaches its final path, executable, only once every check has passed.
+	staged := dst + ".staged"
+	sum, err := writeBinary(staged, r, m.maxB)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
@@ -862,6 +1037,10 @@ func (m *Manager) install(ctx context.Context, name, filename string, r io.Reade
 		return nil, RejectedError{fmt.Errorf("%w: downloaded %s, expected %s", ErrSHA256Mismatch, sum[:12], wantSHA[:min(12, len(wantSHA))])}
 	}
 	if err := m.checkSignature(sum, signature); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	if err := promoteBinary(staged, dst); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, err
 	}
@@ -913,12 +1092,12 @@ func (m *Manager) checkStoredSignature(bin, sha string) error {
 	b, err := os.ReadFile(signaturePath(bin))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return errors.New("signature required (installed before trusted keys were set — reinstall)")
+			return errors.New("signature required (installed before trusted keys were set - reinstall)")
 		}
 		return fmt.Errorf("signature file: %w", err)
 	}
 	if err := VerifyDetached(m.trusted, sha, string(b)); err != nil {
-		return fmt.Errorf("stored signature does not verify — reinstall the plugin: %w", err)
+		return fmt.Errorf("stored signature does not verify - reinstall the plugin: %w", err)
 	}
 	return nil
 }
@@ -1007,7 +1186,7 @@ func (m *Manager) checkSignature(sha, signature string) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, ErrSignatureRequired):
-		return reject("this instance only accepts signed plugins (FILEX_PLUGIN_TRUSTED_KEYS is set) — supply the detached signature over the binary's sha256")
+		return reject("this instance only accepts signed plugins (FILEX_PLUGIN_TRUSTED_KEYS is set) - supply the detached signature over the binary's sha256")
 	default:
 		return reject("signature %s", strings.TrimPrefix(err.Error(), ErrSignatureInvalid.Error()+": "))
 	}
@@ -1111,7 +1290,7 @@ func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature,
 		}
 		_ = os.Rename(sigBackup, signaturePath(target))
 	}
-	if err := os.Rename(staged, target); err != nil {
+	if err := promoteBinary(staged, target); err != nil {
 		rollback()
 		return m.statusOf(ctx, e), fmt.Errorf("could not put the new binary in place: %w", err)
 	}
@@ -1149,13 +1328,13 @@ func (m *Manager) upgrade(ctx context.Context, id int64, r io.Reader, signature,
 	m.stop(e)
 	rollback()
 	if !oldExists {
-		return m.statusOf(ctx, e), fmt.Errorf("the new binary did not come up (%s: %s) — there was no previous binary to restore", st.State, st.StateError)
+		return m.statusOf(ctx, e), fmt.Errorf("the new binary did not come up (%s: %s) - there was no previous binary to restore", st.State, st.StateError)
 	}
 	row.SHA256 = prevSum
 	_ = m.store.UpdatePlugin(ctx, row)
 	m.start(e)
 	m.waitOutOfStarting(ctx, e, 45*time.Second)
-	return m.statusOf(ctx, e), fmt.Errorf("the new binary did not come up (%s: %s) — the previous one was restored", st.State, st.StateError)
+	return m.statusOf(ctx, e), fmt.Errorf("the new binary did not come up (%s: %s) - the previous one was restored", st.State, st.StateError)
 }
 
 // waitOutOfStarting blocks until the plugin settles or d elapses.
@@ -1214,7 +1393,7 @@ func (m *Manager) download(ctx context.Context, rawURL string) (*http.Response, 
 		// dialer returns the shared sentinel, and errors.Is walks from the
 		// error we HAVE towards its causes, never sideways to another
 		// wrapper of the same cause.
-		if errors.Is(err, netguard.ErrPrivateTarget) {
+		if errors.Is(err, netguard.ErrPrivateTarget) || errors.Is(err, netguard.ErrDowngrade) {
 			return nil, reject("download: %v", err)
 		}
 		return nil, fmt.Errorf("download: %w", err)
@@ -1394,10 +1573,21 @@ func (m *Manager) statusOf(ctx context.Context, e *entry) *Status {
 	return st
 }
 
-// writeBinary streams r to path (0755), capped, returning its sha256.
+// promoteBinary makes a verified staged binary executable and puts it at its
+// final path - the only way a binary gets there.
+func promoteBinary(staged, final string) error {
+	if err := os.Chmod(staged, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(staged, final)
+}
+
+// writeBinary streams r to path, capped, returning its sha256. The file is
+// private and NOT executable (0600): it has not been verified yet, and
+// promoteBinary is what makes it a program.
 func writeBinary(path string, r io.Reader, maxBytes int64) (string, error) {
 	tmp := path + ".partial"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return "", err
 	}

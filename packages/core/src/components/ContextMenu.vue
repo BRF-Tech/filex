@@ -6,10 +6,11 @@
  * transformed flex containers, panel sidebars, …) can shift the
  * `position: fixed` backdrop off-window.
  */
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
+import { useSystemDark } from '../composables/useSystemDark';
 import { menuShortcutHint } from '../composables/useKeyboardShortcuts';
 import { actionIconSvg } from '../lib/actionIcons';
 import { openAlongInline } from '../lib/direction';
@@ -331,20 +332,9 @@ const visibleActions = computed(() => {
   return out;
 });
 
-const prefersDark = ref(false);
-let mq: MediaQueryList | undefined;
-function syncPrefersDark(e?: MediaQueryListEvent | MediaQueryList) {
-  prefersDark.value = !!(e && 'matches' in e && e.matches);
-}
-onMounted(() => {
-  if (typeof window === 'undefined') return;
-  mq = window.matchMedia('(prefers-color-scheme: dark)');
-  syncPrefersDark(mq);
-  mq.addEventListener?.('change', syncPrefersDark);
-});
-onBeforeUnmount(() => {
-  mq?.removeEventListener?.('change', syncPrefersDark);
-});
+/* The OS mode for `auto` (`data-prefers-dark`): composables/useSystemDark,
+   the one listener every core surface shares (#74). */
+const prefersDark = useSystemDark();
 
 const themeClass = computed(() => {
   const t = props.theme || 'auto';

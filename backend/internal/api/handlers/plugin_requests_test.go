@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/api"
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/capability"
@@ -61,7 +62,7 @@ func packManifest(version string) string {
 }
 
 // source serves an app's manifest (plain http on loopback, which the app
-// fetcher allows) and a storage plugin's feed + binary (https, which the
+// fetcher allows with LoopbackSources) and a storage plugin's feed + binary (https, which the
 // storage fetcher requires). Both answers can be changed mid-test — that is
 // how a source that moves on between the request and its approval is made.
 type source struct {
@@ -166,6 +167,7 @@ func newPRFix(t *testing.T) *prFix {
 	reg, err := wasmplugin.New(wasmplugin.Options{
 		Store: store, Dir: filepath.Join(t.TempDir(), "app-plugins"),
 		SecretKey: "0123456789abcdef0123456789abcdef", StorageResolver: resolver,
+		LoopbackSources: true, // the app source below is a loopback httptest server
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { reg.Close(context.Background()) })
@@ -181,12 +183,16 @@ func newPRFix(t *testing.T) *prFix {
 
 	clk := &clock{t: time.Now().UTC()}
 	reqs := pluginreq.New(pluginreq.Options{Store: store, Apps: reg, Plugins: mgr, Notify: notif, Now: clk.Now})
+	// Default apps (0.50), as internal/server wires it: an app request's File
+	// types group and the approving administrator's choices.
+	assocSvc := assoc.New(store)
+	assocSvc.SetSource(reg)
 
 	srv := httptest.NewServer(api.BuildRouter(&api.Deps{
 		Cfg: cfg, Store: tenantstore.New(store), Quota: accounting.Quota(),
 		Worker: syncpkg.New(store), Caps: capability.New(store), Share: share.NewService(store),
 		StorageResolver: resolver, AppPlugins: reg, Plugins: mgr, Notify: notif,
-		PluginRequests: reqs, LocalAuth: localDrv,
+		PluginRequests: reqs, LocalAuth: localDrv, Assoc: assocSvc,
 	}))
 	t.Cleanup(srv.Close)
 

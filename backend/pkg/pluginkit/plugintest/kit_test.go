@@ -566,7 +566,7 @@ func TestSigningProducesAVerifiableSignature(t *testing.T) {
 	if err != nil || !info.Available {
 		t.Fatalf("signing should be available: %+v %v", info, err)
 	}
-	issued, err := h.CertIssue("Burak", "burak@example.com", 30)
+	issued, err := h.CertIssue("Alice", "alice@example.com", 30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +591,7 @@ func TestSigningProducesAVerifiableSignature(t *testing.T) {
 
 	screen := plugintest.NewHost(manifest())
 	screen.EnterScreen()
-	if _, err := screen.CertIssue("Burak", "", 30); !plugintest.IsCode(err, wire.ErrPermissionDenied) {
+	if _, err := screen.CertIssue("Alice", "", 30); !plugintest.IsCode(err, wire.ErrPermissionDenied) {
 		t.Fatalf("a screen may not issue certificates, got %q", plugintest.Code(err))
 	}
 }

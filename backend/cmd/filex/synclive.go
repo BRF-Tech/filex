@@ -361,7 +361,7 @@ func (l *liveLoop) notePairsFile() {
 // streamState prints the stream's state for people and for the desktop app,
 // which parses `live: <connected|polling|offline>` into its status word.
 func (l *liveLoop) streamState(st cliclient.StreamState, detail string) {
-	fmt.Fprintf(l.out, "live: %s — %s\n", st, detail)
+	fmt.Fprintf(l.out, "live: %s - %s\n", st, detail)
 	l.mu.Lock()
 	l.streamLive = st == cliclient.StreamLive
 	l.mu.Unlock()
@@ -383,9 +383,9 @@ func (l *liveLoop) localState(pairID string, err error) {
 	case err == nil:
 		fmt.Fprintf(l.out, "%s: local: watched\n", pairID)
 	case errors.Is(err, errTooLargeToWatch):
-		fmt.Fprintf(l.out, "%s: local: poll-only — too-large — %s\n", pairID, strings.TrimPrefix(err.Error(), errTooLargeToWatch.Error()+": "))
+		fmt.Fprintf(l.out, "%s: local: poll-only - too-large - %s\n", pairID, strings.TrimPrefix(err.Error(), errTooLargeToWatch.Error()+": "))
 	default:
-		fmt.Fprintf(l.out, "%s: local: poll-only — unavailable — %v\n", pairID, err)
+		fmt.Fprintf(l.out, "%s: local: poll-only - unavailable - %v\n", pairID, err)
 	}
 }
 
@@ -795,7 +795,7 @@ func (l *liveLoop) Run(ctx context.Context) error {
 		}
 	}
 	if l.stream == nil {
-		fmt.Fprintf(l.out, "live: polling — changes are found by the interval poll only\n")
+		fmt.Fprintf(l.out, "live: polling - changes are found by the interval poll only\n")
 	}
 
 	nextPoll := l.now().Add(l.interval)

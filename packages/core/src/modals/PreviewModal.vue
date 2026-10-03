@@ -24,6 +24,7 @@
  * then upgrade to Monaco once the import resolves.
  */
 import { sanitizeHtml } from '../lib/sanitizeHtml';
+import { markdownToSafeHtml } from '../lib/markdownHtml';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { Component } from 'vue';
 import type { FileNode } from '../types/FileNode';
@@ -33,6 +34,16 @@ import StarButton from '../components/StarButton.vue';
 import { ensureMonaco, getMonaco, ensureHighlight } from '../composables/useMonacoLoader';
 import { useLocale } from '../composables/useLocale';
 import { browserProbeURL } from '../lib/externalReach';
+import {
+  OFFICE_DOWNLOAD_ERROR,
+  fetchOfficeDiagnosis,
+  officeDiagnoseEndpoint,
+  officeDiagnosisText,
+  officeErrorCode,
+  officeErrorText,
+  officeEventEndsTheEditor,
+  type OfficeEventChannel,
+} from '../lib/officeDiagnosis';
 import { fileIconTile } from '../lib/fileIcons';
 import { actionIconSvg } from '../lib/actionIcons';
 import { OFFICE_EXTS } from '../lib/serviceGate';
@@ -154,8 +165,10 @@ const emit = defineEmits<{
    *  emits upward — the chevrons are a second trigger for it, not a second
    *  navigation mechanism. The host keeps the `file` prop in sync. */
   (e: 'nav', delta: number): void;
-  /** The host opens its own share dialog. Only reachable when `shareEnabled`. */
-  (e: 'share'): void;
+  /** The host opens its own share dialog for `file`: the one in view, which
+   *  after a draft's Save is the saved file, not the draft the viewer was
+   *  opened on (#85). Only reachable when `shareEnabled`. */
+  (e: 'share', file: FileNode): void;
   /** The star toggle succeeded — so the host can update its listing row. */
   (e: 'starred', value: boolean): void;
   /** Drafts (issue #71): the draft was saved — it is a file at `path` now.
@@ -167,6 +180,9 @@ const emit = defineEmits<{
   (e: 'toast', message: string): void;
   /** v4 — an app's interface queued a job (`job.submit`); the raw ops row. */
   (e: 'op', op: Record<string, unknown>): void;
+  /** #110: the file in view was saved from here (an app's interface, the
+   *  code or Markdown editor): its new size, so the host's row catches up. */
+  (e: 'saved', saved: { path: string; size?: number }): void;
 }>();
 
 const { t, formatSize, formatDate, nodeDisplayName } = useLocale(() => props.locale);
@@ -305,6 +321,12 @@ const appFiles = computed(() =>
       }]
     : [],
 );
+/** An app's interface saved: the file in view when it saved the first of its
+ *  files (`index` 0), and the header and the host learn its new size. */
+function onAppSaved(r: { path: string; size: number; index: number }): void {
+  draftTouched.value = true;
+  if (r.index === 0) noteSaved(livePath.value, r.size);
+}
 function onAppDirty(v: boolean): void {
   appDirty.value = v;
   if (v) draftTouched.value = true;
@@ -521,14 +543,48 @@ const counterText = computed(() => {
   return t('viewer.counter', { i, n });
 });
 
+/**
+ * #110: what a save made in this viewer changed, until the host's row says
+ * it too. The header read the size and date the file had when it was opened,
+ * after any number of saves: filextext re-keyed its workspace after a password
+ * reset (a new version on the storage) and the header still said 1.92 KB.
+ * Only the file in view (`livePath`); another file shown resets it.
+ */
+const savedMeta = ref<{ path: string; size?: number; at: number } | null>(null);
+watch(
+  () => props.file?.path,
+  () => {
+    savedMeta.value = null;
+  },
+);
+function noteSaved(path: string, size?: number): void {
+  savedMeta.value = { path, size, at: Date.now() };
+  emit('saved', { path, size });
+}
+/** The bytes a text save puts on the storage. */
+function utf8Size(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
 /** `246.3 KB • Sep 9, 2026 • 1 of 9`, with any unknown part left out
- *  rather than printed as a placeholder. */
+ *  rather than printed as a placeholder.
+ *  ⚠ A draft's size is unknown here, so it is left out: the draft is being
+ *  written while it is open (the editors and an app save into it, and its
+ *  Save moves it), and the row it was opened with carries the size it had
+ *  when it was made - "0 B" for every New document, kept on screen through
+ *  every save (measured with filextext, 0.48.0: "0 B" after the app had
+ *  written 4.47 KB). `draftKey` is the path's answer, so it holds from the
+ *  first frame, before the server has said whose draft it is. */
 const metaLine = computed(() => {
   const f = props.file;
   if (!f) return '';
   const parts: string[] = [];
-  if (typeof f.size === 'number' && f.type === 'file') parts.push(formatSize(f.size));
-  const when = formatDate(f.last_modified);
+  const saved = savedMeta.value && savedMeta.value.path === livePath.value ? savedMeta.value : null;
+  // A save made in this viewer reports what it wrote (noteSaved): that figure
+  // is shown, a draft's included. The row's own size never is for a draft.
+  const size = typeof saved?.size === 'number' ? saved.size : draftKey.value ? undefined : f.size;
+  if (typeof size === 'number' && f.type === 'file') parts.push(formatSize(size));
+  const when = formatDate(saved ? saved.at : f.last_modified);
   if (when) parts.push(when);
   if (counterText.value) parts.push(counterText.value);
   return parts.join(' • ');
@@ -538,6 +594,18 @@ const metaLine = computed(() => {
 const canNav = computed(
   () => showChrome.value && (props.navEnabled === true || (props.total ?? 0) > 1),
 );
+
+/**
+ * #110: the chevrons stand BESIDE a surface that fills the stage, never on it.
+ * They are drawn at the screen's edges, over the stage. A photo has ground
+ * around it there; an app's own interface, an editor or a document viewer
+ * reaches the edge, and the chevrons covered it: filextext's page list and its
+ * scroll bar, measured in Firefox and WebKit with two files in the folder.
+ * Such a stage keeps a gutter on each side for them (`fe-viewer__stage--gutter`).
+ * Which surfaces fill the stage is FILL_KINDS alone: a kind added there gets
+ * its gutter with nothing else to remember.
+ */
+const chevGutter = computed(() => canNav.value && FILL_KINDS.has(kind.value));
 
 /** Starring is the real thing, not a second implementation: StarButton +
  *  lib/star.ts, the same pair the listing rows use. It needs the DB node id,
@@ -549,9 +617,10 @@ const starNodeId = computed(() =>
 /**
  * Which kinds get the stage stretched instead of centred. Editors and
  * document surfaces want every pixel; a photo wants to sit in the middle
- * of the ground with room around it.
+ * of the ground with room around it. An app's own interface (`app`) is an
+ * editor too. The ONE list: the chevrons' gutter (chevGutter) reads it.
  */
-const FILL_KINDS = new Set(['pdf', 'markdown', 'code', 'text', 'office', 'viewer']);
+const FILL_KINDS = new Set(['pdf', 'markdown', 'code', 'text', 'office', 'viewer', 'app']);
 const stageModifier = computed(() =>
   FILL_KINDS.has(kind.value) ? 'fe-preview--fill' : 'fe-preview--center',
 );
@@ -706,6 +775,7 @@ async function saveMarkdown() {
     if (!res.ok) {
       throw requestFailure(res.status, await res.text().catch(() => ''), props.locale);
     }
+    noteSaved(livePath.value, utf8Size(sent));
     if (sent === rawText.value) mdDirty.value = false;
   } catch (err) {
     showFetchError(said(err, 'err.save_failed'));
@@ -773,26 +843,18 @@ const markdownUnavailable = ref(false);
 
 async function renderMarkdown(text: string): Promise<void> {
   try {
-    const mod = (await import(/* @vite-ignore */ 'markdown-it').catch(() => null)) as any;
-    if (!mod) {
+    // Inline HTML renders (the GitHub / GitLab contract: operators expect
+    // `<img>`, tables, `<details>`, etc. to work), and the output goes through
+    // the one preview sanitizer before it reaches v-html: lib/markdownHtml.ts,
+    // the pipeline the update review's release notes use too.
+    const html = await markdownToSafeHtml(text);
+    if (html === null) {
       markdownHtml.value = '';
       markdownUnavailable.value = true;
       return;
     }
     markdownUnavailable.value = false;
-    const Md = (mod as { default: any }).default ?? (mod as any);
-    // html: true so inline HTML in README.md / docs renders (the
-    // GitHub / GitLab contract — operators expect `<img>`, tables,
-    // `<details>`, etc. to work). The output goes through the one preview
-    // sanitizer (lib/sanitizeHtml.ts, DOMPurify) before it reaches v-html.
-    const md = new Md({
-      html: true,
-      linkify: true,
-      breaks: true,
-      typographer: true,
-    });
-    const raw = md.render(text);
-    markdownHtml.value = sanitizeHtml(raw, 'document');
+    markdownHtml.value = html;
     // Wait for Vue to flush the v-html into the DOM before walking it.
     await new Promise<void>((r) => setTimeout(r, 0));
     await enrichMarkdown();
@@ -1037,6 +1099,7 @@ async function saveCode(): Promise<void> {
     if (!res.ok) {
       throw requestFailure(res.status, await res.text().catch(() => ''), props.locale);
     }
+    noteSaved(livePath.value, utf8Size(text));
     if (!monacoEditor || monacoEditor.getValue() === text) codeDirty.value = false;
     saveOk.value = true;
     setTimeout(() => {
@@ -1059,6 +1122,9 @@ async function runOrchestration(open: boolean, url: string, k: string): Promise<
   fetchError.value = null;
   fetchErrorDetail.value = null;
   officeError.value = null;
+  officeDiagnosis.value = null;
+  // A diagnosis still on its way belongs to the file that was open.
+  officeGen++;
   viewerCmp.value = null;
   viewerLoadError.value = null;
   pdfFallbackToNative.value = false;
@@ -1138,7 +1204,35 @@ const codeLanguage = computed(() => CODE_LANGS[ext(props.file)] || 'plaintext');
 
 const officeEl = ref<HTMLDivElement | null>(null);
 const officeError = ref<string | null>(null);
+/**
+ * After "Download failed" (-4): which of its two failures it was, as filex saw
+ * it - the document server downloaded the file and the browser could not load
+ * the converted copy, it never asked, or filex refused it (lib/officeDiagnosis,
+ * issue #80). Shown under the document server's own sentence.
+ */
+const officeDiagnosis = ref<string | null>(null);
+/** Bumped per opened file, so a late diagnosis never lands on the next one. */
+let officeGen = 0;
 let officeEditor: any = null;
+
+/** Ask filex what it saw of the document server's download of this file. */
+async function diagnoseOfficeDownload(gen: number): Promise<void> {
+  const file = props.file;
+  const endpoint = officeDiagnoseEndpoint(props.onlyOfficeConfigEndpoint);
+  if (!file || !endpoint) return;
+  const headers: Record<string, string> = {};
+  try {
+    if (props.authHeaders) Object.assign(headers, await props.authHeaders());
+  } catch {
+    return;
+  }
+  const d = await fetchOfficeDiagnosis(endpoint, file.path, {
+    headers,
+    credentials: props.authCredentials || 'same-origin',
+  });
+  if (gen !== officeGen) return;
+  officeDiagnosis.value = officeDiagnosisText(d, t);
+}
 
 /** "No document server here", in the sentence this person can act on. */
 function officeUnconfigured(): string {
@@ -1168,6 +1262,8 @@ async function officeConfigError(res: Response): Promise<string> {
 
 async function mountOnlyOfficeEditor(): Promise<void> {
   officeError.value = null;
+  officeDiagnosis.value = null;
+  const gen = officeGen;
   if (!props.file || kind.value !== 'office') return;
   /* ⚠ BOTH halves. The standalone /files/edit route always handed over the
    * config ENDPOINT and left the base null when the capabilities probe said
@@ -1208,13 +1304,33 @@ async function mountOnlyOfficeEditor(): Promise<void> {
     await loadOnlyOfficeScript(documentServerUrl);
     disposeOnlyOfficeEditor();
 
-    const mountId = 'fe-onlyoffice-mount';
+    const mountId = OFFICE_MOUNT_ID;
     officeEl.value.id = mountId;
+    officeHostEl = officeEl.value.parentElement;
 
+    /* ⚠⚠ The screen is never split. A trouble the editor cannot go on from
+       (lib/officeDiagnosis officeEventEndsTheEditor) closes the editor
+       BEFORE the fallback is drawn: api.js put its iframe where the mount
+       was, so the fallback replacing the mount left the dead editor, its
+       own "Download failed" dialog and all, standing beside it (measured
+       against ONLYOFFICE Docs 9.4 in the 0.50 final run). Anything else is
+       the document server's to show, in its own closable dialog, over an
+       editor that goes on - no fallback. */
+    const onOfficeEvent = (channel: OfficeEventChannel, err: any) => {
+      if (!officeEventEndsTheEditor(channel)) {
+        console.info('[filex] ONLYOFFICE warning', officeErrorCode(err), formatOnlyOfficeError(err));
+        return;
+      }
+      closeDeadOfficeEditor();
+      officeError.value = formatOnlyOfficeError(err);
+      // "Download failed" is two failures in one sentence; filex knows
+      // which (issue #80). The code, not the localised description, says
+      // it is that one.
+      if (officeErrorCode(err) === OFFICE_DOWNLOAD_ERROR) void diagnoseOfficeDownload(gen);
+    };
     config.events = {
-      onError: (err: any) => {
-        officeError.value = formatOnlyOfficeError(err);
-      },
+      onError: (err: any) => onOfficeEvent('onError', err),
+      onWarning: (err: any) => onOfficeEvent('onWarning', err),
       // Drafts: the document server keeps the edits until the session ends
       // and then saves them into the draft itself; this only tells the page
       // there ARE edits (the leave-page question).
@@ -1246,6 +1362,27 @@ function disposeOnlyOfficeEditor(): void {
   officeEditor = null;
 }
 
+/** Where api.js is told to put its editor (it REPLACES this element). */
+const OFFICE_MOUNT_ID = 'fe-onlyoffice-mount';
+/** The element the editor's frame went into (the mount's parent). */
+let officeHostEl: HTMLElement | null = null;
+
+/**
+ * Close an editor the document server has given up on, and take away what it
+ * leaves: destroyEditor() swaps the iframe for a fresh placeholder of its
+ * own, which is not the element this component renders and would stand
+ * beside the fallback.
+ */
+function closeDeadOfficeEditor(): void {
+  disposeOnlyOfficeEditor();
+  const left = typeof document === 'undefined' ? null : document.getElementById(OFFICE_MOUNT_ID);
+  if (left && left !== officeEl.value) left.remove();
+  // A destroyEditor that threw leaves the frame itself: it goes too, from
+  // where this editor was put and nowhere else.
+  for (const frame of Array.from(officeHostEl?.querySelectorAll('iframe[name^="frameEditor"]') ?? [])) frame.remove();
+  officeHostEl = null;
+}
+
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange);
   disposeOnlyOfficeEditor();
@@ -1265,12 +1402,12 @@ function formatOnlyOfficeError(err: unknown): string {
   const e = err as { data?: unknown; message?: unknown; errorDescription?: unknown };
   if (e?.data && typeof e.data === 'object') {
     const d = e.data as { errorDescription?: unknown; errorCode?: unknown; message?: unknown };
-    if (typeof d.errorDescription === 'string') return d.errorDescription;
+    if (typeof d.errorDescription === 'string') return officeErrorText(d.errorDescription);
     if (typeof d.message === 'string') return d.message;
     if (d.errorCode !== undefined) return `OnlyOffice error ${d.errorCode}`;
   }
   if (typeof e?.data === 'string') return e.data;
-  if (typeof e?.errorDescription === 'string') return e.errorDescription;
+  if (typeof e?.errorDescription === 'string') return officeErrorText(e.errorDescription);
   if (typeof e?.message === 'string') return e.message;
   try {
     return JSON.stringify(err);
@@ -1355,6 +1492,18 @@ const showDraftClose = ref(false);
 
 /** The path the file is at NOW: the draft's, or where its Save put it. */
 const livePath = computed(() => draftSaved.value?.path ?? props.file?.path ?? '');
+/** Still a draft: opened on a draft's path and not saved yet. Share and the
+ *  star are a file's, not a draft's - and after the Save it IS a file, at
+ *  `livePath`, the same row (the Save moves it), so they come back (#85).
+ *  ⚠ Not `draftKey`, which stays the opening path's answer after the Save. */
+const onDraft = computed(() => !!draftKey.value && !draftSaved.value);
+/** The file in view as a row: the host's, moved to where a draft's Save put it. */
+const liveFile = computed<FileNode | null>(() => {
+  const f = props.file;
+  const saved = draftSaved.value;
+  if (!f || !saved) return f;
+  return { ...f, path: saved.path, basename: saved.name || f.basename };
+});
 
 function sayDraft(err: unknown): string {
   return said(err, 'err.save_failed').text;
@@ -1589,17 +1738,18 @@ onBeforeUnmount(() => {
             :aria-label="t('viewer.download')"
           ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('download')"></span></a>
           <button
-            v-if="shareEnabled && !draftKey"
+            v-if="shareEnabled && !onDraft"
             type="button"
             class="fe-viewer__act"
             :title="t('viewer.share')"
             :aria-label="t('viewer.share')"
-            @click="emit('share')"
+            data-testid="viewer-share"
+            @click="liveFile && emit('share', liveFile)"
           ><span class="fe-icon" aria-hidden="true" v-html="actionIconSvg('access')"></span></button>
           <!-- The listing's StarButton, not a copy of it: same component, same
                lib/star.ts request, same optimistic rollback. -->
           <StarButton
-            v-if="starNodeId !== null && !draftKey"
+            v-if="starNodeId !== null && !onDraft"
             class="fe-viewer__act fe-viewer__act--star"
             :starred="file.starred === true"
             :node-id="starNodeId"
@@ -1684,7 +1834,12 @@ onBeforeUnmount(() => {
         </span>
       </div>
 
-      <div class="fe-viewer__stage" @click.self="onGroundClick">
+      <div
+        class="fe-viewer__stage"
+        :class="{ 'fe-viewer__stage--gutter': chevGutter }"
+        data-testid="viewer-stage"
+        @click.self="onGroundClick"
+      >
         <div v-if="file" class="fe-preview" :class="stageModifier" @click.self="onGroundClick">
           <template v-if="kind === 'image'">
             <img
@@ -1796,7 +1951,7 @@ onBeforeUnmount(() => {
               :user-name="userName"
               :title="appLabel"
               @dirty="onAppDirty"
-              @saved="draftTouched = true"
+              @saved="onAppSaved"
               @toast="(m) => emit('toast', m.text)"
               @op="(op) => emit('op', op)"
               @close="requestClose"
@@ -1898,6 +2053,7 @@ onBeforeUnmount(() => {
               <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
               <span class="fe-preview__fallback-icon" aria-hidden="true" v-html="tileHtml"></span>
               <p>{{ officeError }}</p>
+              <p v-if="officeDiagnosis" data-testid="office-diagnosis">{{ officeDiagnosis }}</p>
               <a :href="download" class="fe-btn fe-btn--primary">{{ t('viewer.download') }}</a>
             </div>
             <div v-else ref="officeEl" class="fe-preview__office" />

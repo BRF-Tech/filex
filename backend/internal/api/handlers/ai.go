@@ -14,6 +14,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/httpx"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -79,7 +80,7 @@ func (h *AI) AttachBody(b *filebody.Resolver) { h.ops.attachBody(b) }
 func (h *AI) List(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.ops.List(r.Context(), r.URL.Query().Get("path"))
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
@@ -89,7 +90,7 @@ func (h *AI) List(w http.ResponseWriter, r *http.Request) {
 func (h *AI) Info(w http.ResponseWriter, r *http.Request) {
 	e, err := h.ops.Info(r.Context(), r.URL.Query().Get("path"))
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entry": e})
@@ -99,7 +100,7 @@ func (h *AI) Info(w http.ResponseWriter, r *http.Request) {
 func (h *AI) Download(w http.ResponseWriter, r *http.Request) {
 	rc, mime, size, err := h.ops.Read(r.Context(), r.URL.Query().Get("path"))
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	defer rc.Close()
@@ -117,6 +118,19 @@ type aiUploadBody struct {
 	Path          string `json:"path"`
 	Content       string `json:"content,omitempty"`        // UTF-8 text
 	ContentBase64 string `json:"content_base64,omitempty"` // binary
+	// AllowPlaintext: the caller knows `path` is in an end-to-end encrypted
+	// folder and stores the bytes there UNENCRYPTED on purpose. Without it
+	// such a write answers 409 E2E_PLAINTEXT_REFUSED (ai_e2e.go).
+	AllowPlaintext bool `json:"allow_plaintext,omitempty"`
+}
+
+// formFlag reads a boolean multipart/form field: "true", "1" or "yes".
+func formFlag(r *http.Request, name string) bool {
+	switch r.FormValue(name) {
+	case "true", "1", "yes":
+		return true
+	}
+	return false
 }
 
 // Upload → POST /api/ai/upload. Accepts JSON (base64/text) or multipart.
@@ -158,9 +172,10 @@ func (h *AI) Upload(w http.ResponseWriter, r *http.Request) {
 		}
 		// multipart.File is an io.Seeker; passed straight through it stays one,
 		// which is what keeps the S3 SDK able to measure and replay the body.
-		e, err := h.ops.WriteStream(r.Context(), dest, f, fh.Size)
+		ctx := withPlaintextConsent(r.Context(), formFlag(r, "allow_plaintext"))
+		e, err := h.ops.WriteStream(ctx, dest, f, fh.Size)
 		if err != nil {
-			writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+			writeAIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"entry": e})
@@ -185,9 +200,9 @@ func (h *AI) Upload(w http.ResponseWriter, r *http.Request) {
 		data = []byte(body.Content)
 	}
 
-	e, err := h.ops.Write(r.Context(), body.Path, data)
+	e, err := h.ops.Write(withPlaintextConsent(r.Context(), body.AllowPlaintext), body.Path, data)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entry": e})
@@ -212,7 +227,7 @@ func (h *AI) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.ops.Delete(r.Context(), body.Path); err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -227,7 +242,7 @@ func (h *AI) Mkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := h.ops.Mkdir(r.Context(), body.Path)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entry": e})
@@ -248,7 +263,7 @@ func (h *AI) Move(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := h.ops.Move(r.Context(), body.Src, body.Dst)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entry": e})
@@ -266,17 +281,17 @@ func (h *AI) Search(w http.ResponseWriter, r *http.Request) {
 	parsed := search.ParseQuery(q.Get("q"))
 	s, _, err := h.ops.resolveStorage(r.Context(), p)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	tags, err := aiTagFilter(r.Context(), h.ops, s.Name, parsed)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	entries, err := aiNameSearch(r.Context(), h.ops, p, parsed, tags)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
@@ -306,7 +321,7 @@ func (h *AI) Share(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.ops.CreateShare(r.Context(), body.Path, body.Pin, body.ExpiresInDays, body.MaxDownloads)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -322,7 +337,7 @@ func (h *AI) Unshare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.ops.RevokeShare(r.Context(), body.Token); err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -332,6 +347,9 @@ func (h *AI) Unshare(w http.ResponseWriter, r *http.Request) {
 type aiZipBody struct {
 	Sources []string `json:"sources"`
 	Dest    string   `json:"dest"`
+	// AllowPlaintext: write the archive into an encrypted folder anyway
+	// (aiUploadBody.AllowPlaintext).
+	AllowPlaintext bool `json:"allow_plaintext,omitempty"`
 }
 
 // Zip → POST /api/ai/zip {"sources":[…],"dest":"…"}. Packs the sources into a
@@ -343,9 +361,9 @@ func (h *AI) Zip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	e, err := h.ops.Zip(r.Context(), body.Sources, body.Dest)
+	e, err := h.ops.Zip(withPlaintextConsent(r.Context(), body.AllowPlaintext), body.Sources, body.Dest)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entry": e})
@@ -355,6 +373,9 @@ func (h *AI) Zip(w http.ResponseWriter, r *http.Request) {
 type aiUnzipBody struct {
 	Src  string `json:"src"`
 	Dest string `json:"dest"`
+	// AllowPlaintext: extract into an encrypted folder anyway
+	// (aiUploadBody.AllowPlaintext).
+	AllowPlaintext bool `json:"allow_plaintext,omitempty"`
 }
 
 // Unzip → POST /api/ai/unzip {"src":"…","dest":"…"}. Extracts a stored zip into
@@ -365,9 +386,9 @@ func (h *AI) Unzip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	n, refused, err := h.ops.Unzip(r.Context(), body.Src, body.Dest)
+	n, refused, err := h.ops.Unzip(withPlaintextConsent(r.Context(), body.AllowPlaintext), body.Src, body.Dest)
 	if err != nil {
-		resp := map[string]any{"error": err.Error()}
+		resp := aiErrorBody(err)
 		if errors.Is(err, errAISnapshotRefused) {
 			// The all-refused case: say so the way every other pre-write
 			// guard refusal does, with the count too -- an error string alone
@@ -384,6 +405,29 @@ func (h *AI) Unzip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "extracted": n, "refused": refused})
 }
 
+// writeAIError is the one shape of a refused AI REST call: aiStatus for the
+// status, the message in `error`, and the wire code an agent matches on in
+// `code` when the refusal has one (aiErrCode: E2E_ENCRYPTED,
+// E2E_PLAINTEXT_REFUSED, E2E_BOUNDARY, RESERVED_NAME, NO_FREE_NAME,
+// ENTRY_UNAVAILABLE). An unavailable entry (entry_unavailable.go, #104) also
+// names the entry and the storage's answer, as the explorer's 409 does.
+func writeAIError(w http.ResponseWriter, err error) {
+	var ue *entryUnavailableError
+	if errors.As(err, &ue) {
+		writeJSON(w, http.StatusConflict, ue.body())
+		return
+	}
+	writeJSON(w, aiStatus(err), aiErrorBody(err))
+}
+
+func aiErrorBody(err error) map[string]any {
+	body := map[string]any{"error": err.Error()}
+	if code := aiErrCode(err); code != "" {
+		body["code"] = code
+	}
+	return body
+}
+
 // aiStatus maps an aiOps error to an HTTP status code, reusing the driver
 // error mapping for storage-level failures.
 func aiStatus(err error) int {
@@ -392,6 +436,24 @@ func aiStatus(err error) int {
 	}
 	if errors.Is(err, errAINoStorage) {
 		return http.StatusServiceUnavailable
+	}
+	// A call that cannot be acted on as asked (a field missing): fix the call,
+	// not retry it - mapDriverErr's default 500 reads as "retry".
+	if errors.Is(err, errAIBadInput) {
+		return http.StatusBadRequest
+	}
+	// End-to-end encryption (ai_e2e.go): a conflict with where the bytes are,
+	// which retrying never changes. The boundary refusal used to fall through
+	// to mapDriverErr's 500, so an agent was told "server fault, retry" for a
+	// move the explorer answers 409.
+	switch aiErrCode(err) {
+	case codeE2EEncrypted, codeE2EPlaintextRefused, codeE2EBoundary:
+		return http.StatusConflict
+	}
+	// An entry the storage could not answer for (issue #104): a state the
+	// caller can see and wait out, not a fault (writeAIError adds the code).
+	if errors.Is(err, errEntryUnavailable) {
+		return http.StatusConflict
 	}
 	// writegate: an app has frozen the path (423, the message names the app),
 	// or it is one of filex's own names (403).
@@ -412,6 +474,15 @@ func aiStatus(err error) int {
 	// free, so the move was refused. Transient, not a conflict.
 	if errors.Is(err, errNameCheckFailed) {
 		return http.StatusServiceUnavailable
+	}
+	// A move whose destination is taken lands beside it (ops.MoveDest,
+	// ops.UniqueDest), and only when every name beside it is taken too is the
+	// move refused, with nothing moved. A conflict the caller can resolve, as
+	// the explorer's move answers it (manager_mutate.go). It fell through to
+	// mapDriverErr, whose text match finds neither "exists" nor "not found" in
+	// "no free name left", and answered 500, which reads as "retry" (task #116).
+	if errors.Is(err, ops.ErrNoFreeName) {
+		return http.StatusConflict
 	}
 	// Permanent refusals, not server faults: a confined token reaching outside
 	// its root, or the bound user lacking the grant level. These must NOT fall

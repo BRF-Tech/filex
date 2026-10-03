@@ -10,19 +10,24 @@
 //  - the "updated" note is said once: the version seen is kept in the
 //    account's preferences.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 import AppFrame from '@brftech/filex-core/src/components/plugin/AppFrame.vue';
 import { announceAppUpdated } from '@brftech/filex-core/src/lib/appUpdates';
 import { RealtimeClient } from '@brftech/filex-core/src/lib/realtime';
 import { currentPrefs, savePref } from '@brftech/filex-core/src/lib/prefs';
 import { HELLO } from '../../../packages/app-ui/src/protocol';
+import { teardownDom, unmountAll } from '../helpers/teardown';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
 
-const mounted: VueWrapper[] = [];
-afterEach(() => {
-  mounted.splice(0).forEach((w) => w.unmount());
+// A frame that opens writes "seen this version" to the account (400 ms later).
+answerAccountPrefs();
+
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.restoreAllMocks();
-  document.body.innerHTML = '';
 });
 
 const settle = async () => {
@@ -52,7 +57,6 @@ function mountFrame() {
     },
     attachTo: document.body,
   });
-  mounted.push(w);
   return { w, api };
 }
 
@@ -135,14 +139,12 @@ describe('the first opening after an approval', () => {
     expect(document.querySelector('[data-testid="appframe-reload"]'), 'nothing to reload').toBeNull();
     expect(JSON.parse(currentPrefs().appsSeen ?? '{}').sketch).toBe('1.0.0');
 
-    mounted.splice(0).forEach((w) => w.unmount());
-    document.body.innerHTML = '';
+    unmountAll();
     mountFrame();
     await settle();
     expect(document.querySelector('[data-testid="appframe-updated"]'), 'once').toBeNull();
 
-    mounted.splice(0).forEach((w) => w.unmount());
-    document.body.innerHTML = '';
+    unmountAll();
     savePref('appsSeen', JSON.stringify({}));
     mountFrame();
     await settle();

@@ -15,9 +15,11 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,7 +48,7 @@ func signOut(t *testing.T, c *http.Client, base, returnTo string) string {
 
 func TestIdentityProviders_SignOutEndsTheSessionAtTheProviderThePageRuns(t *testing.T) {
 	first := newAdaIssuer(t, "right-secret")
-	srv, admin, _, _, _ := liveServer(t, nil)
+	srv, admin, store, _, _ := liveServer(t, nil)
 	configure := func(idp *fakeidp.IdP) {
 		t.Helper()
 		status, body := patchProvider(t, admin, srv.URL, "oidc", map[string]any{"enabled": true, "config": map[string]any{
@@ -81,6 +83,13 @@ func TestIdentityProviders_SignOutEndsTheSessionAtTheProviderThePageRuns(t *test
 	configure(second)
 	require.Empty(t, signOut(t, stale, srv.URL, "/admin/login"),
 		"a token the old provider issued must not be sent to the new one")
+	// Since 0.50 the account is bound to the identity it first signed in with
+	// (the first issuer): another issuer's identity is refused until an
+	// administrator removes the bind (docs/SSO.md).
+	ada, err := store.GetUserByEmail(context.Background(), "ada@idp.example")
+	require.NoError(t, err)
+	status, raw := doReq(t, admin, http.MethodPatch, srv.URL+"/api/admin/users/"+strconv.FormatInt(ada.ID, 10), map[string]any{"sso_unlink": true})
+	require.Equal(t, http.StatusOK, status, string(raw))
 
 	// …and a session through the provider the page runs now ends at THAT one.
 	fresh, ok, _ := oidcBrowser(t, srv.URL)

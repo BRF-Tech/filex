@@ -24,6 +24,7 @@
  * Pure types plus one transport; no Vue.
  */
 import type { EventPossibility } from './webhookEvents';
+import type { PluginActionsResponse } from '../types/Plugins';
 
 /** The signed-in person, as the dialog reads and writes it. */
 export interface SettingsUser {
@@ -70,6 +71,13 @@ export interface UserSettingsApi {
   quota(): Promise<SettingsQuota>;
   notificationSettings(): Promise<SettingsNotificationPrefs | null>;
   updateNotificationSettings(prefs: SettingsNotificationPrefs): Promise<SettingsNotificationPrefs | null>;
+  /**
+   * 0.50 - `GET /api/files/plugins/actions`: the app interfaces that open
+   * files and the administrator's open rules, so Default apps can say which
+   * of the person's choices are still available. Absent: the pane lists the
+   * choices without judging them.
+   */
+  pluginActions?(): Promise<PluginActionsResponse>;
 }
 
 export type SettingsThemeMode = 'light' | 'auto' | 'dark';
@@ -107,7 +115,15 @@ export interface UserSettingsHost {
   readonly desktopApp?: {
     readonly platform: string | null;
     readonly platformLabel: string;
-    readonly downloads: Array<{ href: string; label: string; hint: string }>;
+    /** `other`: the same file for the other processor (x64 / arm64), drawn
+     *  beside the row. The host writes every word, this dialog none. */
+    readonly downloads: Array<{
+      href: string;
+      label: string;
+      hint: string;
+      arch?: string;
+      other?: { arch: string; label: string; href: string };
+    }>;
     readonly releasesUrl: string;
   };
   /** The browser's own notifications (the admin app in a browser tab). */
@@ -156,5 +172,6 @@ export function userSettingsApi(
     notificationSettings: () => jsonFetch<SettingsNotificationPrefs>(`${root}/api/notifications/settings`),
     updateNotificationSettings: (prefs) =>
       jsonFetch<SettingsNotificationPrefs>(`${root}/api/notifications/settings`, json('PATCH', prefs)),
+    pluginActions: () => jsonFetch<PluginActionsResponse>(`${root}/api/files/plugins/actions`),
   };
 }

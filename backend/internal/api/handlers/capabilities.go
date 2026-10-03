@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/newdoc"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
+	"github.com/brf-tech/filex/backend/internal/thumb"
 )
 
 // Capabilities exposes /api/capabilities.
@@ -57,6 +58,11 @@ type Capabilities struct {
 	// Archive publishes the non-sensitive creation policy used by the explorer
 	// so the create dialog honours the operator's configured default.
 	Archive *archivecli.Service
+	// SSO lists the sign-in page's SSO buttons for the address asked on (the
+	// tenant it names, else the platform's own): `auth_sso` [{id, label}].
+	// Nil = the field is absent and the page keeps its one button from
+	// `auth_drivers` (docs/TENANT-ADMIN.md).
+	SSO func(r *http.Request) []ssoMethod
 	// Queued names the changes this server runs as jobs of its operations queue
 	// when asked with `queued=1`: "rename" on POST /api/files/manager?action=rename,
 	// "restore" on POST /api/files/manager/restore, "purge" on
@@ -75,9 +81,14 @@ func NewCapabilities(svc *capability.Service, store db.Store, multiTenant bool) 
 //
 // We emit BOTH the rich nested shape (filex-core admin SPA) AND a flat
 // alias set (legacy embed.js + filex-core SFC fallback expected:
-// `ffmpeg / ghostscript / libreoffice / max_chunk_mb / upload_limit_mb /
-// onlyoffice_url / drawio_url`). Cheap to ship both — keeps the SFC
-// happy without breaking the existing admin UI bindings.
+// `ffmpeg / ghostscript / max_chunk_mb / upload_limit_mb / onlyoffice_url /
+// drawio_url`). Cheap to ship both - keeps the SFC happy without breaking
+// the existing admin UI bindings.
+//
+// ⚠ 0.50: no `libreoffice` any more. LibreOffice left the images and the
+// office engine is the connected OnlyOffice Document Server, so a flag named
+// after a program filex never runs could only ever be false - a reader would
+// take it for "office documents cannot be previewed or converted here".
 func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	c, err := h.Service.Get(r.Context())
 	if err != nil {
@@ -90,8 +101,8 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	flat := map[string]any{
 		"ffmpeg":       c.Thumbs.Video,
 		"imagemagick":  c.Thumbs.ImageMagick,
+		"heic":         c.Thumbs.HEIC,
 		"ghostscript":  c.Thumbs.PDF,
-		"libreoffice":  c.Thumbs.Office,
 		"max_chunk_mb": int64(0),
 		"upload_limit_mb": func() int64 {
 			if c.MaxUploadSize <= 0 {
@@ -111,6 +122,11 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	if dr, ok := c.External["drawio"]; ok && dr.Enabled {
 		flat["drawio_url"] = dr.URL
 	}
+
+	// Folders show their pictures (the folder card, and the list on a resting
+	// pointer) unless an administrator turned it off: read per request, so an
+	// explorer loaded after the change follows it (docs/thumbnails.md).
+	flat["folder_previews"] = thumb.FolderPreviewsSetting.Resolve(r.Context(), h.Store)
 
 	// Marshal the rich snapshot to a generic map so we can layer the
 	// flat aliases on top (no struct tag wrestling).
@@ -144,9 +160,23 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 
 	// Per-tenant branding: identify only the tenant this host belongs to.
 	if h.MultiTenant && h.Store != nil {
-		if p, _ := h.Store.GetProviderByHost(r.Context(), multioidc.RequestHost(r)); p != nil {
+		p, _ := h.Store.GetProviderByHost(r.Context(), multioidc.RequestHost(r))
+		if p != nil {
 			merged["tenant"] = map[string]any{"slug": p.Slug, "name": p.Name}
 		}
+		// The sign-in form's Realm field (docs/MULTI-TENANCY.md, Realms). Only
+		// a multi-tenant install has one — a single-tenant answer carries no
+		// `realm` at all. On a tenant's own address it arrives filled with that
+		// tenant's realm and locked (the address already says which tenant); on
+		// the platform's address it is empty and free.
+		realm := map[string]any{"enabled": true, "locked_realm": nil}
+		if lr := p.LoginRealm(); lr != "" {
+			realm["locked_realm"] = lr
+		}
+		merged["realm"] = realm
+	}
+	if h.SSO != nil {
+		merged["auth_sso"] = h.SSO(r)
 	}
 	/* kimlik:e3 cloud */
 	if h.CloudEnabled {

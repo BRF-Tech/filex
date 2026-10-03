@@ -16,8 +16,9 @@ import (
 type Audit struct {
 	Store db.Store
 	// DemoMode marks a public playground, where this page is readable by
-	// whoever read the credentials off the landing page — and the addresses
-	// in it belong to the other visitors. See maskAuditEntries.
+	// whoever read the credentials off the landing page - and the addresses
+	// (and the names typed at the sign-in form) in it belong to the other
+	// visitors. See demoMask.
 	DemoMode bool
 }
 
@@ -109,7 +110,7 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if h.DemoMode {
-		maskAuditEntries(entries)
+		newDemoMask(ctx, h.Store).auditRows(entries)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": entries,

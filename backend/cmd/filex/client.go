@@ -1,7 +1,8 @@
 // client.go wires the `filex client` subcommand family — a CLI consumer
 // of a REMOTE filex server's REST API (the rest of the binary manages a
 // local instance). Connection resolution, wire calls and mv semantics
-// live in internal/cliclient; this file is cobra plumbing + rendering.
+// live in internal/cliclient; this file is cobra plumbing + rendering
+// (client_files.go holds the queue-backed and per-file extras).
 package main
 
 import (
@@ -43,10 +44,16 @@ func (o *clientOpts) api(requireToken bool) (*cliclient.Client, error) {
 		return nil, err
 	}
 	if conn.URL == "" {
-		return nil, errors.New("no server URL — pass --url, set FILEX_URL, or run `filex client login`")
+		return nil, errors.New("no server URL - pass --url, set FILEX_URL, or run `filex client login`")
 	}
 	if requireToken && conn.Token == "" {
-		return nil, errors.New("no token — run `filex client login` or set FILEX_TOKEN")
+		if conn.SavedURL != "" {
+			// ⚠ The saved session is another address's: it is never sent here
+			// (cliclient.Resolve). Say so rather than "no token".
+			return nil, fmt.Errorf("no saved session for %s - the one in %s is for %s, and a session goes only to the address it was saved with; run `filex client login --url %s` or set FILEX_TOKEN",
+				conn.URL, cfgPath, conn.SavedURL, conn.URL)
+		}
+		return nil, errors.New("no token - run `filex client login` or set FILEX_TOKEN")
 	}
 	return cliclient.New(conn), nil
 }
@@ -55,14 +62,14 @@ func (o *clientOpts) api(requireToken bool) (*cliclient.Client, error) {
 // tells the user exactly what to do next.
 func authHint(err error) error {
 	if cliclient.IsUnauthorized(err) {
-		return fmt.Errorf("%w — token missing/expired; run `filex client login`", err)
+		return fmt.Errorf("%w - token missing/expired; run `filex client login`", err)
 	}
 	return err
 }
 
 // clientCmd builds the `filex client` tree:
 //
-//	filex client login|ls|upload|download|mkdir|rm|mv|search|share|plugins
+//	filex client login|ls|upload|download|mkdir|rm|mv|cp|search|share|trash|versions|tag|actions|run|archive|plugins
 func clientCmd() *cobra.Command {
 	opts := &clientOpts{}
 	c := &cobra.Command{
@@ -71,10 +78,12 @@ func clientCmd() *cobra.Command {
 		Long: "Connect to a remote filex server and manage files from the terminal.\n" +
 			"Connection resolution order: --url/--token flags, then FILEX_URL/FILEX_TOKEN\n" +
 			"environment variables, then ~/.filex/cli.yaml (written by `filex client login`).\n" +
+			"The session saved there is sent only to the server URL it was saved with; another\n" +
+			"URL needs its own login, or a token given with --token / FILEX_TOKEN.\n" +
 			"Remote paths use the adapter://relative/path form, e.g. docs://reports/2026.",
 	}
 	c.PersistentFlags().StringVar(&opts.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
-	c.PersistentFlags().StringVar(&opts.token, "token", "", "API or session token (default: $FILEX_TOKEN or ~/.filex/cli.yaml)")
+	c.PersistentFlags().StringVar(&opts.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the session ~/.filex/cli.yaml saved for this server URL)")
 	c.PersistentFlags().BoolVar(&opts.json, "json", false, "print raw JSON responses instead of tables")
 
 	c.AddCommand(
@@ -85,8 +94,15 @@ func clientCmd() *cobra.Command {
 		clientMkdirCmd(opts),
 		clientRmCmd(opts),
 		clientMvCmd(opts),
+		clientCpCmd(opts),
 		clientSearchCmd(opts),
 		clientShareCmd(opts),
+		clientTrashCmd(opts),
+		clientVersionsCmd(opts),
+		clientTagCmd(opts),
+		clientActionsCmd(opts),
+		clientRunCmd(opts),
+		clientArchiveCmd(opts),
 		clientPluginsCmd(opts),
 	)
 	return c
@@ -103,11 +119,19 @@ func quiet(c *cobra.Command) *cobra.Command {
 // ─────────────────── login ───────────────────
 
 func clientLoginCmd(opts *clientOpts) *cobra.Command {
-	var email, totp string
+	var email, totp, realm string
 	c := &cobra.Command{
 		Use:   "login",
 		Short: "Sign in and store the session token in ~/.filex/cli.yaml",
-		Args:  cobra.NoArgs,
+		Long: "Sign in with an e-mail address (or user name) and password, and store the session\n" +
+			"token in ~/.filex/cli.yaml for the other commands (filex sync and filex mount too).\n\n" +
+			"On a multi-tenant server, --realm names the tenant to sign in to - its realm, as on\n" +
+			"the web sign-in form. At a tenant's own address none is needed. The realm is saved\n" +
+			"with the address and used again by the next login there; --realm \"\" signs in to the\n" +
+			"platform's own accounts. When the tenant has an address of its own, the server hands\n" +
+			"the sign-in over to it (a one-use handoff code); the CLI follows, and later commands\n" +
+			"use that address. A single-tenant server ignores the realm.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath, err := cliclient.DefaultConfigPath()
 			if err != nil {
@@ -118,8 +142,15 @@ func clientLoginCmd(opts *clientOpts) *cobra.Command {
 				return err
 			}
 			if conn.URL == "" {
-				return errors.New("login needs a server URL — pass --url or set FILEX_URL")
+				return errors.New("login needs a server URL - pass --url or set FILEX_URL")
 			}
+			// The realm: --realm when given (--realm "" = the platform's own
+			// accounts), else the one saved with this address.
+			savedRealm := !cmd.Flags().Changed("realm")
+			if savedRealm {
+				realm = conn.Realm
+			}
+			realm = strings.TrimSpace(realm)
 
 			// One shared reader: prompting email and piping the password
 			// through the same stdin must not swallow each other's lines.
@@ -144,24 +175,59 @@ func clientLoginCmd(opts *clientOpts) *cobra.Command {
 			}
 
 			api := cliclient.New(cliclient.Conn{URL: conn.URL})
-			lr, err := api.Login(cmd.Context(), email, password, totp)
+			lr, err := api.Login(cmd.Context(), cliclient.LoginRequest{Email: email, Password: password, TOTP: totp, Realm: realm})
 			if err != nil {
-				return err
+				return realmHint(err, realm, savedRealm)
 			}
-			if err := cliclient.SaveFileConfig(cfgPath, cliclient.FileConfig{URL: conn.URL, Token: lr.Token}); err != nil {
+			// lr.URL is the tenant's own address when the server handed the
+			// sign-in over: the session belongs there, and so do later commands.
+			if err := cliclient.SaveFileConfig(cfgPath, cliclient.FileConfig{URL: lr.URL, Token: lr.Token, Realm: realm}); err != nil {
 				return fmt.Errorf("save %s: %w", cfgPath, err)
 			}
 			if opts.json {
-				fmt.Fprintf(cmd.OutOrStdout(), "{\"ok\":true,\"url\":%q,\"config\":%q}\n", conn.URL, cfgPath)
+				b, err := json.Marshal(struct {
+					OK        bool   `json:"ok"`
+					URL       string `json:"url"`
+					Realm     string `json:"realm,omitempty"`
+					HandedOff bool   `json:"handed_off,omitempty"`
+					Config    string `json:"config"`
+				}{true, lr.URL, realm, lr.HandedOff, cfgPath})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(b))
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Logged in as %s on %s\nToken saved to %s (0600)\n", email, conn.URL, cfgPath)
+			who := email
+			if realm != "" {
+				who += " (realm " + realm + ")"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Logged in as %s on %s\n", who, lr.URL)
+			if lr.HandedOff {
+				fmt.Fprintf(cmd.OutOrStdout(), "Signed in at %s and handed over to the tenant's own address; later commands use it.\n", conn.URL)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Token saved to %s (0600)\n", cfgPath)
 			return nil
 		},
 	}
-	c.Flags().StringVar(&email, "email", "", "account email (prompted when omitted)")
+	c.Flags().StringVar(&email, "email", "", "account email or user name (prompted when omitted)")
 	c.Flags().StringVar(&totp, "totp", "", "two-factor code (accounts with TOTP enabled)")
+	c.Flags().StringVar(&realm, "realm", "", "tenant realm on a multi-tenant server (default: the one saved with this address; \"\" = the platform's own accounts)")
 	return quiet(c)
+}
+
+// realmHint adds the realm to a refused sign-in's error. The server answers a
+// realm nobody has - or one that is not the address's tenant - exactly as a
+// wrong password, on purpose; the CLI cannot tell them apart either, but it
+// can say the realm is among what may be wrong, and where it came from.
+func realmHint(err error, realm string, saved bool) error {
+	if realm == "" || !cliclient.IsUnauthorized(err) || cliclient.IsTOTPRequired(err) {
+		return err
+	}
+	if saved {
+		return fmt.Errorf("%w - the email, the password or the realm %q saved with this address is wrong (the server does not say which); --realm \"\" signs in to the platform's own accounts", err, realm)
+	}
+	return fmt.Errorf("%w - the email, the password or the realm %q is wrong (the server does not say which)", err, realm)
 }
 
 // readPassword reads the password without echo when stdin is a terminal,
@@ -435,24 +501,18 @@ func clientRmCmd(opts *clientOpts) *cobra.Command {
 
 func clientMvCmd(opts *clientOpts) *cobra.Command {
 	c := &cobra.Command{
-		Use:   "mv <adapter://source> <adapter://target>",
-		Short: "Move or rename a remote item (target: existing dir, or full new path)",
-		Args:  cobra.ExactArgs(2),
+		Use:   "mv <adapter://source>... <adapter://target>",
+		Short: "Move or rename remote items (target: existing folder, or full new path); across storages too",
+		Long: "Move a file or a folder on the server. The target is an existing folder (or ends in /),\n" +
+			"which receives the item under its own name, or the item's full new path - in the same\n" +
+			"folder that is a rename. Source and target may be on different storages; a move to\n" +
+			"another folder and name is one step on the server. Nothing is ever replaced: a taken\n" +
+			"name in a target folder gets a free one beside it (name-copy.ext), and a full target path\n" +
+			"that is taken is refused. With several sources the target must be an existing folder.\n" +
+			"The command waits for the server's operation and fails when it did.",
+		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			api, err := opts.api(true)
-			if err != nil {
-				return err
-			}
-			dest, raw, err := api.Move(cmd.Context(), args[0], args[1])
-			if err != nil {
-				return authHint(err)
-			}
-			if opts.json {
-				fmt.Fprintln(cmd.OutOrStdout(), string(raw))
-				return nil
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Moved %s -> %s\n", args[0], dest.String())
-			return nil
+			return runTransfer(cmd, opts, "move", args)
 		},
 	}
 	return quiet(c)
@@ -504,7 +564,7 @@ func clientShareCmd(opts *clientOpts) *cobra.Command {
 	var expiresDays int
 	c := &cobra.Command{
 		Use:   "share <adapter://path>",
-		Short: "Create a public download link (folders are served as ZIP)",
+		Short: "Create a public download link (folders are served as ZIP); `share ls` / `share rm` list and revoke yours",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			api, err := opts.api(true)
@@ -531,6 +591,9 @@ func clientShareCmd(opts *clientOpts) *cobra.Command {
 	}
 	c.Flags().BoolVar(&pin, "pin", false, "protect the link with a server-generated PIN")
 	c.Flags().IntVar(&expiresDays, "expires-days", 0, "expire the link after N days (0 = never)")
+	// `share <path>` creates; `share ls` and `share rm` are its subcommands. A
+	// remote path always has `://`, so it can never be taken for one of them.
+	c.AddCommand(clientShareLsCmd(opts), clientShareRmCmd(opts))
 	return quiet(c)
 }
 

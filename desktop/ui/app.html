@@ -563,10 +563,24 @@
       .segmented {
         display: inline-flex;
         align-self: flex-start;
+        /* ⚠ Never narrower than its buttons. `overflow: hidden` (for the
+           rounded corners) also drops a flex item's automatic minimum width
+           to 0, so beside a long description the strip SHRANK and cut its
+           last button: "5 MB/s" and "Evenings & nights" ran off the card at
+           1440 (2026-09-25, the Snap screenshots). */
+        flex: 0 0 auto;
+        max-width: 100%;
         border: 1px solid var(--fe-border);
         border-radius: var(--fe-radius);
         overflow: hidden;
       }
+      /* A setting row with a segmented strip: the description gives way first,
+         and when even a narrowed description and the strip do not fit on one
+         line, the strip goes under the description instead of off the card.
+         16rem is the narrowest a description stays readable at. Every row of
+         this kind is one of these cards, so the rule is here, once. */
+      .between:has(> .segmented) { flex-wrap: wrap; }
+      .between:has(> .segmented) > :first-child { flex: 1 1 16rem; min-width: 0; }
       .segmented button {
         height: var(--fe-h-md);
         border: 0;
@@ -890,8 +904,8 @@
                                  'Sunucu yanıt vermedi. Kapalı olabilir ya da bu bilgisayar ağ dışında olabilir.'],
         'boot.retry':           ['Try again', 'Yeniden dene'],
         'boot.signed_out':      ['Signed out of {host}', '{host} oturumu kapandı'],
-        'boot.signed_out_sub':  ["The server no longer accepts this computer's sign-in — it was revoked or it expired. Sync for this account is stopped. “Reconnect” signs in again in your browser and keeps this account's synced folders.",
-                                 'Sunucu bu bilgisayarın oturumunu artık kabul etmiyor — iptal edilmiş ya da süresi dolmuş. Bu hesabın eşitlemesi durdu. «Yeniden bağlan» tarayıcında tekrar giriş yapar ve bu hesabın eşitlenen klasörlerini korur.'],
+        'boot.signed_out_sub':  ["The server no longer accepts this computer's sign-in - it was revoked or it expired. Sync for this account is stopped. “Reconnect” signs in again in your browser and keeps this account's synced folders.",
+                                 'Sunucu bu bilgisayarın oturumunu artık kabul etmiyor - iptal edilmiş ya da süresi dolmuş. Bu hesabın eşitlemesi durdu. «Yeniden bağlan» tarayıcında tekrar giriş yapar ve bu hesabın eşitlenen klasörlerini korur.'],
         'boot.reconnect':       ['Reconnect', 'Yeniden bağlan'],
 
         'rail.add':             ['Add another account', 'Başka bir hesap ekle'],
@@ -911,8 +925,8 @@
         'set.sub':              ["This app's settings, plus the storage connections of the server you are signed in to.",
                                  'Bu uygulamanın ayarları ve bağlı olduğunuz sunucunun depo bağlantıları.'],
         'set.connections':      ['Storage connections', 'Depo bağlantıları'],
-        'set.connections_sub':  ['See how to reach this server from this computer — mount it, or connect with an S3 client, over SFTP or with this app. Storages themselves are created and edited in the admin panel.',
-                                 'Bu sunucuya bu bilgisayardan nasıl erişileceğini görün — bağlayın ya da bir S3 istemcisi, SFTP veya bu uygulamayla erişin. Depoların kendisi yönetim panelinde oluşturulur ve düzenlenir.'],
+        'set.connections_sub':  ['See how to reach this server from this computer - mount it, or connect with an S3 client, over SFTP or with this app. Storages themselves are created and edited in the admin panel.',
+                                 'Bu sunucuya bu bilgisayardan nasıl erişileceğini görün - bağlayın ya da bir S3 istemcisi, SFTP veya bu uygulamayla erişin. Depoların kendisi yönetim panelinde oluşturulur ve düzenlenir.'],
         'set.connections_open': ['How to connect', 'Nasıl bağlanılır'],
         // "Mount as a drive" (WebDAV) — the one-click counterpart of the guide.
         'drive.title':          ['Mount as a drive', 'Sürücü olarak bağla'],
@@ -925,14 +939,14 @@
         'drive.mounted_at':     ['Mounted at {where}', '{where} konumuna bağlandı'],
         'drive.open':           ['Open', 'Aç'],
         // ⚠ The honest limits, said BEFORE the click, not discovered after.
-        'drive.note_win':       ['Uses Windows’ built-in WebDAV client. It must be reached over HTTPS, its WebClient service must be running (this starts it for you), and it is weak with very large files — for those, sync the folder instead.',
-                                 'Windows’un yerleşik WebDAV istemcisini kullanır. HTTPS üzerinden erişilmeli, WebClient hizmeti çalışıyor olmalı (bunu senin için başlatır) ve çok büyük dosyalarda zayıftır — onlar için klasörü eşitle.'],
+        'drive.note_win':       ['Uses Windows’ built-in WebDAV client. It must be reached over HTTPS, its WebClient service must be running (this starts it for you), and it is weak with very large files - for those, sync the folder instead.',
+                                 'Windows’un yerleşik WebDAV istemcisini kullanır. HTTPS üzerinden erişilmeli, WebClient hizmeti çalışıyor olmalı (bunu senin için başlatır) ve çok büyük dosyalarda zayıftır - onlar için klasörü eşitle.'],
         'drive.note_mac':       ['Uses macOS’ built-in WebDAV client (Finder). Best over HTTPS.',
                                  'macOS’un yerleşik WebDAV istemcisini (Finder) kullanır. En iyisi HTTPS üzerindedir.'],
         'drive.note_linux':     ['Uses your desktop’s WebDAV client (GVfs / gio). Best over HTTPS.',
                                  'Masaüstünün WebDAV istemcisini (GVfs / gio) kullanır. En iyisi HTTPS üzerindedir.'],
-        'drive.warn_http':      ['This server is on http:// — Windows refuses to send credentials to a WebDAV drive without HTTPS, and the others are insecure. Use https://.',
-                                 'Bu sunucu http:// üzerinde — Windows, HTTPS olmadan bir WebDAV sürücüsüne kimlik bilgisi göndermeyi reddeder, diğerlerinde de güvensizdir. https:// kullan.'],
+        'drive.warn_http':      ['This server is on http:// - Windows refuses to send credentials to a WebDAV drive without HTTPS, and the others are insecure. Use https://.',
+                                 'Bu sunucu http:// üzerinde - Windows, HTTPS olmadan bir WebDAV sürücüsüne kimlik bilgisi göndermeyi reddeder, diğerlerinde de güvensizdir. https:// kullan.'],
         // Failures, one message per machine-readable problem from src/drive.ts.
         'drive.err.no-free-letter':   ['No free drive letter is available. Detach an existing network drive and try again.',
                                        'Boş sürücü harfi yok. Var olan bir ağ sürücüsünü ayırıp yeniden dene.'],
@@ -965,25 +979,25 @@
         'set.admin':            ['Admin panel ↗', 'Yönetim paneli ↗'],
         'set.signout':          ['Sign out', 'Çıkış yap'],
         'set.reconnect':        ['Reconnect', 'Yeniden bağlan'],
-        'set.signed_out':       ["Signed out by the server — this account's sync is stopped until you reconnect.",
-                                 'Sunucu oturumu kapattı — yeniden bağlanana kadar bu hesabın eşitlemesi durdu.'],
+        'set.signed_out':       ["Signed out by the server - this account's sync is stopped until you reconnect.",
+                                 'Sunucu oturumu kapattı - yeniden bağlanana kadar bu hesabın eşitlemesi durdu.'],
         'set.no_accounts':      ['No accounts.', 'Hesap yok.'],
         'set.folders':          ['Synced folders', 'Eşitlenen klasörler'],
         'set.pause':            ['Pause sync', 'Eşitlemeyi duraklat'],
-        'set.pause_sub':        ['Nothing is uploaded or downloaded until you resume — and it stays paused after a restart. The tray menu has the same switch.',
-                                 'Sen sürdürene kadar hiçbir şey yüklenmez ya da indirilmez — yeniden başlatınca da duraklatılmış kalır. Aynı düğme tepsi menüsünde de var.'],
+        'set.pause_sub':        ['Nothing is uploaded or downloaded until you resume - and it stays paused after a restart. The tray menu has the same switch.',
+                                 'Sen sürdürene kadar hiçbir şey yüklenmez ya da indirilmez - yeniden başlatınca da duraklatılmış kalır. Aynı düğme tepsi menüsünde de var.'],
         'set.limit_down':       ['Download limit', 'İndirme sınırı'],
         'set.limit_down_sub':   ['How fast folder sync may download, for each signed-in account. Opening or dragging a file in this window is not limited.',
                                  'Klasör eşitlemenin indirme hızı, oturum açılmış her hesap için ayrı. Bu pencerede dosya açmak ya da sürüklemek sınırlanmaz.'],
         'set.limit_up':         ['Upload limit', 'Yükleme sınırı'],
-        'set.limit_up_sub':     ['How fast folder sync may upload — so a big first sync does not fill the line everyone else on the server uses.',
-                                 'Klasör eşitlemenin yükleme hızı — büyük bir ilk eşitleme sunucudaki herkesin kullandığı hattı doldurmasın.'],
+        'set.limit_up_sub':     ['How fast folder sync may upload - so a big first sync does not fill the line everyone else on the server uses.',
+                                 'Klasör eşitlemenin yükleme hızı - büyük bir ilk eşitleme sunucudaki herkesin kullandığı hattı doldurmasın.'],
         'set.limit_none':       ['Unlimited', 'Sınırsız'],
         'set.limit_mb':         ['{n} MB/s', '{n} MB/sn'],
         'set.limit_custom':     ['Currently {n} KB/s', 'Şu an {n} KB/sn'],
         'set.window':           ['When to sync', 'Ne zaman eşitlensin'],
-        'set.window_sub':       ['Evenings & nights is 19:00–08:00, nights 22:00–07:00, local time. Outside those hours no new sync round starts; one still running when they end stops and carries on next time.',
-                                 'Akşam ve gece 19:00–08:00, gece 22:00–07:00 arasıdır (yerel saat). Bu saatlerin dışında yeni eşitleme turu başlamaz; saat dolduğunda süren tur durur ve bir sonrakinde devam eder.'],
+        'set.window_sub':       ['Evenings & nights is 19:00-08:00, nights 22:00-07:00, local time. Outside those hours no new sync round starts; one still running when they end stops and carries on next time.',
+                                 'Akşam ve gece 19:00-08:00, gece 22:00-07:00 arasıdır (yerel saat). Bu saatlerin dışında yeni eşitleme turu başlamaz; saat dolduğunda süren tur durur ve bir sonrakinde devam eder.'],
         'set.window_any':       ['Any time', 'Her zaman'],
         'set.window_19:00-08:00': ['Evenings & nights', 'Akşam ve gece'],
         'set.window_22:00-07:00': ['Nights', 'Gece'],
@@ -996,8 +1010,8 @@
         'set.sync_root':        ['filex folder on this computer', 'Bu bilgisayardaki filex klasörü'],
         'set.sync_root_sub':    ['Kept folders mirror under it as storage/path.',
                                  '"Bilgisayarda tut" dediklerin bunun altına depo/yol düzeninde iner.'],
-        'set.sync_root_none':   ['Not chosen yet — you will be asked at the first "Keep on this computer".',
-                                 'Henüz seçilmedi — ilk "Bilgisayarda tut" dediğinde sorulur.'],
+        'set.sync_root_none':   ['Not chosen yet - you will be asked at the first "Keep on this computer".',
+                                 'Henüz seçilmedi - ilk "Bilgisayarda tut" dediğinde sorulur.'],
         'set.sync_root_change': ['Change…', 'Değiştir…'],
         // ⚠ Named for the ACTOR, not for the act. "Recently deleted" is what
         // the file list's own Trash holds — the server's — and two entries in
@@ -1034,20 +1048,20 @@
         'set.other_copy_open':  ['Open installed apps', 'Yüklü uygulamaları aç'],
         // Linux has no one "installed apps" page to open, so the text carries
         // the commands. The snap is the one published as filex-app.
-        'set.other_copy_snap_sub': ['The Snap Store copy of filex is installed on this computer as well. It keeps its own accounts and its own sync history, so a folder paired in both is synced by two apps that do not know about each other — duplicate uploads, conflict copies, a delete reaching the side that did not ask for it. Keep one: remove the snap with "sudo snap remove filex-app", or remove this copy with your package manager.',
+        'set.other_copy_snap_sub': ['The Snap Store copy of filex is installed on this computer as well. It keeps its own accounts and its own sync history, so a folder paired in both is synced by two apps that do not know about each other - duplicate uploads, conflict copies, a delete reaching the side that did not ask for it. Keep one: remove the snap with "sudo snap remove filex-app", or remove this copy with your package manager.',
                                     'filex\'in Snap Store kopyası da bu bilgisayarda kurulu. Kendi hesaplarını ve kendi senkron geçmişini tuttuğu için ikisinde de eşlenen bir klasörü birbirinden habersiz iki uygulama senkronlar: aynı dosya iki kez yüklenir, çakışma kopyaları oluşur, bir silme istemeyen tarafa ulaşabilir. Birini tutun: snap\'i "sudo snap remove filex-app" komutuyla ya da bu kopyayı paket yöneticinizle kaldırın.'],
         'set.language':         ['Language', 'Dil'],
         'set.language_sub':     ['Applies to this window, the tray menu and the file list.',
                                  'Bu pencere, tepsi menüsü ve dosya listesi için geçerlidir.'],
         'set.language_system':  ['System', 'Sistem'],
         'ow.title':             ['Open documents with filex', 'Belgeleri filex ile aç'],
-        'ow.idea':              ['Double-click a Word, Excel or PowerPoint file and it opens here, in the editor your filex server runs — no Office needed on this computer.',
-                                 'Bir Word, Excel ya da PowerPoint dosyasına çift tıkla; filex sunucunun çalıştırdığı düzenleyicide burada açılsın — bu bilgisayarda Office gerekmez.'],
+        'ow.idea':              ['Double-click a Word, Excel or PowerPoint file and it opens here, in the editor your filex server runs - no Office needed on this computer.',
+                                 'Bir Word, Excel ya da PowerPoint dosyasına çift tıkla; filex sunucunun çalıştırdığı düzenleyicide burada açılsın - bu bilgisayarda Office gerekmez.'],
         'ow.types':             ['Handles: {types}', 'Açtığı türler: {types}'],
         'ow.registered':        ['filex is listed under "Open with" for these files.',
                                  'filex bu dosyalar için “Birlikte aç” listesinde görünür.'],
-        'ow.dev':               ['Only the installed app is registered with the system — a run from source is not.',
-                                 'Sisteme yalnızca kurulu uygulama kayıtlıdır — kaynaktan çalıştırma kayıtlı değildir.'],
+        'ow.dev':               ['Only the installed app is registered with the system - a run from source is not.',
+                                 'Sisteme yalnızca kurulu uygulama kayıtlıdır - kaynaktan çalıştırma kayıtlı değildir.'],
         // ⚠ The Windows wording is not hedging. Choosing the default handler is
         // the user's act, in the OS, and no application can perform it for them
         // — a button that claimed to would be a button that does nothing.
@@ -1059,19 +1073,19 @@
         // its sandbox (src/channel.ts → defaultHandlerRoute): no button, the way.
         'ow.default_linux_sandbox': ['This copy runs in a {store} sandbox, which cannot change your desktop’s defaults. Right-click a document in your file manager, choose Open With…, pick filex and set it as the default there.',
                                  'Bu kopya {store} korumalı alanında çalışıyor ve masaüstünün varsayılanlarını değiştiremez. Dosya yöneticisinde bir belgeye sağ tıkla, Birlikte Aç…’ı seç, filex’i seçip orada varsayılan yap.'],
-        'ow.default_mac':       ['macOS sets this in Finder — Get Info → Open with → Change All. This explains where.',
-                                 'macOS bunu Finder’dan ayarlar — Bilgi Al → Şununla aç → Tümünü Değiştir. Bu düğme nereden yapılacağını anlatır.'],
+        'ow.default_mac':       ['macOS sets this in Finder - Get Info → Open with → Change All. This explains where.',
+                                 'macOS bunu Finder’dan ayarlar - Bilgi Al → Şununla aç → Tümünü Değiştir. Bu düğme nereden yapılacağını anlatır.'],
         'ow.default_btn_win':   ['Open Default apps', 'Varsayılan uygulamaları aç'],
         'ow.default_btn_linux': ['Make filex the default', 'Varsayılanı filex yap'],
         'ow.default_btn_mac':   ['How to do it', 'Nasıl yapılır'],
-        'ow.default_done':      ['Done — filex is the default for these documents.',
-                                 'Tamam — bu belgeler için varsayılan artık filex.'],
+        'ow.default_done':      ['Done - filex is the default for these documents.',
+                                 'Tamam - bu belgeler için varsayılan artık filex.'],
         'ow.default_failed':    ['That did not work: {err}', 'Bu işe yaramadı: {err}'],
         'ow.open_now':          ['Being edited right now', 'Şu anda düzenleniyor'],
         'ow.writes_to':         ['saves go to {file}', 'kayıtlar {file} dosyasına gider'],
         'upd.title':            ['Updates', 'Güncellemeler'],
-        'upd.idea':             ['filex updates itself in the background — while you are away, or when you quit. No installer, nothing to click.',
-                                 'filex kendini arka planda günceller — bilgisayar başında değilken ya da çıkışta. Kurulum ekranı yok, tıklayacağın bir şey yok.'],
+        'upd.idea':             ['filex updates itself in the background - while you are away, or when you quit. No installer, nothing to click.',
+                                 'filex kendini arka planda günceller - bilgisayar başında değilken ya da çıkışta. Kurulum ekranı yok, tıklayacağın bir şey yok.'],
         'upd.check':            ['Check now', 'Şimdi denetle'],
         'upd.checking':         ['Checking…', 'Denetleniyor…'],
         'upd.current':          ['Up to date', 'Güncel'],
@@ -1081,24 +1095,24 @@
         'upd.ready':            ['Version {v} installs itself shortly', '{v} sürümü birazdan kendiliğinden kurulacak'],
         'upd.restart':          ['Install it now', 'Şimdi kur'],
         'upd.error':            ['Could not check for updates', 'Güncelleme denetlenemedi'],
-        'upd.manual':           ['Version {v} is out — install it by downloading',
-                                 '{v} sürümü çıktı — indirerek kurun'],
+        'upd.manual':           ['Version {v} is out - install it by downloading',
+                                 '{v} sürümü çıktı - indirerek kurun'],
         'upd.manual_idea':      ['This macOS build is not signed for self-update; new versions install as a fresh download.',
                                  'Bu macOS paketi kendini güncellemek için imzalı değil; yeni sürümler indirilerek kurulur.'],
-        'upd.portable_manual':  ['Version {v} is out — download it and replace this .exe',
-                                 '{v} sürümü çıktı — indirip bu .exe dosyasının yerine koyun'],
-        'upd.portable_idea':    ['This portable copy does not update itself — there is nothing installed for an update to replace. Download a new .exe and put it over this one; the folder beside it keeps your accounts and settings.',
-                                 'Bu taşınabilir kopya kendini güncellemez — güncellemenin değiştireceği kurulu bir şey yok. Yeni bir .exe indirip bunun üzerine koyun; yanındaki klasör hesaplarınızı ve ayarlarınızı korur.'],
+        'upd.portable_manual':  ['Version {v} is out - download it and replace this .exe',
+                                 '{v} sürümü çıktı - indirip bu .exe dosyasının yerine koyun'],
+        'upd.portable_idea':    ['This portable copy does not update itself - there is nothing installed for an update to replace. Download a new .exe and put it over this one; the folder beside it keeps your accounts and settings.',
+                                 'Bu taşınabilir kopya kendini güncellemez - güncellemenin değiştireceği kurulu bir şey yok. Yeni bir .exe indirip bunun üzerine koyun; yanındaki klasör hesaplarınızı ve ayarlarınızı korur.'],
         'upd.download':         ['Download', 'İndir'],
         'upd.store':            ['{store} keeps this copy up to date', 'Bu kopyayı {store} güncel tutuyor'],
-        'upd.store_idea':       ['This copy was installed from {store}, and new versions arrive the same way — there is nothing to check or download here.',
+        'upd.store_idea':       ['This copy was installed from {store}, and new versions arrive the same way - there is nothing to check or download here.',
                                  'Bu kopya {store} üzerinden kuruldu; yeni sürümler de aynı yoldan gelir. Burada denetlenecek ya da indirilecek bir şey yok.'],
         'upd.open_store':       ['Open store page', 'Mağaza sayfasını aç'],
         'upd.dev':              ['Only the installed app updates itself.',
                                  'Yalnızca kurulu uygulama kendini günceller.'],
         'set.portable':         ['Portable copy', 'Taşınabilir kopya'],
-        'set.portable_sub':     ['Everything this copy keeps — accounts, settings, sync state, logs — is in the folder beside the .exe. Delete that folder and nothing of yours is left on this machine.',
-                                 'Bu kopyanın tuttuğu her şey — hesaplar, ayarlar, senkron durumu, günlükler — .exe dosyasının yanındaki klasörde. O klasörü silin, bu makinede size ait hiçbir şey kalmaz.'],
+        'set.portable_sub':     ['Everything this copy keeps - accounts, settings, sync state, logs - is in the folder beside the .exe. Delete that folder and nothing of yours is left on this machine.',
+                                 'Bu kopyanın tuttuğu her şey - hesaplar, ayarlar, senkron durumu, günlükler - .exe dosyasının yanındaki klasörde. O klasörü silin, bu makinede size ait hiçbir şey kalmaz.'],
         'set.portable_stuck':   ['This .exe cannot write next to itself (a read-only disk, or a folder that needs administrator rights), so its files are here instead. Deleting the .exe will NOT remove them.',
                                  'Bu .exe kendi yanına yazamıyor (salt okunur disk ya da yönetici hakkı isteyen bir klasör), bu yüzden dosyaları burada duruyor. .exe dosyasını silmek onları KALDIRMAZ.'],
         'set.portable_show':    ['Show folder', 'Klasörü aç'],
@@ -1111,31 +1125,31 @@
         'sync.stopped':         ['stopped', 'durdu'],
         // How changes reach the engine (LiveState in src/syncstatus.ts). One word
         // and what it means — no new UI, just the truth about the speed.
-        'sync.live.connected':  ['Live — changes arrive as they happen', 'Canlı — değişiklikler anında geliyor'],
-        'sync.live.polling':    ['Polling — this server does not announce changes; checked every 30 s',
-                                 'Yoklama — bu sunucu değişiklikleri bildirmiyor; 30 sn’de bir kontrol ediliyor'],
-        'sync.live.offline':    ['Offline — the server cannot be reached; retrying',
-                                 'Çevrimdışı — sunucuya ulaşılamıyor; yeniden deneniyor'],
+        'sync.live.connected':  ['Live - changes arrive as they happen', 'Canlı - değişiklikler anında geliyor'],
+        'sync.live.polling':    ['Polling - this server does not announce changes; checked every 30 s',
+                                 'Yoklama - bu sunucu değişiklikleri bildirmiyor; 30 sn’de bir kontrol ediliyor'],
+        'sync.live.offline':    ['Offline - the server cannot be reached; retrying',
+                                 'Çevrimdışı - sunucuya ulaşılamıyor; yeniden deneniyor'],
         // Keys are the engine's codes (LocalNote in src/syncstatus.ts).
-        'sync.local.too-large': ['Changes made on this computer are found by the 30-second check — the folder has too many items to watch',
-                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur — klasörde izlenemeyecek kadar çok öğe var'],
-        'sync.local.unavailable': ['Changes made on this computer are found by the 30-second check — the folder cannot be watched',
-                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur — klasör izlenemiyor'],
+        'sync.local.too-large': ['Changes made on this computer are found by the 30-second check - the folder has too many items to watch',
+                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur - klasörde izlenemeyecek kadar çok öğe var'],
+        'sync.local.unavailable': ['Changes made on this computer are found by the 30-second check - the folder cannot be watched',
+                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur - klasör izlenemiyor'],
         // Another process holds the folder's lock (FolderView 'busy' in
         // src/sync-policy.ts): the other copy of this app, or the CLI. Not an
         // error — the folder is being synced, just not by this copy.
-        'sync.busy':            ['Another filex on this computer is syncing this folder — this copy takes over when that one stops',
-                                 'Bu bilgisayardaki başka bir filex bu klasörü eşitliyor — o kapandığında bu kopya devralır'],
-        'sync.paused':          ['paused — resume sync to continue', 'duraklatıldı — devam etmek için eşitlemeyi sürdür'],
-        'sync.signed_out':      ['stopped — the server signed this account out; Reconnect to continue',
-                                 'durdu — sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
+        'sync.busy':            ['Another filex on this computer is syncing this folder - this copy takes over when that one stops',
+                                 'Bu bilgisayardaki başka bir filex bu klasörü eşitliyor - o kapandığında bu kopya devralır'],
+        'sync.paused':          ['paused - resume sync to continue', 'duraklatıldı - devam etmek için eşitlemeyi sürdür'],
+        'sync.signed_out':      ['stopped - the server signed this account out; Reconnect to continue',
+                                 'durdu - sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
         'sync.window_wait':     ['waiting for the sync window, {window}', 'eşitleme saatleri bekleniyor, {window}'],
         'sync.held_one':        ['1 item on this computer is not on the server or differs from it.',
                                  'Bu bilgisayardaki 1 öğe sunucuda yok ya da sunucudakinden farklı.'],
         'sync.held_many':       ['{n} items on this computer are not on the server or differ from it.',
                                  'Bu bilgisayardaki {n} öğe sunucuda yok ya da sunucudakinden farklı.'],
-        'sync.held_sub':        ["filex is holding them back instead of uploading them: this folder's first sync would have sent a great many items into a server folder that already has content — which is what an old copy of the folder looks like. Everything else keeps syncing.",
-                                 'filex bunları yüklemek yerine bekletiyor: bu klasörün ilk eşitlemesi, zaten içeriği olan bir sunucu klasörüne çok sayıda öğe gönderecekti — bu, klasörün eski bir kopyasına benziyor. Geri kalan her şey eşitlenmeye devam ediyor.'],
+        'sync.held_sub':        ["filex is holding them back instead of uploading them: this folder's first sync would have sent a great many items into a server folder that already has content - which is what an old copy of the folder looks like. Everything else keeps syncing.",
+                                 'filex bunları yüklemek yerine bekletiyor: bu klasörün ilk eşitlemesi, zaten içeriği olan bir sunucu klasörüne çok sayıda öğe gönderecekti - bu, klasörün eski bir kopyasına benziyor. Geri kalan her şey eşitlenmeye devam ediyor.'],
         'sync.held_upload':     ['Upload them', 'Sunucuya yükle'],
         'sync.held_discard':    ['Move to local trash', 'Yerel çöpe taşı'],
         'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
@@ -1144,18 +1158,18 @@
         // no plural on a noun after a number and needs one.
         'sync.phase_plan_n':    ['{n} changes to make', '{n} değişiklik yapılacak'],
         'sync.phase_plan_n_one': ['{n} change to make', '{n} değişiklik yapılacak'],
-        'sync.phase_inventory_listed': ['listing the server — {n} items so far', 'sunucu listeleniyor — şimdiye dek {n} öğe'],
-        'sync.phase_inventory_listed_one': ['listing the server — {n} item so far', 'sunucu listeleniyor — şimdiye dek {n} öğe'],
-        'sync.phase_inventory_here': ['{n} items on this computer — listing the server…', 'bu bilgisayarda {n} öğe — sunucu listeleniyor…'],
-        'sync.phase_inventory_here_one': ['{n} item on this computer — listing the server…', 'bu bilgisayarda {n} öğe — sunucu listeleniyor…'],
+        'sync.phase_inventory_listed': ['listing the server - {n} items so far', 'sunucu listeleniyor - şimdiye dek {n} öğe'],
+        'sync.phase_inventory_listed_one': ['listing the server - {n} item so far', 'sunucu listeleniyor - şimdiye dek {n} öğe'],
+        'sync.phase_inventory_here': ['{n} items on this computer - listing the server…', 'bu bilgisayarda {n} öğe - sunucu listeleniyor…'],
+        'sync.phase_inventory_here_one': ['{n} item on this computer - listing the server…', 'bu bilgisayarda {n} öğe - sunucu listeleniyor…'],
         'sync.phase_inventory_also_here': ['({n} on this computer)', '(bu bilgisayarda {n})'],
-        'sync.phase_settling_n': ['finishing up — {done}/{total}', 'tamamlanıyor — {done}/{total}'],
+        'sync.phase_settling_n': ['finishing up - {done}/{total}', 'tamamlanıyor - {done}/{total}'],
         'sync.pending':         ['waiting for its first check', 'ilk denetimini bekliyor'],
         'sync.moving':          ['moving to the new filex folder…', 'yeni filex klasörüne taşınıyor…'],
         'set.sync_root_moving': ['Moving…', 'Taşınıyor…'],
         'sync.exited':          ['the sync engine stopped (exit {code})', 'eşitleme motoru durdu (çıkış {code})'],
-        'sync.restarting':      ['— starting it again shortly', '— birazdan yeniden başlatılıyor'],
-        'sync.phase_transfer':  ['moving files — {done}/{total}', 'dosyalar aktarılıyor — {done}/{total}'],
+        'sync.restarting':      ['- starting it again shortly', '- birazdan yeniden başlatılıyor'],
+        'sync.phase_transfer':  ['moving files - {done}/{total}', 'dosyalar aktarılıyor - {done}/{total}'],
         'sync.phase_bytes':     ['{bytes} of {size}', '{bytes} / {size}'],
         'sync.eta':             ['about {eta} left', 'yaklaşık {eta} kaldı'],
         'sync.eta_h':           ['{h} h {m} min', '{h} sa {m} dk'],
@@ -1863,7 +1877,7 @@
           if (v.bytesDone && v.bytesTotal) {
             line += ', ' + T('sync.phase_bytes', { bytes: localSize(v.bytesDone), size: localSize(v.bytesTotal) });
           }
-          if (v.eta) line += ' — ' + T('sync.eta', { eta: localEta(v) });
+          if (v.eta) line += ' - ' + T('sync.eta', { eta: localEta(v) });
           return line;
         }
         // Every phase says its figures once the engine has them: a large
@@ -1959,7 +1973,7 @@
             case 'signed-out': line = T('sync.signed_out'); cls = 'err'; break;
             case 'active': line = activityLine(v); cls = 'ok'; break;
             case 'busy': line = T('sync.busy'); break;
-            case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '–') }); break;
+            case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '-') }); break;
             // An engine that stopped on its own: said in this window's
             // language, with the engine's own reason when it gave one (its
             // words, like any engine error here) and the restart the
@@ -2041,7 +2055,7 @@
           <!-- ⚠ ONE button, and since v0.43.0 it is the "How to connect" one:
                the shared panel lost its Storages tab, so "Manage storages" no
                longer described anything it does. Storages are created and
-               edited in the admin panel — the per-account "Admin panel ↗" link
+               edited in the admin panel - the per-account "Admin panel ↗" link
                in the Accounts list above is that door.
                ⚠ Not a duplicate of the file list's own sidebar entry, which
                opens the same component: syncOverlays() HIDES the explorer
@@ -2069,7 +2083,7 @@
             <div class="segmented">${
               (state.windowPresets || ['']).map((w) => `<button data-sync-window="${esc(w)}"${
                 (state.syncWindow || '') === w ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
-              }${w ? ` title="${esc(w.replace('-', '–'))}"` : ''}>${esc(w ? T('set.window_' + w) : T('set.window_any'))}</button>`).join('')
+              }${w ? ` title="${esc(w.replace('-', '-'))}"` : ''}>${esc(w ? T('set.window_' + w) : T('set.window_any'))}</button>`).join('')
             }</div>
           </div></div>
           ${active ? `<div class="card"><div class="between">

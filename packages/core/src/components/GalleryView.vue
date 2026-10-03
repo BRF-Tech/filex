@@ -15,6 +15,8 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { lockOf, lockWords } from '../lib/appLock';
 import { linkWordsFor } from '../lib/symlink'; /* issue #34 — a link that will not open */
+import { unavailableWordsFor } from '../lib/unavailable'; /* issue #104 - an entry the storage could not answer for */
+import { thumbNoteWords } from '../lib/thumbNote'; /* 0.50 - why a file has no thumbnail */
 import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import ItemCheck from './ItemCheck.vue';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
@@ -26,6 +28,7 @@ import {
 } from '../lib/filePreview'; /* gorunum:v1-preview */
 import StarButton from './StarButton.vue';
 import ThumbTile from './ThumbTile.vue';
+import FolderMosaic from './FolderMosaic.vue';
 import { applyDragGhost } from '../lib/dragGhost';
 import { displayParentDirOf } from '../lib/listing'; /* the folder a row sits in — one split rule for every view */
 import {
@@ -120,6 +123,18 @@ function linkOf(n: FileNode) {
   return linkWordsFor(n, { t });
 }
 
+/* issue #104 - an entry the storage could not answer for: "!" with the
+   sentence and the storage's own answer, from the one module (lib/unavailable)
+   the details panel and the refused-open toast read too. */
+function unavailableOf(n: FileNode) {
+  return unavailableWordsFor(n, { t });
+}
+/** Why the file has no thumbnail, when the reason is its own (lib/thumbNote,
+ *  the same rule in the list, the grid and the gallery). */
+function thumbNoteOf(n: FileNode) {
+  return thumbNoteWords(n, { t });
+}
+
 
 /* gruplama — this pane's sort, by injection, so the gallery cannot disagree
  * with the list beside it about whether a date heading is honest right now. */
@@ -148,6 +163,10 @@ const grouped = computed(() =>
     labels: { t, formatMonthYear, zonedYearMonth },
   }),
 );
+
+/** Some folder here has files to show: every folder is then drawn large
+ *  (FolderMosaic), so the tiles keep one look. Folder previews off: none. */
+const folderPreviews = computed(() => props.files.some((n) => n.type === 'dir' && (n.preview?.length ?? 0) > 0));
 
 function thumbOf(n: FileNode): string | null {
   return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
@@ -363,11 +382,22 @@ function metaFor(n: FileNode): string {
              thumbnail that arrived re-rendered every tile of the folder. The
              tile draws the <img> (draggable="false", same reason as GridView)
              and the play badge over a video frame; its slot until then. -->
+        <!-- Folder previews (0.50): the files that came into a folder last,
+             fanned out as prints in front of the folder drawn large
+             (FolderMosaic, the gallery's shape); once any folder here has
+             files to show, every folder is drawn so, an empty one empty. -->
+        <FolderMosaic
+          v-else-if="n.type === 'dir' && folderPreviews && !isEncryptedFolder(n)"
+          shape="fan"
+          :node="n"
+          :src-of="thumbOf"
+        />
         <ThumbTile
           v-else
           :node="n"
           :src-of="thumbOf"
           :video-badge="drawsAsVideo(n)"
+          :note="thumbNoteOf(n)"
           :alt="n.basename"
           :class="{ 'fe-thumb--page': drawsAsPage(n) /* gorunum:v1-preview — crop a page from its TOP */ }"
         >
@@ -438,6 +468,16 @@ function metaFor(n: FileNode): string {
         data-testid="symlink-badge"
         :data-link-state="linkOf(n)!.state"
         ><span class="fe-symlink__glyph" aria-hidden="true">&#128279;</span>{{ linkOf(n)!.badge }}</span>
+      </div>
+      <!-- issue #104 - an entry the storage could not answer for. -->
+      <div v-if="unavailableOf(n)" class="fe-gal__meta-line">
+        <span
+        class="fe-unavailable"
+        role="img"
+        :title="unavailableOf(n)!.full"
+        :aria-label="unavailableOf(n)!.full"
+        data-testid="unavailable-badge"
+        >{{ unavailableOf(n)!.badge }}</span>
       </div>
       <div v-if="lockTitleOf(n)" class="fe-gal__meta-line">
         <span

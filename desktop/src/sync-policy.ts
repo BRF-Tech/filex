@@ -307,7 +307,7 @@ export function trayTooltip(f: TrayFacts, words: { paused: string; syncing: stri
   else if (f.failing) parts.push(words.failing);
   else if (f.syncing) parts.push(words.syncing);
   if (f.unreadLabel) parts.push(f.unreadLabel);
-  return parts.join(' — ');
+  return parts.join(' - ');
 }
 
 // ── held items ───────────────────────────────────────────────────────────

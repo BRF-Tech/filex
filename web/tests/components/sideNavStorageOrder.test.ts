@@ -37,10 +37,7 @@ async function closeMenu() {
   await nextTick();
 }
 
-afterEach(() => {
-  closeRowMenus();
-  document.body.innerHTML = '';
-});
+afterEach(() => closeRowMenus());
 
 describe('SideNav — the storage order menu', () => {
   it('offers move up / move down / sort by name / reset order on a storage row', async () => {

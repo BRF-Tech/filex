@@ -7,7 +7,9 @@
 //
 // What a person chose about the interface itself — theme, palette, density,
 // language. One JSON document per person PER SURFACE (`web` | `desktop`),
-// stored by migration 00047.
+// stored by migration 00047. The account's "open with" choices (0.50) are
+// NOT part of it: GET carries them as `openWith`, PUT drops the key, and
+// /api/me/open-with changes them (openwith.go).
 //
 // ⚠⚠ WHY THE SERVER. The owner picked a theme in one browser and the other
 // browser did not have it. `localStorage` is per BROWSER, never per person: a
@@ -106,6 +108,12 @@ func (h *UserPrefs) Get(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(doc) == "" {
 		doc = "{}"
 	}
+	// 0.50: the account's "open with" choices ride along as `openWith`, the
+	// same for every surface (openwith.go). Read failures leave the document
+	// as it is: a preference is never worth an error at boot.
+	if choices, err := loadOpenWith(r.Context(), h.Store, u.ID); err == nil {
+		doc = withOpenWith(doc, choices)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	// ⚠ Private: this is one person's appearance, on a route every signed-in
 	// browser hits at boot. A shared cache holding it would hand the next
@@ -163,6 +171,11 @@ func (h *UserPrefs) Put(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "prefs must be an object"})
 		return
 	}
+	// ⚠ The account's "open with" choices are not this document's to write:
+	// a surface PUTs its whole document, so a copy it read at boot would undo
+	// a choice made since on another surface (openwith.go). They change one
+	// kind at a time, through /api/me/open-with.
+	doc = withoutOpenWith(doc)
 	if err := h.Store.SetUserPrefs(r.Context(), u.ID, surface, doc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

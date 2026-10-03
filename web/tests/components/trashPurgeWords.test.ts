@@ -22,14 +22,10 @@ describe('the delete dialog', () => {
     expect(text).toContain(en['modal.delete.permanent_message'].replace('{count}', '3'));
     expect(text).not.toContain('moved to trash');
     expect(w.findAll('button').map((b) => b.text())).toContain(en['modal.delete.permanent_confirm']);
-    w.unmount();
-    document.body.innerHTML = '';
   });
 
   it('still says "moved to trash" for an ordinary delete', () => {
-    const w = dialog({});
+    dialog({});
     expect(document.body.textContent ?? '').toContain('moved to trash');
-    w.unmount();
-    document.body.innerHTML = '';
   });
 });

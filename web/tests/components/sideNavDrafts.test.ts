@@ -2,7 +2,7 @@
 // Trash, with a COUNT — never a notification. It is drawn only where the
 // server keeps drafts for the caller, and dropped with the other identity
 // views for an app token.
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import SideNav from '@brftech/filex-core/src/components/SideNav.vue';
@@ -23,10 +23,6 @@ function nav(extra: Record<string, unknown> = {}) {
     },
   });
 }
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 const rowOrder = (w: ReturnType<typeof nav>) =>
   w.findAll('.fe-sidenav__group [data-testid^="sidenav-view-"]').map((b) => b.attributes('data-testid'));

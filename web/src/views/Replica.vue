@@ -520,14 +520,14 @@ function onFailureAction(key: string, row: ReplicaFailure) {
                     <strong v-if="prim.replica_target_id">
                       {{ replicaNameById(prim.replica_target_id) || '#' + prim.replica_target_id }}
                     </strong>
-                    <span v-else>—</span>
+                    <span v-else>-</span>
                   </template>
                 </i18n-t>
               </p>
             </div>
             <Select
               :model-value="prim.replica_target_id ?? 0"
-              :options="[{ value: 0, label: '—' }, ...replicaTargets.map((rt) => ({ value: rt.id, label: rt.name }))]"
+              :options="[{ value: 0, label: '-' }, ...replicaTargets.map((rt) => ({ value: rt.id, label: rt.name }))]"
               size="sm"
               class="min-w-[180px]"
               @update:model-value="(v) => setPrimaryTarget(prim, Number(v))"

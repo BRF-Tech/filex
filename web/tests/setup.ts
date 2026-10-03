@@ -4,7 +4,14 @@
 //   most components touch indirectly via Tailwind/Headless UI.
 // - Resets sessionStorage / localStorage / document.cookie between tests
 //   so Pinia stores backed by them don't leak state.
-import { afterEach, vi } from 'vitest';
+// - ⚠ Refuses the network (helpers/noNetwork): a request a test did not mock
+//   fails that test, with the URL.
+// - ⚠ Ends every test the one safe way (helpers/teardown): let what is in
+//   flight land, unmount every mounted page, THEN empty <body>. Tests do not
+//   do this themselves (task #127).
+import { afterAll, afterEach, vi } from 'vitest';
+import { failOnNetworkHits } from './helpers/noNetwork';
+import { teardownDom } from './helpers/teardown';
 
 // matchMedia stub — required by DarkModeToggle / theme.ts on cold boot.
 if (!('matchMedia' in window)) {
@@ -64,7 +71,9 @@ if (!('IntersectionObserver' in window)) {
 }
 
 // Reset DOM + browser stores between tests to avoid cross-test pollution.
-afterEach(() => {
+// Registered here, it runs AFTER the test file's own afterEach hooks.
+afterEach(async () => {
+  await teardownDom();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,4 +85,11 @@ afterEach(() => {
     if (name) document.cookie = `${name}=; Max-Age=0; path=/`;
   });
   vi.clearAllMocks();
+  failOnNetworkHits('(this test)');
+});
+
+// A request that fires after the file's last test still fails the file.
+afterAll(async () => {
+  await teardownDom();
+  failOnNetworkHits('after the last test of this file');
 });

@@ -6,6 +6,9 @@
  *     StoragePluginsTab.vue — the page as it was before Apps existed).
  *   • Apps: WebAssembly plugins that add rows to the file menu and run as
  *     ops jobs (components/plugins/AppPluginsTab.vue, docs/APP-PLUGINS-API.md).
+ *   • Default apps (0.50): which handler opens each kind of file and which
+ *     draws its thumbnail (components/plugins/DefaultAppsTab.vue,
+ *     docs/APP-PLUGINS.md → Default apps).
  *
  * Both tabs stay mounted (`v-show`), so each loads exactly as it did as a
  * page of its own. The Apps tab opens first when the runtime is on and at
@@ -23,8 +26,10 @@ import { useRoute, useRouter } from 'vue-router';
 import StoragePluginsTab from '@/components/plugins/StoragePluginsTab.vue';
 import AppPluginsTab from '@/components/plugins/AppPluginsTab.vue';
 import PluginRequestsPanel from '@/components/plugins/PluginRequestsPanel.vue';
+import DefaultAppsTab from '@/components/plugins/DefaultAppsTab.vue';
 
-type Tab = 'storage' | 'apps';
+type Tab = 'storage' | 'apps' | 'defaults';
+const TABS: Tab[] = ['storage', 'apps', 'defaults'];
 
 const { t } = useI18n();
 const route = useRoute();
@@ -35,13 +40,17 @@ const router = useRouter();
  * page (views/AppPluginPage.vue) lands on the Apps tab it was opened from,
  * whichever tab the default rule below would pick.
  */
-const fromAddress: Tab | null = route.query.tab === 'apps' || route.query.tab === 'storage' ? route.query.tab : null;
+const fromAddress: Tab | null = TABS.includes(route.query.tab as Tab) ? (route.query.tab as Tab) : null;
 const activeTab = ref<Tab>(fromAddress ?? 'storage');
 const chosen = ref(fromAddress !== null);
+
+/** The Default apps tab is mounted the first time it is opened, then kept. */
+const defaultsSeen = ref(fromAddress === 'defaults');
 
 function setTab(tab: Tab) {
   activeTab.value = tab;
   chosen.value = true;
+  if (tab === 'defaults') defaultsSeen.value = true;
   void router.replace({ query: { ...route.query, tab } });
 }
 
@@ -60,7 +69,7 @@ const generation = ref(0);
 
     <nav class="flex gap-1 border-b border-zinc-200 dark:border-zinc-800" role="tablist">
       <button
-        v-for="tab in (['storage', 'apps'] as Tab[])"
+        v-for="tab in TABS"
         :key="tab"
         type="button"
         role="tab"
@@ -81,6 +90,11 @@ const generation = ref(0);
     </div>
     <div v-show="activeTab === 'apps'" role="tabpanel">
       <AppPluginsTab :key="`apps-${generation}`" @loaded="onAppsLoaded" />
+    </div>
+    <!-- Mounted when first opened, then kept; it reads its list again each
+         time it is opened, because an install on the Apps tab changes it. -->
+    <div v-if="activeTab === 'defaults' || defaultsSeen" v-show="activeTab === 'defaults'" role="tabpanel">
+      <DefaultAppsTab :key="`defaults-${generation}`" :active="activeTab === 'defaults'" />
     </div>
   </div>
 </template>

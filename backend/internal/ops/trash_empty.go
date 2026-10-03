@@ -28,7 +28,6 @@ package ops
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -222,51 +221,15 @@ func (s *Service) LatestTrashEmpty(ctx context.Context, key string) (*Op, error)
 }
 
 func (s *Service) latestTrashEmpty(ctx context.Context, key string, activeOnly bool) (*Op, error) {
-	q := `SELECT id FROM pending_ops WHERE kind=? AND COALESCE(dest,'')=?`
-	if activeOnly {
-		q += ` AND status IN ('pending','running')`
-	}
-	q += ` ORDER BY id DESC LIMIT 1`
-	var id int64
-	if err := s.db.QueryRowContext(ctx, s.q(q), OpTrashEmpty, key).Scan(&id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return s.Get(ctx, id)
+	return s.latestOfKind(ctx, OpTrashEmpty, key, activeOnly)
 }
 
 // TrashEmptyDone is closed when the run behind op id has ended, or nil when
 // this process is not running it.
-func (s *Service) TrashEmptyDone(id int64) <-chan struct{} {
-	if v, ok := s.trashDone.Load(id); ok {
-		return v.(chan struct{})
-	}
-	return nil
-}
+func (s *Service) TrashEmptyDone(id int64) <-chan struct{} { return doneOf(&s.trashDone, id) }
 
 // startTrashEmpty runs op in its own goroutine (see the file comment), once.
-func (s *Service) startTrashEmpty(op *Op) {
-	done := make(chan struct{})
-	if _, dup := s.trashDone.LoadOrStore(op.ID, done); dup {
-		return
-	}
-	life := s.lifeCtx()
-	ctx, cancel := context.WithCancel(life)
-	ch := &cancelHandle{}
-	ch.cancel = func() { ch.cancelled.Store(true); cancel() }
-	s.cancels.Store(op.ID, ch)
-	s.bg.Add(1)
-	go func() {
-		defer s.bg.Done()
-		defer s.trashDone.Delete(op.ID)
-		defer close(done)
-		defer s.cancels.Delete(op.ID)
-		defer cancel()
-		s.runTrashEmpty(ctx, life, op, ch)
-	}()
-}
+func (s *Service) startTrashEmpty(op *Op) { s.startOwnRun(&s.trashDone, op, s.runTrashEmpty) }
 
 // runTrashEmpty is one run, from its turn to its final row.
 func (s *Service) runTrashEmpty(ctx, life context.Context, op *Op, ch *cancelHandle) {
@@ -336,28 +299,7 @@ func (s *Service) resumeTrashEmpties(ctx context.Context) {
 	if s.trashEmptier == nil {
 		return
 	}
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id FROM pending_ops WHERE kind=? AND status=? ORDER BY id ASC`),
-		OpTrashEmpty, StatusPending)
-	if err != nil {
-		slog.Warn("ops: resume trash empties", slog.String("err", err.Error()))
-		return
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
-		}
-	}
-	_ = rows.Close()
-	for _, id := range ids {
-		op, err := s.Get(ctx, id)
-		if err != nil {
-			continue
-		}
-		slog.Info("ops: resuming an interrupted trash empty", slog.Int64("op", id))
-		s.startTrashEmpty(op)
-	}
+	s.resumeKind(ctx, OpTrashEmpty, "trash empty", s.startTrashEmpty)
 }
 
 // Viewer is who is looking at the queue: every row (All), or the rows of
@@ -401,7 +343,7 @@ func (v Viewer) Sees(op *Op) bool {
 	if op == nil {
 		return false
 	}
-	if op.Kind == OpTrashEmpty && op.tenant != "" && op.tenant == v.Tenant {
+	if (op.Kind == OpTrashEmpty || op.Kind == OpThumbRepair) && op.tenant != "" && op.tenant == v.Tenant {
 		return true
 	}
 	for _, id := range v.StorageIDs {

@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 )
 
 // SettingKey is the settings table row that stores the retention days value.
@@ -571,6 +573,23 @@ func (s *Service) purgeOlderThan(ctx context.Context, cutoff time.Time, scope []
 func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	if n.Type == model.NodeTypeDirectory {
 		s.purgeDirDescendants(ctx, n)
+		// ⚠⚠ Issue #104: a LIVE row that still names the folder as its parent
+		// would go with it (the parent_id cascade) - a row nobody deleted,
+		// gone from every listing, its quota never released, its caches and
+		// history left behind. The shape is real on older databases: the
+		// queue's "already missing" branches soft-deleted a folder where it
+		// stood and left its contents live under it. Such a folder stays until
+		// nothing live is bound to it (the storage sync drops those rows once
+		// it finds their files gone); the purge never takes a live row.
+		if live, err := s.Store.ListNodesByParent(ctx, n.StorageID, &n.ID); err != nil {
+			return fmt.Errorf("trash: list the rows under folder %d: %w", n.ID, err)
+		} else if len(live) > 0 {
+			return fmt.Errorf("%w: folder %d (%s) still has %d", ErrRowsStillUnder, n.ID, n.Path, len(live))
+		}
+	}
+	var history []string
+	if n.Type == model.NodeTypeFile {
+		history = versioning.Keys(ctx, s.Store, n.ID)
 	}
 	if !ownsBytesAt(n.Path) {
 		// ⚠⚠ Soft-deleted where it stood (see ownsBytesAt): nothing of this
@@ -622,7 +641,29 @@ func (s *Service) purgeOne(ctx context.Context, n *model.Node) error {
 	// store (internal/quotastore) — the one place that also counts the bytes
 	// when they land. Subtracting here as well would release every purged
 	// file twice.
-	return s.Store.HardDeleteNode(ctx, n.ID)
+	if err := s.Store.HardDeleteNode(ctx, n.ID); err != nil {
+		return err
+	}
+	// The file's snapshots (`.versions/<id>/`): keyed by the row, not by its
+	// path, so they go whether or not the row owned bytes at its path. Up to
+	// 0.49 a purge left them on the storage for good (issue #104).
+	s.forgetHistory(ctx, n.StorageID, n.ID, history)
+	return nil
+}
+
+// ErrRowsStillUnder: a folder was not purged because live rows still name it
+// as their parent, and the cascade would take them with it (purgeOne). The
+// purge counts it as failed and tries again on its next run.
+var ErrRowsStillUnder = errors.New("trash: live rows are still under the folder")
+
+// forgetHistory deletes a purged file's snapshots from its storage.
+func (s *Service) forgetHistory(ctx context.Context, storageID, nodeID int64, keys []string) {
+	if len(keys) == 0 || s.Resolver == nil {
+		return
+	}
+	if drv, err := s.Resolver(storageID); err == nil {
+		versioning.Forget(ctx, drv, nodeID, keys)
+	}
 }
 
 // ownsBytesAt reports whether a trashed row's own bytes can be at p — that is,
@@ -689,6 +730,13 @@ func (s *Service) purgeDirDescendants(ctx context.Context, dir *model.Node) {
 		}
 		offset += len(batch)
 	}
+	// Deepest first: a sub-folder's row purged before its contents took them
+	// with it through the parent_id cascade, before their quota and their
+	// history were released.
+	sort.SliceStable(descendants, func(i, j int) bool {
+		return strings.Count(strings.Trim(descendants[i].Path, "/"), "/") >
+			strings.Count(strings.Trim(descendants[j].Path, "/"), "/")
+	})
 	var drv storage.Driver
 	if s.Resolver != nil {
 		drv, _ = s.Resolver(dir.StorageID)
@@ -708,10 +756,17 @@ func (s *Service) purgeDirDescendants(ctx context.Context, dir *model.Node) {
 		if s.Reclaim != nil {
 			s.Reclaim(ctx, c.ID)
 		}
+		var history []string
+		if c.Type == model.NodeTypeFile {
+			history = versioning.Keys(ctx, s.Store, c.ID)
+		}
 		// Quota release is inside HardDeleteNode (internal/quotastore) — see
 		// purgeOne.
 		if err := s.Store.HardDeleteNode(ctx, c.ID); err != nil {
 			continue
+		}
+		if drv != nil {
+			versioning.Forget(ctx, drv, c.ID, history)
 		}
 	}
 }

@@ -46,7 +46,7 @@ async function close() {
   <Modal
     :open="true"
     :size="placement === 'home' ? 'xl' : 'lg'"
-    :title="subtitle ? `${label} — ${subtitle}` : label"
+    :title="subtitle ? `${label} - ${subtitle}` : label"
     :locale="locale"
     :theme="theme"
     :close-on-backdrop="false"

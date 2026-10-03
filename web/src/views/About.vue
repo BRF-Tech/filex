@@ -19,13 +19,15 @@ const data = computed(() => caps.data);
 /* The server says `v0.46.0 (<40-digit commit>, <build time>)`. The release
    is the headline; the commit, shortened as git shows it, and the build day
    go on the quiet line below. The copy button still copies the whole string,
-   which is what a bug report wants (Burak, 2026-09-26: it ran off the card). */
+   which is what a bug report wants (the maintainer, 2026-09-26: it ran off the card). */
 const ver = computed(() => parseServerVersion(data.value.version));
 const buildLine = computed(
   () => [shortCommit(ver.value.commit), ver.value.built.slice(0, 10)].filter(Boolean).join(' · ') || data.value.build,
 );
 
 interface ToolEntry {
+  /** The row's id for tests and the badge; the name when it is a product's. */
+  id: string;
   name: string;
   available: boolean;
 }
@@ -37,11 +39,25 @@ interface ToolEntry {
  * availability itself is the server's one answer (enginebin), shared with
  * Apps and the converter. */
 const thumbnailTools = computed<ToolEntry[]>(() => [
-  { name: 'ImageMagick', available: data.value.imagemagick },
-  { name: 'FFmpeg', available: data.value.ffmpeg },
-  { name: 'Ghostscript', available: data.value.ghostscript },
-  { name: 'LibreOffice', available: data.value.libreoffice },
+  { id: 'ImageMagick', name: 'ImageMagick', available: data.value.imagemagick },
+  /* ⚠ A row of its own, and not the ImageMagick row's answer: libheif can be
+   * there without its HEVC decoder (Ubuntu 24.04), and then ImageMagick is
+   * "Found" while no phone photo can be drawn. The server decodes a sample to
+   * find out (enginebin.HEIC, 0.50 test phase). */
+  { id: 'HEIC', name: t('about.heic'), available: data.value.heic === true },
+  { id: 'FFmpeg', name: 'FFmpeg', available: data.value.ffmpeg },
+  { id: 'Ghostscript', name: 'Ghostscript', available: data.value.ghostscript },
+  /* 0.50: office documents are drawn by the OnlyOffice document server and
+   * nothing else (LibreOffice left the image); the row says whether it is
+   * configured. */
+  { id: 'Office', name: t('about.office'), available: data.value.thumbs?.office === true },
 ]);
+
+/** ImageMagick is there and cannot decode HEIC: say what to install. */
+const heicDecoderMissing = computed(() => data.value.imagemagick && data.value.heic === false);
+
+/** No office thumbnails: say where OnlyOffice is configured. */
+const officeMissing = computed(() => data.value.thumbs?.office !== true);
 
 /** A database engine by its product name — the page capitalised the id
  *  ("Sqlite"). */
@@ -98,7 +114,7 @@ function authName(d: string): string {
           >
             {{ driverName(d, t, te) }}
           </Badge>
-          <span v-if="!data.storage_drivers.length" class="text-xs text-zinc-500">—</span>
+          <span v-if="!data.storage_drivers.length" class="text-xs text-zinc-500">-</span>
         </div>
       </div>
 
@@ -114,7 +130,7 @@ function authName(d: string): string {
           >
             {{ authName(d) }}
           </Badge>
-          <span v-if="!data.auth_drivers.length" class="text-xs text-zinc-500">—</span>
+          <span v-if="!data.auth_drivers.length" class="text-xs text-zinc-500">-</span>
         </div>
       </div>
     </div>
@@ -123,18 +139,28 @@ function authName(d: string): string {
       <p class="text-xs uppercase tracking-wide text-zinc-500 mb-2">
         {{ t('about.thumbnails') }}
       </p>
-      <ul class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <!-- As many columns as fit a name and its badge on one line: four fixed
+           columns broke "HEIC fotoğrafları" + "Bulunamadı" onto two lines at
+           1440 px (0.50 test phase), and a row taller than its neighbours
+           threw the grid out of line. -->
+      <ul class="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-x-4 gap-y-2" data-testid="about-tools">
         <li
           v-for="t2 in thumbnailTools"
-          :key="t2.name"
+          :key="t2.id"
           class="flex items-center gap-2 text-sm"
         >
-          <span>{{ t2.name }}</span>
-          <Badge :tone="t2.available ? 'emerald' : 'zinc'" dot size="xs" :data-testid="`about-tool-${t2.name}`">
+          <span class="whitespace-nowrap">{{ t2.name }}</span>
+          <Badge :tone="t2.available ? 'emerald' : 'zinc'" dot size="xs" :data-testid="`about-tool-${t2.id}`">
             {{ t2.available ? t('about.toolFound') : t('about.toolMissing') }}
           </Badge>
         </li>
       </ul>
+      <p v-if="heicDecoderMissing" class="mt-2 text-xs text-zinc-500" data-testid="about-heic-hint">
+        {{ t('about.heicHint') }}
+      </p>
+      <p v-if="officeMissing" class="mt-2 text-xs text-zinc-500" data-testid="about-office-hint">
+        {{ t('about.officeHint') }}
+      </p>
     </div>
 
     <div class="card card-body">

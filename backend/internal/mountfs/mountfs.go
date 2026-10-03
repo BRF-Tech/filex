@@ -55,7 +55,7 @@ import (
 var ErrUnsupported = errors.New(
 	"filex mount needs a filesystem driver, and on this platform there is none " +
 		"it can use. Linux needs nothing (FUSE is in the kernel) and Windows " +
-		"needs WinFsp, a free separate install — https://winfsp.dev. macOS is " +
+		"needs WinFsp, a free separate install - https://winfsp.dev. macOS is " +
 		"not supported: it needs macFUSE, whose licence forbids a commercial " +
 		"program from installing it and whose Go binding needs a C toolchain " +
 		"filex deliberately does not use. There, use `filex sync` for a folder, " +
@@ -73,7 +73,7 @@ var (
 	// ErrMountTimeout — it neither failed nor came up. On Windows this is
 	// usually WinFsp missing: the DLL loads, the mount never registers.
 	ErrMountTimeout = errors.New(
-		"the mount did not come up (on Windows, check that WinFsp is installed — https://winfsp.dev)")
+		"the mount did not come up (on Windows, check that WinFsp is installed - https://winfsp.dev)")
 	// ErrUnmountFailed — the driver would not let go.
 	ErrUnmountFailed = errors.New("could not unmount")
 )
@@ -361,7 +361,7 @@ func (f *FS) Rename(ctx context.Context, oldPath, newPath string) error {
 	}
 	src, _ := f.remoteOf(oldPath)
 	dst, _ := f.remoteOf(newPath)
-	if _, _, err := f.cfg.Client.Move(ctx, src, dst); err != nil {
+	if _, err := f.cfg.Client.Move(ctx, src, dst); err != nil {
 		return err
 	}
 	f.blocks.dropFile(src)

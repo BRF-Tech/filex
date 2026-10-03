@@ -32,7 +32,7 @@ func seedUserIn(t *testing.T, store db.Store, providerID int64, email string) in
 // could read, rename, re-password, DISABLE and DELETE another tenant's users
 // by id — including that tenant's last admin, which locks the whole tenant
 // out. Same class as the /dav leak (H4) and left explicitly out of scope by
-// the olivov PR; this is the follow-up.
+// the multi-tenant PR; this is the follow-up.
 //
 // Out-of-tenant must answer 404, not 403: a foreign id has to be
 // indistinguishable from one that does not exist.
@@ -40,9 +40,9 @@ func TestUsersAdmin_TenantGate(t *testing.T) {
 	srv, client, store := multiTenantServer(t)
 
 	// Two tenants, each with its own admin, plus a victim user in tenant B.
-	_, meEmail, mePass := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
-	otherID, _, _ := seedTenant(t, store, "arasboya", "admin@arasboya.test", false)
-	victim := seedUserIn(t, store, otherID, "victim@arasboya.test")
+	_, meEmail, mePass := seedTenant(t, store, "globex", "admin@globex.test", false)
+	otherID, _, _ := seedTenant(t, store, "initech", "admin@initech.test", false)
+	victim := seedUserIn(t, store, otherID, "victim@initech.test")
 
 	testutil.LoginAs(t, srv, client, meEmail, mePass)
 
@@ -94,7 +94,7 @@ func TestUsersAdmin_TenantGate(t *testing.T) {
 	})
 
 	t.Run("own tenant's user still reachable", func(t *testing.T) {
-		mine := seedUserIn(t, store, providerOf(t, store, mustUserID(t, store, meEmail)), "mine@diyetlif.test")
+		mine := seedUserIn(t, store, providerOf(t, store, mustUserID(t, store, meEmail)), "mine@globex.test")
 
 		status, _ := doJSON(t, client, http.MethodGet, url(mine), nil)
 		require.Equal(t, http.StatusOK, status, "the gate must not break same-tenant admin")
@@ -114,8 +114,8 @@ func TestUsersAdmin_SupertenantUnaffected(t *testing.T) {
 	email, password := testutil.SeedAdmin(t, store) // provider 1 = supertenant
 	testutil.LoginAs(t, srv, client, email, password)
 
-	tenantID, _, _ := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
-	target := seedUserIn(t, store, tenantID, "user@diyetlif.test")
+	tenantID, _, _ := seedTenant(t, store, "globex", "admin@globex.test", false)
+	target := seedUserIn(t, store, tenantID, "user@globex.test")
 
 	status, body := doJSON(t, client, http.MethodGet,
 		srv.URL+"/api/admin/users/"+itoa(target), nil)

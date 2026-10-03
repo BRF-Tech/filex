@@ -22,8 +22,15 @@ func Middleware(required bool) func(http.Handler) http.Handler {
 
 			var user *model.User
 			var token *model.APIToken
+			// told is the reason a driver refused THIS person and may say so
+			// (the header proxy's first-login rule, auth.RefusalToTell): the
+			// 401 below carries it as a code, for the sign-in page.
+			told := ""
 			for _, d := range drivers {
 				u, tok, err := authenticate(d, r)
+				if err != nil && told == "" && errors.Is(err, ErrUnauthorized) {
+					told = SSOReason(err)
+				}
 				if err != nil && !errors.Is(err, ErrUnauthorized) {
 					slog.Warn("auth driver error",
 						slog.String("driver", d.Name()),
@@ -44,17 +51,22 @@ func Middleware(required bool) func(http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
 				_ = json.NewEncoder(w).Encode(map[string]string{
-					"error": "this account is disabled",
+					"error":  "this account is disabled",
+					"reason": SSOReasonAccountDisabled,
 				})
 				return
 			}
 
 			if user == nil && required {
+				body := map[string]string{"error": "unauthorized"}
+				if told != "" {
+					// Only a code, and only when a driver vouched for who the
+					// caller is: any other 401 is byte for byte what it was.
+					body["reason"] = told
+				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				_ = json.NewEncoder(w).Encode(map[string]string{
-					"error": "unauthorized",
-				})
+				_ = json.NewEncoder(w).Encode(body)
 				return
 			}
 

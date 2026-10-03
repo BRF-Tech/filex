@@ -14,25 +14,73 @@
 # rerun after changing pkg/pluginkit. Import paths are rewritten from the
 # private module (github.com/brf-tech/filex/backend) to the public one,
 # exactly as scripts/export-public.sh does for the whole tree.
+#
+# Go is required: `go mod tidy` writes the copy's go.sum, and a copy without
+# it does not build. GO names another go binary (default: go on PATH).
 set -euo pipefail
 out="${1:?target directory}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 priv="github.com/brf-tech/filex/backend"
 pub="github.com/brf-tech/filex/backend"
+go="${GO:-go}"
+# Checked BEFORE the old copy is removed. A shell without Go used to delete
+# the copy, write a go.mod and no go.sum, skip the tidy and exit 0; the
+# copy's own `go build` then failed on the first import (lesson #922).
+if ! command -v "$go" >/dev/null 2>&1; then
+  echo "pluginkit-devmodule: '$go' not found; Go is needed to finish the copy (go mod tidy writes go.sum)" >&2
+  exit 1
+fi
 rm -rf "$out"
 mkdir -p "$out/pkg"
 cp -r "$root/backend/pkg/pluginkit" "$out/pkg/pluginkit"
 find "$out/pkg" -name '*_test.go' -delete
 find "$out/pkg" -name '*.go' -exec sed -i "s#$priv#$pub#g" {} +
-pdk="$(grep -E '^\s*github.com/extism/go-pdk ' "$root/backend/go.mod" | awk '{print $2}')"
 gover="$(grep -E '^go ' "$root/backend/go.mod" | awk '{print $2}')"
-cat > "$out/go.mod" <<EOF
-module $pub
 
-go $gover
+# Every module the copy imports, at the version backend/go.mod pins, so the
+# copy builds against exactly what filex is built and tested with. 0.50:
+# thumbkit imports golang.org/x/image, and a go.mod that named go-pdk alone
+# left the tidy to fetch the LATEST x/image, which needs a newer Go.
+imports="$(find "$out/pkg" -name '*.go' -exec awk '
+  /^import [(]/ { blk = 1; next }
+  blk && /^[)]/ { blk = 0; next }
+  blk || /^import / { if (match($0, /"[^"]+"/)) print substr($0, RSTART + 1, RLENGTH - 2) }
+' {} + | sort -u)"
+mods="$(awk '
+  /^require [(]/ { blk = 1; next }
+  blk && /^[)]/ { blk = 0; next }
+  blk && NF >= 2 { print $1, $2; next }
+  /^require [^(]/ { print $2, $3 }
+' "$root/backend/go.mod")"
+requires=()
+for imp in $imports; do
+  case "${imp%%/*}" in *.*) ;; *) continue ;; esac # the standard library
+  case "$imp" in "$pub" | "$pub"/*) continue ;; esac # the copy itself
+  best="" bestver=""
+  while read -r mod ver; do
+    [ -n "$mod" ] || continue
+    case "$imp" in
+      "$mod" | "$mod"/*)
+        if [ ${#mod} -gt ${#best} ]; then best="$mod" bestver="$ver"; fi
+        ;;
+    esac
+  done <<<"$mods"
+  if [ -z "$best" ]; then
+    echo "pluginkit-devmodule: pkg/pluginkit imports $imp, and no module in backend/go.mod provides it" >&2
+    exit 1
+  fi
+  requires+=("$best $bestver")
+done
+{
+  echo "module $pub"
+  echo
+  echo "go $gover"
+  echo
+  echo "require ("
+  printf '%s\n' "${requires[@]}" | sort -u | sed 's/^/	/'
+  echo ")"
+} >"$out/go.mod"
 
-require github.com/extism/go-pdk $pdk
-EOF
 cat > "$out/README.md" <<'EOF'
 # filex guest SDK — development copy
 
@@ -49,7 +97,9 @@ Call it from your plugin's build, before `go build`:
 It is silent and exits 0 once your go.mod points at the published module
 instead of this directory: there is then no local copy to be stale.
 EOF
-(cd "$out" && GOFLAGS=-mod=mod go mod tidy >/dev/null 2>&1 || true)
+# GOTOOLCHAIN=local: the Go on this machine, never a download. A failing
+# tidy fails the script; it used to end in `|| true`.
+(cd "$out" && GOTOOLCHAIN=local GOFLAGS=-mod=mod "$go" mod tidy)
 
 # The copy carries its own guard: what pluginkit it came from, and the script
 # that refuses a build when that pluginkit has moved on since. An app runs it

@@ -7,11 +7,22 @@ vi.mock('@/api/auth', () => ({
   AuthApi: {
     me: vi.fn(),
     login: vi.fn(),
+    handoff: vi.fn(),
     logout: vi.fn(),
     oidcStartUrl: vi.fn((p: string = 'oidc', r: string = '/admin/') => `/api/auth/oidc/start?provider=${p}&return_to=${r}`),
   },
 }));
 
+// Signing somebody in attaches their view document (columns, sort, the
+// default folder view), which core then reads with a raw fetch of
+// GET /api/files/manager/view-prefs. Here it is only seen being attached;
+// nothing reaches the network.
+vi.mock('@brftech/filex-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@brftech/filex-core')>()),
+  attachViewPrefsHttp: vi.fn(),
+}));
+
+import { attachViewPrefsHttp } from '@brftech/filex-core';
 import { useAuthStore } from '@/stores/auth';
 import en from '@/locales/en.json';
 import { AuthApi } from '@/api/auth';
@@ -60,6 +71,7 @@ describe('stores/auth', () => {
     expect(store.isAdmin).toBe(true);
     expect(store.permissions).toContain('*');
     expect(sessionStorage.getItem('filex.bearer')).toBe('token-abc');
+    expect(attachViewPrefsHttp, "the person's view document is attached").toHaveBeenCalledTimes(1);
   });
 
   it('login(failure) sets error + leaves user null', async () => {
@@ -75,6 +87,38 @@ describe('stores/auth', () => {
     // test mock doesn't carry the isAxiosError flag.
     expect(store.error).toBe(en.login.errGeneric);
     expect(store.user).toBeNull();
+  });
+
+  // A realm typed on the platform page of a multi-tenant server, for a tenant
+  // with an address of its own (#128): signed in, but no session HERE - the
+  // store keeps nothing and hands the page the ticket to carry.
+  it('login(handoff) keeps no session and holds the ticket for the page', async () => {
+    sessionStorage.removeItem('filex.bearer');
+    (AuthApi.login as ReturnType<typeof vi.fn>).mockResolvedValue({
+      handoff: { origin: 'https://files.acme.test', code: 'T' },
+    });
+    const store = useAuthStore();
+    const ok = await store.login({ email: 'alex', password: 'pw', realm: 'acme' });
+    expect(ok).toBe(false);
+    expect(store.handoff).toEqual({ origin: 'https://files.acme.test', code: 'T' });
+    expect(store.user).toBeNull();
+    expect(store.error).toBeNull();
+    expect(sessionStorage.getItem('filex.bearer')).toBeNull();
+    expect(AuthApi.me).not.toHaveBeenCalled();
+  });
+
+  it('redeemHandoff opens the session on this address', async () => {
+    const user = { id: 7, email: 'alex@acme.local', display_name: 'Alex', role: 'user', created_at: '', updated_at: '' };
+    (AuthApi.handoff as ReturnType<typeof vi.fn>).mockResolvedValue({ user, token: 'tok-h' });
+    (AuthApi.me as ReturnType<typeof vi.fn>).mockResolvedValue({ user, permissions: [] });
+    const store = useAuthStore();
+    expect(await store.redeemHandoff('T')).toBe(true);
+    expect(AuthApi.handoff).toHaveBeenCalledWith('T');
+    expect(store.user?.email).toBe('alex@acme.local');
+    expect(sessionStorage.getItem('filex.bearer')).toBe('tok-h');
+
+    (AuthApi.handoff as ReturnType<typeof vi.fn>).mockRejectedValue({ response: { status: 401 } });
+    expect(await store.redeemHandoff('T')).toBe(false);
   });
 
   it('fetchMe(401) returns null without error', async () => {

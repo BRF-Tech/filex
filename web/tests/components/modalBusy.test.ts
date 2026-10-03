@@ -11,11 +11,10 @@
 // × is shut, the dialog says aria-busy — and where the work may be given up
 // by closing (the converter), × asks INSIDE the dialog.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { mount } from '@vue/test-utils';
 
 import Modal from '@brftech/filex-core/src/modals/Modal.vue';
-
-const mounted: VueWrapper[] = [];
+import { teardownDom } from '../helpers/teardown';
 
 function open(props: Record<string, unknown>) {
   const w = mount(Modal, {
@@ -23,7 +22,6 @@ function open(props: Record<string, unknown>) {
     slots: { default: '<input type="text" />' },
     attachTo: document.body,
   });
-  mounted.push(w);
   return w;
 }
 
@@ -41,10 +39,11 @@ function closeButton() {
   return document.querySelector('.fe-modal__close') as HTMLButtonElement;
 }
 
-afterEach(() => {
-  mounted.splice(0).forEach((w) => w.unmount());
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.unstubAllGlobals();
-  document.body.innerHTML = '';
 });
 
 describe('a dialog whose work is on its way', () => {

@@ -174,7 +174,7 @@ describe('typeLabel — the Type column, in words', () => {
   it('prints the uppercased extension when nothing maps, never an empty cell', () => {
     expect(typeLabelKey(node('main.zig'))).toBeNull();
     expect(typeLabelFor(node('main.zig'), t)).toBe('ZIG');
-    expect(typeLabelFor(node('LICENSE', { extension: '' }), t)).toBe('—');
+    expect(typeLabelFor(node('LICENSE', { extension: '' }), t)).toBe('-');
   });
 
   it('is case-insensitive about the extension the backend reports', () => {

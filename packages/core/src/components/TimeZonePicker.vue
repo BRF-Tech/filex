@@ -410,7 +410,7 @@ const display = computed(() => {
   const zone = props.modelValue;
   const city = (zone.split('/').pop() ?? zone).replace(/_/g, ' ');
   const off = namePart(zone, tag.value, 'shortOffset');
-  return off ? `${city} — ${off}` : city;
+  return off ? `${city} - ${off}` : city;
 });
 
 function rowTime(row: TzRow): string {

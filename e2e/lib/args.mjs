@@ -21,7 +21,7 @@
 // this one.
 
 /** Options that take the following argument as their value. */
-export const VALUE_OPTIONS = ['binary', 'port', 'grep', 'grep-invert', 'spec', 'browser', 'url', 'base-path'];
+export const VALUE_OPTIONS = ['binary', 'port', 'grep', 'grep-invert', 'spec', 'browser', 'url', 'base-path', 'loads', 'close-after'];
 
 /** Options that are on or off. */
 export const BOOLEAN_OPTIONS = ['build', 's3', 'keep', 'headed'];

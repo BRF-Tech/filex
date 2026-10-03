@@ -85,6 +85,14 @@ test.describe('resumable upload', () => {
   // click; it is not enough for a login that queues behind that work, and the
   // teardown was failing on exactly that rather than on anything under test.
   test.use({ actionTimeout: 60_000 });
+  /* ⚠ The measurement is the page's own wire, read through `page.route`. After
+     the reload the explorer's service worker controls the page, and a request
+     a service worker carries is not routed (Playwright's documented limit):
+     WebKit's resume went through, the trace shows both tail chunks answered
+     200 and the commit 202, and the counter still read one chunk (0.50
+     three-engine run, runs 1 and 2). Blocking the worker measures the
+     upload, not the cache. */
+  test.use({ serviceWorkers: 'block' });
 
   test.beforeAll(async ({ request }) => {
     await seedLocalStorage(request, STORAGE_NAME, MOUNT);

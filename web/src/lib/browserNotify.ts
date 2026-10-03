@@ -177,7 +177,7 @@ export function brandedNotification(opts: BrowserNotifyOptions): {
   // ⚠ The event sentence is never dropped to make room for the name: the two
   // are joined, because "New file: report.pdf" and "2.4 MB, in Documents" are
   // different facts and the toast has room for both.
-  const body = opts.body ? `${opts.title} — ${opts.body}` : opts.title;
+  const body = opts.body ? `${opts.title} - ${opts.body}` : opts.title;
   const options: NotificationOptions = {
     body,
     icon: brandIconUrl(),

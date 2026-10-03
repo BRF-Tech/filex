@@ -97,9 +97,11 @@ func TestGated_WhatAMissingEngineWouldAdd(t *testing.T) {
 		return nil
 	}
 
+	// 0.50: `libreoffice` is the office engine, a document server to CONNECT
+	// (kind "office"), read by the name the admin knows it by.
 	h.reg.engines = &engineSet{bins: map[string]string{}}
-	assert.Equal(t, []GatedRule{{Ext: []string{"docx", "odt"}, Needs: Need{Kind: "engine", ID: "libreoffice", Name: "LibreOffice"}}},
-		gatedOf(true, "upper"), "an administrator is told what LibreOffice would add, and by its name")
+	assert.Equal(t, []GatedRule{{Ext: []string{"docx", "odt"}, Needs: Need{Kind: "office", ID: "libreoffice", Name: "ONLYOFFICE"}}},
+		gatedOf(true, "upper"), "an administrator is told what the office engine would add, and what to connect")
 	assert.Nil(t, gatedOf(false, "upper"), "nobody else is")
 	assert.Nil(t, gatedOf(true, "deliver"), "an engine the app was never granted is not offered for installing")
 
@@ -109,8 +111,12 @@ func TestGated_WhatAMissingEngineWouldAdd(t *testing.T) {
 	}))
 	assert.Equal(t, []string{"docx"}, gatedOf(true, "upper")[0].Ext)
 
-	// LibreOffice is here: nothing is missing.
+	// A soffice on this machine is not the office engine any more (0.50).
 	h.reg.engines = &engineSet{bins: map[string]string{"libreoffice": "/usr/bin/soffice"}}
+	assert.Equal(t, []string{"docx"}, gatedOf(true, "upper")[0].Ext, "a LibreOffice binary opened the office types")
+
+	// A document server is connected: nothing is missing.
+	h.reg.engines = &engineSet{bins: map[string]string{}, office: &fakeOffice{ready: true}}
 	assert.Nil(t, gatedOf(true, "upper"))
 }
 

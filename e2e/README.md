@@ -1,4 +1,4 @@
-# filex — E2E test suite
+# filex - E2E test suite
 
 End-to-end tests powered by [Playwright](https://playwright.dev). They
 drive the same Vue 3 admin UI a real user sees, against a running
@@ -25,14 +25,14 @@ Drop `--build` once you have a binary in `bin/`, or point at one with
 
 | Flag | What it does |
 |---|---|
-| `--s3` | also starts MinIO in Docker, creates a bucket and registers an `s3` storage, then runs `26-s3-storage.spec.ts` against it |
+| `--s3` | also starts an S3 server in Docker (Versity S3 Gateway, `versity/versitygw:v1.8.0`, posix backend), creates a bucket and registers two `s3` storages, then runs `26-s3-storage.spec.ts` against them. `E2E_S3_IMAGE` names another versitygw image (a registry mirror). `E2E_MINIO_IMAGE` is refused: `minio/minio` is no longer published on Docker Hub, and the harness no longer runs MinIO |
 | `--keep` | leaves the server (and the data dir) up afterwards so you can poke at it |
 | `--port <n>` | fixed port instead of a free one |
 | `--grep <pattern>` | passed through to Playwright |
 | `--base-path <p>` | serves filex under a sub-path (`FILEX_BASE_PATH`, e.g. `/filex`) behind `lib/subpath-proxy.mjs`, which passes the full path like a real proxy, redirects the specs' own root-relative requests into the base, and **fails the run** when the app asks for anything outside it. `164-sub-path.spec.ts` asserts where each journey lands; at the root it asserts the root addresses. On Git Bash set `MSYS_NO_PATHCONV=1`, or `/filex` arrives as a Windows path |
 
 The **cypress** profile starts the same kind of instance and drives
-`web/cypress` instead. The two suites are not duplicates — Playwright walks
+`web/cypress` instead. The two suites are not duplicates - Playwright walks
 journeys, Cypress pins the HTTP contracts and the admin screens that read them
 (`web/cypress/README.md` has the split, and `docs/CONTRIBUTING.md` has the "which
 one do I add a test to" table):
@@ -44,7 +44,7 @@ node e2e/run.mjs cypress --spec "cypress/e2e/14-explorer-sidenav.cy.ts"
 
 It seeds one deterministic local storage before running. ⚠ That seed is not a
 nicety: a bare instance has zero storages, and most Cypress specs discover "the
-first storage" and then quietly assert nothing when there is none — a green run
+first storage" and then quietly assert nothing when there is none - a green run
 that measured almost nothing.
 
 The **deployment** profile is a separate, read-only smoke against something
@@ -55,7 +55,7 @@ node e2e/run.mjs deployment --url https://fm.example.com
 ```
 
 ⚠ Keep the two apart. `90-deployment-smoke.spec.ts` talks to production, so a
-run that mixes it into the local suite goes red when production is slow — which
+run that mixes it into the local suite goes red when production is slow - which
 means it can no longer answer the only question a pre-release run exists to
 answer: *is this build good?*
 
@@ -65,22 +65,22 @@ read it. Use `FILEX_ADMIN_EMAIL` / `FILEX_ADMIN_PASSWORD` (which is what
 `run.mjs` does).
 
 ⚠ Use `127.0.0.1`, not `localhost`: on Windows `localhost` resolves to `::1`
-first, and a server bound to `127.0.0.1` answers that with `ECONNREFUSED` —
+first, and a server bound to `127.0.0.1` answers that with `ECONNREFUSED` -
 indistinguishable from a server that failed to start.
 
 ⚠ **Never give the server's stdout to a Node pipe.** `run.mjs` hands the child
-a file descriptor (`stdio: ['ignore', logFd, logFd]`). The obvious alternative
-— `'pipe'` plus `child.stdout.pipe(writeStream)` — deadlocks the server: the
+a file descriptor (`stdio: ['ignore', logFd, logFd]`). The obvious alternative -
+`'pipe'` plus `child.stdout.pipe(writeStream)` - deadlocks the server: the
 suite runs under `spawnSync`, which blocks Node's event loop, so nothing drains
 the pipe, the 64 KiB OS buffer fills, and filex (one log line per HTTP request,
 written from inside the request path) blocks forever in `write(2)`. Measured:
 551 requests served, then dead to everything including `/healthz` for the rest
-of the run — 20 specs failing with connection timeouts that look exactly like a
+of the run - 20 specs failing with connection timeouts that look exactly like a
 product deadlock. `tests/01-harness.spec.ts` guards both the mechanism and the
 call.
 
 ⚠ **A storage's root is `config.path`.** Not `mount_path`, and not
-`config.root` when `config.path` is also set — `local.Driver.Init` reads `path`
+`config.root` when `config.path` is also set - `local.Driver.Init` reads `path`
 first. `helpers/seed.ts` used to send `{root: mountPath, path: 'fileman'}`, so
 every storage every spec created resolved to the same `./fileman` directory
 under the server's working dir and specs read each other's files. Use
@@ -92,7 +92,14 @@ visually. `pnpm test:debug` opens the inspector.
 ## Test layout
 
 Every spec opens with a comment naming what it pins and, for a regression, the
-report it came from — read that before changing an assertion.
+report it came from - read that before changing an assertion.
+
+Each spec has a number of its own: a new one takes the highest number in use
++ 1, checked against the other open branches (`docs/CONTRIBUTING.md`,
+"Browser suites"; `web/tests/quality/e2eSpecNumbers.test.ts` refuses a number
+used twice or a letter after it). `run.mjs` runs the files in their names'
+plain sort, which is not numeric (`126-` runs before `95-`), so no spec may
+depend on running after another.
 
 | File | Coverage |
 |------|----------|
@@ -101,7 +108,7 @@ report it came from — read that before changing an assertion.
 | `tests/10-login.spec.ts` | bad creds rejected, good creds land on **Home**, logout |
 | `tests/20-storage.spec.ts` | admin storage list + dashboard widget |
 | `tests/25-connections.spec.ts` | the connection guides (WebDAV, SFTP, S3, mount) name the real address |
-| `tests/26-s3-storage.spec.ts` | a real MinIO (`--s3`, two storages): round trip, ranged read, re-chunking, trash, a >8 MiB move between object stores |
+| `tests/26-s3-storage.spec.ts` | a real S3 server (`--s3`, two storages): round trip, ranged read, re-chunking, trash, a >8 MiB move between object stores |
 | `tests/27-usage.spec.ts` | the *Usage & cost* page |
 | `tests/30-files.spec.ts` | upload, list, soft-delete |
 | `tests/40-share.spec.ts` / `77-share.spec.ts` | the admin share list / share creation + public access |
@@ -115,7 +122,7 @@ report it came from — read that before changing an assertion.
 | `tests/80-file-types.spec.ts` / `100-viewer-audit.spec.ts` | MIME contract / a viewer mounts for every extension |
 | `tests/82-capability-gating.spec.ts` | features hidden when the server lacks them |
 | `tests/85-resumable-upload.spec.ts` / `86-slow-storage-cache.spec.ts` | resumable chunks / prepared copies on slow storage |
-| `tests/90-deployment-smoke.spec.ts` | **deployment profile only** — read-only smoke against a live URL |
+| `tests/90-deployment-smoke.spec.ts` | **deployment profile only** - read-only smoke against a live URL |
 | `tests/91-rounds-4-6-regression.spec.ts` | round 4-8 regressions; seeds its own fixtures, or `E2E_FIXTURE_STORAGE` |
 | `tests/95-app-plugins.spec.ts` | an app plugin end to end: install → menu → job → output → public page (the `echo` fixture) |
 | `tests/96-app-plugin-convert.spec.ts` | the **convert** app: install, the target picker as a row of buttons, the grey list for a missing engine, PNG → a real JPEG |
@@ -149,7 +156,7 @@ report it came from — read that before changing an assertion.
 `helpers/auth.ts`     → `loginAs`, `apiLogin`, `logout`
 `helpers/seed.ts`     → `seedLocalStorage`, `dropStorageByName`, `waitForOp`
 `helpers/surface.ts`  → app-plugin surfaces over HTTP: `checkSurface` / `checkLanguages` (the renderer's rules, the browser-side twin of `pkg/pluginkit/plugintest`), `choices`, `driveToJob`
-`helpers/appPlugin.ts` → finding and installing a real app module: `resolveApp`, `guardFixture`, `installThroughWizard` (adds `APP_INSTALL_ALLOWANCE_MS` = 90 s to the test's timeout — filex compiles the module before it answers, ~23 s idle and well over 30 s on a busy machine; a spec sets no install timeout of its own)
+`helpers/appPlugin.ts` → finding and installing a real app module: `resolveApp`, `guardFixture`, `installThroughWizard` (adds `APP_INSTALL_ALLOWANCE_MS` = 90 s to the test's timeout - filex compiles the module before it answers, ~23 s idle and well over 30 s on a busy machine; a spec sets no install timeout of its own)
 `helpers/rowMenu.ts`  → an admin row's verbs: `openRowMenu`, `rowMenuVerbs`, `pickRowAction`, `confirmRowAction`. ⚠ Every admin row ends in ONE **Actions** control and its menu is teleported to `<body>`, so `row.getByRole('button', …)` can never reach a verb; entries are addressed by the words a person reads
 `helpers/prefs.ts`    → `setAccountViewMode`. ⚠ The view mode, the sort and the columns live on the ACCOUNT (`/api/files/manager/view-prefs`), and so do theme, palette, density and language (`/api/me/prefs?surface=web`). The `localStorage` keys are a FIRST-PAINT CACHE that the account's answer overwrites a moment after boot, so a spec that only seeds them measures a race it usually loses
 `fixtures/`            → small files used by upload tests
@@ -164,9 +171,17 @@ report it came from — read that before changing an assertion.
 
 > The two app specs need a built `plugin.wasm` from a sibling checkout
 > (`../filex-convert`, `../filex-sign/dist`, or `FILEX_CONVERT_APP_DIR` /
-> `FILEX_SIGN_APP_DIR`). Without one they SKIP — unless
+> `FILEX_SIGN_APP_DIR`). Without one they SKIP - unless
 > `FILEX_REQUIRE_WASM_FIXTURE=1`, which CI sets so that "green" can never
 > mean "skipped".
+
+## Against real servers (`realenv/`)
+
+`realenv/` is a separate suite with its own Playwright config: filex against a
+real ACME authority (Pebble), a real Caddy, Keycloak, OpenLDAP and the
+ONLYOFFICE Document Server, each in Docker. `node e2e/run.mjs` never runs it;
+`e2e/realenv/run.sh` does, and skips (saying which image is missing) what the
+machine cannot start. `realenv/README.md` has the stages and the wiring.
 
 ## Screenshots (`shots/`)
 
@@ -184,13 +199,13 @@ pnpm shots --only sidenav,capture   # a subset
 `scripts/check-embed.mjs` that the binary serves `web/dist` byte for byte
 **before** a picture is taken, runs every script in `shots/` (`capture`,
 `driveshell`, `sidenav`, `starstags`, `tags`, `langpack`, `notifications`,
-`e2e-recovery`, `apps`, `signing`, `appearance`, `symlinks` — all twelve),
+`e2e-recovery`, `apps`, `signing`, `appearance`, `symlinks` - all twelve),
 syncs the site assets
-and writes one contact sheet, `e2e/.artifacts/shots/contact-sheet.html` — look
+and writes one contact sheet, `e2e/.artifacts/shots/contact-sheet.html` - look
 at it. Pictures land in `docs/screenshots/<release>/`.
 
 Each script can still be run on its own (`node e2e/shots/capture.mjs`); it
-boots its own instance, generates the demo tree (`shots/fixtures.mjs` — PNGs
+boots its own instance, generates the demo tree (`shots/fixtures.mjs` - PNGs
 encoded with Node's zlib, no image dependency) and waits for the sync a seed
 depends on (`syncAndWait`: the sync endpoint answers 202). Useful environment
 variables:
@@ -200,13 +215,13 @@ variables:
 | `FILEX_BIN` | binary to run (default `bin/filex`) |
 | `SHOTS_OUT` | output directory (default `docs/screenshots/<release>/`) |
 | `SHOTS_URL` | shoot an instance that is ALREADY running instead of booting one |
-| `SHOTS_STORAGE` / `SHOTS_MOUNT` | the fixture directory as *this machine* and as the *server* see it — they differ when the server runs in a VM / WSL / container |
+| `SHOTS_STORAGE` / `SHOTS_MOUNT` | the fixture directory as *this machine* and as the *server* see it - they differ when the server runs in a VM / WSL / container |
 | `SHOTS_SEED_ONLY`, `SHOTS_SKIP_SEED` | two passes: seed, run `filex thumb backfill` out of band, then capture. Thumbnails are rendered on UPLOAD, so fixtures written straight to disk have none and the hero shot comes out as a grid of generic icons |
-| `SHOTS_DEMO` | capture `demo-landing.png` — needs an instance booted with `FILEX_DEMO_MODE=true`, because that page replaces the login screen |
+| `SHOTS_DEMO` | capture `demo-landing.png` - needs an instance booted with `FILEX_DEMO_MODE=true`, because that page replaces the login screen |
 | `SHOTS_PLUGIN_BIN` | an already-built `examples/plugin-memfs` binary for the shots machine. Normally unnecessary: when `go` is not on the PATH the script cross-builds the plugin **through WSL**. ⚠ A path that is set and wrong is an error, not a shrug |
-| `SHOTS_ALLOW_SKIP` | permit a deliberate partial run. ⚠ Without it, **a shot the script was asked for and could not take fails the run** — that is the point: `admin-plugins.png` sat outdated for several releases behind a script that logged one line, skipped it and exited 0, and a release step that reports success while leaving the old file in place is not a gate |
+| `SHOTS_ALLOW_SKIP` | permit a deliberate partial run. ⚠ Without it, **a shot the script was asked for and could not take fails the run** - that is the point: `admin-plugins.png` sat outdated for several releases behind a script that logged one line, skipped it and exited 0, and a release step that reports success while leaving the old file in place is not a gate |
 | `SHOTS_KEEP` | leave the instance running afterwards |
-| `FILEX_SIGN_APP_DIR` / `FILEX_CONVERT_APP_DIR` | where `apps.mjs` and `signing.mjs` find the two apps' `plugin.wasm` + `filex-app.json` — the same variables and the same fallbacks (`../filex-sign/dist`, `../filex-convert`) as the Playwright specs' `resolveApp`. Set, a directory is the only one looked in. Missing, the script **fails** rather than skipping the pictures; `pnpm shots` passes these two through and no other `FILEX_*` |
+| `FILEX_SIGN_APP_DIR` / `FILEX_CONVERT_APP_DIR` | where `apps.mjs` and `signing.mjs` find the two apps' `plugin.wasm` + `filex-app.json` - the same variables and the same fallbacks (`../filex-sign/dist`, `../filex-convert`) as the Playwright specs' `resolveApp`. Set, a directory is the only one looked in. Missing, the script **fails** rather than skipping the pictures; `pnpm shots` passes these two through and no other `FILEX_*` |
 
 `apps.mjs`, `signing.mjs`, `appearance.mjs` and `symlinks.mjs` share one stage,
 `shots/scene.mjs`: an instance on its own port and data directory with no
@@ -230,9 +245,49 @@ with Developer Mode or elevation) and fails where it cannot.
   can tell "this machine can't" from "this build is broken".
 - Environment-dependent cases gate on the capability probe, not on a hostname:
   OnlyOffice (`external.onlyoffice.state`), SVG thumbnails
-  (`thumbs.svg` / rsvg-convert), office thumbnails (`libreoffice`), S3
-  (`--s3`). On a host with those installed they become real assertions with no
+  (`thumbs.svg` / rsvg-convert), office thumbnails and the apps' office
+  engine (a connected ONLYOFFICE since 0.50: `external.onlyoffice.state` in
+  spec 195, the runtime's `engines.office` in spec 196), S3 (`--s3`). On a
+  host with those installed they become real assertions with no
   code change.
+
+## A blank sign-in page
+
+Once in a few hundred sign-in loads a full run on the Windows workstation
+showed an empty page: the form never came, and one of the five files the page
+cannot start without (the entry script, its CSS, `vue-vendor`, `i18n`,
+`icons`) had no line in the server's log (task #81). Measured 2026-10-01:
+the browser's connection for that request failed in the operating system,
+`net::ERR_NO_BUFFER_SPACE` (WSAENOBUFS), in the same second as the System
+log's Tcpip event 4231, "all ephemeral ports are in use". A navigation that
+meets it fails out loud; a module script that meets it leaves a blank page.
+It is the machine, not filex, and a retry would only hide it.
+
+What tells you which it was:
+
+- `loginAs` names every request the browser could not fetch while the page
+  started, and says when the error came from the host's network stack.
+- The trace of the failing attempt is kept (`trace: 'retain-on-failure'`):
+  its network tab shows whether the request was made, pending or refused.
+- `run.mjs` starts the server at `FILEX_LOG_LEVEL=debug`, so
+  `e2e/.artifacts/server.log` has a `msg="http start"` line, with the socket
+  (`peer`), for every request that ARRIVED: arrived and unanswered is the
+  server, never arrived is the browser or the host.
+- On Windows, `Get-WinEvent -FilterHashtable @{LogName='System';
+  ProviderName='Tcpip'; Id=4231}` lists port exhaustion. Windows writes it at
+  most about once a day, so no event is not proof that it did not happen.
+
+The cure is on the host: find what holds the ports (`netstat -ano`, the
+foreign endpoint of the `TIME_WAIT` rows, `Get-NetTCPConnection` by owning
+process) while it happens.
+
+To look for it on purpose, `node e2e/run.mjs boot-stress --binary <filex>
+--loads 1000` opens the sign-in page in fresh contexts back to back against
+the same hermetic server, closing each context part-way through its service
+worker's precache (`--close-after rand`, or milliseconds), and writes every
+load that did not start to `e2e/.artifacts/boot-stress/` with its requests as
+the browser saw them. It is a diagnostic, not a gate; exit code 1 when any
+load failed.
 
 ## CI
 
@@ -240,8 +295,8 @@ The public repository's GitHub Actions (`.github/workflows/`):
 
 | Workflow · job | When | What |
 |---|---|---|
-| `ci.yml` · `browser` | every push to `main` and every pull request | `node e2e/run.mjs cypress --build` — the Cypress suite against a throwaway build of that commit; failure screenshots and video are uploaded |
-| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux — a shot script that no longer fits the product turns red here instead of on release night. ⚠ The scenes that need an app build (`apps.mjs`, `signing.mjs`) are **left out** in CI and taken locally at release step 2 — see [CONTRIBUTING.md → Screenshots](../docs/CONTRIBUTING.md#screenshots) |
+| `ci.yml` · `browser` | every push to `main` and every pull request | `node e2e/run.mjs cypress --build` - the Cypress suite against a throwaway build of that commit; failure screenshots and video are uploaded |
+| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux - a shot script that no longer fits the product turns red here instead of on release night. ⚠ The scenes that need an app build (`apps.mjs`, `signing.mjs`) are **left out** in CI and taken locally at release step 2 - see [CONTRIBUTING.md → Screenshots](../docs/CONTRIBUTING.md#screenshots) |
 
 ⚠ **No CI job runs the Playwright suite** (`node e2e/run.mjs local`). It gates a
 release because the release process runs it (`docs/CONTRIBUTING.md` → *Release

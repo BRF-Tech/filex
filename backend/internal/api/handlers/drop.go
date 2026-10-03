@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
-	"net"
 	"net/http"
 	"path"
 	"strings"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -875,21 +875,11 @@ func (l *ipLimiter) allow(ip string) bool {
 	return true
 }
 
-// clientIP extracts the best-effort source IP, honoring X-Forwarded-For's
-// first hop (filex sits behind Caddy) then falling back to RemoteAddr.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
+// clientIP is the address the request came from. The rule (the socket's peer is
+// the truth; X-Forwarded-For only from a trusted proxy) lives in
+// internal/clientip, shared with the access log, the audit trail and the
+// sign-in throttle.
+func clientIP(r *http.Request) string { return clientip.FromRequest(r) }
 
 // dropUploaderTemplate is a dependency-free upload page: drag-and-drop or pick,
 // one or many files, optional name/note, live progress. All limits are echoed
@@ -898,7 +888,7 @@ var dropUploaderTemplate = template.Must(template.New("drop").Parse(`<!doctype h
 <html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.T.drop_title}}{{if .Folder}} — {{.Folder}}{{end}}</title>
+<title>{{.T.drop_title}}{{if .Folder}} - {{.Folder}}{{end}}</title>
 ` + publicPageStyle + `
 {{.BrandCSS}}
 <style>
@@ -969,7 +959,7 @@ var el = function(id){ return document.getElementById(id); };
 var drop = el('drop'), fileInput = el('file'), filesBox = el('files'), sendBtn = el('send'), msg = el('msg');
 
 if (CFG.askName) el('nameField').style.display = 'block';
-// fill() puts values into a table string's {name} placeholders — the server
+// fill() puts values into a table string's {name} placeholders - the server
 // catalogue's grammar (internal/srvtext), so the script's messages come from
 // the same table, in the same language, as the page around it. A name it is
 // not given stays as written rather than vanishing from the sentence.

@@ -256,5 +256,25 @@ test.describe('Meta routes + markdown editor', () => {
     await expect(page.locator('.fe-modal__head')).toHaveCount(0);
     await expect(page.locator('.fe-modal__actions')).toHaveCount(0);
     await expect(page.locator('.fe-modal__backdrop--chromeless')).toBeVisible();
+
+    // A browser tab has no host strip: `--fe-overlay-top` / `--fe-overlay-bottom`
+    // keep core's 0, so the viewer starts at the very top and fills the tab.
+    // (The desktop's document window sets the top one to its bar's height -
+    // desktop/scripts/titlebar-e2e.mjs measures that side.)
+    const geo = await page.evaluate(() => {
+      const card = document.querySelector('.fe-modal__card--chromeless')!.getBoundingClientRect();
+      const backdrop = document.querySelector('.fe-modal__backdrop--chromeless')!.getBoundingClientRect();
+      return {
+        backdropTop: backdrop.top,
+        cardTop: card.top,
+        cardBottom: card.bottom,
+        vh: window.innerHeight,
+        overlayTop: getComputedStyle(document.documentElement).getPropertyValue('--fe-overlay-top').trim(),
+      };
+    });
+    expect(geo.overlayTop).toBe('0px');
+    expect(geo.backdropTop).toBe(0);
+    expect(geo.cardTop).toBe(0);
+    expect(Math.abs(geo.cardBottom - geo.vh)).toBeLessThanOrEqual(1);
   });
 });

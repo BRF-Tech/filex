@@ -121,6 +121,6 @@ describe('the self-service key form', () => {
   });
 
   it('says it in Turkish too', () => {
-    expect(coreTr['conn.tokens.scopesRequired']).toBe('En az bir izin seçin — hiçbir izni olmayan bir API anahtarı verilmez.');
+    expect(coreTr['conn.tokens.scopesRequired']).toBe('En az bir izin seçin - hiçbir izni olmayan bir API anahtarı verilmez.');
   });
 });

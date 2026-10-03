@@ -71,7 +71,7 @@ func withServerMessage(err error) error {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(ae.Body, &body) == nil && body.Message != "" {
-		return fmt.Errorf("%w — %s", err, body.Message)
+		return fmt.Errorf("%w - %s", err, body.Message)
 	}
 	return err
 }

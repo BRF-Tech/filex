@@ -356,6 +356,20 @@ const routes: RouteRecordRaw[] = [
         meta: { adminPerm: 'admin.users', breadcrumb: 'users.editTitle', parent: 'users' },
       },
       {
+        // Groups of people (backend internal/group) — managing people, so
+        // admin.users like the Users page.
+        path: 'groups',
+        name: 'groups',
+        component: () => import('@/views/Groups.vue'),
+        meta: { adminPerm: 'admin.users', breadcrumb: 'nav.groups' },
+      },
+      {
+        path: 'groups/:id',
+        name: 'groups.edit',
+        component: () => import('@/views/GroupEdit.vue'),
+        meta: { adminPerm: 'admin.users', breadcrumb: 'groups.editTitle', parent: 'groups' },
+      },
+      {
         /**
          * gorunum:v2 — the profile PAGE is gone; every field it had is in the
          * user-settings dialog. The ADDRESS stays because the server prints it:
@@ -405,6 +419,28 @@ const routes: RouteRecordRaw[] = [
         name: 'auth-providers',
         component: () => import('@/views/AuthProviders.vue'),
         meta: { breadcrumb: 'nav.authProviders' },
+      },
+      {
+        // Tenants (docs/TENANT-ADMIN.md): the platform operator's. The server
+        // refuses an administrator of a tenant (supertenant_only); the sidebar
+        // shows the page only to the operator of a multi-tenant install.
+        path: 'tenants',
+        name: 'tenants',
+        component: () => import('@/views/Tenants.vue'),
+        meta: { breadcrumb: 'nav.tenants' },
+      },
+      {
+        // My tenant: a tenant's administrator runs their own tenant.
+        path: 'my-tenant',
+        name: 'tenant-self',
+        component: () => import('@/views/TenantSelf.vue'),
+        meta: { breadcrumb: 'nav.myTenant' },
+      },
+      {
+        path: 'tenants/:id',
+        name: 'tenants.edit',
+        component: () => import('@/views/TenantEdit.vue'),
+        meta: { breadcrumb: 'tenants.editTitle', parent: 'tenants' },
       },
       {
         path: 'api-mcp',
@@ -467,6 +503,14 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.protection' },
       },
       {
+        // Sign-in attempt limit: its numbers, the exempt addresses, the trusted
+        // proxies, the locks in force and the recent trail (instance-wide).
+        path: 'login-security',
+        name: 'login-security',
+        component: () => import('@/views/LoginSecurity.vue'),
+        meta: { breadcrumb: 'nav.loginSecurity' },
+      },
+      {
         path: 'archives',
         name: 'archives',
         component: () => import('@/views/Archives.vue'),
@@ -502,6 +546,15 @@ const routes: RouteRecordRaw[] = [
         name: 'queue',
         component: () => import('@/views/Queue.vue'),
         meta: { adminPerm: 'admin.monitor', breadcrumb: 'nav.queue' },
+      },
+      {
+        // Admin → Tools: maintenance that is not an action on a file, one tab
+        // per tool (components/tools/registry.ts). Administrators only: the
+        // server's /api/admin/tools routes sit behind RequireAdmin.
+        path: 'tools',
+        name: 'tools',
+        component: () => import('@/views/Tools.vue'),
+        meta: { breadcrumb: 'nav.tools' },
       },
       {
         path: 'notifications',

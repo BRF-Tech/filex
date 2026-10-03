@@ -81,7 +81,7 @@ const unread = computed(() => Math.max(0, props.feed.unreadCount || 0));
 /** The accessible name carries the count too — a badge is a picture of a number. */
 const buttonLabel = computed(() =>
   unread.value > 0
-    ? `${t('notifications.bell')} — ${t('notifications.unreadCount', { n: unread.value })}`
+    ? `${t('notifications.bell')} - ${t('notifications.unreadCount', { n: unread.value })}`
     : t('notifications.bell'),
 );
 

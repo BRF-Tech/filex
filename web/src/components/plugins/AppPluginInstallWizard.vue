@@ -32,12 +32,23 @@
  * An upgrade's review says, besides the grant: the module and interface
  * hashes from → to, which interface files were added, removed and changed,
  * the filex range and the signature from → to, and the source's release
- * notes (plain text). Nothing updates itself (filex 0.48): this review is
+ * notes (Markdown, drawn through the explorer preview's pipeline and its
+ * sanitizer, #122). Nothing updates itself (filex 0.48): this review is
  * where every newer version is approved.
  *
  * ⚠ An app whose `filex` range leaves this server out is said at the review
  * (`review.compat.ok === false`) and cannot be installed from it; the server
  * refuses it too (`incompatible`).
+ *
+ * An app that opens kinds of file or draws their thumbnails (0.50) gets a
+ * "File types" group at an install's review (`review.file_types`): one row
+ * per kind and capability, who handles it now, and where this app goes -
+ * first, after them, or off - as a row of buttons. Only the rows changed
+ * from the default the server named are sent (`associations`): nothing
+ * chosen keeps the default order. An upgrade asks the same about the kinds
+ * the new version ADDS, and only those: the order the administrator has for
+ * the kinds the app already handled stays as it is (the maintainer, 2026-10-01). The
+ * group is AppPluginFileTypes, the one a request's approval shows too.
  *
  * ⚠ What the dry run knows is said AT THE REVIEW (release-candidate sweep,
  * 2026-09-21): an app of the same name already installed (with "upgrade it
@@ -57,14 +68,20 @@ import {
   appPluginError,
   type AppPlugin,
   type AppPluginDryRun,
+  type AppPluginInstallKind,
   type AppPluginInstallSource,
+  type AppPluginPlace,
 } from '@/api/appPlugins';
 import { extractError } from '@/api/client';
 import { refusalSentence } from '@/lib/appPluginRefusal';
 import { formatBytes } from '@/lib/format';
+import { changedPlacements, defaultPlaces } from '@/lib/fileTypes';
+import { useToastStore } from '@/stores/toast';
 import { pluginLabelOf } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
+import AppPluginFileTypes from './AppPluginFileTypes.vue';
+import ReleaseNotes from './ReleaseNotes.vue';
 import Input from '@/components/ui/Input.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -96,6 +113,7 @@ const emit = defineEmits<{
 }>();
 
 const { t, locale } = useI18n();
+const toast = useToastStore();
 
 const step = ref<Step>('source');
 const source = ref<Source>('github');
@@ -110,6 +128,8 @@ const manifestUrl = ref('');
 const sha256 = ref('');
 
 const review = ref<AppPluginDryRun | null>(null);
+/** The File types group's choices, by row key (`fileTypeKey`). */
+const places = ref<Record<string, AppPluginPlace>>({});
 const understood = ref(false);
 const busy = ref(false);
 const failure = ref('');
@@ -146,6 +166,7 @@ function reset() {
   manifestUrl.value = '';
   sha256.value = '';
   review.value = null;
+  places.value = {};
   understood.value = false;
   busy.value = false;
   failure.value = '';
@@ -240,6 +261,7 @@ async function toReview() {
     review.value = target
       ? await AppPluginsApi.upgradeDryRun(target.id, src)
       : await AppPluginsApi.dryRun(src);
+    places.value = defaultPlaces(review.value.file_types);
     understood.value = false;
     step.value = 'review';
   } catch (e: unknown) {
@@ -288,6 +310,11 @@ const grant = computed<string[]>(() =>
 /** The review's range verdict: false when this filex is outside the app's range. */
 const compatible = computed(() => review.value?.compat?.ok !== false);
 
+/** The missing engines that are programs to install, and the office engine
+ *  (0.50: a document server to connect, `kind: "office"`), said apart. */
+const programsMissing = computed(() => (review.value?.engines_missing ?? []).filter((e) => e.kind !== 'office'));
+const officeMissing = computed(() => (review.value?.engines_missing ?? []).find((e) => e.kind === 'office') ?? null);
+
 // An install whose name is taken cannot go through: the review says so and
 // offers the upgrade instead of letting "Install" be the one to find out. An
 // app whose range leaves this filex out cannot either.
@@ -313,12 +340,20 @@ async function install() {
   try {
     const target = upgradeTarget.value;
     if (target) {
-      const p = await AppPluginsApi.upgrade(target.id, src, grant.value);
+      const p = await AppPluginsApi.upgrade(target.id, src, grant.value, placements.value);
       step.value = 'done';
+      if (p.association_errors?.length) {
+        toast.warn(t('appPlugins.wizard.fileTypes.notSaved', { list: p.association_errors.join('; ') }));
+      }
       emit('upgraded', p);
     } else {
-      const p = await AppPluginsApi.install(src, grant.value);
+      const p = await AppPluginsApi.install(src, grant.value, placements.value);
       step.value = 'done';
+      // The app is installed either way; a choice the server could not write
+      // leaves that kind in its order, and the administrator is told which.
+      if (p.association_errors?.length) {
+        toast.warn(t('appPlugins.wizard.fileTypes.notSaved', { list: p.association_errors.join('; ') }));
+      }
       emit('installed', p);
     }
   } catch (e: unknown) {
@@ -329,6 +364,15 @@ async function install() {
 }
 
 const manifest = computed(() => review.value?.manifest ?? null);
+
+/* ── File types (0.50) ─────────────────────────────────────────────────── */
+
+/** The group's rows: an install's every kind; an upgrade's, the kinds it adds
+ *  (the server lists only those). */
+const fileTypes = computed<AppPluginInstallKind[]>(() => review.value?.file_types ?? []);
+
+/** What the install or the upgrade sends: only the rows changed from the default. */
+const placements = computed(() => changedPlacements(fileTypes.value, places.value));
 
 /** The interface's addresses outside its package, mirrored first. */
 const externals = computed(() =>
@@ -342,7 +386,7 @@ function sizeOf(n: number | undefined): string {
 
 /** A hash short enough to compare by eye. */
 function short(h: string | undefined): string {
-  return h ? h.slice(0, 12) : '—';
+  return h ? h.slice(0, 12) : '-';
 }
 
 /** The upgrade's module line: changed, the same, gone — or nothing (neither has one). */
@@ -524,11 +568,11 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
             <dd class="sm:col-span-2">{{ manifest.public_pages?.length ?? 0 }}</dd>
             <template v-if="review.kind === 'language_pack'">
               <dt class="text-zinc-500">{{ t('appPlugins.wizard.facts.manifestSha256') }}</dt>
-              <dd class="break-all font-mono sm:col-span-2">{{ review.manifest_sha256 || '—' }}</dd>
+              <dd class="break-all font-mono sm:col-span-2">{{ review.manifest_sha256 || '-' }}</dd>
             </template>
             <template v-else-if="review.engine !== false">
               <dt class="text-zinc-500">{{ t('appPlugins.wizard.facts.sha256') }}</dt>
-              <dd class="break-all font-mono sm:col-span-2">{{ review.wasm_sha256 || '—' }}</dd>
+              <dd class="break-all font-mono sm:col-span-2">{{ review.wasm_sha256 || '-' }}</dd>
             </template>
             <template v-if="manifest.homepage">
               <dt class="text-zinc-500">{{ t('appPlugins.wizard.facts.homepage') }}</dt>
@@ -587,8 +631,8 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           <p v-if="signedLine" class="text-xs text-amber-800 dark:text-amber-200" data-testid="app-plugin-upgrade-signed">{{ signedLine }}</p>
           <div v-if="review.upgrade.notes" class="text-xs" data-testid="app-plugin-upgrade-notes">
             <h4 class="font-semibold text-zinc-600 dark:text-zinc-300">{{ t('appPlugins.wizard.diff.notes') }}</h4>
-            <!-- Plain text, as the source wrote it: never rendered as markup. -->
-            <p class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-zinc-600 dark:text-zinc-400">{{ review.upgrade.notes }}</p>
+            <!-- Markdown through the explorer preview's pipeline and its sanitizer (ReleaseNotes). -->
+            <ReleaseNotes :notes="review.upgrade.notes" testid="app-plugin-upgrade-notes-md" />
           </div>
         </div>
 
@@ -689,12 +733,27 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
         <!-- The engines this app asks for that this server does not have: it
              installs, and whatever needs them will not work until they are. -->
         <div
-          v-if="review.engines_missing?.length"
+          v-if="programsMissing.length"
           class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
           data-testid="app-plugin-engines-missing"
         >
-          {{ t('appPlugins.wizard.enginesMissing', { engines: review.engines_missing.map((e) => e.name).join(', ') }) }}
+          {{ t('appPlugins.wizard.enginesMissing', { engines: programsMissing.map((e) => e.name).join(', ') }) }}
         </div>
+        <!-- The office engine (0.50) is a document server to CONNECT, with no
+             restart after it: "install it and restart filex" sent an
+             administrator after a LibreOffice filex no longer runs. -->
+        <div
+          v-if="officeMissing"
+          class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+          data-testid="app-plugin-office-missing"
+        >
+          {{ t('appPlugins.wizard.officeMissing', { name: officeMissing.name }) }}
+        </div>
+
+        <!-- File types (0.50): where this app goes for each kind it opens or
+             draws (an upgrade: each kind it adds). Nothing changed: the
+             default order. -->
+        <AppPluginFileTypes v-model="places" :rows="fileTypes" :mode="isUpgrade ? 'upgrade' : 'install'" />
 
         <AppPluginPermissionList
           :permissions="review.permissions"

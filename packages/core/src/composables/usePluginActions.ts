@@ -14,7 +14,7 @@
 import { computed, ref, watch, type Ref } from 'vue';
 import type { FileApi } from './useFileApi';
 import type { FileNode } from '../types/FileNode';
-import type { PluginActionRow, PluginActionsResponse, PluginRunResult, PluginViewRow } from '../types/Plugins';
+import type { OpenRule, PluginActionRow, PluginActionsResponse, PluginRunResult, PluginViewRow } from '../types/Plugins';
 import { pluginActionsFor, pluginActionKey } from '../lib/pluginMenu';
 
 export const PLUGIN_ACTIONS_TTL_MS = 5 * 60 * 1000;
@@ -52,6 +52,8 @@ export function usePluginActions(api: FileApi, enabled: () => boolean) {
 
   const actions = computed<PluginActionRow[]>(() => (isEnabled.value ? entry.data.value.actions : []));
   const views = computed<PluginViewRow[]>(() => (isEnabled.value ? entry.data.value.views : []));
+  /** 0.50 - the administrator's open rules, by kind (lib/appViewer applies them). */
+  const openRules = computed<Record<string, OpenRule>>(() => (isEnabled.value ? (entry.data.value.open_rules ?? {}) : {}));
 
   /** Fetch (or reuse the shared answer) — a no-op while the feature is off. */
   async function refresh(force = false): Promise<PluginActionsResponse> {
@@ -65,7 +67,7 @@ export function usePluginActions(api: FileApi, enabled: () => boolean) {
     entry.inflight = api
       .pluginActions()
       .then((res) => {
-        entry.data.value = { actions: res.actions ?? [], views: res.views ?? [] };
+        entry.data.value = { actions: res.actions ?? [], views: res.views ?? [], open_rules: res.open_rules ?? {} };
         entry.at = Date.now();
         error.value = null;
         return entry.data.value;
@@ -115,7 +117,7 @@ export function usePluginActions(api: FileApi, enabled: () => boolean) {
     });
   }
 
-  return { enabled: isEnabled, actions, views, loaded, error, refresh, actionsFor, byKey, run };
+  return { enabled: isEnabled, actions, views, openRules, loaded, error, refresh, actionsFor, byKey, run };
 }
 
 export type PluginActionsStore = ReturnType<typeof usePluginActions>;

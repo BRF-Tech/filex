@@ -38,7 +38,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { SHOTS, STORAGE, api, check, finish, launchApp, signIn, skipTour, sleep, tickRow } from './lib/harness.mjs';
+import { SHOTS, STORAGE, api, arrived, check, finish, launchApp, signIn, skipTour, sleep, tickRow } from './lib/harness.mjs';
 
 fs.mkdirSync(SHOTS, { recursive: true });
 const DIR = `titlebar-e2e-${Date.now()}`;
@@ -303,6 +303,81 @@ try {
   await win.screenshot({ path: path.join(SHOTS, 'titlebar-03-share.png') }).catch(() => {});
   await measure('Share open', share);
   await win.keyboard.press('Escape');
+
+  // ── 4. a document window - the file's own frameless window ────────────
+  // Its bar (docChromeScript in src/main.ts) is reserved through the same
+  // core contract as this window's: `--fe-overlay-top` on `:root`, and every
+  // window-sized layer core draws starts below it. It used to be an
+  // `!important` patch on the chromeless viewer's padding alone (#93): the
+  // viewer sat below the bar but its backdrop - and any dialog in that
+  // window - still began at the top, under the bar.
+  await settle();
+  await sleep(400);
+  let doc = null;
+  for (let attempt = 0; attempt < 2 && !doc; attempt++) {
+    const next = app.waitForEvent('window', { timeout: attempt === 0 ? 12_000 : 20_000 }).catch(() => null);
+    await win.evaluate((n) => {
+      const row = [...document.querySelectorAll('.fe-list__row')].find((r) => r.textContent?.includes(n));
+      row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    }, FILE);
+    const w = await next;
+    if (w) doc = await arrived(w, /\/files\/edit\?/);
+  }
+  check('a document window opens for the file', !!doc, doc ? doc.url() : 'no window');
+  if (doc) {
+    await doc.locator('.fe-modal__card--chromeless').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {});
+    await doc.locator('#filex-winbar').waitFor({ state: 'attached', timeout: 10_000 }).catch(() => {});
+    await sleep(500);
+    const geo = await doc.evaluate(() => {
+      const bar = document.getElementById('filex-winbar')?.getBoundingClientRect();
+      const backdrop = document.querySelector('.fe-modal__backdrop--chromeless')?.getBoundingClientRect();
+      const card = document.querySelector('.fe-modal__card--chromeless')?.getBoundingClientRect();
+      const overlayTop = getComputedStyle(document.documentElement).getPropertyValue('--fe-overlay-top').trim();
+      // Any declaration this window's chrome injects that wins by !important.
+      let important = 0;
+      for (const id of ['filex-winbar-style', 'filex-openwith-banner-style']) {
+        const sheet = document.getElementById(id)?.sheet;
+        for (const rule of sheet ? [...sheet.cssRules] : []) {
+          const st = rule.style;
+          if (!st) continue;
+          for (let i = 0; i < st.length; i++) if (st.getPropertyPriority(st[i]) === 'important') important++;
+        }
+      }
+      const close = document.querySelector('#filex-winbar button[aria-label="Close"]');
+      let closeHit = null;
+      if (close) {
+        const r = close.getBoundingClientRect();
+        const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        closeHit = !!el && close.contains(el);
+      }
+      return {
+        bar: bar ? { top: bar.top, bottom: bar.bottom } : null,
+        backdropTop: backdrop?.top ?? null,
+        card: card ? { top: card.top, bottom: card.bottom } : null,
+        vh: window.innerHeight,
+        overlayTop,
+        important,
+        closeHit,
+      };
+    });
+    await doc.screenshot({ path: path.join(SHOTS, 'titlebar-04-document.png') }).catch(() => {});
+    const barH = geo.bar ? Math.round(geo.bar.bottom) : -1;
+    check('document window: the bar is drawn', !!geo.bar && barH > 0, JSON.stringify(geo.bar));
+    check('document window: its height is core\'s --fe-overlay-top', geo.overlayTop === `${barH}px`,
+      `--fe-overlay-top=${geo.overlayTop || '(unset)'} bar=${barH}px`);
+    check('document window: the viewer\'s backdrop starts BELOW the bar, not under it',
+      geo.backdropTop !== null && Math.abs(geo.backdropTop - barH) <= 0.5, `backdrop top=${geo.backdropTop}`);
+    check('document window: the viewer fills the rest of the window, no more',
+      !!geo.card && geo.card.top >= barH - 0.5 && Math.abs(geo.card.bottom - geo.vh) <= 1,
+      JSON.stringify({ card: geo.card, vh: geo.vh }));
+    check('document window: no !important patch over core\'s rules', geo.important === 0, `${geo.important} declarations`);
+    if (process.platform !== 'darwin') {
+      check('document window: the point under its close button is the button', geo.closeHit === true, String(geo.closeHit));
+    }
+    await app.evaluate(({ BrowserWindow }) => {
+      for (const w of BrowserWindow.getAllWindows()) if (/\/files\/edit\?/.test(w.webContents.getURL())) w.destroy();
+    }).catch(() => {});
+  }
 } catch (e) {
   if (!e?.skip) check('flow completed', false, String(e && e.message).split('\n')[0]);
 } finally {

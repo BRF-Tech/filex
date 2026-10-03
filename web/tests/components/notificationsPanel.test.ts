@@ -95,8 +95,8 @@ function row(p: Partial<NotificationItem>): NotificationItem {
 
 const PLAIN_USER: User = {
   id: 42,
-  email: 'gokcil@local',
-  username: 'gokcil',
+  email: 'bob@local',
+  username: 'bob',
   display_name: 'Gökçil',
   role: 'user',
   created_at: '2026-09-01T00:00:00Z',
@@ -147,7 +147,6 @@ async function openIt(notif: ReturnType<typeof useNotificationsStore>) {
 }
 
 beforeEach(() => {
-  document.body.innerHTML = '';
   listCalls.mockClear();
   markRead.mockClear();
   markAllRead.mockClear();

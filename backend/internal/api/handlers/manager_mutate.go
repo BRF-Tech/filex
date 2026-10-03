@@ -644,14 +644,12 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 
 		case terr == nil && out.Missing:
 			// Source object already gone (stale index / out-of-band delete):
-			// drop the cache row and continue so one missing item doesn't
-			// fail the whole delete batch.
-			origClean := normalizeDBPath(srcRel)
-			origHash := pathkey.Hash(current.ID, origClean)
-			if existing, err := h.Store.GetNodeByPath(ctx, current.ID, origHash); err == nil && existing != nil {
-				_ = h.Store.HardDeleteNode(ctx, existing.ID)
-				h.removeFromIndex(ctx, existing.ID)
-			}
+			// drop the cache rows and continue so one missing item doesn't
+			// fail the whole delete batch. ⚠ Every row below a folder too, one
+			// by one (dropGoneRows): the folder's row alone took its contents
+			// through the parent_id cascade and released none of their bytes
+			// from the owners' quota (issue #104).
+			h.dropGoneRows(ctx, current.ID, srcRel)
 			continue
 
 		case errors.Is(terr, trash.ErrUnsupported):
@@ -670,6 +668,15 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if !trashed {
+			// Bytes are gone for good: drop the rows instead of parking a
+			// trash entry whose Restore could never find anything - every row
+			// below a folder with it, each file's bytes released from its
+			// owner's quota (dropGoneRows; issue #104).
+			h.dropGoneRows(ctx, current.ID, srcRel)
+			continue
+		}
+
 		// Update DB: store the original path in storage_key so Restore
 		// can find it; flip deleted_at; rewrite path/path_hash to the
 		// trash location so a fresh upload at the original path works.
@@ -684,15 +691,9 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 			if existing.Type == model.NodeTypeDirectory {
 				subtreeIDs = h.collectSubtreeIDs(ctx, current.ID, existing.ID)
 			}
-			if trashed {
-				newClean := normalizeDBPath(out.Key)
-				newHash := pathkey.Hash(current.ID, newClean)
-				_ = h.Store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
-			} else {
-				// Bytes are gone for good: drop the row instead of parking a
-				// trash entry whose Restore could never find anything.
-				_ = h.Store.HardDeleteNode(ctx, existing.ID)
-			}
+			newClean := normalizeDBPath(out.Key)
+			newHash := pathkey.Hash(current.ID, newClean)
+			_ = h.Store.SoftDeleteAndRetag(ctx, existing.ID, newClean, newHash, origClean)
 			h.removeFromIndex(ctx, existing.ID)
 			for _, cid := range subtreeIDs {
 				h.removeFromIndex(ctx, cid)
@@ -880,7 +881,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		// Rewind rather than io.MultiReader(sniff, src): multipart.File is an
 		// io.Seeker, and handing the driver a seekable body keeps the S3 SDK
 		// able to measure and to replay it on retry. Wrapping it cost us both
-		// and put every upload on the chunked path (olivov H1, 2026-08-05).
+		// and put every upload on the chunked path (a production report, 2026-08-05).
 		var sniff [512]byte
 		n, _ := io.ReadFull(src, sniff[:])
 		mime := ""
@@ -1078,6 +1079,11 @@ func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, path
 	// replacement is only known per file, so the caller checks that itself
 	// and only the path level is asked here.
 	if need == "" {
+		// require asks for the other verbs; an upload into an entry the
+		// storage could not answer for is refused here (issue #104).
+		if refuseUnavailable(w, r, h.Store, current, rel) {
+			return nil, "", nil, false
+		}
 		if !h.allowed(r.Context(), current, rel, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 			return nil, "", nil, false

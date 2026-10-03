@@ -1,7 +1,7 @@
 # Caddy config for the full filex stack. HTTPS is obtained + renewed
 # automatically for real public domains (ports 80/443 must be reachable).
 #
-# Add-on vhosts (OnlyOffice / Drawio / MinIO) below default to a harmless
+# Add-on vhosts (OnlyOffice / Drawio) below default to a harmless
 # *.localhost self-signed host when you don't run that add-on. Leave the block
 # or delete it — an unused *.localhost vhost costs nothing and requests no cert.
 
@@ -32,12 +32,6 @@
 # needs a real HTTPS host. Delete this block if you don't run Drawio.
 {$DRAWIO_DOMAIN} {
 	reverse_proxy drawio:8080
-}
-
-# MinIO web console (minio profile) — bucket management UI. Delete this block if
-# you don't want the console exposed.
-{$MINIO_CONSOLE_DOMAIN} {
-	reverse_proxy minio:9001
 }
 
 # Apps' own interfaces on an origin of their own (optional) — FILEX_APP_UI_ORIGIN,

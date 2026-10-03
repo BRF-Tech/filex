@@ -58,9 +58,11 @@ async function up() {
 
 function goTest() {
   const backend = path.join(REPO, 'backend');
-  const test = 'go test -count=1 -v ./internal/db/...';
+  // -timeout 30m: on a slow disk MySQL's DDL alone took internal/db past go
+  // test's default 10 minutes (the 0.50 integration run, a loaded test machine).
+  const test = 'go test -count=1 -timeout 30m -v ./internal/db/...';
   if (nativeGo()) {
-    return sh('go', ['test', '-count=1', '-v', './internal/db/...'], {
+    return sh('go', ['test', '-count=1', '-timeout', '30m', '-v', './internal/db/...'], {
       cwd: backend,
       env: { ...process.env, FILEX_TEST_PG_DSN: PG_DSN, FILEX_TEST_MYSQL_DSN: MY_DSN },
     });

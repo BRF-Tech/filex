@@ -49,7 +49,7 @@ func (h *SelfTokens) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokenList(tokens)})
 }
 
 type selfTokenCreateReq struct {

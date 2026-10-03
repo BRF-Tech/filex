@@ -22,6 +22,8 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { lockOf, lockWords } from '../lib/appLock';
 import { linkWordsFor } from '../lib/symlink'; /* issue #34 — a link that will not open */
+import { unavailableWordsFor } from '../lib/unavailable'; /* issue #104 - an entry the storage could not answer for */
+import { thumbNoteWords } from '../lib/thumbNote'; /* 0.50 - why a file has no thumbnail */
 import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import ItemCheck from './ItemCheck.vue';
 import { encryptedFolderTile, fileIconTile, isEncryptedFolder } from '../lib/fileIcons';
@@ -39,6 +41,7 @@ import {
 import { useSortStore, type ListingOrder } from '../lib/sortOrder'; /* gruplama */
 import StarButton from './StarButton.vue';
 import ThumbTile from './ThumbTile.vue';
+import FolderMosaic from './FolderMosaic.vue';
 import { snippetSegments } from '../lib/snippet'; /* bul:s3 */
 import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
 import { contentDir } from '../lib/direction';
@@ -136,7 +139,24 @@ const emit = defineEmits<{
    *  arithmetic runs over what the user sees rather than over the backend's
    *  answer. See the same emit in ListView. */
   (e: 'display-order', nodes: FileNode[]): void;
+  /** The pointer came to rest on a folder card, or left it (useFolderPeek:
+   *  the pane shows what is inside). */
+  (e: 'peek', node: FileNode, el: Element, pointerType: string): void;
+  (e: 'peek-end'): void;
 }>();
+
+/**
+ * Folder previews (0.50, docs/thumbnails.md): a folder whose listing row
+ * carries `preview` shows its pictures as a mosaic (FolderMosaic) in the same
+ * 184x108 box a file card has. ⚠ All folder cards get the box as soon as one
+ * of them has pictures, so a row of folders stays one height; a view with no
+ * pictured folder keeps the compact 56px folder cards it always had.
+ */
+const folderPreviews = computed(() => props.files.some((n) => n.type === 'dir' && (n.preview?.length ?? 0) > 0));
+
+function onCardEnter(n: FileNode, ev: PointerEvent) {
+  if (n.type === 'dir') emit('peek', n, ev.currentTarget as Element, ev.pointerType);
+}
 
 /**
  * gorunum:v1 — folders first, always, and by the SHARED comparator
@@ -172,6 +192,18 @@ function lockTitleOf(n: FileNode): string {
    target, so it is not one of these. */
 function linkOf(n: FileNode) {
   return linkWordsFor(n, { t });
+}
+
+/* issue #104 - an entry the storage could not answer for: "!" with the
+   sentence and the storage's own answer, from the one module (lib/unavailable)
+   the details panel and the refused-open toast read too. */
+function unavailableOf(n: FileNode) {
+  return unavailableWordsFor(n, { t });
+}
+/** Why the file has no thumbnail, when the reason is its own (lib/thumbNote,
+ *  the same rule in the list, the grid and the gallery). */
+function thumbNoteOf(n: FileNode) {
+  return thumbNoteWords(n, { t });
 }
 
 
@@ -444,7 +476,7 @@ function snippetTitle(snippet: string): string {
        localized label + busy state. Structure/layout untouched. -->
   <div
     class="fe-grid"
-    :class="{ 'is-loading': loading, 'has-selection': selectable && selected.size > 0 }"
+    :class="{ 'is-loading': loading, 'has-selection': selectable && selected.size > 0, 'has-folder-previews': folderPreviews }"
     role="listbox"
     aria-multiselectable="true"
     :aria-label="t('grid.aria')"
@@ -482,6 +514,9 @@ function snippetTitle(snippet: string): string {
       @touchstart.passive="touch.onTouchStart(n, $event)"
       @touchend="touch.onTouchEnd"
       @touchmove.passive="touch.onTouchMove"
+      @pointerenter="onCardEnter(n, $event)"
+      @pointerleave="n.type === 'dir' && emit('peek-end')"
+      @pointerdown="emit('peek-end')"
     >
       <!-- gorunum:v1 — the preview, files only: 184×108. A thumbnail when
            there is one, otherwise the type tile centred on --fe-bg-elev.
@@ -541,6 +576,7 @@ function snippetTitle(snippet: string): string {
           :node="n"
           :src-of="thumbOf"
           :video-badge="drawsAsVideo(n)"
+          :note="thumbNoteOf(n)"
           :alt="n.basename"
           :class="{ 'fe-thumb--page': drawsAsPage(n) /* gorunum:v1-preview — crop a page from its TOP */ }"
         >
@@ -577,6 +613,12 @@ function snippetTitle(snippet: string): string {
             @change="(val: boolean) => emit('star-change', n, val)"
           />
         </div>
+      </div>
+
+      <!-- Folder previews (0.50): the folder's pictures, or its glyph large,
+           in the file card's box; only while some folder here has pictures. -->
+      <div v-else-if="folderPreviews" class="fe-grid__thumb fe-grid__thumb--folder">
+        <FolderMosaic :node="n" :src-of="thumbOf" />
       </div>
 
       <!-- gorunum:v1 — the row both cards share: tile · name over caption · ⋮.
@@ -642,6 +684,15 @@ function snippetTitle(snippet: string): string {
             data-testid="symlink-badge"
             :data-link-state="linkOf(n)!.state"
             ><span class="fe-symlink__glyph" aria-hidden="true">&#128279;</span>{{ linkOf(n)!.badge }}</span>
+            <!-- issue #104 - an entry the storage could not answer for. -->
+            <span
+            v-if="unavailableOf(n)"
+            class="fe-unavailable"
+            role="img"
+            :title="unavailableOf(n)!.full"
+            :aria-label="unavailableOf(n)!.full"
+            data-testid="unavailable-badge"
+            >{{ unavailableOf(n)!.badge }}</span>
             {{ captionFor(n) }}
           </div>
           <!-- A card at a storage's root has no parent folder to name: no line,

@@ -76,12 +76,12 @@ func (n nonSeekable) Read(p []byte) (int, error) { return n.r.Read(p) }
 // a Content-Length header. Without it the SDK falls back to
 // Transfer-Encoding: chunked; AWS and MinIO accept that, but the S3 spec
 // lets a provider answer 411 MissingContentLength and DT Cloud S3 does,
-// which broke every browser upload (olivov H1, 2026-08-05).
+// which broke every browser upload (a production report, 2026-08-05).
 func TestWrite_SendsContentLength(t *testing.T) {
 	var got capturedPut
 	d := fakeS3(t, &got)
 
-	payload := []byte("hello olivov")
+	payload := []byte("hello filex")
 	body := nonSeekable{io.MultiReader(
 		bytes.NewReader(payload[:5]),
 		bytes.NewReader(payload[5:]),

@@ -40,7 +40,7 @@ const figure = (w: VueWrapper) => w.find('[data-testid="quota-widget-figure"]').
 const tooltip = (w: VueWrapper) => w.find('button').attributes('title');
 
 const UPLOADER = { used_bytes: 523_457_650, quota_bytes: 0, percent_used: 0, unlimited: true };
-const DRIVE = { name: 'Diyetlif-Bulut-Depolama', used_bytes: 245_276_276_422, file_count: 153_943 };
+const DRIVE = { name: 'Globex-Cloud-Storage', used_bytes: 245_276_276_422, file_count: 153_943 };
 
 describe('QuotaWidget', () => {
   beforeEach(() => {

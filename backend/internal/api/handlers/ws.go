@@ -648,9 +648,15 @@ func sanitizePresenceKey(v string) string {
 // registrations apart. Next to a folder that detail is noise, so everything
 // from the first dash separator on is dropped. Capped like every other presence
 // string, because the label is user-supplied.
+//
+// Since 0.50 the desktop app writes "filex desktop - Win32"; the ones before
+// it wrote an em dash, and their tokens live on. The long dashes are built
+// from their code points: characters to recognise, not text to show (the
+// no-long-dash check reads every Go string).
 func wsClientLabel(label string) string {
 	s := strings.Join(strings.Fields(label), " ")
-	for _, sep := range []string{" — ", " – ", " - ", "—", "–"} {
+	em, en := string(rune(0x2014)), string(rune(0x2013))
+	for _, sep := range []string{" " + em + " ", " " + en + " ", " - ", em, en} {
 		if i := strings.Index(s, sep); i > 0 {
 			s = s[:i]
 			break

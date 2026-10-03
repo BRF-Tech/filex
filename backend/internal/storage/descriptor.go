@@ -144,7 +144,7 @@ func ScanFields() []Field {
 			"** any number of folders, and a pattern without a / matches that name at any depth " +
 			"(.* skips every hidden file and folder). The scan does not go into a matching folder, " +
 			"and matching files are not catalogued, indexed, thumbnailed or virus-scanned. This " +
-			"saves work; it is not access control — the files stay on the storage, reachable by " +
+			"saves work; it is not access control - the files stay on the storage, reachable by " +
 			"path, over WebDAV/SFTP and through the AI tools. Anything catalogued before you add " +
 			"a pattern stays as it is.",
 		HelpI18nKey: "storages.fieldHelp.scanExclude",
@@ -189,7 +189,7 @@ func LazyFields() []Field {
 			I18nKey: "storages.fields.lazyFill",
 			Help: "Click first, fill in the background: the folder somebody opens is listed from disk at once and cataloged " +
 				"first, and a throttled background pass catalogs the rest, so search, folder sizes and usage end up covering " +
-				"everything. Only on open: nothing runs in the background — only the folders people visit are cataloged, and " +
+				"everything. Only on open: nothing runs in the background - only the folders people visit are cataloged, and " +
 				"search, folder sizes and usage say they cover those folders only.",
 			HelpI18nKey: "storages.fieldHelp.lazyFill",
 			Default:     LazyFillBackground,

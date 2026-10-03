@@ -161,6 +161,21 @@ var themeLengthTokens = []string{
 // thing it is for (aligned hashes, sizes and paths).
 var themeFontTokens = []string{"--fe-font"}
 
+// themePageColorTokens are the outward-facing pages' own colours - the share
+// page's two-stop ground and its card, the sign-in page's ground and card.
+// OPTIONAL in both variants: a theme that sets them gets its own pages, one
+// that does not gets them worked out from its palette in the browser
+// (packages/core lib/themes `publicPageTokens`; the sign-in page's defaults
+// are the palette's own tokens). Kept in step with `PAGE_TOKENS` there by
+// web/tests/api/themePageTokens.test.ts.
+var themePageColorTokens = []string{
+	"--fe-ppage-ground-1",
+	"--fe-ppage-ground-2",
+	"--fe-ppage-card",
+	"--fe-login-ground",
+	"--fe-login-card",
+}
+
 // ThemeAuthoredColorTokens exposes the authored colour list so a token added
 // here and not to the editor is caught by a test rather than discovered.
 func ThemeAuthoredColorTokens() []string { return append([]string(nil), themeColorTokens...) }
@@ -170,7 +185,8 @@ func ThemeAllTokens() []string {
 	out := append([]string(nil), themeColorTokens...)
 	out = append(out, themeDerivedColorTokens...)
 	out = append(out, themeLengthTokens...)
-	return append(out, themeFontTokens...)
+	out = append(out, themeFontTokens...)
+	return append(out, themePageColorTokens...)
 }
 
 // themeTokenKind classifies a token name, or returns "" when it is not one a
@@ -187,6 +203,11 @@ func themeTokenKind(name string) string {
 		}
 	}
 	for _, k := range themeDerivedColorTokens {
+		if k == name {
+			return "color"
+		}
+	}
+	for _, k := range themePageColorTokens {
 		if k == name {
 			return "color"
 		}
@@ -638,18 +659,26 @@ func (h *Themes) Delete(w http.ResponseWriter, r *http.Request) {
 // `--px-bg1`/`--px-bg2` are the page's gradient: the page ground and the
 // raised one, which is what the stock pair already is — a barely-there wash
 // rather than two different colours.
-var pxFromFe = []struct{ px, fe string }{
-	{"--px-bg1", "--fe-bg"},
-	{"--px-bg2", "--fe-bg-elev"},
-	{"--px-card", "--fe-bg-elev"},
-	{"--px-fg", "--fe-text"},
-	{"--px-muted", "--fe-text-muted"},
-	{"--px-line", "--fe-border"},
-	{"--px-accent", "--fe-primary"},
-	{"--px-accent-hover", "--fe-primary-hover"},
-	{"--px-accent-soft", "--fe-primary-soft"},
-	{"--px-ok", "--fe-ok"},
-	{"--px-err", "--fe-danger"},
+//
+// Each `--px-*` takes the FIRST of its `fe` names the theme sets: a theme that
+// defines its own share page (themePageColorTokens) gives the page's ground and
+// card from those, the same values the SPA's share page wears; one that does
+// not falls back to its palette, as before.
+var pxFromFe = []struct {
+	px string
+	fe []string
+}{
+	{"--px-bg1", []string{"--fe-ppage-ground-1", "--fe-bg"}},
+	{"--px-bg2", []string{"--fe-ppage-ground-2", "--fe-bg-elev"}},
+	{"--px-card", []string{"--fe-ppage-card", "--fe-bg-elev"}},
+	{"--px-fg", []string{"--fe-text"}},
+	{"--px-muted", []string{"--fe-text-muted"}},
+	{"--px-line", []string{"--fe-border"}},
+	{"--px-accent", []string{"--fe-primary"}},
+	{"--px-accent-hover", []string{"--fe-primary-hover"}},
+	{"--px-accent-soft", []string{"--fe-primary-soft"}},
+	{"--px-ok", []string{"--fe-ok"}},
+	{"--px-err", []string{"--fe-danger"}},
 }
 
 // publicThemeCSS renders the instance default theme as a <style> block for the
@@ -686,11 +715,14 @@ func pxDecls(m map[string]string) string {
 	}
 	var b strings.Builder
 	for _, pair := range pxFromFe {
-		v := strings.TrimSpace(m[pair.fe])
-		if v == "" || !themeHexRe.MatchString(v) {
-			continue
+		for _, fe := range pair.fe {
+			v := strings.TrimSpace(m[fe])
+			if v == "" || !themeHexRe.MatchString(v) {
+				continue
+			}
+			b.WriteString(pair.px + ":" + v + ";")
+			break
 		}
-		b.WriteString(pair.px + ":" + v + ";")
 	}
 	// The face travels too — a brand that is a typeface rather than a colour
 	// is still a brand, and the public page is the surface strangers judge.

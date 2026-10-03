@@ -33,7 +33,7 @@ var ErrFileTooLarge = fmt.Errorf("%w: the file is larger than your per-file uplo
 // that exists always reads back (0, 0) = "unlimited, nothing used". A
 // no-rows result therefore says nothing about quotas — it says there is no
 // such user, and the caller should answer 404 rather than leak
-// `sql: no rows in result set` as a 500 (olivov H5, 2026-08-05).
+// `sql: no rows in result set` as a 500 (a production report, 2026-08-05).
 var ErrUserNotFound = errors.New("quota: user not found")
 
 // lookupUsage reads (used, limit) and normalises the missing-user case.

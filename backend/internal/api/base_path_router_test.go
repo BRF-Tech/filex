@@ -43,7 +43,7 @@ const fakeIndex = `<!DOCTYPE html>
 `
 
 // fakeManifest is the real build's manifest, as vite-plugin-pwa writes it.
-const fakeManifest = `{"name":"filex — File Manager","short_name":"filex","start_url":"/admin/","display":"standalone","background_color":"#0a0a0a","lang":"en","scope":"/","id":"/admin/","icons":[{"src":"icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}`
+const fakeManifest = `{"name":"filex - File Manager","short_name":"filex","start_url":"/admin/","display":"standalone","background_color":"#0a0a0a","lang":"en","scope":"/","id":"/admin/","icons":[{"src":"icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}`
 
 const fakeJS = `import("./Lazy-1.js");export const x=new URL("../assets/logo.svg",import.meta.url).href;`
 
@@ -185,7 +185,7 @@ func TestBasePath_TheWebAppIsServedForTheBase(t *testing.T) {
 	assert.Equal(t, "/filex/admin/", m["id"])
 	assert.Equal(t, "/filex/admin/", m["start_url"])
 	assert.Equal(t, "/filex/", m["scope"])
-	assert.Equal(t, "filex — File Manager", m["name"], "the rest travels unchanged")
+	assert.Equal(t, "filex - File Manager", m["name"], "the rest travels unchanged")
 
 	// Everything else is served byte for byte: one build, any base.
 	resp, body = bpGet(t, c, srv.URL+"/filex/admin/assets/index-AbC123.js")

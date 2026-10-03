@@ -49,7 +49,7 @@ func (a *aiOps) Tags(ctx context.Context, p string, set *[]tagItem) (*aiTagsResu
 		return nil, err
 	}
 	if rel == "" {
-		return nil, errors.New("a storage root carries no tags — name a file or folder")
+		return nil, errors.New("a storage root carries no tags - name a file or folder")
 	}
 	n, err := catalogueOnDemand(ctx, a.store, a.resolver, a.sync(), s.ID, rel)
 	if err != nil {
@@ -118,6 +118,6 @@ func (h *AI) writeTags(w http.ResponseWriter, res *aiTagsResult, err error) {
 	case badTagInput(err):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 	default:
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 	}
 }

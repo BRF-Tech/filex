@@ -108,6 +108,16 @@ export function nodeRowToFileNode(
     ...(perm ? { perm } : {}),
     read_only: readOnly,
     ...(isSymlink ? { symlink: true } : {}),
+    /* issue #104 - an entry the storage could not answer for. The raw node
+       row carries the flag and the storage's answer under the same names the
+       folder listing uses, so Recent, Starred, a tag view and Home badge it
+       and refuse it exactly as the folder does (lib/unavailable). */
+    ...(row.unavailable === true
+      ? {
+          unavailable: true,
+          ...(typeof row.unavailable_reason === 'string' ? { unavailable_reason: row.unavailable_reason } : {}),
+        }
+      : {}),
     // ⚠⚠ The SERVER's `thumb_url`, never one built here. It used to be
     // `/api/files/thumb/<id>` for every file, and the endpoint answers
     // `404 "not ready"` for everything it has not rendered — a docx, a

@@ -36,7 +36,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/netguard"
 )
 
 func init() {
@@ -65,9 +67,36 @@ type Driver struct {
 	emailAttr  string // e.g. "mail"
 	startTLS   bool
 	caFile     string // optional PEM bundle for a private CA
+	// caPEM is a private CA pasted as PEM text: a tenant's own directory
+	// (docs/TENANT-ADMIN.md) names no file on the server.
+	caPEM string
+	// guarded: a tenant's own directory. The connection goes through
+	// internal/netguard (no loopback, private, link-local or overlay address,
+	// judged on the resolved address at connect time) and must be encrypted
+	// (ldaps:// or StartTLS): the bind password crosses a network the platform
+	// operator does not own. Set by authsetup, never by a form.
+	guarded bool
 	// homing decides which tenant a just-in-time account lands in. Zero value
 	// (MultiTenant=false) is the single-tenant install and does nothing.
 	homing auth.TenantHoming
+	// firstLogin is what happens to a directory person with no account yet
+	// (auth.ProvisionFirstLogin). Default: open one, as this driver always did.
+	firstLogin auth.FirstLoginPolicy
+	// tellRefusal: show_refusal_reason, OFF by default. On, a person whose
+	// directory password was right but whom the first-login rule refuses is
+	// told why (auth.RefusedAfterPassword); off, they get the wrong-password
+	// answer.
+	tellRefusal bool
+	// groupAttr is the entry attribute that lists a person's groups; "" = groups
+	// are neither read nor recorded (the behaviour before the first-login rule).
+	// Set by `group_attr`, or to memberOf when allowed_groups needs them.
+	groupAttr string
+	// emailToken is the installation's e-mail token (FILEX_OS_LOGIN_EMAIL_TOKEN,
+	// identity.EmailToken; never empty after load — unset is `local`): an entry
+	// that names no e-mail, signed in to by a bare name, is `<name>@<token>`.
+	// The account an older build keyed by the bare name is adopted
+	// (auth.AdoptAccount), not doubled.
+	emailToken string
 
 	// dial is swapped in tests. Nil means the real dialer.
 	dial func(ctx context.Context) (conn, error)
@@ -115,12 +144,28 @@ func (d *Driver) load(cfg map[string]any) error {
 	}
 	d.startTLS = auth.CfgBool(cfg, "start_tls")
 	d.caFile = auth.CfgString(cfg, "ca_file")
+	d.caPEM, _ = cfg["ca_pem"].(string)
+	d.guarded = auth.CfgBool(cfg, "guarded")
 	d.homing.MultiTenant = auth.CfgBool(cfg, "multi_tenant")
 	d.homing.Pin = auth.CfgString(cfg, "provider")
+	d.firstLogin = auth.FirstLoginPolicyFrom(cfg)
+	d.tellRefusal = auth.TellsRefusal(cfg)
+	d.groupAttr = auth.CfgString(cfg, "group_attr")
+	if d.groupAttr == "" && len(d.firstLogin.AllowedGroups) > 0 {
+		d.groupAttr = defaultGroupAttr
+	}
+	tok, err := identity.EmailToken(auth.CfgString(cfg, "email_token"))
+	if err != nil {
+		return fmt.Errorf("ldap: email_token: %w", err)
+	}
+	d.emailToken = tok
 	if d.url == "" || d.baseDN == "" {
 		return errors.New("ldap: url and base_dn required")
 	}
-	if d.caFile != "" {
+	if d.guarded && !d.startTLS && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(d.url)), "ldaps://") {
+		return errors.New("ldap: a tenant's own directory needs ldaps:// or StartTLS - its bind password crosses a network")
+	}
+	if d.caFile != "" || strings.TrimSpace(d.caPEM) != "" {
 		// Read it now: a typo in the path must be a boot-time complaint, not a
 		// login-time one. A CA that cannot be loaded would otherwise fall back
 		// to the system roots and reject every login with a TLS error that
@@ -163,19 +208,23 @@ func (d *Driver) Authenticate(_ *http.Request) (*model.User, error) {
 // only the private CA, breaks nothing here but is a footgun the moment the
 // same file is pointed at a public directory).
 func (d *Driver) tlsConfig() (*tls.Config, error) {
-	if d.caFile == "" {
+	pem := []byte(d.caPEM)
+	where := "the pasted CA"
+	if d.caFile != "" {
+		var err error
+		if pem, err = os.ReadFile(d.caFile); err != nil {
+			return nil, err
+		}
+		where = d.caFile
+	} else if strings.TrimSpace(d.caPEM) == "" {
 		return nil, nil
-	}
-	pem, err := os.ReadFile(d.caFile)
-	if err != nil {
-		return nil, err
 	}
 	pool, err := x509.SystemCertPool()
 	if err != nil || pool == nil {
 		pool = x509.NewCertPool()
 	}
 	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("no PEM certificate found in %s", d.caFile)
+		return nil, fmt.Errorf("no PEM certificate found in %s", where)
 	}
 	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}, nil
 }
@@ -221,7 +270,12 @@ func (d *Driver) connect(ctx context.Context) (conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ldap: ca_file: %w", err)
 	}
-	opts := []ldap.DialOpt{ldap.DialWithDialer(&net.Dialer{Timeout: dialTimeout})}
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	if d.guarded {
+		// Judged on the resolved address, right before the socket connects.
+		dialer.Control = netguard.Control
+	}
+	opts := []ldap.DialOpt{ldap.DialWithDialer(dialer)}
 	if tc != nil {
 		opts = append(opts, ldap.DialWithTLSConfig(tc))
 	}
@@ -235,16 +289,7 @@ func (d *Driver) connect(ctx context.Context) (conn, error) {
 // Login verifies the credentials against the directory and mints a browser
 // session for the resulting account.
 func (d *Driver) Login(ctx context.Context, identifier, password string) (*model.User, string, error) {
-	user, err := d.verify(ctx, identifier, password)
-	if err != nil {
-		return nil, "", err
-	}
-	tok, err := authlocal.IssueSession(ctx, d.store, user.ID)
-	if err != nil {
-		return nil, "", err
-	}
-	_ = d.store.TouchLastLogin(ctx, user.ID)
-	return user, tok, nil
+	return authlocal.LoginWith(ctx, d.store, d.verify, identifier, password)
 }
 
 // Logout revokes a session minted by Login.
@@ -293,7 +338,12 @@ func (d *Driver) verify(ctx context.Context, identifier, password string) (*mode
 		}
 	}
 
-	entry, err := d.search(c, identifier)
+	// The realm the account's address is made in (multi-tenant): the tenant
+	// the sign-in named, else the one the pin homes it in — `alex@acme.local`,
+	// never another tenant's `alex@local` (auth.TenantHoming.DirectoryRealm).
+	// "" on a single-tenant install and for the platform's own tenant.
+	realm, home, viaPin := d.homing.DirectoryRealm(ctx, d.store)
+	entry, name, err := d.find(c, identifier, realm)
 	if err != nil {
 		return nil, err
 	}
@@ -310,35 +360,147 @@ func (d *Driver) verify(ctx context.Context, identifier, password string) (*mode
 		return nil, auth.ErrUnauthorized
 	}
 
-	em := entry.GetAttributeValue(d.emailAttr)
-	if em == "" {
-		em = identifier
+	// The account's address, ALWAYS `name@domain`: the entry's e-mail
+	// attribute when it holds an address; else the name it was found by when
+	// that is already an address (a UPN); else `<name>@<token>` — the
+	// derivation every login-name provider uses (identity.DeriveEmail), so
+	// `alex` is `alex@local`. A bare `alex` is never an account's e-mail any
+	// more — not even from an email_attr pointed at `uid`.
+	em := identity.Normalize(entry.GetAttributeValue(d.emailAttr))
+	if !identity.LooksLikeEmail(em) {
+		em = identity.DeriveEmail(name, "", realm, d.emailToken)
 	}
-	em = strings.ToLower(strings.TrimSpace(em))
-	user, err := d.store.GetUserByEmail(ctx, em)
+	groups := d.groupsOf(entry)
+	user, created, err := d.account(ctx, name, em, groups, entry.DN)
 	if err != nil {
-		// ⚠⚠ NOT store.CreateUser directly. That call hard-codes provider_id
-		// to `default`, which is seeded is_supertenant = 1 and therefore
-		// confine-EXEMPT: on a multi-tenant install every directory user it
-		// created could reach every storage on the box. auth.ProvisionUser
-		// homes the account in the tenant this login arrived for — the request
-		// Host, which handlers.Auth.Login stamps onto the context (the same
-		// signal multioidc uses to pick a realm), or an operator's pinned
-		// `provider` slug.
-		//
-		// ⚠ A protocol login (SFTP/FTPS/NFS — internal/protocolauth) has no
-		// Host at all, so on a multi-tenant install with no pin this REFUSES
-		// rather than falling back to the supertenant. The account still works
-		// over those protocols the moment it exists; what it cannot do is come
-		// into existence there.
-		user, err = auth.ProvisionUser(ctx, d.store, d.homing, "ldap", em, model.RoleUser)
-		if err != nil {
-			return nil, err
-		}
-		slog.Info("ldap: provisioned a directory account",
-			slog.String("email", em), slog.String("dn", entry.DN))
+		return nil, err
+	}
+	// ⚠ Before anything is written to the account: it must be one the
+	// sign-in's realm admits. A directory address (the mail attribute) can
+	// belong to another tenant's account, and signing in to it — or recording
+	// this sign-in's groups on it — would cross the tenant boundary.
+	auth.NoteHome(ctx, home, viaPin)
+	if !auth.LoginRealmAdmits(ctx, user) {
+		slog.Warn("ldap: the directory's account is in another tenant than the sign-in's realm; refused",
+			slog.Int64("user_id", user.ID), slog.String("dn", entry.DN))
+		return nil, auth.ErrUnauthorized
+	}
+	if d.groupAttr != "" {
+		// Recorded at every sign-in and REPLACED: the directory is the authority
+		// on membership (as for OIDC's claim) — the starting role of a new
+		// account and the filex groups linked to these (auth.RecordSignInGroups,
+		// the one rule for every provider). A failure is loud, not fatal.
+		user = auth.RecordSignInGroups(ctx, d.store, "ldap", user, groups, created)
 	}
 	return user, nil
+}
+
+// find searches for the entry the identifier names and returns it with the
+// name it was found by.
+//
+// ⚠ The second search is the file protocols' way in. They ask with the
+// account's e-mail (protocolauth: SFTP's username field and the account share
+// nothing else), and an account whose entry has no e-mail attribute is
+// `alex@local` — which a login-name filter such as `(uid=%s)` matches nobody by.
+// An address this driver made up (`<name>@<token>`, or `<name>@<realm>.<token>`
+// in the sign-in's realm — identity.LoginNameOf) that matched nothing is asked
+// again as the name it was made from. A real mailbox, another realm's address,
+// or an address that matched, is never taken apart.
+func (d *Driver) find(c conn, identifier, realm string) (*ldap.Entry, string, error) {
+	entry, err := d.search(c, identifier)
+	if err != nil || entry != nil {
+		return entry, identifier, err
+	}
+	name, ok := identity.LoginNameOf(identifier, realm, d.emailToken)
+	if !ok {
+		return nil, identifier, nil
+	}
+	entry, err = d.search(c, name)
+	return entry, name, err
+}
+
+// account is the filex account of a directory person: the one at their
+// address; else the one an older build opened under their bare name, adopted
+// (auth.AdoptAccount — it counts as existing, the first-login rule does not
+// judge it); else a new one, if the first-login rule opens it. created reports
+// the last case.
+func (d *Driver) account(ctx context.Context, name, em string, groups []string, dn string) (*model.User, bool, error) {
+	if user, err := d.store.GetUserByEmail(ctx, em); err == nil && user != nil {
+		return user, false, nil
+	}
+	adopted, err := auth.AdoptAccount(ctx, d.store, auth.Adoption{
+		Driver: "ldap", LoginName: name, Email: em, Homing: d.homing,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if adopted != nil {
+		return adopted, false, nil
+	}
+	// ⚠⚠ NOT store.CreateUser directly. That call hard-codes provider_id to
+	// `default`, which is seeded is_supertenant = 1 and therefore
+	// confine-EXEMPT: on a multi-tenant install every directory user it created
+	// could reach every storage on the box. auth.ProvisionUser homes the account
+	// in the tenant this login arrived for — the request Host, which
+	// handlers.Auth.Login stamps onto the context (the same signal multioidc uses
+	// to pick a realm), or an operator's pinned `provider` slug.
+	//
+	// ⚠ A protocol login (SFTP/FTPS/NFS — internal/protocolauth) has no Host at
+	// all, so on a multi-tenant install with no pin this REFUSES rather than
+	// falling back to the supertenant. The account still works over those
+	// protocols the moment it exists; what it cannot do is come into existence
+	// there.
+	//
+	// ⚠ The first-login rule (auth.ProvisionFirstLogin) sits in front of that:
+	// auto_create off, or allowed_groups with no match, refuses. The person is
+	// answered exactly as for a wrong password (no account/group oracle) unless
+	// show_refusal_reason is on (auth.RefusedAfterPassword); the reason is in
+	// the log and the audit row either way.
+	user, err := auth.ProvisionFirstLogin(ctx, d.store, auth.FirstLogin{
+		Driver: "ldap", Identifier: name, Email: em, Role: model.RoleUser,
+		Groups: groups, Policy: d.firstLogin, Homing: d.homing,
+	})
+	if err != nil {
+		if errors.Is(err, auth.ErrFirstLoginRefused) {
+			// After the bind: the password was right. The answer a wrong
+			// password gets, unless the operator chose to tell why.
+			return nil, false, auth.RefusedAfterPassword(d.tellRefusal, err)
+		}
+		return nil, false, err
+	}
+	slog.Info("ldap: provisioned a directory account",
+		slog.String("email", em), slog.String("dn", dn))
+	return user, true, nil
+}
+
+// defaultGroupAttr is where Active Directory (and OpenLDAP with the memberOf
+// overlay) list a person's groups.
+const defaultGroupAttr = "memberOf"
+
+// groupsOf returns the group names an entry carries: each value of the group
+// attribute as it is, and — for a distinguished name such as
+// `CN=Editors,OU=Groups,DC=corp,DC=example` — its leading value too (`Editors`),
+// so an operator can write either in allowed_groups and in a role's SSO-group
+// target. nil when groups are not being read.
+func (d *Driver) groupsOf(e *ldap.Entry) []string {
+	if d.groupAttr == "" || e == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(g string) {
+		if g = strings.TrimSpace(g); g != "" && !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	for _, v := range e.GetAttributeValues(d.groupAttr) {
+		add(v)
+		if dn, err := ldap.ParseDN(v); err == nil && len(dn.RDNs) > 0 && len(dn.RDNs[0].Attributes) > 0 {
+			add(dn.RDNs[0].Attributes[0].Value)
+		}
+	}
+	return out
 }
 
 // search finds the single entry the identifier names.
@@ -362,7 +524,7 @@ func (d *Driver) search(c conn, identifier string) (*ldap.Entry, error) {
 	filter := d.filter(identifier)
 	res, err := c.Search(ldap.NewSearchRequest(
 		d.baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, 0, false,
-		filter, []string{"dn", d.emailAttr}, nil,
+		filter, d.searchAttrs(), nil,
 	))
 	if err != nil {
 		// A size-limit answer still carries the entries the server did return;
@@ -401,4 +563,14 @@ func (d *Driver) filter(identifier string) string {
 	esc := ldap.EscapeFilter(strings.ToLower(strings.TrimSpace(identifier)))
 	f := strings.ReplaceAll(d.userFilter, "%[1]s", "%s")
 	return strings.ReplaceAll(f, "%s", esc)
+}
+
+// searchAttrs is what a search asks the directory for: the DN, the e-mail
+// attribute, and the group attribute when groups are being read.
+func (d *Driver) searchAttrs() []string {
+	attrs := []string{"dn", d.emailAttr}
+	if d.groupAttr != "" {
+		attrs = append(attrs, d.groupAttr)
+	}
+	return attrs
 }

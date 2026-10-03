@@ -29,7 +29,7 @@ import { computed, getCurrentScope, onScopeDispose, ref } from 'vue';
  *  queue kind this package has no drawing for is shown as. */
 export type OperationKind =
   | 'upload' | 'copy' | 'move' | 'delete' | 'rename' | 'restore' | 'purge' | 'convert'
-  | 'archive' | 'archive-create' | 'archive-extract' | 'plugin' | 'trash';
+  | 'archive' | 'archive-create' | 'archive-extract' | 'plugin' | 'trash' | 'thumbs';
 export type OperationStatus = 'running' | 'done' | 'error' | 'aborted';
 
 /** What a publisher hands to `sync()` for one row. */

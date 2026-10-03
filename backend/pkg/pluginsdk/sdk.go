@@ -362,7 +362,7 @@ func Run[T Backend](ctx context.Context, p Plugin[T]) error {
 	}
 	token := os.Getenv("FILEX_PLUGIN_TOKEN")
 	if token == "" {
-		return errors.New("FILEX_PLUGIN_TOKEN is not set — a plugin is started by filex, not by hand (set FILEX_PLUGIN_LISTEN and a token to run it standalone)")
+		return errors.New("FILEX_PLUGIN_TOKEN is not set - a plugin is started by filex, not by hand (set FILEX_PLUGIN_LISTEN and a token to run it standalone)")
 	}
 	s := &server{
 		name: p.Name, version: p.Version, label: p.Label, fields: p.Fields,

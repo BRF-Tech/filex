@@ -31,7 +31,7 @@ type Dashboard struct {
 	Queue QueueStats
 	// DemoMode marks a public playground. The `recent_activity` block below
 	// is the same audit rows the Audit page serves, client addresses and all,
-	// on the FIRST page of the admin panel. See maskAuditRecent.
+	// on the FIRST page of the admin panel. See demoMask.recent.
 	DemoMode bool
 }
 
@@ -62,9 +62,10 @@ type StorageSummary struct {
 // CapabilitiesShort is the trimmed capability summary embedded in the
 // dashboard payload (full capabilities are at /api/capabilities).
 type CapabilitiesShort struct {
-	FFmpeg              bool `json:"ffmpeg"`
-	Ghostscript         bool `json:"ghostscript"`
-	LibreOffice         bool `json:"libreoffice"`
+	FFmpeg      bool `json:"ffmpeg"`
+	Ghostscript bool `json:"ghostscript"`
+	// No `libreoffice` since 0.50: office documents are OnlyOffice's
+	// (onlyoffice_reachable), and filex runs no LibreOffice anywhere.
 	OnlyOfficeReachable bool `json:"onlyoffice_reachable"`
 }
 
@@ -180,7 +181,7 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 
 	recent, _ := h.Store.ListAuditRecent(ctx, 10)
 	if h.DemoMode {
-		maskAuditRecent(recent)
+		newDemoMask(ctx, h.Store).recent(recent)
 	}
 	if recent == nil {
 		recent = []*model.AuditEntry{}
@@ -232,7 +233,6 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		if cap, err := h.Caps.Get(ctx); err == nil && cap != nil {
 			capShort.FFmpeg = cap.Thumbs.Video
 			capShort.Ghostscript = cap.Thumbs.PDF
-			capShort.LibreOffice = cap.Thumbs.Office
 			if oo, ok := cap.External["onlyoffice"]; ok {
 				capShort.OnlyOfficeReachable = oo.State == "ok"
 			}

@@ -153,7 +153,7 @@ func (h *Storages) denyOnDemo(driver string) error {
 	case "local":
 		return errors.New("this is a public demo: a storage on the server's own filesystem cannot be added here")
 	case "s3", "sftp", "webdav", "smb", "ftp", "ftps", "b2", "gcs", "azure":
-		return errors.New("this is a public demo: connecting the server to another storage backend is disabled here — run your own filex to attach a bucket or a share")
+		return errors.New("this is a public demo: connecting the server to another storage backend is disabled here - run your own filex to attach a bucket or a share")
 	}
 	return nil
 }
@@ -690,7 +690,7 @@ func (h *Storages) TriggerSync(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"ok":     true,
 			"status": "running",
-			"note":   "a scan is already running for this storage; no second one was started — watch its progress under sync runs",
+			"note":   "a scan is already running for this storage; no second one was started - watch its progress under sync runs",
 		})
 		return
 	}
@@ -739,7 +739,7 @@ func (h *Storages) rescanFolder(w http.ResponseWriter, r *http.Request, id int64
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"ok":     true,
 			"status": "running",
-			"note":   "a scan is already running for this storage; no folder rescan was started — ask again once it has finished",
+			"note":   "a scan is already running for this storage; no folder rescan was started - ask again once it has finished",
 		})
 	case errors.Is(err, syncpkg.ErrFolderNotCatalogued):
 		writeJSON(w, http.StatusNotFound, map[string]string{

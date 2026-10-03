@@ -2,7 +2,7 @@
 
 filex lays its whole interface out right to left for Arabic, Hebrew,
 Persian, Urdu and every other right-to-left language a
-[language pack](PLUGIN-KIT.md) adds — the explorer, the admin panel, the
+[language pack](PLUGIN-KIT.md) adds - the explorer, the admin panel, the
 public share, PIN and file-request pages, the signing wizard and the
 embeddable components. Nothing has to be switched on: install a pack for a
 right-to-left language, pick it, and the screens turn.
@@ -19,7 +19,7 @@ a list of primary language subtags (`ar`, `fa`, `he`, `ur`, `ps`, `sd`, `ug`,
 `yi`, …) and of script subtags that override it (`az-Arab` is right to left,
 `ar-Latn` is not). The answer reaches the browser as the `rtl` flag on each
 row of the offered-language list (`GET /api/public/branding` → `ui_locales`),
-and the interface reads that flag and nothing else — it keeps no second list,
+and the interface reads that flag and nothing else - it keeps no second list,
 and it does not ask the browser (`Intl.Locale#getTextInfo` is a different
 list, and Firefox does not have it). English and Turkish, the two built-in
 languages, are left to right; so is any code the server does not offer.
@@ -32,7 +32,7 @@ languages, are left to right; so is any code the server does not offer.
   `packages/core/src/lib/direction.ts`). The layout turns in the same frame as
   the words.
 - **An embedded explorer** (`<FileExplorer>`, the web component, the React
-  wrapper) carries `dir` on its own root, from **its own `locale`** — not from
+  wrapper) carries `dir` on its own root, from **its own `locale`** - not from
   the host page. An Arabic explorer inside an English page reads right to
   left; an English explorer inside an Arabic page reads left to right. Laying
   English out mirrored because the page around it is Arabic (or the reverse)
@@ -53,23 +53,23 @@ Mirrored: the order of everything along a line (the navigation panel moves to
 the right, the details panel to the left, the Actions column of a table to the
 left edge and the Name column to the right edge), text alignment, paddings and
 borders, the frozen columns' edges, slide-in animations, switch knobs, and the
-icons that **mean a direction** — back and forward arrows, the breadcrumb
+icons that **mean a direction** - back and forward arrows, the breadcrumb
 separator, a collapsed row's chevron, "go into", undo, sign-out, send, and the
 panel icons for the navigation and details panels.
 
 Gestures turn with it: dragging a column's edge grows the column the way the
 pointer goes, a column dropped on the right half of its neighbour lands before
 it, arrow keys move things the way the arrow points (← is "next" in a
-right-to-left interface), and menus open toward the line's end — down-left of
-the pointer — and flip at the screen's edge.
+right-to-left interface), and menus open toward the line's end - down-left of
+the pointer - and flip at the screen's edge.
 
 **Never mirrored:**
 
-- **Document space.** A PDF page, an image, a drawing, a signature — anything
+- **Document space.** A PDF page, an image, a drawing, a signature - anything
   with coordinates of its own. A signature box placed at the left of a page is
   at the left of that page in every language; the PDF field editor positions
   boxes in the page's own coordinates and the signer stamps them there.
-- **Machine text** — commands, paths, URLs, addresses, keys — reads left to
+- **Machine text** - commands, paths, URLs, addresses, keys - reads left to
   right inside a right-to-left page (`pre`, `code`, `kbd`, `samp`), so a
   connection guide's `sftp -P 2022 …` can still be typed back.
 - Things that do not point along the line: "open in a new tab" (up and out),
@@ -86,19 +86,19 @@ report.pdf` keeps its number in front in an Arabic list, and an Arabic file
 name keeps its order in an English one.
 
 Inside a right-to-left sentence the interface also isolates, invisibly, what
-must read left to right — a number pair (`3 / 10`, `1.2 MB / 5 GB`), a
+must read left to right - a number pair (`3 / 10`, `1.2 MB / 5 GB`), a
 `word:value` token such as the search syntax `tag:…` or `root:<storage>://<folder>`,
-and an absolute path (`/var/lib/filex/report.pdf`) — and every value
+and an absolute path (`/var/lib/filex/report.pdf`) - and every value
 interpolated into a sentence (a file name in "Could not upload «…»"). This
 happens where the words are drawn; a translator writes plain text.
 
 **And text filex did not write goes through the same gate.** A sentence the
-SERVER composed (`server.*` — it reaches the browser as the `message` of a
+SERVER composed (`server.*` - it reaches the browser as the `message` of a
 refusal), an installed app's own words, a notification built out of a row:
 none of it passes through `useLocale().t` or the admin panel's
 post-translation hook, and it is the text most likely to name a path, a URL or
 a command. `lib/direction` **`foreignText(locale, text)`** is the one function
-for it — `lib/errorWords` calls it for every failure it says (the reader's
+for it - `lib/errorWords` calls it for every failure it says (the reader's
 direction rides on the translator, `T.foreign`), `api/client.ts` for the
 message of a refusal, and `useNotificationText` for the bell and the browser
 notification.
@@ -106,7 +106,7 @@ notification.
 > ⚠ Measured in the Arabic panel (v0.43.0): `server.token.scope_unknown` names
 > `root:<storage>://<folder>`, and without isolation the closing `>` took the
 > paragraph's direction, was drawn at the far left of the run and mirrored into
-> `<` — the line read `…<root:<storage>://<folder`. The catalogue's own copy of
+> `<` - the line read `…<root:<storage>://<folder`. The catalogue's own copy of
 > the same sentence was correct, which is what made it read as a broken pack.
 > A pack cannot fix it: bidi controls are forbidden in a translation and the
 > validator refuses them. `e2e/tests/126-rtl-server-text.spec.ts` measures the
@@ -120,7 +120,7 @@ the Arabic comma `،`, the ideographic `、` and the fullwidth `，` as well as
 ## For translators
 
 - Write plain text. Do not add `U+200E`/`U+200F` marks or `dir` markup to
-  strings — the interface isolates names, number pairs, `word:value` tokens
+  strings - the interface isolates names, number pairs, `word:value` tokens
   and paths itself, in the text the server writes as well as on screen.
 - Keep placeholders (`{name}`, `{n}`) as they are; put names in your
   language's quotation marks (`«{name}»`) as you would in prose.
@@ -146,9 +146,9 @@ under `dir="rtl"` and are the very same pixels under `dir="ltr"`:
 | `translateX(8px)`, `box-shadow: -1px 0 …` | `calc(8px * var(--filex-dir-x, 1))` (set on every `[dir]`, top of `base.css`) |
 | `-translate-x-full`, `origin-top-right` | add the `rtl:` partner (`rtl:translate-x-full`, `rtl:origin-top-left`) |
 
-- **Gestures** use the helpers in `packages/core/src/lib/direction.ts` —
+- **Gestures** use the helpers in `packages/core/src/lib/direction.ts` -
   `dirOfElement`, `inlineSign`, `inlineKeyStep`, `inlineStartX` /
-  `inlineEndX`, `openAlongInline`, `clampAlongInline` — never a component's
+  `inlineEndX`, `openAlongInline`, `clampAlongInline` - never a component's
   own `dir === 'rtl' ? … : …`. `scrollLeft` is negative in a right-to-left
   scroller; read its magnitude.
 - **Teleported surfaces** bind `:dir="dir"` from `useLocale()`.

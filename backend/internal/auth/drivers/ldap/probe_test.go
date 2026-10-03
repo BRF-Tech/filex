@@ -84,7 +84,7 @@ func TestProbe_AWorkingConfigurationPassesStepByStep(t *testing.T) {
 		assert.Equal(t, auth.ProbeOK, c.Status, c.ID)
 		ids = append(ids, c.ID)
 	}
-	assert.Equal(t, []string{"required", "connect", "starttls", "bind", "base"}, ids)
+	assert.Equal(t, []string{"required", "first_login_open", "connect", "starttls", "bind", "base"}, ids)
 	assert.True(t, auth.ProbeOKAll(checks))
 	// StartTLS must carry the server name, or tls.Client refuses the
 	// handshake whenever no ca_file is set (the bug the test turned up).
@@ -103,7 +103,7 @@ func TestProbe_AWorkingConfigurationPassesStepByStep(t *testing.T) {
 func TestProbe_NoServiceAccountIsAnonymousAndSaidToBe(t *testing.T) {
 	fc := &fakeConn{}
 	checks := probeWith(fc, nil, map[string]any{"url": "ldaps://dc.example.com", "base_dn": "dc=example,dc=com"})
-	assert.Equal(t, "bind_anonymous", checks[2].ID)
+	assert.Equal(t, "bind_anonymous", checks[3].ID)
 	assert.Empty(t, fc.binds)
 }
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -386,4 +387,58 @@ func TestRoles_ViewerRoleIsEditableButCapped(t *testing.T) {
 	status, body = fxJSON(t, "GET", pf.URL+"/api/admin/roles/builtin", pf.adminTok, nil)
 	require.Equal(t, http.StatusOK, status)
 	assert.Equal(t, perm.PresetStandard, decode(t, body)["preset"])
+}
+
+// The custom role editor's app-permission "Default" rests on the built-in
+// role a role's people are on. The rule is the server's (perm.HolderRole);
+// the editor asks it for the body it has, saved or not (lesson #759: 0.49.0
+// kept a copy of the rule in the editor).
+func TestPermAdmin_PreviewHolderRole(t *testing.T) {
+	pf := newPermFix(t)
+	ctx := context.Background()
+	preview := func(body map[string]any) string {
+		t.Helper()
+		status, out := fxJSON(t, "POST", pf.URL+"/api/admin/roles/preview", pf.adminTok, body)
+		require.Equal(t, http.StatusOK, status, out)
+		return decode(t, out)["holder_role"].(string)
+	}
+
+	readOnly := map[string]any{"permissions": perm.ReadOnly.Strings()}
+	assert.Equal(t, model.RoleViewer, preview(readOnly))
+	assert.Equal(t, model.RoleUser, preview(map[string]any{"permissions": perm.Standard.Strings()}))
+	assert.Equal(t, model.RoleViewer, preview(map[string]any{}), "an unfinished body — no name yet — is answered, not refused")
+	someFolders := map[string]any{
+		"permissions": perm.ReadOnly.Strings(),
+		"effects":     map[string]string{"files.delete": "allow"},
+		"conditions":  map[string]any{"paths": []string{"Scratch"}},
+	}
+	assert.Equal(t, model.RoleUser, preview(someFolders), "deleting in some folders needs the User level")
+	assert.Equal(t, model.RoleViewer, preview(map[string]any{
+		"permissions": perm.ReadOnly.Strings(),
+		"effects":     map[string]string{"files.delete": "allow"},
+		"conditions":  map[string]any{"paths": []string{" ", "/"}},
+	}), "a blank path names no folder once saved")
+
+	// The answer is what saving does: the same body, saved and given, puts
+	// its holder on that level.
+	for _, body := range []map[string]any{someFolders, readOnly} {
+		want := preview(body)
+		saved := map[string]any{"name": "Preview " + want, "enabled": true}
+		for k, v := range body {
+			saved[k] = v
+		}
+		status, out := fxJSON(t, "POST", pf.URL+"/api/admin/roles", pf.adminTok, saved)
+		require.Equal(t, http.StatusCreated, status, out)
+		status, out = fxJSON(t, "PUT", pf.URL+"/api/admin/users/"+idStr(pf.UserA)+"/roles", pf.adminTok, map[string]any{"role_id": decode(t, out)["id"]})
+		require.Equal(t, http.StatusOK, status, out)
+		u, err := pf.Store.GetUser(ctx, pf.UserA)
+		require.NoError(t, err)
+		assert.Equal(t, want, u.Role, "saved, %v puts its people on %s", body, want)
+	}
+
+	// Editing roles is an administrator's; so is asking what an edit comes to.
+	status, out := fxJSON(t, "POST", pf.URL+"/api/admin/roles/preview", pf.memberTok, readOnly)
+	assert.Equal(t, http.StatusForbidden, status, out)
+	status, out = fxReq(t, "POST", pf.URL+"/api/admin/roles/preview", pf.adminTok, strings.NewReader("{"), "application/json")
+	assert.Equal(t, http.StatusBadRequest, status, out)
 }

@@ -62,7 +62,7 @@ func clientPluginRequestCmd(opts *clientOpts) *cobra.Command {
 			if !res.Created {
 				verb = "Already requested"
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s #%d: %s %s %s %s — %s\n", verb, r.ID, r.Op, r.Kind, r.Name, r.Version, r.Status)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s #%d: %s %s %s %s - %s\n", verb, r.ID, r.Op, r.Kind, r.Name, r.Version, r.Status)
 			if len(r.Permissions) > 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "Permissions: %s\n", strings.Join(r.Permissions, ", "))
 			}

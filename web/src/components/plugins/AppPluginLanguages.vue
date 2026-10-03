@@ -37,7 +37,7 @@ const { t } = useI18n();
     <li v-for="l in languages" :key="l.code" :data-testid="`app-plugin-language-${l.code}`">
       <span class="font-medium text-zinc-800 dark:text-zinc-100" :lang="l.code">{{ localeLabel(l.code) }}</span>
       <span class="font-mono text-zinc-500"> ({{ l.code }})</span>
-      —
+      -
       <template v-if="l.total > 0">
         <span :data-testid="`app-plugin-language-${l.code}-coverage`">{{ t('appPlugins.lang.coverage', { percent: l.percent }) }}</span>
         <span v-if="l.percent < 100" class="text-zinc-500"> · {{ t('appPlugins.lang.fallback') }}</span>

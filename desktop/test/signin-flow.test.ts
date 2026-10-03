@@ -46,7 +46,7 @@ test('the report: the tray, the Dock or a second launch reloading the window kee
 
 test('a link from an earlier attempt is "stale" — the current one is still good', () => {
   assert.equal(failureOf('s2', 's1', new Error('authorization does not match the pending request')).kind, 'stale');
-  assert.equal(failureOf(null, 's1', new Error('no sign-in is waiting — start again')).kind, 'stale');
+  assert.equal(failureOf(null, 's1', new Error('no sign-in is waiting - start again')).kind, 'stale');
 });
 
 test('a refused exchange is "spent" — only a new attempt can finish', () => {
@@ -57,6 +57,6 @@ test('a refused exchange is "spent" — only a new attempt can finish', () => {
 
 test('nothing pending: the server form, with the reason when there was one', () => {
   assert.deepEqual(signInView(null, null), { view: 'connect', failure: null });
-  const f = failureOf(null, 'old', new Error('no sign-in is waiting — start again'));
+  const f = failureOf(null, 'old', new Error('no sign-in is waiting - start again'));
   assert.deepEqual(signInView(null, f), { view: 'connect', failure: f });
 });

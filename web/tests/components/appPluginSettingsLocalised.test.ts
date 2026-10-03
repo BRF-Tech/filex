@@ -119,7 +119,6 @@ async function openPage(locale: string) {
 
 beforeEach(() => {
   setActivePinia(createPinia());
-  document.body.innerHTML = '';
 });
 
 describe('the app page draws its settings in the reader’s language', () => {

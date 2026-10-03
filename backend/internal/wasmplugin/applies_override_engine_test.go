@@ -78,8 +78,10 @@ func TestOverride_EngineExtFromTheManifestFollowsTheEngine(t *testing.T) {
 	assert.Equal(t, []string{"pdf"}, extOf("deliver"))
 	assert.False(t, runs("upper", "docx"), "the run check agrees with the menu")
 
-	// LibreOffice appears: the office types come with it — overridden or not.
-	h.reg.engines = &engineSet{bins: map[string]string{"libreoffice": "/usr/bin/soffice"}}
+	// The office engine appears (a document server is connected; since 0.50
+	// that is what `libreoffice` is): the office types come with it -
+	// overridden or not.
+	h.reg.engines = &engineSet{bins: map[string]string{}, office: &fakeOffice{ready: true}}
 	assert.Equal(t, []string{"pdf", "txt", "docx", "odt"}, extOf("upper"), "LibreOffice arrived: the overridden action offers the office types")
 	assert.Equal(t, []string{"pdf", "docx", "odt"}, extOf("deliver"), "…and so does the one nobody overrode")
 	assert.True(t, runs("upper", "docx"))
@@ -92,8 +94,8 @@ func TestOverride_EngineExtFromTheManifestFollowsTheEngine(t *testing.T) {
 	assert.Equal(t, []string{"pdf", "txt", "docx"}, extOf("upper"))
 	assert.False(t, runs("upper", "odt"), "a removed engine type came back through the second fold")
 
-	// LibreOffice goes: the office types go with it.
-	h.reg.engines = &engineSet{bins: map[string]string{}}
+	// The document server goes: the office types go with it.
+	h.reg.engines = &engineSet{bins: map[string]string{}, office: &fakeOffice{ready: false}}
 	assert.Equal(t, []string{"pdf", "txt"}, extOf("upper"))
 	assert.False(t, runs("upper", "docx"))
 }

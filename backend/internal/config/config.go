@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/secheaders"
 )
 
@@ -69,6 +70,16 @@ type Config struct {
 	// default — a single-tenant install behaves exactly as before. See
 	// docs/MULTI-TENANCY.md.
 	MultiTenant bool `yaml:"multi_tenant"`
+	// TenantDomain (FILEX_TENANT_DOMAIN) gives every tenant an address of
+	// its own: `<realm>.<tenant domain>` (`acme.tenants.files.example`), the
+	// name a tenant's own domain points its CNAME at (docs/TENANT-ADMIN.md).
+	// It needs a wildcard DNS record of ADDRESS records (A/AAAA, not a CNAME)
+	// for `*.<tenant domain>` pointing at the platform. Empty = no platform
+	// subdomains, and no own domains.
+	TenantDomain string `yaml:"tenant_domain"`
+	// TLS is who issues the certificates of the tenants' addresses
+	// (docs/TENANT-ADMIN.md, "TLS").
+	TLS TLSConfig `yaml:"tls"`
 	// PluginsDisabled (FILEX_PLUGINS_DISABLED=1) turns the storage-plugin
 	// subsystem off: nothing under <data-dir>/plugins is launched, no remote
 	// plugin is contacted, and the admin API answers 503.
@@ -106,6 +117,16 @@ type Config struct {
 	// refuses new work rather than queueing it, which is what stops one slow
 	// plugin from becoming one slow filex.
 	PluginMaxInFlight int `yaml:"plugin_max_in_flight"`
+	// PluginLoopbackSources (FILEX_PLUGIN_LOOPBACK_SOURCES=1) lets plugin
+	// and app DOWNLOADS reach this machine (127.0.0.0/8, ::1): a storage
+	// plugin from a URL, an app's manifest, module and interface bundle, the
+	// update check. Every other private or local address stays refused.
+	//
+	// ⚠ Development and the end-to-end tests only (they serve plugin sources
+	// from a loopback server). Off on a server, always: with it on, a
+	// manifest that names a loopback address makes filex send GET requests to
+	// its own neighbours on this machine.
+	PluginLoopbackSources bool `yaml:"plugin_loopback_sources"`
 	// AppPluginsDisabled (FILEX_APP_PLUGINS_DISABLED=1) turns the in-process
 	// WebAssembly app-plugin runtime off (internal/wasmplugin): nothing under
 	// <data-dir>/app-plugins is loaded, the user routes answer 404 and the
@@ -147,7 +168,17 @@ type Config struct {
 	// ⚠ Losing it makes every credential sealed under it unusable; they must be
 	// re-issued. It is not a password to rotate casually — treat it like the
 	// database, because losing one is as bad as losing the other.
-	SecretKey        string        `yaml:"secret_key"`
+	SecretKey string `yaml:"secret_key"`
+	// TrustedProxies (FILEX_TRUSTED_PROXIES) lists the reverse proxies whose
+	// X-Forwarded-For / X-Real-IP filex believes: addresses and CIDR networks,
+	// comma or space separated, and the words `auto` (worked out from where
+	// filex runs), `loopback`, `private` and `link-local` (each a class of
+	// address as net/netip defines it); `none` trusts no proxy. Empty = `auto`:
+	// loopback, plus - in a container on its own network - that network minus
+	// its gateways. The `login.trusted_proxies` setting, when it holds a list,
+	// wins over this. Load refuses a bad entry. See internal/clientip and
+	// docs/CONFIGURATION.md.
+	TrustedProxies   string        `yaml:"trusted_proxies"`
 	Log              LogConfig     `yaml:"log"`
 	DB               DBConfig      `yaml:"db"`
 	Auth             AuthConfig    `yaml:"auth"`
@@ -568,10 +599,17 @@ type AuthConfig struct {
 	// an SSO-only installation whose identity provider is down can still be
 	// reached by the person who has to fix it (local.RecoveryLogin). ON by
 	// default; FILEX_AUTH_RECOVERY_LOGIN=false turns it off.
-	RecoveryLogin bool              `yaml:"recovery_login"`
-	OIDC          OIDCConfig        `yaml:"oidc"`
-	LDAP          LDAPConfig        `yaml:"ldap"`
-	Header        HeaderProxyConfig `yaml:"header_proxy"`
+	RecoveryLogin bool `yaml:"recovery_login"`
+	// LoginEmailToken is what follows the `@` of an account a provider knows only
+	// by a login name (`alex` → `alex@local`): FILEX_OS_LOGIN_EMAIL_TOKEN,
+	// default "local". ⚠ Chosen at installation and never changed afterwards —
+	// it is part of every such account's e-mail address, so a later change makes
+	// `alex@evim` a second account beside `alex@local`. Environment only: no
+	// page or API edits it (identity.EmailToken).
+	LoginEmailToken string            `yaml:"login_email_token"`
+	OIDC            OIDCConfig        `yaml:"oidc"`
+	LDAP            LDAPConfig        `yaml:"ldap"`
+	Header          HeaderProxyConfig `yaml:"header_proxy"`
 }
 
 // OIDCConfig — Keycloak/Auth0/etc.
@@ -595,6 +633,24 @@ type OIDCConfig struct {
 	//                     the IdP (the behavior before this option existed).
 	// Anything else means the default.
 	Logout string `yaml:"logout"`
+
+	// AutoCreate: open an account when somebody signs in through this provider
+	// for the first time. nil (unset) means YES — the behaviour before the
+	// first-login rule, so an upgrade leaves nobody outside. AllowedGroups is a
+	// comma list: when set, only members of one of those groups get an account.
+	// Group → role is not configured here: it is the permission rules that
+	// target an SSO group (internal/perm).
+	AutoCreate    *bool  `yaml:"auto_create"`
+	AllowedGroups string `yaml:"allowed_groups"`
+	// TrustEmail (FILEX_OIDC_TRUST_EMAIL) takes every address this identity
+	// provider sends as verified, `email_verified` or not. Off, an address it
+	// does not mark verified signs in to no existing account that is not yet
+	// bound to the person's SSO identity, and opens a new account switched
+	// off, for an administrator to approve (docs/SSO.md). nil (unset): the
+	// answer the upgrade to 0.50 took once (authsetup.EnvTrustEmail) - on
+	// when the database had accounts that came through SSO, off on a fresh
+	// install.
+	TrustEmail *bool `yaml:"trust_email"`
 }
 
 // LocalLogout reports whether signing out leaves the IdP's session alone.
@@ -626,6 +682,23 @@ type LDAPConfig struct {
 	// exactly as local passwords are — none of them has a second-factor
 	// channel. See internal/protocolauth.
 	ProtocolLogin bool `yaml:"protocol_login"`
+
+	// AutoCreate: open an account when somebody signs in through this provider
+	// for the first time. nil (unset) means YES — the behaviour before the
+	// first-login rule, so an upgrade leaves nobody outside. AllowedGroups is a
+	// comma list: when set, only members of one of those groups get an account.
+	// Group → role is not configured here: it is the permission rules that
+	// target an SSO group (internal/perm).
+	AutoCreate    *bool  `yaml:"auto_create"`
+	AllowedGroups string `yaml:"allowed_groups"`
+	// GroupAttr is the entry attribute listing a person's groups ("" = memberOf
+	// once allowed_groups needs them, otherwise groups are not read).
+	GroupAttr string `yaml:"group_attr"`
+	// ShowRefusalReason tells a person whose directory password was right why
+	// the first-login rule refused them (no account opened, not in an allowed
+	// group). OFF by default: the sign-in form would then confirm a directory
+	// password to anybody guessing (auth.RefusedAfterPassword).
+	ShowRefusalReason bool `yaml:"show_refusal_reason"`
 	// Provider is the tenant SLUG a just-in-time directory account is homed in
 	// when the login carries no Host that maps to one — i.e. the protocol
 	// logins (SFTP, FTPS, NFS), which present a password on a socket.
@@ -643,6 +716,15 @@ type HeaderProxyConfig struct {
 	GroupHeader string   `yaml:"group_header"`
 	TrustedIPs  []string `yaml:"trusted_ips"`
 	AdminGroup  string   `yaml:"admin_group"`
+
+	// AutoCreate: open an account when somebody signs in through this provider
+	// for the first time. nil (unset) means YES — the behaviour before the
+	// first-login rule, so an upgrade leaves nobody outside. AllowedGroups is a
+	// comma list: when set, only members of one of those groups get an account.
+	// Group → role is not configured here: it is the permission rules that
+	// target an SSO group (internal/perm).
+	AutoCreate    *bool  `yaml:"auto_create"`
+	AllowedGroups string `yaml:"allowed_groups"`
 	// Provider is the tenant SLUG a just-in-time account is homed in when the
 	// request Host maps to no tenant. See LDAPConfig.Provider — same rule, and
 	// on this driver the Host is almost always there, so it is rarely needed.
@@ -918,6 +1000,12 @@ func Load(path string) (Config, error) {
 	if err := resolveBasePath(&cfg, basePathFrom); err != nil {
 		return Config{}, err
 	}
+	// A trusted-proxy entry that is not an address stops the server here: a
+	// list silently ignored would leave the operator believing forwarded
+	// addresses are read from the proxy they named.
+	if _, err := clientip.ParseList(cfg.TrustedProxies); err != nil {
+		return Config{}, fmt.Errorf("config: FILEX_TRUSTED_PROXIES: %w", err)
+	}
 	// Who may frame filex's pages: a value that is not an origin stops the
 	// server here, with what to write instead (internal/secheaders).
 	fa, err := secheaders.Normalize(cfg.FrameAncestors)
@@ -1074,6 +1162,24 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_MULTI_TENANT"); v == "1" || v == "true" {
 		c.MultiTenant = true
 	}
+	if v := os.Getenv("FILEX_TENANT_DOMAIN"); v != "" {
+		c.TenantDomain = strings.Trim(strings.ToLower(strings.TrimSpace(v)), ".")
+	}
+	if v := os.Getenv("FILEX_TLS_MODE"); v != "" {
+		c.TLS.Mode = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("FILEX_TLS_LISTEN"); v != "" {
+		c.TLS.Listen = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_TLS_HTTP_LISTEN"); v != "" {
+		c.TLS.HTTPListen = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_TLS_ACME_EMAIL"); v != "" {
+		c.TLS.ACMEEmail = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_TLS_ACME_DIRECTORY"); v != "" {
+		c.TLS.ACMEDirectory = strings.TrimSpace(v)
+	}
 	pluginsSpoken := false
 	if v, ok := os.LookupEnv("FILEX_PLUGINS_DISABLED"); ok && v != "" {
 		pluginsSpoken = true
@@ -1094,6 +1200,9 @@ func applyEnv(c *Config) {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
 			c.PluginMaxInFlight = n
 		}
+	}
+	if v := os.Getenv("FILEX_PLUGIN_LOOPBACK_SOURCES"); v != "" {
+		c.PluginLoopbackSources = v == "1" || strings.EqualFold(v, "true")
 	}
 	appPluginsSpoken := false
 	if v, ok := os.LookupEnv("FILEX_APP_PLUGINS_DISABLED"); ok && v != "" {
@@ -1262,6 +1371,36 @@ func applyEnv(c *Config) {
 	if v := getenvFirst("FILEX_OIDC_LOGOUT", "FILEX_AUTH_OIDC_LOGOUT"); v != "" {
 		c.Auth.OIDC.Logout = v
 	}
+	if v := os.Getenv("FILEX_OS_LOGIN_EMAIL_TOKEN"); v != "" {
+		c.Auth.LoginEmailToken = v
+	}
+	if b, ok := envBool("FILEX_OIDC_AUTO_CREATE"); ok {
+		c.Auth.OIDC.AutoCreate = &b
+	}
+	if v := os.Getenv("FILEX_OIDC_ALLOWED_GROUPS"); v != "" {
+		c.Auth.OIDC.AllowedGroups = v
+	}
+	if b, ok := envBool("FILEX_OIDC_TRUST_EMAIL"); ok {
+		c.Auth.OIDC.TrustEmail = &b
+	}
+	if b, ok := envBool("FILEX_LDAP_AUTO_CREATE"); ok {
+		c.Auth.LDAP.AutoCreate = &b
+	}
+	if v := os.Getenv("FILEX_LDAP_ALLOWED_GROUPS"); v != "" {
+		c.Auth.LDAP.AllowedGroups = v
+	}
+	if v := os.Getenv("FILEX_LDAP_GROUP_ATTR"); v != "" {
+		c.Auth.LDAP.GroupAttr = v
+	}
+	if b, ok := envBool("FILEX_LDAP_SHOW_REFUSAL_REASON"); ok {
+		c.Auth.LDAP.ShowRefusalReason = b
+	}
+	if b, ok := envBool("FILEX_HEADER_AUTO_CREATE"); ok {
+		c.Auth.Header.AutoCreate = &b
+	}
+	if v := os.Getenv("FILEX_HEADER_ALLOWED_GROUPS"); v != "" {
+		c.Auth.Header.AllowedGroups = v
+	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.URL = v
 	}
@@ -1354,6 +1493,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_SECRET_KEY"); v != "" {
 		c.SecretKey = v
+	}
+	if v := os.Getenv("FILEX_TRUSTED_PROXIES"); v != "" {
+		c.TrustedProxies = v
 	}
 	if v := os.Getenv("FILEX_S3"); v != "" {
 		c.S3.Enabled = v == "1" || strings.EqualFold(v, "true")
@@ -1597,3 +1739,48 @@ func applyEnv(c *Config) {
 		c.Seed.Storage.PathStyle = v == "1" || strings.EqualFold(v, "true")
 	}
 }
+
+// envBool reads a boolean environment variable: ok is false when it is unset or
+// empty, so an unset variable can keep a setting's own default.
+func envBool(name string) (val, ok bool) {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return false, false
+	}
+	switch strings.ToLower(v) {
+	case "0", "false", "no", "off":
+		return false, true
+	}
+	return true, true
+}
+
+// TLS modes (FILEX_TLS_MODE).
+const (
+	// TLSModeProxy: a reverse proxy in front terminates TLS and issues the
+	// certificates; filex answers its questions (/api/tls/ask,
+	// /api/tls/certificate). The default, and what every install did before.
+	TLSModeProxy = "proxy"
+	// TLSModeACME: filex terminates TLS itself on TLS.Listen and issues
+	// certificates from an ACME authority (Let's Encrypt by default).
+	TLSModeACME = "acme"
+)
+
+// TLSConfig is who issues the certificates of the platform's and the
+// tenants' addresses (docs/TENANT-ADMIN.md). A tenant's own certificate
+// (brought on its domain) is served first either way.
+type TLSConfig struct {
+	// Mode is TLSModeProxy (default) or TLSModeACME.
+	Mode string `yaml:"mode"`
+	// Listen is where filex's own TLS server listens in acme mode (default
+	// ":443"); HTTPListen the plain listener the HTTP-01 challenge and the
+	// redirect to HTTPS answer on (default ":80", "off" for none).
+	Listen     string `yaml:"listen"`
+	HTTPListen string `yaml:"http_listen"`
+	// ACMEEmail is the contact the ACME account is registered with.
+	ACMEEmail string `yaml:"acme_email"`
+	// ACMEDirectory is the ACME directory URL; empty = Let's Encrypt.
+	ACMEDirectory string `yaml:"acme_directory"`
+}
+
+// ACME reports whether filex issues certificates itself.
+func (t TLSConfig) ACME() bool { return t.Mode == TLSModeACME }

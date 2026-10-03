@@ -34,6 +34,7 @@ import {
   buildGuide,
   guideName,
   guideProtocols,
+  guideUser,
   hostOf,
   type ProtocolGuide,
 } from '../lib/connectionGuides';
@@ -66,7 +67,12 @@ const { t } = useLocale(locale);
 // Destructured on purpose: Vue only auto-unwraps refs that are top-level in
 // the setup scope, so `conn.storages` inside a template would render a Ref
 // object rather than its value.
-const { visible, me, publicUrl, error, load } = useConnections(props.config);
+const { visible, me, realm, publicUrl, error, load } = useConnections(props.config);
+
+/** The name a WebDAV client signs in with (lib/connectionGuides `guideUser`):
+ *  the e-mail, with a tenant account's realm in front on a multi-tenant
+ *  server. The SFTP/FTPS login comes from the server already written that way. */
+const guideUserName = computed(() => guideUser(me.value?.email ?? '', realm.value));
 
 // ── theme ────────────────────────────────────────────────────────────
 // Resolved in JS rather than left to `prefers-color-scheme`, because the
@@ -126,7 +132,7 @@ const guide = computed<ProtocolGuide | null>(() =>
     protocol.value,
     {
       origin: origin.value,
-      user: me.value?.email ?? '',
+      user: guideUserName.value,
       storages: visible.value,
       storage: guideStorage.value || undefined,
       s3Endpoint: s3.value?.endpoint,

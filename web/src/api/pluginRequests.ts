@@ -1,7 +1,7 @@
 import type { PluginText } from '@brftech/filex-core';
 
 import { api } from './client';
-import type { AppPluginDryRun, AppPluginPermissionReview } from './appPlugins';
+import type { AppPluginDryRun, AppPluginInstallKind, AppPluginPermissionReview, AppPluginPlacement } from './appPlugins';
 
 // Plugin install requests (/api/admin/plugin-requests, internal/pluginreq,
 // docs/APP-PLUGINS.md → Install requests).
@@ -71,6 +71,15 @@ export interface PluginRequest {
   manifest?: unknown;
   /** …and the review the dry run gave (an app's: the install review's answer). */
   review?: AppPluginDryRun | Record<string, unknown>;
+  /**
+   * A pending app request's File types group (one request's own answer
+   * only), worked out when it is read: what the app would open or draw
+   * thumbnails of, who handles each kind now, where the app lands by default.
+   * An upgrade lists only the kinds it adds.
+   */
+  file_types?: AppPluginInstallKind[];
+  /** An approval's File types choices the server could not write (the app is installed either way). */
+  association_errors?: string[];
 }
 
 export interface PluginRequestList {
@@ -97,11 +106,15 @@ export const PluginRequestsApi = {
     return data.request;
   },
 
-  /** Install what the request froze. 409 `superseded` when the source changed. */
-  async approve(id: number): Promise<PluginRequest> {
+  /**
+   * Install what the request froze. 409 `superseded` when the source changed.
+   * `associations` are the File types choices the approving administrator
+   * made (none: the default order).
+   */
+  async approve(id: number, associations: AppPluginPlacement[] = []): Promise<PluginRequest> {
     const { data } = await api.post<{ request: PluginRequest }>(
       `/admin/plugin-requests/${id}/approve`,
-      {},
+      associations.length ? { associations } : {},
       { timeout: PLUGIN_REQUEST_APPROVE_TIMEOUT_MS },
     );
     return data.request;

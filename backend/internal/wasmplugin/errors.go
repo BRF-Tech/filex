@@ -35,7 +35,7 @@ func (e *CallError) Error() string {
 func (e *CallError) Unwrap() error { return e.Cause }
 
 // ErrUnsupportedArch is returned by New on a CPU wazero has no compiler for.
-var ErrUnsupportedArch = errors.New("wasmplugin: app plugins need an amd64 or arm64 host (wazero's interpreter is refused — it would take every core)")
+var ErrUnsupportedArch = errors.New("wasmplugin: app plugins need an amd64 or arm64 host (wazero's interpreter is refused - it would take every core)")
 
 // IsCode reports whether err is a CallError with the given code.
 func IsCode(err error, code string) bool {

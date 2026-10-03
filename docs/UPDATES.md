@@ -1,6 +1,6 @@
 # Updates
 
-filex can tell you when a new release exists and — where it is able to — install
+filex can tell you when a new release exists and - where it is able to - install
 it for you. What happens is decided by **which part of the version moved**:
 
 > Looking for **what changed** rather than how it is installed?
@@ -8,9 +8,9 @@ it for you. What happens is decided by **which part of the version moved**:
 
 | Version part | Example | What filex does |
 |---|---|---|
-| **z** — patch | `0.7.5 → 0.7.6` | Applies it automatically (when the policy allows) |
-| **y** — minor | `0.7.6 → 0.8.0` | Announces it; you upgrade with one click |
-| **x** — major | `0.9.0 → 1.0.0` | Announces it and shows the upgrade instructions |
+| **z** - patch | `0.7.5 → 0.7.6` | Applies it automatically (when the policy allows) |
+| **y** - minor | `0.7.6 → 0.8.0` | Announces it; you upgrade with one click |
+| **x** - major | `0.9.0 → 1.0.0` | Announces it and shows the upgrade instructions |
 
 The asymmetry is the whole design. A patch is a fix on a shape that already
 works. A minor may add a migration or change an embedded API. A major is a
@@ -36,7 +36,7 @@ FILEX_UPDATE_CHECK=0
 ```
 
 The admin UI shows the result under **Ops → Updates**: running version, what is
-available, why filex is or is not taking it, and — when it cannot act itself —
+available, why filex is or is not taking it, and - when it cannot act itself -
 the exact commands for your install.
 
 ---
@@ -46,14 +46,14 @@ the exact commands for your install.
 | Variable | Default | Meaning |
 |---|---|---|
 | `FILEX_UPDATE_CHECK` | `1` | Master switch for the periodic check. `0` = no outbound request ever. |
-| `FILEX_UPDATE_POLICY` | `manual` | `off` · `manual` · `patch` · `minor` — how far filex may go on its own. |
-| `AUTO_UPGRADE` | – | Shorthand: `true` selects `patch`. An explicit `FILEX_UPDATE_POLICY` wins. |
+| `FILEX_UPDATE_POLICY` | `manual` | `off` · `manual` · `patch` · `minor` - how far filex may go on its own. |
+| `AUTO_UPGRADE` | - | Shorthand: `true` selects `patch`. An explicit `FILEX_UPDATE_POLICY` wins. |
 | `FILEX_UPDATE_CHANNEL` | `stable` | Release channel (informational unless you host your own manifest). |
 | `FILEX_UPDATE_MANIFEST_URL` | `https://filex.sh/updates/stable.json` | Where the release index is fetched from. Point it at your own mirror for air-gapped installs. |
-| `FILEX_UPDATE_WINDOW` | – | Daily maintenance window for automatic upgrades, e.g. `03:00-05:00` (server local time). Empty = any time. |
+| `FILEX_UPDATE_WINDOW` | - | Daily maintenance window for automatic upgrades, e.g. `03:00-05:00` (server local time). Empty = any time. |
 | `FILEX_UPDATE_INTERVAL` | `24h` | Time between checks. Values under `1h` are raised to `1h`. |
-| `FILEX_UPDATE_PRE_COMMAND` | – | Shell command run right before a self-upgrade (database dump for external engines). A non-zero exit **aborts** the upgrade. |
-| `FILEX_INSTALL_MODE` | auto-detected | `binary`, `docker` or `package` — or the package manager by name: `homebrew`, `winget`, `snap` — when the detection is wrong for your setup. See [Package-manager installs](#package-manager-installs). |
+| `FILEX_UPDATE_PRE_COMMAND` | - | Shell command run right before a self-upgrade (database dump for external engines). A non-zero exit **aborts** the upgrade. |
+| `FILEX_INSTALL_MODE` | auto-detected | `binary`, `docker` or `package` - or the package manager by name: `homebrew`, `winget`, `snap` - when the detection is wrong for your setup. See [Package-manager installs](#package-manager-installs). |
 
 The periodic-check settings also exist in `config.yaml` under `update:`
 (`enabled`, `policy`, `channel`, `manifest_url`, `window`, `interval`).
@@ -82,13 +82,13 @@ goes silent.
 ```bash
 filex self-update            # install the newest release
 filex self-update --check    # look, change nothing
-filex self-update --to v0.8.0  # a specific version — you are the confirmation
+filex self-update --to v0.8.0  # a specific version - you are the confirmation
 ```
 
 **Container installs cannot upgrade themselves, by design.** An image layer is
 immutable: a binary written inside a running container disappears at the next
 `docker compose up`, and the version silently reverts. That is a worse failure
-than not upgrading — the UI would report success while the old code kept running.
+than not upgrading - the UI would report success while the old code kept running.
 So in a container filex refuses, and shows you this instead:
 
 ```bash
@@ -104,7 +104,7 @@ the last service that should hold it.
 
 In a container, `FILEX_UPDATE_POLICY=patch` (or `minor`, or `AUTO_UPGRADE=true`)
 therefore changes nothing: every release is announced. **Ops → Updates** says
-so — its policy badge reads **Announces only**, and a line under it names the
+so - its policy badge reads **Announces only**, and a line under it names the
 saved policy as having no effect on this install. See
 [What the policy badge says](#what-the-policy-badge-says).
 
@@ -112,24 +112,24 @@ saved policy as having no effect on this install. See
 
 ## Package-manager installs
 
-When a package manager installed filex — Homebrew, winget or Snap — the package
+When a package manager installed filex - Homebrew, winget or Snap - the package
 manager owns the binary, and filex leaves it alone: `filex self-update` refuses,
 and no update policy ever replaces it. Replacing it anyway would split the two
 records: the package manager would keep reporting the old version, and its next
 upgrade would write over whatever filex had put there (a snap's files are
-read-only to begin with). Upgrade with the package manager instead — filex
+read-only to begin with). Upgrade with the package manager instead - filex
 tells you the command:
 
 | Installed with | How filex recognizes it | Upgrade command |
 |---|---|---|
 | Homebrew (cask) | the binary lives under `…/Caskroom/<token>/<version>/` | `brew upgrade --cask filex` |
 | Homebrew (formula) | the binary lives under `…/Cellar/<formula>/<version>/<dir>/` | `brew upgrade filex` |
-| winget | the binary lives under `…\WinGet\Packages\<id>_<source>\` — per user under `%LOCALAPPDATA%\Microsoft`, machine-wide under `%ProgramFiles%` | `winget upgrade BRFTech.filex` |
+| winget | the binary lives under `…\WinGet\Packages\<id>_<source>\` - per user under `%LOCALAPPDATA%\Microsoft`, machine-wide under `%ProgramFiles%` | `winget upgrade BRFTech.filex` |
 | Snap | `SNAP` and `SNAP_NAME` are set **and** the binary lives under `$SNAP` | `snap refresh filex` |
-| a distribution package (`.deb`, `.rpm`, AUR …), Linux | the binary lives directly in `/usr/bin`, `/usr/sbin`, `/bin` or `/sbin` — only a package manager puts files there; a hand install goes to `/usr/local/bin` | none named: upgrade with the package manager that installed it |
+| a distribution package (`.deb`, `.rpm`, AUR …), Linux | the binary lives directly in `/usr/bin`, `/usr/sbin`, `/bin` or `/sbin` - only a package manager puts files there; a hand install goes to `/usr/local/bin` | none named: upgrade with the package manager that installed it |
 
-The name in the command is read from where the binary lives — the cask token,
-the formula, the winget package id, the snap instance — so a renamed or forked
+The name in the command is read from where the binary lives - the cask token,
+the formula, the winget package id, the snap instance - so a renamed or forked
 package is told the command for itself. What keeps the detection honest:
 
 - The path is judged after following links: `/opt/homebrew/bin/filex` and
@@ -152,23 +152,23 @@ The admin page (**Ops → Updates**) shows the release, why filex is not taking 
 and the command, with no **Upgrade now** button. Its policy badge reads
 **Announces only** whatever `FILEX_UPDATE_POLICY` says, and the line under it
 names the saved policy as having no effect here, with the package manager and
-its command (`brew upgrade --cask filex`) — or "your package manager" when
+its command (`brew upgrade --cask filex`) - or "your package manager" when
 filex cannot tell which one it was. Two things filex would have
 done itself are yours now, and the instructions say so: a package manager
 replaces the file, not the running process, so **restart filex** afterwards (on
-Windows, stop it first — a running `filex.exe` cannot be replaced); and the
+Windows, stop it first - a running `filex.exe` cannot be replaced); and the
 database snapshot a self-upgrade takes before a schema change does not happen,
 so when a release changes the schema, **back up first**.
 
 **Packagers:** a package that installs filex into `/usr/bin` (or `/usr/sbin`,
 `/bin`, `/sbin`) is recognized without help. One that puts it elsewhere (under
 `/opt`, say) can declare itself with
-`FILEX_INSTALL_MODE=package` in the environment filex runs in — the service
+`FILEX_INSTALL_MODE=package` in the environment filex runs in - the service
 unit's `Environment=` covers the server's automatic updates; a `filex
 self-update` typed in a shell reads the shell's. filex then refuses to replace
 itself and tells the operator to upgrade with the package manager that installed
 it. `FILEX_INSTALL_MODE=homebrew|winget|snap` names the manager outright, and
-`FILEX_INSTALL_MODE=binary` turns all of this off — on a snap the replacement
+`FILEX_INSTALL_MODE=binary` turns all of this off - on a snap the replacement
 then fails anyway, because the files are read-only.
 
 ---
@@ -178,7 +178,7 @@ then fails anyway, because the files are read-only.
 Before a patch is applied without asking, **all** of these must hold:
 
 1. The policy allows it (`patch` or `minor`).
-2. The release is marked `auto_ok` in the manifest — a **kill switch**: a bad
+2. The release is marked `auto_ok` in the manifest - a **kill switch**: a bad
    release can be pulled back from automatic distribution without deleting the
    tag.
 3. Neither the target nor any release being skipped over carries a schema
@@ -189,15 +189,15 @@ Before a patch is applied without asking, **all** of these must hold:
 5. The current time is inside `FILEX_UPDATE_WINDOW`, if one is set.
 
 Minor releases have one extra rule: while filex is on a `0.x` version, semver
-gives minor releases no compatibility promise, so they are **never** automatic —
+gives minor releases no compatibility promise, so they are **never** automatic -
 even under `policy: minor`. That relaxes once the project reaches `1.0`.
 
 ### What the policy badge says
 
 The badge on **Ops → Updates** says what this install **does** by itself, which
 is not always what the saved policy asks for. The server works it out from the
-policy, the checking switch, the install mode and the running version — the
-same rules as the list above, in one place — and the page only words it:
+policy, the checking switch, the install mode and the running version - the
+same rules as the list above, in one place - and the page only words it:
 
 | Saved policy | Install | Badge | Why |
 |---|---|---|---|
@@ -209,7 +209,7 @@ same rules as the list above, in one place — and the page only words it:
 
 When the badge is not the saved policy, a line under it names the saved policy
 and says it has no effect here, and why. The policy itself is **kept**, not
-reset: it takes effect again when the reason goes away — checking is switched
+reset: it takes effect again when the reason goes away - checking is switched
 back on, the data directory is served by a plain binary, filex reaches `1.0`.
 
 ## What an upgrade does, in order
@@ -218,7 +218,7 @@ back on, the data directory is served by a plain binary, filex reaches `1.0`.
    binary a package manager owns).
 2. Download the build for your OS/arch and verify its **SHA-256** against the
    manifest (which arrived over TLS).
-3. Unpack next to the current binary — same filesystem, so the final move is
+3. Unpack next to the current binary - same filesystem, so the final move is
    atomic rather than a cross-device copy.
 4. **Smoke-test** the new binary by running `filex --version`. A truncated
    download, a wrong architecture or a corrupt archive dies here, before
@@ -235,7 +235,7 @@ Everything before step 6 is undone by doing nothing.
 > **Why the snapshot matters:** putting the old binary back does not put the old
 > schema back. A self-upgrade never rolls a migration down, and the down steps
 > that do exist (`filex migrate down`, one at a time) are destructive by
-> definition — `00038`'s drops the columns it added, with whatever was written
+> definition - `00038`'s drops the columns it added, with whatever was written
 > into them. For anything that already migrated, the backup *is* the rollback.
 
 ### Rolling back
@@ -283,13 +283,13 @@ The document filex polls is a plain static JSON file, so you can host your own
 
 Two fields are filex's own rather than GitHub's:
 
-- **`auto_ok`** — the kill switch described above. It cannot be derived from
+- **`auto_ok`** - the kill switch described above. It cannot be derived from
   anything, which is why this document exists at all.
-- **`migrations`** — makes "patches carry no schema changes" checkable instead
+- **`migrations`** - makes "patches carry no schema changes" checkable instead
   of a promise, and makes an install confirm (so a backup is taken) before it
   takes a release that changes the schema. `scripts/gen-update-manifest.py`
-  **derives** it from the git tags — a tag whose tree holds a migration file no
-  earlier tag held — so a mirror built from a checkout with its tags fetched
+  **derives** it from the git tags - a tag whose tree holds a migration file no
+  earlier tag held - so a mirror built from a checkout with its tags fetched
   gets it right without a list to maintain (`--print-migrations` shows the
   result, `--repo-dir` names the checkout). Every published release is listed,
   not just the newest ones.
@@ -312,7 +312,7 @@ only an administrator's bell and badge carry them. The stored row, the admin
 
 | Event | When |
 |---|---|
-| `update_available` | A newly published release is seen. Fires **once** per version — the mark is persisted, so a restart loop cannot turn it into a stream. Severity rises to `warning` for security releases. |
+| `update_available` | A newly published release is seen. Fires **once** per version - the mark is persisted, so a restart loop cannot turn it into a stream. Severity rises to `warning` for security releases. |
 | `update_applied` | A self-upgrade replaced the binary. |
 
 ---
@@ -320,7 +320,7 @@ only an administrator's bell and badge carry them. The stored row, the admin
 ## Embedded / vendored copies
 
 If you embed the filex explorer web component in another application and vendor
-its bundle, that copy has its own upgrade path — the server updating itself does
+its bundle, that copy has its own upgrade path - the server updating itself does
 not move it. Treat it like any other dependency: bump on patch automatically,
 review on minor (the component's config and event API may change), and verify
 after the bump that the host page still loads the bundle it expects.
@@ -332,7 +332,7 @@ after the bump that the host page still loads the bundle it expects.
 All three are admin-only, and in **multi-tenant mode supertenant-only**:
 applying a release replaces the binary every tenant is served by and needs a
 restart of the whole instance, so it belongs to the platform operator. A tenant
-admin gets `403 supertenant_only`, on the status read as well — an admin who
+admin gets `403 supertenant_only`, on the status read as well - an admin who
 cannot apply an update has nothing to do with the answer. Single-tenant
 installs are unaffected. See
 [MULTI-TENANCY.md](MULTI-TENANCY.md#instance-wide-admin-surfaces).
@@ -345,7 +345,7 @@ POST /api/admin/update/apply  → install the pending release
 
 `apply` answers `409` on a container or package-manager install, with the
 instructions in the body. That is a permanent condition, not a transient
-failure — which is exactly why it is not a `5xx`.
+failure - which is exactly why it is not a `5xx`.
 
 The status names the install: `mode` is `binary`, `docker` or `package`, and a
 `package` install also carries `package_manager` (`homebrew`, `winget`,
@@ -355,7 +355,7 @@ absent when `FILEX_INSTALL_MODE=package` was set and nothing more could be
 detected.
 
 `policy` is the saved policy, always as saved. `behavior` is what the install
-does with it by itself — `off`, `announce`, `patch` or `minor` — and
+does with it by itself - `off`, `announce`, `patch` or `minor` - and
 `policy_limit` says why that is less than `policy` asks for: `disabled`
 (checking is switched off), `container`, `package`, or `zero_major` (`minor` on
 a `0.x` version). `policy_limit` is absent when the policy is in force. A

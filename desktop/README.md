@@ -4,7 +4,7 @@ The filex explorer as a desktop app: a window, a tray icon, and a sync engine
 that keeps local folders in step with the server in the background.
 
 What it is **not** is the admin panel in a frame. The window embeds
-`<filex-explorer>` — the same web component every other surface embeds — and the
+`<filex-explorer>` - the same web component every other surface embeds - and the
 app adds the five things a browser tab cannot do:
 
 1. **Several accounts at once.** A rail down the left switches between servers
@@ -12,7 +12,7 @@ app adds the five things a browser tab cannot do:
 2. **A durable session, kept out of plaintext.** Sign-in happens in your real
    browser (PKCE, `src/browser-auth.ts`), and the resulting token is stored
    through the OS keychain (`safeStorage`). If the keychain is unavailable the
-   app **refuses to store the token** rather than writing it to disk — and says
+   app **refuses to store the token** rather than writing it to disk - and says
    so on the sign-in window before a sign-in starts, not after the browser
    round trip (`src/keychain.ts`; on Linux Chromium's `basic_text` fallback
    counts as no keychain).
@@ -37,11 +37,11 @@ app adds the five things a browser tab cannot do:
 4. **It keeps itself up to date, quietly.** See *Updates* below.
 5. **It can be the app that opens a document.** Double-click a `.docx` on the
    disk and it opens in the server's ONLYOFFICE editor, with the edits written
-   back over the local file — see *Open with filex* below. A browser tab cannot
+   back over the local file - see *Open with filex* below. A browser tab cannot
    be a file handler at all.
 
 The top bar ends as the web app's does, in the **notification bell** and the
-**avatar** — the web app's own components, which the explorer draws itself
+**avatar** - the web app's own components, which the explorer draws itself
 because no slot reaches a custom element (`config.notifications`,
 `config.account`; see [docs/DESKTOP.md → Notifications and your
 account](../docs/DESKTOP.md#notifications-and-your-account)). The main process
@@ -49,7 +49,7 @@ reads the bell for the native notifications and the dock badge and hands the
 count to the window (`notify:unread`), so the window adds no second poll; a
 clicked native notification marks its row read and lands where the bell's row
 does (the explorer's `revealNotification`). The avatar carries *User settings*
-(the web app's settings dialog, opened in this window — `config.account
+(the web app's settings dialog, opened in this window - `config.account
 .settings`), *Admin panel ↗* for an administrator and the file list's shortcut
 and tour rows. It carries no *Sign out*: signing an account out of the app is
 an app setting, in Settings → Accounts, beside the language, sync and the
@@ -58,7 +58,7 @@ other accounts.
 Settings also opens a full-screen **Connections** surface, and that too is the
 shared component (`<filex-connections>`) rather than an app-specific screen: it
 manages the account's storages and mints the credentials for reaching the same
-server *without* a browser — S3 access keys, SSH keys for SFTP, NFS exports and
+server *without* a browser - S3 access keys, SSH keys for SFTP, NFS exports and
 the API tokens FTPS, WebDAV and `filex mount` sign in with. ⚠ On Windows the
 bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 [WinFsp](https://winfsp.dev)); see
@@ -74,14 +74,14 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 | `src/channel.ts` | Who installed this copy (Microsoft Store, snap, Flatpak, AUR, or a direct download) and everything that follows from it: who updates it, a snap's real home and engine state, the Linux desktop entry. No Electron import |
 | `src/browser-auth.ts` | Browser sign-in (PKCE) + deep-link/manual code exchange |
 | `src/sync.ts` | Supervises one `filex sync run --watch` per account; pairs, trash, status |
-| `src/openwith.ts` | "Open with filex", the parts that can lose a document: argv classification, local path → synced twin, scratch naming, the atomic write-back, the sweeps. No Electron import — that is what makes it testable |
+| `src/openwith.ts` | "Open with filex", the parts that can lose a document: argv classification, local path → synced twin, scratch naming, the atomic write-back, the sweeps. No Electron import - that is what makes it testable |
 | `src/openwith-io.ts` | The six server calls that round trip does (list, stat, mkdir, upload, download, delete) |
 | `src/remote-search.ts` | ⌘K across the rail: the search and download addresses the main process uses for an account the window is NOT showing, with that account's token (`config.accountSearch` in the shared component). No Electron import |
 | `src/preload-app.cts` | The window's only bridge: `window.filexApp` (state, settings, sync, updates) |
 | `src/preload-shell.cts` | The narrower bridge for the chrome (rail/settings) |
 | `src/preload-editor.cts` | One line, for the editor window: it gets no `filexApp` bridge, only the SPA's own "you are inside the desktop app" flag |
-| `build/installer.nsh` | Windows file-type registration, written by hand — see *Open with filex* |
-| `ui/app.html` | The app's own chrome — rail, settings, boot screens, string table, and the `config.brand` the explorer's top-bar mark comes from (a slot is unreachable in a web component) |
+| `build/installer.nsh` | Windows file-type registration, written by hand - see *Open with filex* |
+| `ui/app.html` | The app's own chrome - rail, settings, boot screens, string table, and the `config.brand` the explorer's top-bar mark comes from (a slot is unreachable in a web component) |
 | `scripts/sync-web.mjs` | Copies the built explorer bundle → `app/` for embedding |
 | `scripts/fetch-cli.mjs` | Puts the `filex` CLI into `build/bin` (fails the build if missing) |
 | `scripts/build-main.mjs` | Bundles the main process with esbuild (see *Packaging traps*) |
@@ -90,7 +90,7 @@ bundled CLI also mounts a real drive letter (`filex mount Z:`, needs the free
 ## Build & run
 
 ```bash
-# from the repo root — the explorer bundle has to exist first
+# from the repo root - the explorer bundle has to exist first
 pnpm run build:packages
 cd desktop
 pnpm run build      # sync the web bundle + bundle the main process
@@ -99,8 +99,8 @@ pnpm run dev        # build, then run it
 # installers (unsigned)
 pnpm run dist:win        # installer + PORTABLE single .exe
 pnpm run dist:linux      # .deb + .rpm + AppImage (the .rpm needs rpmbuild: `apt install rpm`)
-pnpm run dist:mac        # .dmg + .zip — host arch (arm64 on Apple Silicon), ad-hoc sealed
-pnpm run dist:store      # Microsoft Store package (.appx) — Windows only; see "Microsoft Store"
+pnpm run dist:mac        # .dmg + .zip - host arch (arm64 on Apple Silicon), ad-hoc sealed
+pnpm run dist:store      # Microsoft Store package (.appx) - Windows only; see "Microsoft Store"
 pnpm run dist:snap       # Snap Store .snap (strict, core20 template; no snapcraft needed)
 
 # Windows on Arm, cross-built on an x64 machine (the CLI inside is arm64 too)
@@ -122,7 +122,7 @@ built by real snapcraft (in LXD), and its bundled fpm is x86-64 only
 built, and electron-updater reads **one** `latest.yml` on Windows whatever the
 CPU. The release joins the two with the x64 installer first
 (`.github/workflows/scripts/merge-latest-yml.mjs` in the public repository);
-never publish the arm64 run's `latest.yml` on its own — every x64 install would
+never publish the arm64 run's `latest.yml` on its own - every x64 install would
 be offered the arm64 installer. Linux has a feed per architecture
 (`latest-linux.yml`, `latest-linux-arm64.yml`) and needs no joining.
 
@@ -135,12 +135,12 @@ without the embedded server UI (85 MB of admin SPA the app already ships in
 `app/`).
 
 The runtime is **Electron 44** (Node 24, Chromium 152), supported until
-2027-03-02 — [releases.electronjs.org/schedule](https://releases.electronjs.org/schedule)
+2027-03-02 - [releases.electronjs.org/schedule](https://releases.electronjs.org/schedule)
 lists each major's end of life; only the latest three are patched.
 
 - ⚠ `pnpm install` does **not** download the Electron binary any more (since
-  Electron 42 there is no postinstall step). The first thing that needs it —
-  `pnpm run dev`, an e2e suite, `require('electron')` — fetches it, and
+  Electron 42 there is no postinstall step). The first thing that needs it -
+  `pnpm run dev`, an e2e suite, `require('electron')` - fetches it, and
   `node node_modules/electron/install.js` does it up front. (The package
   declares `engines.node >= 22.12`; the download itself also ran on Node 20.20
   when measured.) Packaging never touches it: electron-builder downloads its
@@ -160,9 +160,9 @@ lists each major's end of life; only the latest three are patched.
 ## Updates
 
 The app updates itself and nobody is asked about it: it checks a few times a
-day, downloads in the background, and installs at a moment that costs nothing —
+day, downloads in the background, and installs at a moment that costs nothing -
 when you quit, or once the machine has been idle for ten minutes with no window
-open — then comes back in the tray. The sync watchers are stopped before the
+open - then comes back in the tray. The sync watchers are stopped before the
 swap, so an update never lands mid-transfer.
 
 Two things make that possible, and both are easy to undo by accident:
@@ -179,13 +179,13 @@ The feed is a plain static directory on filex.sh, not the GitHub provider: when
 it was chosen this repo's mirror was private, and that provider would need a
 token shipped inside the app. `FILEX_NO_UPDATE=1` turns the whole thing off.
 
-**A store copy never touches the feed** (Microsoft Store, Flatpak, snap —
+**A store copy never touches the feed** (Microsoft Store, Flatpak, snap -
 `src/channel.ts`). The store replaces the package itself; electron-updater does
 not know it is inside one and would download the NSIS installer (or a `.deb`)
 and run it from within the package. Settings says which store updates the copy
 and offers its page instead.
 
-**Two builds can never apply an update in place** — the ad-hoc sealed macOS app
+**Two builds can never apply an update in place** - the ad-hoc sealed macOS app
 (see *Signing*) and the Windows portable `.exe` (see below). They take the same
 route, which is worth understanding before adding a third: the updater is never
 wired at all, so nothing is downloaded that could not be applied, and the same
@@ -195,12 +195,12 @@ Settings card stuck at "Checking…" forever, waiting on an updater nobody wired
 
 ## Channels: who installs it, who updates it
 
-**Names.** On Linux the desktop app is **`filex-app`** — the command
+**Names.** On Linux the desktop app is **`filex-app`** - the command
 (`/usr/bin/filex-app`), the .deb/.rpm package, the desktop entry, the snap and
 the AUR package (`filex-app-bin`). **`filex` is the CLI**, everywhere. The
 window, the menu entry and the tray still say "filex", and the download files
 keep their `filex-desktop-*` names on every platform. Until 0.43.x the Linux
-desktop package was called `filex` and put `/usr/bin/filex` on PATH — the
+desktop package was called `filex` and put `/usr/bin/filex` on PATH - the
 CLI's command.
 
 | Channel | Built by | Published to | Updated by |
@@ -216,7 +216,7 @@ CLI's command.
 | macOS `.dmg` / `.zip` | `dist:mac` | GitHub Release + feed | nobody until signed (see *Signing*) |
 | Homebrew cask `filex-app` | `scripts/pkg-manifests.mjs` (from the Release `.dmg`) | [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex) | `brew upgrade` |
 
-Where the store channels stand is measured, not assumed — the user-facing
+Where the store channels stand is measured, not assumed - the user-facing
 pages ([`README.md`](../README.md), [`docs/DESKTOP.md`](../docs/DESKTOP.md), the
 filex.sh install box and the install prompt in `web/`) show a badge or a
 command only for a listing that installs today. As of 0.47.0: the Microsoft
@@ -224,7 +224,7 @@ Store, the Snap Store (stable) and the Homebrew tap are live; the winget PRs
 pass validation and wait for the moderators' first review, so no page offers
 `winget install` as working; the AUR package is not published (new AUR
 accounts were closed), so no page mentions it. Change those pages when one of
-these moves — `gh pr list -R microsoft/winget-pkgs --search "BRFTech in:title"`
+these moves - `gh pr list -R microsoft/winget-pkgs --search "BRFTech in:title"`
 and `curl -s "https://aur.archlinux.org/rpc/v5/info?arg[]=filex-app-bin"` say
 where they are. The badges themselves are the stores' unmodified artwork in
 `docs/badges/`; filex.sh carries a mirror of them (`site/assets/badges/`,
@@ -236,8 +236,8 @@ checked by `web/tests/deploy/siteAssets.test.ts`).
 updater there: Settings names who keeps the copy current and opens its page.
 
 **Upgrading from the package called `filex` (≤ 0.43.x).** The new .deb/.rpm
-`Conflicts`/`Replaces` (rpm: `Obsoletes`) the old one — bounded to
-`filex (<< 0.44.0)`, so a future CLI package named `filex` is never touched —
+`Conflicts`/`Replaces` (rpm: `Obsoletes`) the old one - bounded to
+`filex (<< 0.44.0)`, so a future CLI package named `filex` is never touched -
 and `apt`/`dnf` swap them in one step. At its first start the renamed app
 carries over what the user set up under the old name
 (`main.ts` → `migrateLegacyLinuxNames`): an autostart entry it wrote
@@ -246,7 +246,7 @@ file of that name is left alone), and "make filex the default" choices in
 `mimeapps.list` (`filex.desktop` → `filex-app.desktop`, once no
 `filex.desktop` is installed anywhere).
 
-**Snap** `filex-app` (strict confinement, `base: core20` — electron-builder's
+**Snap** `filex-app` (strict confinement, `base: core20` - electron-builder's
 template; core24 arrives with electron-builder 26):
 
 - `HOME` inside a snap is `~/snap/filex-app/<revision>`. The default filex
@@ -256,26 +256,45 @@ template; core24 arrives with electron-builder 26):
   real `~/.filex` is a hidden directory the `home` interface does not reach.
   ⚠ A terminal `filex sync` outside the snap therefore does not see the snap's
   pairings.
-- Two plugs do not connect by themselves: `snap connect
+- Three plugs do not connect by themselves: `snap connect
   filex-app:password-manager-service` (the keyring; until then the sign-in
-  window says so — with the command spelled from the snap's own name — and
-  does not start a sign-in) and `snap connect filex-app:removable-media`
-  (folders under `/media`, `/run/media`, `/mnt`).
+  window says so - with the command spelled from the snap's own name - and
+  does not start a sign-in), `snap connect filex-app:removable-media`
+  (folders under `/media`, `/run/media`, `/mnt`) and, since 0.50,
+  `snap connect filex-app:browser-sandbox` (Chromium's sandbox; until then the
+  launcher refuses to start the app and prints that command).
 - `filex://` and "Open with" come from the desktop entry snapd installs
   (`filex-app_filex-app.desktop`). "Make filex the default" cannot reach the
   desktop from inside the snap, so Settings explains the file manager's *Open
   with* instead of offering the button.
 - "Start when I sign in" writes
-  `~/snap/filex-app/current/.config/autostart/filex-app.desktop` — exactly the
+  `~/snap/filex-app/current/.config/autostart/filex-app.desktop` - exactly the
   file snapd's `autostart:` launches, `--hidden` included.
-- Chromium's own sandbox is off (`--no-sandbox`, electron-builder's default
-  under strict confinement); the confinement is the sandbox.
+- Chromium's own sandbox is ON since 0.50: the `browser-sandbox` plug
+  (`browser-support` with `allow-sandbox: true`) lets the app build its
+  user-namespace sandbox inside the confinement. Without such a plug
+  electron-builder starts a snap with `--no-sandbox` and leaves chrome-sandbox
+  out, which is what 0.49 shipped. The Snap Store reviews `allow-sandbox` by
+  hand; the release treats an upload waiting for that review as a warning.
 - snapd holds a refresh of a running app back for up to 14 days, and filex
   usually runs in the tray: a snap update lands on quit, or when that runs out.
 
+**The Linux launcher** (since 0.50). `filex-app` in every Linux package is
+`build/linux/launcher.sh`, and the Electron binary is `filex-app-bin` beside
+it: `scripts/linux-launcher.cjs` swaps them in `afterPack` (through
+`scripts/after-pack.cjs`), so the .deb's `/usr/bin/filex-app` and menu entry,
+the AppImage's AppRun and the snap's command.sh all start the launcher. It
+checks that Chromium's sandbox can be built (the setuid `chrome-sandbox` is in
+place, or `unshare -Ur true` works, or in a snap `snapctl is-connected
+browser-sandbox`) and otherwise shows what to do and exits 78; it never adds
+`--no-sandbox`. `process.execPath` is `filex-app-bin`, so the sign-in entry
+names the launcher (`src/login-item.ts`). Tests:
+`test/linux-launcher.test.ts`; the release opens every Linux package with the
+sandbox checked (`desktop-look.mjs --expect-sandbox`, `--expect-refusal`).
+
 **AppImage** installs nothing, so at each start it writes a hidden
 `~/.local/share/applications/filex-appimage.desktop` pointing at itself and
-makes it the `filex://` handler with `xdg-mime` — the only way the browser can
+makes it the `filex://` handler with `xdg-mime` - the only way the browser can
 hand the sign-in back to a bare image. `TryExec` makes desktops ignore the
 entry once the image is deleted. (The name did not follow the rename: the image
 rewrites that very file at every start, and a new name would leave the old one
@@ -287,8 +306,10 @@ behind, still claiming the link.)
   filex-app` (names are reviewed by hand, up to two working days) → `snapcraft
   export-login --snaps=filex-app --acls=package_access,package_push,package_update,package_release
   --expires=<date> creds.txt` → the file's content as the repository secret
-  `SNAPCRAFT_STORE_CREDENTIALS`. Auto-connecting the two plugs above is a
-  separate request on the Snapcraft forum (store-requests, a week's vote).
+  `SNAPCRAFT_STORE_CREDENTIALS`. Auto-connecting the plugs above is a
+  separate request on the Snapcraft forum (store-requests, a week's vote);
+  `browser-sandbox` (`allow-sandbox: true`) is the one the Store also reviews
+  at upload.
 - AUR: an aur.archlinux.org account with its own SSH key → run
   `packaging/aur/update-pkgbuild.sh <version>` (the committed PKGBUILD is a
   template with SKIP checksums until the first `filex-app` release) and push
@@ -301,13 +322,13 @@ behind, still claiming the link.)
 ## Portable (Windows)
 
 `pnpm run dist:win` produces two artifacts: the installer, and
-`filex-desktop-portable-x64.exe` — one self-extracting file that runs from
+`filex-desktop-portable-x64.exe` - one self-extracting file that runs from
 wherever it is put. Linux and macOS already had this (the AppImage runs
 unextracted, the mac `.zip` is unzip-and-run); Windows was the only platform
 with no way to run filex without an installer.
 
 **Its data lives beside the `.exe`, not in `%APPDATA%`.** For an installed app
-the roaming profile is right — nobody wants a program scattering folders across
+the roaming profile is right - nobody wants a program scattering folders across
 their desktop. A run-and-delete copy is the opposite case: it is carried in on
 a stick, run on a machine that is not the user's, and the promise is that
 deleting one folder leaves nothing of theirs behind.
@@ -317,7 +338,7 @@ How, in `src/portable.ts`:
 - The signal is **`PORTABLE_EXECUTABLE_DIR`**, which the portable stub sets
   before launching the app (`templates/nsis/portable.nsi` in app-builder-lib).
   ⚠ It is the *only* signal. `process.execPath` under this target is the
-  extraction temp directory, which the stub deletes on exit — guessing from it
+  extraction temp directory, which the stub deletes on exit - guessing from it
   would give an account store that empties itself between launches. No
   variable means not portable, and nothing is overridden.
 - One `app.setPath('userData', …)` (plus `sessionData`), made at the **top of
@@ -328,16 +349,16 @@ How, in `src/portable.ts`:
   line written, which is why `portable-e2e.mjs` asserts the log location: it is
   the one thing that catches a `setPath` that ran a moment too late.
 - ⚠ The sync engine is the exception that had to be handled separately. It
-  keeps its pairs, baselines and **local trash — real copies of files it
-  deleted** — in `~/.filex/sync`, which on a borrowed machine is somebody
+  keeps its pairs, baselines and **local trash - real copies of files it
+  deleted** - in `~/.filex/sync`, which on a borrowed machine is somebody
   else's home directory. `sync.ts` therefore passes **`FILEX_SYNC_DIR`** (new
   in the Go CLI, mirroring the existing `FILEX_CLI_CONFIG`) so that store lands
   inside `filex-data` too.
-- ⚠⚠ **When the `.exe` sits somewhere unwritable** — `C:\Program Files`, a
-  read-only stick, a share — the fallback is a **sibling** directory,
+- ⚠⚠ **When the `.exe` sits somewhere unwritable** - `C:\Program Files`, a
+  read-only stick, a share - the fallback is a **sibling** directory,
   `%APPDATA%\@brftech\filex-desktop-portable`, and Settings shows the path.
   Measured before it was fixed: falling back to the plain default put the
-  portable copy straight into the *installed* app's profile — reading and
+  portable copy straight into the *installed* app's profile - reading and
   writing the accounts of whoever owns the machine, and, because the
   single-instance lock is keyed on that directory, exiting silently and raising
   the installed app's window whenever it was already running.
@@ -358,7 +379,7 @@ does it for you.
 
 ## Language
 
-*Settings → Language* — System / English / Türkçe, stored in the app state. One
+*Settings → Language* - System / English / Türkçe, stored in the app state. One
 resolver in the main process decides what "system" means, because three surfaces
 read it: this window, the tray menu (main process) and the explorer inside it (a
 separate component with its own catalogue). Covered by `scripts/lang-e2e.mjs`.
@@ -377,7 +398,7 @@ matters when working on this code:
   in one place, because two `argv.find(…)` calls drift apart.
 - **Documents are released only after `refreshPairs()`.** Whether a file has a
   synced twin is the first question asked, and `knownPairs` is empty until that
-  resolves — a cold start would otherwise copy a file that needed no copy.
+  resolves - a cold start would otherwise copy a file that needed no copy.
 - **The write-back is the dangerous part** (`writeBackAtomic`): temp file in the
   *same* directory then rename, never a write over the document, never a rename
   across drives (EXDEV), never resurrecting a document the user deleted while it
@@ -389,7 +410,7 @@ matters when working on this code:
   `FILEX_OPENWITH_POLL_MS` / `_GRACE_MS` / `_QUIET_MS` shorten it for tests.
 - ⚠⚠ **Windows registration is hand-written (`build/installer.nsh`) and must
   stay that way.** electron-builder's `fileAssociations` uses an NSIS macro that
-  writes the DEFAULT ProgId of `.docx` — it takes the file type at install time,
+  writes the DEFAULT ProgId of `.docx` - it takes the file type at install time,
   which on a machine with no Office (the exact machine this feature is for) is
   enough to make filex the handler without anyone being asked. The hand-written
   version adds an `OpenWithProgids` entry and a `SupportedTypes` list and
@@ -397,7 +418,7 @@ matters when working on this code:
   **`rank: Alternate`** for the same reason; Linux uses `linux.mimeTypes` (not
   `fileAssociations`, which would also ship our own `<mime-type>` XML
   redeclaring types shared-mime-info already defines).
-- **The extension list lives in five places** — `OFFICE_EXTENSIONS` in
+- **The extension list lives in five places** - `OFFICE_EXTENSIONS` in
   `src/openwith.ts`, `mac.fileAssociations` + `linux.mimeTypes` in
   `electron-builder.yml`, `build/installer.nsh` and `build/appx-extensions.xml`
   (Microsoft Store). YAML, NSIS and XML cannot import TypeScript; widening one
@@ -433,7 +454,7 @@ and hands each device the highest version it can run.
   itself, so the package carries a mapping that `scripts/appx-manifest.cjs`
   (the `appxManifestCreated` hook) writes into the manifest only: `0.43.1` →
   `1.0.4301.0`, and from filex `1.1.0` on the two numbers are equal. ⚠ filex
-  never ships a `1.0.x` — it would sort below every 0.x already in the Store.
+  never ships a `1.0.x` - it would sort below every 0.x already in the Store.
   The app itself keeps reporting its real version.
 - **Identity.** `appx.identityName`, `publisher` and `publisherDisplayName`
   in `electron-builder.yml` must be Partner Center's *Product identity* values,
@@ -455,15 +476,20 @@ and hands each device the highest version it can run.
   private copy of, so a Store copy on a machine that still has the NSIS install
   shares its accounts and folders. Settings says so and points at Windows'
   installed-apps list.
-- `pnpm run e2e:store` (Windows, Developer Mode) installs an e2e *variant* —
+- `pnpm run e2e:store` (Windows, Developer Mode) installs an e2e *variant* -
   own identity, own `filex-e2e://` scheme, own userData name, so it cannot touch
-  a real installation — and checks it as a Store copy: manifest, a cold
+  a real installation - and checks it as a Store copy: manifest, a cold
   protocol launch, the running app's channel, a toast Windows files under the
   package (Action Center), AppData redirection, the startup task. The variant
-  is removed afterwards. ⚠ The GitHub runner cannot activate a package, so
-  those checks only warn there; the local release run is where they are
-  strict (`scripts/release/plan.mjs`, "desktop: the Store package works as a
-  Store copy").
+  is removed afterwards. It puts no window on screen: the app runs with
+  `--keep-windows-hidden` (its window is created and driven over DevTools but
+  never shown), the protocol launch is frozen the moment it shows up and
+  then stopped, and a watch over the variant's windows fails the run if one
+  appears (on CI, where nobody's screen is at stake, those two window checks
+  only warn); the test toast is the one thing it shows. ⚠ The GitHub runner
+  cannot activate a package, so those checks only warn there; the local
+  release run is where they are strict (`scripts/release/plan.mjs`,
+  "desktop: the Store package works as a Store copy").
 
 ## Security posture (do not loosen)
 
@@ -473,7 +499,7 @@ expose the narrowest surface that works. Tokens live in the OS keychain.
 
 ## Signing
 
-Releases are **unsigned** by design for now — Windows SmartScreen and macOS
+Releases are **unsigned** by design for now - Windows SmartScreen and macOS
 Gatekeeper will warn. A code-signing certificate is a separate, paid decision,
 not a defect. The one signed Windows build is the Microsoft Store package, and
 Microsoft signs it (see *Microsoft Store*).
@@ -486,7 +512,7 @@ macOS specifics, because the failure mode there is not a warning but a wall:
   (an `afterPack` hook) therefore re-seals the bundle with a deep **ad-hoc**
   signature, which downgrades the verdict to the honest "unverified developer"
   dialog.
-- First launch of a downloaded copy: macOS blocks once — open **System
+- First launch of a downloaded copy: macOS blocks once - open **System
   Settings → Privacy & Security → Open Anyway** (or right-click → Open on
   older versions). A locally built copy has no quarantine flag and just opens.
 - **Self-update is impossible on macOS until real signing lands**: Squirrel.Mac
@@ -498,7 +524,7 @@ macOS specifics, because the failure mode there is not a warning but a wall:
   `.dmg` as a **Download** button, rather than announcing an install it cannot
   perform. The `zip` target and `latest-mac.yml` ship anyway so the feed is
   already correct the day a Developer ID certificate (and notarization)
-  arrives — which is the actual fix for all of the above.
+  arrives - which is the actual fix for all of the above.
 
 ## Packaging traps (each of these shipped once)
 
@@ -514,17 +540,17 @@ macOS specifics, because the failure mode there is not a warning but a wall:
   fixed filename.
 - **nsis and portable both emit `.exe`.** Under the shared `artifactName`
   template they are the same filename written twice, and whichever target ran
-  last wins — so `portable.artifactName` is an override, not a nicety. It obeys
+  last wins - so `portable.artifactName` is an override, not a nicety. It obeys
   the no-version rule too: `filex-desktop-portable-x64.exe`.
 - **The Windows feed does not list the portable build.** Measured:
   electron-builder writes only the installer into `latest.yml`, because that is
   the artifact its updater would apply. So the app builds that filename itself
   (`PORTABLE_ARTIFACT` in `main.ts`) to link a manual download, and
-  `portable-e2e.mjs` asserts the two agree — a rename breaks a test rather than
+  `portable-e2e.mjs` asserts the two agree - a rename breaks a test rather than
   somebody's browser.
 - **The .deb/.rpm package name is not `executableName`.** For a scoped npm
   name electron-builder names the package after productName (`filex`), so
-  `deb.packageName`/`rpm.packageName` say `filex-app` explicitly — without them
+  `deb.packageName`/`rpm.packageName` say `filex-app` explicitly - without them
   the renamed build was still `Package: filex` and `apt` upgraded the old one
   in place.
 - **A URL scheme goes in `linux.mimeTypes`, not `linux.protocols`.**
@@ -545,27 +571,28 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | Script | What it proves |
 |---|---|
 | `ui-login-e2e.mjs` | Browser sign-in end to end, including the manual-code fallback |
-| `signin-retry-e2e.mjs` | A sign-in that fails — a stale link, a refused code, a reload of the window — stays on the waiting screen of the same attempt; *Start again* begins a new one; *Cancel* is the only way back to the server address (issue #36) |
+| `signin-retry-e2e.mjs` | A sign-in that fails - a stale link, a refused code, a reload of the window - stays on the waiting screen of the same attempt; *Start again* begins a new one; *Cancel* is the only way back to the server address (issue #36) |
 | `chrome-e2e.mjs` | The app's own chrome: rail, tabs, theme, scrollbars |
 | `files-e2e.mjs` · `share-e2e.mjs` | Listing, upload, preview; share links |
 | `share-limit-e2e.mjs` | A capped link hands out exactly that many downloads |
 | `sync-e2e.mjs` | A paired folder actually syncs, both directions |
-| `update-e2e.mjs` | The updater downloads and stages a newer version — and installs silently |
+| `update-e2e.mjs` | The updater downloads and stages a newer version - and installs silently |
 | `portable-e2e.mjs` | The portable `.exe` is named so it neither overwrites the installer nor carries a version; the real self-extracting `.exe` starts and loads a page; its data lands in one folder beside it; and Settings says this copy does not update itself instead of sitting at “Checking…” |
 | `lang-e2e.mjs` | The language setting moves the shell, the file list and the stored state |
+| `settings-layout-e2e.mjs` | Every segmented setting (bandwidth limits, when to sync, language, how a file opens) stays inside its card, in English and Turkish, at the window's narrowest (720 px) and at 1440: no button cut, none past the card's edge, the strip never over its description |
 | `shell-e2e.mjs` | The shell windows (settings, pickers) open and answer |
 | `dragout-e2e.mjs` | Dragging files OUT: what lands on this computer before an OS drag can start |
 | `search-e2e.mjs` | ⌘K "Everywhere" in the app window: the rows are exactly the server's answer; a hit downloads and drags out from its row; a drop on the palette is not an upload; with two accounts on the rail (one server, two people) one badge per account, the second person sees only what they may, another account's hit downloads and drags as THAT account, and opening it switches the rail. Needs an ADMIN (it creates its own storage, files and second user); `FILEX_SHOTS_DIR` saves two screenshots |
 | `openwith-e2e.mjs` | A document double-clicked from outside every synced folder: second instance → editor window → server-side save → the bytes on the ORIGINAL local path change → the copy is gone after the window closes. Plus the synced-twin route, which makes no copy at all |
 | `plumbing-smoke.mjs` | `app://`, preload injection and `safeStorage`, without a server |
 
-And three that MEASURE rather than assert — they answer "is this presentable"
+And three that MEASURE rather than assert - they answer "is this presentable"
 and "does this window offer the same thing twice", which no pass/fail can:
 
 | Script | What it shows |
 |---|---|
-| `look-chrome.mjs` | Photographs every surface the app draws ITSELF — connect, waiting, rail, settings (English + Türkçe, light + dark + a palette), the folder picker, the sync-trash listing, storage connections. `LOOK_OUT` / `LOOK_TAG` name the files; `LOOK_DEAD_SERVER` adds the "can't reach the server" shot |
-| `diag-chrome-metrics.mjs` | Prints the chrome's control heights, type scale and colours beside the `--fe-*` tokens they are supposed to be — the measurement behind `test/chrome-tokens.test.ts` |
+| `look-chrome.mjs` | Photographs every surface the app draws ITSELF - connect, waiting, rail, settings (English + Türkçe, light + dark + a palette), the folder picker, the sync-trash listing, storage connections. `LOOK_OUT` / `LOOK_TAG` name the files; `LOOK_DEAD_SERVER` adds the "can't reach the server" shot |
+| `diag-chrome-metrics.mjs` | Prints the chrome's control heights, type scale and colours beside the `--fe-*` tokens they are supposed to be - the measurement behind `test/chrome-tokens.test.ts` |
 | `diag-duplicates.mjs` | Lists the explorer's header cluster, its "⋯" menu, the rail and the settings surface side by side, so "two controls, one job" is read off two lists instead of remembered |
 
 
@@ -573,16 +600,16 @@ Two more, which need neither a server nor Electron:
 
 | Command | What it proves |
 |---|---|
-| `pnpm test` | The parts of "Open with filex" that can lose a document, measured directly (`test/openwith.test.ts`, Node's own runner via type stripping); the notification and portable-data decisions; and `test/chrome-tokens.test.ts` — the shell's chrome states no colour of its own, sizes its controls from `--fe-h-*`, and never becomes a SECOND writer of a preference the file list already owns |
-| `pnpm test:red` | ⚠ The same cases against a deliberately naive implementation (`test/openwith-naive.ts`), and **fails if any of them passes there**. A case the first draft already satisfies measures nothing while looking like it does — this repo has shipped exactly that kind of test before |
+| `pnpm test` | The parts of "Open with filex" that can lose a document, measured directly (`test/openwith.test.ts`, Node's own runner via type stripping); the notification and portable-data decisions; and `test/chrome-tokens.test.ts` - the shell's chrome states no colour of its own, sizes its controls from `--fe-h-*`, and never becomes a SECOND writer of a preference the file list already owns |
+| `pnpm test:red` | ⚠ The same cases against a deliberately naive implementation (`test/openwith-naive.ts`), and **fails if any of them passes there**. A case the first draft already satisfies measures nothing while looking like it does - this repo has shipped exactly that kind of test before |
 
 ⚠ `openwith-e2e.mjs` performs the editor's save the way ONLYOFFICE's callback
-does — by writing new bytes over the scratch copy through the API. The document
+does - by writing new bytes over the scratch copy through the API. The document
 server itself is a separate ~2 GB service that has to reach the filex instance
 over the network, and a local run has none; everything on this side of that one
 POST is the real product code.
 
-⚠ `dragout-e2e.mjs` measures the **preparation** — which bytes reach the disk, a
+⚠ `dragout-e2e.mjs` measures the **preparation** - which bytes reach the disk, a
 folder's subtree, the cache making the second drag free, and that an unprepared
 selection is refused. It never calls `dragStart` on a valid selection: that
 opens the OS drag loop, which cannot be driven from a script and would leave a
@@ -593,7 +620,7 @@ one step a human has to do.
 app has not prepared and then copies the stand-in with **Explorer's own copy
 engine** (`Shell.Application.CopyHere`) rather than `fs.mkdirSync`, printing
 every `[drag …]` / `[xfer …]` step. That difference is what caught the header
-bug in 0.27.2 — the suite's simulated drop could not see it.
+bug in 0.27.2 - the suite's simulated drop could not see it.
 
-`look*.mjs` and `diag-*.mjs` are not suites — they open the app and take a
+`look*.mjs` and `diag-*.mjs` are not suites - they open the app and take a
 screenshot of one surface, for looking at a change rather than asserting it.

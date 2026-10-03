@@ -74,6 +74,35 @@ describe('staged upload from a stream source', () => {
     expect(server.wireBytes).toBe(data.length + CHUNK);
   });
 
+  // #86: an in-place E2E conversion of a file over 200 MB goes staged, and
+  // the server checks `expect` and `e2e_convert` at the COMMIT - the moment
+  // the plaintext is replaced (upload_staged.go). Without them the commit
+  // would keep the plaintext as a version, and overwrite a file edited since.
+  it('sends the commit query a conversion write needs, at the commit and nowhere else', async () => {
+    const data = pattern(CHUNK * 2 + 9);
+    const up = useUploadChunked(config, fakeApi(server), memoryStorage());
+    await up.uploadFile({
+      path: 'main://docs',
+      file: new File([], 'büyük.mp4'),
+      source: streamUploadSource(bytesStream(data), data.length),
+      commitQuery: { e2e_convert: '1', expect: '1234:1700000000000' },
+    });
+    expect(server.commitQueries).toEqual([{ e2e_convert: '1', expect: '1234:1700000000000' }]);
+    const id = [...server.sessions.keys()][0];
+    expect(Array.from(server.assembled(id))).toEqual(Array.from(data));
+  });
+
+  it('an ordinary upload commits with no query at all', async () => {
+    const data = pattern(CHUNK + 1);
+    const up = useUploadChunked(config, fakeApi(server), memoryStorage());
+    await up.uploadFile({
+      path: 'main://docs',
+      file: new File([], 'x.fxe'),
+      source: streamUploadSource(bytesStream(data), data.length),
+    });
+    expect(server.commitQueries).toEqual([{}]);
+  });
+
   it('is never bookmarked: its bytes are gone with the tab, a resume could not rebuild them', async () => {
     const data = pattern(CHUNK * 2 + 5);
     const store = memoryStorage();

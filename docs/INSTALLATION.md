@@ -5,27 +5,27 @@ Pick the path that matches how far you want to go:
 | Path | What you get | Best for |
 |---|---|---|
 | [**Minimal**](#minimal) | One container, SQLite, a local folder. No external services. | Trying it out, small/personal use |
-| [**Full stack (Compose)**](#full-stack-docker-compose) | filex + PostgreSQL + Redis + OnlyOffice + MinIO + Caddy (auto‑HTTPS). | Real self‑hosting, teams |
+| [**Full stack (Compose)**](#full-stack-docker-compose) | filex + PostgreSQL + Redis + OnlyOffice + an S3 server + Caddy (auto-HTTPS). | Real self-hosting, teams |
 | [**Kubernetes (Helm)**](#kubernetes-helm) | Helm chart with toggles for the same components. | Clusters |
 | [**App stores**](#app-stores) | Ready-made packages for Umbrel, CasaOS, Runtipi, Unraid, Portainer. | Home servers / NAS |
 | [**Binary**](#binary) | A single static binary. | No Docker, systemd, edge devices |
 
 All paths end at the same place: the app at `…/admin` (the operator's door) or at
-`…/drive` (the neutral door, for the accounts you hand out). Both open **Home** —
-your storages, what you opened last, what you starred — with the admin panel one
+`…/drive` (the neutral door, for the accounts you hand out). Both open **Home** -
+your storages, what you opened last, what you starred - with the admin panel one
 click away from the explorer's header for whoever is allowed it, and both start
-with a first‑run admin account (see [First run](#first-run)).
+with a first-run admin account (see [First run](#first-run)).
 
-**Images.** `ghcr.io/brf-tech/filex:latest` is the full‑featured image
+**Images.** `ghcr.io/brf-tech/filex:latest` is the full-featured image
 (thumbnails for image/video/pdf/office included). `…:slim` is a smaller image
-without the thumbnail toolchain — thumbnails then degrade to placeholder cards.
+without the thumbnail toolchain - thumbnails then degrade to placeholder cards.
 The binary inside both is identical; only the runtime tooling differs.
 
 ---
 
 ## Minimal
 
-The fastest way to a running instance — SQLite, embedded search + thumbnails,
+The fastest way to a running instance - SQLite, embedded search + thumbnails,
 one local storage folder, nothing external.
 
 ```bash
@@ -40,7 +40,7 @@ docker run -d --name filex -p 5212:5212 \
 
 The two `FILEX_DEFAULT_STORAGE_*` variables are what make the explorer show
 something. Without them filex boots with no storage at all and the UI says
-*"No storage configured"* — correct, and a poor first minute. With them, the
+*"No storage configured"* - correct, and a poor first minute. With them, the
 folder you bind at `/srv/files` is seeded as a **local** storage named `Files`
 on first boot, so your files are there when you log in.
 
@@ -49,7 +49,7 @@ on first boot, so your files are there when you log in.
 > thumbnail cache, first-run secret), `/srv/files` is content. A named volume
 > for the first and a bind mount for the second keeps them apart.
 
-Open <http://localhost:5212/admin> and grab the first‑run password from the logs
+Open <http://localhost:5212/admin> and grab the first-run password from the logs
 (`docker logs filex`).
 
 Prefer Compose? Use [`deploy/compose/docker-compose.minimal.yml`](../deploy/compose/docker-compose.minimal.yml):
@@ -62,21 +62,21 @@ docker compose -f docker-compose.minimal.yml logs -f      # first-run creds
 
 It mounts `./files` into the container at `/srv/files` and seeds it as the
 default **local** storage, so anything you drop into `deploy/compose/files`
-shows up in the explorer with no setup at all. More drivers — S3, SFTP,
-WebDAV, FTP, SMB — are added from the admin UI (see [STORAGE.md](STORAGE.md)).
+shows up in the explorer with no setup at all. More drivers - S3, SFTP,
+WebDAV, FTP, SMB - are added from the admin UI (see [STORAGE.md](STORAGE.md)).
 
 > Set `FILEX_PUBLIC_URL` to the URL people actually open. Behind a reverse proxy
-> that's your `https://…` domain — it's baked into share links, the OIDC
+> that's your `https://…` domain - it's baked into share links, the OIDC
 > redirect, and OnlyOffice callbacks.
 
 ---
 
 ## Full stack (Docker Compose)
 
-A production‑shaped, one‑command stack: filex + **PostgreSQL** (database) +
-**Redis** (queue) + **OnlyOffice** (document editing) + **MinIO** (S3 storage) +
+A production-shaped, one-command stack: filex + **PostgreSQL** (database) +
+**Redis** (queue) + **OnlyOffice** (document editing) + an **S3 server** (Versity S3 Gateway) +
 **Caddy** (reverse proxy with automatic HTTPS), and optionally **ClamAV**
-(antivirus — the filex image ships no scanner, so it runs as its own container
+(antivirus - the filex image ships no scanner, so it runs as its own container
 under the `clamav` profile). Files in [`deploy/compose/`](../deploy/compose/).
 
 **1. Configure.**
@@ -89,18 +89,17 @@ $EDITOR .env          # set domains + secrets
 
 Set `FILEX_DOMAIN` / `ONLYOFFICE_DOMAIN` and strong secrets
 (`openssl rand -hex 24`). The **`ONLYOFFICE_JWT_SECRET` must be identical**
-between filex and OnlyOffice — the compose file already wires the same variable
+between filex and OnlyOffice - the compose file already wires the same variable
 to both.
 
-> **Zero‑touch config.** The admin account, SSO/LDAP/header auth, SMTP, branding
+> **Zero-touch config.** The admin account, SSO/LDAP/header auth, SMTP, branding
 > and an initial storage can all be set through `FILEX_*` env in `.env`, so the
-> stack comes up already configured (no first‑run UI clicks). See
-> [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero‑touch seeding) and
+> stack comes up already configured (no first-run UI clicks). See
+> [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero-touch seeding) and
 > the [`deploy/compose/`](../deploy/compose/) examples.
 
-**2. DNS.** Point `FILEX_DOMAIN` and `ONLYOFFICE_DOMAIN` (and
-`MINIO_CONSOLE_DOMAIN` if you keep the console) at the host. Open ports **80 and
-443** so Caddy can issue certificates.
+**2. DNS.** Point `FILEX_DOMAIN` and `ONLYOFFICE_DOMAIN` at the host. Open
+ports **80 and 443** so Caddy can issue certificates.
 
 **3. Launch.**
 
@@ -112,19 +111,25 @@ docker compose -f docker-compose.full.yml logs -f filex      # first-run creds
 Caddy fetches HTTPS certs automatically; open `https://<FILEX_DOMAIN>/admin` (your
 users: `https://<FILEX_DOMAIN>/drive`).
 
-**4. Wire the bundled MinIO as a storage.** Create a bucket in the MinIO console
-(`https://<MINIO_CONSOLE_DOMAIN>`), then **Storages → Add** an S3 storage:
+**4. Wire the bundled S3 server as a storage** (the `versitygw` profile). It
+makes the bucket `FILEX_DEFAULT_STORAGE_S3_BUCKET` names (default `filex`) on
+start; seed it as the default storage with Option A in `.env`, or **Storages →
+Add** an S3 storage:
 
-- endpoint `http://minio:9000` (filex reaches MinIO over the internal network)
-- `path_style` = true, `region` = `auto`
-- `bucket` = your bucket, `prefix` = `filex`
-- `access_key` / `secret_key` = your `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`
+- endpoint `http://versitygw:7070` (filex reaches it over the internal network)
+- `path_style` = true, `region` = `us-east-1` (part of the signature: `auto` is
+  refused)
+- `bucket` = `filex`, `prefix` = `files`
+- `access_key` / `secret_key` = your `S3_ACCESS_KEY` / `S3_SECRET_KEY`
 
-OnlyOffice is already connected — open any Office file to edit it. See
+What it is, and how to move off the MinIO an older stack bundled:
+[STORAGE.md → A local S3 server](STORAGE.md#a-local-s3-server).
+
+OnlyOffice is already connected - open any Office file to edit it. See
 [ONLYOFFICE.md](ONLYOFFICE.md) and [STORAGE.md](STORAGE.md).
 
 > **Want a lighter "full"?** Delete the services you don't need from the compose
-> file and drop the matching `FILEX_*` env from the `filex` service — everything
+> file and drop the matching `FILEX_*` env from the `filex` service - everything
 > is additive.
 
 ---
@@ -133,7 +138,7 @@ OnlyOffice is already connected — open any Office file to edit it. See
 
 A Helm chart lives at [`deploy/helm/filex/`](../deploy/helm/filex/). It deploys
 filex with a PVC for `/data` and an Ingress, and can pull in PostgreSQL, Redis,
-OnlyOffice and MinIO as optional dependencies.
+OnlyOffice and an S3 server (Versity S3 Gateway) as optional dependencies.
 
 ```bash
 # Minimal: filex + SQLite + a local PVC.
@@ -147,13 +152,24 @@ helm install filex ./deploy/helm/filex -f deploy/helm/filex/values-full.yaml \
 ```
 
 Key `values.yaml` toggles: `postgresql.enabled`, `redis.enabled`,
-`onlyoffice.enabled`, `minio.enabled`, `persistence.size`, `ingress.*`,
-`basePath`, `resources`. See the chart's `values.yaml` for the full list.
+`onlyoffice.enabled`, `versitygw.enabled`, `persistence.size`, `ingress.*`,
+`basePath`, `trustedProxies`, `resources`. See the chart's `values.yaml` for the
+full list.
+
+`trustedProxies` sets `FILEX_TRUSTED_PROXIES`, the proxies whose
+`X-Forwarded-For` filex believes. Empty, it is `auto`: in a pod, the pod's own
+interface subnet - a node's `/24` with flannel, the pod alone (`/32`) with
+Calico or Cilium - so an ingress controller on **another node** is not trusted
+and every visitor would resolve to its address. List your cluster's pod
+network, keeping `auto`: `--set trustedProxies="auto, 10.244.0.0/16"` (or the
+ingress controller's range); a CDN in front of the ingress is listed too. The
+**Sign-in security** page names a peer that sends forwarded addresses without
+being trusted ([CONFIGURATION.md → Trusted proxies](CONFIGURATION.md#trusted-proxies)).
 
 To serve filex under a path of the host instead of its root
 (`https://files.example.com/filex/`), set `basePath`: the chart sets
 `FILEX_BASE_PATH` and routes that path on the Ingress, passing it through
-unchanged — don't add a rewrite/strip annotation
+unchanged - don't add a rewrite/strip annotation
 ([Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path)):
 
 ```bash
@@ -163,10 +179,10 @@ helm install filex ./deploy/helm/filex \
   --set publicURL=https://files.example.com/filex
 ```
 
-> **Zero‑touch config.** Auth (OIDC/LDAP/header), the first admin, SMTP, branding
+> **Zero-touch config.** Auth (OIDC/LDAP/header), the first admin, SMTP, branding
 > and a default storage can all be supplied as `FILEX_*` env in the chart values,
-> so a fresh release boots fully configured with no admin‑UI setup. See
-> [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero‑touch seeding) and
+> so a fresh release boots fully configured with no admin-UI setup. See
+> [CONFIGURATION.md](CONFIGURATION.md) (Authentication + Zero-touch seeding) and
 > the [`deploy/helm/filex/`](../deploy/helm/filex/) values examples.
 
 ---
@@ -174,27 +190,27 @@ helm install filex ./deploy/helm/filex \
 ## App stores
 
 Ready-made packages for the common home-server platforms live under
-[`deploy/`](../deploy/) — each directory has a README with install steps.
+[`deploy/`](../deploy/) - each directory has a README with install steps.
 All of them run the same single container (SQLite + local storage) and end at
 the same [first run](#first-run).
 
-- **Umbrel** — [`deploy/umbrel/filex/`](../deploy/umbrel/filex/): community
+- **Umbrel** - [`deploy/umbrel/filex/`](../deploy/umbrel/filex/): community
   app-store package (app-proxy pattern); login is `admin@local` + the password
   Umbrel shows in the app dialog.
-- **CasaOS** — [`deploy/casaos/`](../deploy/casaos/): compose with the
+- **CasaOS** - [`deploy/casaos/`](../deploy/casaos/): compose with the
   `x-casaos` store metadata; paste it via *Install a customized app*.
-- **Runtipi** — [`deploy/runtipi/filex/`](../deploy/runtipi/filex/): dynamic
+- **Runtipi** - [`deploy/runtipi/filex/`](../deploy/runtipi/filex/): dynamic
   compose app; the install form asks for the (optional) first admin.
-- **Unraid** — [`deploy/unraid/`](../deploy/unraid/): Community Applications
+- **Unraid** - [`deploy/unraid/`](../deploy/unraid/): Community Applications
   template XML; map a share to `/srv/files` and set the Public URL.
-- **Portainer** — [`deploy/portainer/`](../deploy/portainer/): App Templates
+- **Portainer** - [`deploy/portainer/`](../deploy/portainer/): App Templates
   v3 JSON; add the raw URL under *Settings → App Templates*.
 
 ---
 
 ## Binary
 
-filex ships as a single static binary (CGO‑free) for linux/macOS/Windows ×
+filex ships as a single static binary (CGO-free) for linux/macOS/Windows ×
 amd64/arm64. Download the archive for your platform from the **Releases** page,
 extract, then:
 
@@ -238,6 +254,29 @@ sudo systemctl enable --now filex
 
 Put it behind a reverse proxy for TLS (see [Behind a reverse proxy](#behind-a-reverse-proxy)).
 
+**Thumbnail tools (optional).** The binary draws image, SVG, text and archive
+thumbnails by itself. Video, audio, PDF and HEIC/AVIF previews need programs on
+`PATH`; on Debian or Ubuntu:
+
+```bash
+sudo apt install ffmpeg ghostscript poppler-utils \
+  imagemagick libheif-plugin-libde265
+```
+
+Office documents are not a program here: their previews, and the apps' office
+conversions (the Convert app's Word/Excel/PowerPoint/OpenDocument targets),
+come from the ONLYOFFICE Document Server you connect under **External
+services** ([ONLYOFFICE.md](ONLYOFFICE.md)). Since 0.50 filex runs no
+LibreOffice, even one installed on this machine.
+
+⚠ `libheif-plugin-libde265` is the HEVC decoder a HEIC photo needs. Ubuntu
+24.04's `libheif1` only *suggests* it, so `apt install imagemagick` alone
+leaves ImageMagick listing HEIC and decoding none. filex checks at start by
+decoding a sample: **About** then shows **HEIC photos: Not found** and the
+photos are listed under **Admin → Tools → Thumbnail repair** with the package
+to install. Restart filex after installing any of these. See
+[thumbnails.md](thumbnails.md#generators--required-tools).
+
 ### Build from source
 
 Requires Go 1.25+, Node 20+, pnpm 9+.
@@ -250,7 +289,7 @@ pnpm run build:all      # packages -> admin UI -> embed -> Go binary
 ./bin/filex serve
 ```
 
-`CGO_ENABLED=0` means you can cross‑compile without a C toolchain
+`CGO_ENABLED=0` means you can cross-compile without a C toolchain
 (`GOOS=linux GOARCH=arm64 go build ./backend/cmd/filex`).
 
 ---
@@ -270,7 +309,7 @@ prints the password **once**:
 ```
 
 The account's username is **`admin`**, whatever its email: the SFTP, FTPS and
-sign-in forms accept either. `admin` is reserved — no other account can take
+sign-in forms accept either. `admin` is reserved - no other account can take
 it, and a later account whose email starts with `admin@` becomes `admin2`.
 (Installs created before v0.43.0 keep the name their first administrator
 already has, usually `admin2`.)
@@ -286,31 +325,40 @@ filex admin random-password --email admin@local
 ```
 
 Enable TOTP 2FA per user under **user settings → Security**. Add SSO/LDAP via
-[SSO.md](SSO.md) / [CONFIGURATION.md](CONFIGURATION.md).
+[SSO.md](SSO.md) / [CONFIGURATION.md](CONFIGURATION.md). On a binary install,
+people can also sign in with the Windows or Linux account of the machine filex
+runs on ([OS-LOGIN.md](OS-LOGIN.md); the Linux one is not for Docker). Wrong
+passwords are limited from the first start - put your own address on the
+allow-list before you need it
+([sign-in attempt limits](CONFIGURATION.md#sign-in-attempt-limits)).
 
 ---
 
 ## Behind a reverse proxy
 
-filex serves everything from **one origin** on port `5212` — the SPA, the API,
-public share (`/s/…`) and file‑drop (`/d/…`) pages, `/embed.js`, the realtime
+filex serves everything from **one origin** on port `5212` - the SPA, the API,
+public share (`/s/…`) and file-drop (`/d/…`) pages, `/embed.js`, the realtime
 WebSocket at `/api/ws`, `/healthz`.
 Forward `/` to `filex:5212` and:
 
 - set `FILEX_PUBLIC_URL` to the external `https://…` URL,
-- pass the real client IP (`X-Real-IP` / `X-Forwarded-For`) — used for audit and
-  file‑drop rate limiting,
+- pass the real client IP (`X-Real-IP` / `X-Forwarded-For`) - used for audit,
+  file-drop rate limiting and the sign-in attempt limit, and believed only from
+  a trusted proxy (`FILEX_TRUSTED_PROXIES`; by default `auto`: this machine
+  and, in a container, the other containers on its network - list a proxy on
+  the host in front of the container, on another machine, or a CDN in front of
+  your proxy - [Trusted proxies](CONFIGURATION.md#trusted-proxies)),
 - allow large bodies (e.g. `5G`) and long timeouts for uploads,
-- allow WebSocket/SSE upgrades — `/api/ws` (the socket an open explorer runs
-  on; blocked, it silently falls back to re‑listing every 12 s) and the MCP
-  stream at `/api/ai/mcp` — and pass the real `Host` header, because the
-  same‑origin upgrade is origin‑checked,
+- allow WebSocket/SSE upgrades - `/api/ws` (the socket an open explorer runs
+  on; blocked, it silently falls back to re-listing every 12 s) and the MCP
+  stream at `/api/ai/mcp` - and pass the real `Host` header, because the
+  same-origin upgrade is origin-checked,
 - enable gzip for the admin SPA.
 
 The bundled Caddy config ([`deploy/compose/Caddyfile`](../deploy/compose/Caddyfile))
 already does all of this; an nginx example is in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-**Under a path instead of a host of its own** — `https://example.com/filex/` —
+**Under a path instead of a host of its own** - `https://example.com/filex/` -
 set `FILEX_PUBLIC_URL=https://example.com/filex` (its path becomes the base, or
 set `FILEX_BASE_PATH=/filex`) and have the proxy forward `/filex/…` **with the
 path unchanged**: Caddy `handle`, not `handle_path`. Caddy and nginx examples:
@@ -322,24 +370,24 @@ path unchanged**: Caddy `handle`, not `handle_path`. Caddy and nginx examples:
 
 Everything filex owns lives under `FILEX_DATA_DIR` (`/data` in Docker):
 
-- `instance.sqlite` — the database (unless you use PostgreSQL/MySQL),
-- `search.bleve/` — the full‑text index (rebuildable),
-- `thumbs/` — the thumbnail cache (regenerable; released when a file is purged,
+- `instance.sqlite` - the database (unless you use PostgreSQL/MySQL),
+- `search.bleve/` - the full-text index (rebuildable),
+- `thumbs/` - the thumbnail cache (regenerable; released when a file is purged,
   and swept for orphans every `FILEX_THUMBS_SWEEP_INTERVAL`),
-- `cache/` — the read cache for slow storages (disposable),
-- `uploads/` — staging for chunked and resumable uploads. ⚠ Until a transfer
-  commits, this is the file's only copy — it is not disposable while one is in
+- `cache/` - the read cache for slow storages (disposable),
+- `uploads/` - staging for chunked and resumable uploads. ⚠ Until a transfer
+  commits, this is the file's only copy - it is not disposable while one is in
   flight,
-- `ssh/` and `ftps/` — the SFTP host keys and the FTPS self-signed certificate,
+- `ssh/` and `ftps/` - the SFTP host keys and the FTPS self-signed certificate,
   generated on the first boot that enables those listeners. Regenerable, but
   regenerating them is a **changed host key**: every client that has connected
   before refuses the next connection until somebody clears it,
-- `plugins/`, `dav/` — installed storage-plugin binaries and the WebDAV lock
+- `plugins/`, `dav/` - installed storage-plugin binaries and the WebDAV lock
   store,
-- `.first-run.txt` — the initial admin secret.
+- `.first-run.txt` - the initial admin secret.
 
 Back up the **database** (the SQLite file, or your Postgres), your **storage
-backends**, and ⚠⚠ **`FILEX_SECRET_KEY`** if you set one — it seals the S3
+backends**, and ⚠⚠ **`FILEX_SECRET_KEY`** if you set one - it seals the S3
 access keys, so a restored database without the matching key has access keys
 that no longer verify. See
 [Backup & restore](DEPLOYMENT.md#backup--restore). The search index and
@@ -350,14 +398,21 @@ thumbnail cache can be rebuilt (`POST /api/admin/search/rebuild`,
 
 ## Upgrading
 
-Pull the new image (or binary) and restart — **migrations run automatically on
+Pull the new image (or binary) and restart - **migrations run automatically on
 startup**. Back up the database first. To roll a schema back one step manually:
 `filex migrate down`.
+
+⚠ **A Compose stack or Helm release that bundled MinIO** (before 0.50): the
+bundled S3 server is now Versity S3 Gateway, and MinIO's data has to be copied
+across. Nothing is deleted for you, and the chart refuses to render until you
+have kept the old volume - follow
+[STORAGE.md → Moving off the bundled MinIO](STORAGE.md#moving-off-the-bundled-minio)
+before you upgrade.
 
 ---
 
 ## See also
 
-- [CONFIGURATION.md](CONFIGURATION.md) — every `FILEX_*` variable
+- [CONFIGURATION.md](CONFIGURATION.md) - every `FILEX_*` variable
 - [STORAGE.md](STORAGE.md) · [SSO.md](SSO.md) · [ONLYOFFICE.md](ONLYOFFICE.md)
-- [DEPLOYMENT.md](DEPLOYMENT.md) — reverse proxy, HTTPS, scaling, backup
+- [DEPLOYMENT.md](DEPLOYMENT.md) - reverse proxy, HTTPS, scaling, backup

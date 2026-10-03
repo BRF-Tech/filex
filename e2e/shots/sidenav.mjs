@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { seedFixtures, syncAndWait } from './fixtures.mjs';
+import { seedFixtures, syncAndWait, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -183,8 +183,8 @@ async function seed() {
   seedFixtures(demoRoot);
   // …plus a couple of Office documents, because "a regular user wants
   // thumbnails and their documents" is the whole point of the report.
-  writeFileSync(join(demoRoot, 'Documents', 'Q3 budget.xlsx'), 'PK placeholder');
-  writeFileSync(join(demoRoot, 'Documents', 'Proposal.docx'), 'PK placeholder');
+  writeOfficeFile(join(demoRoot, 'Documents', 'Q3 budget.xlsx'));
+  writeOfficeFile(join(demoRoot, 'Documents', 'Proposal.docx'));
   mkdirSync(join(demoRoot, 'Documents', 'Contracts'), { recursive: true });
   writeFileSync(join(demoRoot, 'Documents', 'Contracts', 'msa-2026.md'), '# MSA 2026\n\nDraft.\n');
   const demo = await makeStorage(adminToken, 'My files', demoRoot, false);
@@ -410,7 +410,7 @@ async function toggleNav(page) {
  * survives from the attribute — and a key it does carry wins.
  */
 const EMBED_HOST = (token, storages, connections) => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Acme Portal — Files</title>
+<html lang="en"><head><meta charset="utf-8"><title>Acme Portal - Files</title>
 <style>
   body { margin: 0; font: 15px system-ui, sans-serif; background: #f4f5f7; color: #1a1e27; }
   header { padding: 18px 28px; background: #fff; border-bottom: 1px solid #e2e6ed; }
@@ -421,7 +421,7 @@ const EMBED_HOST = (token, storages, connections) => `<!doctype html>
          box-shadow: 0 1px 3px rgba(15,23,42,.12); }
 </style></head>
 <body>
-  <header><b>Acme Portal</b><span>Documents — embedded with &lt;filex-explorer&gt;</span></header>
+  <header><b>Acme Portal</b><span>Documents - embedded with &lt;filex-explorer&gt;</span></header>
   <main><div class="box"><filex-explorer id="fx" api-base="${URL}" sidenav ui-profile="simple"${connections ? ' connections' : ''}></filex-explorer></div></main>
   <script type="module">
     // ⚠ Set \`config\` BEFORE the module import, not after. The import is what
@@ -618,7 +618,7 @@ async function run(tokens) {
     );
     // …and it actually mints, as the non-admin account, which is the thing that
     // was impossible before this surface existed anywhere but the admin panel.
-    await page.locator('[data-testid="token-label"]').fill('WebDAV — laptop');
+    await page.locator('[data-testid="token-label"]').fill('WebDAV - laptop');
     await page.locator('[data-testid="token-mint"]').click();
     await page.waitForSelector('[data-testid="token-secret"]', { timeout: 20_000 });
     check(

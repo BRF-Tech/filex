@@ -1,23 +1,23 @@
-# Protocols — reaching filex without a browser
+# Protocols - reaching filex without a browser
 
 filex speaks a protocol in **two directions**. Whatever it can connect *to*, it can also
 be reached *as*:
 
 | Protocol | filex connects to it (storage driver) | filex is reachable as it (server) |
 |---|---|---|
-| Local disk | ✅ | — (it *is* the disk) |
+| Local disk | ✅ | - (it *is* the disk) |
 | S3 | ✅ | ✅ **on by default** (`FILEX_S3=0` to switch off) |
-| SFTP | ✅ | ✅ `FILEX_SFTP=1` — off by default |
-| FTP / FTPS | ✅ | ✅ `FILEX_FTPS=1` — off by default, explicit TLS only |
+| SFTP | ✅ | ✅ `FILEX_SFTP=1` - off by default |
+| FTP / FTPS | ✅ | ✅ `FILEX_FTPS=1` - off by default, explicit TLS only |
 | WebDAV | ✅ | ✅ `/dav`, **on by default** |
-| NFSv3 | — (mount it on the host and use the local driver) | ✅ `FILEX_NFS=1` — off by default |
-| SMB / CIFS | ✅ | ❌ — see [Why no SMB server](#why-there-is-no-smb-server) |
-| HTTPS (`filex mount`) | — | ✅ always, no server-side switch |
+| NFSv3 | - (mount it on the host and use the local driver) | ✅ `FILEX_NFS=1` - off by default |
+| SMB / CIFS | ✅ | ❌ - see [Why no SMB server](#why-there-is-no-smb-server) |
+| HTTPS (`filex mount`) | - | ✅ always, no server-side switch |
 
 A backend that is in **neither** column can still be mounted: a
 [storage plugin](PLUGINS.md) is a separate program that teaches filex a backend
 it does not ship, and a storage on one is served over every protocol in the
-right-hand column exactly like a built-in — WebDAV, SFTP, FTPS, NFS and the S3
+right-hand column exactly like a built-in - WebDAV, SFTP, FTPS, NFS and the S3
 endpoint each have a test against a live plugin. ⚠ When such a plugin is down,
 those surfaces answer an **error**, never an empty listing: a mirroring client
 that saw an empty success would delete the user's local copy.
@@ -25,11 +25,11 @@ that saw an empty success would delete the user's local copy.
 Everything below lands in the **same tree**, with the same RBAC grants, the same trash,
 the same quota, the same search index and the same audit trail as the web UI. A file
 uploaded over FTPS is thumbnailed, indexed and counted exactly like one dropped in the
-browser, because every protocol writes through the same funnel — and since v0.34.0 it
+browser, because every protocol writes through the same funnel - and since v0.34.0 it
 also **announces itself** on the realtime socket, so a browser with that folder open
 sees it appear rather than finding out on its next navigation
 ([REALTIME.md](REALTIME.md)). ⚠ A write over any of these protocols that **replaces**
-an existing file emits `file.updated`, not `file.uploaded` — worth knowing if you have
+an existing file emits `file.updated`, not `file.uploaded` - worth knowing if you have
 a webhook watching protocol traffic ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
 
 ⚠⚠ **One thing is not shared: version history.** WebDAV and the S3 gateway take a
@@ -37,15 +37,23 @@ pre-write snapshot; **SFTP, FTPS and NFS do not**, so an overwrite over those th
 destroys the previous bytes silently. See
 [TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
 
-Every one of them addresses a storage the same way — the first path segment, or the
-bucket over S3 — and every one accepts either the storage's **name** or its immutable
+⚠ **Nor the catalogue's "unavailable" mark** (0.50, issue #104). An entry the
+storage could not answer for is listed in the explorer with a warning and
+refused on every filex surface - the explorer, the REST and AI/MCP APIs - with
+`409 ENTRY_UNAVAILABLE` ([PLUGINS.md](PLUGINS.md#an-entry-your-stat-cannot-answer-for)).
+WebDAV, SFTP, FTPS, NFS and the S3 gateway serve the storage driver directly and
+never read that mark: a client of theirs meets whatever the storage itself
+answers for the path.
+
+Every one of them addresses a storage the same way - the first path segment, or the
+bucket over S3 - and every one accepts either the storage's **name** or its immutable
 **uid**. Give a machine the uid and the mount survives a rename; the rule is one function
 (`internal/storageref`) rather than five, so there is no protocol where only one of the
 two works. See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
 
-**The connection instructions are in the app**, not here: **How to connect** — the entry
+**The connection instructions are in the app**, not here: **How to connect** - the entry
 in the file explorer's navigation panel, on every surface that draws it (the web app, the
-desktop app, any embed) — builds every command from *this* deployment: its host, its port,
+desktop app, any embed) - builds every command from *this* deployment: its host, its port,
 your login, the key or export you just minted. Admins reach the same panel from
 *Connections* in the admin sidebar. This document is the map; that page is the thing you
 copy from.
@@ -62,42 +70,114 @@ password and without disturbing the others.
 | S3 | access key id + secret (SigV4) | How to connect → S3 |
 | SFTP | your login + an **API token** as the password, or a registered **SSH public key** | How to connect → SFTP |
 | FTPS | your login + an **API token** as the password | How to connect → FTPS |
-| NFSv3 | **the export path itself** — it carries 32 bytes of entropy | How to connect → NFS |
+| NFSv3 | **the export path itself** - it carries 32 bytes of entropy | How to connect → NFS |
 | WebDAV | your login + an **API token** as the password | any token |
 | `filex mount` | `FILEX_URL` + an **API token** | any token |
 
-Every credential in that table is a **person's** — mint them while signed in as
+Wrong **passwords** over SFTP, FTPS and WebDAV count against the same
+[sign-in attempt limit](CONFIGURATION.md#sign-in-attempt-limits) as the web form:
+past it the account (or the address) is locked, WebDAV answers `429` with
+`Retry-After`, and FTPS / SFTP simply refuse. An API token is not a password
+attempt and is never counted. ⚠ But while that name or that address is locked,
+a token given as the password is refused too: somebody else's wrong guesses can
+pause a token mount for as long as the lock lasts (up to 15 minutes with the
+default settings). A registered SSH key is not affected. The counters are the
+web form's own - one set, decided in the server's memory and written through to
+the database. The address
+counted is the socket's peer on FTPS and SFTP; on WebDAV, which arrives through
+the web server, it is read through the [trusted
+proxies](CONFIGURATION.md#trusted-proxies) (by default `auto`: this machine
+and, in a container, the other containers on its network).
+
+Every credential in that table is a **person's** - mint them while signed in as
 yourself, or from a `user` API token. An *app* token (a host app's proxy, a bot)
 is refused by all four self-service credential surfaces (API tokens, S3 access
 keys, SSH keys, NFS exports); its explorer does not show the **API keys** entry,
 and "How to connect" keeps the guides but replaces the mint forms with a line
 saying this session cannot create credentials. See
-[MCP.md → Token kinds](MCP.md#token-kinds--user-vs-app).
+[MCP.md → Token kinds](MCP.md#token-kinds---user-vs-app).
 
 Your login is your **username** if you have set one, otherwise your email. Both work
 everywhere; an `@` in an SSH or FTP login has to be quoted in most clients' config files,
 which is what usernames are for.
 
-Your **account password** is accepted too, wherever the table says "API token" — a token
+Your **account password** is accepted too, wherever the table says "API token" - a token
 is simply the credential you can revoke without changing your password. On an install with
-[LDAP/AD](LDAP.md) that includes the **directory** password: the directory is asked when
-the local users table cannot judge the password, and a successful check is cached for five
-minutes because these protocols present the credential on every request. Operators can
-switch that off with `auth.ldap.protocol_login: false`.
+[LDAP/AD](LDAP.md) that includes the **directory** password, and with a Windows or Linux
+(PAM) provider ([OS-LOGIN.md](OS-LOGIN.md)) the **operating-system** password: every such
+provider that is running is asked in turn when the local users table cannot judge the
+password, and a successful check is cached for five minutes because these protocols present
+the credential on every request. Operators switch that off per provider with its
+`protocol_login` setting (Admin → Identity providers; `auth.ldap.protocol_login: false` for
+LDAP configured from the config file). S3 and NFS never take a password - they use access
+keys and exports.
 
 > ⚠ **An account with 2FA enabled cannot use its password on any of these.** None of
 > these protocols has a channel for a second factor, so accepting the password would make
-> each of them a documented 2FA bypass. Mint a token (or a key, or an access key) —
+> each of them a documented 2FA bypass. Mint a token (or a key, or an access key) -
 > that is the app-specific-password pattern, and each one is individually revocable.
 
 > ⚠ **Revoking reaches sessions that are already open.** Deleting a token, disabling a
 > key or revoking an export cuts the SFTP/FTPS connection it opened and stops the NFS
-> mount within about half a minute — not only the *next* login.
+> mount within about half a minute - not only the *next* login.
+
+### Multi-tenant installs: the realm
+
+Skip this on a single-tenant install: there a user name is only a user name, and
+`acme/alex` is a name nobody has.
+
+On a [multi-tenant](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)
+install two tenants may each have an `alex`, so a password sign-in has to say
+**which tenant** it is for before an account is looked up. A protocol says it the
+way the web page does - by the **address** the client reached - when it carries
+one; when it carries none, the user name says it as **`realm/name`**:
+
+| Protocol | The tenant comes from | Example |
+|---|---|---|
+| WebDAV | the `Host` the client connected to (the web page's own resolver) | map `https://files.acme.example/dav/` as `alex` |
+| WebDAV on the platform's address, or for a tenant with no address of its own | the user name | `acme/alex@acme.example` |
+| FTPS | the name the client sent in the TLS handshake (SNI) | connect to `files.acme.example` as `alex` |
+| FTPS, a client that sends no SNI (or connects by IP) | the user name | `acme/alex` |
+| SFTP | the user name - always | `acme/alex`, `acme/alex@acme.example` |
+
+- **Where no address names a tenant** (SFTP always, FTPS without SNI, the
+  platform's own address), a bare name is the platform's own tenant. `/alex`
+  says the same outright.
+- **An address and a realm that disagree are refused**: `beta/alex` on acme's
+  address is not beta's alex, it is nobody. So is a realm nobody has. Both are
+  answered - and counted - exactly as a wrong password.
+- The lookup never leaves the tenant: in realm `acme`, a bare `alex` is looked
+  up as the address a directory would have given it (`alex@acme.local`), then
+  as a username; a name typed as an e-mail address is looked up as typed and
+  nothing else. Only acme's accounts can match.
+- **Why SFTP needs the realm in the name.** SSH has no equivalent of HTTP's
+  `Host` or TLS's SNI: the client never tells the server which name it dialled,
+  so `sftp alex@files.acme.example` and `sftp alex@files.beta.example` arrive
+  identically. Only the user name can carry the tenant. (FTPS can read SNI
+  because its control channel is TLS; plain FTP is never served - see
+  [FTPS](#ftps).)
+- **A token or a registered SSH key needs no realm.** The credential belongs to
+  one account, and the tenant is that account's: `alex` with acme's token or
+  key signs in as acme's alex. A realm that *is* written must be the
+  credential's own - acme's key as `beta/alex` is refused.
+- FTPS on a tenant's own address needs a certificate valid for that name if the
+  client verifies it (one certificate can carry every tenant's name).
+- **The CLI** - `filex client login`, whose session `filex sync` and
+  `filex mount` use too - takes the realm as `--realm acme` on the platform's
+  address and follows the web page's handoff to a tenant's own address
+  ([CLI.md](CLI.md#multi-tenant-servers-the-realm)); with an API token
+  (`FILEX_TOKEN`) it needs none.
+- The [sign-in attempt limit](CONFIGURATION.md#sign-in-attempt-limits) counts
+  `<realm>/<name>`: `acme/alex`, `alex` on acme's address and the web form's
+  `alex` in realm acme are one counter; beta's `alex` is another.
+
+*How to connect* prints your login already written this way: a tenant account's
+SFTP / FTPS login is `realm/username`, and its WebDAV user `realm/e-mail`.
 
 A **token carries its verbs** onto every protocol: signed in with a token as the
 password (WebDAV, SFTP, FTPS), or through an S3 access key or an NFS export
 minted from a token, `read` lists and downloads, `write` creates, changes,
-renames and moves, `delete` removes — so a `read` token is a read-only mount.
+renames and moves, `delete` removes - so a `read` token is a read-only mount.
 A key or export minted from a browser session carries every verb. On top of
 that the **account's permissions** apply: `access.webdav`, `access.sftp`,
 `access.ftp`, `access.s3` and `access.nfs` decide who may use each protocol at
@@ -121,13 +201,13 @@ all, and the file permissions each operation
 
 > ⚠ **Give the endpoint its own hostname** (`FILEX_S3_DOMAIN=s3.example.com`) if you can.
 > Without one it lives under `/s3`, and a client pointed at the application root gets the
-> web app's HTML — rclone reports *"XML syntax error on line 10"*, which says nothing
+> web app's HTML - rclone reports *"XML syntax error on line 10"*, which says nothing
 > about what is wrong. Never point `FILEX_S3_DOMAIN` at the host the app itself serves.
 
 **Under a base path** ([filex served under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path),
 `FILEX_BASE_PATH=/filex`) the path-style endpoint is `https://example.com/filex/s3`
 and works as it does at the root: the client signs `/filex/s3/<bucket>/<key>`, and
-filex verifies the signature against exactly that path — the one the client sent —
+filex verifies the signature against exactly that path - the one the client sent -
 though the prefix is taken off before the request is routed. Tested with the AWS
 SDK's own signer, header- and query-signed (presigned URLs). The reverse proxy
 must pass the path unchanged: a proxy that strips or rewrites it changes what was
@@ -135,32 +215,32 @@ signed and every request answers *SignatureDoesNotMatch*. A dedicated host
 (`FILEX_S3_DOMAIN`) is served at its own root, never under the app's base, and
 is not affected by it.
 
-> ⚠ A bucket you cannot reach answers **NoSuchBucket**, never AccessDenied — the same
+> ⚠ A bucket you cannot reach answers **NoSuchBucket**, never AccessDenied - the same
 > thing S3 does cross-account, because the alternative is an existence oracle. A *write*
 > you are not allowed answers **AccessDenied**, because a client told "no such key" would
 > retry forever against a permission problem.
 
-filex's own bookkeeping trees — `.versions/`, `.thumbs/`, `.filex-trash/`,
+filex's own bookkeeping trees - `.versions/`, `.thumbs/`, `.filex-trash/`,
 the desktop app's open-with working area `.filex-open/` and the people's
 [drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save)
-`.filex-drafts/` — are **not** exposed here, at any depth, on any verb: not
+`.filex-drafts/` - are **not** exposed here, at any depth, on any verb: not
 listed, not readable by known key, and not writable. A draft is not shown even
 to its owner over a protocol: it is not a file yet. Every protocol judges this by the same list (`backend/internal/syspath`);
 before it existed each carried its own three-name copy and all of them listed
 `.filex-open/`. Every other protocol has always hidden the first three;
 the S3 gateway is the one that had to catch up, and it matters most here
 because [version history](TRASH-VERSIONING.md#what-triggers-a-snapshot) holds a
-copy of every file this gateway has replaced — the `.versions/` tree is real
+copy of every file this gateway has replaced - the `.versions/` tree is real
 data, not scratch space.
 
 ## SFTP
 
-`FILEX_SFTP=1`. Its own TCP listener (default `:2022` — sftpgo and `rclone serve sftp`
+`FILEX_SFTP=1`. Its own TCP listener (default `:2022` - sftpgo and `rclone serve sftp`
 both use it, while 2222 means "SSH in a container"), not a route.
 
 - Password (an API token) **or** a registered public key. `ssh-copy-id` cannot work
-  against filex — it appends to `~/.ssh/authorized_keys` over a shell and filex has no
-  shell — so keys are pasted at *Connections → SFTP*.
+  against filex - it appends to `~/.ssh/authorized_keys` over a shell and filex has no
+  shell - so keys are pasted at *Connections → SFTP*.
 - `exit-status` is sent on the subsystem channel, so **`scp` reports success correctly**.
   OpenSSH 9+ speaks SFTP for `scp`, and without this every copy ended in a silent
   `exit 1` with the bytes already transferred.
@@ -174,7 +254,7 @@ both use it, while 2222 means "SSH in a container"), not a route.
 
 ## FTPS
 
-`FILEX_FTPS=1`. For the equipment that only ever learned FTP — scanners,
+`FILEX_FTPS=1`. For the equipment that only ever learned FTP - scanners,
 multifunction printers, older cameras, industrial controllers.
 
 - **Explicit TLS is mandatory**, on the control channel *and* the data channel. There is
@@ -189,13 +269,13 @@ multifunction printers, older cameras, industrial controllers.
   file under the real name.
 
 > ⚠ **The passive port range matters as much as the port.** A firewall that blocks it
-> makes every transfer *hang* with no error on either side — the classic FTP failure,
+> makes every transfer *hang* with no error on either side - the classic FTP failure,
 > impossible to guess at from the client end. Set `FILEX_FTPS_PASV_MIN`/`_MAX` and open
 > both.
 
 **Certificates.** Without `FILEX_FTPS_CERT`/`_KEY` filex generates a self-signed
 pair and the connection guide says so. With them, the files are **re-read
-whenever they change** — every handshake checks their mtime and size — so a real,
+whenever they change** - every handshake checks their mtime and size - so a real,
 auto-renewing certificate can be bound: mount your reverse proxy's certificate
 directory read-only, point the two variables at the `.crt`/`.key`, and the
 renewal Caddy or certbot writes every couple of months is what the next FTPS
@@ -210,7 +290,7 @@ warning once; a good pair written afterwards is picked up.
 `FILEX_NFS=1`, **off by default and meant for a LAN or a VPN**.
 
 NFSv3 cannot authenticate a request in a way filex can use: real identity means
-RPCSEC_GSS, which means Kerberos, and AUTH_SYS — what every NAS actually ships — is the
+RPCSEC_GSS, which means Kerberos, and AUTH_SYS - what every NAS actually ships - is the
 client asserting *"I am uid 1000"* with nothing to check it against.
 
 So **the identity is bound to the export, not to the request**. Each export gets a path
@@ -219,7 +299,7 @@ one account for its whole lifetime; the uid and gid on each request are discarde
 than trusted, and the permissions you see are synthesised from your ACL.
 
 > ⚠⚠ NFSv3 is **unencrypted**. Anyone who can read the traffic sees your files, and
-> anyone who learns the path can mount them. LAN or VPN only — for anything off-LAN the
+> anyone who learns the path can mount them. LAN or VPN only - for anything off-LAN the
 > answer is `filex mount`.
 
 > ⚠ There is **no portmapper** on port 111, so every client must be told the port
@@ -229,8 +309,8 @@ than trusted, and the permissions you see are synthesised from your ACL.
 ⚠ NFSv3 has **no "close"**, so the server opens, writes and closes the handle on every
 write RPC and filex commits on each close: one `cp -p` of a 5 MB file is a `CREATE` plus
 five 1 MiB writes. That used to reach every open browser as six separate change frames;
-they are now coalesced into two ([REALTIME.md](REALTIME.md)). Nothing is dropped — the
-last frame of a burst always reflects the final state — so this is a difference you
+they are now coalesced into two ([REALTIME.md](REALTIME.md)). Nothing is dropped - the
+last frame of a burst always reflects the final state - so this is a difference you
 notice only in how quiet the page is.
 
 ## WebDAV
@@ -250,7 +330,7 @@ map natively.
 
 ## `filex mount`
 
-No server-side switch — it is the same binary as the CLI, talking to the REST API over
+No server-side switch - it is the same binary as the CLI, talking to the REST API over
 ordinary HTTPS.
 
 ```bash
@@ -274,7 +354,7 @@ On **Windows** the mountpoint is usually a drive letter, and WinFsp
 ```powershell
 $env:FILEX_URL   = "https://filex.example.com"
 $env:FILEX_TOKEN = "<token>"
-filex mount Z:            # ⚠ Z: must be FREE — it is created, not reused
+filex mount Z:            # ⚠ Z: must be FREE - it is created, not reused
 ```
 
 Stop it with Ctrl-C in that window.
@@ -282,7 +362,7 @@ Stop it with Ctrl-C in that window.
 > ⚠ **macOS is not supported.** It needs macFUSE, whose Go binding needs a C
 > toolchain filex deliberately does not use and whose licence forbids a commercial
 > program from installing it. The command refuses there rather than appearing to work
-> and doing nothing — use the desktop app with folder sync instead.
+> and doing nothing - use the desktop app with folder sync instead.
 
 ---
 
@@ -291,8 +371,8 @@ Stop it with Ctrl-C in that window.
 SMB is the one asymmetric row: filex can use a NAS as a storage, but does not serve SMB.
 
 Add a storage (Admin → Storages) with driver **SMB / CIFS**, give it the host, the share name alone
-(`media`, not `\\nas\media`), an account and optionally a sub-folder. Everything else —
-RBAC, trash, versions, quota, search, thumbnails — behaves as it does on any other
+(`media`, not `\\nas\media`), an account and optionally a sub-folder. Everything else -
+RBAC, trash, versions, quota, search, thumbnails - behaves as it does on any other
 storage.
 
 > ⚠ A NAS is usually the slowest storage in an install. Pair it with the download cache
@@ -300,7 +380,7 @@ storage.
 
 ### Why there is no SMB server
 
-Not a licence problem and not a protocol problem — a size problem, stated plainly:
+Not a licence problem and not a protocol problem - a size problem, stated plainly:
 
 - There is **no MIT/Apache-licensed, mature Go SMB *server***. The one that genuinely
   works (`macos-fuse-t/go-smb2`) is AGPL-3.0, which would relicense filex; the MIT one
@@ -310,7 +390,7 @@ Not a licence problem and not a protocol problem — a size problem, stated plai
   leases, durable handles, signing and encryption. Windows does not consider a share
   "working" until most of that is there. It is legal (MS-SMB2 is an open specification)
   and it is the single largest item on filex's board.
-- And the thing people actually want from it — a drive letter — is already answered by
+- And the thing people actually want from it - a drive letter - is already answered by
   `filex mount` off-LAN and by NFSv3 on-LAN, at a fraction of the cost.
 
 If it is ever written, note that port 445 is not carried across the public internet by
@@ -344,11 +424,11 @@ FILEX_SECRET_KEY=<32+ random bytes>   # ⚠ required once S3 keys exist
 
 > S3 and `/dav` are on because neither opens a port of its own and both refuse every
 > unsigned or unauthenticated request; a credential still has to be minted before
-> anything can reach them. The three that open a **listener** are off until asked for — a
+> anything can reach them. The three that open a **listener** are off until asked for - a
 > port nobody requested is not something to open for them.
 
 > ⚠⚠ **`FILEX_SECRET_KEY` is a deploy requirement, not an option.** S3 secrets cannot be
-> hashed the way tokens are — SigV4 verifies a request by recomputing an HMAC chain from
+> hashed the way tokens are - SigV4 verifies a request by recomputing an HMAC chain from
 > the secret, so the server must be able to recover it. It is sealed with AES-GCM under
 > this key. Without the key configured, minting an access key **fails** rather than
 > storing plaintext; **change or lose the key and every existing access key stops

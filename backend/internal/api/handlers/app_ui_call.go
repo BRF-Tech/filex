@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
@@ -67,6 +68,9 @@ func (h *AppPlugins) UICall(w http.ResponseWriter, r *http.Request) {
 			}
 			if lk != nil && e2e.UnderEncrypted(r.Context(), lk, sid, "/"+rel) {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "encrypted", "message": "an app cannot read files in an encrypted folder"})
+				return
+			}
+			if !h.openAllowed(w, r, p, v, path.Base(rel)) {
 				return
 			}
 		}

@@ -38,7 +38,7 @@ watch([storageId, state], () => {
 });
 
 function duration(r: SyncRun): string {
-  if (!r.finished_at) return '—';
+  if (!r.finished_at) return '-';
   return formatDuration(
     (new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000,
     locale.value,
@@ -89,7 +89,7 @@ const columns = computed<DataColumn<SyncRun>[]>(() => [
     sortable: true,
     sortDir: 'desc',
     width: 170,
-    format: (r) => (r.started_at ? formatDate(r.started_at, locale.value) : '—'),
+    format: (r) => (r.started_at ? formatDate(r.started_at, locale.value) : '-'),
     sortValue: (r) => (r.started_at ? Date.parse(r.started_at) : null),
   },
   {

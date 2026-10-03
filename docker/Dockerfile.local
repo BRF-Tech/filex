@@ -43,7 +43,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/filex
 
 # ---------------------------------------------------------------------------
-# Stage 3: Runtime — full thumbnail toolchain (matches docker/Dockerfile)
+# Stage 3: Runtime - full thumbnail toolchain (matches docker/Dockerfile;
+# no LibreOffice since 0.50 - office documents are the connected ONLYOFFICE's)
 # ---------------------------------------------------------------------------
 FROM alpine:3.24
 
@@ -54,10 +55,11 @@ RUN apk --no-cache add \
         tini \
         '7zip>=25.01-r0' \
         ffmpeg \
+        imagemagick \
+        imagemagick-heic \
+        libheif-libde265 \
         ghostscript \
         poppler-utils \
-        libreoffice \
-        openjdk17-jre-headless \
         rsvg-convert \
         ttf-liberation \
         ttf-dejavu \

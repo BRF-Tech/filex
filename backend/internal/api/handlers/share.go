@@ -22,7 +22,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/basepath"
-	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -268,6 +267,13 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	// No link to an entry the storage could not answer for, or to anything
+	// inside one (issue #104). The AI/MCP share door is refused in
+	// resolveStorage.
+	if st, err := h.Store.GetStorage(r.Context(), node.StorageID); err == nil && st != nil &&
+		refuseUnavailableNode(w, r, h.Store, st, node) {
+		return
+	}
 	// ONE rule for every door that mints a link (public_link_rule.go):
 	// filex's own names are never linked (a link to `.filex-trash` hands out
 	// every deleted file, one to `.filex-open` other people's open
@@ -282,6 +288,10 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if err := publicLinkRefusal(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, linkPerm); err != nil {
 		var lr *linkRefusal
 		if errors.As(err, &lr) && lr.v.WritePerm(w, r) {
+			return
+		}
+		if errors.Is(err, errE2EEncrypted) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": codeE2EEncrypted})
 			return
 		}
 		if !answerGate(w, err) {
@@ -801,6 +811,56 @@ func randomPIN(n int) string {
 
 var errNoStorages = errors.New("no storages configured")
 
+// errShareHidden and errShareNotYours are shareRevokeRefusal's two answers.
+var (
+	errShareHidden   = errors.New("share not found")
+	errShareNotYours = errors.New("forbidden: not your share")
+)
+
+// shareRevokeRefusal is THE rule for revoking a public link, whichever door
+// asks: DELETE /api/files/share/{id}, POST /api/ai/unshare and the MCP
+// file_unshare tool. nil, errShareHidden (answer it exactly like a share that
+// does not exist) or errShareNotYours.
+//
+// Whose share is it? A plain user only manages the links they created. The
+// admin half of that used to be a bare `user.IsAdmin()`, and under
+// multi-tenancy "an admin" is the admin of EVERY tenant, so the early-out
+// handed every share on the instance to any tenant's administrator.
+// GetShareByID and GetShareByToken are pass-throughs, so the row is walked
+// back to its storage: share, node, storage. ⚠ Fails closed: a share whose
+// node cannot be read is refused rather than treated as ownerless, the choice
+// ownsNode makes for the same reason. And a token confined to a folder only
+// revokes links on files inside it: the share id or token skips
+// confine.Middleware.
+//
+// ⚠⚠ /api/ai/unshare and file_unshare asked only the last question until
+// v0.50: a tenant administrator could revoke another tenant's links by token,
+// and a folder-confined token any link its account had made.
+func shareRevokeRefusal(ctx context.Context, store db.Store, sh *model.Share) error {
+	user := auth.UserFrom(ctx)
+	if user == nil {
+		return errShareNotYours
+	}
+	scope, tenantConfined := confinedScope(ctx)
+	root, rootConfined := callerRoot(ctx)
+	if tenantConfined || rootConfined {
+		n, err := store.GetNode(ctx, sh.NodeID)
+		if err != nil || n == nil {
+			return errShareHidden
+		}
+		if tenantConfined && !scope.CanAccessStorage(n.StorageID) {
+			return errShareHidden
+		}
+		if rootConfined && !root.Within(rootStorageName(ctx, store, n.StorageID), n.Path) {
+			return errShareHidden
+		}
+	}
+	if !user.IsAdmin() && (sh.CreatedBy == nil || *sh.CreatedBy != user.ID) {
+		return errShareNotYours
+	}
+	return nil
+}
+
 // HandleDelete revokes a share.
 func (h *Share) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -818,41 +878,14 @@ func (h *Share) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	// Whose share is it? The non-admin half of the check below was right all
-	// along — a plain user only manages the links they created. The admin
-	// half was `!user.IsAdmin() && …`, and under multi-tenancy "an admin" is
-	// the admin of EVERY tenant, so that early-out handed every share on the
-	// instance to any tenant's administrator.
-	//
-	// GetShareByID is another pass-through, so the row has to be walked back
-	// to its storage: share → node → storage. ⚠ Fails closed — an id whose
-	// node cannot be read is refused rather than treated as ownerless, which
-	// is the same choice ownsNode makes and for the same reason.
-	//
-	// Refusal is the 404 already used for a share id that does not exist —
-	// written inline rather than through ownsStorage, whose "<what> not
-	// found" body would be distinguishable from that miss. The pre-existing
-	// 403 stays for the case it was written for (a real share in your own
-	// tenant that you did not create): there the caller is allowed to know
-	// the row exists.
-	if scope, confined := confinedScope(r.Context()); confined {
-		n, nerr := h.Store.GetNode(r.Context(), sh.NodeID)
-		if nerr != nil || n == nil || !scope.CanAccessStorage(n.StorageID) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-			return
-		}
-	}
-	// Root confinement: a confined token may only revoke links on files inside
-	// its folder — the share id skips confine.Middleware. Walk share → node →
-	// path; the same 404 the missing-share branch above produces.
-	if _, confined := confine.RootFrom(r.Context()); confined {
-		n, nerr := h.Store.GetNode(r.Context(), sh.NodeID)
-		if nerr != nil || n == nil || !rootAllows(r.Context(), h.Store, n.StorageID, n.Path) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-			return
-		}
-	}
-	if !user.IsAdmin() && (sh.CreatedBy == nil || *sh.CreatedBy != user.ID) {
+	// The one rule every door that revokes a link asks (shareRevokeRefusal):
+	// the same 404 as the miss above outside the caller's tenant or token
+	// root, the 403 inside them for a link somebody else made.
+	switch err := shareRevokeRefusal(r.Context(), h.Store, sh); {
+	case errors.Is(err, errShareHidden):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	case err != nil:
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
@@ -946,6 +979,14 @@ func (h *Share) HandleMetadata(w http.ResponseWriter, r *http.Request) {
 // On a PIN-protected share without a PIN, GET renders an HTML form. POST
 // (with a PIN field) is what the form submits to. ?pin= and X-Filex-Pin
 // are also accepted for programmatic access.
+// redirectableDownload reports whether a presigned download address may be
+// handed to a share's visitor as a redirect: an absolute https:// URL with a
+// host, nothing else (HandleDownload says why).
+func redirectableDownload(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil
+}
+
 func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// A JavaScript browser gets the branded public surface; everything else
 	// — no-JS browsers, curl, download managers, the PIN form's own POST —
@@ -1051,6 +1092,13 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		h.renderErrorPage(w, r, http.StatusNotFound, "notfound")
 		return
 	}
+	// An entry the storage could not answer for (#104): the visitor reads
+	// why, in their language, rather than the storage driver's own error.
+	// Before the folder branch, so the browse page and its zip ask it too.
+	if linkTargetUnavailable(r.Context(), h.Store, node.StorageID, node.Path) {
+		h.renderErrorPage(w, r, http.StatusConflict, "unavailable")
+		return
+	}
 	drv, err := h.StorageResolver(node.StorageID)
 	if err != nil {
 		http.Error(w, "storage error", http.StatusInternalServerError)
@@ -1110,8 +1158,15 @@ func (h *Share) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	// backend is precisely what does not have this object yet. Redirecting
 	// there would hand the visitor a 404 (or, on an overwrite, the previous
 	// version) with the download already charged against the link.
+	//
+	// ⚠ And only to an https:// address. The address comes from the driver -
+	// for a storage plugin, from somebody else's code - and a share's visitor
+	// was sent to whatever it said: plain http (the file in the clear, and a
+	// download most browsers block from an https page), another site
+	// entirely, a scheme that is not a download at all. Anything but an
+	// absolute https URL is served through filex instead, which always works.
 	if pres, ok := drv.(storage.Presigner); ok && !src.Staged && drv.Capabilities().Presign {
-		if u, err := pres.PresignDownload(r.Context(), node.Path, 5*time.Minute); err == nil && u != "" {
+		if u, err := pres.PresignDownload(r.Context(), node.Path, 5*time.Minute); err == nil && redirectableDownload(u) {
 			http.Redirect(w, r, u, http.StatusFound)
 			return
 		}
@@ -1523,7 +1578,7 @@ h1 { font-size: 1.25rem; margin: 0 0 6px; letter-spacing: -0.01em; }
 .spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-inline-end-color: transparent; border-radius: 50%; display: inline-block; vertical-align: -2px; animation: px-spin 0.8s linear infinite; opacity: 0.5; margin-inline-end: 8px; }
 @keyframes px-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } .btn { transition: none; } }
-/* wiring:e1 — branding chrome (logo/name header + custom footer) */
+/* wiring:e1 - branding chrome (logo/name header + custom footer) */
 .pbrand { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; }
 .pbrand__logo { height: 34px; max-width: 200px; object-fit: contain; display: block; }
 .pbrand__name { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; overflow-wrap: anywhere; }

@@ -51,6 +51,10 @@ describe('e2e/run.mjs option checking', () => {
       'https://fm.example.com',
       '--base-path',
       '/filex',
+      '--loads',
+      '1000',
+      '--close-after',
+      'rand',
     ];
     expect(unknownOptions(argv)).toEqual([]);
   });

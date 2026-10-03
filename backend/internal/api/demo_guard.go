@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/api/handlers"
 )
 
 // demoGuardedPrefixes are the paths a public demo refuses to let a visitor
@@ -96,11 +98,8 @@ func DemoGuard(enabled bool) func(http.Handler) http.Handler {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"error": "this is a public demo: the admin surface is read-only here, " +
-					"and the shared demo account cannot be changed — run your own filex to try this",
-				"demo": "read-only",
-			})
+			// The same answer the admin MCP tools give (handlers.AIAdmin.invoke).
+			_ = json.NewEncoder(w).Encode(handlers.DemoRefusal())
 		})
 	}
 }

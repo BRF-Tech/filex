@@ -9,16 +9,12 @@
 // keystroke taken from the document being written. QuickLook's own guard was
 // a second copy of the same check with the same hole.
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { useKeyboardShortcuts } from '@brftech/filex-core/src/composables/useKeyboardShortcuts';
 import { isTypingTarget } from '@brftech/filex-core/src/lib/typingTarget';
 import QuickLook from '@brftech/filex-core/src/components/QuickLook.vue';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 /** Monaco's focused element in Chromium (EditContext), inside its editor. */
 function editContextTarget(): HTMLElement {

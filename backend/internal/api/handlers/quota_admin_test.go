@@ -14,7 +14,7 @@ import (
 // usage_bytes/quota_bytes are COALESCE'd columns on `users`, so no-rows can
 // only mean "no such user" — that's a 404, not a server fault.
 //
-// olivov hit this reading the endpoint with *provider* ids (H5, 2026-08-05);
+// A multi-tenant deployment hit this reading the endpoint with *provider* ids (H5, 2026-08-05);
 // a 500 gave them nothing to go on, which is the actual cost of the bug.
 func TestAdminQuota_UnknownUserIs404(t *testing.T) {
 	srv, client, store := testutil.NewTestServer(t)

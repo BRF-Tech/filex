@@ -16,7 +16,7 @@ import (
 
 // App permissions: what an installed app declares about ITS OWN actions —
 // "Request signatures" for the signing app — so an administrator can let one
-// role use that action and not another (Burak 2026-09-28: "share.links gibi
+// role use that action and not another (the maintainer 2026-09-28: "share.links gibi
 // rbac olaylarını applere de getirelim"). Signing a document someone sent you
 // needs no permission; ASKING people to sign does.
 //
@@ -67,6 +67,22 @@ func ValidAppDefault(d string) bool {
 
 // SourceAppDefault is an app permission decided by the app's own default.
 const SourceAppDefault SourceKind = "app_default"
+
+// AppDefaultFor is, for each built-in role (viewer, user, admin), whether an
+// account on it holds an app permission whose manifest default is def when
+// nobody has decided it: no exception, no custom role, no decision of the
+// built-in role. It is AppAllowed itself, asked of such an account, so the
+// catalogue (GET /api/admin/roles/catalogue → apps[].default_for) carries the
+// answer and the role editors' "Default (allowed / not allowed)" only reads
+// it — 0.49.0's editors kept a copy of the last layer of appDecide.
+func AppDefaultFor(def AppDefault) map[string]bool {
+	out := make(map[string]bool, 3)
+	for _, role := range []string{model.RoleViewer, model.RoleUser, model.RoleAdmin} {
+		// With nothing decided anywhere, the key is never found: any will do.
+		out[role], _ = Resolve(Input{Role: role}).AppAllowed(AppPrefix+"default.for", def)
+	}
+	return out
+}
 
 // AppAllowed decides the app permission key for this account. def is the
 // app's manifest default for it. Layers, highest first: the administrator

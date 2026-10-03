@@ -141,6 +141,33 @@ describe('each rule catches what it names', () => {
     expect(check({ 'no.such.key': 'y' }).warnings.map((w: { code: string }) => w.code)).toContain('UNKNOWN');
   });
 
+  it('an em dash or an en dash, in every table (filex writes a plain hyphen)', () => {
+    // From their code points, like tests/i18n/noLongDashes.test.ts: no editor
+    // can quietly turn the test into the character it looks for.
+    const EM = String.fromCharCode(0x2014);
+    const EN = String.fromCharCode(0x2013);
+    expect(codes(check({ [explorerKey]: `Descargar ${EM} ya` }))).toContain(`DASH:${explorerKey}`);
+    expect(codes(check({ [adminKey]: `Aplicaciones 1${EN}3` }))).toContain(`DASH:${adminKey}`);
+    expect(codes(check({ [sharedKey]: EM }))).toContain(`DASH:${sharedKey}`);
+    expect(codes(check({ 'server.mail.label.pin': `PIN ${EM} {pin}` }))).toContain('DASH:server.mail.label.pin');
+    expect(codes(check({ [explorerKey]: 'Descargar - ya' }))).toEqual([]);
+    expect(codes(check({ [adminKey]: 'Aplicaciones 1-3' }))).toEqual([]);
+    expect(codes(check({ 'server.mail.label.pin': 'PIN - {pin}' }))).toEqual([]);
+  });
+
+  it('a character that passes for a hyphen is a DASH too; the minus sign alone is a symbol', () => {
+    const NB = String.fromCharCode(0x2011);
+    const MINUS = String.fromCharCode(0x2212);
+    expect(codes(check({ [explorerKey]: `Solo${NB}lectura` }))).toContain(`DASH:${explorerKey}`);
+    expect(codes(check({ [adminKey]: `Prioridad ${MINUS}10` }))).toContain(`DASH:${adminKey}`);
+    for (const cp of [0x2010, 0x2012, 0x2015]) {
+      expect(codes(check({ [explorerKey]: `a ${String.fromCharCode(cp)} b` })), cp.toString(16)).toContain(`DASH:${explorerKey}`);
+    }
+    expect(codes(check({ [explorerKey]: MINUS }))).toEqual([]);
+    const msg = check({ [explorerKey]: `Solo${NB}lectura` }).errors.map((e: { msg: string }) => e.msg).join(' ');
+    expect(msg).toContain('U+2011');
+  });
+
   it('a string over the per-string ceiling', () => {
     expect(codes(check({ [explorerKey]: 'x'.repeat(V.LIMITS.MaxUILocaleValueBytes + 1) }))).toContain(`SIZE:${explorerKey}`);
   });

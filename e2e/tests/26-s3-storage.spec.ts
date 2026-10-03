@@ -1,7 +1,7 @@
 /**
  * An S3 backend, end to end — against a real S3 server, not a fake.
  *
- * `node e2e/run.mjs local --s3` starts MinIO in Docker, registers an `s3`
+ * `node e2e/run.mjs local --s3` starts an S3 server (versitygw) in Docker, registers an `s3`
  * storage through the admin API and sets `E2E_S3_STORAGE`. Without that the
  * whole file skips, loudly enough to see in the report: a green run that
  * silently omitted S3 is worse than a red one.
@@ -21,7 +21,7 @@
  *   4. Deleting goes to trash on S3 too, where "rename" is a copy and a
  *      delete rather than an atomic operation.
  *   5. **A move between two S3 storages of a file past 8 MiB** (issue #27). The harness's
- *      MinIO is plaintext http://, which is what makes this worth a real
+ *      S3 server is plaintext http://, which is what makes this worth a real
  *      server: over http the SDK signs the payload hash and must rewind the
  *      body, and a cross-storage move hands it the source's stream, which
  *      cannot rewind (a local source is a file, which can — measured: the
@@ -33,7 +33,7 @@ import { createHash } from 'node:crypto';
 import { newAuthedRequest, waitForOp } from '../helpers/seed';
 
 const STORAGE = process.env.E2E_S3_STORAGE ?? '';
-/** A second s3 storage on the same MinIO, for moves between object stores. */
+/** A second s3 storage on the same S3 server, for moves between object stores. */
 const STORAGE_B = process.env.E2E_S3_STORAGE_B ?? '';
 /** 12 MiB: more than two 5 MiB backend parts, so re-chunking is exercised. */
 const BIG = 12 * 1024 * 1024;

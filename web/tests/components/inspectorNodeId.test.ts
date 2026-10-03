@@ -1,6 +1,6 @@
 // The details panel's Node ID row is an ADMINISTRATOR's.
 //
-// ⚠ Burak, 2026-09-23: the id is a support handle — what an administrator
+// ⚠ The maintainer, 2026-09-23: the id is a support handle — what an administrator
 // quotes into Admin → File history or reads off an audit row — and it says
 // nothing to anybody else, so a shared surface was putting a number in front
 // of every reader. It is gated in the SHARED panel (core InspectorPanel), so

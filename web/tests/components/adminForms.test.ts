@@ -17,7 +17,7 @@
 // it is wrong; what is wrong is said INSIDE the dialog, under the box it is
 // about, in the reader's language; and what the server still refuses lands
 // in the dialog too — never in a toast behind it.
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
@@ -62,10 +62,51 @@ vi.mock('@/api/storages', () => ({
   StoragesApi: { list: vi.fn(async () => []) },
 }));
 
+// The Webhooks page's global-webhook card reads its config as it mounts.
+vi.mock('@/api/notifications', () => ({
+  NotificationsApi: {
+    list: vi.fn(),
+    unreadCount: vi.fn(),
+    markRead: vi.fn(),
+    markAllRead: vi.fn(),
+    getSettings: vi.fn(),
+    updateSettings: vi.fn(),
+    adminList: vi.fn(),
+    sendTest: vi.fn(),
+    getWebhookConfig: vi.fn(async () => ({ url: '', token_set: false })),
+    updateWebhookConfig: vi.fn(),
+  },
+}));
+
+// ⚠ The Users page asks the roles endpoints for its custom roles as it
+// mounts. Unmocked, that was a REAL request (happy-dom → localhost:3000,
+// ECONNREFUSED) whose refusal landed at whatever moment the network chose —
+// often in the NEXT test, after the page had been torn out of the document.
+// The page then re-drew its table (and the row menu teleported under <body>)
+// into DOM that was no longer there: "Cannot read properties of null
+// (reading 'insertBefore')", an unhandled rejection that fails the whole
+// run although every test passed (v0.49.0 release gate, task #127). The
+// answers are ours now, and `rolesAnswer` lets a test hold them back.
+let rolesAnswer: Promise<void> = Promise.resolve();
+vi.mock('@/api/roles', () => ({
+  RolesApi: {
+    allOverrides: vi.fn(async () => {
+      await rolesAnswer;
+      return {};
+    }),
+    listRules: vi.fn(async () => {
+      await rolesAnswer;
+      return { rules: [], assignments: {} };
+    }),
+    setUserRole: vi.fn(),
+  },
+}));
+
 import Users from '@/views/Users.vue';
 import Webhooks from '@/views/Webhooks.vue';
 import ApiMcp from '@/views/ApiMcp.vue';
 import { useToastStore } from '@/stores/toast';
+import { teardownDom, unmountAll } from '../helpers/teardown';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () {
@@ -76,13 +117,24 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
   };
 }
 
+// What Vue reports while a page updates — a render that throws lands here
+// instead of escaping as an unhandled rejection after the test.
+const renderErrors: unknown[] = [];
+
 function mountView(view: unknown, locale: 'en' | 'tr' = 'en'): VueWrapper {
   const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { en, tr } });
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/:p(.*)*', component: { template: '<div />' } }],
   });
-  return mount(view as never, { global: { plugins: [i18n, router] }, attachTo: document.body });
+  const w = mount(view as never, {
+    global: {
+      plugins: [i18n, router],
+      config: { errorHandler: (err: unknown) => void renderErrors.push(err) },
+    },
+    attachTo: document.body,
+  });
+  return w;
 }
 
 function button(w: VueWrapper, text: string) {
@@ -98,7 +150,18 @@ function toasts() {
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
-  document.body.innerHTML = '';
+  rolesAnswer = Promise.resolve();
+  renderErrors.length = 0;
+});
+
+// ⚠ Finish what the page still has in flight, UNMOUNT it, and only then
+// clear the document (helpers/teardown; setup.ts does the same after every
+// test of every file). Wiping <body> under a page that is still mounted (what
+// the old beforeEach did) leaves a live component drawing into detached DOM
+// the moment anything it awaits answers.
+afterEach(async () => {
+  await teardownDom();
+  expect(renderErrors, 'a page threw while it re-drew').toEqual([]);
 });
 
 describe('Add user', () => {
@@ -161,6 +224,36 @@ describe('Add user', () => {
     expect(w.find('input[name="new-user-email"]').element.closest('form')?.hasAttribute('novalidate')).toBe(true);
     expect(w.find('input[name="new-user-email"]').attributes('required')).toBeDefined();
     expect(w.find('input[name="new-user-name"]').attributes('required')).toBeUndefined();
+  });
+
+  // Task #127, the sequence that failed the v0.49.0 release run, played on
+  // purpose: a page with a row (whose menu is teleported under <body>) is
+  // left, the next page opens, and only THEN does the first page's roles
+  // answer arrive. Taken down properly (afterEach does the same), the old
+  // page draws nothing; left mounted under a wiped <body>, its table re-drew
+  // into detached DOM and threw "reading 'insertBefore'".
+  it('a roles answer that arrives after the page is gone draws nothing', async () => {
+    let answer!: () => void;
+    rolesAnswer = new Promise<void>((r) => (answer = r));
+    usersCreate.mockResolvedValue({ id: 9, email: 'new@example.com', role: 'viewer' });
+    const first = mountView(Users);
+    await flushPromises();
+    await button(first, 'Add user').trigger('click');
+    await flushPromises();
+    await first.find('input[name="new-user-email"]').setValue('new@example.com');
+    await button(first, 'Create').trigger('click');
+    await flushPromises();
+    expect(first.text()).toContain('new@example.com');
+
+    unmountAll();
+    rolesAnswer = Promise.resolve();
+    const next = mountView(Users);
+    await flushPromises();
+
+    answer();
+    await flushPromises();
+    expect(renderErrors).toEqual([]);
+    expect(next.text()).not.toContain('new@example.com');
   });
 
   it("the server's refusal lands under the box, inside the dialog", async () => {

@@ -507,6 +507,33 @@ describe.skipIf(!inSource)('the public tree the export builds carries nothing pr
     },
   );
 
+  // Real people, tenants and customers (0.50, before the launch). The names
+  // are the exporter's `private_names`, read from the script, so they are
+  // written down nowhere that ships. History keeps what it said when it
+  // shipped: CHANGELOG.md, the release notes generated from it, and the SQL
+  // migrations, which are the exporter's own exceptions too.
+  const privateNames = bashArray('private_names');
+  const isHistory = (f: string) => /(^|\/)(CHANGELOG\.md|releases\.json)$/.test(f) || /(^|\/)migrations\//.test(f);
+
+  it('no exported file names a real person, tenant or customer (private_names)', () => {
+    expect(privateNames.length, `${EXPORTER} lists no private_names`).toBeGreaterThan(0);
+    const word = new RegExp(`\\b(?:${privateNames.join('|')})\\b`, 'i');
+    const hits: string[] = [];
+    for (const f of exported) {
+      if (isHistory(f)) continue;
+      textOf(f)
+        .split('\n')
+        .forEach((line, i) => {
+          if (word.test(line)) hits.push(`${f}:${i + 1}`);
+        });
+    }
+    expect(
+      hits,
+      'a real name in a file the export publishes. Use a placeholder: alice/bob for a person, ' +
+        'acme/globex/initech for a tenant, @example.com for an address.',
+    ).toEqual([]);
+  });
+
 });
 
 // The runbook assertion, deliberately outside the block above: it is about a
@@ -675,13 +702,18 @@ describe('the About blurb this repository claims', () => {
     // ⚠ Not "starts with the product name": GitHub prints the repository name
     // directly above the blurb, so opening with `filex` again spends a sentence
     // on nothing, and an assertion demanding it would be this file's taste
-    // rather than a defect. The defect was `filex - self-hosted` — a spaced
-    // ASCII hyphen where the README, the site, the locale catalogue and every
-    // package.json use an em dash. Hyphenated words are untouched, which is why
-    // it is the spaces on both sides that are matched.
+    // rather than a defect.
+    //
+    // ⚠ This used to demand the OPPOSITE: an em dash, because the README, the
+    // site, the locale catalogue and every package.json used one. Since
+    // 2026-09-30 (owner's ruling) no surface a person reads carries an em or
+    // en dash, the README and the site included, so the blurb follows them
+    // with a plain " - " (web/tests/i18n/noLongDashesDocs.test.ts). The blurb
+    // lives in GitHub's settings, so a change here is pasted there by hand.
+    const longDash = new RegExp(`[${String.fromCharCode(0x2014)}${String.fromCharCode(0x2013)}]`);
     expect(
-      / - /.test(REPO_ABOUT),
-      'REPO_ABOUT separates a clause with " - ". Every other surface uses " — ".',
+      longDash.test(REPO_ABOUT),
+      'REPO_ABOUT carries an em or en dash. Every other surface writes a plain " - ".',
     ).toBe(false);
     expect(REPO_HOMEPAGE).toMatch(/^https:\/\//);
   });

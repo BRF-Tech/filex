@@ -66,7 +66,7 @@ describe('thumb', () => {
         // No thumbnails on this instance is not a failure — an UNSTAMPED one is.
         stamped.forEach((u) => {
           expect(u, `thumb_url must carry a stamp: ${u}`).to.match(
-            /^\/api\/files\/thumb\/\d+\?exp=\d+&sig=[0-9a-f]{64}$/,
+            /^\/api\/files\/thumb\/\d+\?exp=\d+&sig=[0-9a-f]{64}(?:&v=\d+)?$/,
           );
         });
       });

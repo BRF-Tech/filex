@@ -1,7 +1,7 @@
 package handlers_test
 
 // A public link answers only while the person who made it may still make it
-// (link_creator.go; Burak 2026-09-28: "linkler kapanır"). Nothing is deleted:
+// (link_creator.go; the maintainer 2026-09-28: "linkler kapanır"). Nothing is deleted:
 // the link comes back when the permission does. A file request also carries its
 // creator's blocked file types, because what is dropped lands in the creator's
 // storage as the creator's file.
@@ -103,7 +103,7 @@ func TestPerm_FileRequestsCloseAndCarryTheCreatorsLimits(t *testing.T) {
 }
 
 // Deleting an account closes the public links it opened — download links and
-// file requests — through every door that deletes one (Burak, 2026-09-28:
+// file requests — through every door that deletes one (the maintainer, 2026-09-28:
 // "Kapansın"). ⚠ Before, the store kept the rows with created_by cleared, and a
 // link with no creator is one linkCreatorAllows leaves open: the deleted
 // person's links went on answering. The audit row says how many closed.

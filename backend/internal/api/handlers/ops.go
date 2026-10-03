@@ -773,6 +773,11 @@ func opDestPerm(kind string) perm.Perm {
 // opAllow checks one path of an op: the per-user permission p when set (its
 // level included), otherwise the plain ≥editor level. It writes the refusal.
 func (o *Ops) opAllow(w http.ResponseWriter, r *http.Request, storageID int64, rel string, p perm.Perm, legacyMsg string) bool {
+	// A queued copy, move or delete of an entry the storage could not answer
+	// for, or into one, is refused before it is queued (issue #104).
+	if refuseUnavailableID(w, r, o.Store, storageID, rel) {
+		return false
+	}
 	if p == "" {
 		if !aclAllowID(r.Context(), o.ACL, o.Store, storageID, rel, acl.LevelEditor) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": legacyMsg})

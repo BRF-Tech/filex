@@ -91,9 +91,33 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/ai/upload":        gated(perm.AIUse),
 	"POST /api/ai/upload/ticket": gated(perm.AIUse),
 	"POST /api/ai/zip":           gated(perm.AIUse),
+	// The explorer's operations (handlers/ai_doors.go): the group gate here,
+	// and inside, the permission the explorer's own route checks - its
+	// handler runs (plugins.run before an app's action; files.create /
+	// files.modify / share.upload_links in the handlers).
+	"POST /api/ai/copy":              gated(perm.AIUse),
+	"POST /api/ai/apps/run":          gated(perm.AIUse),
+	"POST /api/ai/convert":           gated(perm.AIUse),
+	"POST /api/ai/ops/{id}/cancel":   gated(perm.AIUse),
+	"POST /api/ai/trash/restore":     gated(perm.AIUse),
+	"POST /api/ai/versions/restore":  gated(perm.AIUse),
+	"POST /api/ai/versions/snapshot": gated(perm.AIUse),
+	"POST /api/ai/archive/create":    gated(perm.AIUse),
+	"POST /api/ai/archive/extract":   gated(perm.AIUse),
+	"POST /api/ai/share/request":     gated(perm.AIUse),
+	// The bell, a star, comments, item permissions (ai_doors_people.go):
+	// comments.write and share.users are asked inside, by the handlers the
+	// explorer's routes run.
+	"POST /api/ai/notifications/read":      gated(perm.AIUse),
+	"POST /api/ai/star":                    gated(perm.AIUse),
+	"POST /api/ai/comments":                gated(perm.AIUse),
+	"POST /api/ai/comments/{id}/delete":    gated(perm.AIUse),
+	"POST /api/ai/permissions":             gated(perm.AIUse),
+	"POST /api/ai/permissions/{id}/revoke": gated(perm.AIUse),
 
 	// ── own account and credentials ──
 	"POST /api/auth/login":                  exemptBecause(whySecurity),
+	"POST /api/auth/handoff":                exemptBecause("the tenant's-address half of a sign-in typed on the platform's address: a one-use ticket bound to one account and this host becomes the session (multi-tenant realms)"),
 	"POST /api/auth/logout":                 exemptBecause(whySecurity),
 	"POST /api/auth/totp/enroll":            exemptBecause(whySecurity),
 	"POST /api/auth/totp/verify":            exemptBecause(whySecurity),
@@ -115,6 +139,9 @@ var permRouteTable = map[string]permRoute{
 	"PATCH /api/tokens/{id}":                gated(perm.AccessAPI),
 	"DELETE /api/tokens/{id}":               exemptBecause(whyWithdraw),
 	"PUT /api/me/prefs/":                    exemptBecause(whyOwnState),
+	"PUT /api/me/open-with/{ext}":           exemptBecause(whyOwnState),
+	"DELETE /api/me/open-with/{ext}":        exemptBecause(whyOwnState),
+	"DELETE /api/me/open-with/":             exemptBecause(whyOwnState),
 	"PATCH /api/notifications/settings":     exemptBecause(whyOwnState),
 	"POST /api/notifications/read-all":      exemptBecause(whyOwnState),
 	"POST /api/notifications/{id}/read":     exemptBecause(whyOwnState),
@@ -165,6 +192,8 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/files/permissions":                           inHandler("share.users (and owner level on the item)"),
 	"PATCH /api/files/permissions/{id}":                     inHandler("share.users"),
 	"DELETE /api/files/permissions/{id}":                    inHandler("share.users"),
+	"PATCH /api/files/permissions/groups/{id}":              inHandler("share.users"),
+	"DELETE /api/files/permissions/groups/{id}":             inHandler("share.users"),
 	"POST /api/files/permissions/invite":                    inHandler("share.users"),
 	"POST /api/files/permissions/share-mail":                inHandler("share.links"),
 	"POST /api/files/comments":                              gated(perm.CommentsWrite),

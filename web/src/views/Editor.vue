@@ -19,16 +19,20 @@ import { useI18n } from 'vue-i18n';
 
 import {
   PreviewModal,
+  followOpenWithChoices,
   isExternalUsable,
+  openKindOf,
+  openWithChoice,
   pickAppViewer,
   useFileApi,
   type ExplorerConfig,
   type FileNode,
   type ExternalServiceStatus,
+  type OpenRule,
   type PluginViewRow,
 } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
-import { effectiveTheme } from '@/lib/theme';
+import { liveTheme } from '@/lib/theme';
 import { getServerRoot } from '@/api/runtimeConfig';
 import { explorerAuth } from '@/lib/explorerConfig';
 
@@ -105,7 +109,7 @@ async function loadCapabilities(): Promise<void> {
 }
 
 /**
- * An app's own interface for this file (Burak, 2026-09-27 — one surface):
+ * An app's own interface for this file (the maintainer, 2026-09-27 — one surface):
  * the explorer's rule (lib/appViewer `pickAppViewer`) over the server's list
  * of views, and "Open with"'s choice when the tab was opened from one
  * (`app=plugin/view`, or `builtin`). The same default plugin endpoints the
@@ -113,6 +117,8 @@ async function loadCapabilities(): Promise<void> {
  */
 const fileApi = useFileApi({ apiBase: getServerRoot(), auth: explorerAuth() } as ExplorerConfig);
 const appViews = ref<PluginViewRow[]>([]);
+/** 0.50 - the administrator's open rules (Default apps), by kind. */
+const appRules = ref<Record<string, OpenRule>>({});
 /** The viewer waits for the list too: an app's file must not flash in
  *  filex's own viewer first. */
 const appsLoaded = ref(false);
@@ -120,6 +126,7 @@ async function loadAppViews(): Promise<void> {
   try {
     const list = await fileApi.pluginActions();
     appViews.value = list.views ?? [];
+    appRules.value = list.open_rules ?? {};
   } catch {
     /* apps off, or not reachable: filex's own viewer */
   } finally {
@@ -127,7 +134,14 @@ async function loadAppViews(): Promise<void> {
   }
 }
 const appChoice = computed(() => (typeof route.query.app === 'string' && route.query.app ? route.query.app : null));
-const appViewer = computed(() => pickAppViewer(appViews.value, node.value, appChoice.value));
+// The explorer's rule (lib/appViewer): the tab's `app=` when that handler is
+// on for the kind, else the person's "always open with" choice, else the
+// first the administrator left on.
+const appViewer = computed(() =>
+  pickAppViewer(appViews.value, node.value, appChoice.value, appRules.value, openWithChoice(openKindOf(node.value))),
+);
+const stopFollowingOpenWith = followOpenWithChoices();
+onBeforeUnmount(stopFollowingOpenWith);
 
 const node = computed<FileNode | null>(() => {
   const rawPath = route.query.path;
@@ -201,11 +215,10 @@ function closeWindow() {
 // embedded viewer follows the host admin's dark/light state. Without
 // this the SFC's `prefers-color-scheme` media-query fallback locks
 // the standalone editor to OS-dark when the admin shell is light.
-const currentTheme = ref<'light' | 'dark'>(effectiveTheme());
-let htmlObserver: MutationObserver | null = null;
-const onStorage = (e: StorageEvent) => {
-  if (e.key === 'filex.theme') currentTheme.value = effectiveTheme();
-};
+// ⚠ `liveTheme` (lib/theme): the settings switch, the OS in auto and another
+// tab's choice all reach it there - this view no longer keeps a copy of its
+// own with a MutationObserver and a `storage` listener (#74).
+const currentTheme = liveTheme;
 
 onMounted(() => {
   const n = node.value;
@@ -215,15 +228,6 @@ onMounted(() => {
   if (n) document.title = n.basename;
   void loadCapabilities();
   void loadAppViews();
-  htmlObserver = new MutationObserver(() => {
-    currentTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  });
-  htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  window.addEventListener('storage', onStorage);
-});
-onBeforeUnmount(() => {
-  htmlObserver?.disconnect();
-  window.removeEventListener('storage', onStorage);
 });
 </script>
 

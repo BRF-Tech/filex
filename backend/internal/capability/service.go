@@ -1,5 +1,5 @@
 // Package capability probes runtime feature availability — both binary
-// tools (ffmpeg, gs, libreoffice, vips) and external HTTP services
+// tools (ffmpeg, gs, imagemagick, rsvg) and external HTTP services
 // (OnlyOffice, Drawio).
 //
 // Results are cached so the /api/capabilities endpoint is cheap: 1h after
@@ -61,6 +61,10 @@ type Service struct {
 	oidcAutoRedirect bool
 	recoveryLogin    bool
 	appPlugins       model.AppPluginsCapabilities
+	// appPluginEngines answers AppPlugins.Engines at every refresh: the
+	// office engine comes and goes with the document server's configuration
+	// (0.50), which an administrator changes without a restart.
+	appPluginEngines func(context.Context) map[string]bool
 }
 
 // New constructs a Service.
@@ -126,6 +130,16 @@ func (s *Service) SetAppPlugins(v model.AppPluginsCapabilities) {
 	s.mu.Unlock()
 }
 
+// SetAppPluginEngines wires the live engine map of the app-plugin runtime
+// (wasmplugin.Registry.Engines): read at every refresh rather than once at
+// boot, so connecting OnlyOffice shows the office engine without a restart.
+func (s *Service) SetAppPluginEngines(fn func(context.Context) map[string]bool) {
+	s.mu.Lock()
+	s.appPluginEngines = fn
+	s.cached = nil
+	s.mu.Unlock()
+}
+
 // AttachStorageResolver wires the resolver used for per-storage capability
 // probes. Optional — when nil the response omits the per-storage map.
 func (s *Service) AttachStorageResolver(resolver func(int64) (storage.Driver, error)) {
@@ -164,18 +178,34 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 	if err != nil {
 		return nil, err
 	}
+	st := externalState(name, es.Enabled, es.URL, es.SecretEnc)
+	_ = s.store.UpdateExternalServiceState(ctx, name, *st.LastCheck, st.State)
+	s.Invalidate()
+	return st, nil
+}
+
+// ProbeExternalValues probes a service at values that are NOT the stored
+// row's - the admin page's unsaved form (issue #80: "Test now" tested the
+// saved address, not the one in the box) - and stores nothing: the row's
+// verdict stays about the row, and the configuration in force is untouched.
+func (s *Service) ProbeExternalValues(name string, enabled bool, url, secret string) *model.ExternalServiceState {
+	return externalState(name, enabled, url, secret)
+}
+
+// externalState is the one verdict both probes give.
+func externalState(name string, enabled bool, url, secret string) *model.ExternalServiceState {
 	now := time.Now()
 	st := &model.ExternalServiceState{
-		Enabled:   es.Enabled,
-		URL:       es.URL,
+		Enabled:   enabled,
+		URL:       url,
 		LastCheck: &now,
 	}
 	switch {
-	case !es.Enabled:
+	case !enabled:
 		st.State = "disabled"
-	case es.URL == "":
+	case url == "":
 		st.State = "unconfigured"
-	case missingSecret(name, es.SecretEnc):
+	case missingSecret(name, secret):
 		// ⚠ Reachable is not the same as configured. A Document Server with no
 		// JWT secret on filex's side answers /healthcheck perfectly happily and
 		// then refuses every editor session, which is how a green Test button
@@ -183,16 +213,14 @@ func (s *Service) ProbeExternal(ctx context.Context, name string) (*model.Extern
 		// thing here rather than probing and calling it healthy.
 		st.State = "unconfigured"
 	default:
-		if ok, detail := probeHTTPDetail(externalProbeURL(name, es.URL)); ok {
+		if ok, detail := probeHTTPDetail(externalProbeURL(name, url)); ok {
 			st.State = "ok"
 		} else {
 			st.State = "unreachable"
 			st.Detail = externalProbeHint(name, detail)
 		}
 	}
-	_ = s.store.UpdateExternalServiceState(ctx, name, now, st.State)
-	s.Invalidate()
-	return st, nil
+	return st
 }
 
 func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
@@ -241,7 +269,11 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	caps.OIDCAutoRedirect = s.oidcAutoRedirect
 	caps.AuthRecoveryLogin = s.recoveryLogin
 	caps.AppPlugins = s.appPlugins
+	enginesFn := s.appPluginEngines
 	s.mu.RUnlock()
+	if enginesFn != nil && caps.AppPlugins.Enabled {
+		caps.AppPlugins.Engines = enginesFn(ctx)
+	}
 	// ⚠⚠ The engines are enginebin's ONE answer — the same one Apps and the
 	// converter read (wasmplugin.probeEngines). This block used to ask
 	// `has("magick") || has("convert")` itself, and on Windows `convert` is
@@ -251,13 +283,20 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 	// 2026-09-21). Nothing here may probe a binary of its own again.
 	engines := enginebin.Probe()
 	caps.Thumbs.ImageMagick = engines.Has(enginebin.ImageMagick)
+	// ⚠ HEIC is measured, not inferred from ImageMagick: libheif without its
+	// HEVC decoder plugin (Ubuntu 24.04) lists HEIC and decodes none, and
+	// 0.50 said "HEIC: yes" while every phone photo failed. enginebin.HEIC
+	// draws a sample once (again when the binary changes); this reads that
+	// cached answer, the same one the thumbnail pipeline reads.
+	caps.Thumbs.HEIC = caps.Thumbs.ImageMagick && enginebin.HEIC().Decodes
 	if engines.Has(enginebin.FFmpeg) {
 		caps.Thumbs.Video = true
 		caps.Thumbs.Audio = true
 	}
 	caps.Thumbs.PDF = engines.Has(enginebin.Ghostscript) || engines.Has(enginebin.Poppler)
-	caps.Thumbs.Office = engines.Has(enginebin.LibreOffice)
-	caps.Thumbs.SVG = engines.Has(enginebin.RSVG)
+	// SVG thumbnails are drawn by the built-in engine (thumb/svgwasm) on
+	// every install; rsvg-convert is only its fallback.
+	caps.Thumbs.SVG = true
 	// Optional OCR for content search — resolution shared with the
 	// extractor (FILEX_TESSERACT_BIN authoritative, else $PATH) so the
 	// advertised flag and the actual pipeline can never disagree.
@@ -312,6 +351,14 @@ func (s *Service) refresh(ctx context.Context) (*model.Capabilities, error) {
 				st.State = "disabled"
 			}
 			caps.External[es.Name] = st
+			// Office thumbnails are drawn by the OnlyOffice document server
+			// (thumb/office.go): there are office thumbnails exactly when it is
+			// configured, the same test the editor and the pipeline make (a
+			// URL and a secret). Reachable or not is the card's "state"; a
+			// server that is down for a while is retried, not unconfigured.
+			if es.Name == "onlyoffice" {
+				caps.Thumbs.Office = es.Enabled && es.URL != "" && !missingSecret(es.Name, es.SecretEnc)
+			}
 		}
 	}
 
@@ -456,7 +503,7 @@ func probeErrorText(err error) string {
 // static welcome page still loaded).
 func externalProbeHint(name, detail string) string {
 	if name == "onlyoffice" && (strings.HasSuffix(detail, "HTTP 502") || strings.HasSuffix(detail, "HTTP 503") || strings.HasSuffix(detail, "HTTP 504")) {
-		return detail + " — the document server's web server answered, but its docservice did not: run `supervisorctl status` in that container"
+		return detail + " - the document server's web server answered, but its docservice did not: run `supervisorctl status` in that container"
 	}
 	return detail
 }

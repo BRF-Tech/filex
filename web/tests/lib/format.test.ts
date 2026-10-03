@@ -34,8 +34,8 @@ describe('formatBytes', () => {
   });
 
   it('returns em-dash for negative or NaN', () => {
-    expect(formatBytes(-1)).toBe('—');
-    expect(formatBytes(Number.NaN)).toBe('—');
+    expect(formatBytes(-1)).toBe('-');
+    expect(formatBytes(Number.NaN)).toBe('-');
   });
 
   // ⚠ The unit is the language's own word (`unit.*` of the core catalogue,
@@ -66,33 +66,33 @@ describe('formatNumber', () => {
   });
 
   it('returns em-dash for null / undefined / NaN', () => {
-    expect(formatNumber(null)).toBe('—');
-    expect(formatNumber(undefined)).toBe('—');
-    expect(formatNumber(Number.NaN)).toBe('—');
+    expect(formatNumber(null)).toBe('-');
+    expect(formatNumber(undefined)).toBe('-');
+    expect(formatNumber(Number.NaN)).toBe('-');
   });
 });
 
 describe('formatDate', () => {
   it('returns em-dash for empty input', () => {
-    expect(formatDate(null)).toBe('—');
-    expect(formatDate(undefined)).toBe('—');
-    expect(formatDate('')).toBe('—');
+    expect(formatDate(null)).toBe('-');
+    expect(formatDate(undefined)).toBe('-');
+    expect(formatDate('')).toBe('-');
   });
 
   it('returns em-dash for invalid date', () => {
-    expect(formatDate('not-a-date')).toBe('—');
+    expect(formatDate('not-a-date')).toBe('-');
   });
 
   it('renders a real date', () => {
     const out = formatDate('2026-04-28T12:00:00Z', 'en');
-    expect(out).not.toBe('—');
+    expect(out).not.toBe('-');
     expect(out).toMatch(/\d{4}/);
   });
 });
 
 describe('formatRelative', () => {
   it('returns em-dash for empty', () => {
-    expect(formatRelative(null)).toBe('—');
+    expect(formatRelative(null)).toBe('-');
   });
 
   it('renders relative for recent times', () => {
@@ -128,8 +128,8 @@ describe('formatDuration', () => {
   });
 
   it('returns em-dash for negative', () => {
-    expect(formatDuration(-1)).toBe('—');
-    expect(formatDuration(Number.NaN)).toBe('—');
+    expect(formatDuration(-1)).toBe('-');
+    expect(formatDuration(Number.NaN)).toBe('-');
   });
 });
 
@@ -174,7 +174,7 @@ describe('the admin panel prints what the explorer prints', () => {
     expect(formatPercent(12.5, 'en')).toBe('13%');
     expect(formatPercent(7.25, 'en')).toBe('7.3%');
     expect(formatPercent(7.25, 'tr')).toBe('%7,3');
-    expect(formatPercent(Number.NaN, 'en')).toBe('—');
+    expect(formatPercent(Number.NaN, 'en')).toBe('-');
   });
 });
 

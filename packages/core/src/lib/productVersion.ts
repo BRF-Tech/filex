@@ -1,7 +1,7 @@
 /**
  * productVersion — the one line that says which filex this is: `filex 0.43.0`.
  *
- * Burak, 2026-09-24: the version should be somewhere a PERSON can find it —
+ * The maintainer, 2026-09-24: the version should be somewhere a PERSON can find it —
  * the account menu, or user settings. It was only on the sign-in page (twice,
  * each written out by hand) and on the administrators' About page, so anybody
  * who is not an administrator and is already signed in had no way to say
@@ -45,7 +45,7 @@ export interface ServerVersion {
  * internal/version.String): the release, then the commit and the build time
  * in brackets, either of which a build may leave out. Printed whole, the 40
  * hex digits and the timestamp gave the avatar menu a sideways scroll bar and
- * ran off the About page (Burak, 2026-09-26).
+ * ran off the About page (the maintainer, 2026-09-26).
  */
 export function parseServerVersion(version: string | null | undefined): ServerVersion {
   const v = String(version ?? '').trim();

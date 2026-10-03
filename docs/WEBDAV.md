@@ -6,13 +6,13 @@ filex serves every configured storage over **WebDAV** at:
 https://<your-filex>/dav/<storage-name>/<path>
 ```
 
-The first segment also accepts the storage's **uid** — assigned once, never
-changed — which is what a permanent mount should be given, because renaming the
+The first segment also accepts the storage's **uid** - assigned once, never
+changed - which is what a permanent mount should be given, because renaming the
 storage re-addresses the name and every mount written against it answers 404.
 See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
 
 Mount your filex drives in Windows Explorer, macOS Finder, or any WebDAV
-client (rclone, Cyberduck, WinSCP, davfs2, Kodi, Documents by Readdle, …) —
+client (rclone, Cyberduck, WinSCP, davfs2, Kodi, Documents by Readdle, …) -
 uploads, downloads, rename/move, delete and folder creation all work, and
 every change is mirrored into the filex index (listings, search, thumbnails)
 just like an upload through the web UI.
@@ -39,7 +39,7 @@ FILEX_DAV=0
 
 (or `dav.enabled: false` in `config.yaml`). The whole `/dav` subtree then
 answers 404. Class-2 locking (`LOCK`/`UNLOCK`) is always on when the server is
-enabled — Windows refuses to mount a read-write drive without it — and the
+enabled - Windows refuses to mount a read-write drive without it - and the
 locks are **durable**: they are written to `<data>/dav/dav-locks.json` and read
 back at boot, so a deploy no longer silently forgets every lock it was
 holding.
@@ -53,15 +53,28 @@ Every request needs **HTTP Basic** credentials:
 | Username | your filex **username** or account **email** |
 | Password | your **account password**, *or* a filex **API token** |
 
-Both secrets are accepted in the same password field — filex first tries the
+Both secrets are accepted in the same password field - filex first tries the
 account password, then falls back to interpreting the value as an API token
-(mint one under **API / MCP** in the admin UI, or — for any account — from the
-file explorer's navigation panel under **Connections → API keys**). Failures return `401` with
-`WWW-Authenticate: Basic realm="filex"`.
+(mint one under **API / MCP** in the admin UI, or - for any account - from the
+file explorer's navigation panel under **Connections → API keys**). With LDAP,
+Windows or Linux (PAM) sign-in switched on, the directory or operating-system
+password is accepted too, unless that provider's `protocol_login` is off
+([PROTOCOLS.md](PROTOCOLS.md#the-one-thing-to-understand-first-credentials)).
+Failures return `401` with `WWW-Authenticate: Basic realm="filex"` - the HTTP
+authentication realm, a fixed label, not a tenant realm.
+
+Wrong passwords count against the [sign-in attempt
+limit](CONFIGURATION.md#sign-in-attempt-limits); while a lock lasts the answer
+is `429` with `Retry-After`, and a token presented for that name is refused too.
+
+On a multi-tenant install the address you mapped names the tenant. On the
+platform's address write `realm/name` (`acme/alex@acme.example`); a realm that
+is not the address's tenant is refused like a wrong password
+([PROTOCOLS.md](PROTOCOLS.md#multi-tenant-installs-the-realm)).
 
 ⚠ The **API keys** entry is missing when the explorer is an embed proxied with
-one shared *app* token — those credentials belong to a person, and an app token
-is not one ([MCP.md](MCP.md#token-kinds--user-vs-app)). Sign in to filex
+one shared *app* token - those credentials belong to a person, and an app token
+is not one ([MCP.md](MCP.md#token-kinds---user-vs-app)). Sign in to filex
 directly, or ask an admin to mint the token at `POST /api/admin/ai-tokens`.
 
 Notes:
@@ -70,13 +83,13 @@ Notes:
   `/dav` behind TLS (Windows additionally refuses Basic over plain HTTP by
   default).
 - **Accounts with TOTP/2FA enabled cannot use their password here** (Basic
-  auth has no second-factor slot). Mint an API token and use that instead —
+  auth has no second-factor slot). Mint an API token and use that instead -
   this is also the recommended setup for any always-on mount.
 - API tokens are honored with their **verb scopes**: `read` covers browsing
   and downloads, `write` covers uploads/mkdir/move/copy/locks, `delete`
   covers deletes. A token grants only the scopes it names (an empty list,
   which no door issues any more, grants nothing).
-- Tokens carrying a **`root:` confinement scope are rejected** on `/dav` —
+- Tokens carrying a **`root:` confinement scope are rejected** on `/dav` -
   the WebDAV tree has no confinement middleware, so accepting a
   subtree-limited token would widen its reach. Use an unconfined token (or
   RBAC grants) for WebDAV.
@@ -87,17 +100,17 @@ Notes:
 > available inside the app with your real host, your storage name and your
 > own username already substituted, plus a copy button per command:
 >
-> - the file explorer's navigation panel → **How to connect** — the same entry
+> - the file explorer's navigation panel → **How to connect** - the same entry
 >   on every surface that draws the panel, for every signed-in user;
 > - admins also reach it from **Connections** in the admin sidebar.
 >
 > Both routes render the same component from `@brftech/filex-core`, so they
-> cannot drift apart from each other — but they *can* drift from this file.
+> cannot drift apart from each other - but they *can* drift from this file.
 > A correction here belongs in `packages/core/src/lib/connectionGuides.ts`
 > too, and the other way round.
 
 **Under a base path** ([filex served under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path),
-`FILEX_BASE_PATH=/filex`) the endpoint is `https://example.com/filex/dav/` —
+`FILEX_BASE_PATH=/filex`) the endpoint is `https://example.com/filex/dav/` -
 every example below takes the base in front of `/dav/`, and the in-app page
 prints it that way. Answers are consistent with it: every `href` in a
 `PROPFIND` is under `/filex/dav/`, and a `MOVE`/`COPY` names its
@@ -119,14 +132,14 @@ Command-line equivalent:
 net use Z: "https://fm.example.com/dav/" /user:you@example.com <password-or-token> /persistent:yes
 ```
 
-Tips — and Windows has three built-in limits that will look like filex bugs if
+Tips - and Windows has three built-in limits that will look like filex bugs if
 you do not know about them. All three live under
 `HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters`, and the
 **WebClient service must be restarted** after any change
 (`net stop webclient && net start webclient`).
 
 - **Transfers stop at ~47.7 MB.** `FileSizeLimitInBytes` defaults to
-  **50,000,000 bytes**, not 4 GB — 4 GB (`0xFFFFFFFF`) is the largest value you
+  **50,000,000 bytes**, not 4 GB - 4 GB (`0xFFFFFFFF`) is the largest value you
   may set, not the default. Raise it with:
 
   ```bat
@@ -136,7 +149,7 @@ you do not know about them. All three live under
 - **Folders with roughly a thousand files fail to open**, often reported as
   *"Disk is not formatted"* or error 31. `FileAttributesLimitInBytes` defaults
   to 1,000,000 bytes, which is the total size of the properties returned for one
-  collection — about 1,000 entries. See
+  collection - about 1,000 entries. See
   [Microsoft KB 912152](https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/cannot-access-webdav-web-folder).
 
   ```bat
@@ -144,12 +157,12 @@ you do not know about them. All three live under
   ```
 
 - **HTTPS is mandatory.** `BasicAuthLevel` defaults to `1`, meaning "Basic
-  authentication over SSL only" — over plain `http://` Windows silently refuses
+  authentication over SSL only" - over plain `http://` Windows silently refuses
   to send your credentials and the mount fails with no useful message. Do not
   set it to `2`; use TLS.
 
 - **The mapped drive will not survive a sign-out.** Since Windows 7, Basic
-  authentication credentials cannot be persisted by Credential Manager — this is
+  authentication credentials cannot be persisted by Credential Manager - this is
   by design ([KB 2673544](https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/cannot-automatically-reconnect-dav-share)),
   and `/persistent:yes` does not change it. Re-run `net use` from a logon script
   if you need the drive back automatically.
@@ -211,8 +224,8 @@ WebDAV enforces exactly the same authorization model as the web UI:
 
 ## Limits & behavior notes
 
-- **DELETE goes to the trash**, exactly like the web UI. A `DELETE` — of a file
-  or of a whole collection — renames the object into the hidden
+- **DELETE goes to the trash**, exactly like the web UI. A `DELETE` - of a file
+  or of a whole collection - renames the object into the hidden
   `.filex-trash/` bucket and flags the node row; the item then appears in the
   trash listing and can be restored, and it is only destroyed for good when the
   retention window expires or an admin empties the trash. See
@@ -220,7 +233,7 @@ WebDAV enforces exactly the same authorization model as the web UI:
   - A **collection** goes in as **one restorable unit**: restoring the folder
     brings its whole subtree back with it.
   - Trashed bytes **still count against the owner's quota** until they are
-    purged — the same rule the web UI follows. Deleting over WebDAV does not
+    purged - the same rule the web UI follows. Deleting over WebDAV does not
     free space; emptying the trash does.
   - The only way a WebDAV delete destroys data outright is a storage backend
     that supports neither move nor copy, since there is then no way to preserve
@@ -239,10 +252,10 @@ WebDAV enforces exactly the same authorization model as the web UI:
   folder half in the trash, or half at its new name. List the folder again to
   see the result.
 - **Cross-storage MOVE is not supported** (drivers can't rename across
-  backends) — the server answers `502`; do COPY + DELETE instead. COPY
+  backends) - the server answers `502`; do COPY + DELETE instead. COPY
   across storages works (it streams through the server).
 - Uploads are **spooled server-side** and written to the backing driver as a
-  whole object on close — very large files need matching temp-dir space on
+  whole object on close - very large files need matching temp-dir space on
   the filex host.
 - Locks are **persisted to disk** (`<data>/dav/dav-locks.json`) and survive a
   restart. ⚠ They are still **per node**: the file lives under that instance's
@@ -260,8 +273,8 @@ WebDAV enforces exactly the same authorization model as the web UI:
 - A `PUT` also **announces itself** on the realtime socket, so a browser with
   that folder open sees the file appear (measured at 21 ms from the write).
   ⚠ Before v0.34.0 the whole `/dav` surface was silent: the row and the index
-  were correct, nothing was broadcast, and an open explorer — which does not
-  poll while its socket is healthy — never showed the file at all
+  were correct, nothing was broadcast, and an open explorer - which does not
+  poll while its socket is healthy - never showed the file at all
   ([REALTIME.md](REALTIME.md)).
 - ⚠ A `PUT` over an **existing** path emits `file.updated`; a `PUT` that
   creates a file emits `file.uploaded`. Until v0.34.0 both were
@@ -271,13 +284,15 @@ WebDAV enforces exactly the same authorization model as the web UI:
   first; the same operation over SFTP, FTPS or NFS does not. See
   [TRASH-VERSIONING.md](TRASH-VERSIONING.md#what-triggers-a-snapshot).
 - Multi-tenant installs: `/dav` is **tenant-scoped**. The scope comes from the
-  authenticated user's provider — not the request Host — so it matches what
+  authenticated user's provider - not the request Host - so it matches what
   the JSON API and the web UI apply. A caller sees only their own provider's
   storages in the root, and any path under another provider's storage answers
   `404` (a foreign storage is indistinguishable from one that isn't there).
   Admins of the **supertenant** provider stay confine-exempt and see
   everything; `role: admin` on a regular tenant means admin *of that tenant*.
-  Suspended-tenant users are refused at login.
+  Suspended-tenant users are refused at login. The Host does decide which
+  tenant a sign-in is for: on acme's address `alex` is acme's alex, and
+  `beta/alex` there is refused.
 
   Before this, `/dav` resolved storages globally by name, so any tenant admin
   could list, read, write and permanently delete every other tenant's files.

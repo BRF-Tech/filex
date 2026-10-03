@@ -39,12 +39,18 @@ func permDeniedMessage(lang string, p perm.Perm, src perm.Source) string {
 	vars := srvtext.Vars{
 		"action": srvtext.Text(lang, "server.perm.action."+string(p), nil),
 		"rule":   src.RuleNameFor(lang),
+		"group":  src.GroupName,
 	}
-	kind := src.Kind
+	kind := string(src.Kind)
 	if kind == "" {
-		kind = perm.SourceBase
+		kind = string(perm.SourceBase)
 	}
-	return srvtext.Text(lang, "server.perm.denied."+string(kind), vars)
+	// A role the account holds through a group names the group too — the
+	// person has no role of their own to look for.
+	if src.GroupName != "" {
+		kind += "_group"
+	}
+	return srvtext.Text(lang, "server.perm.denied."+kind, vars)
 }
 
 // writePermDenied writes the 403 for a caller lacking permission p. res may

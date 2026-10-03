@@ -182,7 +182,7 @@ const skippedColumns = computed<DataColumn<UpdateRelease>[]>(() => [
     label: t('common.notes'),
     sortable: true,
     width: 320,
-    format: (r) => r.notes || '—',
+    format: (r) => r.notes || '-',
     sortValue: (r) => r.notes || null,
   },
 ]);
@@ -307,7 +307,7 @@ const skippedColumns = computed<DataColumn<UpdateRelease>[]>(() => [
               <div class="flex flex-wrap gap-1">
                 <Badge v-if="row.migrations" tone="amber">{{ t('updates.migrations') }}</Badge>
                 <Badge v-if="row.security" tone="rose">{{ t('updates.security') }}</Badge>
-                <template v-if="!row.migrations && !row.security">—</template>
+                <template v-if="!row.migrations && !row.security">-</template>
               </div>
             </template>
           </DataTable>
@@ -350,7 +350,7 @@ const skippedColumns = computed<DataColumn<UpdateRelease>[]>(() => [
             t('updates.checkedAtWhen', { when: formatDate(s.checked_at, locale) })
           }}</span>
           <span v-else-if="!s.enabled">{{ t('updates.disabled') }}</span>
-          <span v-else>—</span>
+          <span v-else>-</span>
           <Button size="sm" variant="outline" :disabled="checking" @click="checkNow">
             <RefreshCw class="me-1 h-3 w-3" :class="checking ? 'animate-spin' : ''" />
             {{ t('updates.checkNow') }}

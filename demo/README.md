@@ -9,8 +9,8 @@ different ways:
 | `vue.html`    | Vue 3                | `@brftech/filex-core`            | Mount `<FileExplorer>` SFC |
 | `react.html`  | React 18             | `@brftech/filex-react`           | Mount `<FileManager>` |
 
-All three are meant to pull the package off jsdelivr / esm.sh — no build step,
-no `node_modules` — take an `apiBase` and optional bearer token from a small
+All three are meant to pull the package off jsdelivr / esm.sh - no build step,
+no `node_modules` - take an `apiBase` and optional bearer token from a small
 toolbar, and render the file manager full-window.
 
 > ⚠⚠ **None of the three renders an explorer today.** Measured 2026-09-14 by
@@ -19,8 +19,8 @@ toolbar, and render the file manager full-window.
 >
 > | Page | What happens |
 > |---|---|
-> | `index.html` | The bundle registers `<filex-explorer>` before the page assigns `config`, and the element throws `config requires either apiBase or endpoint`. The page also listens for `filex-ready`, `filex-error`, `filex-share-created` and `filex-navigate`, none of which the element emits — its events are `error`, `share-created`, `file-opened`, `upload-progress` and `selection-change`, with the payload in `e.detail[0]` ([docs/API.md](../docs/API.md#events-customevent-on-the-element)). |
-> | `vue.html` | The app never mounts: the module script's import of `@brftech/filex-core` failed in the measurement, so `{{ status }}` stays on screen uncompiled. It would not render once that loads either — the component is written `<FileExplorer … />` in an in-DOM template, which the browser lowercases to `<fileexplorer>` before Vue sees it — and it listens for a `ready` event the component does not have. |
+> | `index.html` | The bundle registers `<filex-explorer>` before the page assigns `config`, and the element throws `config requires either apiBase or endpoint`. The page also listens for `filex-ready`, `filex-error`, `filex-share-created` and `filex-navigate`, none of which the element emits - its events are `error`, `share-created`, `file-opened`, `upload-progress` and `selection-change`, with the payload in `e.detail[0]` ([docs/API.md](../docs/API.md#events-customevent-on-the-element)). |
+> | `vue.html` | The app never mounts: the module script's import of `@brftech/filex-core` failed in the measurement, so `{{ status }}` stays on screen uncompiled. It would not render once that loads either - the component is written `<FileExplorer … />` in an in-DOM template, which the browser lowercases to `<fileexplorer>` before Vue sees it - and it listens for a `ready` event the component does not have. |
 > | `react.html` | Babel's JSX transform imports `react/jsx-runtime`, which the page's import map does not provide, so the script fails before React starts. The page also passes `onReady` and `onNavigate`, which are not props of `<FileManager>`. |
 >
 > All three also pass `startPath`, `locale: 'auto'` and `auth: { kind: 'cookie' }`,
@@ -43,9 +43,9 @@ npx http-server -p 8000
 
 Then open:
 
-- <http://localhost:8000/index.html> — vanilla / WC demo
-- <http://localhost:8000/vue.html>   — Vue 3 demo
-- <http://localhost:8000/react.html> — React demo
+- <http://localhost:8000/index.html> - vanilla / WC demo
+- <http://localhost:8000/vue.html>   - Vue 3 demo
+- <http://localhost:8000/react.html> - React demo
 
 Each page expects a running `filex` backend at the URL you type into the
 toolbar (default `http://localhost:5212`). Start one in a separate shell:
@@ -82,7 +82,7 @@ allow-list**, and a ranged read needs `Range`. Each chunk is a `PUT` carrying
 the first header. `Content-Range` has been in the default list since filex
 0.41.1, and `Range` and `X-Filex-Accept-Prepare` joined it in 0.43.0 (which
 also exposes `Content-Range` and `Retry-After`). On an older server, or if you
-set your own list in `config.yaml`, include all of them — a list copied from
+set your own list in `config.yaml`, include all of them - a list copied from
 before 0.43.0 silently loses ranged reads and the `202` "preparing" opt-in:
 
 ```yaml
@@ -118,7 +118,7 @@ The demos use `@latest` by default. To pin a version, edit the
 - Select several files → Download, and they come back as one streamed ZIP
 - Right-click context menu / long-press on touch
 - Preview: image, video, audio, PDF, text, code (Monaco)
-- Sharing — PIN + expiry + max downloads, copy URL
+- Sharing - PIN + expiry + max downloads, copy URL
 - Sort / filter / search
 - Keyboard shortcuts (`Delete`, `F2` rename, `Ctrl+C/X/V`, `Esc`)
 - Dark / light / auto theming

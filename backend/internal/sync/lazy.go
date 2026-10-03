@@ -540,7 +540,7 @@ func (lc *lazyCatalogue) deletePass(ctx context.Context, dir string, parent *int
 	}
 	for _, n := range candidates {
 		// 4. Each candidate confirmed gone by its own Stat — folders too.
-		if !lc.confirmGone(ctx, n) {
+		if !s.confirmGone(ctx, n, b) {
 			continue
 		}
 		batch := []*model.Node{n}
@@ -584,22 +584,6 @@ func folderGuardOK(isRoot bool, seen, baseline, gone int) bool {
 		return true
 	}
 	return guardOK(seen, baseline)
-}
-
-// confirmGone is the delete pass's second opinion: an unstored (in-flight)
-// upload is never a candidate, and anything else is gone only when its own
-// Stat answers ErrNotFound. Unlike the full scan's confirmGone it asks for
-// folders too — a local driver can stat a directory.
-func (lc *lazyCatalogue) confirmGone(ctx context.Context, n *model.Node) bool {
-	if n.TransferState != "" && n.TransferState != model.TransferStateStored {
-		return false
-	}
-	key := n.StorageKey
-	if key == "" {
-		key = n.Path
-	}
-	_, err := lc.s.driver.Stat(ctx, key)
-	return errors.Is(err, storage.ErrNotFound)
 }
 
 // announce tells whoever is looking what a reconcile found.

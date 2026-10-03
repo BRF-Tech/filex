@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/asn1"
 	"errors"
 	"math/big"
 	"time"
@@ -25,8 +24,8 @@ import (
 //
 // One seal key per (tenant, app), made on first use and kept sealed with
 // FILEX_SECRET_KEY like every other key here. The certificate is issued by
-// the tenant's LIVE authority, carries the document-signing EKU like a
-// signer's, and says whose seal it is: CN "filex document seal", O "filex",
+// the tenant's LIVE authority, carries the document-signing usages like a
+// signer's (wire.SignerEKUs), and says whose seal it is: CN "filex document seal", O "filex",
 // OU the app's name — an app with `sign` can seal only as ITSELF, never as
 // another app. When the authority is rotated, the next seal request issues a
 // new seal certificate from the new authority and the old key is destroyed
@@ -57,11 +56,13 @@ func (r *Registry) sealFor(ctx context.Context, tenantID int64, p *Installed) (*
 	}
 	if row != nil {
 		cert, cerr := firstCertOf(row.CertPEM)
-		if cerr == nil && cert.CheckSignatureFrom(caCert) == nil && time.Now().Before(cert.NotAfter) {
+		if cerr == nil && cert.CheckSignatureFrom(caCert) == nil && time.Now().Before(cert.NotAfter) && hasSignerEKUs(cert) {
 			return row, caCert, nil
 		}
-		// Issued by an authority that has since been retired, or run out:
-		// the key goes, the certificate stays in the documents it sealed.
+		// Issued by an authority that has since been retired, run out, or
+		// issued by a filex that still put emailProtection on it (before
+		// 0.50.0): the key goes, the certificate stays in the documents it
+		// sealed, and the next seal says documents and nothing else.
 		if derr := r.opts.Store.DestroyAppPluginSigningKey(ctx, row.ID); derr != nil {
 			return nil, nil, derr
 		}
@@ -84,8 +85,7 @@ func (r *Registry) sealFor(ctx context.Context, tenantID int64, p *Installed) (*
 		NotBefore:          now.Add(-5 * time.Minute),
 		NotAfter:           notAfter,
 		KeyUsage:           x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
-		ExtKeyUsage:        []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
-		UnknownExtKeyUsage: []asn1.ObjectIdentifier{{1, 3, 6, 1, 5, 5, 7, 3, 36}},
+		UnknownExtKeyUsage: signerEKUs(),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, caCert, &priv.PublicKey, caKey)
 	if err != nil {

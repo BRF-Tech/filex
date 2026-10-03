@@ -39,6 +39,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -101,10 +102,13 @@ func (rv Resolver) FromRequest(r *http.Request) string {
 		return rv.Fallback()
 	}
 	p, err := rv.Store.GetProviderByHost(r.Context(), host)
-	if err != nil || p == nil || p.Host == "" {
+	if err != nil || p == nil {
 		return rv.Fallback()
 	}
-	return rv.origin(p.Host, rv.scheme(r))
+	if a := rv.addressOf(r.Context(), p, host); a != "" {
+		return rv.origin(a, rv.scheme(r))
+	}
+	return rv.Fallback()
 }
 
 // ForProvider returns a tenant's origin without a request — for the e-mails
@@ -114,10 +118,62 @@ func (rv Resolver) ForProvider(ctx context.Context, providerID int64) string {
 		return rv.Fallback()
 	}
 	p, err := rv.Store.GetProvider(ctx, providerID)
-	if err != nil || p == nil || !p.Enabled || p.Host == "" {
+	if err != nil || p == nil || !p.Enabled {
 		return rv.Fallback()
 	}
-	return rv.origin(p.Host, rv.scheme(nil))
+	if a := rv.addressOf(ctx, p, ""); a != "" {
+		return rv.origin(a, rv.scheme(nil))
+	}
+	return rv.Fallback()
+}
+
+// domainLister is the store's list of a tenant's own domains
+// (docs/TENANT-ADMIN.md). Optional: a store without it knows no own domains.
+type domainLister interface {
+	ListProviderDomains(ctx context.Context, providerID int64) ([]*model.ProviderDomain, error)
+}
+
+// addressOf picks the address a tenant's links are minted on, "" for none:
+//
+//  1. its `host`, the operator's, when set (as before own domains existed);
+//  2. the address the request arrived on, when that is one of the tenant's
+//     own: its platform subdomain or an ACTIVE own domain, compared with what
+//     the data says, so the request's string is never echoed unproven;
+//  3. its first active own domain;
+//  4. its platform subdomain.
+//
+// The platform's own tenant has neither own domains nor a subdomain.
+func (rv Resolver) addressOf(ctx context.Context, p *model.Provider, arrived string) string {
+	if p.Host != "" {
+		return p.Host
+	}
+	if p.IsSupertenant {
+		return ""
+	}
+	sub := db.PlatformSubdomain(p)
+	if arrived != "" && arrived == sub {
+		return sub
+	}
+	first := ""
+	if dl, ok := rv.Store.(domainLister); ok {
+		if ds, err := dl.ListProviderDomains(ctx, p.ID); err == nil {
+			for _, d := range ds {
+				if d == nil || d.Status != model.DomainActive {
+					continue
+				}
+				if arrived != "" && d.Domain == arrived {
+					return d.Domain
+				}
+				if first == "" {
+					first = d.Domain
+				}
+			}
+		}
+	}
+	if first != "" {
+		return first
+	}
+	return sub
 }
 
 // ForStorage returns the origin of the tenant a storage belongs to. A storage

@@ -74,7 +74,7 @@ func quotaUserID(r *http.Request) (int64, bool) {
 
 // quotaErrStatus keeps "no such user" out of the 500 bucket. Reading a quota
 // for an id that isn't a user is a client mistake, not a server fault, and
-// answering 500 `sql: no rows in result set` told olivov nothing about the
+// answering 500 `sql: no rows in result set` told a multi-tenant deployment nothing about the
 // real problem — they were passing provider ids to a user endpoint (H5).
 func quotaErrStatus(err error) int {
 	if errors.Is(err, quota.ErrUserNotFound) {

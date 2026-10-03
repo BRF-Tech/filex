@@ -37,7 +37,7 @@ func anyStrings(v any) []string {
 }
 
 func TestWSWatchAcknowledgesAndDeliversRecursively(t *testing.T) {
-	url, hub, store := newWSFixture(t, &model.User{ID: 1, DisplayName: "Burak"})
+	url, hub, store := newWSFixture(t, &model.User{ID: 1, DisplayName: "Alice"})
 	ctx := context.Background()
 	conn, _, err := websocket.Dial(ctx, url, nil)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestWSWatchEmptySetIsAcknowledged(t *testing.T) {
 
 // A watcher must not show up in the presence bar of the folders it mirrors.
 func TestWSWatchIsNotPresence(t *testing.T) {
-	url, hub, store := newWSFixture(t, &model.User{ID: 1, DisplayName: "Burak"})
+	url, hub, store := newWSFixture(t, &model.User{ID: 1, DisplayName: "Alice"})
 	conn, _, err := websocket.Dial(context.Background(), url, nil)
 	require.NoError(t, err)
 	defer conn.Close(websocket.StatusNormalClosure, "")

@@ -115,7 +115,12 @@ func (f *opsFixture) runOp(t *testing.T, kind string, sources []string, dest str
 	defer cancel()
 	go f.svc.Run(runCtx)
 
-	deadline := time.Now().Add(3 * time.Second)
+	// The deadline only stops a hung op; a healthy one returns at its first
+	// finished poll. It was 3 s: a copy whose rows the search index's content
+	// hook indexes inline (bleve, fsync per batch) took 0.3 s alone and over
+	// 3 s on a loaded machine with a busy disk, and the test went red with
+	// "did not finish; last status=running" for nothing it measures.
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		cur, err := f.svc.Get(ctx, op.ID)
 		require.NoError(t, err)

@@ -41,7 +41,7 @@ func PrintBanner(w io.Writer, cfg config.Config, fr FirstRunCredentials, caps ma
 	// serving. The listen address is the fact; the public URL is the claim.
 	if !cfg.PublicURLSet {
 		fmt.Fprintf(w, "  %s    %s  %s\n", bold.Sprint("Listening on:"), cfg.Listen,
-			dim.Sprint("(FILEX_PUBLIC_URL unset — the socket URL follows the request)"))
+			dim.Sprint("(FILEX_PUBLIC_URL unset - the socket URL follows the request)"))
 	} else {
 		fmt.Fprintf(w, "  %s    %s\n", bold.Sprint("Listening on:"), cfg.PublicURL)
 	}

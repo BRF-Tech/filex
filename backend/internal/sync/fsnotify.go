@@ -26,12 +26,12 @@ func (s *storageSyncer) loopFSNotify() {
 		// (storage.Watcher — a plugin, typically). Falling straight through
 		// to polling is what made that interface dead code for years.
 		if w, hasWatch := s.driver.(storage.Watcher); hasWatch {
-			slog.Info("sync: driver is not local but streams its own changes — using them",
+			slog.Info("sync: driver is not local but streams its own changes - using them",
 				slog.String("storage", s.storage.Name))
 			s.loopDriverWatch(w)
 			return
 		}
-		slog.Warn("sync: fsnotify mode requested but the driver is not local and streams no changes — falling back to poll", slog.String("storage", s.storage.Name))
+		slog.Warn("sync: fsnotify mode requested but the driver is not local and streams no changes - falling back to poll", slog.String("storage", s.storage.Name))
 		s.loopPoll()
 		return
 	}

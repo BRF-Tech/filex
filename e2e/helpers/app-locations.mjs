@@ -38,7 +38,7 @@ export const APP_LOCATIONS = {
   // and French ship as examples." There is a fourth on the maintainer's
   // machine — `G:/filex-lang-ar` — and it is deliberately NOT here: Arabic is
   // filex's right-to-left test fixture, not published and not advertised
-  // (Burak, 2026-09-19). The specs that need a right-to-left language reach it
+  // (the maintainer, 2026-09-19). The specs that need a right-to-left language reach it
   // by path through e2e/helpers/langPack.ts; nothing that takes a PICTURE may
   // find it, because these pictures are the README's.
   'lang-es': {

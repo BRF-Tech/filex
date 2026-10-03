@@ -82,8 +82,17 @@ test.describe('the admin panel says which thing, in words', () => {
     await apiLogin(request);
     await dropStorageByName(request, RO);
     await dropStorageByName(request, RW);
-    // Leave ONLYOFFICE as a fresh install has it: off, no address, no secret.
-    await request.patch('/api/admin/external/onlyoffice', { data: { enabled: false, url: '', secret: '' } });
+    // Leave ONLYOFFICE as the run started: the harness's document server when
+    // filex was started with one (FILEX_ONLYOFFICE_URL / _JWT, e2e/README.md),
+    // a fresh install's "off, no address, no secret" otherwise.
+    // ⚠ Always "off" switched the document server off for every spec after
+    // this one on a run that had it (0.50 test phase: 195's drawing half and
+    // 91's ONLYOFFICE cases skipped as "not reachable").
+    const url = process.env.FILEX_ONLYOFFICE_URL ?? '';
+    const secret = process.env.FILEX_ONLYOFFICE_JWT ?? '';
+    await request.patch('/api/admin/external/onlyoffice', {
+      data: url && secret ? { enabled: true, url, secret } : { enabled: false, url: '', secret: '' },
+    });
   });
 
   test('Panel: the queue, the storages and the activity in words', async ({ page, request }) => {

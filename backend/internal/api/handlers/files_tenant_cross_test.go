@@ -237,8 +237,8 @@ func newXTFixture(t *testing.T, asAdmin bool) *xtFixture {
 	t.Helper()
 	srv, client, store := newXTServer(t, true)
 	f := &xtFixture{srv: srv, client: client, store: store}
-	f.mine = seedXTSide(t, store, "diyetlif")
-	f.theirs = seedXTSide(t, store, "arasboya")
+	f.mine = seedXTSide(t, store, "globex")
+	f.theirs = seedXTSide(t, store, "initech")
 	if asAdmin {
 		testutil.LoginAs(t, srv, client, f.mine.adminEmail, f.mine.adminPass)
 	} else {
@@ -420,7 +420,7 @@ func TestFilesCross_VersionsRestore(t *testing.T) {
 
 	live, err := os.ReadFile(livePath)
 	require.NoError(t, err)
-	require.Equal(t, "LIVE-arasboya", string(live),
+	require.Equal(t, "LIVE-initech", string(live),
 		"the other tenant's live bytes must be untouched")
 }
 
@@ -706,7 +706,7 @@ func TestFilesCross_SingleTenantUnaffected(t *testing.T) {
 func TestFilesCross_SupertenantReachesEverything(t *testing.T) {
 	srv, client, store := newXTServer(t, true)
 	_, superEmail, superPass := seedTenant(t, store, "platform", "ops@platform.test", true)
-	side := seedXTSide(t, store, "arasboya")
+	side := seedXTSide(t, store, "initech")
 	testutil.LoginAs(t, srv, client, superEmail, superPass)
 
 	do := func(method, path string, body any) (int, map[string]any) {

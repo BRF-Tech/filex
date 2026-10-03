@@ -407,19 +407,6 @@ const KNOWN_DUPLICATION: Debt[] = [
     maxTokens: 175,
   },
   {
-    files: [
-      'packages/core/src/components/ContextMenu.vue',
-      'packages/core/src/components/OnboardingTour.vue',
-    ],
-    reason:
-      'Both watch prefers-color-scheme with the same ref + matchMedia + ' +
-      'addEventListener/removeEventListener pair, because both draw outside `.fe` ' +
-      "where the theme cascade does not reach. OnboardingTour's copy even says " +
-      '"same pattern as ContextMenu" in a comment — it was copied knowingly. One ' +
-      'usePrefersDark() composable.',
-    maxTokens: 150,
-  },
-  {
     files: ['desktop/src/dragout.ts'],
     reason:
       'Listing a remote directory through the manager API — build the URL, set ' +

@@ -98,7 +98,7 @@ func CheckSchedule(m wire.Manifest, in *wire.TickInput, out *wire.TickOutput) er
 	add := func(msg string) { bad = append(bad, msg) }
 	if len(out.Items) > maxItems {
 		add(strconv.Itoa(len(out.Items)) + " items: at most " + strconv.Itoa(maxItems) +
-			" a wake-up, and the rest are DROPPED — order them so the urgent work comes first")
+			" a wake-up, and the rest are DROPPED - order them so the urgent work comes first")
 	}
 	seen := map[string]bool{}
 	for _, it := range out.Items {
@@ -107,7 +107,7 @@ func CheckSchedule(m wire.Manifest, in *wire.TickInput, out *wire.TickOutput) er
 			add(where + ": a key must match " + wire.ScheduleKeyPattern)
 		}
 		if seen[it.Key] {
-			add(where + ": returned twice in one answer — one key is one piece of work")
+			add(where + ": returned twice in one answer - one key is one piece of work")
 		}
 		seen[it.Key] = true
 		if !hasAction(m, it.ActionID) {
@@ -118,11 +118,11 @@ func CheckSchedule(m wire.Manifest, in *wire.TickInput, out *wire.TickOutput) er
 			add(where + ": due_at is missing")
 		case it.DueAt.After(in.WindowEnd):
 			add(where + ": due " + it.DueAt.UTC().Format(time.RFC3339) + ", after this window ends at " +
-				in.WindowEnd.Format(time.RFC3339) + " — it will NOT be scheduled; return it at the wake-up whose window contains it")
+				in.WindowEnd.Format(time.RFC3339) + " - it will NOT be scheduled; return it at the wake-up whose window contains it")
 		}
 		switch {
 		case len(it.Paths) == 0:
-			add(where + ": no paths — scheduled work runs as a job, and a job runs on files")
+			add(where + ": no paths - scheduled work runs as a job, and a job runs on files")
 		case len(it.Paths) > maxPaths:
 			add(where + ": " + strconv.Itoa(len(it.Paths)) + " paths, at most " + strconv.Itoa(maxPaths))
 		}
@@ -136,7 +136,7 @@ func CheckSchedule(m wire.Manifest, in *wire.TickInput, out *wire.TickOutput) er
 			if adapter == "" {
 				adapter = p[:i]
 			} else if adapter != p[:i] {
-				add(where + ": paths span " + quote(adapter) + " and " + quote(p[:i]) + " — one item, one storage")
+				add(where + ": paths span " + quote(adapter) + " and " + quote(p[:i]) + " - one item, one storage")
 			}
 		}
 	}

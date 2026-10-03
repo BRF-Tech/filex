@@ -59,6 +59,9 @@ test('winget: versioned URL, upper-case hash, per-user NSIS, the stable product 
   assert.match(inst, /ProductCode: af48dd76-2015-5c31-806d-7410b4687915/);
   assert.match(inst, /DisplayName: filex 0\.43\.3/);
   assert.match(inst, /ReleaseDate: 2026-09-25/);
+  // DisplayVersion would only repeat PackageVersion, which winget-pkgs asks
+  // submitters not to do (microsoft/winget-pkgs#443023).
+  for (const f of Object.values(files)) assert.doesNotMatch(f, /DisplayVersion/);
   for (const f of Object.values(files)) {
     assert.match(f, /ManifestVersion: 1\.12\.0/);
     assert.match(f, /PackageVersion: 0\.43\.3/);

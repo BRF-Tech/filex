@@ -88,6 +88,19 @@ const (
 // that deletes a folder recursively must still be able to remove it.
 const KeepMarker = ".keepdir"
 
+// E2EKeyFile is the key file the browser writes at the root of an end-to-end
+// encrypted folder (the "marker", docs/E2E-ENCRYPTION.md): the folder's salt,
+// its wrapped key slots and its level. internal/e2e names it MarkerName, from
+// here, so the two cannot disagree.
+//
+// ⚠ It is NOT filex's own machinery and none of the rules above apply to it:
+// the web UI writes it, a copy or a move of the folder must carry it, a zip of
+// the folder must pack it (`filex decrypt` reads it from there) and a protocol
+// client syncing the folder must mirror it. Two rules only, each its own
+// function: a person-facing listing leaves it out (Unlisted), and a surface
+// that holds no key may not write it (Keyless).
+const E2EKeyFile = ".filex-e2e.json"
+
 // dirs is the closed set, in the order web/tests/lib/internalPaths.test.ts
 // expects to read it. Keep the declaration on one line — that test parses it.
 var dirs = []string{Trash, Versions, Thumbs, OpenWith, Drafts}
@@ -114,6 +127,25 @@ func IsDirName(name string) bool {
 // child it is about to return.
 func IsName(name string) bool {
 	return IsDirName(name) || strings.TrimSpace(name) == KeepMarker
+}
+
+// Unlisted reports whether a person-facing LISTING leaves one entry out: one
+// of filex's own names (IsName) or an encrypted folder's key file
+// (E2EKeyFile). The explorer's listings, search, Recent/Starred/tag views and
+// the AI surface's file_list and file_search all ask it, by entry name.
+//
+// ⚠ A listing rule only. What a copy, an archive, a transfer or a protocol
+// server carries is IsName's business: a zip of an encrypted folder without
+// its key file is a zip nobody can ever decrypt.
+func Unlisted(name string) bool {
+	return IsName(name) || strings.TrimSpace(name) == E2EKeyFile
+}
+
+// IsKeyFile reports whether rel's last segment is an encrypted folder's key
+// file.
+func IsKeyFile(rel string) bool {
+	segs := segments(rel)
+	return len(segs) > 0 && segs[len(segs)-1] == E2EKeyFile
 }
 
 // segments splits a storage-relative path into its segments. It accepts the
@@ -298,7 +330,11 @@ var ErrReserved = errors.New("reserved for filex's own use")
 type ReservedError struct{ Rel string }
 
 func (e *ReservedError) Error() string {
-	return `"` + Reserved(e.Rel) + `" is ` + ErrReserved.Error()
+	name := Reserved(e.Rel)
+	if name == E2EKeyFile {
+		return `"` + name + `" is an encrypted folder's key file: only the filex web UI writes it`
+	}
+	return `"` + name + `" is ` + ErrReserved.Error()
 }
 
 func (e *ReservedError) Unwrap() error { return ErrReserved }
@@ -348,6 +384,14 @@ const (
 	// needs to know whose draft it is and who is asking; to Refused (which
 	// knows neither) it is Change.
 	OwnDraft
+	// Keyless is Change from a surface that holds no encryption key: the AI
+	// REST routes and the MCP tools (handlers.aiOps), and everything that
+	// writes through them (ShareX, the upload ticket). Refused wherever
+	// Change is, AND on an encrypted folder's key file (E2EKeyFile). Such a
+	// surface cannot read or re-key that file, and an overwrite, a rename or
+	// a delete of it loses the keys of every file in the folder; a key file
+	// written where there was none makes an ordinary folder look encrypted.
+	Keyless
 )
 
 // RefusedBy is Refused asked on behalf of a person: identical, except that
@@ -375,6 +419,9 @@ func RefusedBy(v Verb, rel string, person int64) bool {
 // session prefix, not a rename or move into or out of it, not an archive
 // extracted into it, not the area anywhere but at the root.
 func Refused(v Verb, rel string) bool {
+	if v == Keyless && IsKeyFile(rel) {
+		return true
+	}
 	if !Hidden(rel) {
 		return false
 	}
@@ -405,8 +452,8 @@ func isWorkCopy(segs []string) bool {
 }
 
 // Reserved names the part of rel that made Refused say no — the first
-// internal directory in it, or the keep marker — for an error a person can
-// read. "" when rel is not Hidden.
+// internal directory in it, the keep marker, or (Keyless) the key file - for
+// an error a person can read. "" when rel is none of them.
 func Reserved(rel string) string {
 	segs := segments(rel)
 	for _, seg := range segs {
@@ -416,6 +463,9 @@ func Reserved(rel string) string {
 	}
 	if len(segs) > 0 && segs[len(segs)-1] == KeepMarker {
 		return KeepMarker
+	}
+	if IsKeyFile(rel) {
+		return E2EKeyFile
 	}
 	return ""
 }

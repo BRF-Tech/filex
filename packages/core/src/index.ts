@@ -207,7 +207,26 @@ export type { PluginActionsStore } from './composables/usePluginActions';
 export { appliesMatches, appliesToNodes, appliesItemOf } from './lib/pluginApplies';
 /* Which app's own interface opens a file — one rule for the preview, "Open
  * with" and the standalone editor tab. */
-export { pickAppViewer, appViewersFor, viewerViews, BUILTIN_VIEWER } from './lib/appViewer';
+export {
+  pickAppViewer,
+  pickOpenHandler,
+  openHandlersFor,
+  openHandlerId,
+  openKindOf,
+  normalizeOpenChoice,
+  appViewersFor,
+  viewerViews,
+  BUILTIN_VIEWER,
+} from './lib/appViewer';
+export type { OpenHandler, OpenHandlers } from './lib/appViewer';
+// 0.50 - the person's "always open this kind with this app" (lib/openWith).
+export {
+  openWithChoice,
+  openWithChoices,
+  setOpenWithChoice,
+  clearOpenWithChoices,
+  followOpenWithChoices,
+} from './lib/openWith';
 export { labelOf as pluginLabelOf, labelIn as pluginLabelIn, appTextOr as pluginTextOr } from './lib/pluginLabel';
 /* The public page's three card widths, and which kind gets which. */
 export { publicLayoutFor } from './lib/publicLayout';
@@ -235,6 +254,8 @@ export { hasSteps, isBackAction, stepFooter } from './lib/surfaceSteps';
 /* v3 §3.0 — "go to this file, and start that screen on it". */
 export { isOpenRequest, openHashFor, openTargetFor } from './lib/surfaceOpen';
 export type { SurfaceOpenOptions, SurfaceOpenTarget } from './lib/surfaceOpen';
+export { jobOpenOf } from './lib/jobOpen';
+export type { JobOpen } from './lib/jobOpen';
 export type { StepFooter } from './lib/surfaceSteps';
 /* v3 §2 — a choice you can read without clicking. The replacement for
  * `<select>` in every surface, and available to a host that draws its own. */
@@ -444,6 +465,8 @@ export type { AppLock, LockedRefusal, LockWordsHost } from './lib/appLock';
 /* issue #34 — a symlink the server will NOT follow: what it is, why it will
    not open, and the rule that every surface refuses it out loud. */
 export { linkStateOf, linkWords, linkWordsFor, isUnopenableLink } from './lib/symlink';
+export { isUnavailable, unavailableWordsFor } from './lib/unavailable';
+export type { UnavailableWords, UnavailableWordsHost } from './lib/unavailable';
 export type { LinkState, LinkWords, LinkWordsHost } from './lib/symlink';
 /* v2 — where a `page` view lives and how a host opens it. */
 export { pluginPagePath, pluginPageUrl, isPagePlacement, PLUGIN_PAGE_SEGMENT } from './lib/pluginPage';
@@ -455,6 +478,7 @@ export type {
   PluginGatedRule,
   PluginViewRow,
   PluginActionsResponse,
+  OpenRule,
   PluginSurface,
   SurfaceNode,
   SurfaceAction,
@@ -525,6 +549,7 @@ export type {
 
 export type {
   FileNode,
+  ThumbNote,
   ShareInfo,
   UploadLimits,
   Capabilities,
@@ -542,6 +567,15 @@ export { isExternalUsable } from './types/FileNode';
 // ——— Composables (consumers can roll their own UI on top) ———
 export { useFileApi, resolveEndpoints } from './composables/useFileApi';
 export type { FileApi, ManagerResponse, PendingOpDto } from './composables/useFileApi';
+/* #119 - drafts (#71) are reached through `useFileApi(config).drafts`, the
+   client bound to the explorer's own endpoints and transport; `draftsClient`
+   stays internal. What a caller of `api.drafts` needs to read its answers: */
+export type { DraftDto, DraftList, DraftSaveOutcome } from './lib/drafts';
+export { isDraftLimit, isDraftFolderGone, draftLimitOf, DRAFT_LIMIT, DRAFT_TARGET_TAKEN, DRAFT_FOLDER_GONE } from './lib/drafts';
+/* #122 - somebody's Markdown as markup safe to draw: the explorer preview's own
+   pipeline (markdown-it, then the document sanitizer), for every other surface
+   that shows it - an app's release notes on the update review. */
+export { markdownToSafeHtml } from './lib/markdownHtml';
 /* bul:s3 — global-search contract types + snippet helpers */
 export type { GlobalSearchHit, GlobalSearchScope } from './composables/useFileApi';
 /* #47 — several accounts in one ⌘K (the desktop rail), and the one place a
@@ -688,6 +722,12 @@ export {
   applyThemeToEl,
   syncThemeStyle,
   generateThemeCss,
+  /* #74 - the outward-facing pages (share, sign-in): optional tokens a theme
+   * may define, and what one that does not gets in its own tones. */
+  PAGE_TOKENS,
+  PUBLIC_PAGE_TOKENS,
+  LOGIN_PAGE_TOKENS,
+  publicPageTokens,
   /* The light/dark MODE half — a different question from which palette paints
    * (see themes.ts). Exported because the appearance controls now live in the
    * host's own settings surface, and a host that can pick a palette but cannot
@@ -841,8 +881,47 @@ export { default as E2eRecoveryUnlockModal } from './components/E2eRecoveryUnloc
 /* wiring:e2 fxe — single encrypted files, for embedders (a desktop app that
    opens a `.fxe` natively) and for end-to-end tests that need a real one
    without driving a browser. docs/E2E-ENCRYPTION.md → "Single encrypted files". */
-export { createFxe, readFxe, unlockFxe, decryptFxeBody } from './lib/e2efile';
+export {
+  createFxe,
+  readFxe,
+  unlockFxe,
+  decryptFxeBody,
+  changeFxePassword,
+  rekeyedFxeKey,
+  replaceFxeHeader,
+} from './lib/e2efile';
 export type { FxeHeader, FxeKey, FxeCredential, CreateFxeOptions } from './lib/e2efile';
+export type { E2eCredential } from './lib/e2ecrypto';
+/* #119 - the rest of what the explorer does with an encrypted folder, for an
+   integrator that writes into one without the explorer (docs/E2E-ENCRYPTION.md
+   → "Using the building blocks"). Each is the explorer's own code path, not a
+   copy: encrypted names (level 2), the STREAM format every file over the
+   one-shot limit is written in (0x02), converting a folder that already holds
+   plain files, the names pass after raising a folder to level 2. */
+export { unlockNameKey, markerHasNames } from './lib/e2ecrypto';
+export {
+  encryptName,
+  decryptStoredName,
+  classifyStoredName,
+  namePlainProblem,
+  dirIdOf,
+  effectiveDirId,
+} from './lib/e2enames';
+export type { E2eNameKey, EncryptedName, DecodedName, StoredName, StoredNameKind, NameProblem } from './lib/e2enames';
+export {
+  E2E_FILE_VERSION_STREAM,
+  E2E_STREAM_CHUNK_LOG2,
+  createStreamEncryptor,
+  createStreamDecryptor,
+  encryptFolderFileStream,
+  decryptFolderFileStream,
+  streamFolderFileSize,
+} from './lib/e2estream';
+export type { StreamEncryptOptions, StreamDecryptOptions, FolderFileEncryptOptions } from './lib/e2estream';
+export { runConversion } from './lib/e2econvert';
+export type { ConvertIo, ConvertRow, ConvertProgress, ConvertOptions } from './lib/e2econvert';
+export { runNamePass } from './lib/e2enamepass';
+export type { NamePassIo, NamePassRow, NamePassProgress } from './lib/e2enamepass';
 /* /wiring:e2 */
 
 /* ── connections ────────────────────────────────────────────────────
@@ -877,6 +956,7 @@ export {
   buildFtpsGuide,
   buildNfsGuide,
   guideProtocols,
+  guideUser,
   hostOf,
   isPlainHttp,
 } from './lib/connectionGuides';

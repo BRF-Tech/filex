@@ -52,21 +52,22 @@
 //   SHOTS_DRY_RUN=1        walk every scene to its picture and write nothing
 //   SHOTS_KEEP=1           leave the instance running afterwards
 
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { chromium } from '@playwright/test';
-import { seedFixtures, zipStored } from './fixtures.mjs';
+import { seedFixtures } from './fixtures.mjs';
+import { packBoardApp } from './board-app/pack.mjs';
 import {
   addLocalStorage,
   bootInstance,
   client,
+  dismissToasts,
   findApp,
   installApp,
   log,
   newContext,
+  shootWhole,
   shot,
   signIn,
   sleep,
@@ -75,10 +76,6 @@ import {
 
 const SET = 'apps';
 const ADMIN = { email: 'demo@demo.com', password: 'demo-shots' };
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const BOARD_APP = join(HERE, 'board-app');
-const SDK_IIFE = join(HERE, '..', '..', 'packages', 'app-ui', 'dist', 'filex-app-ui.iife.js');
 
 // The file the board viewer is opened on.
 const BOARD_FILE = 'Launch plan.board';
@@ -111,76 +108,9 @@ const BOARD = {
   ],
 };
 
-/**
- * Packs the board app into `dir`: ui.zip (its ui/ files and the SDK) and a
- * manifest pinning that zip's SHA-256 — what an author ships.
- */
-function packBoardApp(dir) {
-  if (!existsSync(SDK_IIFE)) {
-    throw new Error(`${SDK_IIFE} is missing — build the packages first (pnpm run build:packages; pnpm shots does)`);
-  }
-  const ui = join(BOARD_APP, 'ui');
-  const entries = readdirSync(ui)
-    .sort()
-    .map((name) => ({ name, data: readFileSync(join(ui, name)) }));
-  entries.push({ name: 'filex-app-ui.iife.js', data: readFileSync(SDK_IIFE) });
-  const zip = zipStored(entries);
-  const manifest = JSON.parse(readFileSync(join(BOARD_APP, 'filex-app.json'), 'utf8'));
-  manifest.ui.bundle.sha256 = createHash('sha256').update(zip).digest('hex');
-  const uiZip = join(dir, 'ui.zip');
-  const manifestPath = join(dir, 'filex-app.json');
-  writeFileSync(uiZip, zip);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  return { uiZip, manifestPath, manifest };
-}
-
-/**
- * Close every toast still on screen, and wait for the layer to be empty.
- *
- * ⚠ A toast is a notice about the LAST thing that happened; the picture is
- * about the screen. One left over from the install sat across two lines of
- * the app's own grants in the first v0.43.0 take.
- */
-async function dismissToasts(page) {
-  const layer = page.getByTestId('toast-layer');
-  for (let i = 0; i < 12 && (await layer.locator('button').count()) > 0; i++) {
-    await layer.locator('button').first().click({ timeout: 2_000 }).catch(() => {});
-    await sleep(150);
-  }
-  await sleep(250);
-}
-
-/**
- * Shoots the install wizard's review dialog whole.
- *
- * ⚠⚠ The review is TALLER than the window — nine permissions, each with a
- * sentence — and an element screenshot of something taller than the
- * viewport is stitched by the browser. Over a dialog that floats above a
- * scrolling page the stitch came back as the top of the review, a grey
- * band, and the page underneath bleeding through it (v0.43.0, first take:
- * 1344×3308 of which two thirds were nothing). So the window is grown to
- * hold the whole dialog, and it is MEASURED to fit before the shutter.
- */
+/** The install review, whole (scene.mjs shootWhole). */
 async function shootReview(page, perms, name) {
-  const dialog = page.locator('[role="dialog"]').filter({ has: perms });
-  let fits = '';
-  for (let i = 0; i < 5; i++) {
-    const box = await dialog.boundingBox();
-    const view = page.viewportSize();
-    if (!box || !view) throw new Error('the install review dialog has no box to measure');
-    if (box.y >= 0 && box.y + box.height <= view.height) {
-      fits = 'yes';
-      break;
-    }
-    fits = `${Math.ceil(box.y + box.height)}px of dialog in a ${view.height}px window`;
-    await page.setViewportSize({ width: view.width, height: Math.min(2600, Math.ceil(box.y + box.height + 48)) });
-    await sleep(300);
-  }
-  if (fits !== 'yes') throw new Error(`the install review does not fit the window (${fits}) — the picture would be stitched`);
-  await shot(dialog, SET, name);
-  // Back to the window every other picture here is framed in.
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await sleep(300);
+  await shootWhole(page, page.locator('[role="dialog"]').filter({ has: perms }), SET, name);
 }
 
 async function main() {

@@ -58,6 +58,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/brf-tech/filex/backend/pkg/pluginkit"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
@@ -373,6 +374,113 @@ func (h *Harness) Act(viewID, actionID string, state, values map[string]any) (*w
 	ev.State = state
 	ev.Data = map[string]any{"values": values}
 	return h.View(viewID, ev)
+}
+
+// Press presses one of the screen's footer buttons THE WAY FILEX DOES, and
+// answers the next screen. Prefer it to Submit and Act for anything a person
+// clicks: those two let the test choose the event, and a test that chooses
+// is a test that can choose wrong.
+//
+// ⚠⚠ filex posts the PRIMARY button as `submit` and every other one as
+// `action`, with the button id in `action_id` - the full page, the dialog
+// and an embedded explorer's popup alike (packages/core usePluginSurface
+// `press`). filex-sign 0.1.0 shipped primary buttons ("Convert to PDF",
+// "Open its Signatures panel", "Close the expired request") whose handlers
+// listened for `action` only: a click redrew the same screen. Its tests
+// pressed them with Act, so they were green the whole time. Press
+// reads the button's weight off the screen the plugin drew, so the test
+// sends what the person's click sends.
+//
+// It also refuses the presses filex never sends, with an error rather than
+// a quiet second screen:
+//   - a button the screen does not draw (a test pressing a button that was
+//     renamed or dropped is testing a screen nobody sees);
+//   - a disabled button;
+//   - the primary button while a visible required field is empty (the
+//     browser stops it there and points at the field; the host would answer
+//     422 required).
+//
+// The event carries the screen's own `state` back, and the values a person
+// would be sending: what the screen's forms already hold (their `values`,
+// else each field's `default`), with `values` laid over them and the values
+// of fields `show_when` hides dropped.
+func (h *Harness) Press(viewID string, s *wire.Surface, button string, values map[string]any) (*wire.Surface, error) {
+	if s == nil {
+		return nil, errors.New("plugintest: Press needs the screen the button is on")
+	}
+	var (
+		btn   wire.SurfaceAction
+		found bool
+		ids   []string
+	)
+	for _, a := range s.Actions {
+		ids = append(ids, a.ID)
+		if a.ID == button {
+			btn, found = a, true
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("plugintest: the screen has no footer button %q (it draws %q)", button, ids)
+	}
+	if btn.Disabled {
+		return nil, fmt.Errorf("plugintest: footer button %q is disabled; filex does not send a press on it", button)
+	}
+	var fields []wire.Field
+	sent := map[string]any{}
+	for _, form := range Forms(s) {
+		fs := FieldsOf(form)
+		given := ValuesOf(form)
+		for _, f := range fs {
+			if v, ok := given[f.Key]; ok {
+				sent[f.Key] = v
+			} else if f.Default != nil {
+				sent[f.Key] = f.Default
+			}
+		}
+		fields = append(fields, fs...)
+	}
+	for k, v := range values {
+		sent[k] = v
+	}
+	if btn.Primary {
+		var empty []string
+		for _, k := range RequiredKeys(fields, sent) {
+			if !hasAnswer(sent[k]) {
+				empty = append(empty, k)
+			}
+		}
+		if len(empty) > 0 {
+			return nil, fmt.Errorf("plugintest: filex does not send this press: required field(s) %q are empty", empty)
+		}
+	}
+	for _, k := range HiddenKeys(fields, sent) {
+		delete(sent, k)
+	}
+	event := "action"
+	if btn.Primary {
+		event = "submit"
+	}
+	ev := h.Event(event)
+	ev.ActionID = button
+	ev.State = s.State
+	ev.Data = map[string]any{"values": sent}
+	return h.View(viewID, ev)
+}
+
+// hasAnswer is the host's "is there anything in this value at all?" (the
+// required gate): `false` and `0` are answers, an empty string or list is not.
+func hasAnswer(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(t) != ""
+	case []any:
+		return len(t) > 0
+	case []string:
+		return len(t) > 0
+	}
+	return true
 }
 
 // Page answers a public-page event on a link the plugin opened. The fake

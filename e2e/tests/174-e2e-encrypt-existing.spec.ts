@@ -7,7 +7,9 @@
  *      ciphertext where it is, names untouched, the key file ends at v2, and
  *      the plaintext versions filex kept are gone;
  *   2. level 2, interrupted: the second write fails, the strip says the job
- *      did not finish, Continue takes it to the end — contents AND names.
+ *      did not finish, Continue takes it to the end — contents AND names;
+ *   3. the conversion starts by itself even when another listing of the
+ *      folder overtakes the dialog's own (the race below, staged).
  *
  * ⚠ Language pinned to English on the ACCOUNT (lesson #616) and restored.
  */
@@ -112,7 +114,12 @@ async function openStorage(page: Page) {
   await expect(page.getByTestId('sidenav-new').first()).toBeVisible({ timeout: 30_000 });
 }
 
-async function encryptFolder(page: Page, name: string, level: 'content' | 'names') {
+async function encryptFolder(
+  page: Page,
+  name: string,
+  level: 'content' | 'names',
+  beforeSubmit?: () => Promise<void>,
+) {
   const target = await settled(row(page, name));
   await target.click({ button: 'right' });
   await target.dispose();
@@ -128,6 +135,7 @@ async function encryptFolder(page: Page, name: string, level: 'content' | 'names
   await pws.nth(1).fill(PW);
   await dialog.getByTestId('e2e-create-ack').check();
   await shot(page, `convert-dialog-${level}.png`);
+  await beforeSubmit?.();
   await dialog.getByRole('button', { name: 'Encrypt folder', exact: true }).click();
   const keyEl = page.locator('.fe-e2e-rk__key');
   await expect(keyEl).toBeVisible({ timeout: 20_000 });
@@ -236,5 +244,78 @@ test.describe.serial('E2E encrypt an existing folder in place', () => {
     for (const n of disk('Eski')) expect(n, 'names are ciphertext').toMatch(STORED);
     await expect(page.getByTestId('e2e-names-status')).toHaveText('Contents and names');
     for (const n of ['bir.txt', 'iki.txt', 'alt']) await expect(row(page, n)).toBeVisible();
+  });
+
+  /* The 0.50 final run lost test 1 once (Chromium, a disk with seconds of
+   * write latency): the folder was on screen, "Contents only", and every file
+   * stayed plaintext for the whole 30 s. The server log had no request after
+   * the key file's upload but two listings of the folder, 4 ms apart.
+   *
+   * The dialog writes the key file, awaits load(folder) and starts the
+   * conversion only if the explorer is in the folder by then. The key file's
+   * own change event reloaded the folder while that listing was out; the
+   * reload took the newer ticket, the dialog's listing committed nothing, and
+   * its await returned with the explorer still on the parent. The reload
+   * committed a moment later - and nothing started the conversion.
+   *
+   * Staged here: once the key file is written, the dialog's listing of the
+   * folder is held 6 s, so the reload the key file's change brings (about 2 s
+   * later on an idle machine) is asked while it is out; the reload's own
+   * listing is held 10 s, so the dialog's answers first. The listings before
+   * the key file (the dialog's look for encrypted folders inside) go through
+   * as they are. The test checks the race really was staged - the second
+   * listing asked before the first answered - so a run where it was not
+   * cannot pass for a green. Before lib/listingTickets `follow`, red every
+   * time. */
+  test("the conversion starts even when another listing of the folder overtakes the dialog's own", async ({ page }) => {
+    test.setTimeout(120_000);
+    await mkdir(api, '', 'Yarış');
+    await upload(api, 'Yarış', 'bir.txt', 'bir\n');
+    await upload(api, 'Yarış', 'iki.txt', 'iki\n');
+
+    await openStorage(page);
+    const folderWire = `${STORE}://Yarış`;
+    let keyWritten = false;
+    let listings = 0;
+    let firstAnsweredAt = 0;
+    let secondAskedAt = 0;
+    await encryptFolder(page, 'Yarış', 'content', async () => {
+      await page.route(
+        (u) => u.pathname === '/api/files/manager' && u.searchParams.get('action') === 'upload',
+        async (route) => {
+          const body = route.request().postDataBuffer()?.toString('latin1') ?? '';
+          const isKeyFile = body.includes(`filename="${MARKER}"`);
+          await route.continue();
+          if (isKeyFile) keyWritten = true;
+        },
+      );
+      await page.route(
+        (u) =>
+          u.pathname === '/api/files/manager' &&
+          u.searchParams.get('action') === 'index' &&
+          u.searchParams.get('path') === folderWire,
+        async (route) => {
+          if (!keyWritten) return route.continue();
+          const n = ++listings;
+          if (n === 1) {
+            await new Promise((r) => setTimeout(r, 6_000));
+            firstAnsweredAt = Date.now();
+          } else if (n === 2) {
+            secondAskedAt = Date.now();
+            await new Promise((r) => setTimeout(r, 10_000));
+          }
+          return route.continue();
+        },
+      );
+    });
+
+    await expect
+      .poll(() => (markerOnDisk('Yarış').conv === undefined ? 'done' : 'running'), { timeout: 30_000 })
+      .toBe('done');
+    expect(listings, 'a second listing of the folder was asked').toBeGreaterThanOrEqual(2);
+    expect(secondAskedAt, 'the race was staged: the second listing was asked while the first was out').toBeGreaterThan(0);
+    expect(secondAskedAt).toBeLessThan(firstAnsweredAt);
+    for (const [p, head] of Object.entries(heads('Yarış'))) expect(head, p).toBe('filexe2e');
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 });

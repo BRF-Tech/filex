@@ -23,6 +23,7 @@ import { useI18n } from 'vue-i18n';
 import {
   UserSettingsDialog,
   setThemeMode as setCoreThemeMode,
+  type PluginActionsResponse,
   type SettingsUser,
   type UserSettingsHost,
 } from '@brftech/filex-core';
@@ -39,7 +40,7 @@ import '@brftech/filex-core/style.css';
 import { AuthApi } from '@/api/auth';
 import { quotaApi } from '@/api/quota';
 import { NotificationsApi } from '@/api/notifications';
-import { extractError } from '@/api/client';
+import { api, extractError } from '@/api/client';
 import type { User } from '@/api/types';
 import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
@@ -110,6 +111,8 @@ const host: UserSettingsHost = {
       await notif.updateSettings(prefs);
       return notif.settings;
     },
+    // 0.50 - Default apps: which of the person's choices are still on.
+    pluginActions: async () => (await api.get<PluginActionsResponse>('/files/plugins/actions')).data,
   },
   setUser(u: SettingsUser) {
     auth.user = u as User;

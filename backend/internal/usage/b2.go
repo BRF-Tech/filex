@@ -217,7 +217,7 @@ func (b B2) parse(day time.Time, r io.Reader) ([]Day, error) {
 	// numbers from the wrong file.
 	for _, need := range []string{colDate, colBucketID, colByteHours} {
 		if _, ok := idx[need]; !ok {
-			return nil, fmt.Errorf("missing column %q — is this a B2 usage report?", need)
+			return nil, fmt.Errorf("missing column %q - is this a B2 usage report?", need)
 		}
 	}
 

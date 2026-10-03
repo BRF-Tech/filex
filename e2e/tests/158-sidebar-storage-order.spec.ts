@@ -284,6 +284,7 @@ test.describe('sidebar storage order (#57)', () => {
   });
 
   test('a finger: long press + move drags, long press alone opens the menu', async ({ browser, baseURL }) => {
+    test.skip(test.info().project.name !== 'chromium', 'the finger is driven through CDP Input.dispatchTouchEvent, which only Chromium has');
     const ctx = await (browser as Browser).newContext({
       baseURL,
       viewport: { width: 390, height: 844 },

@@ -60,6 +60,7 @@ const TOKEN_IS_THEIRS: Record<string, string> = {
   'webhooks.global.hint': 'the global webhook\'s Bearer token (see notifications.webhookToken)',
   'plugins.fields.token': 'a remote storage plugin\'s token is the plugin service\'s own secret',
   'plugins.remoteHint': 'a remote storage plugin\'s token is the plugin service\'s own secret',
+  'external.advisories.jwt_not_enforced': 'the document server\'s JWT, and its own error quoted as it shows it ("The document security token is not correctly formed")',
 };
 
 /* The mapped drive a connection guide talks a person through â a letter in
@@ -153,6 +154,12 @@ const TURKISH: Rule[] = [
   { use: 'filtre', wrong: tr('<süzgeç|<süzer>|<süzebilir') },
   { use: 'depo', wrong: tr('<tüm disk|<bu diskte|<disklerde>') },
   { use: 'kova', wrong: tr('<bucket') },
+  /* 2026-10-01 (#130 measured in the browser): an LDAP form said "E-posta
+     attribute" beside "Grup niteliği", and the header proxy "Kullanıcı
+     header'ı" beside "Ad başlığı" - an English word left in a Turkish
+     label reads as untranslated, and no rule knew these two words. */
+  { use: 'nitelik (a directory attribute)', wrong: tr('<attribute') },
+  { use: 'başlık (an HTTP header)', wrong: tr('<header') },
   { use: 'önizlemenin gösterebildiği — arkasındaki kütüphanenin adı değil', wrong: /model-viewer/i },
   { use: 'e-posta', wrong: tr('<(e-mail|email|mail)>') },
   { use: 'izin (API anahtarının yapabildikleri)', wrong: tr('<scope'), except: SCOPE_IS_THEIRS },
@@ -298,6 +305,11 @@ const SAME: Array<[string, string[]]> = [
   ['roles', ['nav.roles', 'permissions.title']],
   ['built-in role', ['audit.resource.permissions', 'audit.target.permissions']],
   ['role', ['common.role', 'audit.resource.permission_rule', 'audit.target.permission_rule']],
+  /* ⚠ NOT a group: an app permission's Allow / Deny (`permissions.apps.effect.*`)
+     and the catalogue's (`permissions.effect.*`) say the same words today, but
+     the owner wants the apps' pair free to change on its own — "Block" for an
+     app without every Deny becoming Block (2026-09-29). Tying them here would
+     undo that. */
   /* A permission that opens a door the connections page manages is called
      what that page calls the thing. */
   ['API keys (the access permission)', ['conn.tokens.title', 'permissions.items.access.api.label']],

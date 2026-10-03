@@ -1,17 +1,17 @@
 # Storage replication
 
-Replication keeps a **second, backup‑only copy** of a storage's files. Every
+Replication keeps a **second, backup-only copy** of a storage's files. Every
 write, delete, move and copy that lands on a storage is **fanned out** to a
-linked backup sink in the background, so you always have an off‑site mirror you
+linked backup sink in the background, so you always have an off-site mirror you
 can fall back to if the primary backend has a bad day.
 
-This is an **advanced feature**. A normal filex install doesn't need it —
+This is an **advanced feature**. A normal filex install doesn't need it -
 reach for it when you want a warm backup of a bucket/disk on a *different*
 provider (e.g. an S3 bucket mirrored to a second region, or a local disk mirrored
 to remote SFTP).
 
-- [How it works](#how-it-works) — [targets vs storages](#targets-vs-storages) · [modes](#per-path-modes)
-- [Setup](#setup) — [create a target](#1-create-a-replication-target) · [link a storage](#2-link-a-storage-to-the-target) · [rules](#3-rules--per-path-modes)
+- [How it works](#how-it-works) - [targets vs storages](#targets-vs-storages) · [modes](#per-path-modes)
+- [Setup](#setup) - [create a target](#1-create-a-replication-target) · [link a storage](#2-link-a-storage-to-the-target) · [rules](#3-rules---per-path-modes)
 - [Reconcile & repair](#reconcile--repair)
 - [Status report & notifications](#status-report--notifications)
 - [Admin endpoints](#admin-endpoints)
@@ -33,19 +33,19 @@ to remote SFTP).
             │  async fan-out (background goroutine, per-path rule)
             ▼
    ┌──────────────────────┐
-   │  ReplicationTarget   │  (backup-only sink — never shown, never read from
+   │  ReplicationTarget   │  (backup-only sink - never shown, never read from
    │  (backup sink)       │   except as a fallback when primary read fails)
    └──────────────────────┘
 ```
 
-The write to the **primary** happens synchronously — the user's request only
+The write to the **primary** happens synchronously - the user's request only
 returns once the primary has the file. The copy to the backup target then
 happens **asynchronously** in the background, by reading the object back from
 the primary and writing it to the target. Reads normally come from the primary;
 if a primary **read** or **stat** errors, the wrapper transparently falls back
 to the replica so individual downloads keep working during a primary outage.
-(Directory *listings* always come from the primary — they are never served from
-the backup, so a listing can't show a half‑replicated view.)
+(Directory *listings* always come from the primary - they are never served from
+the backup, so a listing can't show a half-replicated view.)
 
 ### Targets vs storages
 
@@ -53,8 +53,8 @@ filex draws a hard line between the two:
 
 | | **Storage** | **ReplicationTarget** |
 |---|---|---|
-| Shows in the Storages list / file explorer | **yes** — a named top‑level folder | **never** |
-| Written to directly by users | yes | **no** — backup only |
+| Shows in the Storages list / file explorer | **yes** - a named top-level folder | **never** |
+| Written to directly by users | yes | **no** - backup only |
 | Read from | yes (source of truth) | only as a **fallback** when the primary errors |
 | Role | primary backend | backup sink for one or more storages |
 | Configured at | **Storages** page | **Replication** page |
@@ -62,18 +62,18 @@ filex draws a hard line between the two:
 A **ReplicationTarget** is just a backend definition (driver + config) with no
 mount point. A regular **Storage** points at one via its `replica_target_id`
 field; once linked, the storage is transparently wrapped by a *replicated
-driver* that fans its writes out to the target. The target itself is invisible —
+driver* that fans its writes out to the target. The target itself is invisible -
 it will never appear as a folder and users can't browse it.
 
 Both a storage and a target use the **same adapters** (`local` · `s3` · `sftp` ·
-`webdav` · `ftp` · `smb`) and the **same `config` shape** — the target dialog
+`webdav` · `ftp` · `smb`) and the **same `config` shape** - the target dialog
 renders from the same driver descriptors the storage form does, so a driver
 cannot be offered for one and missing from the other. See
 [STORAGE.md → Adapters](STORAGE.md#adapters) for every adapter's config keys.
 
 > **Pick a *different* backend for the target.** Mirroring an S3 bucket to
 > another bucket on the same account, or a disk to a folder on the same disk,
-> defeats the point — a provider/hardware failure would take out both copies.
+> defeats the point - a provider/hardware failure would take out both copies.
 
 ### Per-path modes
 
@@ -84,16 +84,16 @@ but never propagate deletes under `archive/**`. There are three modes:
 | Mode | Creates / updates | Deletes | Moves / copies / mkdir |
 |---|---|---|---|
 | **`mirror`** (default) | replicated | replicated | replicated |
-| **`append_only`** | replicated | **not** replicated — the file **stays** on the backup | replicated |
+| **`append_only`** | replicated | **not** replicated - the file **stays** on the backup | replicated |
 | **`skip`** | not replicated | not replicated | not replicated |
 
-- **`mirror`** — the backup tracks the primary exactly, deletions included.
-- **`append_only`** — the backup only ever *grows*: new/changed files are
+- **`mirror`** - the backup tracks the primary exactly, deletions included.
+- **`append_only`** - the backup only ever *grows*: new/changed files are
   copied, but a delete on the primary leaves the backup copy in place. Good for
-  a tamper‑resistant archive where you never want a delete to erase the backup.
-- **`skip`** — the path is excluded from replication entirely.
+  a tamper-resistant archive where you never want a delete to erase the backup.
+- **`skip`** - the path is excluded from replication entirely.
 
-Rules are evaluated by **priority ascending** — the **first enabled rule whose
+Rules are evaluated by **priority ascending** - the **first enabled rule whose
 pattern matches wins**. If no rule matches (or there are no rules), the storage
 falls back to the **default mode** from settings (`default_mode`, itself
 defaulting to `mirror`).
@@ -116,11 +116,11 @@ defaulting to `mirror`).
 Three steps: create a target, link a storage to it, and (optionally) add rules.
 The **Replication** admin page walks you through all three; the equivalent API
 calls are shown below for automation. All endpoints require an **admin** session
-or an admin‑scoped API token.
+or an admin-scoped API token.
 
 ### 1. Create a replication target
 
-`POST /api/admin/replication-targets`. The body is a backend definition — same
+`POST /api/admin/replication-targets`. The body is a backend definition - same
 `driver` + `config` you'd use for a storage, minus any mount/sync fields:
 
 ```bash
@@ -139,13 +139,13 @@ curl -X POST https://files.example.com/api/admin/replication-targets \
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `name` | string | — | Display name for the target. Required. |
-| `driver` | string | — | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`. Required. |
-| `config` | object | `{}` | Per‑adapter settings — see [STORAGE.md → Adapters](STORAGE.md#adapters). |
-| `mode` | string | `async` | Fan‑out mode. `async` (default) fans writes out in the background. |
-| `enabled` | bool | `true` | Disabled targets are ignored by the fan‑out engine. |
+| `name` | string | - | Display name for the target. Required. |
+| `driver` | string | - | `local` · `s3` · `sftp` · `webdav` · `ftp` · `smb`. Required. |
+| `config` | object | `{}` | Per-adapter settings - see [STORAGE.md → Adapters](STORAGE.md#adapters). |
+| `mode` | string | `async` | Fan-out mode. `async` (default) fans writes out in the background. |
+| `enabled` | bool | `true` | Disabled targets are ignored by the fan-out engine. |
 
-> The target's `mode` (`async`/`sync`) is **not** the same thing as a per‑path
+> The target's `mode` (`async`/`sync`) is **not** the same thing as a per-path
 > [replica mode](#per-path-modes) (`mirror`/`append_only`/`skip`). The target
 > mode governs *when* the copy happens; today the engine always fans out
 > **asynchronously**, so the user's write never waits on the backup.
@@ -163,21 +163,21 @@ curl -X PATCH https://files.example.com/api/admin/storages/7 \
 ```
 
 From that point on, every mutation on storage `7` is mirrored to target `3`
-according to the [rules](#3-rules--per-path-modes). To **stop** replicating,
+according to the [rules](#3-rules---per-path-modes). To **stop** replicating,
 clear the link (`"replica_target_id": null`). Deleting a target automatically
 unlinks every storage that pointed at it.
 
 > The legacy `role` and `replica_of_id` columns on a storage are retained only
 > for backwards compatibility with old (v0.1.16) deployments. The current model
-> is the single `replica_target_id` foreign key — ignore the legacy fields.
+> is the single `replica_target_id` foreign key - ignore the legacy fields.
 
-### 3. Rules — per-path modes
+### 3. Rules - per-path modes
 
 With no rules, everything replicates in the storage's default mode (`mirror`).
 Add rules only where you want different behavior. `POST /api/admin/replica/rules`:
 
 ```bash
-# Never propagate deletes under archive/ — keep the backup append-only.
+# Never propagate deletes under archive/ - keep the backup append-only.
 curl -X POST https://files.example.com/api/admin/replica/rules \
   -H 'Content-Type: application/json' -b cookies.txt \
   -d '{ "path_pattern": "archive/**", "mode": "append_only",
@@ -195,9 +195,9 @@ curl -X POST https://files.example.com/api/admin/replica/rules \
 | `mode` | string | `mirror` · `append_only` · `skip`. |
 | `priority` | int | Lower wins. First enabled matching rule decides the mode. |
 | `enabled` | bool | Disabled rules are skipped during matching. |
-| `description` | string | Free‑text note (optional). |
+| `description` | string | Free-text note (optional). |
 
-The catch‑all default mode lives in **settings**, not in a rule:
+The catch-all default mode lives in **settings**, not in a rule:
 
 ```bash
 curl -X PATCH https://files.example.com/api/admin/replica/settings \
@@ -205,33 +205,33 @@ curl -X PATCH https://files.example.com/api/admin/replica/settings \
   -d '{ "default_mode": "mirror", "report_enabled": true, "report_cron": "0 */6 * * *" }'
 ```
 
-Rule and settings changes take effect immediately — the engine reloads its
+Rule and settings changes take effect immediately - the engine reloads its
 cache after every create/update/delete.
 
 ---
 
 ## Reconcile & repair
 
-Because fan‑out is asynchronous, a backup write can fail *after* the primary
+Because fan-out is asynchronous, a backup write can fail *after* the primary
 write already succeeded (target briefly unreachable, credentials rotated, disk
 full, …). Every such failure is recorded in a **failures** table keyed by
 `(path, op)`, with an error code, message and attempt count, and it fires a
 `replica_fail` notification. Repeated failures on the same path bump the attempt
 count rather than piling up rows.
 
-**Repair re‑runs the failed operation against the backup.** filex uses the
+**Repair re-runs the failed operation against the backup.** filex uses the
 persistent [queue](CONFIGURATION.md#queue) to do this reliably:
 
-- **Fix all** — `POST /api/admin/replica/fix` (`ReconcileAll`) enqueues one
+- **Fix all** - `POST /api/admin/replica/fix` (`ReconcileAll`) enqueues one
   `replica_retry` queue op for **every unresolved failure** that has none waiting
   already. It answers `{queued, already_queued}`: a retry still waiting in the
   queue absorbs the next request for the same failure, so pressing again adds
   nothing. Progress is visible on the Queue page.
-- **Fix one** — `POST /api/admin/replica/fix-one` with `{path, op}` enqueues a
+- **Fix one** - `POST /api/admin/replica/fix-one` with `{path, op}` enqueues a
   single retry for one failure, `{ok, queued}`. `queued: false` means one was
   already waiting.
-- The **retry handler** picks each op up and re‑executes it against the backup:
-  a `write`/`move`/`copy` re‑reads the object from the primary and writes it to
+- The **retry handler** picks each op up and re-executes it against the backup:
+  a `write`/`move`/`copy` re-reads the object from the primary and writes it to
   the target; a `delete` removes it from the target. On success it **resolves**
   the failure row (sets `resolved_at`); on error the queue **retries with
   backoff** (up to 3 attempts) before giving up.
@@ -245,27 +245,27 @@ persistent [queue](CONFIGURATION.md#queue) to do this reliably:
 
 A **status report** summarises replication health: how many failures are
 currently unresolved and how many were repaired in the last 24 h. It's a
-**singleton** — one row, overwritten on each run — fetched with
+**singleton** - one row, overwritten on each run - fetched with
 `GET /api/admin/replica/report` (`204 No Content` until the first run).
 
 You can run it two ways:
 
-- **On a schedule** — set `report_cron` (a standard cron spec, e.g.
+- **On a schedule** - set `report_cron` (a standard cron spec, e.g.
   `0 */6 * * *`) and `report_enabled: true` in
-  [settings](#3-rules--per-path-modes). An empty spec or `report_enabled: false`
+  [settings](#3-rules---per-path-modes). An empty spec or `report_enabled: false`
   removes the schedule.
-- **On demand** — `POST /api/admin/replica/report/run-now`.
+- **On demand** - `POST /api/admin/replica/report/run-now`.
 
 Each run **upserts** the report row (so the latest counts are always available)
-but only **emits a `replica_status_report` notification when it's actionable** —
+but only **emits a `replica_status_report` notification when it's actionable** -
 i.e. when there are failures, there were repairs, *or* a webhook URL is
 configured (you've opted in to receive every report at your own endpoint).
-⚠ That last condition means the **legacy** `FILEX_WEBHOOK_URL` specifically —
+⚠ That last condition means the **legacy** `FILEX_WEBHOOK_URL` specifically -
 a webhook v2 target subscribed to `replica_status_report` does not make a
 quiet report actionable, because the decision is taken before any target is
 matched. This
-stops an every‑few‑hours cron from flooding the in‑app bell with "0 failures"
-no‑ops. When it does notify, the **in‑app** message stays terse while the
+stops an every-few-hours cron from flooding the in-app bell with "0 failures"
+no-ops. When it does notify, the **in-app** message stays terse while the
 **webhook** payload carries the **full list of failed paths** so you can pipe it
 into your own tooling.
 
@@ -273,7 +273,7 @@ Other replication events that reach the bell + webhook:
 
 | Event | Severity | When |
 |---|---|---|
-| `replica_fail` | warning | a background fan‑out (write/delete/move/copy) to the backup failed |
+| `replica_fail` | warning | a background fan-out (write/delete/move/copy) to the backup failed |
 | `primary_read_fail` | error | a read/stat fell back to the backup because the primary errored |
 | `replica_reconcile_done` | info | a **Fix all** run queued one or more new retries (retries already waiting are not announced again) |
 | `replica_status_report` | info | a status report ran and was actionable (see above) |
@@ -282,7 +282,7 @@ Other replication events that reach the bell + webhook:
 
 ## Admin endpoints
 
-All under `/api/admin`, admin‑only. When the replica subsystem isn't wired up,
+All under `/api/admin`, admin-only. When the replica subsystem isn't wired up,
 these return **`503 Service Unavailable`** (`{"error":"replica offline"}` /
 `"replica reconcile offline"`).
 
@@ -317,7 +317,7 @@ these return **`503 Service Unavailable`** (`{"error":"replica offline"}` /
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/replica/fix` | Enqueue a retry for **every** unresolved failure with none waiting → `{queued, already_queued}` |
-| `POST` | `/replica/fix-one` | Enqueue one retry — body `{path, op}` (`op` = `write`/`delete`/`move`/`copy`) → `{ok, queued}` |
+| `POST` | `/replica/fix-one` | Enqueue one retry - body `{path, op}` (`op` = `write`/`delete`/`move`/`copy`) → `{ok, queued}` |
 
 **Report & settings:**
 
@@ -328,9 +328,9 @@ these return **`503 Service Unavailable`** (`{"error":"replica offline"}` /
 | `GET` | `/replica/settings` | Get `{report_cron, report_enabled, default_mode}` |
 | `PATCH` | `/replica/settings` | Update settings (reloads cron + rules engine) |
 
-> These same operations are also exposed as **token‑authenticated REST** under
-> `/api/ai/admin/...` for admin‑scoped API tokens (used by MCP/automation),
-> alongside the session‑cookie admin panel above.
+> These same operations are also exposed as **token-authenticated REST** under
+> `/api/ai/admin/...` for admin-scoped API tokens (used by MCP/automation),
+> alongside the session-cookie admin panel above.
 
 ---
 
@@ -347,19 +347,19 @@ drop out of the unresolved count.
 
 ### Files aren't being replicated at all
 Check, in order:
-1. **The storage isn't linked** — `replica_target_id` is empty. Link it on the
+1. **The storage isn't linked** - `replica_target_id` is empty. Link it on the
    Replication page (step 2). Without a link there's no wrapper and nothing
    fans out.
 2. **The target is disabled** (`enabled: false`).
-3. **A rule set the path to `skip`** — or the `default_mode` is `skip`. Review
+3. **A rule set the path to `skip`** - or the `default_mode` is `skip`. Review
    `/api/admin/replica/rules` and `/api/admin/replica/settings`; remember the
-   **lowest‑priority matching rule wins**.
-4. **Deletes specifically not propagating** — that path is likely `append_only`
+   **lowest-priority matching rule wins**.
+4. **Deletes specifically not propagating** - that path is likely `append_only`
    (deletes are intentionally *not* mirrored in that mode).
 
 ### The status report never emits a notification
 By design it only notifies when there's something to say. If counts are `0/0`
-and you still want a heartbeat on every run, **configure a webhook URL** — the
+and you still want a heartbeat on every run, **configure a webhook URL** - the
 report then posts to it every cron tick. Also confirm `report_enabled: true`
 and a **valid cron spec** in settings (an invalid spec is rejected and no
 schedule is installed). `GET /api/admin/replica/report` still returns the
@@ -374,12 +374,12 @@ reconcile **Service**, which comes online once a storage is paired with a target
 ### A download worked even though the primary was down
 Expected. Read and stat fall back to the backup when the primary errors, and a
 `primary_read_fail` notification is emitted so you know the primary needs
-attention — the backup covered for it.
+attention - the backup covered for it.
 
 ---
 
 ## See also
 
-- [STORAGE.md](STORAGE.md) — storages, adapters, and the `config` shape shared with targets
-- [CONFIGURATION.md](CONFIGURATION.md) — global config/env, including the [queue](CONFIGURATION.md#queue) that repair rides on
-- [RBAC.md](RBAC.md) — per‑storage / per‑file access control
+- [STORAGE.md](STORAGE.md) - storages, adapters, and the `config` shape shared with targets
+- [CONFIGURATION.md](CONFIGURATION.md) - global config/env, including the [queue](CONFIGURATION.md#queue) that repair rides on
+- [RBAC.md](RBAC.md) - per-storage / per-file access control

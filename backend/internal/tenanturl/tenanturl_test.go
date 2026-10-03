@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
@@ -175,6 +176,57 @@ func TestForStorageAndProvider(t *testing.T) {
 	single := tenanturl.New(st, operator, false)
 	assert.Equal(t, operator, single.ForStorage(ctx, 42))
 	assert.Equal(t, operator, single.ForProvider(ctx, 7))
+}
+
+// domainStore is a fakeStore that also knows tenants' own domains.
+type domainStore struct {
+	*fakeStore
+	domains map[int64][]*model.ProviderDomain
+}
+
+func (d *domainStore) ListProviderDomains(_ context.Context, id int64) ([]*model.ProviderDomain, error) {
+	return d.domains[id], nil
+}
+
+// A tenant with no `host` of its own (docs/TENANT-ADMIN.md): its links go to
+// the address the request arrived on when that is provably its own, else to
+// its first active own domain, else to its platform subdomain. Never to a
+// string the data does not hold.
+func TestTenantWithoutHostMintsOnItsOwnAddresses(t *testing.T) {
+	db.SetTenantDomain("tenants.files.test")
+	t.Cleanup(func() { db.SetTenantDomain("") })
+	acme := &model.Provider{ID: 9, Slug: "acme", Realm: "acme", Enabled: true}
+	st := &domainStore{fakeStore: newStore(), domains: map[int64][]*model.ProviderDomain{}}
+	st.byID[9] = acme
+	st.byHost["acme.tenants.files.test"] = acme
+	st.byHost["files.acme.test"] = acme
+	st.byHost["spoofed.example"] = acme // a store that matched loosely
+	rv := tenanturl.New(st, operator, true)
+	ctx := context.Background()
+
+	assert.Equal(t, "https://acme.tenants.files.test", rv.ForProvider(ctx, 9), "no own domain: the platform subdomain")
+	assert.Equal(t, "https://acme.tenants.files.test", rv.FromRequest(req("acme.tenants.files.test", nil)))
+
+	st.domains[9] = []*model.ProviderDomain{
+		{ProviderID: 9, Domain: "old.acme.test", Status: model.DomainSuspended},
+		{ProviderID: 9, Domain: "files.acme.test", Status: model.DomainActive},
+	}
+	assert.Equal(t, "https://files.acme.test", rv.ForProvider(ctx, 9), "the first ACTIVE own domain")
+	assert.Equal(t, "https://files.acme.test", rv.FromRequest(req("files.acme.test", nil)), "arrived on its own domain")
+	assert.Equal(t, "https://acme.tenants.files.test", rv.FromRequest(req("acme.tenants.files.test", nil)), "arrived on its subdomain")
+	assert.Equal(t, "https://files.acme.test", rv.FromRequest(req("spoofed.example", nil)),
+		"a host the data does not name for the tenant is never echoed")
+
+	// A tenant with a host keeps it, wherever the request came in.
+	acme.Host = "files.acme.example"
+	assert.Equal(t, "https://files.acme.example", rv.FromRequest(req("files.acme.test", nil)))
+	assert.Equal(t, "https://files.acme.example", rv.ForProvider(ctx, 9))
+
+	// No tenant domain and no own domain: the operator's URL, as before.
+	acme.Host = ""
+	st.domains[9] = nil
+	db.SetTenantDomain("")
+	assert.Equal(t, operator, rv.ForProvider(ctx, 9))
 }
 
 func TestZeroValueAndNilStore(t *testing.T) {

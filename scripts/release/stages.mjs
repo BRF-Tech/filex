@@ -853,7 +853,7 @@ export async function push(R) {
               `⚠⚠ ${R.plan.exportRemote}'s ${tag} names the PRIVATE release commit ${short(peeled)}. The private history is reachable in public.\n` +
               `  1. git -C ${slash(exp)} push ${R.plan.exportRemote} :refs/tags/${tag}\n` +
               `  2. push the export's tag again (one ref)\n` +
-              `  3. gh run list --workflow Release: if a run built from that tag, its binaries came from the private tree — that is a real leak, tell Burak.`,
+              `  3. gh run list --workflow Release: if a run built from that tag, its binaries came from the private tree — that is a real leak, tell the maintainer.`,
           };
         }
         if (main !== S.exportHead) {

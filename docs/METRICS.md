@@ -11,12 +11,12 @@ not public. The scrape job authenticates as an admin with an API token:
 
 > ⚠ On a **demo instance** (`FILEX_DEMO_MODE`) only `GET`, `HEAD` and `OPTIONS`
 > reach `/metrics`; every other method answers `403`. A scrape job is
-> unaffected — it uses `GET` — and an ordinary install is untouched, the demo
+> unaffected - it uses `GET` - and an ordinary install is untouched, the demo
 > guard being a pass-through when demo mode is off. The reason is in
 > [DEMO.md](DEMO.md#the-read-only-guard): `/metrics` is registered for every
 > HTTP method chi knows, and a demo publishes its admin login, so it was the one
 > admin-gated path a visitor could reach with a verb the guard did not cover.
-> Nothing was exploitable — the exposition is read-only whatever the method —
+> Nothing was exploitable - the exposition is read-only whatever the method -
 > but the guard's rule is exceptionless now.
 
 ```yaml
@@ -32,9 +32,9 @@ scrape_configs:
 ```
 
 Mint the token in the admin UI (API / MCP), or from the file explorer's
-navigation panel under **Connections → API keys** — which an embed proxied with
+navigation panel under **Connections → API keys** - which an embed proxied with
 a shared *app* token does not show
-([MCP.md](MCP.md#token-kinds--user-vs-app)) — with an account that has
+([MCP.md](MCP.md#token-kinds---user-vs-app)) - with an account that has
 the `admin` role. The gate is the **account's role**, so give the scrape job a
 token of its own and keep it the way you keep an admin password.
 
@@ -58,13 +58,13 @@ which is the first thing anyone wants when "filex is slow".
 | `filex_staged_uploads_aborted_total` | counter | aborted by the client |
 
 The two gauges are moved by events for freshness and **re-measured against the
-staging directory on every sweeper pass**, so a restart — or a crash that left
-part files behind — cannot leave the dashboard lying about how full the staging
+staging directory on every sweeper pass**, so a restart - or a crash that left
+part files behind - cannot leave the dashboard lying about how full the staging
 filesystem is.
 
 > Reading them: `failed` rising while `committed` stays flat is a backend that
 > is down. `chunk_retries` rising with `failed` flat is a flaky link between the
-> client and filex — the protocol is doing its job, and there is nothing to fix
+> client and filex - the protocol is doing its job, and there is nothing to fix
 > on the server.
 
 ### The staging GC
@@ -97,7 +97,7 @@ rather than "no data" before the first refusal ever happens.
 | `filex_transfer_bytes_total` | counter | `storage`, `direction` | bytes moved to/from a driver |
 | `filex_storage_throughput_bytes_per_second` | gauge | `storage`, `direction` | rolling rate over the last 2 minutes |
 
-`direction` is `read` or `write` — a link can be fast one way and slow the
+`direction` is `read` or `write` - a link can be fast one way and slow the
 other, and an S3 upload behaves nothing like an S3 download.
 
 The timing covers the **driver call only**, not the DB mirror, the search index
@@ -107,7 +107,7 @@ anything that is not the backend stays out of it.
 The throughput gauge is rendered at scrape time straight from
 `internal/throughput`, which is the same signal `internal/filecache` reads to
 decide whether a storage is slow enough to be worth caching. One measurement,
-two consumers — so the graph and the cache can never disagree.
+two consumers - so the graph and the cache can never disagree.
 
 ### Download cache
 
@@ -132,7 +132,7 @@ number is already available through the admin API. It is seeded from the users
 table at boot and moved by the same deltas the accounting store writes.
 
 The counter exists so a stalled accounting path is visible even when adds and
-releases cancel out — a flat `accounted_bytes_total` while uploads are landing
+releases cancel out - a flat `accounted_bytes_total` while uploads are landing
 means the writes are not being counted, which is exactly the bug
 [Quotas](QUOTAS.md) documents.
 
@@ -148,11 +148,11 @@ The alternative is an operator watching a spinner.
 | `filex_plugin_op_duration_seconds{plugin,op}` | histogram | how long the plugin took to answer (buckets 5 ms → 30 s) |
 | `filex_plugin_in_flight{plugin}` | gauge | operations inside the plugin right now, out of its ceiling (`FILEX_PLUGIN_MAX_INFLIGHT`, default 10) |
 | `filex_plugin_restarts_total{plugin}` | counter | times the supervisor restarted it after it exited |
-| `filex_plugin_up{plugin}` | gauge | `1` while it is running **and its driver is registered** — `0` while it is disabled, failed or refused |
+| `filex_plugin_up{plugin}` | gauge | `1` while it is running **and its driver is registered** - `0` while it is disabled, failed or refused |
 
 ⚠ **`busy` is not an error.** It means the plugin hit its concurrency ceiling
-and a caller was refused a slot after waiting 5 s. That is a sizing signal — a
-storage too popular or a backend too slow for that many parallel operations — not a
+and a caller was refused a slot after waiting 5 s. That is a sizing signal - a
+storage too popular or a backend too slow for that many parallel operations - not a
 fault to chase in the plugin's code. It is a separate outcome precisely so it
 cannot hide inside an error rate.
 
@@ -166,8 +166,8 @@ without metrics, so a probe cannot be refused because users are keeping the
 plugin busy, and install-time traffic does not appear as user traffic.
 
 ⚠ Neither is the **server-side multipart part push**. It bypasses the slot and
-the counter deliberately — a part body can only be read once, so it must not
-wait behind a queue or be retried — which means a large staged upload into a
+the counter deliberately - a part body can only be read once, so it must not
+wait behind a queue or be retried - which means a large staged upload into a
 plugin storage moves bytes without moving `filex_plugin_ops_total`. Use the
 transfer metrics above for that.
 
@@ -204,7 +204,7 @@ groups:
         expr: filex_plugin_up == 0
         for: 5m
         annotations:
-          summary: "storage plugin {{ $labels.plugin }} is not registered — storages on it cannot open"
+          summary: "storage plugin {{ $labels.plugin }} is not registered - storages on it cannot open"
 
       - alert: FilexPluginRestartLoop
         expr: increase(filex_plugin_restarts_total[15m]) > 3

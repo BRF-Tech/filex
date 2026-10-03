@@ -1,5 +1,5 @@
 // The explorer reads the account's permissions itself when its host passes
-// none (Burak 2026-09-28, PR #75 review: "core kendi çeksin"). The web app
+// none (the maintainer 2026-09-28, PR #75 review: "core kendi çeksin"). The web app
 // passes them (Explore.vue); the desktop app and the work / fishapp embeds
 // never did, so a role that denies Delete hid the button in the browser and
 // showed it — to answer 403 — everywhere else. One surface, one behaviour:

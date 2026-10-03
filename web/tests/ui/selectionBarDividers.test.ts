@@ -5,8 +5,8 @@
 // divider before every app's group; the right click drew them, but the bar's
 // "⋯" was built from a divider-free list, so two apps' verbs ran together as
 // one column right beside a menu that separated them.
-import { afterEach, describe, expect, it } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { describe, expect, it } from 'vitest';
+import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 
 import Toolbar from '@brftech/filex-core/src/components/Toolbar.vue';
@@ -21,18 +21,11 @@ const actions = [
   { key: 'plugin:sign/request', label: 'Request signatures' },
 ];
 
-let w: VueWrapper | null = null;
-afterEach(() => {
-  w?.unmount();
-  w = null;
-  document.body.innerHTML = '';
-});
-
 describe('selection bar "⋯"', () => {
   it('keeps a line between every app’s actions', async () => {
     // The bar teleports into the explorer's `.fe__primary`; give it one.
     document.body.innerHTML = '<div class="fe"><div id="tb"></div><div class="fe__primary"></div></div>';
-    w = mount(Toolbar, {
+    mount(Toolbar, {
       props: {
         viewMode: 'list',
         searchQuery: '',

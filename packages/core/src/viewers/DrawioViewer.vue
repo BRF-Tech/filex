@@ -148,7 +148,7 @@ async function persist(xml: string): Promise<void> {
     }, 2500);
   } catch (err) {
     console.warn('[filex] diagram save failed', err);
-    error.value = tt('viewer.drawio.save_failed', 'The diagram could not be saved. Your changes are still in the editor — try again.');
+    error.value = tt('viewer.drawio.save_failed', 'The diagram could not be saved. Your changes are still in the editor - try again.');
     disabledPane = false;
     status.value = 'error';
   }

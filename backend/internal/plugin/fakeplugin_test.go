@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -62,6 +63,14 @@ type fakePlugin struct {
 	swallowWrites bool // accepts the bytes, stores nothing
 	notFoundIs500 bool // answers a plain error for a missing path
 	ignoreMtime   bool // accepts set-mtime and leaves the timestamp alone
+
+	// anyToken answers whatever bearer token comes: a LAUNCHED plugin is
+	// handed a token filex mints per start, which a fake standing in for one
+	// cannot know in advance.
+	anyToken bool
+	// deletes counts DELETE /v1/instances/{id}: the release of an instance
+	// and the configuration (credentials included) it was created with.
+	deletes int
 }
 
 func newFakePlugin(name string, caps plugin.Capabilities) *fakePlugin {
@@ -75,6 +84,39 @@ func newFakePlugin(name string, caps plugin.Capabilities) *fakePlugin {
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
 	return f
+}
+
+// newFakePluginOn serves the fake on a listener of the test's choosing (a
+// unix socket somewhere), answering any token.
+func newFakePluginOn(ln net.Listener, name string, caps plugin.Capabilities) *fakePlugin {
+	f := &fakePlugin{
+		name:      name,
+		caps:      caps,
+		token:     "test-token",
+		anyToken:  true,
+		files:     map[string]*fakeFile{},
+		instances: map[string]map[string]any{},
+		events:    make(chan plugin.Event, 8),
+	}
+	f.srv = httptest.NewUnstartedServer(http.HandlerFunc(f.handle))
+	_ = f.srv.Listener.Close()
+	f.srv.Listener = ln
+	f.srv.Start()
+	return f
+}
+
+// setName changes the driver name the fake describes from now on.
+func (f *fakePlugin) setName(name string) {
+	f.mu.Lock()
+	f.name = name
+	f.mu.Unlock()
+}
+
+// counts reads the counters under the lock.
+func (f *fakePlugin) counts() (describes, deletes, live int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.describes, f.deletes, len(f.instances)
 }
 
 func (f *fakePlugin) Close()      { f.srv.Close() }
@@ -107,7 +149,7 @@ func (f *fakePlugin) writeErr(w http.ResponseWriter, status int, code, msg strin
 }
 
 func (f *fakePlugin) handle(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Authorization") != "Bearer "+f.token {
+	if !f.anyToken && r.Header.Get("Authorization") != "Bearer "+f.token {
 		f.writeErr(w, http.StatusUnauthorized, "unauthorized", "bad token")
 		return
 	}
@@ -115,11 +157,12 @@ func (f *fakePlugin) handle(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/describe":
 		f.mu.Lock()
 		f.describes++
+		name := f.name
 		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(plugin.DescribeResponse{
 			Protocol: plugin.ProtocolVersion,
-			Name:     f.name,
+			Name:     name,
 			Version:  "1.2.3",
 			Label:    "Fake storage",
 			Fields: []storage.Field{
@@ -181,11 +224,14 @@ func (f *fakePlugin) instanceOp(w http.ResponseWriter, r *http.Request) {
 	}
 	_, known := f.instances[id]
 	files := f.files
-	f.mu.Unlock()
 	if r.Method == http.MethodDelete && op == "" {
+		delete(f.instances, id)
+		f.deletes++
+		f.mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	f.mu.Unlock()
 	if !known {
 		f.writeErr(w, http.StatusConflict, plugin.ErrCodeNoInstance, "unknown instance "+id)
 		return

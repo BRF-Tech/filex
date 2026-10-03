@@ -64,7 +64,5 @@ describe('the operations centre', () => {
     await w.find('.fe-opc__badge').trigger('click');
     expect(w.find('.fe-opc__state').text(), 'a count beside "no honest number"').not.toContain('0/3');
     expect(w.find('.fe-opc__state').text()).toBe('In progress');
-    w.unmount();
-    document.body.innerHTML = '';
   });
 });

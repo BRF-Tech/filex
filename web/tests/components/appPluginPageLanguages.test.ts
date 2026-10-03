@@ -75,7 +75,6 @@ async function openPage(locale: string) {
 
 beforeEach(() => {
   setActivePinia(createPinia());
-  document.body.innerHTML = '';
 });
 
 describe('a language pack’s page', () => {

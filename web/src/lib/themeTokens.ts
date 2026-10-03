@@ -60,6 +60,22 @@ export const AUTHORED_TOKENS: AuthoredToken[] = [
 /** The authored keys alone — the shape the backend allowlist mirrors. */
 export const AUTHORED_KEYS: string[] = AUTHORED_TOKENS.map((t) => t.key);
 
+/**
+ * #74 - the outward-facing pages' own colours: the share page's ground (two
+ * stops) and card, the sign-in page's ground and card. OPTIONAL: a theme
+ * that leaves them out gets those pages in its own tones (packages/core
+ * lib/themes `publicPageTokens`; the sign-in page's defaults are the
+ * palette's own tokens). The keys are core's `PAGE_TOKENS`, and the backend
+ * allowlist (`themePageColorTokens`) mirrors them.
+ */
+export const PAGE_TOKEN_FIELDS: { key: string; labelKey: string }[] = [
+  { key: '--fe-ppage-ground-1', labelKey: 'appearance.pageToken.shareGroundTop' },
+  { key: '--fe-ppage-ground-2', labelKey: 'appearance.pageToken.shareGroundBottom' },
+  { key: '--fe-ppage-card', labelKey: 'appearance.pageToken.shareCard' },
+  { key: '--fe-login-ground', labelKey: 'appearance.pageToken.signInGround' },
+  { key: '--fe-login-card', labelKey: 'appearance.pageToken.signInCard' },
+];
+
 /** A whole theme as the editor holds it while somebody is typing. */
 export interface ThemeDraft {
   key: string;
@@ -71,6 +87,13 @@ export interface ThemeDraft {
   /** Shared metrics — set once, written into both variants. */
   radius: string;
   font: string;
+  /** The share and sign-in pages: colours of their own (`own`), or the
+   *  palette's tones (no page token is stored at all). */
+  pages: {
+    own: boolean;
+    light: Record<string, string>;
+    dark: Record<string, string>;
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -228,10 +251,17 @@ export function draftToTokens(draft: ThemeDraft): {
   light: Record<string, string>;
   dark: Record<string, string>;
 } {
-  return {
-    light: deriveTokens(draft.light, { dark: false, radius: draft.radius, font: draft.font }),
-    dark: deriveTokens(draft.dark, { dark: true, radius: draft.radius, font: draft.font }),
-  };
+  const light = deriveTokens(draft.light, { dark: false, radius: draft.radius, font: draft.font });
+  const dark = deriveTokens(draft.dark, { dark: true, radius: draft.radius, font: draft.font });
+  // The pages' own colours ride in the same maps, and only when the operator
+  // gave them some: a theme without them keeps following its palette there.
+  if (draft.pages?.own) {
+    for (const { key } of PAGE_TOKEN_FIELDS) {
+      if (draft.pages.light[key]) light[key] = draft.pages.light[key];
+      if (draft.pages.dark[key]) dark[key] = draft.pages.dark[key];
+    }
+  }
+  return { light, dark };
 }
 
 /* ------------------------------------------------------------------ */
@@ -280,7 +310,25 @@ export const STOCK_DARK: Record<string, string> = {
 
 export const DEFAULT_FONT = 'Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
-/** A blank draft — the stock palette under a new name. */
+/** The stock pages (packages/core variables.css `.fe.fe-ppage`, the sign-in
+ *  page's sunken ground and surface) - where "colours of their own" starts. */
+export const STOCK_PAGES_LIGHT: Record<string, string> = {
+  '--fe-ppage-ground-1': '#f5f7fb',
+  '--fe-ppage-ground-2': '#e9edf4',
+  '--fe-ppage-card': '#ffffff',
+  '--fe-login-ground': '#f7f8fb',
+  '--fe-login-card': '#ffffff',
+};
+
+export const STOCK_PAGES_DARK: Record<string, string> = {
+  '--fe-ppage-ground-1': '#12151a',
+  '--fe-ppage-ground-2': '#191e25',
+  '--fe-ppage-card': '#1f242c',
+  '--fe-login-ground': '#1a1d23',
+  '--fe-login-card': '#15171c',
+};
+
+/** A blank draft - the stock palette under a new name; its pages follow it. */
 export function newDraft(): ThemeDraft {
   return {
     key: '',
@@ -289,6 +337,7 @@ export function newDraft(): ThemeDraft {
     dark: { ...STOCK_DARK },
     radius: '8',
     font: DEFAULT_FONT,
+    pages: { own: false, light: { ...STOCK_PAGES_LIGHT }, dark: { ...STOCK_PAGES_DARK } },
   };
 }
 
@@ -304,6 +353,12 @@ export function draftFromStored(t: {
     for (const k of AUTHORED_KEYS) out[k] = m?.[k] ?? fallback[k];
     return out;
   };
+  const pagesOf = (m: Record<string, string>, fallback: Record<string, string>) => {
+    const out: Record<string, string> = {};
+    for (const { key } of PAGE_TOKEN_FIELDS) out[key] = m?.[key] ?? fallback[key];
+    return out;
+  };
+  const ownPages = PAGE_TOKEN_FIELDS.some(({ key }) => !!t.light?.[key] || !!t.dark?.[key]);
   return {
     key: t.key,
     name: t.name,
@@ -311,6 +366,11 @@ export function draftFromStored(t: {
     dark: pick(t.dark, STOCK_DARK),
     radius: String(radiusPx(t.light?.['--fe-radius'] ?? '8px')),
     font: t.light?.['--fe-font'] ?? DEFAULT_FONT,
+    pages: {
+      own: ownPages,
+      light: pagesOf(t.light, STOCK_PAGES_LIGHT),
+      dark: pagesOf(t.dark, STOCK_PAGES_DARK),
+    },
   };
 }
 

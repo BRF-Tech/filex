@@ -25,6 +25,8 @@
  */
 import { test, expect } from '@playwright/test';
 import { loginAs, apiLogin, ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
+import { readWebPrefs, restoreWebPrefs } from '../helpers/prefs';
+import { newAuthedRequest } from '../helpers/seed';
 import { BASE_PATH } from '../helpers/base';
 // panel:tek-satir — the four panels below moved onto the shared admin table,
 // and a row's verbs moved with them: one pinned "Actions" control per row
@@ -112,13 +114,25 @@ async function makeTestStorage(request: import('@playwright/test').APIRequestCon
 }
 
 test.describe('storage connections', () => {
-  test.beforeAll(async ({ request }) => {
+  /* ⚠ The language test below switches the admin to Turkish and back through
+     the dialog, and the switch back WRITES `locale: 'en'` into the account's
+     preference document (helpers/prefs `readWebPrefs`). The document is put
+     back exactly as it was found, so no later spec inherits a language. */
+  let prefsBefore: Record<string, unknown> = {};
+
+  test.beforeAll(async ({ request, playwright, baseURL }) => {
+    const admin = await newAuthedRequest(playwright, baseURL ?? '');
+    prefsBefore = await readWebPrefs(admin);
+    await admin.dispose();
     await dropTestStorage(request);
     await makeTestStorage(request);
   });
 
-  test.afterAll(async ({ request }) => {
+  test.afterAll(async ({ request, playwright, baseURL }) => {
     await dropTestStorage(request);
+    const admin = await newAuthedRequest(playwright, baseURL ?? '');
+    await restoreWebPrefs(admin, prefsBefore);
+    await admin.dispose();
   });
 
   /**
@@ -177,7 +191,10 @@ test.describe('storage connections', () => {
     context,
     baseURL,
   }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    // Chromium's names for the clipboard permissions; WebKit and Firefox know
+    // neither ("Unknown permission: clipboard-write") and do not need them for
+    // the copy below, which falls back to execCommand on a plain-http origin.
+    if (test.info().project.name === 'chromium') await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await loginAs(page);
     await page.goto('/admin/connections');
     await expect(page.getByTestId('connections-panel')).toBeVisible();

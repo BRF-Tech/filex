@@ -13,7 +13,12 @@
  *   5. its frame cannot navigate itself to a page of filex (`/admin/`):
  *      filex's pages frame themselves by path (`/_appui/`, `/z/`);
  *   6. a sibling frame's forged hello and save are ignored — the bridge
- *      answers only the frame filex drew.
+ *      answers only the frame filex drew;
+ *   7. with a second file in the folder, the viewer's previous and next
+ *      chevrons stand beside the frame, not on it, and after a save the
+ *      viewer's header says the new size (task #110: in Firefox and WebKit
+ *      the chevrons covered filextext's page list and scroll bar, and the
+ *      header kept the size the file was opened with).
  *
  * The app is built here: an interface-only app (manifest + a zip of three
  * files) whose script speaks the bridge's protocol itself — no SDK build is
@@ -203,6 +208,8 @@ test.describe.serial('An app’s own interface — the sandbox, in every engine'
     root = storageRoot(mount);
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, `note.${ext}`), 'hello from disk');
+    // A second file of the kind: the viewer draws its previous/next chevrons.
+    writeFileSync(join(root, `note2.${ext}`), 'the second file');
     await seedLocalStorage(api, store, mount);
     const perms = await install(api, manifest(app, ext, { package_fetch: true }));
     expect(perms, 'the review says it reads its own package').toContain('ui:package-fetch');
@@ -339,5 +346,25 @@ test.describe.serial('An app’s own interface — the sandbox, in every engine'
     expect(forger, 'the sibling frame is there').toBeTruthy();
     expect(await forger!.evaluate(() => (window as unknown as { got: string[] }).got), 'no port, no answer').toEqual([]);
     expect(readFileSync(join(root, `note.${ext}`), 'utf8')).toBe(before);
+  });
+
+  test('the viewer: the chevrons stand beside the frame, and its header follows a save', async ({ page }) => {
+    const frame = await openInterface(page);
+    const box = await page.locator('iframe[data-testid="app-frame"]').boundingBox();
+    expect(box, 'the frame is drawn').toBeTruthy();
+    for (const sel of ['.fe-viewer__chev--prev', '.fe-viewer__chev--next']) {
+      const chev = page.locator(sel);
+      await expect(chev, `${sel} is drawn: two files in the folder`).toBeVisible();
+      const c = (await chev.boundingBox())!;
+      const beside = c.x + c.width <= box!.x || c.x >= box!.x + box!.width;
+      expect(beside, `${sel} (${c.x}..${c.x + c.width}) beside the frame (${box!.x}..${box!.x + box!.width})`).toBe(true);
+    }
+    const meta = page.locator('.fe-viewer__meta');
+    await expect(meta).not.toContainText('1.5 KB');
+    const saved = await frame.evaluate(() =>
+      (window as unknown as { __call: (m: string, p: unknown) => Promise<unknown> }).__call('file.save', { index: 0, data: 'x'.repeat(1500) }),
+    );
+    expect(saved).toMatchObject({ saved: true, size: 1500 });
+    await expect(meta, 'the header says the size the save wrote').toContainText('1.5 KB');
   });
 });

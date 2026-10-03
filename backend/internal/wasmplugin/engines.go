@@ -12,18 +12,23 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/enginebin"
+	"github.com/brf-tech/filex/backend/pkg/pluginkit/officecmd"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
 // ── Heavy engines as host functions ────────────────────────────────────
 //
-// ffmpeg, ImageMagick, LibreOffice, Ghostscript, poppler and rsvg do not
-// compile to wasm in any usable form (see the research in the plan), and a
-// plugin may not run programs itself. So the filex image's own binaries are
-// offered through engine_run, under a permission per engine, with the same
-// confinement thumb/office.go uses for its LibreOffice calls: a private
-// working directory per run, a minimal environment, a wall clock, and the
-// process group killed when the clock or the job's context ends.
+// ffmpeg, ImageMagick, Ghostscript, poppler and rsvg do not compile to wasm
+// in any usable form (see the research in the plan), and a plugin may not run
+// programs itself. So the filex image's own binaries are offered through
+// engine_run, under a permission per engine, confined: a private working
+// directory per run, a minimal environment, a wall clock, and the process
+// group killed when the clock or the job's context ends.
+//
+// The office engine (`office`, alias `libreoffice`) is not a binary: it is the
+// connected OnlyOffice Document Server (office.go). It takes the same request
+// shape - inputs staged in the run directory, results collected from it - so
+// an app does not care which kind of engine it is talking to.
 //
 // What keeps a plugin from reading the host through an engine is the ARGUMENT
 // rule, not trust in the engine: every argument is a bare token — no path
@@ -55,16 +60,20 @@ type engineResult struct {
 // while Apps and the converter said "not installed". One probe, read by
 // every screen, cannot disagree with itself.
 type engineSet struct {
-	bins map[string]string // engine → resolved binary path
+	bins map[string]string // binary engine → resolved binary path
+	// office is the office engine's back end, nil when none is wired. It is
+	// asked on every availability question (Ready), so a document server
+	// connected or removed in the admin UI is seen without a restart.
+	office OfficeConverter
 }
 
 // popplerTools are the extra poppler binaries a plugin may pick with
 // args[0] = tool name; the engine name resolves pdftoppm otherwise.
 var popplerTools = map[string]bool{"pdftoppm": true, "pdftotext": true, "pdfinfo": true, "pdftocairo": true, "pdfseparate": true, "pdfunite": true}
 
-func probeEngines() *engineSet {
+func probeEngines(office OfficeConverter) *engineSet {
 	set := enginebin.Probe()
-	es := &engineSet{bins: map[string]string{}}
+	es := &engineSet{bins: map[string]string{}, office: office}
 	for name := range enginebin.Candidates {
 		if p := set.Path(name); p != "" {
 			es.bins[name] = p
@@ -73,13 +82,26 @@ func probeEngines() *engineSet {
 	return es
 }
 
-func (e *engineSet) available(name string) bool { _, ok := e.bins[name]; return ok }
+// available reports whether an engine - or the engine an alias stands for -
+// can run right now.
+func (e *engineSet) available(ctx context.Context, name string) bool {
+	if e == nil {
+		return false
+	}
+	if isOffice(name) {
+		return e.office != nil && e.office.Ready(ctx)
+	}
+	_, ok := e.bins[name]
+	return ok
+}
 
-// Available returns the engine → present map for capabilities and describe.
-func (e *engineSet) Available() map[string]bool {
+// Available returns the engine → present map for capabilities and the admin
+// panel: every engine by its own id (enginebin.Names), never an alias, so
+// the office engine is listed once.
+func (e *engineSet) Available(ctx context.Context) map[string]bool {
 	out := map[string]bool{}
-	for name := range enginebin.Candidates {
-		out[name] = e.available(name)
+	for _, name := range enginebin.Names() {
+		out[name] = e.available(ctx, name)
 	}
 	return out
 }
@@ -104,14 +126,32 @@ func (e *engineSet) run(ctx context.Context, s *Scope, req *engineRequest) (any,
 			return nil, err
 		}
 	}
-	bin, ok := e.bins[req.Engine]
-	if !ok {
-		return nil, hostErr(wire.ErrUnavailable, engineMissingMessage(req.Engine))
-	}
-	if req.Engine == "poppler" && len(args) > 0 && popplerTools[args[0]] {
-		if p, err := exec.LookPath(args[0]); err == nil {
-			bin = p
-			args = args[1:]
+	var (
+		bin    string
+		office *officecmd.Command
+	)
+	if isOffice(req.Engine) {
+		// The command line is read before availability, like the argument
+		// rule above: what the office engine cannot do is a bug on every host.
+		job, err := parseOfficeArgs(args)
+		if err != nil {
+			return nil, err
+		}
+		if !e.available(ctx, req.Engine) {
+			return nil, hostErr(wire.ErrUnavailable, officeUnconfiguredMessage(req.Engine))
+		}
+		office = job
+	} else {
+		b, ok := e.bins[req.Engine]
+		if !ok {
+			return nil, hostErr(wire.ErrUnavailable, engineMissingMessage(req.Engine))
+		}
+		bin = b
+		if req.Engine == "poppler" && len(args) > 0 && popplerTools[args[0]] {
+			if p, err := exec.LookPath(args[0]); err == nil {
+				bin = p
+				args = args[1:]
+			}
 		}
 	}
 
@@ -158,12 +198,28 @@ func (e *engineSet) run(ctx context.Context, s *Scope, req *engineRequest) (any,
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	switch req.Engine {
-	case "ghostscript":
+	var res *engineResult
+	if office != nil {
+		started := time.Now()
+		res = &engineResult{}
+		if err := e.runOffice(rctx, s, req.Engine, runDir, office, before, res); err != nil {
+			return nil, err
+		}
+		res.Duration = time.Since(started).Milliseconds()
+	} else {
+		r, err := e.runBinary(rctx, req.Engine, bin, args, runDir)
+		if err != nil {
+			return nil, err
+		}
+		res = r
+	}
+	return e.collect(s, req, runDir, before, res)
+}
+
+// runBinary runs a binary engine in its run directory.
+func (e *engineSet) runBinary(rctx context.Context, engine, bin string, args []string, runDir string) (*engineResult, error) {
+	if engine == "ghostscript" {
 		args = append([]string{"-dSAFER", "-dBATCH", "-dNOPAUSE"}, args...)
-	case "libreoffice":
-		args = append([]string{"--headless", "--norestore", "--nologo", "--nofirststartwizard",
-			"-env:UserInstallation=file://" + filepath.ToSlash(filepath.Join(runDir, ".lo-profile"))}, args...)
 	}
 	cmd := exec.CommandContext(rctx, bin, args...)
 	cmd.Dir = runDir
@@ -193,16 +249,21 @@ func (e *engineSet) run(ctx context.Context, s *Scope, req *engineRequest) (any,
 	err := cmd.Run()
 	res := &engineResult{StdoutTail: stdout.String(), StderrTail: stderr.String(), Duration: time.Since(started).Milliseconds()}
 	if rctx.Err() != nil {
-		return nil, hostErr(wire.ErrTimeout, req.Engine+" exceeded its time budget")
+		return nil, hostErr(wire.ErrTimeout, engine+" exceeded its time budget")
 	}
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			res.Exit = ee.ExitCode()
 		} else {
-			return nil, hostErr(wire.ErrUnavailable, req.Engine+": "+err.Error())
+			return nil, hostErr(wire.ErrUnavailable, engine+": "+err.Error())
 		}
 	}
+	return res, nil
+}
 
+// collect hands back the run's artefacts: named outputs when asked for, else
+// every new file.
+func (e *engineSet) collect(s *Scope, req *engineRequest, runDir string, before map[string]bool, res *engineResult) (any, error) {
 	// Collect artefacts: named outputs when asked for, else every new file.
 	entries, _ := os.ReadDir(runDir)
 	want := map[string]bool{}

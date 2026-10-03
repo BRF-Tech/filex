@@ -28,8 +28,8 @@ test('a count of one is said in the singular, any other in the plural', () => {
   const en = page('en');
   assert.equal(en.activityLine({ phase: 'plan', done: 0, total: 1 }), '1 change to make');
   assert.equal(en.activityLine({ phase: 'plan', done: 0, total: 1204 }), '1,204 changes to make');
-  assert.equal(en.activityLine({ phase: 'inventory', done: 0, total: 0, listed: 1 }), 'listing the server — 1 item so far');
-  assert.equal(en.activityLine({ phase: 'inventory', done: 0, total: 0, listed: 7 }), 'listing the server — 7 items so far');
+  assert.equal(en.activityLine({ phase: 'inventory', done: 0, total: 0, listed: 1 }), 'listing the server - 1 item so far');
+  assert.equal(en.activityLine({ phase: 'inventory', done: 0, total: 0, listed: 7 }), 'listing the server - 7 items so far');
   const tr = page('tr');
   assert.equal(tr.activityLine({ phase: 'plan', done: 0, total: 1 }), '1 değişiklik yapılacak');
   assert.equal(tr.activityLine({ phase: 'plan', done: 0, total: 1204 }), '1.204 değişiklik yapılacak');
@@ -42,17 +42,17 @@ test('a count of one is said in the singular, any other in the plural', () => {
 test('the inventory says what is on this computer, and keeps it while the server is listed', () => {
   const en = page('en');
   const inv = (v: Record<string, unknown>) => ({ phase: 'inventory', done: 0, total: 0, ...v });
-  assert.equal(en.activityLine(inv({ here: 1204 })), '1,204 items on this computer — listing the server…');
-  assert.equal(en.activityLine(inv({ here: 1 })), '1 item on this computer — listing the server…');
+  assert.equal(en.activityLine(inv({ here: 1204 })), '1,204 items on this computer - listing the server…');
+  assert.equal(en.activityLine(inv({ here: 1 })), '1 item on this computer - listing the server…');
   assert.equal(
     en.activityLine(inv({ here: 1204, listed: 48211 })),
-    'listing the server — 48,211 items so far (1,204 on this computer)',
+    'listing the server - 48,211 items so far (1,204 on this computer)',
   );
   assert.equal(en.activityLine(inv({})), 'listing the server…');
   const tr = page('tr');
-  assert.equal(tr.activityLine(inv({ here: 1204 })), 'bu bilgisayarda 1.204 öğe — sunucu listeleniyor…');
+  assert.equal(tr.activityLine(inv({ here: 1204 })), 'bu bilgisayarda 1.204 öğe - sunucu listeleniyor…');
   assert.equal(
     tr.activityLine(inv({ here: 1204, listed: 48211 })),
-    'sunucu listeleniyor — şimdiye dek 48.211 öğe (bu bilgisayarda 1.204)',
+    'sunucu listeleniyor - şimdiye dek 48.211 öğe (bu bilgisayarda 1.204)',
   );
 });

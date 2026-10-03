@@ -1,8 +1,12 @@
 // Package sftp is a Storage Driver fronting an SSH/SFTP server.
 //
 // Connection lazy: the underlying SSH session is established on first
-// operation. A single shared session is reused; if a client error
-// indicates a dead session, the next operation will re-dial.
+// operation. A single shared session is reused; a session whose connection
+// broke, or that a silence limit cut, is dropped and the next operation
+// dials a new one (timeout.go). Before issue #75 nothing dropped it: a dead
+// session was handed out again for good.
+//
+// Every wait on the server is bounded (issue #75, timeout.go).
 package sftp
 
 import (
@@ -16,7 +20,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -25,6 +28,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/regfile"
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
 )
 
 func init() {
@@ -56,9 +60,14 @@ type Driver struct {
 	// the same, holding our request with it).
 	skipped regfile.Skipped
 
-	mu     sync.Mutex
-	ssh    *ssh.Client
-	client *sftp.Client
+	// policy bounds how long a server that does not answer is waited for
+	// (timeout.go); what names the server in the error that says so.
+	policy stall.Policy
+	what   string
+
+	// sessions holds the shared session; one caller dials at a time
+	// (current).
+	sessions stall.One[*session]
 }
 
 // Name implements storage.Driver.
@@ -86,6 +95,12 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 	d.knownHostsPath = storage.ConfigString(cfg, "known_hosts")
 	d.hostKeyPin = storage.ConfigString(cfg, "host_key")
 	d.insecureHostKey, _ = cfg["insecure_skip_host_key"].(bool)
+	d.policy = stall.Settings{
+		AttemptTimeout: cfg["attempt_timeout_s"],
+		MaxAttempts:    cfg["max_attempts"],
+		TotalTimeout:   cfg["total_timeout_s"],
+	}.Policy(defaults)
+	d.what = "sftp server " + d.addr()
 	if d.root == "" {
 		d.root = "/"
 	}
@@ -119,46 +134,6 @@ func (d *Driver) Capabilities() storage.Capabilities {
 		Delete: true,
 		Mkdir:  true,
 	}
-}
-
-func (d *Driver) connect() (*sftp.Client, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.client != nil {
-		return d.client, nil
-	}
-	hostKeyCB, err := d.hostKeyCallback()
-	if err != nil {
-		return nil, fmt.Errorf("sftp: host key: %w", err)
-	}
-	cfg := &ssh.ClientConfig{
-		User:            d.user,
-		HostKeyCallback: hostKeyCB,
-		Timeout:         10 * time.Second,
-	}
-	if d.password != "" {
-		cfg.Auth = append(cfg.Auth, ssh.Password(d.password))
-	}
-	if d.keyPEM != "" {
-		signer, err := ssh.ParsePrivateKey([]byte(d.keyPEM))
-		if err != nil {
-			return nil, fmt.Errorf("sftp: parse key: %w", err)
-		}
-		cfg.Auth = append(cfg.Auth, ssh.PublicKeys(signer))
-	}
-	addr := net.JoinHostPort(d.host, fmt.Sprintf("%d", d.port))
-	conn, err := ssh.Dial("tcp", addr, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("sftp: dial: %w", err)
-	}
-	cl, err := sftp.NewClient(conn)
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("sftp: client: %w", err)
-	}
-	d.ssh = conn
-	d.client = cl
-	return cl, nil
 }
 
 // hostKeyCallback picks the SSH host-key verification strategy from config.
@@ -259,17 +234,14 @@ func (d *Driver) join(p string) string {
 }
 
 // List implements storage.Driver.
-func (d *Driver) List(_ context.Context, p string) ([]storage.Object, error) {
-	cl, err := d.connect()
-	if err != nil {
-		return nil, err
-	}
+func (d *Driver) List(ctx context.Context, p string) ([]storage.Object, error) {
 	abs := d.join(p)
-	entries, err := cl.ReadDir(abs)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, storage.ErrNotFound
-		}
+	var entries []os.FileInfo
+	if err := d.run(ctx, readWork, func(cl *sftp.Client) error {
+		var err error
+		entries, err = cl.ReadDir(abs)
+		return err
+	}); err != nil {
 		return nil, err
 	}
 	out := make([]storage.Object, 0, len(entries))
@@ -324,16 +296,13 @@ func kindOf(mode fs.FileMode) storage.ObjectKind {
 }
 
 // Stat implements storage.Driver.
-func (d *Driver) Stat(_ context.Context, p string) (storage.Object, error) {
-	cl, err := d.connect()
-	if err != nil {
-		return storage.Object{}, err
-	}
-	info, err := cl.Stat(d.join(p))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return storage.Object{}, storage.ErrNotFound
-		}
+func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
+	var info os.FileInfo
+	if err := d.run(ctx, readWork, func(cl *sftp.Client) error {
+		var err error
+		info, err = cl.Stat(d.join(p))
+		return err
+	}); err != nil {
 		return storage.Object{}, err
 	}
 	// List does not show a named pipe, socket or device, so Stat does not
@@ -356,151 +325,157 @@ func (d *Driver) Stat(_ context.Context, p string) (storage.Object, error) {
 }
 
 // Read implements storage.Driver.
-func (d *Driver) Read(_ context.Context, p string) (io.ReadCloser, error) {
-	cl, err := d.connect()
-	if err != nil {
-		return nil, err
-	}
-	f, err := cl.Open(d.join(p))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, storage.ErrNotFound
-		}
-		return nil, err
-	}
-	return f, nil
+func (d *Driver) Read(ctx context.Context, p string) (io.ReadCloser, error) {
+	return d.open(ctx, p, 0, -1)
 }
 
 // ReadRange implements storage.RangeReader. sftp.File is seekable (the
 // protocol reads at an explicit offset), so nothing before off is
 // transferred. A seek past EOF is accepted and the first Read reports
 // io.EOF, per the contract.
-func (d *Driver) ReadRange(_ context.Context, p string, off, length int64) (io.ReadCloser, error) {
+func (d *Driver) ReadRange(ctx context.Context, p string, off, length int64) (io.ReadCloser, error) {
 	if off < 0 {
 		return nil, fmt.Errorf("sftp: negative range offset %d", off)
 	}
-	cl, err := d.connect()
-	if err != nil {
-		return nil, err
-	}
-	f, err := cl.Open(d.join(p))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, storage.ErrNotFound
-		}
-		return nil, err
-	}
 	if length == 0 {
-		_ = f.Close()
-		return storage.EmptyReadCloser(), nil
-	}
-	if off > 0 {
-		if _, err := f.Seek(off, io.SeekStart); err != nil {
-			_ = f.Close()
+		// Asked for nothing: the file is still opened once, so a missing one
+		// answers ErrNotFound as it always did.
+		rc, err := d.open(ctx, p, 0, 0)
+		if err != nil {
 			return nil, err
 		}
+		_ = rc.Close()
+		return storage.EmptyReadCloser(), nil
 	}
-	return storage.LimitReadCloser(f, length), nil
+	rc, err := d.open(ctx, p, off, length)
+	if err != nil {
+		return nil, err
+	}
+	if length > 0 {
+		return storage.LimitReadCloser(rc, length), nil
+	}
+	return rc, nil
 }
 
-// Write implements storage.Writer.
-func (d *Driver) Write(_ context.Context, p string, r io.Reader, _ int64) error {
-	cl, err := d.connect()
+// readBuffer is how much one Read asks the server for: the SFTP client splits
+// a large Read into concurrent requests, which is what keeps a download over
+// a slow link from paying one round trip per 32 KB.
+const readBuffer = 1 << 20
+
+// open opens p for reading at off, through the policy (opening is
+// repeatable). length is how much the caller will read, -1 for all of it.
+//
+// ⚠ The download itself is a fileReader: every Read is watched, and only
+// while it waits on the network. The *sftp.File it wraps is never handed out
+// whole, because its WriteTo (what io.Copy picks) moves the entire file in one
+// call - including while it waits on the caller's slow writer, which a watch
+// would read as a silent server.
+func (d *Driver) open(ctx context.Context, p string, off, length int64) (io.ReadCloser, error) {
+	var (
+		f     *sftp.File
+		owner *session
+	)
+	err := d.runOn(ctx, readWork, func(s *session) error {
+		file, err := s.client.Open(d.join(p))
+		if err != nil {
+			return err
+		}
+		if err := storage.SeekOpened(file, off); err != nil {
+			return err
+		}
+		f, owner = file, s
+		return nil
+	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	abs := d.join(p)
-	_ = cl.MkdirAll(path.Dir(abs))
-	f, err := cl.Create(abs)
-	if err != nil {
+	return storage.ReadAhead(&fileReader{d: d, s: owner, f: f, limit: d.policy.AttemptTimeout}, readBuffer, length), nil
+}
+
+// Write implements storage.Writer. Not sent again once it reached the
+// server: r is the caller's stream (see run). The caller's stream is read
+// only until Write returns, even when it returns early on its context.
+func (d *Driver) Write(ctx context.Context, p string, r io.Reader, _ int64) error {
+	g := &gateReader{r: r}
+	defer g.shut()
+	return d.run(ctx, sendWork, func(cl *sftp.Client) error {
+		abs := d.join(p)
+		_ = cl.MkdirAll(path.Dir(abs))
+		f, err := cl.Create(abs)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(f, g)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
 		return err
-	}
-	defer f.Close()
-	_, err = io.Copy(f, r)
-	return err
+	})
+}
+
+// SetMtime implements storage.Toucher.
+func (d *Driver) SetMtime(ctx context.Context, p string, mtime time.Time) error {
+	return d.run(ctx, readWork, func(cl *sftp.Client) error {
+		return cl.Chtimes(d.join(p), mtime, mtime)
+	})
 }
 
 // Move implements storage.Mover.
-// SetMtime implements storage.Toucher.
-func (d *Driver) SetMtime(_ context.Context, p string, mtime time.Time) error {
-	cl, err := d.connect()
-	if err != nil {
-		return err
-	}
-	if err := cl.Chtimes(d.join(p), mtime, mtime); err != nil {
-		if os.IsNotExist(err) {
-			return storage.ErrNotFound
+func (d *Driver) Move(ctx context.Context, src, dst string) error {
+	return d.run(ctx, changeWork, func(cl *sftp.Client) error {
+		a := d.join(src)
+		b := d.join(dst)
+		_ = cl.MkdirAll(path.Dir(b))
+		return cl.Rename(a, b)
+	})
+}
+
+// Copy implements storage.Copier - naive download/upload, both directions
+// through this host, so it is watched like an upload.
+func (d *Driver) Copy(ctx context.Context, src, dst string) error {
+	return d.run(ctx, sendWork, func(cl *sftp.Client) error {
+		in, err := cl.Open(d.join(src))
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := cl.Create(d.join(dst))
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(out, in)
+		if cerr := out.Close(); err == nil {
+			err = cerr
 		}
 		return err
-	}
-	return nil
-}
-
-func (d *Driver) Move(_ context.Context, src, dst string) error {
-	cl, err := d.connect()
-	if err != nil {
-		return err
-	}
-	a := d.join(src)
-	b := d.join(dst)
-	_ = cl.MkdirAll(path.Dir(b))
-	return cl.Rename(a, b)
-}
-
-// Copy implements storage.Copier — naive download/upload.
-func (d *Driver) Copy(_ context.Context, src, dst string) error {
-	cl, err := d.connect()
-	if err != nil {
-		return err
-	}
-	in, err := cl.Open(d.join(src))
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := cl.Create(d.join(dst))
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	})
 }
 
 // Delete implements storage.Deleter.
-func (d *Driver) Delete(_ context.Context, p string) error {
-	cl, err := d.connect()
-	if err != nil {
-		return err
-	}
-	abs := d.join(p)
-	if err := cl.Remove(abs); err != nil {
-		// Maybe a directory.
-		return cl.RemoveDirectory(abs)
-	}
-	return nil
+func (d *Driver) Delete(ctx context.Context, p string) error {
+	return d.run(ctx, changeWork, func(cl *sftp.Client) error {
+		abs := d.join(p)
+		if err := cl.Remove(abs); err != nil {
+			// Maybe a directory.
+			return cl.RemoveDirectory(abs)
+		}
+		return nil
+	})
 }
 
 // Mkdir implements storage.Mkdirer.
-func (d *Driver) Mkdir(_ context.Context, p string) error {
-	cl, err := d.connect()
-	if err != nil {
-		return err
-	}
-	return cl.MkdirAll(d.join(p))
+func (d *Driver) Mkdir(ctx context.Context, p string) error {
+	return d.run(ctx, readWork, func(cl *sftp.Client) error {
+		return cl.MkdirAll(d.join(p))
+	})
 }
 
-// Close releases the underlying SSH session — called on shutdown.
+// Close releases the underlying SSH session - called on shutdown. The
+// connection is cut first, so a silent server cannot hold the shutdown.
 func (d *Driver) Close() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.client != nil {
-		_ = d.client.Close()
-		d.client = nil
-	}
-	if d.ssh != nil {
-		_ = d.ssh.Close()
-		d.ssh = nil
+	s, held := d.sessions.Take()
+	if held {
+		s.close()
 	}
 	return nil
 }

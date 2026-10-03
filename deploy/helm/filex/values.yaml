@@ -26,6 +26,22 @@ publicURL: "https://files.example.com"
 # answers at the root too.
 basePath: ""
 
+# The proxies whose X-Forwarded-For / X-Real-IP filex believes (sets
+# FILEX_TRUSTED_PROXIES; docs/CONFIGURATION.md -> "Trusted proxies"). The
+# address it settles is what the sign-in attempt limit counts by and what the
+# audit log records. Empty = "auto": the pod's own interface subnet - a node's
+# /24 with flannel, the pod alone (/32) with Calico or Cilium - never its
+# gateway (the node).
+# ⚠ So an ingress controller on ANOTHER node is not trusted, and every
+# visitor would resolve to its address: list your cluster's pod network (or
+# the ingress controller's range), keeping auto - for a 10.244.0.0/16 pod
+# CIDR: trustedProxies: "auto, 10.244.0.0/16". A pod network or a VPN in
+# 100.64.0.0/10 (carrier-grade NAT, Tailscale, Cloudflare WARP) is listed the
+# same way, and so is a CDN in front of the ingress (Cloudflare's edge, say).
+# The Sign-in security page names a peer that sends forwarded addresses
+# without being trusted, and wins over this value once it saves a list.
+trustedProxies: ""
+
 replicaCount: 1
 
 service:
@@ -116,15 +132,26 @@ drawio:
 
 # Mermaid diagrams render in the browser with no service — always available.
 
-# ── Bundled MinIO (S3-compatible storage) ───────────────────────────────
-# Deploys an internal MinIO. After install, add it as an S3 storage in the
-# admin UI: endpoint=http://<release>-minio:9000, path_style=true, region=auto.
-minio:
+# ── Bundled S3 server (Versity S3 Gateway) ──────────────────────────────
+# Deploys an internal S3 server (posix backend: every object is a plain file
+# on its PVC, which an upgrade or an uninstall never deletes). It makes
+# `bucket` on start. Add it as an S3 storage in the admin UI, or seed it
+# with storage.type=s3: endpoint=http://<release>-versitygw:7070,
+# path_style=true, region=us-east-1 (part of the signature; `auto` is
+# refused). S3 object versioning is available per bucket; filex keeps its
+# own versions and does not need it. docs/STORAGE.md, "A local S3 server".
+versitygw:
   enabled: false
-  image: minio/minio:latest
-  rootUser: filex
-  rootPassword: change-me-minio
+  image: versity/versitygw:v1.8.0
+  accessKey: filex
+  secretKey: change-me-s3
+  bucket: filex
   storage: 20Gi
+
+# Retired: the bundled MinIO (minio/minio is no longer published). A values
+# file that still sets minio.enabled=true stops the render with the steps
+# that keep its PVC (docs/STORAGE.md, "Moving off the bundled MinIO").
+minio: {}
 
 # ── Zero-touch config ────────────────────────────────────────────────────
 # A fresh install comes up fully configured with NO admin-UI clicks. `auth` is
@@ -193,7 +220,7 @@ trashRetentionDays: ""
 # Initial storage, seeded on first boot so files have a home immediately.
 #   type: none | local | s3
 #   local — a directory on a mounted volume (choose it under storage.local.volume)
-#   s3    — an S3/MinIO bucket; blank endpoint + minio.enabled uses bundled MinIO
+#   s3    - an S3 bucket; blank endpoint + versitygw.enabled uses the bundled server
 storage:
   type: none
   name: Files
@@ -214,10 +241,10 @@ storage:
   s3:
     bucket: filex
     prefix: files
-    endpoint: ""           # blank + minio.enabled → bundled MinIO
-    region: auto
-    accessKey: ""          # blank + minio.enabled → minio.rootUser
-    secretKey: ""          # blank + minio.enabled → minio.rootPassword
+    endpoint: ""           # blank + versitygw.enabled → the bundled server
+    region: auto           # blank endpoint + versitygw.enabled → us-east-1
+    accessKey: ""          # blank + versitygw.enabled → versitygw.accessKey
+    secretKey: ""          # blank + versitygw.enabled → versitygw.secretKey
     pathStyle: true
   # Connect an EXISTING external storage of ANY driver (sftp / webdav / ftp, or
   # advanced s3): set `type` to the driver name and fill `config` with that

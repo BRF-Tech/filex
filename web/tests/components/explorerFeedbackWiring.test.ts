@@ -1,7 +1,7 @@
 // How the explorer answers an action that fails or takes long — wiring that
 // lives in FileExplorer.vue, which is far too large to mount here, so it is
 // read as source (the way sideNavStorageLine.test.ts reads it). What a person
-// sees is also driven end to end in e2e/tests/158-explorer-feedback.spec.ts.
+// sees is also driven end to end in e2e/tests/152-explorer-feedback.spec.ts.
 //
 // Audit, 2026-09-26:
 //   - a refused paste, drag-move, duplicate or copy went out as `emit('error')`

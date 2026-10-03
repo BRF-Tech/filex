@@ -51,7 +51,7 @@ import NotificationBell from '@/components/NotificationBell.vue';
 const UserSettingsModal = defineAsyncComponent(
   () => import('@/components/UserSettingsModal.vue'),
 );
-import { effectiveTheme } from '@/lib/theme';
+import { liveTheme } from '@/lib/theme';
 import { explorerAuth, openTriggerPref } from '@/lib/explorerConfig';
 import { currentMountBase } from '@/router';
 import { getServerRoot } from '@/api/runtimeConfig';
@@ -381,24 +381,12 @@ async function rediscoverStorages() {
 // cascade falls back to `prefers-color-scheme: dark` on OS dark
 // systems even when the admin shell is on light, leaving the
 // explorer pane locked to dark after the user flips the panel.
-// MutationObserver watches `<html>` class changes; localStorage
-// `storage` events keep cross-tab toggles in sync.
-const currentTheme = ref<'light' | 'dark'>(effectiveTheme());
-let htmlObserver: MutationObserver | null = null;
-const onStorage = (e: StorageEvent) => {
-  if (e.key === 'filex.theme') currentTheme.value = effectiveTheme();
-};
-onMounted(() => {
-  htmlObserver = new MutationObserver(() => {
-    currentTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  });
-  htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  window.addEventListener('storage', onStorage);
-});
-onBeforeUnmount(() => {
-  htmlObserver?.disconnect();
-  window.removeEventListener('storage', onStorage);
-});
+// ⚠ `liveTheme` (lib/theme), the mode the window is painted in: the settings
+// switch, the OS in auto and another tab's choice all reach it there. This
+// view used to keep its own copy with a MutationObserver and a `storage`
+// listener, which turned the explorer dark inside a shell that stayed light
+// (#74).
+const currentTheme = liveTheme;
 
 // Visible storages for the explorer root. Admins get the rich admin-store
 // list; non-admins (user/viewer) can't hit /api/admin/storages, so we discover
@@ -765,7 +753,7 @@ function firstAdminPage(): string {
        so .fe (height:100%) grows with it and .fe__body's internal overflow:auto
        never engages → the whole PAGE scrolls. height:100vh caps the shell so the
        listing scrolls INSIDE each pane instead. -->
-  <div class="h-screen flex flex-col bg-zinc-50 dark:bg-zinc-950">
+  <div class="h-screen flex flex-col bg-[var(--fe-bg-elev)]">
     <!-- gorunum:v2-topbar — THE PAGE HAS NO TOP BAR.
          What stood here (wordmark + tagline, Back, Admin panel, How to
          connect, Settings, Sign out, the dark-mode toggle and the language

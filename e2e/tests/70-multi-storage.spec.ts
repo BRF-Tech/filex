@@ -36,6 +36,15 @@ const S3_ENDPOINT = process.env.E2E_S3_ENDPOINT ?? 'https://nbg1.your-objectstor
 const S3_ACCESS = process.env.E2E_S3_ACCESS_KEY ?? '';
 const S3_SECRET = process.env.E2E_S3_SECRET_KEY ?? '';
 const S3_PREFIX = process.env.E2E_S3_PREFIX ?? 'e2e-test/';
+/** Path-style addressing, for an endpoint with no per-bucket host names: a
+ *  local S3 server answers `http://127.0.0.1:7070/<bucket>`, while
+ *  `<bucket>.127.0.0.1` / `<bucket>.localhost` resolve nowhere (measured in
+ *  the 0.50 final run: "the host name filex-e2e-multi.localhost does not
+ *  resolve"). Virtual-host style stays the default, as the hosted store it
+ *  was written against wants. Against a local versitygw, set
+ *  E2E_S3_REGION=us-east-1 too: the region is part of the signature and the
+ *  gateway answers any other with 400 AuthorizationHeaderMalformed. */
+const S3_PATH_STYLE = process.env.E2E_S3_PATH_STYLE === '1';
 
 const S3_STORAGE = 'e2e-multi-s3';
 const LOCAL_STORAGE = 'e2e-multi-local';
@@ -52,7 +61,7 @@ async function seedS3Storage(request: APIRequestContext) {
     access_key: S3_ACCESS,
     secret_key: S3_SECRET,
     prefix: S3_PREFIX.replace(/\/$/, ''),
-    path_style: false,
+    path_style: S3_PATH_STYLE,
   };
   const res = await request.post('/api/admin/storages', {
     data: {

@@ -18,7 +18,7 @@ a file, not a redesign.
 
 Backblaze writes a usage report once a day into a bucket it owns, named
 `b2-reports-<accountId>`, under one folder per day. filex reads those files over
-the same S3 API it already speaks — no new dependency, no new credential type —
+the same S3 API it already speaks - no new dependency, no new credential type -
 and caches what it parsed, so opening the page does not fetch a month of CSVs
 every time.
 
@@ -32,13 +32,13 @@ The account-level line and the per-bucket lines are rows of the **same** file;
 the account line is the one with an empty `bucket_id`. An account inside a
 Backblaze organization or group gets `usage.<resource>.<location>.csv` or
 `usage.group-<groupId>.<location>.csv` instead, and filex reads every
-`usage.*.csv` in the day's folder — skipping `usage.audit-*` and the
+`usage.*.csv` in the day's folder - skipping `usage.audit-*` and the
 `*.reportingLocations.csv` lookup table, which are not usage.
 
 ## Setting it up
 
 **1. Make a read-only application key.** In the Backblaze console, create an
-application key with read access. ⚠ **Not the master key** — B2's S3 endpoint
+application key with read access. ⚠ **Not the master key** - B2's S3 endpoint
 rejects it with `InvalidAccessKeyId: Malformed Access Key Id`, which reads like
 a wrong secret and is not one. See [STORAGE.md](STORAGE.md#s3--s3-compatible).
 
@@ -52,12 +52,12 @@ endpoint `https://s3.<region>.backblazeb2.com`, bucket `b2-reports-<accountId>`,
 |---|---|
 | **Provider** | `Backblaze B2` |
 | **Report storage** | the storage you just made |
-| **Account ID** | your B2 account id — the same one in the bucket's name. Optional: the day's folder is listed either way, and the id is only used to try `usage.account-<id>.csv` by name when it cannot be |
+| **Account ID** | your B2 account id - the same one in the bucket's name. Optional: the day's folder is listed either way, and the id is only used to try `usage.account-<id>.csv` by name when it cannot be |
 | **Path prefix** | only if the reports are not at the root of that bucket |
 
-The same values are rows in the settings table — `usage.provider`,
-`usage.report_storage`, `usage.account_id`, `usage.prefix` and `usage.pricing`
-— so they can also be written through `PATCH /api/admin/settings`, or seeded
+The same values are rows in the settings table - `usage.provider`,
+`usage.report_storage`, `usage.account_id`, `usage.prefix` and `usage.pricing` -
+so they can also be written through `PATCH /api/admin/settings`, or seeded
 from the environment on **first boot**, like the antivirus family:
 `FILEX_USAGE_PROVIDER`, `FILEX_USAGE_REPORT_STORAGE`, `FILEX_USAGE_ACCOUNT_ID`,
 `FILEX_USAGE_PREFIX` and `FILEX_USAGE_PRICING` (the JSON price table). A
@@ -74,7 +74,7 @@ never read.)
 
 The `usage.pricing` setting holds the table the estimate is computed with, and
 the free allowances are their own fields rather than constants buried in a
-formula — so a price change is an edit, not a release.
+formula - so a price change is an edit, not a release.
 
 The defaults are Backblaze's list prices as read on 2026-09-11:
 
@@ -82,7 +82,7 @@ The defaults are Backblaze's list prices as read on 2026-09-11:
 |---|---|---|
 | Storage | $0.00695 / GB / month | first 10 GB |
 | Download | $0.01 / GB | 3× what you store |
-| Class A/B/C transactions | free | — |
+| Class A/B/C transactions | free | - |
 | Class D transactions | $0.004 / 10,000 | 2,500 / day |
 
 The page shows the allowance line separately from the billable line, because
@@ -103,11 +103,11 @@ GET /api/admin/usage?from=2026-08-01&to=2026-08-31
 ```
 
 Supertenant-only. It answers `502` with a `hint` when the configuration points
-at something it cannot read — a missing storage, a bucket with no reports in it,
-a prefix that matches nothing — rather than an empty report, because an empty
+at something it cannot read - a missing storage, a bucket with no reports in it,
+a prefix that matches nothing - rather than an empty report, because an empty
 report reads as "you used nothing".
 
 ## See also
 
-- [STORAGE.md](STORAGE.md) — attaching an S3 storage, and the B2 master-key trap
-- [CONFIGURATION.md](CONFIGURATION.md) — the environment variables filex does read
+- [STORAGE.md](STORAGE.md) - attaching an S3 storage, and the B2 master-key trap
+- [CONFIGURATION.md](CONFIGURATION.md) - the environment variables filex does read

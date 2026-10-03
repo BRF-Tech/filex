@@ -85,6 +85,11 @@ const WORKFLOW_GUARDS = [
   // 0.48.1: only the newest winget pull request per package stays open.
   'closes superseded winget pull requests after the new one, for the CLI and the desktop app',
   'closes only older versions of the same package, and nothing when the new pull request is missing',
+  // 0.50: every Linux package opens with Chromium's sandbox on, or refuses.
+  'opens every Linux package with the sandbox on, and checks the two refusals',
+  'installs the AppArmor profile docs/DESKTOP.md gives, word for word',
+  'a snap waiting for the Snap Store review does not fail the release',
+  "tells a sandboxed app from one running without it, from /proc",
 ];
 
 /**
@@ -102,6 +107,12 @@ export function releaseAssets(version) {
     `filex_${version}_linux_x86_64.tar.gz`, `filex_${version}_windows_x86_64.zip`, `filex_${version}_darwin_arm64.tar.gz`,
     `filex_${version}_linux_arm64.tar.gz`, `filex_${version}_windows_arm64.zip`,
     'filex-linux-arm64', 'filex-windows-arm64.exe', 'filex-darwin-arm64',
+    // 0.50: every file a download link names (the install prompt, Settings,
+    // DESKTOP.md, CLI.md, filex.sh) is on this list, so a release that drops
+    // one fails here instead of leaving a 404 behind a link
+    // (web/tests/composables/installDownloads.test.ts holds the links to it).
+    'filex-desktop-x86_64.rpm',
+    'filex-linux-amd64', 'filex-windows-amd64.exe', 'filex-darwin-amd64',
   ];
 }
 
@@ -210,6 +221,10 @@ export default function plan({ repo, version, tag }) {
     remote: 'origin',
     exportRemote: 'origin',
     exportScript: 'scripts/export-public.sh',
+    // The Go module lives in backend/, so its tag is backend/vX.Y.Z (stages.mjs
+    // signs and pushes `${backendTagPrefix}${tag}`). 0.50: the plan did not
+    // name it and the sign/push stages looked for "undefinedv0.50.0".
+    backendTagPrefix: 'backend/',
     // The maintainer key (docs/CONTRIBUTING.md → Release process, step 7).
     signingKeys: ['EFA3B1262FD992800DBBB5E3A8FEBA97FF786513'],
     // The public tree may name this project's hosts only as these two

@@ -21,6 +21,10 @@ import path from 'node:path';
 
 import { DEFAULT_THEME_ID, THEME_LS_KEY, setTheme, useThemeState } from '@brftech/filex-core';
 import { applyPalette } from '@/lib/palette';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
+
+// setTheme() writes the palette to the account 400 ms later.
+answerAccountPrefs();
 
 const styleEl = () => document.head.querySelector('style[data-filex-theme]');
 

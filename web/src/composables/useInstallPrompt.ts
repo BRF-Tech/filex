@@ -10,7 +10,7 @@
 // embeddable explorer must not surface an install prompt inside its host apps
 // (work.example.com "Dosyalar", fishapp). See vite.config.ts for the matching SW
 // scope guard.
-import { computed, onBeforeUnmount, onMounted, readonly, ref, type ComputedRef } from 'vue';
+import { computed, onBeforeUnmount, onMounted, readonly, ref, type ComputedRef, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { viewPrefsSlot } from '@brftech/filex-core';
 import { registerAppServiceWorker } from '@/lib/serviceWorker';
@@ -116,6 +116,68 @@ export function detectDesktopPlatform(): DesktopPlatform | null {
   return null;
 }
 
+/* ── which processor ───────────────────────────────────────────────────────
+ *
+ * Windows and Linux builds come in two architectures since 0.48.1, and the
+ * wrong one is not a slower download, it is a worse app: an x64 build on an
+ * Arm Windows laptop runs under emulation, and on Linux arm64 it does not run
+ * at all.
+ *
+ * ⚠⚠ The user-agent string CANNOT say so. Chromium froze it: Windows on Arm
+ * reports "Windows NT 10.0; Win64; x64" and Linux arm64 "X11; Linux x86_64",
+ * so an "x64" in it means nothing. Chromium answers the real question through
+ * User-Agent Client Hints (`navigator.userAgentData.getHighEntropyValues`,
+ * `architecture` + `bitness`), which is asynchronous. Firefox and Safari have
+ * no client hints; there the string's only trustworthy signal is a POSITIVE
+ * Arm one (Firefox on Linux arm64 says "Linux aarch64"), and everything else
+ * is "unknown", never a guessed x64.
+ *
+ * Unknown is a real answer and the rows say so: they offer x64 first, each
+ * with the arm64 build of the same file beside it (`other`). A detected
+ * machine gets its own build first, with the other one beside it all the same,
+ * because a browser that reports the wrong architecture (an x64 browser under
+ * emulation) must not leave its user with no way to the right file. */
+export type DesktopArch = 'x64' | 'arm64';
+
+/** The answer client hints give, as a build name. Only a 64-bit machine has a
+ *  build; anything else (32-bit, an architecture the hints do not name) is
+ *  unknown. */
+export function archFromHints(architecture?: string | null, bitness?: string | null): DesktopArch | null {
+  if (bitness !== '64') return null;
+  if (architecture === 'arm') return 'arm64';
+  if (architecture === 'x86') return 'x64';
+  return null;
+}
+
+/** The one thing a browser WITHOUT client hints can tell: that it runs on
+ *  Arm, from the user-agent string or `navigator.platform` ("Linux aarch64"). */
+export function archFromUserAgent(ua: string, platform = ''): DesktopArch | null {
+  return /\b(aarch64|arm64|armv8)/i.test(`${ua} ${platform}`) ? 'arm64' : null;
+}
+
+interface ClientHints {
+  getHighEntropyValues?(hints: string[]): Promise<{ architecture?: string; bitness?: string }>;
+}
+
+/** This machine's architecture, as well as the browser can tell; null when it
+ *  cannot. Never throws: a refused or failing hints call is "unknown". */
+export async function detectDesktopArch(
+  nav: { userAgent?: string; platform?: string; userAgentData?: ClientHints } | undefined =
+    typeof navigator === 'undefined' ? undefined : (navigator as never),
+): Promise<DesktopArch | null> {
+  if (!nav) return null;
+  const hints = nav.userAgentData;
+  if (hints && typeof hints.getHighEntropyValues === 'function') {
+    try {
+      const v = await hints.getHighEntropyValues(['architecture', 'bitness']);
+      return archFromHints(v?.architecture, v?.bitness);
+    } catch {
+      return null;
+    }
+  }
+  return archFromUserAgent(nav.userAgent ?? '', nav.platform ?? '');
+}
+
 /* ── the download catalogue ────────────────────────────────────────────────
  *
  * ⚠⚠ ONE LIST, RENDERED TWICE. This used to live inside InstallPrompt.vue,
@@ -152,12 +214,46 @@ export const SNAP_STORE_URL = 'https://snapcraft.io/filex-app';
  *  one-line install; the row's hint repeats it. */
 export const HOMEBREW_TAP_URL = 'https://github.com/BRF-Tech/homebrew-filex';
 
+/**
+ * The release files, by kind and architecture: the names electron-builder
+ * gives them (`${productName}-desktop-${arch}.${ext}`, desktop/
+ * electron-builder.yml), where `${arch}` is each format's own spelling - x64
+ * and arm64 for an .exe, x86_64 for an AppImage and an .rpm, amd64 for a
+ * .deb, aarch64 for an arm64 .rpm.
+ *
+ * ⚠⚠ ONE TABLE. The prompt, Settings, docs/DESKTOP.md and filex.sh all link
+ * these files, and web/tests/composables/installDownloads.test.ts holds every
+ * one of those links to this table and the table to the files a release must
+ * carry (scripts/release/plan.mjs `releaseAssets`), so a rename fails a test
+ * instead of becoming a 404.
+ */
+export const DESKTOP_ASSETS = {
+  win_setup: { x64: 'filex-desktop-x64.exe', arm64: 'filex-desktop-arm64.exe' },
+  win_portable: { x64: 'filex-desktop-portable-x64.exe', arm64: 'filex-desktop-portable-arm64.exe' },
+  appimage: { x64: 'filex-desktop-x86_64.AppImage', arm64: 'filex-desktop-arm64.AppImage' },
+  deb: { x64: 'filex-desktop-amd64.deb', arm64: 'filex-desktop-arm64.deb' },
+  rpm: { x64: 'filex-desktop-x86_64.rpm', arm64: 'filex-desktop-aarch64.rpm' },
+  dmg: { arm64: 'filex-desktop-arm64.dmg' },
+} as const;
+
+export type DesktopAssetKind = keyof typeof DESKTOP_ASSETS;
+
+/** The download address of one release file. */
+export function desktopAssetUrl(name: string): string {
+  return `${DL}/${name}`;
+}
+
 export interface DesktopDownload {
   /** What the file is, named the way it is named on the release page. */
   label: string;
   /** What it does to the machine, and roughly how big it is. */
   hint: string;
   href: string;
+  /** The processor the file is built for. Absent on a store row: the store
+   *  (and snapd) picks the build for the machine itself. */
+  arch?: DesktopArch;
+  /** The same file for the other processor, offered beside it. */
+  other?: { arch: DesktopArch; label: string; href: string };
 }
 
 /** The human name of a platform — not translated, because "Windows", "Linux"
@@ -173,68 +269,70 @@ export function desktopPlatformLabel(p: DesktopPlatform | null): string {
  *  to a release page listing ten files. Each entry names the file, what it
  *  does to the machine, and roughly how big it is.
  *
+ *  `arch` is this machine's processor when the browser could tell
+ *  (`detectDesktopArch`), null when it could not. A file built per processor
+ *  is offered for that one, or for x64 when unknown, with the label saying
+ *  which, and with the other processor's file beside it (`other`).
+ *
  *  ⚠ Takes the translate function rather than calling `useI18n()` itself, so
  *  it stays a plain function a test can drive with a stub and a caller outside
  *  a component setup can still use. */
 export function desktopDownloadsFor(
   platform: DesktopPlatform | null,
   t: (key: string) => string,
+  arch: DesktopArch | null = null,
 ): DesktopDownload[] {
+  const mine: DesktopArch = arch ?? 'x64';
+  const theirs: DesktopArch = mine === 'x64' ? 'arm64' : 'x64';
+  /** A row for a file built per processor: this machine's, the other beside it. */
+  const built = (kind: Exclude<DesktopAssetKind, 'dmg'>, key: string): DesktopDownload => ({
+    label: `${t(`install.dl.${key}`)} · ${mine}`,
+    hint: t(`install.dl.${key}_hint`),
+    href: desktopAssetUrl(DESKTOP_ASSETS[kind][mine]),
+    arch: mine,
+    other: {
+      arch: theirs,
+      label: t(`install.dl.other_${theirs}`),
+      href: desktopAssetUrl(DESKTOP_ASSETS[kind][theirs]),
+    },
+  });
   if (platform === 'windows') {
     return [
       // First since 2026-09-26, when the listing went live: the one Windows
       // build Microsoft signs (no SmartScreen prompt) and the Store updates.
+      // The Store hands an Arm PC the arm64 package itself (one bundle).
       {
         label: t('install.dl.win_store'),
         hint: t('install.dl.win_store_hint'),
         href: MSSTORE_URL,
       },
-      {
-        label: t('install.dl.win_setup'),
-        hint: t('install.dl.win_setup_hint'),
-        href: `${DL}/filex-desktop-x64.exe`,
-      },
+      built('win_setup', 'win_setup'),
       // ⚠ A machine you may not install software on is a real case, not an
-      // edge one — and it was the only platform with no answer for it: the
+      // edge one, and it was the only platform with no answer for it: the
       // AppImage and the mac .zip already run unextracted. The hint has to say
       // what it costs, because "portable" reads as strictly better until you
       // find out it never updates.
-      {
-        label: t('install.dl.win_portable'),
-        hint: t('install.dl.win_portable_hint'),
-        href: `${DL}/filex-desktop-portable-x64.exe`,
-      },
+      built('win_portable', 'win_portable'),
     ];
   }
   if (platform === 'linux') {
     return [
       // First, as the Store is on Windows: the one-click install from a
-      // software centre (Ubuntu's App Center finds it), updated by snapd.
+      // software centre (Ubuntu's App Center finds it), updated by snapd,
+      // which also picks the x64 or the arm64 snap by itself.
       {
         label: t('install.dl.linux_snap'),
         hint: t('install.dl.linux_snap_hint'),
         href: SNAP_STORE_URL,
       },
-      {
-        label: t('install.dl.appimage'),
-        hint: t('install.dl.appimage_hint'),
-        href: `${DL}/filex-desktop-x86_64.AppImage`,
-      },
-      {
-        label: t('install.dl.deb'),
-        hint: t('install.dl.deb_hint'),
-        href: `${DL}/filex-desktop-amd64.deb`,
-      },
-      {
-        label: t('install.dl.rpm'),
-        hint: t('install.dl.rpm_hint'),
-        href: `${DL}/filex-desktop-x86_64.rpm`,
-      },
+      built('appimage', 'appimage'),
+      built('deb', 'deb'),
+      built('rpm', 'rpm'),
     ];
   }
   // ⚠ Apple Silicon only, and unsigned: the CI runner's arch is the artifact's
   // arch (macos-14 = arm64), and there is no Developer ID yet, so the first
-  // launch is a Gatekeeper "Open Anyway" — the hint says so up front instead
+  // launch is a Gatekeeper "Open Anyway"; the hint says so up front instead
   // of letting the user find out from a dialog that reads like a virus alert.
   // Homebrew second: the Mac app cannot update itself until it is signed, and
   // `brew upgrade` is the one thing that keeps a Mac copy current.
@@ -242,7 +340,8 @@ export function desktopDownloadsFor(
     {
       label: t('install.dl.dmg'),
       hint: t('install.dl.dmg_hint'),
-      href: `${DL}/filex-desktop-arm64.dmg`,
+      href: desktopAssetUrl(DESKTOP_ASSETS.dmg.arm64),
+      arch: 'arm64',
     },
     {
       label: t('install.dl.mac_brew'),
@@ -263,15 +362,29 @@ export function desktopDownloadsFor(
 export function useDesktopDownloads(): {
   platform: DesktopPlatform | null;
   platformLabel: ComputedRef<string>;
+  /** This machine's processor; null until (and unless) the browser says. */
+  arch: Readonly<Ref<DesktopArch | null>>;
   downloads: ComputedRef<DesktopDownload[]>;
   releasesUrl: string;
 } {
   const { t } = useI18n();
   const platform = detectDesktopPlatform();
+  // The synchronous answer first (the user-agent's Arm signal), so the rows
+  // are right from the first paint wherever that is all there is; Chromium's
+  // client hints arrive a moment later and settle it.
+  const arch = ref<DesktopArch | null>(
+    typeof navigator === 'undefined' ? null : archFromUserAgent(navigator.userAgent, navigator.platform),
+  );
+  if (platform === 'windows' || platform === 'linux') {
+    void detectDesktopArch().then((a) => {
+      if (a) arch.value = a;
+    });
+  }
   return {
     platform,
     platformLabel: computed(() => desktopPlatformLabel(platform)),
-    downloads: computed(() => desktopDownloadsFor(platform, t)),
+    arch: readonly(arch),
+    downloads: computed(() => desktopDownloadsFor(platform, t, arch.value)),
     releasesUrl: DESKTOP_RELEASES_URL,
   };
 }

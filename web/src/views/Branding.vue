@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /* wiring:e1 — Branding settings page: identity fields for the public
    share/drop/PIN pages + the login screen, with a live preview card. */
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watchEffect } from 'vue';
+import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Save, Palette, RotateCcw, Upload } from 'lucide-vue-next';
 
@@ -15,7 +15,7 @@ import Input from '@/components/ui/Input.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import { PublicLinkPreview } from '@brftech/filex-core';
-import { effectiveTheme } from '@/lib/theme';
+import { liveTheme } from '@/lib/theme';
 
 const LOGO_MAX_BYTES = 256 * 1024;
 
@@ -54,15 +54,7 @@ const previewAccent = computed(() => (accentValid.value ? form.accent : '#2f6ceb
 
 /** The preview in the light/dark this panel is in (the public page follows
  *  the visitor's own choice, then the instance default, then the system). */
-const previewTheme = ref<'light' | 'dark'>(effectiveTheme());
-let themeObserver: MutationObserver | null = null;
-onMounted(() => {
-  themeObserver = new MutationObserver(() => {
-    previewTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  });
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-});
-onBeforeUnmount(() => themeObserver?.disconnect());
+const previewTheme = liveTheme; /* lib/theme - one source for every screen (#74) */
 
 function pickLogo() {
   fileInput.value?.click();

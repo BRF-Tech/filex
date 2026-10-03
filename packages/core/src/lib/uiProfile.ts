@@ -67,7 +67,7 @@ export function resolveUiProfile(value: unknown): UiProfile {
   if (!warned.has(seen) && typeof console !== 'undefined') {
     warned.add(seen);
     console.warn(
-      `[filex] unknown uiProfile ${JSON.stringify(seen)} — using "${DEFAULT_UI_PROFILE}". ` +
+      `[filex] unknown uiProfile ${JSON.stringify(seen)} - using "${DEFAULT_UI_PROFILE}". ` +
         `Valid values: ${UI_PROFILES.map((p) => `"${p}"`).join(', ')}. ` +
         `(The former "drive" profile was removed; pass "simple" for the reduced explorer.)`,
     );

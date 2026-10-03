@@ -13,7 +13,7 @@ import (
 
 // TestGrants_UnqualifiedPathIsRejected — POST /api/files/permissions with a
 // bare "/deneme" silently fell back to storages[0] and wrote the grant
-// there. olivov watched a grant meant for their own storage land on a
+// there. A multi-tenant deployment watched a grant meant for their own storage land on a
 // different tenant's (H6, 2026-08-05); a `storage`/`storage_id` field in the
 // body changed nothing, because there is no such field.
 //

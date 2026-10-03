@@ -552,6 +552,7 @@ func hfHTTPRequest(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 	if ip := net.ParseIP(u.Hostname()); ip != nil && netguard.Refused(ip) {
 		return nil, hostErr(wire.ErrPermissionDenied, "private and local addresses are refused")
 	}
+	s.noteSent(strings.ToLower(u.Hostname()))
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
 	if method == "" {
 		method = http.MethodGet

@@ -96,11 +96,14 @@ type Op struct {
 	// folder on an object store is one source and minutes of objects, which
 	// the source counts above cannot show. From the storage driver's tally
 	// (storage.Tally); live counters like the bytes, never stored.
-	ObjectsTotal int64  `json:"objects_total,omitempty"`
-	ObjectsDone  int64  `json:"objects_done,omitempty"`
-	Failed       int    `json:"failed"`
-	Status       string `json:"status"`
-	Error        string `json:"error,omitempty"`
+	ObjectsTotal int64 `json:"objects_total,omitempty"`
+	ObjectsDone  int64 `json:"objects_done,omitempty"`
+	Failed       int   `json:"failed"`
+	// Skipped counts items the op deliberately left alone (migration 00075):
+	// a thumbnail repair's files no engine draws, or end-to-end encrypted.
+	Skipped int    `json:"skipped,omitempty"`
+	Status  string `json:"status"`
+	Error   string `json:"error,omitempty"`
 	// ErrorCode / ErrorEngine classify a failed APP job for the client, which
 	// says it in the person's language (lib/errorWords `jobFailure`) and keeps
 	// `Error` — English, sometimes plumbing — for an administrator's second
@@ -118,6 +121,12 @@ type Op struct {
 	Label   string     `json:"label,omitempty"`
 	Message string     `json:"message,omitempty"`
 	Outputs []OpOutput `json:"outputs,omitempty"`
+	// Open is where a FINISHED plugin job sends the person who queued it: one
+	// of its outputs (adapter-qualified) and the app's own screen to start
+	// there - the job result's `surface.open` (wasmplugin openAfter). The
+	// client that queued the job follows it; nobody else's does. Filled by the
+	// Decorator, never stored here.
+	Open *OpOpen `json:"open,omitempty"`
 	// ActorID is who asked for this op. The worker runs on a server-lifetime
 	// context long after the request that queued the work is gone, so the only
 	// way a pasted file can be attributed to the person who pasted it is for
@@ -131,6 +140,8 @@ type Op struct {
 	// answers, which carry its counts only.
 	trash  trashParams
 	tenant string
+	// An OpThumbRepair row's request and outcome (thumb_repair.go).
+	thumb thumbParams
 	// resumed is a row claimed once before, by a process that stopped before
 	// it ended (claimWhere): a rename carries on what it had started
 	// (runRename).
@@ -143,6 +154,15 @@ type Op struct {
 func shape(op *Op) {
 	if op.DestStorageID == 0 {
 		op.DestStorageID = op.StorageID
+	}
+	if op.Kind == OpThumbRepair {
+		p, err := decodeThumbParams(op.Sources)
+		if err != nil {
+			slog.Warn("ops: thumb-repair row unreadable; it reaches nothing", slog.Int64("op", op.ID), slog.String("err", err.Error()))
+		}
+		op.thumb, op.tenant = p, op.Dest
+		op.Sources, op.Dest = nil, ""
+		return
 	}
 	if op.Kind != OpTrashEmpty {
 		return
@@ -188,6 +208,11 @@ type Service struct {
 	trashEmptier TrashEmptier
 	trashMu      sync.Mutex
 	trashDone    sync.Map // op id -> chan struct{}, closed when the run ends
+
+	// "Repair thumbnails" (thumb_repair.go): the same three, for its runs.
+	thumbRepairer ThumbRepairer
+	thumbMu       sync.Mutex
+	thumbDone     sync.Map
 
 	// restorer brings a trash entry back for an OpRestore (rename_restore.go).
 	restorer Restorer
@@ -246,8 +271,10 @@ type DBSync interface {
 	// SyncSoftDelete flags the node deleted and retags it to the trash path
 	// (storage_key keeps the original path so Restore works).
 	SyncSoftDelete(ctx context.Context, storageID int64, src, trashRel string)
-	// SyncHardDelete flags the node deleted when the driver could not move it
-	// to trash and had to delete the bytes outright.
+	// SyncHardDelete drops the node's rows (and everything below a folder)
+	// when its bytes are gone for good: the driver could not move it to the
+	// trash and deleted it outright, it was already missing, or a move across
+	// storages took it away. Nothing of it is listed in the trash.
 	SyncHardDelete(ctx context.Context, storageID int64, src string)
 	// SyncCopy inserts a DB node for the freshly written copy.
 	SyncCopy(ctx context.Context, storageID int64, src, dst string)
@@ -295,6 +322,16 @@ func (s *Service) SetUploadCommitter(c UploadCommitter) { s.uploadCommitter = c 
 // OpOutput is one file a plugin job produced.
 type OpOutput struct {
 	Path string `json:"path"`
+}
+
+// OpOpen is "go to this file, and start that screen on it", for the person
+// whose job produced the file - the same request a screen's `open` makes
+// (wire.OpenRequest). Action and View are the app's own; naming neither just
+// opens the file.
+type OpOpen struct {
+	Path   string `json:"path"`
+	Action string `json:"action,omitempty"`
+	View   string `json:"view,omitempty"`
 }
 
 // PluginRunner executes an OpPluginAction row: reads the job behind op.Dest,
@@ -591,7 +628,7 @@ func (s *Service) insertOp(ctx context.Context, kind string, storageID, destStor
 // Get returns the current state of an op.
 func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 	row := s.db.QueryRowContext(ctx, s.q(
-		`SELECT id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at, actor_id
+		`SELECT id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, COALESCE(skipped,0), status, COALESCE(error,''), created_at, started_at, finished_at, actor_id
 		 FROM pending_ops WHERE id=?`), id)
 	op, err := scanOp(row)
 	if err == nil {
@@ -632,7 +669,7 @@ func (s *Service) ListIn(ctx context.Context, status string, storageIDs []int64)
 
 // ListFor is List as v sees it (Viewer.Sees, in the SQL).
 func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, error) {
-	const cols = `id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, status, COALESCE(error,''), created_at, started_at, finished_at, actor_id`
+	const cols = `id, kind, storage_id, COALESCE(dest_storage_id,0), sources_json, COALESCE(dest,''), total, done, failed, COALESCE(skipped,0), status, COALESCE(error,''), created_at, started_at, finished_at, actor_id`
 	q := `SELECT ` + cols + ` FROM pending_ops`
 	var (
 		where []string
@@ -666,8 +703,8 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 			}
 		}
 		if v.Tenant != "" {
-			either = append(either, `(kind=? AND COALESCE(dest,'')=?)`)
-			args = append(args, OpTrashEmpty, v.Tenant)
+			either = append(either, `(kind IN (?,?) AND COALESCE(dest,'')=?)`)
+			args = append(args, OpTrashEmpty, OpThumbRepair, v.Tenant)
 		}
 		if len(either) == 0 {
 			// A scope that reaches no storage sees no ops. An empty `IN ()` is
@@ -690,7 +727,7 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 	for rows.Next() {
 		op := &Op{}
 		var srcJSON string
-		if err := rows.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt, &op.ActorID); err != nil {
+		if err := rows.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Skipped, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt, &op.ActorID); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(srcJSON), &op.Sources)
@@ -723,8 +760,10 @@ func (s *Service) Run(ctx context.Context) {
 	s.stopMu.Unlock()
 	defer s.stopWg.Done()
 
-	// A trash empty the previous process left behind carries on.
+	// A trash empty the previous process left behind carries on, and so
+	// does a thumbnail repair.
 	s.resumeTrashEmpties(ctx)
+	s.resumeThumbRepairs(ctx)
 
 	// Archive jobs have their own lane beside this one (runArchiveLane), and
 	// so do renames, restores and purges (runFinishingLane) — which Stop does
@@ -893,7 +932,7 @@ func (s *Service) claimNext(ctx context.Context) (*Op, bool, error) {
 	// (trash_empty.go) and would hold the whole queue for as long as it runs.
 	// Nor is an archive job (runArchiveLane), nor a rename, a restore or a
 	// purge (runFinishingLane): each lasts as long as its folder does.
-	return s.claimWhere(ctx, `kind <> 'trash-empty' AND kind NOT IN (`+archiveKinds+`) AND kind NOT IN (`+finishingKinds+`)`)
+	return s.claimWhere(ctx, `kind <> 'trash-empty' AND kind <> 'thumb-repair' AND kind NOT IN (`+archiveKinds+`) AND kind NOT IN (`+finishingKinds+`)`)
 }
 
 // claimWhere is claimNext restricted to the rows cond selects.
@@ -1674,7 +1713,7 @@ func normOpPath(p string) string {
 func scanOp(row *sql.Row) (*Op, error) {
 	op := &Op{}
 	var srcJSON string
-	if err := row.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt, &op.ActorID); err != nil {
+	if err := row.Scan(&op.ID, &op.Kind, &op.StorageID, &op.DestStorageID, &srcJSON, &op.Dest, &op.Total, &op.Done, &op.Failed, &op.Skipped, &op.Status, &op.Error, &op.CreatedAt, &op.StartedAt, &op.FinishedAt, &op.ActorID); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(srcJSON), &op.Sources)

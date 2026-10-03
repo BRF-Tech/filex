@@ -129,7 +129,7 @@ func (r *Report) FailureError() error {
 	for _, f := range fails {
 		parts = append(parts, fmt.Sprintf("%s: %s", f.Name, f.Detail))
 	}
-	return fmt.Errorf("plugin fails its own claims — %s", strings.Join(parts, "; "))
+	return fmt.Errorf("plugin fails its own claims - %s", strings.Join(parts, "; "))
 }
 
 // ConformanceTimeout bounds a whole run. A plugin that cannot answer a
@@ -231,7 +231,7 @@ func RunConformance(ctx context.Context, drv storage.Driver, caps Capabilities, 
 			// The commonest way a plugin lies: Write answers success and
 			// stores nothing. Said plainly, because "not found" on its own
 			// sends the author looking at the read path.
-			err = errors.New("the object is gone immediately after a Write that reported success — " +
+			err = errors.New("the object is gone immediately after a Write that reported success - " +
 				"the write path accepted the bytes and stored nothing")
 		case err != nil:
 			err = fmt.Errorf("reading back what was just written failed: %w", err)
@@ -308,7 +308,7 @@ func RunConformance(ctx context.Context, drv storage.Driver, caps Capabilities, 
 					var st storage.Object
 					if st, err = drv.Stat(ctx, name); err == nil {
 						if diff := st.Mtime.UTC().Sub(want); diff > time.Second || diff < -time.Second {
-							err = fmt.Errorf("set_mtime was accepted but Stat still reports %s (want %s) — "+
+							err = fmt.Errorf("set_mtime was accepted but Stat still reports %s (want %s) - "+
 								"a timestamp that is accepted and dropped makes every sync run copy everything again",
 								st.Mtime.UTC().Format(time.RFC3339), want.Format(time.RFC3339))
 						}
@@ -394,7 +394,7 @@ func RunConformance(ctx context.Context, drv storage.Driver, caps Capabilities, 
 		t0 = time.Now()
 		err = d.Delete(ctx, name)
 		if err != nil && !errors.Is(err, storage.ErrNotFound) {
-			err = fmt.Errorf("deleting a path that is already gone answered %v — Delete must be idempotent", err)
+			err = fmt.Errorf("deleting a path that is already gone answered %v - Delete must be idempotent", err)
 		} else {
 			err = nil
 		}

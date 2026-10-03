@@ -1,7 +1,7 @@
 /**
  * 135 — which filex this is, where a person finds it.
  *
- * Burak, 2026-09-24: the version should be in the account dropdown or in user
+ * The maintainer, 2026-09-24: the version should be in the account dropdown or in user
  * settings — somewhere a PERSON can find it. It was on the sign-in page and on
  * the administrators' About page only, so somebody already signed in, and not
  * an administrator, had no way to answer "which version are you on?".
@@ -61,7 +61,7 @@ test.describe('The version is where a person can find it', () => {
   /* ⚠ A release build's REAL string carries the full commit and the build
      time: `v0.46.0 (<40 hex digits>, <timestamp>)`. Printed whole it gave the
      explorer's avatar menu a sideways scroll bar and ran off the About card
-     (Burak, 2026-09-26). This development build has no commit, so the answer
+     (the maintainer, 2026-09-26). This development build has no commit, so the answer
      is given that shape here. */
   const REAL = 'v0.46.0 (a2d7e34d1971707c638a5a44756685f1cd010bd6, 2026-09-26T03:41:30Z)';
   async function releaseShapedVersion(page: import('@playwright/test').Page) {

@@ -29,7 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/perm"
+	"github.com/brf-tech/filex/backend/internal/netguard"
 )
 
 func init() {
@@ -52,23 +52,115 @@ type Driver struct {
 	roleClaim   string // metadata field name containing role
 	adminGroup  string // group/role string that elevates user to admin
 	defaultRole string
-	// providerID scopes this driver instance to one tenant (multi-tenant mode;
-	// docs/MULTI-TENANCY.md): the JIT upsert then looks users up WITHIN that
-	// provider and stamps new users with it. 0 = single-tenant behaviour.
-	providerID int64
+	// tenant is the tenant this driver signs people in to when a sign-in says
+	// no other (Flow.Tenant): the one it was built for. A tenant's own OIDC is
+	// pinned to its tenant (SetProviderID, or TenantConfigKey at Init) and
+	// serves no other; every other instance is the platform's own tenant's
+	// until a flow names the tenant it was started for. Never "every tenant":
+	// docs/SSO.md, "Which account an SSO sign-in opens".
+	tenant Tenant
+	pinned bool
+	// trustEmail: the operator says this identity provider only ever sends
+	// addresses its people own (`trust_email`, default off). Off, an address
+	// the provider does not mark `email_verified: true` opens no existing
+	// account and a new account only switched off.
+	trustEmail bool
+	// firstLogin is what happens to a person with no account yet: auto_create
+	// and allowed_groups (auth.ProvisionFirstLogin). The zero value would refuse
+	// everybody, so Init always sets it (default: open an account).
+	firstLogin auth.FirstLoginPolicy
+	// client is the HTTP client every call to the identity provider goes
+	// through (discovery, keys, the code exchange); nil = the default one. A
+	// tenant's own OIDC (`guarded`, docs/TENANT-ADMIN.md) gets one that dials
+	// through internal/netguard: no loopback, private, link-local or overlay
+	// address, after DNS and on every redirect.
+	client *http.Client
 }
 
-// SetProviderID pins this driver instance to a tenant. Called by the
+// Flow is what a dispatcher decided for ONE sign-in through a driver it shares
+// between tenants (a sign-in provider bound to several tenants,
+// docs/TENANT-ADMIN.md): the redirect URI of the address the flow started on
+// (the identity provider sends the browser back there, and the code exchange
+// must name the same one) and the tenant the account is looked up and created
+// in. The zero value changes nothing: the driver's own redirect URL and
+// tenant stand.
+type Flow struct {
+	RedirectURL string
+	Tenant      Tenant
+}
+
+// Tenant is the tenant an SSO sign-in's account belongs to: it is looked up
+// there, created there, and an account of any other tenant is refused (the
+// meaning auth.LoginRealm.Admits gives a password sign-in).
+type Tenant struct {
+	// ProviderID is the tenant's row. 0 with Main: the platform's own tenant,
+	// read at the callback (the supertenant row).
+	ProviderID int64
+	// Main: the platform's own tenant, which also owns an account with no
+	// tenant at all (identity.Tenant.Owns).
+	Main bool
+}
+
+// IsSet reports whether t names a tenant at all.
+func (t Tenant) IsSet() bool { return t.ProviderID != 0 || t.Main }
+
+// MainTenant is the platform's own tenant, its row read at the callback.
+func MainTenant() Tenant { return Tenant{Main: true} }
+
+// TenantConfigKey is the Init key that pins a driver to one tenant (int64):
+// what a tenant's own OIDC is built with (authsetup), so it serves its tenant
+// and no other from the moment it exists. Never a page field.
+const TenantConfigKey = "tenant_provider_id"
+
+// TrustEmailKey is the provider setting that takes every address the identity
+// provider sends as verified (bool, default off).
+const TrustEmailKey = "trust_email"
+
+type flowKey struct{}
+
+// WithFlow stamps a flow on the request context StartFlow and HandleCallback
+// are given.
+func WithFlow(ctx context.Context, f Flow) context.Context {
+	return context.WithValue(ctx, flowKey{}, f)
+}
+
+func flowFrom(ctx context.Context) Flow {
+	f, _ := ctx.Value(flowKey{}).(Flow)
+	return f
+}
+
+// oauthFor is the OAuth configuration of one flow: the driver's, with the
+// flow's redirect URI when it has one. Never the shared value itself.
+func oauthFor(base *oauth2.Config, f Flow) *oauth2.Config {
+	if base == nil || f.RedirectURL == "" {
+		return base
+	}
+	c := *base
+	c.RedirectURL = f.RedirectURL
+	return &c
+}
+
+// SetProviderID pins this driver instance to a tenant: it signs people in to
+// that tenant only, and a flow started for another is refused. Called by the
 // multi-provider dispatcher right after Init.
 func (d *Driver) SetProviderID(id int64) {
 	d.mu.Lock()
-	d.providerID = id
+	d.tenant, d.pinned = Tenant{ProviderID: id}, id != 0
 	d.mu.Unlock()
 }
 
-// New constructs an empty OIDC driver — Init must be called.
+// BoundTenant is the tenant the driver signs people in to when a sign-in
+// names no other, and whether it is pinned there (serves that tenant only).
+func (d *Driver) BoundTenant() (Tenant, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.tenant, d.pinned
+}
+
+// New constructs an empty OIDC driver - Init must be called. It signs people
+// in to the platform's own tenant until it is pinned or a flow names another.
 func New(store db.Store) *Driver {
-	return &Driver{store: store, defaultRole: model.RoleUser}
+	return &Driver{store: store, defaultRole: model.RoleUser, tenant: MainTenant()}
 }
 
 // Name implements auth.Driver.
@@ -90,6 +182,11 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 	scopes := []string{oidc.ScopeOpenID, "profile", "email"}
 	if extra, ok := cfg["scopes"].([]string); ok {
 		scopes = append(scopes, extra...)
+	}
+	var client *http.Client
+	if auth.CfgBool(cfg, "guarded") {
+		client = &http.Client{Transport: netguard.Transport(15 * time.Second), Timeout: 30 * time.Second}
+		ctx = oidc.ClientContext(ctx, client)
 	}
 
 	provider, err := oidc.NewProvider(ctx, issuer)
@@ -115,9 +212,17 @@ func (d *Driver) Init(ctx context.Context, cfg map[string]any) error {
 		Scopes:       scopes,
 	}
 	d.issuer = issuer
+	d.client = client
 	d.endSession = logout.EndSessionEndpoint
 	d.roleClaim, _ = cfg["role_claim"].(string)
 	d.adminGroup, _ = cfg["admin_group"].(string)
+	d.firstLogin = auth.FirstLoginPolicyFrom(cfg)
+	d.trustEmail = auth.CfgBool(cfg, TrustEmailKey)
+	if id, _ := cfg[TenantConfigKey].(int64); id != 0 {
+		d.tenant, d.pinned = Tenant{ProviderID: id}, true
+	} else if !d.tenant.IsSet() {
+		d.tenant = MainTenant()
+	}
 	return nil
 }
 
@@ -163,7 +268,7 @@ func (d *Driver) StartFlow(w http.ResponseWriter, r *http.Request) error {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   600,
 	})
-	url := d.oauth.AuthCodeURL(state)
+	url := oauthFor(d.oauth, flowFrom(r.Context())).AuthCodeURL(state)
 	http.Redirect(w, r, url, http.StatusFound)
 	return nil
 }
@@ -172,41 +277,73 @@ func (d *Driver) StartFlow(w http.ResponseWriter, r *http.Request) error {
 // It returns the upserted local user plus the local session token.
 func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.User, string, error) {
 	d.mu.RLock()
-	oauthCfg := d.oauth
+	flow := flowFrom(r.Context())
+	oauthCfg := oauthFor(d.oauth, flow)
 	verifier := d.verifier
 	roleClaim := d.roleClaim
 	adminGroup := d.adminGroup
-	providerID := d.providerID
+	tenant, pinned := d.tenant, d.pinned
+	trustEmail := d.trustEmail
 	endSession := d.endSession
+	firstLogin := d.firstLogin
+	client := d.client
 	d.mu.RUnlock()
 	if oauthCfg == nil {
 		return nil, "", errors.New("oidc: not initialized")
 	}
+	// The tenant this sign-in is for: the flow's (a provider bound to several
+	// tenants is told which one it was started for), else the driver's own.
+	// ⚠ A pinned driver (a tenant's own OIDC) serves its tenant only. No
+	// reason code for either refusal: the page answers them as any failure.
+	if flow.Tenant.IsSet() {
+		if pinned && flow.Tenant.ProviderID != tenant.ProviderID {
+			return nil, "", fmt.Errorf("oidc: this provider belongs to tenant %d, the sign-in was started for tenant %d", tenant.ProviderID, flow.Tenant.ProviderID)
+		}
+		tenant = flow.Tenant
+	}
+	if !tenant.IsSet() {
+		return nil, "", errors.New("oidc: this provider is bound to no tenant; it signs nobody in")
+	}
 
+	// ⚠ Every refusal below that the person can act on carries a reason code
+	// for the sign-in page (auth.SSORefused, auth.SSOReason); the wrapped error
+	// is the log line, unchanged. An account in another tenant carries none
+	// (see auth/sso_refusal.go).
 	c, err := r.Cookie(stateCookieName)
 	if err != nil || c.Value == "" || c.Value != r.URL.Query().Get("state") {
-		return nil, "", errors.New("oidc: state mismatch")
+		return nil, "", auth.SSORefused(auth.SSOReasonExpired, errors.New("oidc: state mismatch"))
 	}
-	tok, err := oauthCfg.Exchange(r.Context(), r.URL.Query().Get("code"))
+	// The identity provider answered with an error instead of a code (the
+	// person cancelled, or the IdP refused them: RFC 6749 4.1.2.1). Its words
+	// go to the log only; the page gets the code.
+	if idpErr := r.URL.Query().Get("error"); idpErr != "" {
+		return nil, "", auth.SSORefused(auth.SSOReasonIdPDenied, fmt.Errorf("oidc: the identity provider answered %q: %s",
+			clip(idpErr, 64), clip(r.URL.Query().Get("error_description"), 200)))
+	}
+	exCtx := r.Context()
+	if client != nil {
+		exCtx = context.WithValue(exCtx, oauth2.HTTPClient, client)
+	}
+	tok, err := oauthCfg.Exchange(exCtx, r.URL.Query().Get("code"))
 	if err != nil {
-		return nil, "", fmt.Errorf("oidc: code exchange: %w", err)
+		return nil, "", auth.SSORefused(auth.SSOReasonIdPError, fmt.Errorf("oidc: code exchange: %w", err))
 	}
 	rawIDToken, ok := tok.Extra("id_token").(string)
 	if !ok {
-		return nil, "", errors.New("oidc: missing id_token")
+		return nil, "", auth.SSORefused(auth.SSOReasonIdPError, errors.New("oidc: missing id_token"))
 	}
 	idTok, err := verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
-		return nil, "", fmt.Errorf("oidc: verify id_token: %w", err)
+		return nil, "", auth.SSORefused(auth.SSOReasonIdPError, fmt.Errorf("oidc: verify id_token: %w", err))
 	}
 
 	var claims map[string]any
 	if err := idTok.Claims(&claims); err != nil {
-		return nil, "", err
+		return nil, "", auth.SSORefused(auth.SSOReasonIdPError, err)
 	}
 	email, _ := claims["email"].(string)
 	if email == "" {
-		return nil, "", errors.New("oidc: id_token missing email claim")
+		return nil, "", auth.SSORefused(auth.SSOReasonNoEmail, errors.New("oidc: id_token missing email claim"))
 	}
 	// Roles/groups may live in the id_token OR the access_token, under a flat
 	// or dotted claim path. Keycloak, for instance, puts realm roles at
@@ -231,72 +368,57 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 		}
 	}
 
-	// Upsert user. In multi-tenant mode (providerID set) the lookup is scoped to
-	// THIS tenant, a new user is JIT-stamped with it, and the tag is immutable —
-	// an email already registered to another tenant cannot hop realms (the JIT
-	// create then fails on the unique email and the login is refused).
 	ctx := r.Context()
 	lower := strings.ToLower(email)
-	var user *model.User
-	created := false
-	if providerID != 0 {
-		user, err = d.store.GetUserByProviderEmail(ctx, providerID, lower)
-		if err != nil {
-			return nil, "", fmt.Errorf("oidc: lookup user: %w", err)
-		}
-		if user == nil {
-			user, err = d.store.CreateUser(ctx, lower, "", role, "en", model.TimezoneUnset)
-			if err != nil {
-				return nil, "", fmt.Errorf("oidc: this email is registered to another tenant: %w", err)
-			}
-			created = true
-			if err := d.store.SetUserProvider(ctx, user.ID, providerID, idTok.Subject); err != nil {
-				return nil, "", fmt.Errorf("oidc: stamp tenant: %w", err)
-			}
-			if u2, err := d.store.GetUser(ctx, user.ID); err == nil {
-				user = u2
-			}
-		} else if user.OIDCSubject == "" {
-			// Backfill the subject for a pre-existing tenant user.
-			_ = d.store.SetUserProvider(ctx, user.ID, providerID, idTok.Subject)
-		}
-	} else {
-		user, err = d.store.GetUserByEmail(ctx, lower)
-		if err != nil {
-			user, err = d.store.CreateUser(ctx, lower, "", role, "en", model.TimezoneUnset)
-			if err != nil {
-				return nil, "", fmt.Errorf("oidc: upsert user: %w", err)
-			}
-			created = true
-		}
-	}
-	if mapping && !created {
-		d.syncMappedRole(ctx, user, claimAdmin)
-	}
 	// The groups this login carried, for permission rules that target an SSO
-	// group (package perm). Read from the same claim the admin mapping uses,
-	// in both tokens, and REPLACED at every login: the IdP is the authority,
-	// so somebody removed from a group there leaves it here on their next
-	// sign-in. No claim configured, or none in the tokens, is no groups.
+	// group (package perm) and for the first-login rule's allowed_groups. Read
+	// from the same claim the admin mapping uses, in both tokens, and REPLACED
+	// at every login: the IdP is the authority, so somebody removed from a
+	// group there leaves it here on their next sign-in. No claim configured, or
+	// none in the tokens, is no groups.
 	var groups []string
 	if roleClaim != "" {
 		for _, cs := range claimSets {
 			groups = append(groups, claimValues(cs, roleClaim)...)
 		}
 	}
-	if err := d.store.SetUserSSOGroups(ctx, user.ID, groups); err != nil {
-		// Not fatal to the sign-in, but loud: a rule that should bind this
-		// account through a group will not until the next successful write.
-		slog.Warn("oidc: could not record the sign-in's SSO groups",
-			slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+	scope, err := d.scopeOf(ctx, tenant)
+	if err != nil {
+		return nil, "", err
 	}
-	// A NEW account whose groups name a role's SSO group starts with that
-	// role (perm.StartingRole). Only at creation: afterwards the role is the
-	// person's, changed on their own page like anyone else's. An account the
-	// admin mapping made an administrator is bound by no role.
-	if created && !user.IsAdmin() && len(groups) > 0 {
-		d.giveStartingRole(ctx, user, groups)
+	id := identity{issuer: idTok.Issuer, subject: idTok.Subject, email: lower,
+		verified: trustEmail || emailVerified(claims["email_verified"])}
+	// A person with no account yet goes through the first-login rule
+	// (auth.ProvisionFirstLogin) — the ONE creation path, whichever tenant mode.
+	first := auth.FirstLogin{
+		Driver: "oidc", Identifier: lower, Email: lower, Role: role, Groups: groups,
+		Policy: firstLogin, ProviderID: scope.ProviderID, OIDCSubject: idTok.Subject,
 	}
+	user, created, err := d.account(ctx, scope, id, first)
+	if err != nil {
+		return nil, "", err
+	}
+	// ⚠⚠ The last word on the tenant boundary, as auth.LoginRealm.Admits is for
+	// a password sign-in: whatever the lookups above returned, an account of
+	// another tenant is not signed in to. No reason code: the page answers it
+	// as any failure, so nobody learns that the address has an account there.
+	if !scope.owns(user) {
+		return nil, "", fmt.Errorf("oidc: account %d is not in tenant %d, the one this sign-in is for", user.ID, scope.ProviderID)
+	}
+	if created && !id.verified {
+		return nil, "", d.holdForApproval(ctx, user, groups)
+	}
+	if mapping && !created {
+		d.syncMappedRole(ctx, user, claimAdmin)
+	}
+	// The sign-in's groups (auth.RecordSignInGroups, one rule for every
+	// provider): recorded and REPLACED — the IdP is the authority; a NEW
+	// account that is not an administrator starts with the role they name
+	// (perm.StartingRole), once; the filex groups linked to them are joined
+	// and left, members added by hand staying; and the level a group's role
+	// sets is checked at every sign-in — the admin mapping above may just
+	// have demoted an administrator.
+	user = auth.RecordSignInGroups(ctx, d.store, "oidc", user, groups, created)
 	_ = d.store.TouchLastLogin(ctx, user.ID)
 
 	// Mint a local session.
@@ -494,38 +616,18 @@ func claimValues(claims map[string]any, path string) []string {
 	return nil
 }
 
+// clip shortens what the identity provider wrote for the log line.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "") + "..."
+}
+
 func randString(nBytes int) (string, error) {
 	b := make([]byte, nBytes)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-// giveStartingRole gives a new account the custom role its SSO groups name,
-// and the built-in role that role implies (perm.HolderRole). Failures are
-// logged, not fatal: the account then simply starts with its default role.
-func (d *Driver) giveStartingRole(ctx context.Context, user *model.User, groups []string) {
-	rules, err := d.store.ListPermissionRules(ctx)
-	if err != nil {
-		slog.Warn("oidc: starting role: list roles", slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
-		return
-	}
-	role := perm.StartingRole(rules, groups, user.ProviderID)
-	if role == nil {
-		return
-	}
-	want := perm.RoleHolder(role)
-	if user.Role != want {
-		if err := d.store.UpdateUserRole(ctx, user.ID, want); err != nil {
-			slog.Warn("oidc: starting role: set built-in role", slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
-			return
-		}
-		user.Role = want
-	}
-	if err := d.store.SetUserCustomRole(ctx, user.ID, role.ID); err != nil {
-		slog.Warn("oidc: starting role: give role", slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
-		return
-	}
-	perm.Invalidate()
 }

@@ -141,6 +141,29 @@ func (h *Plugins) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+// Logs answers a storage plugin's log - its starts and failures, and the
+// storage sync's answers it could not make sense of (an entry it could not
+// say exists or not, issue #104) - the same shape as an app plugin's
+// (`?after=<seq>` → `{lines, next}`, internal/pluginlog). A line repeated
+// comes back with the same `id` and a higher `count`.
+func (h *Plugins) Logs(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r) {
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	lines, next, err := h.Manager.Logs(r.Context(), id, after)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lines": lines, "next": next})
+}
+
 type pluginInstallReq struct {
 	Name    string `json:"name"`
 	Kind    string `json:"kind"`
@@ -164,10 +187,9 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 	}
 	ct := r.Header.Get("Content-Type")
 	if strings.HasPrefix(ct, "multipart/form-data") {
-		// The binary itself. 32 MiB in memory, the rest spills to disk; the
-		// manager caps the total.
-		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
+		// The binary itself. 32 MiB in memory, the rest spills to disk - up
+		// to the binary cap and no further (multipartBody).
+		if !h.parseMultipart(w, r) {
 			return
 		}
 		defer func() {
@@ -194,8 +216,7 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req pluginInstallReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+	if !decodeAdminJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -222,6 +243,47 @@ func (h *Plugins) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, st)
+}
+
+// pluginJSONMax bounds an administrator's JSON body here: a handful of short
+// fields (a name, an address, a sha256, a signature). Read whole otherwise,
+// a body of any size was decoded into memory before a field was looked at.
+const pluginJSONMax = 64 << 10
+
+// decodeAdminJSON decodes a bounded JSON body into dst, or answers: 413 when
+// the body is larger than pluginJSONMax, 400 when it is not JSON.
+func decodeAdminJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, pluginJSONMax)).Decode(dst)
+	if err == nil {
+		return true
+	}
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+		return false
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+	return false
+}
+
+// parseMultipart parses a binary upload bounded by the manager's binary cap
+// (plus room for the form's other fields), or answers: 413 past it, 400 for
+// a form that does not parse. ParseMultipartForm keeps 32 MiB in memory and
+// spills the rest to temporary files, so without the bound the disk took
+// whatever was sent before the manager's own cap ever saw a byte.
+func (h *Plugins) parseMultipart(w http.ResponseWriter, r *http.Request) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, h.Manager.MaxBinaryBytes()+1<<20)
+	err := r.ParseMultipartForm(32 << 20)
+	if err == nil {
+		return true
+	}
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+		return false
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
+	return false
 }
 
 func installStatus(err error) int {
@@ -264,7 +326,10 @@ func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			FromSource bool `json:"from_source"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !req.FromSource {
+		if !decodeAdminJSON(w, r, &req) {
+			return
+		}
+		if !req.FromSource {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send a multipart file, or {\"from_source\": true}"})
 			return
 		}
@@ -276,8 +341,7 @@ func (h *Plugins) Upgrade(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, st)
 		return
 	}
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad multipart: " + err.Error()})
+	if !h.parseMultipart(w, r) {
 		return
 	}
 	defer func() {
@@ -317,7 +381,10 @@ func (h *Plugins) Patch(w http.ResponseWriter, r *http.Request) {
 		Enabled *bool   `json:"enabled"`
 		Source  *string `json:"source"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Enabled == nil && req.Source == nil) {
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if req.Enabled == nil && req.Source == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "body must be {\"enabled\": true|false} and/or {\"source\": \"owner/name\"}"})
 		return
 	}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -196,11 +197,12 @@ func TestSyncRun_RejectsABadWindowOrLimit(t *testing.T) {
 
 // feedServer is a tiny server with one empty folder, docs://work, that
 // counts listings and change-log questions. withFeed=false answers `changes`
-// the way every server before it does: 501.
-func feedServer(t *testing.T, withFeed bool) (srv *httptest.Server, index, changes *int64) {
+// the way every server before it does: 501. The counters are atomic because
+// a watcher test reads them while the watcher runs (watchFor).
+func feedServer(t *testing.T, withFeed bool) (srv *httptest.Server, index, changes *atomic.Int64) {
 	t.Helper()
 	var mu sync.Mutex
-	index, changes = new(int64), new(int64)
+	index, changes = new(atomic.Int64), new(atomic.Int64)
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -208,10 +210,10 @@ func feedServer(t *testing.T, withFeed bool) (srv *httptest.Server, index, chang
 		q := r.URL.Query()
 		switch q.Get("action") {
 		case "index":
-			*index++
+			index.Add(1)
 			_, _ = w.Write([]byte(`{"adapter":"docs","files":[]}`))
 		case "changes":
-			*changes++
+			changes.Add(1)
 			if !withFeed {
 				w.WriteHeader(http.StatusNotImplemented)
 				_, _ = w.Write([]byte(`{"error":"action not implemented: changes"}`))
@@ -226,6 +228,37 @@ func feedServer(t *testing.T, withFeed bool) (srv *httptest.Server, index, chang
 	return srv, index, changes
 }
 
+// watchFor runs `sync run --watch 20ms` for `window` after the watcher's
+// first listing, and on until `seen` holds (30 s at most in all).
+//
+// ⚠⚠ Not a wall-clock deadline on the whole command. It was 500 ms from the
+// start, and on a loaded machine starting up and the first run took most of
+// it: in the 0.50 full Go run (six packages at once, on a disk whose fsync
+// took hundreds of milliseconds) the watcher made its first run and nothing
+// else in time, two listings, and "it still walks" failed on a watcher that
+// was fine. 500 ms counted from the first listing still lost one run in
+// eight under load. So what a test has to SEE is waited for, and the window
+// only bounds how much more may happen: a slow machine can only make fewer
+// walks, which keeps the upper bounds honest.
+func watchFor(t *testing.T, url string, index *atomic.Int64, window time.Duration, seen func() bool) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		defer cancel()
+		giveUp := time.Now().Add(30 * time.Second)
+		for index.Load() == 0 && ctx.Err() == nil && time.Now().Before(giveUp) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		end := time.Now().Add(window)
+		for ctx.Err() == nil && time.Now().Before(giveUp) && (time.Now().Before(end) || !seen()) {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	err, _, _ := runSync(t, ctx, "run", "--url", url, "--token", "t", "--watch", "20ms")
+	require.NoError(t, err)
+}
+
 // H10: an idle watcher no longer re-lists the tree every tick.
 func TestSyncWatch_AQuietPairIsNotWalkedAgain(t *testing.T) {
 	dir, st := syncEnv(t)
@@ -233,13 +266,10 @@ func TestSyncWatch_AQuietPairIsNotWalkedAgain(t *testing.T) {
 	_, err := st.AddPair(filesync.Pair{Local: filepath.Join(dir, "mirror"), Remote: "docs://work"})
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	err, _, _ = runSync(t, ctx, "run", "--url", srv.URL, "--token", "t", "--watch", "20ms")
-	require.NoError(t, err)
+	watchFor(t, srv.URL, index, 500*time.Millisecond, func() bool { return changes.Load() > 5 })
 
-	require.LessOrEqual(t, *index, int64(2), "one run: the inventory walk and the settle walk, then no listing at all")
-	require.Greater(t, *changes, int64(5), "every tick asks the change log instead")
+	require.LessOrEqual(t, index.Load(), int64(2), "one run: the inventory walk and the settle walk, then no listing at all")
+	require.Greater(t, changes.Load(), int64(5), "every tick asks the change log instead")
 }
 
 // Against an older server the watcher still walks, backing off while nothing
@@ -250,12 +280,11 @@ func TestSyncWatch_WithoutAChangeLogItBacksOff(t *testing.T) {
 	_, err := st.AddPair(filesync.Pair{Local: filepath.Join(dir, "mirror"), Remote: "docs://work"})
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	err, _, _ = runSync(t, ctx, "run", "--url", srv.URL, "--token", "t", "--watch", "20ms")
-	require.NoError(t, err)
+	watchFor(t, srv.URL, index, 500*time.Millisecond, func() bool { return index.Load() > 2 })
 
-	// ~25 ticks; the old watcher walked on every one of them (2 listings each).
-	require.Greater(t, *index, int64(2), "it still walks")
-	require.Less(t, *index, int64(14), "but not on every tick: got %d listings", *index)
+	// ~25 ticks in the window; the old watcher walked on every one of them
+	// (2 listings each).
+	got := index.Load()
+	require.Greater(t, got, int64(2), "it still walks")
+	require.Less(t, got, int64(14), "but not on every tick: got %d listings", got)
 }

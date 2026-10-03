@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Admin Permissions — global overview of every per-file/folder RBAC grant: who has
-// what level, on which path, in which storage. Admin can revoke any grant.
+// what level, on which path, in which storage — a person, or a group (every
+// member of it). Admin can revoke any grant.
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Trash2, ShieldCheck } from 'lucide-vue-next';
@@ -16,14 +17,17 @@ import { DataTable, personName, type ContextAction, type DataColumn } from '@brf
 const { t } = useI18n();
 const toast = useToastStore();
 
-const grants = ref<AdminGrant[]>([]);
+/** A person's grant and a group's have separate id spaces, so a row is keyed
+ *  by both. */
+type Row = AdminGrant & { row_key: string };
+const grants = ref<Row[]>([]);
 const loading = ref(true);
 const q = ref('');
 
 async function load() {
   loading.value = true;
   try {
-    grants.value = await AdminGrantsApi.list();
+    grants.value = (await AdminGrantsApi.list()).map((g) => ({ ...g, row_key: `${g.kind === 'group' ? 'g' : 'u'}${g.id}` }));
   } catch (e) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
@@ -38,8 +42,9 @@ const filtered = computed(() => {
     ? [...grants.value]
     : grants.value.filter(
         (g) =>
-          g.user_email.toLowerCase().includes(term) ||
+          (g.user_email ?? '').toLowerCase().includes(term) ||
           (g.user_name ?? '').toLowerCase().includes(term) ||
+          (g.group_name ?? '').toLowerCase().includes(term) ||
           g.path.toLowerCase().includes(term) ||
           g.storage_name.toLowerCase().includes(term) ||
           g.level.includes(term),
@@ -52,6 +57,7 @@ const filtered = computed(() => {
 });
 
 function userOf(g: AdminGrant): string {
+  if (g.kind === 'group') return g.group_name || `#${g.group_id}`;
   return personName({ name: g.user_name, email: g.user_email }) || `#${g.user_id}`;
 }
 
@@ -86,10 +92,10 @@ function levelTone(l: string): 'rose' | 'amber' | 'zinc' {
 }
 
 async function revoke(g: AdminGrant) {
-  if (!confirm(t('grants.revokeConfirm', { email: g.user_email, path: g.path }))) return;
+  if (!confirm(t('grants.revokeConfirm', { email: userOf(g), path: g.path }))) return;
   try {
-    await AdminGrantsApi.remove(g.id);
-    grants.value = grants.value.filter((x) => x.id !== g.id);
+    await AdminGrantsApi.remove(g.id, g.kind);
+    grants.value = grants.value.filter((x) => !(x.id === g.id && x.kind === g.kind));
     toast.success(t('grants.revokedOk'));
   } catch (e) {
     toast.error(extractError(e, t('errors.generic')));
@@ -123,9 +129,9 @@ function onRowAction(key: string, row: AdminGrant) {
       :rows="filtered"
       :loading="loading"
       :empty="t('grants.empty')"
-      row-key="id"
+      row-key="row_key"
       :row-actions="(row: AdminGrant) => rowActions(row)"
-      :row-actions-test-id="(row: AdminGrant) => `grant-actions-${row.id}`"
+      :row-actions-test-id="(row: Row) => `grant-actions-${row.row_key}`"
       @row-action="(key: string, row: AdminGrant) => onRowAction(key, row)"
     >
       <template #toolbar>
@@ -135,7 +141,8 @@ function onRowAction(key: string, row: AdminGrant) {
       <template #cell-user="{ row }">
         <div>
           {{ userOf(row as AdminGrant) }}
-          <span v-if="(row as AdminGrant).user_name && (row as AdminGrant).user_email" class="tbl-sub">{{ (row as AdminGrant).user_email }}</span>
+          <Badge v-if="(row as AdminGrant).kind === 'group'" size="xs" tone="brand">{{ t('grants.group') }}</Badge>
+          <span v-else-if="(row as AdminGrant).user_name && (row as AdminGrant).user_email" class="tbl-sub">{{ (row as AdminGrant).user_email }}</span>
         </div>
       </template>
 

@@ -3,6 +3,8 @@ import { closeRowMenus, menuEntries, openRowMenu, pickMenuItem } from '../helper
 // who asked through which key and why, a review with the permission rows the
 // install wizard shows, "I understand" before an approval, an optional reason
 // for a rejection, and the source-changed answer said as such.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
@@ -143,6 +145,40 @@ describe('PluginRequestsPanel', () => {
     expect(posted.map((p) => p.url)).toEqual(['/admin/plugin-requests/7/approve']);
     expect(toasts).toEqual([{ kind: 'success', msg: 'e-Signature 0.1.1 installed' }]);
     expect(w.emitted('installed')).toHaveLength(1);
+    w.unmount();
+  });
+
+  // 0.50 - the approving administrator answers the File types group the
+  // install wizard asks (the server's own rows: an upgrade request lists
+  // only the kinds it adds), and only the rows changed from the default are
+  // sent with the approval.
+  it('asks where the app goes for each kind, and sends what was changed with the approval', async () => {
+    const wire = path.resolve(__dirname, '../../../backend/internal/api/handlers/testdata/wire/app-plugin-file-types.json');
+    const fileTypes = JSON.parse(readFileSync(wire, 'utf8')).file_types;
+    requests = [{ ...pending(), op: 'upgrade', from_version: '0.1.0', file_types: fileTypes }];
+    const w = mountPanel();
+    await flushPromises();
+    await openRowMenu(w, 'plugin-request-actions-7');
+    await pickMenuItem('plugin-request-actions-7-review');
+    await flushPromises();
+
+    const dialog = w.find('[data-testid="plugin-request-review"]');
+    const group = dialog.find('[data-testid="install-file-types"]');
+    expect(group.exists(), 'the install wizard’s group').toBe(true);
+    expect(group.find('[data-testid="install-file-types-desc"]').text()).toContain('The kinds this version adds');
+    expect(dialog.find('[data-testid="install-place-thumbnail-whl-first"]').attributes('aria-checked'), 'the server’s default').toBe('true');
+
+    await dialog.find('[data-testid="install-place-thumbnail-whl-off"]').trigger('click');
+    await dialog.find('input[name="plugin-request-understand"]').setValue(true);
+    await dialog.find('[data-testid="plugin-request-approve"]').trigger('click');
+    await flushPromises();
+
+    expect(posted).toEqual([
+      {
+        url: '/admin/plugin-requests/7/approve',
+        body: { associations: [{ capability: 'thumbnail', ext: 'whl', handler: 'app:sign', place: 'off' }] },
+      },
+    ]);
     w.unmount();
   });
 

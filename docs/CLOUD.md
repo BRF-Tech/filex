@@ -1,6 +1,6 @@
 # Cloud preparation (`FILEX_CLOUD`)
 
-> Status: **preparation skeleton only — NOT a live service.** Built in the
+> Status: **preparation skeleton only - NOT a live service.** Built in the
 > v0.7 "Kimlik" wave (E3). The explicit product decision (the project owner, md.18) is:
 > *prepare the scaffolding, do NOT launch a hosted cloud offering yet.* The
 > master flag is therefore **off by default**, and while it is off the
@@ -13,13 +13,13 @@ catalog, tenant self-signup, email verification, and a Stripe billing
 skeleton. It deliberately builds on the **native multi-tenancy foundation
 (v0.1.61, `docs/MULTI-TENANCY.md`)** instead of inventing anything new:
 
-- a signed-up **tenant IS a provider row** — signup calls the exact same
+- a signed-up **tenant IS a provider row** - signup calls the exact same
   provisioning primitive (`db.Store.CreateProvider`) as the operator's
   `/api/admin/providers` lifecycle API. There is **no second provisioning
   path** to keep in sync.
 - plan metadata rides on the existing `providers` table (migration
   `00021_provider_cloud_plan.sql`, all three DB dialects): three **nullable,
-  passive** columns — `plan`, `limits_json`, `billing_ref`.
+  passive** columns - `plan`, `limits_json`, `billing_ref`.
 - email delivery reuses the existing settings-table SMTP mailer
   (`internal/mailer`), with the same "not verified → show the
   token/link on-screen" fallback the share/invite mail uses.
@@ -44,7 +44,7 @@ Code map:
 | `FILEX_CLOUD_PLANS` | *(empty)* | JSON plan catalog: `[{"id","name","price_monthly","stripe_price_id","limits":{"storage_bytes","max_users"}}]`. Empty → one built-in `free` plan (1 GiB / 3 users). A parse error does **not** abort boot: defaults stay active and `/api/cloud/status` reports `plans_error`. |
 | `STRIPE_SECRET` (alias `FILEX_STRIPE_SECRET`) | *(empty)* | Stripe API secret. Empty → both `/api/cloud/billing/*` endpoints answer **503 "stripe not configured"**. |
 | `FILEX_CLOUD_BASE_HOST` | *(empty)* | e.g. `filex.cloud` → a signed-up tenant gets `host = <slug>.<base>`. Empty → tenant provisioned without a host. |
-| `FILEX_MULTI_TENANT` | off | Not owned by this feature, but a real cloud launch **requires** it — tenants are provider rows and only resolve/isolate in multi-tenant mode. `/api/cloud/status` echoes its state. |
+| `FILEX_MULTI_TENANT` | off | Not owned by this feature, but a real cloud launch **requires** it - tenants are provider rows and only resolve/isolate in multi-tenant mode. `/api/cloud/status` echoes its state. |
 
 ## 3. HTTP surface (only exists when `FILEX_CLOUD=1`)
 
@@ -63,22 +63,25 @@ Signup flow details:
 
 - slug: DNS-label rules (`^[a-z0-9][a-z0-9-]{1,62}$`), reserved names
   (`default`, `admin`, `api`, `www`, `mail`, `cloud`, `billing`, `status`)
-  rejected.
+  rejected. The slug is also the tenant's **realm** (its sign-in name, set once
+  and never changed - [MULTI-TENANCY.md → Realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)),
+  so a slug that is a reserved realm (`local`, `root`, `filex`, a protocol name…)
+  is `400`, and one that is another tenant's realm `409`.
 - the tenant is created `enabled=false` (`auth_type=local`) and the resolved
-  plan limits are stamped as a JSON **snapshot** into `limits_json` — later
+  plan limits are stamped as a JSON **snapshot** into `limits_json` - later
   catalog edits never silently change an existing tenant's entitlement.
 - verification token: 32 random bytes hex, 24 h TTL, single-use, held
-  **in memory** (skeleton — see §6). Always logged (`slog`); mailed through
+  **in memory** (skeleton - see §6). Always logged (`slog`); mailed through
   the SMTP mailer when configured **and** verified, otherwise returned in
-  the response (`verify_token`) — the same on-screen fallback pattern the
+  the response (`verify_token`) - the same on-screen fallback pattern the
   invite mail uses.
 - when the flag is on, `GET /api/capabilities` additionally carries
   `"cloud": {"enabled": true, "signup_url": "/api/cloud/signup"}`.
 
-No admin-SPA page exists for any of this (intentional — brief E3): the status
+No admin-SPA page exists for any of this (intentional - brief E3): the status
 endpoint is the whole operator surface for now.
 
-## 4. Stripe skeleton — what is real, what is TODO
+## 4. Stripe skeleton - what is real, what is TODO
 
 Real: config gating (503 without secret), the form-encoded
 `POST /v1/checkout/sessions` request wiring via stdlib `net/http` (no Stripe
@@ -97,17 +100,17 @@ Deliberately NOT implemented (marked `TODO(cloud-launch)` in
 
 ## 5. Guarantees while the flag is OFF (the binding contract)
 
-`FILEX_CLOUD` unset/false — the default everywhere — means:
+`FILEX_CLOUD` unset/false - the default everywhere - means:
 
 1. **No routes.** The `/api/cloud` block in `BuildRouter` is skipped
    entirely; every `/api/cloud/*` path answers chi's stock 404, exactly as
    on a build without the feature.
 2. **No capabilities field.** The `cloud` key is absent (not `false`) from
-   `/api/capabilities` — the wire format is byte-identical.
+   `/api/capabilities` - the wire format is byte-identical.
 3. **Passive schema.** Migration 00021's columns are nullable and are
    read/written **only** by the cloud service (`SetProviderPlan` /
    `GetProviderPlan`, called nowhere else). Existing provider CRUD SQL was
-   not widened — flag-off installs keep the columns `NULL` forever.
+   not widened - flag-off installs keep the columns `NULL` forever.
 4. **No construction.** `cloud.Service` / `StripeClient` are only built
    inside the gated block; no goroutines, no state, no logging.
 
@@ -125,7 +128,7 @@ Prep in order; nothing below is required today.
    skeleton deliberately provisions **no storage**); `FILEX_MULTI_TENANT=1`;
    wildcard DNS + TLS for `*.<base_host>`.
 3. **Durability**: move pending email verifications from the in-memory map
-   to a table (they currently die on restart — acceptable for a skeleton,
+   to a table (they currently die on restart - acceptable for a skeleton,
    not for production).
 4. **Mail**: production SMTP (settings table) so `verify_token` stops
    falling back into the API response; localized mail templates.
@@ -135,16 +138,16 @@ Prep in order; nothing below is required today.
 6. **Abuse controls**: rate-limit `/api/cloud/signup`, CAPTCHA or
    equivalent, disposable-email policy.
 7. **Enforcement**: actually enforce `limits_json` (storage via the existing
-   quota service, user count at user-create) — the skeleton only *records*
+   quota service, user count at user-create) - the skeleton only *records*
    entitlements.
 8. **Ops**: signup/verify metrics + alerts; admin SPA page if operating it
    becomes routine.
 
 ## 7. Testing
 
-- `internal/cloud/plans_test.go` — catalog parsing (defaults, valid,
+- `internal/cloud/plans_test.go` - catalog parsing (defaults, valid,
   malformed, duplicate ids) + boot-on-broken-catalog fallback.
-- `internal/api/handlers/cloud_test.go` — flag-off 404s + capabilities
+- `internal/api/handlers/cloud_test.go` - flag-off 404s + capabilities
   absence; flag-on signup→verify e2e on the sqlite rig (provider row
   disabled→enabled, plan snapshot stamped, token single-use); Stripe-less
   503s; `plans_error` surfacing.

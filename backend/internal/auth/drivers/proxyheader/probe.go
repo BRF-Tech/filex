@@ -29,6 +29,7 @@ func (d *Driver) Probe(_ context.Context, cfg map[string]any, r *http.Request) [
 		return []auth.ProbeCheck{auth.Check("required", auth.ProbeFail, "fields", "trusted_proxies")}
 	}
 	out := []auth.ProbeCheck{auth.Check("required", auth.ProbeOK)}
+	out = append(out, auth.FirstLoginCheck(cfg, stringOr(cfg, "header_roles", defaultRolesHeader)))
 	p := &Driver{}
 	if err := p.load(cfg); err != nil {
 		return append(out, auth.Check("trusted_proxies", auth.ProbeFail, "detail", err.Error()))

@@ -44,6 +44,15 @@ var instanceWideRoutes = []struct {
 		map[string]any{"value": `{"v":"grid"}`}},
 	{"instance default folder view (batch)", http.MethodPatch, "/api/admin/settings",
 		map[string]any{"ui.default_folder_view": `{"v":"grid"}`}},
+	// Sign-in security: the attempt limits, the IP allow-list, the trusted
+	// proxies, the locks in force and the sign-in trail — one global row each,
+	// and an address or an account is not a tenant's own.
+	{"login security read", http.MethodGet, "/api/admin/login-security", nil},
+	{"login security switch off", http.MethodPatch, "/api/admin/login-security", map[string]any{"enabled": false}},
+	{"login security allow-list", http.MethodPatch, "/api/admin/login-security", map[string]any{"ip_allowlist": []string{"0.0.0.0/0"}}},
+	{"login security locks", http.MethodGet, "/api/admin/login-security/locks", nil},
+	{"login security unlock", http.MethodPost, "/api/admin/login-security/unlock", map[string]any{"all": true}},
+	{"login security trail", http.MethodGet, "/api/admin/login-security/attempts", nil},
 	{"archive policy read", http.MethodGet, "/api/admin/archives", nil},
 	{"archive policy rewrite", http.MethodPatch, "/api/admin/archives", map[string]any{"enabled": false}},
 	// The shared document server + converter, and the JWT secret behind them.
@@ -54,6 +63,13 @@ var instanceWideRoutes = []struct {
 	{"auth drivers read", http.MethodGet, "/api/admin/auth-providers", nil},
 	{"auth drivers rewrite", http.MethodPatch, "/api/admin/auth-providers/oidc",
 		map[string]any{"enabled": true, "config": map[string]any{"issuer": "https://attacker.example"}}},
+	// The built-in User and Viewer roles — one global row each, held by every
+	// account of every tenant without a custom role
+	// (builtin_roles_tenant_test.go). Reading them stays open.
+	{"built-in User role rewrite", http.MethodPut, "/api/admin/roles/builtin",
+		map[string]any{"permissions": []string{"account.edit"}}},
+	{"built-in Viewer role rewrite", http.MethodPut, "/api/admin/roles/builtin?role=viewer",
+		map[string]any{"permissions": []string{"account.edit"}}},
 	// The binary every tenant is served by.
 	{"update status", http.MethodGet, "/api/admin/update", nil},
 	{"update apply", http.MethodPost, "/api/admin/update/apply", map[string]any{}},
@@ -62,6 +78,13 @@ var instanceWideRoutes = []struct {
 	{"tenant lifecycle", http.MethodGet, "/api/admin/providers", nil},
 	{"storage plugins", http.MethodGet, "/api/admin/plugins", nil},
 	{"app plugins", http.MethodGet, "/api/admin/app-plugins", nil},
+	// Which app opens and draws which kind (0.50): the platform's, like the
+	// apps themselves.
+	{"default apps read", http.MethodGet, "/api/admin/file-types", nil},
+	{"default apps rewrite", http.MethodPut, "/api/admin/file-types/png",
+		map[string]any{"thumbnail": map[string]any{"order": []string{"builtin"}, "off": []string{}}}},
+	{"default apps reset", http.MethodDelete, "/api/admin/file-types/png", nil},
+	{"app thumbnail limits", http.MethodPut, "/api/admin/app-plugins/1/thumbnails", map[string]any{"timeout_s": 60}},
 }
 
 // TestInstanceWideAdmin_TenantAdminIsRefused is the red proof: on the pre-fix
@@ -71,7 +94,7 @@ var instanceWideRoutes = []struct {
 func TestInstanceWideAdmin_TenantAdminIsRefused(t *testing.T) {
 	srv, client, store := multiTenantServer(t)
 	// Provider 1 (`default`) is the supertenant; this one is a customer.
-	_, email, password := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
+	_, email, password := seedTenant(t, store, "globex", "admin@globex.test", false)
 	testutil.LoginAs(t, srv, client, email, password)
 
 	for _, rt := range instanceWideRoutes {
@@ -90,7 +113,7 @@ func TestInstanceWideAdmin_TenantAdminIsRefused(t *testing.T) {
 // not that a request was refused, it is that scanning stayed on.
 func TestProtection_TenantAdminCannotDisableAntivirus(t *testing.T) {
 	srv, client, store := multiTenantServer(t)
-	_, email, password := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
+	_, email, password := seedTenant(t, store, "globex", "admin@globex.test", false)
 	testutil.LoginAs(t, srv, client, email, password)
 
 	before := settingValue(t, store, "antivirus.enabled")
@@ -116,6 +139,7 @@ func TestInstanceWideAdmin_SupertenantStillPasses(t *testing.T) {
 	for _, path := range []string{
 		"/api/admin/protection", "/api/admin/archives", "/api/admin/external",
 		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers",
+		"/api/admin/login-security", "/api/admin/login-security/locks", "/api/admin/login-security/attempts",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)
 		assert.Equal(t, http.StatusOK, status, "%s refused the platform operator: %v", path, body)
@@ -141,6 +165,7 @@ func TestInstanceWideAdmin_SingleTenantAdminUnaffected(t *testing.T) {
 	for _, path := range []string{
 		"/api/admin/protection", "/api/admin/archives", "/api/admin/external",
 		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers",
+		"/api/admin/login-security", "/api/admin/login-security/locks", "/api/admin/login-security/attempts",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)
 		assert.Equal(t, http.StatusOK, status,

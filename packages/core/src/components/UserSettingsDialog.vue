@@ -53,12 +53,18 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Bell, ShieldCheck, SlidersHorizontal, Sparkles, User as UserIcon, X } from 'lucide-vue-next';
+import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
+import { openHandlersFor, type OpenHandler } from '../lib/appViewer';
+import { clearOpenWithChoices, followOpenWithChoices, openWithChoices, setOpenWithChoice } from '../lib/openWith';
+import { labelOf as pluginLabelOf } from '../lib/pluginLabel';
+import type { OpenRule, PluginViewRow } from '../types/Plugins';
 
 import Modal from '../modals/Modal.vue';
 import ProductVersion from './ProductVersion.vue';
 import ThemePalette from './ThemePalette.vue';
 import TimeZonePicker from './TimeZonePicker.vue';
 import { formatInstant, localeTag, useLocale } from '../composables/useLocale';
+import { useSystemDark } from '../composables/useSystemDark';
 import { accountProblemKey, emailProblem, refusalField, usernameProblem } from '../lib/accountRules';
 import { availableLocales } from '../lib/uiLocales';
 import { gateOnService } from '../lib/serviceGate';
@@ -133,6 +139,90 @@ const sections: { key: Section; icon: typeof UserIcon; soon?: boolean }[] = [
 
 /** The heading that names the dialog (Modal `labelledby`). */
 const headingId = `fx-us-title-${Math.random().toString(36).slice(2, 9)}`;
+
+/* ── Default apps (0.50, lib/openWith) ─────────────────────────────────
+ * A part of Preferences, not a rail entry of its own (the maintainer, 2026-10-01: the
+ * rail stays at five). The kinds this person chose an app for, with "Open
+ * with → Choose an app… → Always use this app" - one record for the whole
+ * account, the same on every surface. Each choice is judged against what the
+ * administrator left on for the kind (the server's own list and rules,
+ * lib/appViewer): one switched off since, or whose app was removed, is kept
+ * and NOT used, and the row says so and what the kind opens with instead. */
+const appViews = ref<PluginViewRow[]>([]);
+const appRules = ref<Record<string, OpenRule>>({});
+const appsKnown = ref(false);
+const appsLoading = ref(false);
+
+async function loadAppHandlers(): Promise<void> {
+  const fetchIt = props.host.api.pluginActions;
+  if (!fetchIt || appsLoading.value) return;
+  appsLoading.value = true;
+  try {
+    const ans = await fetchIt();
+    appViews.value = ans.views ?? [];
+    appRules.value = ans.open_rules ?? {};
+    appsKnown.value = true;
+  } catch {
+    // Apps are off, or the list is out of reach: the rows still show what
+    // the person chose, without judging it.
+    appsKnown.value = false;
+  } finally {
+    appsLoading.value = false;
+  }
+}
+
+watch(
+  () => [props.modelValue, section.value] as const,
+  ([open, s]) => {
+    if (open && s === 'preferences') void loadAppHandlers();
+  },
+  { immediate: true },
+);
+const stopFollowingChoices = followOpenWithChoices();
+onBeforeUnmount(stopFollowingChoices);
+
+/** A handler as the person reads it. */
+function handlerName(h: OpenHandler | null, id: string): string {
+  if (id === 'builtin') return t('openWith.builtin');
+  if (h?.view) return pluginLabelOf(h.view.label, props.host.locale) || h.view.plugin;
+  // Gone (the app was removed): its name from the id.
+  return id.replace(/^app:/, '').split('/')[0] || id;
+}
+
+interface AppChoiceRow {
+  ext: string;
+  id: string;
+  name: string;
+  /** The choice is among the handlers that are on. */
+  available: boolean;
+  /** What the kind opens with instead, when it is not. */
+  instead: string;
+  options: ChoiceOption[];
+}
+
+const appChoiceRows = computed<AppChoiceRow[]>(() =>
+  Object.entries(openWithChoices())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([ext, id]) => {
+      const node = { type: 'file', basename: `file.${ext}`, extension: ext, mime_type: '' };
+      const { on, off } = openHandlersFor(appViews.value, node, appRules.value);
+      const all = [...on, ...off];
+      const mine = all.find((h) => h.id === id) ?? null;
+      const available = !appsKnown.value || on.some((h) => h.id === id);
+      return {
+        ext,
+        id,
+        name: handlerName(mine, id),
+        available,
+        instead: on[0] ? handlerName(on[0], on[0].id) : t('openWith.builtin'),
+        options: on.map((h) => ({ value: h.id, label: handlerName(h, h.id) })),
+      };
+    }),
+);
+
+function changeAppChoice(ext: string, v: string | string[]): void {
+  if (typeof v === 'string' && v) setOpenWithChoice(ext, v);
+}
 
 function close() {
   emit('update:modelValue', false);
@@ -312,10 +402,9 @@ const openTriggerOptions: { value: 'single' | 'double'; label: string }[] = [
 ];
 
 // System-dark, watched — so the palette previews repaint when the OS flips
-// while the dialog is open on 'auto'.
-const systemDark = ref(false);
-let darkMq: MediaQueryList | null = null;
-const onSystemDark = (e: MediaQueryListEvent) => (systemDark.value = e.matches);
+// while the dialog is open on 'auto'. composables/useSystemDark, the one
+// listener every core surface shares (#74).
+const systemDark = useSystemDark();
 
 /** Which variant the previews should paint. */
 const resolvedDark = computed(() =>
@@ -685,19 +774,11 @@ onMounted(() => {
   // One second is the unit it prints, so one second is what it ticks on.
   refreshTzNow();
   tzTimer = setInterval(refreshTzNow, 1000);
-  try {
-    darkMq = window.matchMedia('(prefers-color-scheme: dark)');
-    systemDark.value = darkMq.matches;
-    darkMq.addEventListener('change', onSystemDark);
-  } catch {
-    /* engine without matchMedia — 'auto' then previews as light */
-  }
 });
 watch(() => props.modelValue, sync, { flush: 'post' });
 
 onBeforeUnmount(() => {
   if (tzTimer) clearInterval(tzTimer);
-  darkMq?.removeEventListener('change', onSystemDark);
 });
 
 /** Whether the footer shows Cancel + Save rather than a single way out.
@@ -742,7 +823,7 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
           <p class="fx-us__subtitle">{{ t('userSettings.headingSub') }}</p>
         </div>
         <!-- Which filex this is — at the end of the head, before the way out,
-             quiet: the same piece the account menus draw (Burak, 2026-09-24).
+             quiet: the same piece the account menus draw (the maintainer, 2026-09-24).
              Nothing is drawn while the server's answer is not in. -->
         <ProductVersion :version="host.capabilities?.version" class="fx-us__version" />
         <button
@@ -1148,19 +1229,36 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
                 {{ t('install.desktopSubtitle', { platform: host.desktopApp.platformLabel }) }}
               </p>
               <div class="fx-us__dl-list">
-                <a
+                <!-- The file for this machine's processor, and under it the
+                     same file for the other one: two links, so the row is a
+                     box holding both (a link inside a link is not HTML). -->
+                <div
                   v-for="d in host.desktopApp.downloads"
                   :key="d.href"
-                  :href="d.href"
                   class="fx-us__dl"
-                  data-testid="user-settings-desktop-download"
+                  :data-arch="d.arch"
                 >
-                  <span class="fx-us__dl-text">
-                    <span class="fx-us__label">{{ d.label }}</span>
-                    <span class="fx-us__hint">{{ d.hint }}</span>
-                  </span>
-                  <span aria-hidden="true" class="fx-us__dl-arrow">↓</span>
-                </a>
+                  <a
+                    :href="d.href"
+                    class="fx-us__dl-main"
+                    data-testid="user-settings-desktop-download"
+                  >
+                    <span class="fx-us__dl-text">
+                      <span class="fx-us__label">{{ d.label }}</span>
+                      <span class="fx-us__hint">{{ d.hint }}</span>
+                    </span>
+                    <span aria-hidden="true" class="fx-us__dl-arrow">↓</span>
+                  </a>
+                  <a
+                    v-if="d.other"
+                    :href="d.other.href"
+                    class="fx-us__dl-other"
+                    :data-arch="d.other.arch"
+                    data-testid="user-settings-desktop-download-other"
+                  >
+                    {{ d.other.label }}
+                  </a>
+                </div>
               </div>
               <a
                 :href="host.desktopApp.releasesUrl"
@@ -1178,6 +1276,63 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
               <p class="fx-us__readout" data-testid="user-settings-quota">
                 {{ quotaLine || t('common.loading') }}
               </p>
+            </div>
+
+            <!-- ── Default apps (0.50): a part of Preferences ── -->
+            <div class="fx-us__field fx-us__apps-part" data-testid="user-settings-apps">
+              <span class="fx-us__label">{{ t('userSettings.apps.title') }}</span>
+              <p class="fx-us__hint">{{ t('userSettings.apps.lead') }}</p>
+              <p v-if="!appChoiceRows.length" class="fx-us__apps-empty" data-testid="user-settings-apps-empty">
+                {{ t('userSettings.apps.empty') }}
+              </p>
+              <ul v-else class="fx-us__apps" data-testid="user-settings-apps-list">
+                <li
+                  v-for="row in appChoiceRows"
+                  :key="row.ext"
+                  class="fx-us__app"
+                  :class="{ 'is-gone': !row.available }"
+                  :data-testid="`user-settings-app-${row.ext}`"
+                >
+                  <div class="fx-us__app-head">
+                    <span class="fx-us__app-kind" dir="ltr">.{{ row.ext }}</span>
+                    <span class="fx-us__app-name">{{ row.name }}</span>
+                    <button
+                      type="button"
+                      class="fx-us__btn fx-us__btn--quiet"
+                      :data-testid="`user-settings-app-reset-${row.ext}`"
+                      @click="setOpenWithChoice(row.ext, null)"
+                    >
+                      {{ t('userSettings.apps.reset') }}
+                    </button>
+                  </div>
+                  <p
+                    v-if="!row.available"
+                    class="fx-us__app-gone"
+                    role="status"
+                    :data-testid="`user-settings-app-gone-${row.ext}`"
+                  >
+                    {{ t('userSettings.apps.unavailable', { app: row.instead }) }}
+                  </p>
+                  <ChoiceButtons
+                    v-if="appsKnown && row.options.length > 1"
+                    :model-value="row.available ? row.id : null"
+                    :options="row.options"
+                    :aria-label="t('userSettings.apps.change', { ext: '.' + row.ext })"
+                    :testid-prefix="`user-settings-app-choice-${row.ext}`"
+                    @update:model-value="(v: string | string[]) => changeAppChoice(row.ext, v)"
+                  />
+                </li>
+              </ul>
+              <div v-if="appChoiceRows.length > 1" class="fx-us__apps-foot">
+                <button
+                  type="button"
+                  class="fx-us__btn fx-us__btn--quiet"
+                  data-testid="user-settings-apps-reset-all"
+                  @click="clearOpenWithChoices()"
+                >
+                  {{ t('userSettings.apps.resetAll') }}
+                </button>
+              </div>
             </div>
           </section>
 
@@ -1827,6 +1982,60 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
   font-size: var(--fe-text-xs);
   color: var(--fe-text-muted);
 }
+/* Default apps (0.50): one card per kind the person chose an app for. */
+.fx-us__apps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+.fx-us__app {
+  border: 1px solid var(--fe-border);
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.fx-us__app.is-gone {
+  border-color: var(--fe-warning, #d97706);
+}
+.fx-us__app-head {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+.fx-us__app-kind {
+  font-family: var(--fe-font-mono, ui-monospace, monospace);
+  font-weight: 600;
+  color: var(--fe-text);
+}
+.fx-us__app-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fe-text);
+}
+.fx-us__app.is-gone .fx-us__app-name {
+  text-decoration: line-through;
+  color: var(--fe-text-muted);
+}
+.fx-us__app-gone {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--fe-text);
+}
+.fx-us__apps-empty {
+  margin: 0;
+  color: var(--fe-text-muted);
+}
+.fx-us__apps-foot {
+  display: flex;
+  justify-content: flex-end;
+}
 .fx-us__readout {
   margin: 0;
   font-size: var(--fe-text-sm);
@@ -1846,18 +2055,34 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
 }
 .fx-us__dl {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--fe-gap-sm);
+  flex-direction: column;
+  gap: 2px;
   padding: var(--fe-gap-sm) var(--fe-gap);
   border: 1px solid var(--fe-border);
   border-radius: var(--fe-radius);
   background: var(--fe-bg);
-  text-decoration: none;
   min-width: 0;
 }
 .fx-us__dl:hover {
   border-color: var(--fe-primary);
+}
+.fx-us__dl-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fe-gap-sm);
+  text-decoration: none;
+  min-width: 0;
+}
+/* The other processor's file: small, under the row's hint, plainly a link. */
+.fx-us__dl-other {
+  align-self: flex-start;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  text-decoration: underline;
+}
+.fx-us__dl-other:hover {
+  color: var(--fe-text);
 }
 .fx-us__dl-text {
   display: flex;

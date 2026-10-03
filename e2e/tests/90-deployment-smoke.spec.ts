@@ -140,7 +140,6 @@ test.describe('fm.example.com smoke', () => {
       // flat aliases:
       ffmpeg?: boolean;
       ghostscript?: boolean;
-      libreoffice?: boolean;
       max_chunk_mb?: number;
       upload_limit_mb?: number;
       onlyoffice_url?: string;
@@ -152,7 +151,9 @@ test.describe('fm.example.com smoke', () => {
     // Flat aliases — types matter (booleans / numbers / strings).
     expect(typeof body.ffmpeg, '`ffmpeg` flat alias').toBe('boolean');
     expect(typeof body.ghostscript, '`ghostscript` flat alias').toBe('boolean');
-    expect(typeof body.libreoffice, '`libreoffice` flat alias').toBe('boolean');
+    // 0.50: LibreOffice left the images and the office engine is the
+    // connected ONLYOFFICE, so there is no `libreoffice` flag to report.
+    expect(body, 'no `libreoffice` flat alias since 0.50').not.toHaveProperty('libreoffice');
     expect(typeof body.max_chunk_mb, '`max_chunk_mb` flat alias').toBe('number');
     expect(typeof body.upload_limit_mb, '`upload_limit_mb` flat alias').toBe('number');
     expect(typeof body.onlyoffice_url, '`onlyoffice_url` flat alias').toBe('string');
@@ -168,7 +169,6 @@ test.describe('fm.example.com smoke', () => {
     // Cross-check: flat aliases reflect the nested booleans.
     expect(body.ffmpeg).toBe(body.thumbs!.video);
     expect(body.ghostscript).toBe(body.thumbs!.pdf);
-    expect(body.libreoffice).toBe(body.thumbs!.office);
   });
 
   test.skip(!FM_TOKEN, 'E2E_FM_TOKEN not set');

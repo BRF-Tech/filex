@@ -14,7 +14,7 @@
 // shipped: /dav authenticates with HTTP Basic, so it sat outside the chain
 // where auth.TenantResolver runs, ListEnabledStorages saw an unscoped context,
 // and the root collection listed every tenant's storages. A tenant admin who
-// mapped /dav got all ten olivov tenants read-write (H4, 2026-08-05).
+// mapped /dav got all ten tenants of a multi-tenant deployment read-write (H4, 2026-08-05).
 //
 // S3, SFTP, FTP, NFS and FUSE all authenticate outside the HTTP middleware
 // chain *by definition* — their credentials are not a session cookie. So /dav
@@ -45,6 +45,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,6 +60,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/httpx"
 	"github.com/brf-tech/filex/backend/internal/identity"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
@@ -265,6 +267,14 @@ type Resolver struct {
 	// WebDAV PROPFIND storm or an S3 client at a few hundred requests a second
 	// would spend all its time hashing. Zero disables the cache.
 	CacheTTL time.Duration
+	// Guard limits wrong password attempts (internal/loginguard), for every
+	// protocol at once because every protocol's password arrives through
+	// Password or Any. Nil = no limit, as before it existed.
+	Guard *loginguard.Guard
+	// EmailToken is the installation's e-mail token (identity.EmailToken; ""
+	// = the default): a realm's derived addresses end in it
+	// (`alex@acme.local`), and `acme/alex` is looked up by it.
+	EmailToken string
 
 	mu    sync.Mutex
 	creds map[[32]byte]credEntry
@@ -278,6 +288,10 @@ type Resolver struct {
 type credEntry struct {
 	userID int64
 	exp    time.Time
+	// pinned is the tenant a directory provider's pin homed the sign-in in
+	// (auth.LoginRealm.NotePinned), carried so a cached answer is admitted the
+	// way the fresh one was.
+	pinned int64
 	// directory records that the DIRECTORY judged this password, not the local
 	// password_hash. The re-checks below differ for the two, and conflating
 	// them meant a directory user could never be cached at all: their hash is
@@ -310,19 +324,50 @@ func New(store db.Store, aclResolver *acl.Resolver, multiTenant bool) *Resolver 
 // that are individually revocable, which is the whole point of the app-specific
 // password pattern.
 func (r *Resolver) Password(ctx context.Context, identifier, password string) (*Principal, error) {
+	ctx, name, lr, realmErr := r.realmOf(ctx, identifier)
+	att, err := r.gate(ctx, name, lr)
+	if err != nil {
+		return nil, err
+	}
+	if realmErr != nil {
+		return nil, r.realmRefused(ctx, att, realmErr)
+	}
+	p, fresh, err := r.password(ctx, name, password)
+	if err != nil {
+		var refused *refusedError
+		if errors.As(err, &refused) {
+			return nil, ErrUnauthorized
+		}
+		return nil, r.failed(ctx, att)
+	}
+	if fresh {
+		r.succeeded(ctx, att)
+	}
+	return p, nil
+}
+
+// password is Password without the attempt limit. fresh reports that the
+// password was verified just now (a bcrypt compare or a directory answer)
+// rather than recognised from the credential cache.
+func (r *Resolver) password(ctx context.Context, identifier, password string) (p *Principal, fresh bool, err error) {
 	ident := identity.Normalize(identifier)
 	if ident == "" || password == "" {
-		return nil, ErrUnauthorized
+		return nil, false, ErrUnauthorized
 	}
 
 	if u := r.cached(ctx, ident, password); u != nil {
-		return r.principal(ctx, u, nil)
+		p, err := r.principal(ctx, u, nil)
+		if err != nil {
+			return nil, false, &refusedError{err}
+		}
+		return p, false, nil
 	}
 
 	// The local account, when there is one. A directory user signing in for the
 	// very first time over a protocol has no row yet, and that is not a failure
-	// — the directory is asked below either way.
-	u, err := identity.Resolve(ctx, r.Store, ident)
+	// — the directory is asked below either way. On a multi-tenant install the
+	// lookup stays inside the sign-in's realm (auth.ResolveAccount).
+	u, err := auth.ResolveAccount(ctx, r.Store, ident)
 	if err != nil {
 		u = nil
 	}
@@ -330,13 +375,13 @@ func (r *Resolver) Password(ctx context.Context, identifier, password string) (*
 		// Refused before any password work, local or remote: see the doc
 		// comment. Asking the directory here would also make an account's
 		// second factor depend on which protocol it was presented to.
-		return nil, ErrUnauthorized
+		return nil, false, ErrUnauthorized
 	}
 	// A rule requires this account to have 2FA and it has not enrolled: its
 	// password is refused here as an enrolled account's is, or the protocols
 	// would be the way round the rule (auth.TwoFactorPending).
 	if u != nil && auth.TwoFactorPending(ctx, r.Store, u) {
-		return nil, ErrUnauthorized
+		return nil, false, ErrUnauthorized
 	}
 	// Local password first: a bcrypt compare against a row we already hold,
 	// with no network in it. Keeping this ahead of the directory is what makes
@@ -344,15 +389,87 @@ func (r *Resolver) Password(ctx context.Context, identifier, password string) (*
 	// directory is down.
 	if u != nil && u.PasswordHash != "" &&
 		bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)) == nil {
-		r.remember(ident, password, u.ID, false)
-		return r.principal(ctx, u, nil)
+		r.remember(ctx, ident, password, u.ID, false)
+		return r.verified(ctx, u)
 	}
 	if du := r.viaDirectory(ctx, ident, u, password); du != nil {
-		r.remember(ident, password, du.ID, true)
-		return r.principal(ctx, du, nil)
+		// ⚠ The last word on the tenant boundary, whatever the directory
+		// answered: an account of another tenant is not signed in to through
+		// this realm (and the attempt counts as a wrong one).
+		if !auth.LoginRealmAdmits(ctx, du) {
+			slog.Warn("protocolauth: the directory's account is not in the realm the sign-in was for",
+				slog.Int64("user_id", du.ID), slog.String("realm", auth.LoginRealmFrom(ctx).CounterRealm()))
+			return nil, false, ErrUnauthorized
+		}
+		r.remember(ctx, ident, password, du.ID, true)
+		return r.verified(ctx, du)
 	}
-	return nil, ErrUnauthorized
+	return nil, false, ErrUnauthorized
 }
+
+// realmOf is where a protocol sign-in stands on a multi-tenant install
+// (auth.LoginRealm): the realm typed as `realm/name`, the address the client
+// reached (auth.LoginHostFrom — WebDAV's Host, FTPS's SNI), else the platform's
+// own tenant. It returns the context carrying it, and the name without its
+// realm. A single-tenant install reads nothing: (ctx, identifier, nil, nil).
+func (r *Resolver) realmOf(ctx context.Context, identifier string) (context.Context, string, *auth.LoginRealm, error) {
+	if !r.MultiTenant || r.Store == nil {
+		return ctx, identifier, nil, nil
+	}
+	typed, name, named := tenant.SplitLogin(identifier)
+	lr, err := auth.ResolveLoginRealm(ctx, r.Store, typed, named, auth.LoginHostFrom(ctx), r.EmailToken)
+	return auth.WithLoginRealm(ctx, lr), name, lr, err
+}
+
+// realmRefused answers a sign-in whose realm could not be settled: a realm
+// nobody has, or one that is not the address's tenant, is a wrong attempt like
+// any other (counted, one answer — no realm oracle); a store failure is not
+// the person's and is not counted.
+func (r *Resolver) realmRefused(ctx context.Context, att loginguard.Attempt, err error) error {
+	if errors.Is(err, auth.ErrUnknownRealm) || errors.Is(err, auth.ErrRealmConflict) {
+		slog.Debug("protocolauth: sign-in refused", slog.String("reason", err.Error()), slog.String("realm", att.Realm))
+		return r.failed(ctx, att)
+	}
+	slog.Warn("protocolauth: could not tell which tenant the sign-in is for", slog.Any("err", err))
+	return ErrUnauthorized
+}
+
+// namesAccount reports whether the name a client typed addresses the account
+// a token or a key belongs to. On a multi-tenant install a login name also
+// names the address derived for it in the ACCOUNT's own realm (`alex` names
+// `alex@acme.local`): such a credential identifies its account by itself, so
+// the realm it is read in is the account's.
+func (r *Resolver) namesAccount(ctx context.Context, u *model.User, name string) bool {
+	if !r.MultiTenant || u == nil {
+		return identity.Names(u, name)
+	}
+	realm := ""
+	if u.ProviderID != nil {
+		if p, err := r.Store.GetProvider(ctx, *u.ProviderID); err == nil {
+			realm = p.LoginRealm()
+		}
+	}
+	return identity.NamesIn(u, name, realm, r.EmailToken)
+}
+
+// verified finishes a FRESH password verification: the password was right, and
+// the account may still be refused (a suspended tenant, maintenance mode). That
+// refusal is not a wrong attempt and is not counted as one.
+func (r *Resolver) verified(ctx context.Context, u *model.User) (*Principal, bool, error) {
+	p, err := r.principal(ctx, u, nil)
+	if err != nil {
+		return nil, true, &refusedError{err}
+	}
+	return p, true, nil
+}
+
+// refusedError marks a refusal that came AFTER the password was verified. It
+// reads as ErrUnauthorized to everything, and the attempt limit leaves it
+// uncounted.
+type refusedError struct{ err error }
+
+func (e *refusedError) Error() string { return e.err.Error() }
+func (e *refusedError) Unwrap() error { return ErrUnauthorized }
 
 // viaDirectory asks the configured directory to judge the password, or returns
 // nil when there is no directory, it refused, or it could not answer.
@@ -389,7 +506,20 @@ func (r *Resolver) viaDirectory(ctx context.Context, ident string, local *model.
 // belong to the account it names — the protocols that carry a username field
 // (WebDAV Basic, FTP USER, SFTP) should pass it, so a token pasted against the
 // wrong account is refused rather than silently acting as its real owner.
+//
+// On a multi-tenant install a token names its account by itself, so no realm
+// is needed — but a realm that IS named (`realm/name`, or the tenant's own
+// address) must be the account's, or the token is refused.
 func (r *Resolver) Token(ctx context.Context, identifier, token string) (*Principal, error) {
+	ctx, name, lr, err := r.realmOf(ctx, identifier)
+	if err != nil {
+		return nil, ErrUnauthorized
+	}
+	return r.token(ctx, lr, name, token)
+}
+
+// token is Token once the realm is settled.
+func (r *Resolver) token(ctx context.Context, lr *auth.LoginRealm, identifier, token string) (*Principal, error) {
 	if strings.TrimSpace(token) == "" {
 		return nil, ErrUnauthorized
 	}
@@ -410,7 +540,10 @@ func (r *Resolver) Token(ctx context.Context, identifier, token string) (*Princi
 	if err != nil || u == nil {
 		return nil, ErrUnauthorized
 	}
-	if identifier != "" && !identity.Names(u, identifier) {
+	if !lr.AdmitsCredential(u) {
+		return nil, ErrUnauthorized
+	}
+	if identifier != "" && !r.namesAccount(ctx, u, identifier) {
 		return nil, ErrUnauthorized
 	}
 	_ = r.Store.TouchAPIToken(ctx, tok.ID)
@@ -436,7 +569,16 @@ func (r *Resolver) Token(ctx context.Context, identifier, token string) (*Princi
 // exactly the app-specific-password pattern TOTP accounts are pointed at. The
 // key can be switched off from the account's own settings without touching the
 // password.
+//
+// ⚠ No realm is needed on a multi-tenant install (the owner's decision): the
+// key belongs to one account, and the tenant is that account's. A realm the
+// client DID write (`acme/alex`) must be the account's all the same — the key
+// of beta's alex is refused as `acme/alex`.
 func (r *Resolver) PublicKey(ctx context.Context, identifier, fingerprint string) (*Principal, error) {
+	ctx, identifier, lr, err := r.realmOf(ctx, identifier)
+	if err != nil {
+		return nil, ErrUnauthorized
+	}
 	fingerprint = strings.TrimSpace(fingerprint)
 	if fingerprint == "" {
 		return nil, ErrUnauthorized
@@ -452,7 +594,10 @@ func (r *Resolver) PublicKey(ctx context.Context, identifier, fingerprint string
 	// ⚠ The key must belong to the account the client NAMED. Without this a
 	// key registered by one user logs in as whoever the client typed, which is
 	// impersonation with a valid signature.
-	if identifier != "" && !identity.Names(u, identifier) {
+	if !lr.AdmitsCredential(u) {
+		return nil, ErrUnauthorized
+	}
+	if identifier != "" && !r.namesAccount(ctx, u, identifier) {
 		return nil, ErrUnauthorized
 	}
 	p, err := r.principal(ctx, u, nil)
@@ -469,11 +614,40 @@ func (r *Resolver) PublicKey(ctx context.Context, identifier, fingerprint string
 // makes the same choice — the alternative is each one inventing its own order,
 // and the order is observable (it decides which credential wins when a token
 // happens to equal a password).
+//
+// ⚠ It is also where the sign-in attempt limit is applied for WebDAV, FTPS and
+// SFTP (see Guard): asked before any credential is judged, counted only when
+// the secret was neither a password nor a token.
 func (r *Resolver) Any(ctx context.Context, identifier, secret string) (*Principal, error) {
-	if p, err := r.Password(ctx, identifier, secret); err == nil {
+	ctx, name, lr, realmErr := r.realmOf(ctx, identifier)
+	att, err := r.gate(ctx, name, lr)
+	if err != nil {
+		return nil, err
+	}
+	if realmErr != nil {
+		return nil, r.realmRefused(ctx, att, realmErr)
+	}
+	p, fresh, err := r.password(ctx, name, secret)
+	if err == nil {
+		if fresh {
+			r.succeeded(ctx, att)
+		}
 		return p, nil
 	}
-	return r.Token(ctx, identifier, secret)
+	var refused *refusedError
+	if errors.As(err, &refused) {
+		return nil, ErrUnauthorized
+	}
+	// ⚠ A token is NOT a password attempt: it neither counts when it fails
+	// (the secret may simply have been a token that is wrong in some other
+	// way — there is no attempt limit on 256-bit values) nor resets the
+	// account's counter when it succeeds. A busy token client would otherwise
+	// wipe the counter with every request and hand a password guesser an
+	// unlimited number of tries.
+	if tp, terr := r.token(ctx, lr, name, secret); terr == nil {
+		return tp, nil
+	}
+	return nil, r.failed(ctx, att)
 }
 
 // principal applies the policy checks every credential type shares and
@@ -512,8 +686,20 @@ func tokenRoot(tok *model.APIToken) (confine.Root, bool) {
 
 // ───────────────────────────── credential cache ─────────────────────────────
 
-func (r *Resolver) cacheKey(ident, password string) [32]byte {
-	return sha256.Sum256([]byte(ident + "\x00" + password))
+// cacheKey is the credential cache's key. On a multi-tenant install the
+// sign-in's tenant is part of it: `alex` + a password in realm acme and the same
+// pair in realm beta (or at the platform's address) are two different sign-ins
+// that may name two different people.
+func (r *Resolver) cacheKey(ctx context.Context, ident, password string) [32]byte {
+	scope := ""
+	if lr := auth.LoginRealmFrom(ctx); lr != nil {
+		var id int64
+		if lr.Tenant != nil {
+			id = lr.Tenant.ID
+		}
+		scope = strconv.FormatInt(id, 10) + "/" + strconv.FormatBool(lr.Named)
+	}
+	return sha256.Sum256([]byte(scope + "\x00" + ident + "\x00" + password))
 }
 
 // cached returns the account a previous successful verification recorded, or
@@ -533,7 +719,7 @@ func (r *Resolver) cached(ctx context.Context, ident, password string) *model.Us
 	if r.CacheTTL <= 0 {
 		return nil
 	}
-	key := r.cacheKey(ident, password)
+	key := r.cacheKey(ctx, ident, password)
 	r.mu.Lock()
 	ent, ok := r.creds[key]
 	r.mu.Unlock()
@@ -547,7 +733,14 @@ func (r *Resolver) cached(ctx context.Context, ident, password string) *model.Us
 	if u.TOTPEnabled {
 		return nil
 	}
-	if !ent.directory && (!identity.Names(u, ident) || u.PasswordHash == "") {
+	lr := auth.LoginRealmFrom(ctx)
+	if !ent.directory && (!identity.NamesIn(u, ident, lr.DeriveRealm(), r.EmailToken) || u.PasswordHash == "") {
+		return nil
+	}
+	// The tenant boundary is re-asked, not remembered: the account may have
+	// been moved to another tenant since.
+	lr.NotePinned(ent.pinned)
+	if !auth.LoginRealmAdmits(ctx, u) {
 		return nil
 	}
 	return u
@@ -556,11 +749,15 @@ func (r *Resolver) cached(ctx context.Context, ident, password string) *model.Us
 // remember records a successful password verification. Only POSITIVE results
 // are cached: caching a failure would let a caller keep a lockout or a
 // rate-limit decision alive past the point where the real check would pass.
-func (r *Resolver) remember(ident, password string, userID int64, directory bool) {
+func (r *Resolver) remember(ctx context.Context, ident, password string, userID int64, directory bool) {
 	if r.CacheTTL <= 0 {
 		return
 	}
-	key := r.cacheKey(ident, password)
+	key := r.cacheKey(ctx, ident, password)
+	var pinned int64
+	if lr := auth.LoginRealmFrom(ctx); lr != nil {
+		pinned = lr.PinnedTenant()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.creds == nil {
@@ -569,7 +766,7 @@ func (r *Resolver) remember(ident, password string, userID int64, directory bool
 	if len(r.creds) > 4096 { // crude bound; entries also expire via TTL
 		r.creds = map[[32]byte]credEntry{}
 	}
-	r.creds[key] = credEntry{userID: userID, exp: time.Now().Add(r.CacheTTL), directory: directory}
+	r.creds[key] = credEntry{userID: userID, exp: time.Now().Add(r.CacheTTL), directory: directory, pinned: pinned}
 }
 
 // Forget drops every cached password result. Called when a credential is

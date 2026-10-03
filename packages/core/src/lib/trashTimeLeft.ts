@@ -17,7 +17,7 @@ export function trashTimeLeft(
   ttl: number | null | undefined,
   t: (key: string, vars?: Record<string, string | number>) => string,
 ): string {
-  if (typeof ttl !== 'number' || !Number.isFinite(ttl)) return '—';
+  if (typeof ttl !== 'number' || !Number.isFinite(ttl)) return '-';
   if (ttl <= 0) return t('trash.days_remaining_due');
   return t('trash.days_remaining', { n: ttl });
 }

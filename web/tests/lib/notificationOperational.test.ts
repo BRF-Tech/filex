@@ -41,6 +41,24 @@ const rows = [
     meta: { failed_count: 3, repaired_count: 2, total_files: 90 },
     want: { tr: /3 çözülmemiş, 2 onarıldı/, en: /3 unresolved, 2 repaired/ },
   },
+  {
+    // notify.LegacyAccountElsewhere: the row's own title is in the instance's
+    // default language; meta carries the server catalogue's sentence per language.
+    event: 'ldap_legacy_account_elsewhere',
+    title: 'Directory account alex is in another tenant',
+    body: 'A sign-in to tenant globex as “alex” found an older account by that name in tenant initech.',
+    meta: {
+      provider: 'ldap',
+      account: 'alex',
+      account_tenant: 'initech',
+      login_tenant: 'globex',
+      title_en: 'Directory account alex is in another tenant',
+      title_tr: 'alex dizin hesabı başka bir kiracıda',
+      body_en: 'A sign-in to tenant globex as “alex” found an older account by that name in tenant initech.',
+      body_tr: 'globex kiracısında “alex” adıyla oturum açılırken, bu adla açılmış eski bir hesap initech kiracısında bulundu.',
+    },
+    want: { tr: /alex dizin hesabı başka bir kiracıda/, en: /Directory account alex is in another tenant/ },
+  },
 ];
 
 describe('operational alarms are phrased for the reader', () => {

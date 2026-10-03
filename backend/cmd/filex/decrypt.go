@@ -44,12 +44,12 @@ func decryptCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "decrypt <folder | folder.zip | file | file.fxe>",
 		Short: "Decrypt a downloaded end-to-end encrypted folder or file, offline",
-		Long: "Decrypts an end-to-end encrypted folder downloaded from filex — the folder\n" +
-			"itself, a .zip of it, or a single encrypted file — into a plain folder with\n" +
+		Long: "Decrypts an end-to-end encrypted folder downloaded from filex - the folder\n" +
+			"itself, a .zip of it, or a single encrypted file - into a plain folder with\n" +
 			"the real file and folder names. Works offline: no server, no config.\n\n" +
 			"A single encrypted file (.fxe) carries its own password and recovery key\n" +
 			"and needs no key file: it is decrypted to its ORIGINAL name next to it, or\n" +
-			"to the file -o names. One .fxe at a time — each has its own password.\n\n" +
+			"to the file -o names. One .fxe at a time - each has its own password.\n\n" +
 			"The folder password is asked for on the terminal (no echo). With\n" +
 			"--recovery-key, the recovery key shown when the folder was created is asked\n" +
 			"for instead. Neither is ever taken from an argument or an environment\n" +
@@ -155,13 +155,13 @@ func decryptExit(err error) error {
 	var ue *e2edecrypt.UnsupportedError
 	switch {
 	case errors.Is(err, e2edecrypt.ErrWrongPassword):
-		return &exitError{code: exitDecryptWrongSecret, err: errors.New("wrong password — nothing was written")}
+		return &exitError{code: exitDecryptWrongSecret, err: errors.New("wrong password - nothing was written")}
 	case errors.Is(err, e2edecrypt.ErrWrongRecoveryKey):
-		return &exitError{code: exitDecryptWrongSecret, err: errors.New("wrong recovery key (or this folder has none) — nothing was written")}
+		return &exitError{code: exitDecryptWrongSecret, err: errors.New("wrong recovery key (or this folder has none) - nothing was written")}
 	case errors.As(err, &ue):
 		return &exitError{code: exitDecryptUnsupported, err: err}
 	case errors.As(err, &ce):
-		return &exitError{code: exitDecryptCorrupt, err: fmt.Errorf("%w — nothing was written", err)}
+		return &exitError{code: exitDecryptCorrupt, err: fmt.Errorf("%w - nothing was written", err)}
 	case errors.Is(err, e2edecrypt.ErrNotMarker):
 		return &exitError{code: exitDecryptCorrupt, err: err}
 	}

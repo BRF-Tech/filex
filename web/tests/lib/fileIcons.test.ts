@@ -82,7 +82,7 @@ describe('a file with no extension', () => {
   });
   it('stays unknown when its mime says nothing textual', () => {
     expect(iconFamilyFor({ type: 'file', extension: '', mime_type: 'application/octet-stream', basename: 'blob' })).toBe('unknown');
-    expect(typeLabelFor({ type: 'file', extension: '', mime_type: 'application/octet-stream' }, t)).toBe('—');
+    expect(typeLabelFor({ type: 'file', extension: '', mime_type: 'application/octet-stream' }, t)).toBe('-');
   });
   it('does not override an extension the map does not know', () => {
     expect(iconFamilyFor({ type: 'file', extension: 'zig', mime_type: 'text/plain', basename: 'main.zig' })).toBe('unknown');

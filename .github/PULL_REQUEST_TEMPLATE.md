@@ -13,7 +13,7 @@
 
 ## Checklist
 
-- [ ] Backend: `cd backend && go build ./... && go vet ./... && go test ./...` passes
+- [ ] Backend: `cd backend && go build ./... && go vet ./... && go test -timeout 30m ./...` passes
 - [ ] Frontend (if touched): `pnpm -C packages/core typecheck` and the relevant build pass
 - [ ] Added/updated tests for the change where it makes sense
 - [ ] Updated docs (`docs/`, `README.md`) and `CHANGELOG.md` if user-facing

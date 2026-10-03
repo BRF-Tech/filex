@@ -320,7 +320,7 @@ const columns = computed<DataColumn<Share>[]>(() => [
     label: t('shares.fields.storage'),
     sortable: true,
     width: 130,
-    format: (r) => (r as unknown as ShareRow).storage_name || '—',
+    format: (r) => (r as unknown as ShareRow).storage_name || '-',
     sortValue: (r) => (r as unknown as ShareRow).storage_name || null,
   },
   {

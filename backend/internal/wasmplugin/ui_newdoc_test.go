@@ -11,7 +11,7 @@ import (
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
-// Burak, 2026-09-27: an app may add rows to filex's "New" menu
+// The maintainer, 2026-09-27: an app may add rows to filex's "New" menu
 // (`new_documents: [{ext, label, view, template?}]`). A row makes a file of
 // that kind — empty, or the app's template from its package — and opens it in
 // the named view. Each kind is a derived permission on the review
@@ -170,7 +170,7 @@ func TestUINewDocuments_ComeFromTheRunningAppsGrant(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// Burak, 2026-09-27: `ui.download` — an interface may hand the person a file
+// The maintainer, 2026-09-27: `ui.download` — an interface may hand the person a file
 // to keep on their own disk, through filex, each time with the person's say.
 // The manifest asks (`ui.download: true`); the permission is derived and on
 // the review, and part of the module's described interface.
@@ -188,8 +188,8 @@ func TestUIDownload_IsAPermissionTheManifestAsksFor(t *testing.T) {
 			}
 		}
 	}
-	assert.Equal(t, "Its interface can save files to your computer — each time you allow it", labels["en"])
-	assert.Equal(t, "Arayüzü bilgisayarınıza dosya kaydedebilir — her seferinde sizin izninizle", labels["tr"])
+	assert.Equal(t, "Its interface can save files to your computer - each time you allow it", labels["en"])
+	assert.Equal(t, "Arayüzü bilgisayarınıza dosya kaydedebilir - her seferinde sizin izninizle", labels["tr"])
 
 	plain, err := ParseManifest(uiManifest(t, nil))
 	require.NoError(t, err)

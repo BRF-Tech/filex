@@ -6,6 +6,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 )
@@ -35,10 +36,19 @@ func (e *linkRefusal) Unwrap() error { return errLinkNeedsEdit }
 //     right to see it (RBAC: viewer < editor), AND the per-user permission
 //     for that kind of link (internal/perm): share.links for a download link,
 //     share.upload_links for a file-drop link. acl.NeedLevel carries the
-//     editor floor for both, so one aclCanID answers both halves.
+//     editor floor for both, so one aclCanID answers both halves;
+//   - an end-to-end encrypted folder, and anything inside one, is never
+//     linked (wiring:e2): a download link would hand visitors ciphertext they
+//     cannot open, together with the folder's key file, and a file request
+//     would store their uploads in the folder UNENCRYPTED. The web UI hides
+//     Share there; until v0.50 the API minted the link anyway, on every door.
+//     A single encrypted file (`.fxe`) IS linked, as it is: it carries its
+//     own key slots and its recipient opens it with its password
+//     (docs/E2E-ENCRYPTION.md, "Single encrypted files").
 //
-// It returns nil when the link may be made, a writegate error, or a
-// *linkRefusal (errors.Is errLinkNeedsEdit).
+// It returns nil when the link may be made, a writegate error, a
+// *linkRefusal (errors.Is errLinkNeedsEdit), or an E2E_ENCRYPTED refusal
+// (errors.Is errE2EEncrypted).
 //
 // ⚠⚠ One function so there is one rule: a second copy on a second door is
 // the copy that drifts, and a door that asks less than the explorer hands the
@@ -58,6 +68,14 @@ func publicLinkRefusal(ctx context.Context, resolver *acl.Resolver, store db.Sto
 	if resolver != nil {
 		if v := aclCanID(ctx, resolver, store, storageID, rel, p); !v.ok {
 			return &linkRefusal{v: v}
+		}
+	}
+	if lk, ok := store.(e2e.NodeByPathLookup); ok {
+		if root, enc := e2e.FindRoot(ctx, lk, storageID, rel); enc {
+			return denied(errE2EEncrypted,
+				"public links are off for an end-to-end encrypted folder and everything in it (the folder %q): "+
+					"a visitor would get ciphertext with no way to open it, and a file request would store their uploads there unencrypted",
+				"/"+root)
 		}
 	}
 	return nil

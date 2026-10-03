@@ -9,7 +9,6 @@ package search
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -221,18 +220,9 @@ type doc struct {
 }
 
 // ContentFingerprint identifies a node's content version — used to decide
-// whether the indexed content is stale. Prefers the backend etag; nodes
-// without one fall back to size + mtime.
-func ContentFingerprint(n *model.Node) string {
-	if n.Etag != "" {
-		return n.Etag
-	}
-	var mt int64
-	if n.BackendMtime != nil {
-		mt = n.BackendMtime.UnixMilli()
-	}
-	return fmt.Sprintf("%d:%d", n.Size, mt)
-}
+// whether the indexed content is stale. It is model.Node.ContentFingerprint,
+// the rule the thumbnail pipeline uses too.
+func ContentFingerprint(n *model.Node) string { return n.ContentFingerprint() }
 
 // IndexNode adds or updates a node entry. Previously extracted content is
 // carried over (a rename/move must not wipe it); when the content

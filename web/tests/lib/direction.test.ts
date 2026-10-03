@@ -98,7 +98,6 @@ describe('dirOfElement — the direction a box is DRAWN in', () => {
     expect(dirOfElement(document.getElementById('c'))).toBe('ltr');
     expect(dirOfElement(document.getElementById('d'))).toBe('ltr');
     expect(dirOfElement(null)).toBe('ltr');
-    document.body.innerHTML = '';
   });
 });
 

@@ -73,11 +73,9 @@ func GuardTransfer(ctx context.Context, lk NodeByPathLookup, srcStorageID int64,
 		if src == "" {
 			continue
 		}
-		// Is the item ITSELF an encrypted folder root? FindRoot answers
-		// "nearest marked ancestor-OR-SELF", so the test is whether it came
-		// back with the path we asked about. Such a folder carries its
-		// marker with it and may go anywhere not inside another one.
-		if root, enc := FindRoot(ctx, lk, srcStorageID, src); enc && root == src {
+		// Is the item ITSELF an encrypted folder root? Such a folder carries
+		// its marker with it and may go anywhere not inside another one.
+		if IsRoot(ctx, lk, srcStorageID, src) {
 			if dstEncrypted {
 				return &TransferGuardError{Source: src, Dest: dstRel, Reason: ErrNestedEncrypted}
 			}

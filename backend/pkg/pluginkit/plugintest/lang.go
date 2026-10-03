@@ -148,7 +148,7 @@ func inspectText(where string, t wire.Text, langs []string, opts LangOpts) Repor
 		return r.err(where, "an empty Text: nothing is shown in any language")
 	}
 	if strings.TrimSpace(t["en"]) == "" {
-		r = r.err(where, "no `en` — English is required everywhere a Text appears; every other language falls back to it")
+		r = r.err(where, "no `en` - English is required everywhere a Text appears; every other language falls back to it")
 	}
 	for _, l := range langs {
 		if l == "en" {
@@ -179,7 +179,7 @@ func inspectText(where string, t wire.Text, langs []string, opts LangOpts) Repor
 	for v, ls := range seen {
 		if len(ls) > 1 {
 			sort.Strings(ls)
-			r = r.warn(where, "the same words in %s: %q — a missing translation reads exactly like this", strings.Join(ls, " and "), clip(v, 60))
+			r = r.warn(where, "the same words in %s: %q - a missing translation reads exactly like this", strings.Join(ls, " and "), clip(v, 60))
 		}
 	}
 	return r
@@ -370,7 +370,7 @@ func InspectLocaleParity(byLocale map[string]*wire.Surface, opts LangOpts) Repor
 			}
 		}
 		if len(missing) > 0 {
-			r = r.err(p, "the %s screen has this, the %s screen does not — the same screen must have the same shape in every language",
+			r = r.err(p, "the %s screen has this, the %s screen does not - the same screen must have the same shape in every language",
 				strings.Join(have, "/"), strings.Join(missing, "/"))
 			continue
 		}
@@ -387,13 +387,13 @@ func InspectLocaleParity(byLocale map[string]*wire.Surface, opts LangOpts) Repor
 			byValue[flat[l][p].value] = append(byValue[flat[l][p].value], l)
 		}
 		if len(blank) > 0 && len(blank) < len(locales) {
-			r = r.err(p, "empty in %s but not in the others — a screen must not go blank in one language", strings.Join(blank, "/"))
+			r = r.err(p, "empty in %s but not in the others - a screen must not go blank in one language", strings.Join(blank, "/"))
 			continue
 		}
 		for v, ls := range byValue {
 			if len(ls) > 1 && opts.worthComparing(v) {
 				sort.Strings(ls)
-				r = r.warn(p, "identical in %s: %q — either it is a name, or the %s screen is showing %s words",
+				r = r.warn(p, "identical in %s: %q - either it is a name, or the %s screen is showing %s words",
 					strings.Join(ls, " and "), clip(v, 60), ls[len(ls)-1], ls[0])
 			}
 		}

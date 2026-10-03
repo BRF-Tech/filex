@@ -32,7 +32,7 @@ const caps = useCapabilitiesStore();
  */
 function eventNote(ev: string): string {
   const off = eventOffReason(ev, caps.data);
-  return off ? `${ev} — ${t(off)}` : ev;
+  return off ? `${ev} - ${t(off)}` : ev;
 }
 const toast = useToastStore();
 
@@ -338,10 +338,10 @@ function onRowAction(key: string, row: WebhookTarget) {
           <Badge :tone="row.last_status.status === 'sent' ? 'emerald' : 'rose'">
             {{ row.last_status.status === 'sent' ? t('webhooks.statusSent') : t('webhooks.statusFailed') }}
           </Badge>
-          <span v-if="row.last_status.error" class="ms-1 text-rose-500">— {{ row.last_status.error }}</span>
+          <span v-if="row.last_status.error" class="ms-1 text-rose-500">- {{ row.last_status.error }}</span>
           <span class="tbl-sub">{{ formatDate(row.last_status.at, locale) }}</span>
         </div>
-        <span v-else>—</span>
+        <span v-else>-</span>
       </template>
 
       <template #cell-enabled="{ row }">

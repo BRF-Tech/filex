@@ -1,3 +1,10 @@
+# --- Worktrees and scratch copies (maintainers, 2026-09-29) ---
+# Every worktree and every temporary copy of this repository lives HERE, not
+# as a sibling folder at the drive root (G:/filex-wt-*, G:/filex-sdk-049 …):
+#   git worktree add .claude/worktrees/<name> -b <branch>
+# Git and every tool of this repo ignore it; scripts/wt-clean.sh finds it.
+/.claude/worktrees/
+
 # --- Build outputs ---
 # `node scripts/i18n-export.mjs` without --out (the translator's catalogue).
 /filex-catalogue/
@@ -121,6 +128,8 @@ NUL
 
 # The e2e runner keeps the server log here so CI can upload it.
 e2e/.artifacts/
+# e2e/realenv/run.sh: the run's certificates, logs and results.
+e2e/realenv/.work/
 
 # A local development data directory (a dev server's store and a generated
 # secret). It holds credentials, so it must never be swept into a commit.

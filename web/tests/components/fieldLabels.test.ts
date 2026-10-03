@@ -32,7 +32,7 @@ function fieldNames(root: Element): Array<{ type: string; name: string }> {
 describe('the folder dialogs name their fields', () => {
   for (const locale of ['en', 'tr'] as const) {
     it(`encrypted folder (${locale}): name, password and repeat each have a visible label`, () => {
-      const w = mount(EncryptedFolderModal, { props: { open: true, locale }, attachTo: document.body });
+      mount(EncryptedFolderModal, { props: { open: true, locale }, attachTo: document.body });
       const names = fieldNames(document.body);
       expect(names.map((n) => n.type)).toEqual(['text', 'password', 'password']);
       for (const n of names) expect(n.name, `a ${n.type} field has no label`).not.toBe('');
@@ -47,16 +47,12 @@ describe('the folder dialogs name their fields', () => {
       for (const r of radios) expect((r.labels?.[0]?.textContent ?? '').trim(), 'a level has no label').not.toBe('');
       expect(radios[0].checked).toBe(true);
       expect(radios[0].labels?.[0]?.textContent).toContain(locale === 'en' ? 'Contents only' : 'Yalnız içerik');
-      w.unmount();
-      document.body.innerHTML = '';
     });
   }
 
   it('new folder: the name field has a visible label', () => {
-    const w = mount(NewFolderModal, { props: { open: true, locale: 'en' }, attachTo: document.body });
+    mount(NewFolderModal, { props: { open: true, locale: 'en' }, attachTo: document.body });
     expect(fieldNames(document.body)).toEqual([{ type: 'text', name: 'Folder name' }]);
-    w.unmount();
-    document.body.innerHTML = '';
   });
 });
 

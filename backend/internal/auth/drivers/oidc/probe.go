@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/netguard"
 )
 
 // probeTimeout bounds each network step of a provider test.
@@ -20,6 +21,17 @@ const probeTimeout = 10 * time.Second
 
 // probeClient is the HTTP client the provider test uses; a test swaps it.
 var probeClient = &http.Client{Timeout: probeTimeout}
+
+// guardedProbe marks a test of a tenant's own OIDC (`guarded`): it dials
+// through internal/netguard, like the driver's sign-ins.
+type guardedProbe struct{}
+
+func clientOf(ctx context.Context) *http.Client {
+	if g, _ := ctx.Value(guardedProbe{}).(bool); g {
+		return &http.Client{Transport: netguard.Transport(probeTimeout), Timeout: probeTimeout}
+	}
+	return probeClient
+}
 
 // Probe tests an OpenID Connect configuration as far as it can be tested
 // without a person signing in:
@@ -35,11 +47,11 @@ var probeClient = &http.Client{Timeout: probeTimeout}
 //	redirect    NOT checkable here: an identity provider judges the return
 //	            address only inside a real sign-in, so the result says so
 //
-// ⚠ "client" is only as good as the answer can be read. 401 or
-// `invalid_client` means the ID or the secret was refused; 200 or a 400 with
-// `unauthorized_client` means the client authenticated and is merely not
-// allowed that grant; anything else is reported as not checked rather than
-// guessed. A client with no secret (a public client) cannot be checked
+// ⚠ "client" is only as good as the answer can be read. `unauthorized_client`
+// (with 400, or 401 from Keycloak) or 200 means the client authenticated and
+// is merely not allowed that grant; otherwise 401 or `invalid_client` means
+// the ID or the secret was refused; anything else is reported as not checked
+// rather than guessed. A client with no secret (a public client) cannot be checked
 // without a sign-in at all, and is said to be.
 func (d *Driver) Probe(ctx context.Context, cfg map[string]any, _ *http.Request) []auth.ProbeCheck {
 	var missing []string
@@ -51,7 +63,11 @@ func (d *Driver) Probe(ctx context.Context, cfg map[string]any, _ *http.Request)
 	if len(missing) > 0 {
 		return []auth.ProbeCheck{auth.Check("required", auth.ProbeFail, "fields", strings.Join(missing, ","))}
 	}
-	out := []auth.ProbeCheck{auth.Check("required", auth.ProbeOK)}
+	out := []auth.ProbeCheck{auth.Check("required", auth.ProbeOK),
+		auth.FirstLoginCheck(cfg, auth.CfgString(cfg, "role_claim"))}
+	if auth.CfgBool(cfg, "guarded") {
+		ctx = context.WithValue(ctx, guardedProbe{}, true)
+	}
 
 	issuer := strings.TrimRight(auth.CfgString(cfg, "issuer"), "/")
 	docURL := issuer + "/.well-known/openid-configuration"
@@ -123,7 +139,7 @@ func probeClientCredentials(ctx context.Context, tokenURL string, methods []stri
 	if !post {
 		req.SetBasicAuth(url.QueryEscape(id), url.QueryEscape(secret))
 	}
-	resp, err := probeClient.Do(req)
+	resp, err := clientOf(ctx).Do(req)
 	if err != nil {
 		return auth.Check("client", auth.ProbeFail, "client", id, "reason", auth.NetReason(err), "detail", err.Error())
 	}
@@ -136,10 +152,16 @@ func probeClientCredentials(ctx context.Context, tokenURL string, methods []stri
 	switch {
 	case resp.StatusCode == http.StatusOK:
 		return auth.Check("client", auth.ProbeOK, "client", id)
+	case answer.Error == "unauthorized_client":
+		// RFC 6749, 5.2: "the AUTHENTICATED client is not authorized to use
+		// this authorization grant type" - whatever the status. Keycloak
+		// answers it with 401 for a confidential client without service
+		// accounts (the usual one, deploy/keycloak-client-filex.json):
+		// measured against Keycloak 26.8 in e2e/realenv, where reading the
+		// 401 first called a correct client's secret refused.
+		return auth.Check("client", auth.ProbeOK, "client", id)
 	case resp.StatusCode == http.StatusUnauthorized || answer.Error == "invalid_client":
 		return auth.Check("client", auth.ProbeFail, "client", id, "reason", "credentials")
-	case resp.StatusCode == http.StatusBadRequest && answer.Error == "unauthorized_client":
-		return auth.Check("client", auth.ProbeOK, "client", id)
 	}
 	return auth.Check("client", auth.ProbeUnchecked, "client", id, "reason", "unclear", "status", strconv.Itoa(resp.StatusCode), "detail", answer.Error)
 }
@@ -152,7 +174,7 @@ func probeGet(ctx context.Context, u string) (int, []byte, error) {
 		return 0, nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := probeClient.Do(req)
+	resp, err := clientOf(ctx).Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

@@ -3,7 +3,7 @@
 // ⚠ Both copy the whole file on the storage, which for a large one takes a
 // while, and the buttons only went grey: nothing said a restore was under way,
 // so the pane read as stuck. The pressed button now names its work.
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
 import InspectorPanel from '@brftech/filex-core/src/components/InspectorPanel.vue';
@@ -55,10 +55,6 @@ async function versionsTab(): Promise<VueWrapper> {
 }
 
 describe('InspectorPanel — version work under way', () => {
-  afterEach(() => {
-    document.body.innerHTML = '';
-  });
-
   it('a restore says it is restoring until it ends', async () => {
     const w = await versionsTab();
     await button(w, /^Restore$/)!.trigger('click');

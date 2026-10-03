@@ -27,11 +27,11 @@ const err = (st: ReturnType<typeof newStatus>, line: string) => absorbLine(st, l
 
 test('a pair\'s error is cleared by its next clean pass', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: 1/2 done — 0 up, 1 down, 0 removed here, 0 removed on the server, 1 failed  (5ms)');
+  out(st, 'pair-1: 1/2 done - 0 up, 1 down, 0 removed here, 0 removed on the server, 1 failed  (5ms)');
   err(st, 'pair-1: ! download a.txt: connection reset');
   assert.equal(pairView(st, 'pair-1').error, 'download a.txt: connection reset');
 
-  out(st, 'pair-1: 1/1 done — 0 up, 1 down, 0 removed here, 0 removed on the server  (4ms)');
+  out(st, 'pair-1: 1/1 done - 0 up, 1 down, 0 removed here, 0 removed on the server  (4ms)');
   assert.equal(pairView(st, 'pair-1').error, null, 'a clean pass must clear the pair\'s error');
   assert.equal(st.lastError, null, 'and nothing account-wide may keep it');
 
@@ -52,7 +52,7 @@ test('an error for one pair never shows on another', () => {
 // guaranteed. A pass that failed says so in its own summary, so the order in
 // which the summary and the error text arrive cannot clear a fresh failure.
 test('a failed pass keeps its error whichever pipe is read first', () => {
-  const summary = 'pair-1: 0/1 done — 0 up, 0 down, 0 removed here, 0 removed on the server, 1 failed  (5ms)';
+  const summary = 'pair-1: 0/1 done - 0 up, 0 down, 0 removed here, 0 removed on the server, 1 failed  (5ms)';
   const detail = 'pair-1: ! download a.txt: connection reset';
   const a = newStatus('acc');
   err(a, detail);
@@ -68,14 +68,14 @@ test('a failed pass keeps its error whichever pipe is read first', () => {
 // the next pass) is not a failure and must not paint the folder red.
 test('a raced pass is not an error', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: 0/1 done — 0 up, 0 down, 0 removed here, 0 removed on the server  (5ms)');
-  out(st, 'pair-1: ~ download note.txt: changed on this computer while it was being synced — both versions are kept on the next pass');
+  out(st, 'pair-1: 0/1 done - 0 up, 0 down, 0 removed here, 0 removed on the server  (5ms)');
+  out(st, 'pair-1: ~ download note.txt: changed on this computer while it was being synced - both versions are kept on the next pass');
   assert.equal(pairView(st, 'pair-1').error, null);
 });
 
 test('an error that is not about a pair shows on every pair until the engine works again', () => {
   const st = newStatus('acc');
-  err(st, 'Error: HTTP 401: unauthorized — token missing/expired; run `filex client login`');
+  err(st, 'Error: HTTP 401: unauthorized - token missing/expired; run `filex client login`');
   assert.match(pairView(st, 'pair-1').error ?? '', /401/);
   assert.match(pairView(st, 'pair-2').error ?? '', /401/);
   out(st, 'pair-2: already in step');
@@ -92,13 +92,13 @@ test('notes are not errors', () => {
 
 test('local watching state is per pair and clears when watching resumes', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: local: poll-only — too-large — more than 4000 items (macOS watches every file separately)');
+  out(st, 'pair-1: local: poll-only - too-large - more than 4000 items (macOS watches every file separately)');
   assert.deepEqual(pairView(st, 'pair-1').local, {
     code: 'too-large',
     detail: 'more than 4000 items (macOS watches every file separately)',
   });
   assert.equal(pairView(st, 'pair-2').local, null);
-  out(st, 'pair-1: local: poll-only — unavailable — too many open files');
+  out(st, 'pair-1: local: poll-only - unavailable - too many open files');
   assert.deepEqual(pairView(st, 'pair-1').local, { code: 'unavailable', detail: 'too many open files' });
   out(st, 'pair-1: local: watched');
   assert.equal(pairView(st, 'pair-1').local, null);
@@ -111,7 +111,7 @@ test('local watching state is per pair and clears when watching resumes', () => 
 test('a pair another filex syncs is busy — not failing — until this engine takes it', () => {
   const st = newStatus('acc');
   const detail = 'another filex on this computer is syncing this pair (process 4242, C:\\Program Files\\WindowsApps\\filex\\filex.exe)';
-  out(st, `pair-1: lock: busy — ${detail}`);
+  out(st, `pair-1: lock: busy - ${detail}`);
   assert.deepEqual(pairView(st, 'pair-1').busy, { detail });
   assert.equal(pairView(st, 'pair-1').error, null, 'busy is not an error');
   assert.equal(anyError(st), false, 'and does not turn the rail dot red');
@@ -124,7 +124,7 @@ test('a pair another filex syncs is busy — not failing — until this engine t
 
 test('a one-shot run says busy on stderr; it is still busy, not an error', () => {
   const st = newStatus('acc');
-  err(st, 'pair-1: lock: busy — another filex on this computer is syncing this pair');
+  err(st, 'pair-1: lock: busy - another filex on this computer is syncing this pair');
   assert.deepEqual(pairView(st, 'pair-1').busy, { detail: 'another filex on this computer is syncing this pair' });
   assert.equal(pairView(st, 'pair-1').error, null);
   assert.equal(st.lastError, null);
@@ -132,17 +132,17 @@ test('a one-shot run says busy on stderr; it is still busy, not an error', () =>
 
 test('a pass of the pair ends busy even without the acquired line', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: lock: busy — another filex on this computer is syncing this pair');
+  out(st, 'pair-1: lock: busy - another filex on this computer is syncing this pair');
   out(st, 'pair-1: inventory: 3 item(s) here, listing the server…');
   assert.equal(pairView(st, 'pair-1').busy, null);
-  out(st, 'pair-2: lock: busy — another filex on this computer is syncing this pair');
+  out(st, 'pair-2: lock: busy - another filex on this computer is syncing this pair');
   out(st, 'pair-2: already in step');
   assert.equal(pairView(st, 'pair-2').busy, null);
 });
 
 test('a watcher that exits is not waiting for any pair', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: lock: busy — another filex on this computer is syncing this pair');
+  out(st, 'pair-1: lock: busy - another filex on this computer is syncing this pair');
   markExited(st, 1, false);
   assert.equal(pairView(st, 'pair-1').busy, null);
 });
@@ -173,11 +173,23 @@ test('a line split across two reads is read whole', () => {
 // The engine's live-state lines are the whole contract between
 // backend/cmd/filex/synclive.go and the sync panel's state word.
 test('parses every state the engine prints', () => {
-  assert.deepEqual(parseLiveLine('live: connected — watching 3 folder(s)'), { live: 'connected', detail: 'watching 3 folder(s)' });
-  assert.deepEqual(parseLiveLine('live: polling — --live=false; changes are found by the interval poll only'),
+  assert.deepEqual(parseLiveLine('live: connected - watching 3 folder(s)'), { live: 'connected', detail: 'watching 3 folder(s)' });
+  assert.deepEqual(parseLiveLine('live: polling - --live=false; changes are found by the interval poll only'),
     { live: 'polling', detail: '--live=false; changes are found by the interval poll only' });
-  assert.deepEqual(parseLiveLine('live: offline — connect: refused; retrying in 4s'), { live: 'offline', detail: 'connect: refused; retrying in 4s' });
+  assert.deepEqual(parseLiveLine('live: offline - connect: refused; retrying in 4s'), { live: 'offline', detail: 'connect: refused; retrying in 4s' });
   assert.deepEqual(parseLiveLine('  live: connected  '), { live: 'connected', detail: null });
+});
+
+// The engine wrote an em dash between a state and its detail before 0.50
+// (" - " since). A line from such an engine still reads the same.
+test('reads the separator an engine before 0.50 wrote', () => {
+  const em = String.fromCharCode(0x2014);
+  assert.deepEqual(parseLiveLine(`live: offline ${em} connect: refused`), { live: 'offline', detail: 'connect: refused' });
+  const st = newStatus('acc');
+  out(st, `pair-1: local: poll-only ${em} unavailable ${em} too many open files`);
+  assert.deepEqual(pairView(st, 'pair-1').local, { code: 'unavailable', detail: 'too many open files' });
+  out(st, `pair-2: lock: busy ${em} another filex on this computer is syncing this pair`);
+  assert.deepEqual(pairView(st, 'pair-2').busy, { detail: 'another filex on this computer is syncing this pair' });
 });
 
 // ⚠ Sync progress and results must NOT be read as a state: a pair id that
@@ -186,8 +198,8 @@ test('parses every state the engine prints', () => {
 test('ignores everything else', () => {
   for (const line of [
     'pair-1: transfer: 1/1',
-    'pair-1: 1/1 done — 0 up, 1 down, 0 removed here, 0 removed on the server  (10ms)',
-    'pair-1: local: poll-only — unavailable — too many open files',
+    'pair-1: 1/1 done - 0 up, 1 down, 0 removed here, 0 removed on the server  (10ms)',
+    'pair-1: local: poll-only - unavailable - too many open files',
     'live: connectedish',
     'Watching: changes on either side are synced as they happen; a full check every 30s. Ctrl-C to stop.',
   ]) {
@@ -339,7 +351,7 @@ test('a hold line is handed over once, and changes nothing about the activity', 
   out(st, 'pair-1: plan: 150 change(s) to make');
   out(
     st,
-    'pair-1: hold: 7 item(s) here are not on the server — waiting for a decision ' +
+    'pair-1: hold: 7 item(s) here are not on the server - waiting for a decision ' +
       '(`filex sync confirm pair-1` sends them, `filex sync discard pair-1` moves them to the local sync trash)',
   );
   assert.equal(st.active?.phase, 'plan');
@@ -415,7 +427,7 @@ test('a pair has passed once a pass of it has finished, and not before', () => {
   assert.equal(pairView(st, 'pair-1').passed, false);
   out(st, 'pair-1: already in step');
   assert.equal(pairView(st, 'pair-1').passed, true);
-  out(st, 'pair-2: 4/4 done — 4 uploaded (1.2s)');
+  out(st, 'pair-2: 4/4 done - 4 uploaded (1.2s)');
   assert.equal(pairView(st, 'pair-2').passed, true);
 });
 

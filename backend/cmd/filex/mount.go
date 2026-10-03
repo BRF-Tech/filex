@@ -54,8 +54,8 @@ Examples:
   filex mount --remote 'docs://projects/acme' --read-only ~/acme
   filex mount Z:                            # Windows: a drive letter
 
-Linux needs nothing; Windows needs WinFsp (free — https://winfsp.dev).
-macOS is not supported — use ` + "`filex sync`" + ` or the desktop app there.
+Linux needs nothing; Windows needs WinFsp (free - https://winfsp.dev).
+macOS is not supported - use ` + "`filex sync`" + ` or the desktop app there.
 
 ⚠ Stop the mount with Ctrl-C or by unmounting it, not by killing the process:
   fusermount -u ~/filex      (Linux)`,
@@ -70,7 +70,7 @@ macOS is not supported — use ` + "`filex sync`" + ` or the desktop app there.
 	// FILEX_URL/FILEX_TOKEN, then ~/.filex/cli.yaml. A mount that needed its
 	// own login would be a second place for a token to go stale.
 	f.StringVar(&o.client.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
-	f.StringVar(&o.client.token, "token", "", "API or session token (default: $FILEX_TOKEN or ~/.filex/cli.yaml)")
+	f.StringVar(&o.client.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the session ~/.filex/cli.yaml saved for this server URL)")
 	f.StringVar(&o.remote, "remote", "", "what to mount: empty for every storage, `docs://` for one, `docs://sub/dir` for a subtree")
 	f.BoolVar(&o.readOnly, "read-only", false, "refuse every write through this mount")
 	f.Int64Var(&o.blockSize, "block-size", 4<<20, "read granularity in bytes")
@@ -97,7 +97,7 @@ func (o *mountOpts) run(ctx context.Context, mountpoint string) error {
 	// requiring it to be there first would reject every normal invocation.
 	if driveLetter(mountpoint) {
 		if _, err := os.Stat(mountpoint + `\`); err == nil {
-			return fmt.Errorf("drive %s is already in use — pick a free letter", mountpoint)
+			return fmt.Errorf("drive %s is already in use - pick a free letter", mountpoint)
 		}
 	} else {
 		info, err := os.Stat(mountpoint)

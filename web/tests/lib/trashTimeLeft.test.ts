@@ -19,8 +19,8 @@ describe('trashTimeLeft', () => {
     expect(trashTimeLeft(30, inLang('en'))).toBe('30 days');
     expect(trashTimeLeft(1, inLang('en'))).toBe('1 day');
     expect(trashTimeLeft(0, inLang('en'))).toBe('Due for deletion');
-    expect(trashTimeLeft(null, inLang('en'))).toBe('—');
-    expect(trashTimeLeft(undefined, inLang('en'))).toBe('—');
+    expect(trashTimeLeft(null, inLang('en'))).toBe('-');
+    expect(trashTimeLeft(undefined, inLang('en'))).toBe('-');
     expect(trashTimeLeft(30, inLang('tr'))).toBe('30 gün');
     expect(trashTimeLeft(0, inLang('tr'))).toBe('Silinmek üzere');
   });

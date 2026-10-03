@@ -58,8 +58,8 @@ describe('FileExplorer says when a search was cut', () => {
   });
 
   it('every load starts un-cut, and a search takes the answer’s word for it', () => {
-    const body = EXPLORER.match(/async function load\(path\?: string\) \{([\s\S]*?)\n\}\n/);
-    expect(body, 'load() is gone').not.toBeNull();
+    const body = EXPLORER.match(/async function loadListing\(path\?: string\) \{([\s\S]*?)\n\}\n/);
+    expect(body, 'loadListing() is gone').not.toBeNull();
     // First statement: an earlier search's verdict must not outlive it.
     expect(body![1]).toMatch(/^\s*(\/\*[\s\S]*?\*\/\s*|\/\/[^\n]*\n\s*)*searchTruncated\.value = false;/);
     expect(body![1]).toMatch(/searchTruncated\.value =[^;]*advSearchTruncated\([^;]*resp\.truncated/);

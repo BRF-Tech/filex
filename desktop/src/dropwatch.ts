@@ -24,7 +24,7 @@
 // So the watchers live in a WORKER THREAD, whose event loop keeps running while
 // the main thread is inside the drag loop. The same measurement with a worker
 // reported the file the moment the main thread was free again. This is the
-// difference between "the folder fills in" and Burak's "I drag a folder onto the
+// difference between "the folder fills in" and the maintainer's "I drag a folder onto the
 // desktop and its insides still come over empty" (translated from Turkish).
 //
 // ⚠ What this still cannot do: if the drop target is an APPLICATION rather than

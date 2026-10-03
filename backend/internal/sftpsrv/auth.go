@@ -10,6 +10,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/brf-tech/filex/backend/internal/clientip"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 )
@@ -88,7 +90,10 @@ func (s *Server) sshConfig() (*ssh.ServerConfig, error) {
 // or a registered public key, both individually revocable.
 func (s *Server) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 	login := conn.User()
-	p, err := s.cfg.Auth.Any(context.Background(), login, string(password))
+	// The peer's address is the client's: SSH has no forwarded headers. It is
+	// what the sign-in limit counts by.
+	ctx := protocolauth.WithSource(context.Background(), loginguard.ProtoSFTP, clientip.PeerOf(conn.RemoteAddr().String()))
+	p, err := s.cfg.Auth.Any(ctx, login, string(password))
 	if err != nil {
 		return nil, errAuth
 	}

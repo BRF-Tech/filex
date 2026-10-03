@@ -128,11 +128,15 @@ type StorageCapabilities struct {
 type ThumbCapabilities struct {
 	Image       bool `json:"image"`
 	ImageMagick bool `json:"imagemagick"` // `magick`/`convert` binary present
-	Video       bool `json:"video"`
-	Audio       bool `json:"audio"`
-	PDF         bool `json:"pdf"`
-	Office      bool `json:"office"`
-	SVG         bool `json:"svg"`
+	// HEIC: that ImageMagick DECODES a HEIC photo, measured by drawing a
+	// sample (enginebin.HEIC), not inferred from ImageMagick being there:
+	// libheif can be present without its HEVC decoder plugin (Ubuntu 24.04).
+	HEIC   bool `json:"heic"`
+	Video  bool `json:"video"`
+	Audio  bool `json:"audio"`
+	PDF    bool `json:"pdf"`
+	Office bool `json:"office"`
+	SVG    bool `json:"svg"`
 }
 
 // ExternalServiceState describes a plug-and-play integration's runtime status.

@@ -40,6 +40,26 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import en from '@/locales/en.json';
 import type { NotificationSettings, User } from '@/api/types';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
+import { api } from '@/api/client';
+
+// Picking a theme or a density writes it to the account 400 ms later.
+answerAccountPrefs();
+
+// The Default apps section (0.50) asks which apps are installed and on
+// (GET /api/files/plugins/actions) as the dialog opens: no apps here. Every
+// other GET still goes to the real client, so a new request this dialog starts
+// making is caught by the no-network guard rather than answered by accident.
+beforeEach(() => {
+  const realGet = api.get.bind(api);
+  vi.spyOn(api, 'get').mockImplementation(((url: string, config?: unknown) =>
+    url === '/files/plugins/actions'
+      ? Promise.resolve({ data: { actions: [], views: [] } })
+      : realGet(url, config as never)) as typeof api.get);
+});
+afterEach(() => {
+  vi.mocked(api.get).mockRestore();
+});
 
 const updateSettings = vi.fn<[{ in_app_enabled: boolean; muted_events: string[] }], Promise<NotificationSettings>>();
 const getSettings = vi.fn<[], Promise<NotificationSettings>>();
@@ -473,7 +493,7 @@ describe('UserSettingsModal', () => {
 
     await w.find('[data-testid="profile-username"]').setValue('ayşe');
     const err = w.find('[data-testid="profile-username-error"]');
-    expect(err.text()).toBe('“ş” cannot be used in a username. Use a–z, 0–9, dot, dash or underscore.');
+    expect(err.text()).toBe('“ş” cannot be used in a username. Use a-z, 0-9, dot, dash or underscore.');
     expect(err.text()).not.toContain('invalid username');
     await w.find('[data-testid="user-settings-save-profile"]').trigger('click');
     expect(updateProfile).not.toHaveBeenCalled();
@@ -530,6 +550,9 @@ describe('UserSettingsModal', () => {
     const auth = useAuthStore();
     auth.user = NON_ADMIN;
     registerLocale({ code: 'es', source: 'plugin', plugin: 'lang-es' });
+    // An added language's strings are fetched as it becomes the active one
+    // (GET /api/public/ui-locales/es); the test answers, the network is not asked.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ strings: {} }), { status: 200 })));
     try {
       const i18n = createI18n({ legacy: false, locale: 'es', fallbackLocale: 'en', messages: { en } });
       const w = mount(UserSettingsModal, { props: { modelValue: true }, global: { plugins: [i18n], stubs: inPlace }, attachTo: document.body });
@@ -543,6 +566,7 @@ describe('UserSettingsModal', () => {
       expect(w.find('[data-testid="user-settings-locale-en"]').attributes('aria-pressed')).toBe('false');
     } finally {
       resetLocales();
+      vi.unstubAllGlobals();
     }
   });
 

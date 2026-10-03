@@ -12,17 +12,22 @@
 //  - a call the app was not granted is refused, and a save goes only to the
 //    file the interface was opened with.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 import AppFrame from '@brftech/filex-core/src/components/plugin/AppFrame.vue';
 import { createAppBridge } from '@brftech/filex-core/src/lib/appBridge';
 import { HELLO, PORT } from '../../../packages/app-ui/src/protocol';
+import { teardownDom, unmountAll } from '../helpers/teardown';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
 
-const mounted: VueWrapper[] = [];
-afterEach(() => {
-  mounted.splice(0).forEach((w) => w.unmount());
+// A frame that opens writes "seen this version" to the account (400 ms later).
+answerAccountPrefs();
+
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.restoreAllMocks();
-  document.body.innerHTML = '';
 });
 
 const settle = async () => {
@@ -148,7 +153,6 @@ function mountFrame(props: Record<string, unknown> = {}) {
     },
     attachTo: document.body,
   });
-  mounted.push(w);
   return { w, api };
 }
 
@@ -228,8 +232,7 @@ describe('the frame (AppFrame.vue)', () => {
     await ask(win.sent[0].ports[0], 1, 'file.save', { data: 'x' });
     expect(api.pluginUISave).toHaveBeenCalledWith('sketch', 'editor', { path: 'main://.filex-drafts/1/abcdef12/doc.sketch' }, expect.any(Blob));
 
-    mounted.splice(0).forEach((m) => m.unmount());
-    document.body.innerHTML = '';
+    unmountAll();
     const ro = mountFrame({ readOnly: true });
     await settle();
     f = document.querySelector('iframe') as HTMLIFrameElement;
@@ -401,7 +404,6 @@ describe('what an interface may do only for the person', () => {
     await settle();
     expect((await ask(port, 2, 'clipboard.write', { text: 'b' })).error.code).toBe('unavailable');
     w.unmount();
-    mounted.splice(mounted.indexOf(w), 1);
     // The port is closed with the frame: the question is gone, nothing written.
     expect(document.querySelector('[data-testid="appframe-consent"]')).toBeNull();
     expect(writeText).not.toHaveBeenCalled();
@@ -457,7 +459,7 @@ describe('a frame that asks too much (UI-14)', () => {
   });
 });
 
-// ── ui.download: a file for the person's own disk (Burak, 2026-09-27) ──────
+// ── ui.download: a file for the person's own disk (the maintainer, 2026-09-27) ──────
 //
 // Through filex, never from the frame (a sandboxed frame cannot download);
 // only with the grant (`ui:download`), only on a gesture or the person's yes,
@@ -473,8 +475,7 @@ describe('ui.download', () => {
 
   /** One frame on the page at a time: the helpers find THE iframe. */
   function clearFrames() {
-    mounted.splice(0).forEach((m) => m.unmount());
-    document.body.innerHTML = '';
+    unmountAll();
   }
 
   /** Ask with the data transferred, as the SDK sends a stream. */

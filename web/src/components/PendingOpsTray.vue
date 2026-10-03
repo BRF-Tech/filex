@@ -15,7 +15,7 @@
  */
 import { computed, onBeforeUnmount, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Archive, Copy, Move, PenLine, Trash2, Undo2, RotateCcw, X, AlertTriangle, Check } from 'lucide-vue-next';
+import { Archive, Copy, Image as ImageIcon, Move, PenLine, Trash2, Undo2, RotateCcw, X, AlertTriangle, Check } from 'lucide-vue-next';
 
 import { opObjects, opPercent } from '@brftech/filex-core';
 import { usePendingOpsStore } from '@/stores/pendingOps';
@@ -42,6 +42,7 @@ function iconFor(opType: string) {
   if (opType === 'rename') return PenLine;
   if (opType === 'restore') return Undo2;
   if (opType === 'delete' || opType === 'trash-empty' || opType === 'purge') return Trash2;
+  if (opType === 'thumb-repair') return ImageIcon;
   return Copy;
 }
 
@@ -65,6 +66,8 @@ function verbFor(opType: string): string {
       return t('pendingOps.verb.delete');
     case 'trash-empty':
       return t('pendingOps.verb.trash');
+    case 'thumb-repair':
+      return t('pendingOps.verb.thumbs');
     case 'copy':
     default:
       return t('pendingOps.verb.copy');

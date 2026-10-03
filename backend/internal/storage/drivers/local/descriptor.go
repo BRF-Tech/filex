@@ -34,7 +34,7 @@ func init() {
 				Help: "A symlink pointing INSIDE this folder is always followed. " +
 					"This governs only links pointing outside it: off, they are listed " +
 					"but cannot be opened, written to or deleted through; on, filex " +
-					"treats the linked files as part of the storage — including for " +
+					"treats the linked files as part of the storage - including for " +
 					"indexing, virus scanning, quota and deletion.",
 				HelpI18nKey: "storages.fieldHelp.followSymlinks",
 				Advanced:    true,

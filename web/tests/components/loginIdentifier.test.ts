@@ -16,6 +16,10 @@ import en from '@/locales/en.json';
 vi.mock('@/api/branding', () => ({
   BrandingApi: { get: vi.fn().mockResolvedValue({}) },
 }));
+// The page asks for the server's capabilities as it mounts; none are needed here.
+vi.mock('@/api/capabilities', () => ({
+  CapabilitiesApi: { fetch: vi.fn(async () => ({})) },
+}));
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: vi.fn() }),

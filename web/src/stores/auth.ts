@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { AuthApi } from '@/api/auth';
-import type { LoginRequest, User } from '@/api/types';
+import type { LoginHandoff, LoginRequest, LoginResponse, User } from '@/api/types';
 import type { PermRuleSettings } from '@/api/roles';
 import { extractError } from '@/api/client';
+import { readLoginRefusal, type LoginRefusal } from '@/lib/loginRefusal';
+import { ssoRefusalReason, type SsoRefusalReason } from '@/lib/ssoRefusal';
+import axios from 'axios';
 import { attachViewPrefsHttp, detachViewPrefsStore, forgetPersonalPrefs } from '@brftech/filex-core';
 import { getBearerToken, getServerRoot, getUseCredentials } from '@/api/runtimeConfig';
 
@@ -50,6 +53,15 @@ export const useAuthStore = defineStore('auth', () => {
   const twoFactorRequired = ref(false);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  /** What the last refused sign-in said beyond "no": tries left, or a lock's wait. */
+  const refusal = ref<LoginRefusal | null>(null);
+  /**
+   * Why the server refused the person it was told about without a form - the
+   * header proxy named them, the first-login rule said no, a disabled account
+   * - as the reason code on /api/auth/me's 401/403 (lib/ssoRefusal). The
+   * sign-in page says it. Null after any answer that carried none.
+   */
+  const signInReason = ref<SsoRefusalReason | null>(null);
   const ready = ref(false);
 
   const isAuthenticated = computed(() => user.value !== null);
@@ -78,9 +90,13 @@ export const useAuthStore = defineStore('auth', () => {
       applyAccountTimeZone(me.user?.timezone);
       attachViewPrefsFor(me.user?.id ?? null);
       error.value = null;
+      signInReason.value = null;
       return me.user;
     } catch (e: unknown) {
       // 401 is the normal "not logged in" path; don't surface as error.
+      signInReason.value = axios.isAxiosError(e)
+        ? ssoRefusalReason((e.response?.data as Record<string, unknown> | undefined)?.reason)
+        : null;
       user.value = null;
       permissions.value = [];
       permissionsInFolders.value = [];
@@ -93,24 +109,63 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * Set when the last sign-in was handed to a tenant's own address (a realm
+   * typed on the platform's page of a multi-tenant install): no session was
+   * opened here, and the page carries `code` to `origin` (Login.vue). Null
+   * otherwise.
+   */
+  const handoff = ref<LoginHandoff | null>(null);
+
   async function login(payload: LoginRequest): Promise<boolean> {
     loading.value = true;
     error.value = null;
+    refusal.value = null;
+    handoff.value = null;
     try {
       const res = await AuthApi.login(payload);
-      user.value = res.user;
-      if (res.token) {
-        sessionStorage.setItem('filex.bearer', res.token);
+      if (res.handoff) {
+        // Signed in, but the session belongs to the tenant's address: nothing
+        // is kept here. The caller navigates (see `handoff`).
+        handoff.value = res.handoff;
+        return false;
       }
-      // Re-hydrate permissions in case login response is leaner than /me.
-      await fetchMe();
-      return true;
+      return await adopt(res);
     } catch (e: unknown) {
       error.value = extractError(e, t('login.errGeneric'));
+      refusal.value = readLoginRefusal(e);
       return false;
     } finally {
       loading.value = false;
     }
+  }
+
+  /** Redeems a sign-in handed over from the platform's address: the session is
+   *  opened on this one. False when the ticket was spent, expired or is not
+   *  this address's. */
+  async function redeemHandoff(code: string): Promise<boolean> {
+    loading.value = true;
+    error.value = null;
+    refusal.value = null;
+    try {
+      return await adopt(await AuthApi.handoff(code));
+    } catch (e: unknown) {
+      error.value = extractError(e, t('login.errHandoff'));
+      return false;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /** A sign-in answer that opened a session here. */
+  async function adopt(res: LoginResponse): Promise<boolean> {
+    user.value = res.user ?? null;
+    if (res.token) {
+      sessionStorage.setItem('filex.bearer', res.token);
+    }
+    // Re-hydrate permissions in case login response is leaner than /me.
+    await fetchMe();
+    return true;
   }
 
   /**
@@ -175,6 +230,8 @@ export const useAuthStore = defineStore('auth', () => {
     permissionsByFolder,
     loading,
     error,
+    refusal,
+    signInReason,
     ready,
     isAuthenticated,
     isAdmin,
@@ -183,6 +240,8 @@ export const useAuthStore = defineStore('auth', () => {
     twoFactorRequired,
     fetchMe,
     login,
+    handoff,
+    redeemHandoff,
     logout,
     can,
   };

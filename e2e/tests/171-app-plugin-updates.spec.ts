@@ -15,9 +15,11 @@
  *      install review, and Install stays off.
  *   4. The Version cell, which carries all of it, stacks: its badge and its
  *      lines do not overlap and nothing is cut, at 958 and 1440px (#433).
+ *   5. The review's release notes are Markdown, drawn safely (#122).
  *
  * ⚠ The "source" is a tiny HTTP server on 127.0.0.1 inside this spec (plain
- * http is accepted for loopback only, wasmplugin/fetch.go); nothing here
+ * http is accepted for loopback only, wasmplugin/fetch.go, and only with
+ * FILEX_PLUGIN_LOOPBACK_SOURCES=1, which e2e/run.mjs sets); nothing here
  * reaches GitHub. Point 3 needs a binary stamped with a RELEASE version: a
  * development build checks no range (wasmplugin/compat.go) — run with a
  * binary built with `-X …/internal/version.Version=0.47.0`.
@@ -95,6 +97,12 @@ async function checkNow(page: Page) {
 
 test.describe.serial('App updates — a source followed, a range said', () => {
   let api: APIRequestContext;
+  // ⚠ The language is pinned on the ACCOUNT and restored (lesson #616): the
+  // assertions read English ("Update available"), and an earlier spec's page
+  // (163, filex.locale=tr) leaves the shared admin's document Turkish; in a
+  // full run this spec read "Güncelleme var".
+  const PREFS = '/api/me/prefs?surface=web';
+  let prefsBefore: Record<string, unknown> = {};
 
   test.beforeAll(async ({ playwright, baseURL }) => {
     server = createServer((req, res) => {
@@ -108,11 +116,16 @@ test.describe.serial('App updates — a source followed, a range said', () => {
     await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     api = await newAuthedRequest(playwright, baseURL ?? '');
+    const got = await api.get(PREFS);
+    const doc = got.ok() ? (await got.json()).prefs : {};
+    prefsBefore = doc && typeof doc === 'object' && !Array.isArray(doc) ? doc : {};
+    expect((await api.put(PREFS, { data: { prefs: { ...prefsBefore, locale: 'en' } } })).ok()).toBe(true);
     await removeByName(api, PACK);
     await removeByName(api, 'echo');
   });
 
   test.afterAll(async () => {
+    await api?.put(PREFS, { data: { prefs: prefsBefore } }).catch(() => undefined);
     await removeByName(api, PACK);
     await removeByName(api, 'echo');
     await api.dispose();
@@ -261,5 +274,50 @@ test.describe.serial('App updates — a source followed, a range said', () => {
       }
       await page.screenshot({ path: test.info().outputPath(`apps-updates-${width}.png`) });
     }
+  });
+
+  /**
+   * #122: a release's notes are Markdown (a GitHub release's body), drawn
+   * through the explorer preview's pipeline - markdown-it, then the document
+   * sanitizer - so `**bold**` is bold and nothing in them runs. 0.48.1 printed
+   * them as plain text: asterisks and dashes.
+   *
+   * ⚠ Notes come from a GitHub source's releases, and this spec's source is a
+   * loopback URL (nothing here reaches GitHub), so the review's answer is
+   * given its notes on the way to the page; everything else in it is the
+   * server's.
+   */
+  test('"Review update" draws the release notes as Markdown, and nothing in them runs', async ({ page }) => {
+    const NOTES = [
+      '## 1.0.2',
+      '',
+      '- **Kalın** bir düzeltme: `Ctrl+S` artık kaydediyor',
+      '- [Full Changelog](https://github.com/BRF-Tech/filextext-app/compare/v1.0.1...v1.0.2)',
+      '',
+      'Fixed <img src="x.png" onerror="window.pwned=1"> and <script>window.pwned=2</script> too.',
+    ].join('\n');
+    served.set('/pack/filex-app.json', packManifest('1.0.2'));
+    await openApps(page);
+    await checkNow(page);
+    await page.route(/\/api\/admin\/app-plugins\/\d+\/upgrade\?(.*&)?dry_run=1/, async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      body.upgrade = { ...(body.upgrade ?? {}), notes: NOTES };
+      await route.fulfill({ response: res, json: body });
+    });
+    await page.getByTestId(`app-plugin-actions-${PACK}`).click();
+    await page.getByTestId(`app-plugin-actions-${PACK}-update`).click();
+
+    const notes = page.getByTestId('app-plugin-upgrade-notes-md');
+    await expect(notes).toBeVisible({ timeout: 60_000 });
+    await expect(notes.locator('h2')).toHaveText('1.0.2');
+    await expect(notes.locator('strong')).toHaveText('Kalın');
+    await expect(notes.locator('li')).toHaveCount(2);
+    await expect(notes.locator('code')).toHaveText('Ctrl+S');
+    await expect(notes).not.toContainText('**');
+    await expect(notes.locator('script')).toHaveCount(0);
+    expect(await notes.locator('img').evaluateAll((els) => els.map((e) => e.getAttribute('onerror')))).toEqual([null]);
+    expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
+    await page.screenshot({ path: test.info().outputPath('apps-review-update-notes.png') });
   });
 });

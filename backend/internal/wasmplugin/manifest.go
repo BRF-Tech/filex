@@ -112,7 +112,11 @@ func (m *Manifest) Validate() error {
 		}
 		if isUIPerm(p) {
 			// ONE place says what the interface loads: its `ui` block.
-			return fmt.Errorf("manifest: permission %q is derived from the ui block — leave it out of permissions", raw)
+			return fmt.Errorf("manifest: permission %q is derived from the ui block - leave it out of permissions", raw)
+		}
+		if isThumbPerm(p) {
+			// And what the app draws thumbnails of: its `thumbnails` block.
+			return fmt.Errorf("manifest: permission %q is derived from the thumbnails block - leave it out of permissions", raw)
 		}
 		if !seen[p] {
 			seen[p] = true
@@ -135,7 +139,7 @@ func (m *Manifest) Validate() error {
 		m.Languages[i] = c
 	}
 	if !seenLang["en"] {
-		return fmt.Errorf("manifest: languages must include \"en\" — it is what every other language falls back to")
+		return fmt.Errorf("manifest: languages must include \"en\" - it is what every other language falls back to")
 	}
 	if err := m.checkUILocales(); err != nil {
 		return err
@@ -213,7 +217,7 @@ func (m *Manifest) Validate() error {
 			// A viewer opens a FILE in the preview's place: only an
 			// interface can be one — a Surface has no way to show a file.
 			if v.UI == "" {
-				return fmt.Errorf("manifest: views[%d] (%s): placement viewer is for the app's own interface — give it a ui file", i, v.ID)
+				return fmt.Errorf("manifest: views[%d] (%s): placement viewer is for the app's own interface - give it a ui file", i, v.ID)
 			}
 		case "":
 			v.Placement = "modal"
@@ -292,6 +296,9 @@ func (m *Manifest) Validate() error {
 	if err := m.checkUI(); err != nil {
 		return err
 	}
+	if err := m.checkThumbnails(); err != nil {
+		return err
+	}
 	for i := range m.PublicPages {
 		p := &m.PublicPages[i]
 		if !idRe.MatchString(p.ID) {
@@ -360,7 +367,7 @@ func (m *Manifest) checkUILocales() error {
 			return fmt.Errorf("manifest: ui_locales: %q is given twice (language tags are not case-sensitive)", c)
 		}
 		if len(strs) == 0 {
-			return fmt.Errorf("manifest: ui_locales[%s] is empty — a language with no strings would be offered and then speak English", c)
+			return fmt.Errorf("manifest: ui_locales[%s] is empty - a language with no strings would be offered and then speak English", c)
 		}
 		size := 0
 		for k, v := range strs {

@@ -12,6 +12,10 @@
  *   2. the menu is state-aware: a PDF with nothing pending offers **Sign…**
  *      and **Request signatures…**, and NOT **Sign / Fill**; the hidden
  *      `apply` action is in no menu at all;
+ *   2a. an office document is offered nothing at all - not as a row, not as
+ *      a greyed row, not through a direct run - and the app's pages, reached
+ *      on one by their address, say to convert it with Convert first and
+ *      offer no button (filex-sign 0.3: PDFs only, no engine);
  *   3. every screen the app draws obeys the v3 renderer rules (known nodes,
  *      one primary button, a choice instead of a dropdown) and carries every
  *      language its manifest promises;
@@ -25,6 +29,9 @@
  * FILEX_REQUIRE_WASM_FIXTURE=1 (CI) makes that a failure.
  */
 import { test, expect, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName, waitForOp } from '../helpers/seed';
 import { guardFixture, installThroughWizard, minimalPDF, resolveApp } from '../helpers/appPlugin';
@@ -35,6 +42,7 @@ import {
   openView,
   removeApp,
   runAction,
+  surfaceTexts,
 } from '../helpers/surface';
 
 const APP = resolveApp('sign');
@@ -43,6 +51,12 @@ const STORAGE = `e2e-sign-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
 const PDF = 'contract.pdf';
 const QUALIFIED = `${STORAGE}://${PDF}`;
+/** A real Word document (e2e/fixtures/file-types), not bytes named .docx. */
+const DOCX = 'offer.docx';
+const DOCX_QUALIFIED = `${STORAGE}://${DOCX}`;
+const DOCX_BYTES = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/file-types/letter.docx'),
+);
 
 /** The action ids the manifest declares, so the spec follows the app. */
 function actionID(match: RegExp): string | undefined {
@@ -70,6 +84,14 @@ async function menuVerbs(page: Page, qualified: string): Promise<string[]> {
 
 test.describe('App plugin: sign — install, sign, verify', () => {
   test.describe.configure({ mode: 'serial' });
+  /* ⚠ No service worker: this spec signs documents, it does not measure the
+     installed web app. In Playwright's WebKit a page the panel's worker has
+     taken over sends its /api requests through the worker WITHOUT the
+     session cookie: the 0.50 full round (e2e050w) signed in, opened
+     /admin/explore and got 401 on /api/auth/me 0.4 s later, back on the
+     sign-in page (trace: every request after the navigation lacked the
+     cookie). Whether the worker has taken over by then is a race. */
+  test.use({ serviceWorkers: 'block' });
   guardFixture(APP, test.skip);
 
   test.beforeAll(async ({ request }) => {
@@ -83,6 +105,17 @@ test.describe('App plugin: sign — install, sign, verify', () => {
       },
     });
     if (!up.ok()) throw new Error(`upload ${PDF} failed: ${up.status()} ${await up.text()}`);
+    const upDocx = await request.post('/api/files/manager?action=upload', {
+      multipart: {
+        path: `${STORAGE}://`,
+        'file[]': {
+          name: DOCX,
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          buffer: DOCX_BYTES,
+        },
+      },
+    });
+    if (!upDocx.ok()) throw new Error(`upload ${DOCX} failed: ${upDocx.status()} ${await upDocx.text()}`);
     await removeApp(request, 'sign');
   });
 
@@ -139,6 +172,63 @@ test.describe('App plugin: sign — install, sign, verify', () => {
         verbs.some((v) => v.toLowerCase() === label.toLowerCase()),
         `${a.id} is hidden: it is started by a surface, not by a menu row`,
       ).toBe(false);
+    }
+  });
+
+  test('an office document is offered nothing: it is converted with Convert first', async ({ page, request }) => {
+    /* ⚠⚠ The owner, 2026-10-02: "İmzalama uygulamasında lütfen docx vb
+       şeylerde önce pdf'e çevirmeden imzala işlemini getirme ekrana zaten."
+       filex-sign signs PDFs only and runs no engine: an office document is
+       turned into a PDF by the Convert app, then signed. Red on filex-sign
+       0.2.0, whatever the server has: with LibreOffice the DOCX offered
+       "Sign…" and "Request signatures…" (applies.engine_ext), without it an
+       administrator saw them as greyed rows (`gated`), and both pages
+       offered "Convert to PDF". */
+    await apiLogin(request);
+    const answer = (await (await request.get('/api/files/plugins/actions')).json()) as {
+      actions: Array<{ plugin: string; id: string; applies?: { ext?: string[] }; gated?: Array<{ ext?: string[] }> }>;
+    };
+    const rows = answer.actions.filter((a) => a.plugin === 'sign');
+    expect(rows.length, 'the signing app lists its rows').toBeGreaterThan(0);
+    for (const a of rows) {
+      expect(a.applies?.ext ?? [], `${a.id} must not apply to a .docx`).not.toContain('docx');
+      expect((a.gated ?? []).flatMap((g) => g.ext ?? []), `${a.id} must not be a greyed row on a .docx`).not.toContain(
+        'docx',
+      );
+    }
+
+    // The menu: the app's rows are there on the PDF (so the app answered),
+    // and none of them on the DOCX - not even greyed.
+    await openExplorer(page);
+    await expect
+      .poll(async () => /sign|imzala/i.test((await menuVerbs(page, QUALIFIED)).join(', ')), {
+        timeout: 20_000,
+        message: 'a PDF must offer the signing rows',
+      })
+      .toBe(true);
+    const onDocx = await menuVerbs(page, DOCX_QUALIFIED);
+    const labels = (APP.manifest?.actions ?? [])
+      .flatMap((a) => Object.values(a.label ?? {}))
+      .map((l) => String(l).toLowerCase());
+    const offered = onDocx.filter((v) => labels.some((l) => v.toLowerCase().startsWith(l)));
+    expect(offered, `a .docx must offer no signing row: [${onDocx.join(', ')}]`).toEqual([]);
+
+    // A direct run is refused by filex itself: the action does not apply.
+    const run = await request.post('/api/files/plugins/actions/sign/sign/run', { data: { paths: [DOCX_QUALIFIED] } });
+    expect(run.status(), `a run of Sign on a .docx: ${await run.text()}`).toBe(422);
+
+    // The pages, reached on the DOCX by their address: one message, no button.
+    for (const view of ['sign-self', 'request']) {
+      const s = await openView(request, 'sign', view, DOCX_QUALIFIED);
+      checkSurface(s, `sign/${view} on a .docx`);
+      checkLanguages(s, APP.languages, `sign/${view} on a .docx`);
+      expect((s.actions ?? []).map((a) => a.id), `sign/${view} on a .docx offers no button`).toEqual([]);
+      const en = surfaceTexts(s, ['en'])
+        .map((t) => t.text.en ?? '')
+        .join('\n');
+      expect(en, `sign/${view} on a .docx`).toMatch(/is not a PDF/);
+      expect(en, `sign/${view} on a .docx`).toMatch(/Convert app/);
+      expect(en, `sign/${view} on a .docx`).not.toMatch(/LibreOffice|Convert to PDF/);
     }
   });
 

@@ -8,10 +8,12 @@ import {
   Blocks,
   Database,
   Users,
+  UsersRound,
   Settings,
   Brush,
   PlugZap,
   ShieldCheck,
+  ShieldAlert,
   UserCog,
   ScrollText,
   RefreshCcw,
@@ -22,6 +24,7 @@ import {
   Trash2,
   X,
   ListChecks,
+  Wrench,
   Bell,
   Shield /* koru:k3 */,
   Webhook,
@@ -35,10 +38,12 @@ import {
   Cable,
   BarChart3,
   Archive,
+  Building2,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
 import { useAuthStore } from '@/stores/auth';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import { usePluginHomeApps } from '@/composables/usePluginHomeApps';
 
 interface Props {
@@ -77,6 +82,13 @@ watch(() => route.name, refreshTrash);
  */
 const auth = useAuthStore();
 const router = useRouter();
+const caps = useCapabilitiesStore();
+/** A multi-tenant install (the sign-in form has a Realm) and a caller who may
+ *  configure the instance: on such an install, only the platform operator. */
+const tenantsVisible = computed(() => caps.data.realm?.enabled === true && caps.data.caller_admin === true);
+const tenantSelfVisible = computed(
+  () => caps.data.realm?.enabled === true && caps.data.caller_admin !== true && auth.isAdmin,
+);
 const { apps: homeApps } = usePluginHomeApps();
 const appItems = computed<NavItem[]>(() =>
   auth.isAdmin
@@ -138,6 +150,7 @@ const items = computed<NavItem[]>(() => [
   ...appItems.value,
 
   { to: { name: 'users' }, label: t('nav.users'), icon: Users, group: 'access' },
+  { to: { name: 'groups' }, label: t('nav.groups'), icon: UsersRound, group: 'access' },
   { to: { name: 'grants' }, label: t('nav.grants'), icon: ShieldCheck, group: 'access' },
   { to: { name: 'roles' }, label: t('nav.roles'), icon: UserCog, group: 'access' },
   {
@@ -146,7 +159,19 @@ const items = computed<NavItem[]>(() => [
     icon: ShieldCheck,
     group: 'access',
   },
+  // Tenants: a multi-tenant install's platform operator only. A tenant's
+  // administrator would read a 403 there, and a single-tenant install has one
+  // tenant, its own (docs/TENANT-ADMIN.md).
+  ...(tenantsVisible.value
+    ? [{ to: { name: 'tenants' }, label: t('nav.tenants'), icon: Building2, group: 'access' as const }]
+    : []),
+  // My tenant: an administrator of a tenant (not the platform's) on a
+  // multi-tenant install runs their own tenant there.
+  ...(tenantSelfVisible.value
+    ? [{ to: { name: 'tenant-self' }, label: t('nav.myTenant'), icon: Building2, group: 'access' as const }]
+    : []),
   { to: { name: 'api-mcp' }, label: t('nav.apiMcp'), icon: KeyRound, group: 'access' },
+  { to: { name: 'login-security' }, label: t('nav.loginSecurity'), icon: ShieldAlert, group: 'access' },
 
   { to: { name: 'settings' }, label: t('nav.settings'), icon: Settings, group: 'ops' },
   { to: { name: 'branding' }, label: t('nav.branding'), icon: Palette, group: 'ops' } /* wiring:e1 */,
@@ -156,6 +181,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'external' }, label: t('nav.external'), icon: PlugZap, group: 'ops' },
   { to: { name: 'replica' }, label: t('nav.replica'), icon: GitBranch, group: 'ops' },
   { to: { name: 'queue' }, label: t('nav.queue'), icon: ListChecks, group: 'ops' },
+  { to: { name: 'tools' }, label: t('nav.tools'), icon: Wrench, group: 'ops' },
   { to: { name: 'notifications' }, label: t('nav.notifications'), icon: Bell, group: 'ops' },
   { to: { name: 'webhooks' }, label: t('nav.webhooks'), icon: Webhook, group: 'ops' } /* bag:b3 */,
   { to: { name: 'plugins' }, label: t('nav.plugins'), icon: Blocks, group: 'ops' },

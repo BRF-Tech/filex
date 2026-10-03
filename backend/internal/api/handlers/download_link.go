@@ -206,7 +206,7 @@ func (a *Archive) mintFileLink(w http.ResponseWriter, r *http.Request, req archi
 	}
 	if isDir {
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "a folder cannot travel as one file — download it as an archive",
+			"error": "a folder cannot travel as one file - download it as an archive",
 			"code":  "IS_FOLDER",
 		})
 		return

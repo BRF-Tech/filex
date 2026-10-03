@@ -32,10 +32,7 @@ function view(extra: Record<string, unknown> = {}) {
   });
 }
 
-afterEach(() => {
-  closeRowMenus();
-  document.body.innerHTML = '';
-});
+afterEach(() => closeRowMenus());
 
 describe('the Drafts view', () => {
   it('draws the drafts in THE table, one row each', () => {

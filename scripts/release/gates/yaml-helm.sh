@@ -97,6 +97,47 @@ if [ "$ALL_N" -le "$DEFAULTS_N" ]; then
   fail=1
 fi
 
+# 0.50: the bundled MinIO became versitygw. Its data must never be deleted by
+# an upgrade: the new PVC carries resource-policy keep, and a values file that
+# still turns MinIO on stops the render (an upgrade that merely dropped the
+# old PVC from the manifest would make Helm delete it).
+echo "== 4. the bundled S3 server keeps its data; the retired MinIO is refused"
+if helm template t "$CHART" --set versitygw.enabled=true --set storage.type=s3 > "$OUT/s3.yaml" 2> "$OUT/s3.err"; then
+  "$PY" - "$OUT/s3.yaml" <<'PY' || fail=1
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1], encoding='utf-8')) if d]
+pvc = [d for d in docs if d.get('kind') == 'PersistentVolumeClaim' and d['metadata']['name'].endswith('-versitygw-data')]
+keep = [d for d in pvc if (d['metadata'].get('annotations') or {}).get('helm.sh/resource-policy') == 'keep']
+env = {}
+for d in docs:
+    if d.get('kind') == 'Secret':
+        env.update(d.get('stringData') or {})
+problems = []
+if not pvc:
+    problems.append('no versitygw PVC rendered')
+elif not keep:
+    problems.append('the versitygw PVC has no helm.sh/resource-policy: keep')
+if not str(env.get('FILEX_DEFAULT_STORAGE_S3_ENDPOINT', '')).endswith('-versitygw:7070'):
+    problems.append(f"the seeded endpoint is {env.get('FILEX_DEFAULT_STORAGE_S3_ENDPOINT')!r}, not the bundled server")
+if env.get('FILEX_DEFAULT_STORAGE_S3_REGION') != 'us-east-1':
+    problems.append(f"the seeded region is {env.get('FILEX_DEFAULT_STORAGE_S3_REGION')!r}; the gateway signs us-east-1 only")
+for p in problems:
+    print('  ' + p)
+print('  versitygw: PVC kept, storage seeded at the bundled server' if not problems else '  versitygw: RED')
+sys.exit(1 if problems else 0)
+PY
+else
+  echo "  helm template with versitygw.enabled FAILED"; cat "$OUT/s3.err"; fail=1
+fi
+if helm template t "$CHART" --set minio.enabled=true > /dev/null 2> "$OUT/minio.err"; then
+  echo "  minio.enabled=true still renders: an upgrade would drop the old MinIO PVC without a word"; fail=1
+elif grep -q 'helm.sh/resource-policy=keep' "$OUT/minio.err" && grep -q 'versitygw.enabled=true' "$OUT/minio.err"; then
+  echo "  minio.enabled=true is refused, with the steps that keep its data"
+else
+  echo "  minio.enabled=true failed, but not with the steps that keep its data:"; cat "$OUT/minio.err"; fail=1
+fi
+rm -f "$OUT/s3.yaml" "$OUT/s3.err" "$OUT/minio.err"
+
 rm -f "$OUT/lint.txt" "$OUT/defaults.yaml" "$OUT/defaults.err" "$OUT/all-on.yaml" "$OUT/all-on.err"
 rmdir "$OUT" 2>/dev/null
 if [ "$fail" = 0 ]; then echo "YAML GATE GREEN"; exit 0; else echo "YAML GATE RED"; exit 1; fi

@@ -157,6 +157,12 @@ test.describe('The one table and its own scrollbars', () => {
     await openList(page, true);
     await page.addStyleTag({ content: '.fe-list { scrollbar-gutter: auto !important; }' });
     const r = await loopsIn(page, 700, 740, true);
+    // An engine whose scrollbars overlay the content (WebKit here) cannot loop
+    // this way at all: said as a skip, there; on Chromium a bar that takes no
+    // room still fails, since every case below would then pass vacuously.
+    if (r.bar === 0 && test.info().project.name !== 'chromium') {
+      test.skip(true, 'this engine draws overlay scrollbars that take no room: the loop the probe hunts cannot happen here');
+    }
     expect(r.bar, 'scrollbars take no room in this browser — every other case here would pass vacuously').toBeGreaterThan(0);
     expect(r.found.length, `no loop found in ${r.tried} sizes; the probe cannot see one`).toBeGreaterThan(0);
   });

@@ -16,6 +16,6 @@ export function sayRestore(
     parts.push(t('toast.restore_partial', { n: out.restored, failed: out.failed, reason: out.reason || t('toast.failed') }));
   }
   if (out.taken.length) parts.push(t('toast.restore_taken', { n: out.taken.length, name: out.taken[0] }));
-  if (parts.length) return { message: parts.join(' — '), failure: true };
+  if (parts.length) return { message: parts.join(' - '), failure: true };
   return { message: t('toast.restored', { n: out.restored }), failure: false };
 }

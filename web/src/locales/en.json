@@ -23,23 +23,25 @@
     "collapse": "Hide details",
     "dl": {
       "win_store": "Microsoft Store",
-      "win_store_hint": "Signed by Microsoft, installed and kept up to date by the Store — no SmartScreen warning",
+      "win_store_hint": "Signed by Microsoft, installed and kept up to date by the Store - no SmartScreen warning",
       "win_setup": "Windows installer (.exe)",
       "win_setup_hint": "Installs filex and adds it to the Start menu, and updates itself · ~125 MB",
       "win_portable": "Windows portable (.exe)",
-      "win_portable_hint": "Runs from anywhere — a USB stick, Downloads — and keeps its files beside itself. Does not update itself · ~125 MB",
+      "win_portable_hint": "Runs from anywhere - a USB stick, Downloads - and keeps its files beside itself. Does not update itself · ~125 MB",
       "linux_snap": "Snap Store",
-      "linux_snap_hint": "Ubuntu and other Linux with snapd, also in Ubuntu's App Center — installed and kept up to date by snapd",
+      "linux_snap_hint": "Ubuntu and other Linux with snapd, also in Ubuntu's App Center - installed and kept up to date by snapd",
       "appimage": "Linux (.AppImage)",
-      "appimage_hint": "Portable — no installation, just make it executable and run · ~140 MB",
+      "appimage_hint": "Portable - no installation, just make it executable and run. On Ubuntu 23.10 and later it needs a one-time step first, which it shows you · ~140 MB",
       "deb": "Debian / Ubuntu (.deb)",
       "deb_hint": "Installs system-wide with apt · ~100 MB",
       "rpm": "Fedora / openSUSE (.rpm)",
       "rpm_hint": "Installs system-wide with dnf or zypper · ~100 MB",
       "dmg": "macOS (.dmg, Apple Silicon)",
-      "dmg_hint": "Unsigned — first launch: System Settings → Privacy & Security → Open Anyway",
+      "dmg_hint": "Unsigned - first launch: System Settings → Privacy & Security → Open Anyway",
       "mac_brew": "Homebrew",
-      "mac_brew_hint": "brew install brf-tech/filex/filex-app — and brew upgrade keeps it up to date"
+      "mac_brew_hint": "brew install brf-tech/filex/filex-app - and brew upgrade keeps it up to date",
+      "other_arm64": "For Arm processors (arm64)",
+      "other_x64": "For Intel and AMD processors (x64)"
     }
   },
   "common": {
@@ -136,6 +138,7 @@
     "tagged": "Tagged files",
     "replica": "Replica",
     "queue": "Queue",
+    "tools": "Tools",
     "notifications": "Notifications",
     "webhooks": "Webhooks",
     "about": "About",
@@ -155,7 +158,11 @@
     "usage": "Usage & cost",
     "apps": "Apps",
     "appearance": "Appearance",
-    "roles": "Roles"
+    "roles": "Roles",
+    "loginSecurity": "Sign-in security",
+    "groups": "Groups",
+    "tenants": "Tenants",
+    "myTenant": "My tenant"
   },
   "login": {
     "title": "Sign in",
@@ -180,7 +187,32 @@
     "errGeneric": "Something went wrong. Try again.",
     "errOidc": "SSO sign-in failed. Try again, or sign in with password.",
     "noProviders": "No auth providers enabled. Set {env} in your environment.",
-    "signedOut": "You are signed out."
+    "signedOut": "You are signed out.",
+    "errRemaining": "Email, username or password is wrong. Attempts left before a lock: {n}.",
+    "errLockedAccount": "Too many wrong attempts for this account. Try again in {time}.",
+    "errLockedIp": "Too many wrong attempts from this address. Try again in {time}.",
+    "retryIn": "Try again in {time}",
+    "realm": "Realm",
+    "realmHint": "Your organization's sign-in name. Leave it empty to sign in with this server's own accounts.",
+    "realmLocked": "This address belongs to the {realm} realm.",
+    "handoffGoing": "Signing you in at your organization's address…",
+    "errHandoff": "The sign-in could not be completed here. Sign in again.",
+    "ssoRefused": {
+      "auto_create_off": "This server does not open an account at a first SSO sign-in. Ask your administrator to open your account.",
+      "group_not_allowed": "Your account is not in a group that may sign in here. Ask your administrator for access.",
+      "no_email": "Your identity provider did not send an email address, and your account is found by it. Ask your administrator to check the provider's settings.",
+      "idp_denied": "The sign-in was cancelled or refused at your identity provider. Try again; if it keeps happening, contact your administrator.",
+      "idp_error": "The sign-in could not be completed with your identity provider. Try again; if it keeps happening, contact your administrator.",
+      "expired": "The SSO sign-in took too long, or it was started in another tab or browser. Try again.",
+      "account_disabled": "Your account is disabled. Contact your administrator.",
+      "tenant_suspended": "Your organization's access to this server is suspended. Contact your administrator.",
+      "maintenance": "Sign-in is temporarily limited to the platform operator. Try again later.",
+      "busy": "Too many sign-ins are in progress on this server. Try again in a few minutes.",
+      "forbidden_account": "This is a system or built-in administrator account, and those may not sign in here. Sign in with your own account.",
+      "email_unverified": "Your identity provider did not confirm that your email address is verified, so your account is not opened by the address alone. Contact your administrator.",
+      "account_pending": "Your account was opened and is waiting for your administrator's approval. Sign in again once it is approved.",
+      "identity_mismatch": "This account is bound to another SSO identity. Contact your administrator."
+    }
   },
   "dashboard": {
     "title": "Dashboard",
@@ -215,7 +247,7 @@
     },
     "order": {
       "hint": "Everybody sees the storages in this order in the navigation panel, unless they have arranged their own. Drag a row by its handle, or use Move up / Move down in its Actions menu.",
-      "handle": "Move {name} — drag, or press the up and down arrow keys",
+      "handle": "Move {name} - drag, or press the up and down arrow keys",
       "moveUp": "Move up",
       "moveDown": "Move down",
       "reset": "Reset to default order",
@@ -291,8 +323,7 @@
       "url": "Base URL",
       "share": "Share",
       "domain": "Domain / workgroup",
-      "dialTimeout": "Connect timeout (seconds)",
-      "nameChangedWarning": "Clients address this storage by name. Renaming it changes the WebDAV, SFTP, S3 and NFS paths — a mount or bookmark using the old name will start answering 404 until you update it.",
+      "nameChangedWarning": "Clients address this storage by name. Renaming it changes the WebDAV, SFTP, S3 and NFS paths - a mount or bookmark using the old name will start answering 404 until you update it.",
       "stableAddress": "Stable address",
       "stableAddressHint": "Mounts and scripts can use this instead of the name. It is assigned once and never changes, so renaming the storage does not break them.",
       "s3AttemptTimeout": "Attempt timeout (seconds)",
@@ -304,8 +335,8 @@
     },
     "fieldHelp": {
       "path": "Directory on the server. It is created if missing; filex never mounts /.",
-      "followSymlinks": "A symlink pointing INSIDE this folder is always followed. This governs only links pointing outside it: off, they are listed with a badge saying why they will not open, and cannot be opened, written to or deleted through; on, filex treats the linked files as part of the storage — including for indexing, virus scanning, quota and deletion.",
-      "scanExclude": "One pattern per line, relative to the storage root: * matches within a name, ** any number of folders, and a pattern without a / matches that name at any depth (.* skips every hidden file and folder). The scan does not go into a matching folder, and matching files are not catalogued, indexed, thumbnailed or virus-scanned. This saves work; it is not access control — the files stay on the storage, reachable by path, over WebDAV/SFTP and through the AI tools. Anything catalogued before you add a pattern stays as it is.",
+      "followSymlinks": "A symlink pointing INSIDE this folder is always followed. This governs only links pointing outside it: off, they are listed with a badge saying why they will not open, and cannot be opened, written to or deleted through; on, filex treats the linked files as part of the storage - including for indexing, virus scanning, quota and deletion.",
+      "scanExclude": "One pattern per line, relative to the storage root: * matches within a name, ** any number of folders, and a pattern without a / matches that name at any depth (.* skips every hidden file and folder). The scan does not go into a matching folder, and matching files are not catalogued, indexed, thumbnailed or virus-scanned. This saves work; it is not access control - the files stay on the storage, reachable by path, over WebDAV/SFTP and through the AI tools. Anything catalogued before you add a pattern stays as it is.",
       "lazyFill": "Click first, fill in the background: the folder somebody opens is cataloged first, and a slow background pass catalogs the rest, so search, folder sizes and usage end up covering the whole storage. Only on open: nothing runs in the background. Only the folders people open are cataloged, and search, folder sizes and usage say that they cover those folders only. Sync now catalogs everything once.",
       "lazyMaxWatches": "Folders people open are watched for changes made outside filex. Past this many, the folder opened longest ago stops being watched and is checked again the next time somebody opens it.",
       "lazyWatchTTL": "A folder nobody has opened for this long stops being watched. It is checked again the next time somebody opens it.",
@@ -314,13 +345,13 @@
       "region": "Defaults to \"auto\" when left empty.",
       "endpoint": "Leave empty for AWS S3. Any S3-compatible store needs its endpoint.",
       "pathStyle": "On for every non-AWS store. It is turned on automatically when an endpoint is set and this was never touched.",
-      "disablePresign": "On by default: uploads and the downloads behind public share links stream through filex, so the bucket endpoint never has to be reachable from a browser (a LAN-only MinIO just works). Turn it off only when the endpoint is reachable from your users' browsers (AWS, a public MinIO) and you want them to talk to the bucket directly — faster for very large files, and the store must accept SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch).",
+      "disablePresign": "On by default: uploads and the downloads behind public share links stream through filex, so the bucket endpoint never has to be reachable from a browser (a LAN-only MinIO just works). Turn it off only when the endpoint is reachable from your users' browsers (AWS, a public MinIO) and you want them to talk to the bucket directly - faster for very large files, and the store must accept SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch).",
       "sftpAuth": "Either a password or a private key is required.",
       "keyPath": "Path to a key file on the server, read when the storage starts. Used when the PEM field is empty.",
       "knownHosts": "OpenSSH known_hosts path for strict host-key checking. Default is trust-on-first-use in ~/.filex/known_hosts.",
       "hostKey": "A single public key in authorized_keys / known_hosts line form.",
       "insecureSkipHostKey": "Accepts any host key. Only for throwaway hosts.",
-      "tls": "Plain FTP sends credentials in the clear — turn this on whenever the server supports it.",
+      "tls": "Plain FTP sends credentials in the clear - turn this on whenever the server supports it.",
       "passive": "Off switches to active mode, which needs the server to dial back into this host.",
       "smbShare": "The share name alone, without the server: `media`, not `\\\\nas\\media`.",
       "smbDomain": "Only for a Windows domain account. Leave empty for a NAS.",
@@ -370,16 +401,16 @@
     },
     "discover": {
       "title": "Mount several folders at once",
-      "hint": "The root of a bucket or share is never mounted as one storage. Instead, list the folders under the root you entered above and mount each one you tick as its own storage — same credentials, one sidebar entry per folder.",
+      "hint": "The root of a bucket or share is never mounted as one storage. Instead, list the folders under the root you entered above and mount each one you tick as its own storage - same credentials, one sidebar entry per folder.",
       "list": "List folders under this root",
       "listing": "Listing…",
       "none": "No folders under this root.",
-      "found": "{count} folder found — tick it to mount it. The name is what the sidebar shows; the root is where the storage points. | {count} folders found — tick the ones to mount. The name is what the sidebar shows; the root is where the storage points.",
+      "found": "{count} folder found - tick it to mount it. The name is what the sidebar shows; the root is where the storage points. | {count} folders found - tick the ones to mount. The name is what the sidebar shows; the root is where the storage points.",
       "nameLabel": "Storage name",
       "create": "Create {count} storage | Create {count} storages",
       "creating": "Creating…",
       "createdOk": "{count} storage created | {count} storages created",
-      "createdPartial": "{ok} of {total} created — {failed} failed: {names}",
+      "createdPartial": "{ok} of {total} created - {failed} failed: {names}",
       "selectAll": "Select all",
       "selectNone": "Select none"
     },
@@ -392,7 +423,7 @@
     "syncStarted": "Sync started",
     "syncAlreadyRunning": "A scan of {name} is already running; this page will say when it ends.",
     "syncDone": "{name}: the scan is done",
-    "syncFailed": "{name}: the scan failed — {error}",
+    "syncFailed": "{name}: the scan failed - {error}",
     "syncStopped": "{name}: the scan was stopped before it finished",
     "drift": {
       "missingInDb": "Missing in DB",
@@ -419,15 +450,34 @@
     },
     "deleteConfirm": "Delete user \"{email}\"?",
     "resetPasswordTitle": "New password",
-    "resetPasswordSubtitle": "Copy this password — it will not be shown again.",
+    "resetPasswordSubtitle": "Copy this password - it will not be shown again.",
     "resetPasswordOk": "Password reset",
     "resetPassword": "Reset password",
     "resetPasswordConfirm": "Give \"{email}\" a new password? The current one stops working and every session of this account is signed out.",
-    "passwordOptionalHint": "Optional — an account without a password signs in through SSO or with an API key",
+    "passwordOptionalHint": "Optional - an account without a password signs in through SSO or with an API key",
     "createdOk": "User created",
     "createdRoleNotSet": "The account was created as a Viewer, but its role could not be set: {error}",
     "updatedOk": "User updated",
     "deletedOk": "User deleted",
+    "status": {
+      "disabled": "Disabled",
+      "pending": "Waiting for approval",
+      "pendingTitle": "Opened switched off by an SSO sign-in whose identity provider did not confirm the email address. Switch the account on to approve it."
+    },
+    "account": {
+      "pendingAbout": "This account was opened switched off by an SSO sign-in: the identity provider did not confirm that the email address is verified. Switching it on approves it.",
+      "disabledAbout": "This account is switched off: it cannot sign in.",
+      "approve": "Approve and switch on",
+      "enable": "Switch on",
+      "enabledOk": "Account switched on"
+    },
+    "sso": {
+      "title": "SSO identity",
+      "linked": "This account is bound to the SSO identity it first signed in with. Another identity with the same email address is refused.",
+      "unlink": "Remove SSO bind",
+      "unlinkConfirm": "Remove the SSO bind of \"{email}\"? Its next SSO sign-in is matched by its email address again, as a first sign-in is.",
+      "unlinkedOk": "SSO bind removed"
+    },
     "quota": {
       "title": "Storage quota",
       "limitLabel": "Quota (GB)",
@@ -437,7 +487,10 @@
       "recompute": "Recompute usage",
       "recomputeOk": "Usage recomputed",
       "noRead": "The server does not support reading the current quota; usage appears after you save."
-    }
+    },
+    "viaGroup": "through {group}",
+    "groupRoleConfirm": "{name} has the role “{role}” through the group “{group}”. A built-in role picked here does not replace it: give them a custom role, or take them out of the group. Save anyway?",
+    "groupRoleStill": "Saved, but the role “{role}” from the group “{group}” still applies."
   },
   "profile": {
     "saved": "Profile saved",
@@ -451,19 +504,19 @@
       "code": "Verification code",
       "scanHint": "Scan this QR code with your authenticator app, then enter the 6-digit code.",
       "recoveryTitle": "Recovery codes",
-      "recoveryHint": "Save these now — each one signs you in once if you lose your authenticator. They are shown only this time."
+      "recoveryHint": "Save these now - each one signs you in once if you lose your authenticator. They are shown only this time."
     },
     "locale": "Language",
     "username": {
       "label": "Username",
-      "help": "Your username. You can sign in with it or with your email — and connection clients (SFTP, FTP) need it, because an {'@'} in the name they sign in with has to be escaped in their config files."
+      "help": "Your username. You can sign in with it or with your email - and connection clients (SFTP, FTP) need it, because an {'@'} in the name they sign in with has to be escaped in their config files."
     },
     "avatar": {
       "label": "Profile picture",
       "upload": "Upload photo",
-      "help": "Shown next to your name, and in the file explorer's collaboration bar — on every client signed in as you. Resized to 160px automatically.",
+      "help": "Shown next to your name, and in the file explorer's collaboration bar - on every client signed in as you. Resized to 160px automatically.",
       "notImage": "Please choose an image file.",
-      "failed": "That image could not be processed — try another one.",
+      "failed": "That image could not be processed - try another one.",
       "change": "Change photo"
     }
   },
@@ -471,7 +524,7 @@
     "title": "Settings",
     "subtitle": "Instance-wide configuration",
     "siteName": "Site name",
-    "envOnlyNote": "The public URL, sync interval, log level and default language are set by environment variables (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE), not from this page — see docs/CONFIGURATION.md.",
+    "envOnlyNote": "The public URL, sync interval, log level and default language are set by environment variables (FILEX_PUBLIC_URL, FILEX_SYNC_INTERVAL, FILEX_LOG_LEVEL, FILEX_DEFAULT_LOCALE), not from this page - see docs/CONFIGURATION.md.",
     "savedOk": "Settings saved",
     "folderView": {
       "title": "Default folder view",
@@ -498,7 +551,7 @@
     },
     "smtp": {
       "reason": {
-        "not_configured": "Mail is not set up yet — enter the server, port and sender above and save first.",
+        "not_configured": "Mail is not set up yet - enter the server, port and sender above and save first.",
         "host": "The mail server name could not be found. Check the host name.",
         "connect": "Nothing answered at that server and port. Check the host, the port and whether a firewall blocks the connection.",
         "tls": "The secure connection to the mail server failed. Check the encryption setting (TLS / STARTTLS) and the server’s certificate.",
@@ -531,13 +584,13 @@
   },
   "external": {
     "title": "External services",
-    "subtitle": "Optional editors and renderers — mounted only when reachable",
+    "subtitle": "Optional editors and renderers - mounted only when reachable",
     "fields": {
       "url": "Service URL",
       "jwtSecret": "JWT secret",
       "jwtSecretHint": "Leave blank to keep the current secret",
       "callbackUrl": "Callback URL (the address the document server reaches filex at)",
-      "callbackUrlHint": "Leave empty to use filex's public URL. Fill it in when the document server cannot resolve that address — a container name such as http://filex:5212 belongs here, never in the public URL, which also builds every share link."
+      "callbackUrlHint": "Leave empty to use filex's public URL. Fill it in when the document server cannot resolve that address - a container name such as http://filex:5212 belongs here, never in the public URL, which also builds every share link."
     },
     "states": {
       "healthy": "Healthy",
@@ -548,8 +601,10 @@
     "savedOk": "Service updated",
     "testOk": "Reachable",
     "testFail": "Health check failed",
+    "testWarn": "Reachable, but not everything is right: see the card",
+    "testedUnsaved": "These results are for the values in the form, which are not saved yet. Save them to use them.",
     "envManaged": "Set by the environment",
-    "envManagedHint": "Pinned by an environment variable. A change here applies immediately but is reset from the environment the next time filex restarts.",
+    "envManagedHint": "Set by {env}. A change here, switching it off included, applies now and lasts until filex restarts, when the environment's value is written back. To switch it off for good, remove {env} (or its line in the config file).",
     "overall": {
       "disabled": "Disabled",
       "unconfigured": "Not configured",
@@ -562,13 +617,13 @@
     },
     "threeAddresses": {
       "title": "Three machines, three addresses",
-      "browser": "Your browser loads the editor's JavaScript straight from the document server URL below, so that address has to work in a browser — not only inside the container network.",
+      "browser": "Your browser loads the editor's JavaScript straight from the document server URL below, so that address has to work in a browser - not only inside the container network.",
       "server": "The filex process fetches the document server's health endpoint from the same URL. This is what the Test button checks.",
       "callback": "The document server fetches the document from filex and posts the save back to filex's public URL, so that address has to work from inside the document server's container:",
       "publicUrlUnknown": "(not reported)",
       "diagnose": "When something fails, these two commands say which half is wrong:",
-      "fromWorkstation": "from a workstation — the browser leg",
-      "fromDocumentServer": "from inside the document server container — the callback leg"
+      "fromWorkstation": "from a workstation - the browser leg",
+      "fromDocumentServer": "from inside the document server container - the callback leg"
     },
     "legs": {
       "server": "From the filex server:",
@@ -578,11 +633,11 @@
       "unreachable": "not reachable",
       "notConfigured": "not configured",
       "disabledLeg": "disabled",
-      "cannotCheck": "not checked — filex cannot make the document server issue a request on demand. The warnings below are the shapes that certainly cannot work.",
+      "cannotCheck": "not checked - filex cannot make the document server issue a request on demand. The warnings below are the shapes that certainly cannot work.",
       "disagree": "filex reaches this address and your browser does not. That is what a container-internal name looks like: the editor loads in the browser, so it will fail there.",
-      "callbackOk": "reached filex — the document server downloaded a test file from it",
+      "callbackOk": "reached filex - the document server downloaded a test file through the same signed address a document uses",
       "callbackBad": "did NOT reach filex. The document opens and the save never comes back.",
-      "callbackUnknown": "not measured yet — press “Test now”",
+      "callbackUnknown": "not measured yet - press “Test now”",
       "callbackUnchecked": "could not be measured; the warnings below are the shapes that certainly cannot work."
     },
     "browserStates": {
@@ -591,15 +646,16 @@
       "ok": "the editor loaded",
       "wrongContent": "something answered, but it is not this service",
       "unreachable": "not reachable from here",
-      "timeout": "timed out — nothing answered and nothing refused",
+      "timeout": "timed out - nothing answered and nothing refused",
       "mixedContent": "blocked: this admin page is HTTPS and that address is HTTP"
     },
     "advisories": {
       "browser_bare_host": "“{host}” is a single-label host name. filex can reach it from inside the container network, but your browser loads this service directly and cannot resolve it. Use an address a browser can open.",
-      "browser_loopback_host": "This is a loopback address, but filex is published at {publicUrl} — the people who open it are not on this host, and to their browser “{host}” means their own machine.",
+      "browser_loopback_host": "This is a loopback address, but filex is published at {publicUrl} - the people who open it are not on this host, and to their browser “{host}” means their own machine.",
       "public_url_loopback": "The document server fetches the document from filex and posts the save back to {publicUrl}. Inside its own container that address is the document server, not filex.",
       "public_url_bare_host": "filex's public URL ({publicUrl}) is a container-network name. The document server can reach it, but share links and emails built from it will not open in a browser outside that network.",
-      "public_url_unresolved": "filex itself cannot resolve “{host}”. That is expected if your document server uses a different DNS view; otherwise the public URL points at a name nothing can look up."
+      "public_url_unresolved": "filex itself cannot resolve “{host}”. That is expected if your document server uses a different DNS view; otherwise the public URL points at a name nothing can look up.",
+      "jwt_not_enforced": "The document server accepted an unsigned request, so JWT is off on it. It still checks the token in filex's editor configuration, with its own secret, and refuses it, so documents do not open (\"The document security token is not correctly formed\"); it refuses to download from private addresses; and it sends its save callbacks unsigned, which filex refuses. Set JWT_ENABLED=true and JWT_SECRET to the same secret on the document server."
     },
     "noSecret": {
       "title": "ONLYOFFICE has no JWT secret",
@@ -615,6 +671,8 @@
       "oidc": "OIDC (Keycloak, Auth0, Authentik…)",
       "ldap": "LDAP / Active Directory",
       "proxy-header": "Reverse-proxy header",
+      "windows": "Windows account (this machine or its domain)",
+      "pam": "Linux account (PAM)",
       "api-token": "API key"
     },
     "fields": {
@@ -640,9 +698,43 @@
       "admin_role": "Admin role",
       "auto_provision": "Auto-provision users",
       "ca_file": "CA certificate file",
-      "protocol_login": "Accept directory passwords on WebDAV, SFTP, FTPS, S3 and NFS"
+      "protocol_login": "Accept directory passwords on WebDAV, SFTP, FTPS, S3 and NFS",
+      "auto_create": "Open an account at the first sign-in",
+      "allowed_groups": "Only members of these groups (comma list)",
+      "domain": "Default domain (CORP or corp.example; empty = this machine)",
+      "group_attr": "Group attribute",
+      "pamtester_path": "pamtester path",
+      "service": "PAM service (its file in /etc/pam.d)",
+      "use_sudo": "Run pamtester through sudo (switch it off only if filex runs as root)",
+      "sudo_path": "sudo path",
+      "timeout_seconds": "Time limit of one sign-in (seconds)",
+      "max_concurrent": "Sign-ins at the same time",
+      "email_domain": "Email domain of the accounts",
+      "ca_pem": "CA certificate (PEM)",
+      "show_refusal_reason": "Say why a sign-in with the right password is refused",
+      "trust_email": "Trust this provider's email addresses"
     },
-    "secretSet": "Set — type a new one to replace it; leave it empty to keep it.",
+    "fieldHints": {
+      "timeout_seconds": "A whole number from 3 to 60.",
+      "max_concurrent": "A whole number from 1 to 64; more at once are asked to try again.",
+      "email_domain": "With corp.example, the account alex signs in as alex{'@'}corp.example. Empty: the address this installation chose for operating-system accounts. Choose it before the first sign-in.",
+      "ca_pem": "The private CA the directory's certificate is signed by, pasted as it is. Empty: the system's trusted roots.",
+      "show_refusal_reason": "Off by default. On, a person whose password was right but who still may not sign in here (no account is opened at a first sign-in, or they are in no allowed group) is told why. The sign-in form then also tells anybody who is guessing that a password is right - a password that may open other services that use the same accounts.",
+      "trust_email": "Off by default. Off, an address the provider does not mark verified (email_verified) opens no existing account that is not yet bound to an SSO identity, and a new account for it is opened switched off until an administrator approves it. Turn it on only for a provider whose addresses all belong to the people who hold them: anybody who can set an address there can then sign in to the account with that address."
+    },
+    "upgradeHints": {
+      "trust_email": "The upgrade switched this on so that this provider works as it did before. Switch it off if the provider sends email_verified."
+    },
+    "testAccount": {
+      "title": "Test account",
+      "about": "A real sign-in is tried with this account. When the test passes and the provider is saved switched on, this account becomes a super administrator of filex, so whoever sets it up stays in. The password is used for that one request and never stored - type it again for each test or save.",
+      "aboutTestOnly": "A real sign-in is tried with this account. The password is used for that one request and never stored.",
+      "username": "Username",
+      "password": "Password",
+      "needed": "Give the test account’s username and password first: this provider is only switched on by a test that signs a real account in.",
+      "madeSuperAdmin": "The account {account} was made a super administrator."
+    },
+    "secretSet": "Set - type a new one to replace it; leave it empty to keep it.",
     "testOk": "Every step that can be checked from here passed",
     "testFail": "The test stopped at a step that failed",
     "status": {
@@ -662,6 +754,21 @@
       "bad_url": "the address is not valid",
       "status": "the server answered {status}",
       "not_json": "the answer is not a discovery document",
+      "account_locked_out": "the account is locked out",
+      "account_disabled": "the account is disabled",
+      "account_expired": "the account has expired",
+      "password_expired": "the password has expired",
+      "password_must_change": "the password must be changed before the next sign-in",
+      "account_restriction": "the account has a sign-in restriction",
+      "logon_hours": "the account may not sign in at this hour",
+      "workstation_restriction": "the account may not sign in on this machine",
+      "network_logon_not_granted": "this machine does not let the account sign in over the network (policy: Access this computer from the network)",
+      "invalid": "the settings are not valid",
+      "invalid_name": "that is not a name filex can use for an account",
+      "forbidden_account": "system, service and built-in accounts (Administrator, Guest, NT AUTHORITY…) can never sign in",
+      "missing": "no test account was given",
+      "no_password": "the test account has no password",
+      "no_group_source": "set the role/group claim (OIDC), the group attribute (LDAP) or the roles header, so there is something to read groups from",
       "public": "a client without a secret can only be checked when somebody signs in",
       "unclear": "the provider’s answer ({status}) does not say either way"
     },
@@ -669,6 +776,18 @@
       "required": {
         "ok": "The required fields are filled in.",
         "fail": "Required and empty: {fields}."
+      },
+      "first_login_open": {
+        "ok": "Anybody who signs in for the first time gets an account."
+      },
+      "first_login_closed": {
+        "ok": "Nobody gets an account by signing in: only people who already have one can sign in."
+      },
+      "first_login_groups": {
+        "ok": "Only members of {groups} get an account on their first sign-in (groups are read from {from})."
+      },
+      "first_login": {
+        "fail": "Only some groups are allowed a first sign-in, but this provider reports no groups - nobody new could ever sign in: {reason}."
       },
       "address": {
         "fail": "“{url}” is not an LDAP address: it must start with ldap:// or ldaps://."
@@ -725,24 +844,58 @@
         "fail": "The proxy does not send the {header} header."
       },
       "secret": {
-        "fail": "A secret stored for this provider cannot be opened — {env} may have changed. Type it again."
+        "fail": "A secret stored for this provider cannot be opened - {env} may have changed. Type it again."
+      },
+      "config": {
+        "ok": "The settings are well-formed.",
+        "fail": "The configuration is not valid: {detail}"
+      },
+      "pamtester": {
+        "ok": "pamtester is installed and can be run ({path})."
+      },
+      "pam_service": {
+        "ok": "The PAM service file exists ({file})."
+      },
+      "sudo": {
+        "ok": "sudo lets filex run that one command without a password."
+      },
+      "unknown_user": {
+        "ok": "PAM answers an account that does not exist with a clean no, as it should."
+      },
+      "unsupported_os": {
+        "fail": "This server does not run on Windows, so it cannot sign Windows accounts in."
+      },
+      "platform": {
+        "ok": "This machine can check Windows accounts."
+      },
+      "test_account": {
+        "ok": "A test account was given.",
+        "fail": "The test signs a real account in, and cannot start: {reason}. Give an account of this machine (or its domain) and its password - they are used once and never stored."
+      },
+      "logon": {
+        "ok": "The test account ({account}) signed in.",
+        "fail": "The test account could not sign in: {reason} (code {code})."
+      },
+      "account": {
+        "ok": "The test account is an ordinary account: filex accepts it.",
+        "fail": "filex would never accept this account: {reason}."
       }
     },
-    "lockoutNote": "Password sign-in and the installation administrator’s recovery sign-in are set by the environment, not on this page — so nothing here can lock you out. Providers switched on here are added after the environment’s and apply the moment they are saved.",
+    "lockoutNote": "Password sign-in and the installation administrator’s recovery sign-in are set by the environment, not on this page - so nothing here can lock you out. Providers switched on here are added after the environment’s and apply the moment they are saved.",
     "passwordOn": "Password sign-in is on ({from}).",
     "passwordOff": "Password sign-in is off on this server. Only the environment can turn it on ({env}).",
     "recoveryOn": "The installation administrator can still sign in with a password, for recovery ({env}).",
     "recoveryOff": "Recovery sign-in for the installation administrator is off ({env} is false).",
     "apiTokenAlways": "API keys are always accepted; they are issued on the API / MCP page.",
     "noSecretKey": "{env} is not set on this server, so a client secret or bind password cannot be stored here: secrets are only ever kept sealed.",
-    "envReadOnly": "Configured by the environment: {from}. Change it there and restart filex — this page cannot override it.",
+    "envReadOnly": "Configured by the environment: {from}. Change it there and restart filex - this page cannot override it.",
     "shadowed": "A configuration saved on this page under the same name is kept, but not used while the environment defines this provider.",
-    "legacy": "Saved on this page before v0.43.0, when the page applied nothing — it has never been used, and it was imported switched off. Review every field, then switch it on.",
+    "legacy": "Saved on this page before v0.43.0, when the page applied nothing - it has never been used, and it was imported switched off. Review every field, then switch it on.",
     "failedReason": "Switched on, but it could not start: {reason}",
     "secretSetShort": "set",
     "redirectDefault": "Leave empty for this server’s own address + /api/auth/oidc/callback.",
     "saveApply": "Save and apply",
-    "savedApplied": "Saved and applied — no restart needed.",
+    "savedApplied": "Saved and applied - no restart needed.",
     "confirmTitle": "Switch it on although the test failed?",
     "confirmBody": "The test of {provider} failed at these steps:",
     "confirmNote": "Switched on like this, it may not let anyone sign in until the problem is fixed. Password sign-in and the recovery sign-in keep working either way.",
@@ -752,20 +905,47 @@
       "page": "Set on this page",
       "builtin": "Built in"
     },
-    "technicalDetailIs": "Technical detail: {detail}"
+    "technicalDetailIs": "Technical detail: {detail}",
+    "add": "Add a provider",
+    "addTitle": "Another sign-in provider",
+    "addHint": "A second provider of a kind: another directory, or an SSO for some tenants only. It is made switched off: fill it in on its card, test it and switch it on there.",
+    "kind": "Kind",
+    "label": "Shown as",
+    "labelHint": "What the sign-in page calls it. Empty: the kind's own name.",
+    "slug": "Short name",
+    "slugHint": "Lower-case letters, digits and dashes; it names the provider in addresses. Empty: one is chosen.",
+    "create": "Create",
+    "created": "Provider made, switched off: fill it in on its card.",
+    "addErrors": {
+      "slug_taken": "Another provider already has this short name.",
+      "slug_invalid": "Only lower-case letters, digits and dashes, and not the name of a kind."
+    },
+    "delete": "Delete",
+    "deleteConfirm": "Delete “{name}”? Nobody signs in through it any more.",
+    "deleted": "Provider deleted",
+    "tenantsTitle": "Tenants that sign in through it",
+    "tenantsHint": "A tenant that is not ticked gets nothing from this provider: its people cannot sign in through it, and get no account from it.",
+    "tenantsOwned": "A tenant's own provider: it serves {tenant} only.",
+    "tenantsSave": "Save tenants",
+    "tenantsSaved": "Tenants saved",
+    "platformTenant": "The platform's own tenant",
+    "lockoutConfirm": "This takes away a tenant's last way in. Go on?",
+    "review": "Every sign-in provider is now bound to the tenants it serves. The upgrade bound every provider to every tenant that existed, so nothing changed for anyone: review the bindings below and remove the tenants a provider should not serve.",
+    "reviewDone": "Reviewed"
   },
   "grants": {
     "title": "Folder access",
-    "subtitle": "Every per-file/folder grant — who has what, where. Revoke any.",
+    "subtitle": "Every per-file/folder grant - who has what, where. Revoke any.",
     "search": "Search user, path, storage…",
-    "user": "User",
+    "user": "User or group",
     "storage": "Storage",
     "path": "Path",
     "level": "Level",
     "revoke": "Revoke",
     "revokeConfirm": "Revoke {email}'s access to {path}?",
     "revokedOk": "Grant revoked",
-    "empty": "No grants yet."
+    "empty": "No grants yet.",
+    "group": "Group"
   },
   "apiMcp": {
     "title": "API / MCP",
@@ -776,7 +956,7 @@
     "mcpEndpoint": "MCP endpoint (streamable HTTP)",
     "restBase": "REST base URL",
     "addToClaude": "Add to Claude",
-    "tokenOnce": "This API key is shown only once — copy it and store it safely.",
+    "tokenOnce": "This API key is shown only once - copy it and store it safely.",
     "createdOk": "API key created",
     "updatedOk": "API key updated",
     "editToken": "Edit API key",
@@ -798,11 +978,11 @@
       "label": "Name",
       "labelPlaceholder": "e.g. claude-agent",
       "scopes": "Permissions",
-      "scopesHint": "Choose at least one permission — an API key is never issued with none. “admin” grants the whole admin panel and is never included unless you choose it; File MCP needs “mcp”.",
+      "scopesHint": "Choose at least one permission - an API key is never issued with none. “admin” grants the whole admin panel and is never included unless you choose it; File MCP needs “mcp”.",
       "root": "Root confinement (optional)",
-      "rootNone": "— Every storage —",
+      "rootNone": "- Every storage -",
       "rootPathPlaceholder": "sub/folder (empty = storage root)",
-      "rootHint": "Pick a storage and a path to confine the API key to that subtree — it cannot reach above it. Empty = every storage.",
+      "rootHint": "Pick a storage and a path to confine the API key to that subtree - it cannot reach above it. Empty = every storage.",
       "expiry": "Validity (days)",
       "expiryHint": "0 or empty = never",
       "usernames": "Usernames (optional)",
@@ -844,6 +1024,7 @@
       "ai_share": "Share link (AI)",
       "ai_tokens": "API key",
       "audit": "Audit log",
+      "auth": "Session",
       "auth_provider": "Sign-in provider",
       "duplicates": "Duplicates",
       "embed": "Embedding",
@@ -887,20 +1068,39 @@
       "themes": "Theme",
       "permissions": "Built-in role",
       "roles": "Role",
-      "permission_rule": "Role"
+      "permission_rule": "Role",
+      "login": "Sign-in",
+      "login_security": "Sign-in security",
+      "group": "Group",
+      "groups": "Group",
+      "group_grant": "Group folder access",
+      "thumbnail": "Thumbnails",
+      "tools": "Tools",
+      "tenant": "Tenant",
+      "tenant_domain": "Own domain",
+      "file_association": "Default apps",
+      "file_types": "Default apps"
     },
     "verb": {
       "action": "changed",
       "archive_add": "added to archive",
       "archive_create": "archive created",
       "archive_extract": "archive extracted",
+      "comment_add": "comment added",
+      "comment_delete": "comment deleted",
+      "copy": "copied",
       "create": "created",
       "delete": "deleted",
       "disable": "turned off",
       "empty": "emptied",
       "enroll": "set up",
+      "entry_available": "entry available again",
+      "entry_unavailable": "entry unavailable",
+      "grant_revoke": "access revoked",
+      "grant_set": "access granted",
       "mkdir": "folder created",
       "move": "moved",
+      "op_cancel": "operation stopped",
       "password_change": "password changed",
       "password_reset": "password reset",
       "quota_recompute": "quota recounted",
@@ -917,6 +1117,8 @@
       "upload": "uploaded",
       "upload_abort": "upload cancelled",
       "verify": "verified",
+      "version_restore": "version restored",
+      "version_snapshot": "version saved",
       "zip": "compressed",
       "action_run": "action run",
       "page_job": "job started from its link",
@@ -928,6 +1130,8 @@
       "tags": "tags changed",
       "download_link": "downloaded by dragging it out",
       "download_link_refused": "drag-out download refused",
+      "cross_origin_refused": "request from another site refused",
+      "account_pending": "account opened, waiting for approval",
       "ui_save": "saved from its interface",
       "upgrade": "upgraded",
       "rollback": "put back to the previous version",
@@ -937,12 +1141,30 @@
       "approve": "approved",
       "reject": "rejected",
       "expire": "expired",
-      "supersede": "closed because its source changed"
+      "supersede": "closed because its source changed",
+      "unlocked": "lock lifted",
+      "members_add": "members added",
+      "member_remove": "member removed",
+      "repair": "repaired",
+      "settings_update": "limits changed",
+      "storage_link": "storage linked",
+      "storage_unlink": "storage unlinked",
+      "tenants_set": "tenants changed",
+      "check": "checked",
+      "certificate_set": "certificate brought",
+      "certificate_delete": "certificate removed",
+      "insecure_auth_set": "insecure providers switched",
+      "reset": "put back to the default",
+      "thumbnail_limits": "thumbnail limits changed",
+      "thumbnail_sent": "sent a file out while drawing a thumbnail"
     },
     "target": {
       "auth_provider": "Sign-in provider",
       "external": "External service",
+      "comment": "Comment",
+      "grant": "Folder access",
       "node": "File",
+      "op": "Operation",
       "profile": "Profile",
       "search": "Search index",
       "setting": "Setting",
@@ -957,7 +1179,15 @@
       "file": "File",
       "permissions": "Built-in role",
       "permission_rule": "Role",
-      "plugin_request": "Plugin request"
+      "plugin_request": "Plugin request",
+      "login": "Sign-in",
+      "login_security": "Sign-in security",
+      "group": "Group",
+      "group_grant": "Group folder access",
+      "settings": "Settings",
+      "providers": "Tenant",
+      "tenant_domain": "Own domain",
+      "file_type": "File type"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "What",
@@ -1007,8 +1237,8 @@
     "revoke": "Revoke",
     "pinProtected": "PIN required",
     "pinHintRecoverable": "The visitor must enter a PIN. You can copy it from this row; every read is recorded in the audit log.",
-    "pinHint": "The visitor must enter a PIN. PINs are stored hashed, so filex cannot show this one again — it was shown once, when the link was created.",
-    "pinHintApp": "The visitor must enter a PIN. PINs are stored hashed, so filex cannot show this one again — {app} showed it once, when it created the link.",
+    "pinHint": "The visitor must enter a PIN. PINs are stored hashed, so filex cannot show this one again - it was shown once, when the link was created.",
+    "pinHintApp": "The visitor must enter a PIN. PINs are stored hashed, so filex cannot show this one again - {app} showed it once, when it created the link.",
     "pinForbidden": "Only the person who created this link, or an administrator, can read its PIN.",
     "neverExpires": "Never",
     "revokeConfirm": "Anyone holding the link will no longer be able to open it. The row stays in this list.",
@@ -1112,6 +1342,10 @@
     "search": "Search index",
     "toolFound": "Found",
     "toolMissing": "Not found",
+    "heic": "HEIC photos",
+    "office": "Office documents (ONLYOFFICE)",
+    "officeHint": "Office documents get thumbnails from ONLYOFFICE. Configure it under Settings → External services; until then they show their type icon.",
+    "heicHint": "ImageMagick is installed but cannot decode HEIC photos: libheif's HEVC decoder is missing. Install libheif-plugin-libde265 (Debian, Ubuntu) or libheif-libde265 (Alpine), then restart filex.",
     "licenseIs": "License: {license}"
   },
   "errors": {
@@ -1129,7 +1363,7 @@
   },
   "trash": {
     "title": "Trash",
-    "subtitle": "Soft-deleted files — purged automatically once retention expires.",
+    "subtitle": "Soft-deleted files - purged automatically once retention expires.",
     "all_storages": "All storages",
     "empty": "Empty trash",
     "empty_title": "Trash is empty",
@@ -1139,7 +1373,7 @@
     "col_size": "Size",
     "col_deleted_at": "Deleted",
     "col_deleted_by": "Deleted by",
-    "deleted_by_nobody": "Not recorded: removed outside filex, or deleted before filex kept this",
+    "deleted_by_nobody": "Not recorded: quarantined by the virus scan, or deleted before filex kept this",
     "col_ttl": "TTL",
     "restore": "Restore",
     "purge": "Purge",
@@ -1163,12 +1397,126 @@
     "emptying_freed": "{size} freed so far",
     "emptying_note": "It carries on if you leave this page.",
     "empty_busy": "The trash is already being emptied.",
-    "empty_failed": "{count} item could not be purged — see the server log | {count} items could not be purged — see the server log",
+    "empty_failed": "{count} item could not be purged - see the server log | {count} items could not be purged - see the server log",
     "empty_stopped": "Emptying the trash stopped: {error}",
     "emptying_queued": "Emptying the trash… waiting for another purge to finish",
     "empty_stop": "Stop",
     "stopped_after": "Stopped after {count} item; the rest is still in the trash. | Stopped after {count} items; the rest is still in the trash.",
     "total_count": "Total: {n}"
+  },
+  "tools": {
+    "title": "Tools",
+    "subtitle": "Maintenance you run on purpose. None of it changes anybody's files.",
+    "tabs": {
+      "thumbnails": "Thumbnail repair"
+    },
+    "thumbs": {
+      "title": "Repair thumbnails",
+      "desc": "Draw thumbnails again for one file, a folder and everything in it, a storage, or all of them. It runs in the background; you can leave this page.",
+      "storage": "Storage",
+      "all_storages": "All storages",
+      "path": "File or folder (optional)",
+      "path_placeholder": "/Photos/2024",
+      "path_hint": "Leave it empty for the whole storage.",
+      "path_needs_storage": "Pick a storage to repair one file or folder.",
+      "mode": "What to draw",
+      "mode_fix": "Fix",
+      "mode_rebuild": "Rebuild",
+      "mode_fix_hint": "Draws what is missing, failed, skipped or out of date. Thumbnails that are right are left alone.",
+      "mode_rebuild_hint": "Draws every file again. It takes longer; use it after an engine changed.",
+      "start": "Start",
+      "running": "Repairing thumbnails…",
+      "queued": "Waiting to start…",
+      "progress": "{done} of {total}",
+      "stop": "Stop",
+      "note": "It carries on if you leave this page.",
+      "busy": "Thumbnails are already being repaired.",
+      "path_not_found": "There is no file or folder at that path.",
+      "done": "Thumbnail repair finished.",
+      "stopped": "Thumbnail repair stopped.",
+      "run_failed": "Thumbnail repair stopped: {error}",
+      "last_run": "Last repair",
+      "count": {
+        "processed": "Looked at",
+        "ok": "Drawn",
+        "failed": "Failed",
+        "skipped": "Skipped"
+      },
+      "refused": {
+        "sync_running": "left out: a sync of this storage is still running. Try again when it has finished.",
+        "sync_aborted": "left out: its last sync was interrupted. Sync it again, then repair.",
+        "never_synced": "left out: it has never been synced. Sync it first, then repair."
+      },
+      "problems_title": "Files without a thumbnail, or drawn by a fallback",
+      "problems_empty": "Every file has its thumbnail.",
+      "problems_truncated": "The 500 most recent are shown.",
+      "col": {
+        "name": "File",
+        "storage": "Storage",
+        "reason": "Why",
+        "size": "Size",
+        "attempted": "Last tried",
+        "handlers": "Handlers asked"
+      },
+      "reason": {
+        "svg_too_large": "Larger than the SVG size limit ({limit} MB)",
+        "svg_timeout": "Took longer than the SVG time limit ({limit} s)",
+        "no_engine": "No engine can draw this kind of file",
+        "failed": "Could not be drawn",
+        "no_tool": {
+          "video": "FFmpeg is not installed",
+          "audio": "FFmpeg is not installed",
+          "pdf": "Neither Ghostscript nor poppler is installed",
+          "office": "ONLYOFFICE is not configured (Settings → External services)",
+          "heif": "ImageMagick with HEIC support is not installed",
+          "heic_codec": "libheif's HEVC decoder is not installed (libheif-plugin-libde265)",
+          "other": "A program this kind of file needs is not installed"
+        },
+        "archive_encrypted": "Encrypted archive: its contents are not listed",
+        "archive_too_large": "Archive too large to list (past the listing limits)",
+        "no_handler": "Every handler of this kind is switched off (Default apps)",
+        "app_failed": "{app} could not draw it",
+        "app_timeout": "{app} took longer than its time limit ({limit} s)",
+        "app_too_large": "Larger than the size limit of {app} ({limit} MB)",
+        "fell_back": "Drawn by {generator} after {first} could not",
+        "oo_corrupt": "ONLYOFFICE could not read it: the file may be damaged",
+        "oo_password": "Protected by a password",
+        "oo_too_large": "Larger than the office size limit ({limit} MB)",
+        "oo_too_large_ds": "Larger than the document server's own limit",
+        "oo_retry": "ONLYOFFICE did not answer ({detail}); tried {tries} times, tried again later",
+        "oo_retry_done": "ONLYOFFICE did not answer ({detail}); gave up after {tries} tries"
+      },
+      "retry": "Try again",
+      "limits": {
+        "title": "Thumbnail settings",
+        "desc": "An SVG over either limit gets no thumbnail: it shows its icon and is listed under Tools → Thumbnail repair with the reason. Raise a limit to draw the files it skipped.",
+        "size": "Largest SVG (MB)",
+        "size_hint": "Between {min} and {max} MB. The default is 5.",
+        "time": "Longest drawing time (seconds)",
+        "time_hint": "Between {min} and {max} seconds. The default is 10.",
+        "invalid": "A whole number between {min} and {max}.",
+        "readonly": "These settings apply to the whole server; the server's administrator can change them.",
+        "saved": "Thumbnail settings saved.",
+        "svg_title": "SVG limits",
+        "office_title": "Office documents (ONLYOFFICE)",
+        "office_desc": "ONLYOFFICE draws the first page of an office document. It runs one conversion at a time, shared with the editors, so filex sends it one document at a time by default. A document over the size limit gets no thumbnail and is marked too large.",
+        "office_size": "Largest office document (MB)",
+        "office_size_hint": "Between {min} and {max} MB. The default is 25.",
+        "office_slots": "Documents at once",
+        "office_slots_hint": "Between {min} and {max}. The default is 1.",
+        "folder_previews": "Folder previews",
+        "folder_previews_desc": "Folders are drawn with the files that came into them last (in the grid, the gallery and the list), and resting the pointer on a folder lists what it holds. Off: the classic folder icons and no list."
+      },
+      "attempt": {
+        "ok": "drew it"
+      },
+      "generators": {
+        "title": "Who drew the thumbnails",
+        "desc": "The thumbnails of the files you reach, counted by who drew them: filex itself, or an app.",
+        "legacy": "Before 0.50, or a placeholder card",
+        "empty": "No thumbnail has been drawn yet."
+      }
+    }
   },
   "home": {
     "title": "Home",
@@ -1202,29 +1550,30 @@
   },
   "demo": {
     "badge": "Live demo",
-    "readOnly": "Public demo — the admin panel is read-only. Browsing, uploads, shares and tags all work; anything that would change the instance or the shared demo account is refused, and everything resets nightly.",
-    "title": "filex — self-hosted file manager that embeds anywhere",
+    "hiddenAddress": "hidden on the demo",
+    "readOnly": "Public demo - the admin panel is read-only. Browsing, uploads, shares and tags all work; anything that would change the instance or the shared demo account is refused, and everything resets nightly.",
+    "title": "filex - self-hosted file manager that embeds anywhere",
     "subtitle": "One Go binary with a full web UI, pluggable storage/auth/DB drivers, live updates and presence, an embeddable web component, a desktop app whose folder sync is live, apps that add new things to do with a file, and a built-in MCP server so AI agents can drive it natively.",
     "openCta": "Open the demo",
     "showSignIn": "Admin sign-in",
     "hideSignIn": "Hide admin sign-in",
     "creds": "Demo account: {email} · password: {password}",
-    "sandbox": "Shared sandbox — everything resets nightly; storages, plugins and apps are switched off here.",
-    "adminHint": "Sign in with a non-demo account for full admin.",
-    "alsoIncluded": "Also included: apps — sandboxed WebAssembly add-ons installed through a permission review, with e-Signature and Convert shipping alongside · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy · OIDC SSO and LDAP / Active Directory · in-place viewers and editors, Office through ONLYOFFICE · creating a document from + New — Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
+    "sandbox": "Shared sandbox - everything resets nightly; storages, plugins and apps are switched off here.",
+    "adminHint": "The admin panel is read-only here for every account - run your own filex to change what it shows.",
+    "alsoIncluded": "Also included: apps - sandboxed WebAssembly add-ons installed through a permission review, with e-Signature, Convert, filextext and draw.io shipping alongside · language packs, right-to-left layout included · instance themes on the Appearance screen · the links you made, under My shares · personal and team tags · symlinked folders · a view and sort remembered per folder · roles, groups and per-person exceptions, per-file and per-folder access, and apps' own permissions · multi-tenancy, each tenant with its own sign-in realm and able to run itself - its own sign-in providers, domain and certificate · OIDC SSO, LDAP / Active Directory and sign-in with a Windows or Linux account · sign-in attempt limits with an IP allow-list · in-place viewers and editors, Office through ONLYOFFICE · thumbnails of SVG, HEIC, text and archives, and folders drawn with the files that came into them last · Default apps: which app opens a kind of file · creating a document from + New - Markdown, text, CSV and code anywhere, Word, Excel, PowerPoint and OpenDocument wherever ONLYOFFICE is connected · a whole selection downloaded as one streamed archive · trash and versioning · replication · quotas · audit log · webhooks and in-app notifications · storage plugins · a persistent operation queue · a usage and cost view built from your storage provider's own daily report.",
     "features": {
       "storageTitle": "6 storage drivers, both directions",
-      "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree — then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
+      "storageBody": "Mount local disks, S3, SFTP, WebDAV, FTP/FTPS and SMB/NAS side by side as one tree - then reach that same tree back as S3, SFTP, FTPS, NFSv3 or WebDAV.",
       "searchTitle": "Search that forgives",
-      "searchBody": "Permission-aware full-text search across every storage. Try “budget 2026” for Documents/Budget-2026.csv, or “mian.go” — one typo forgiven — for Code/main.go. Tag a file, yours alone or shared with the team, and tag:yourlabel filters by it.",
+      "searchBody": "Permission-aware full-text search across every storage. Try “budget 2026” for Documents/Budget-2026.csv, or “mian.go” - one typo forgiven - for Code/main.go. Tag a file, yours alone or shared with the team, and tag:yourlabel filters by it.",
       "shareTitle": "Sharing, file requests · E2EE",
-      "shareBody": "Public links with a PIN, an expiry and a download limit, inbound drop links that collect files from other people — plus end-to-end encrypted folders the server cannot read.",
+      "shareBody": "Public links with a PIN, an expiry and a download limit, inbound drop links that collect files from other people - plus end-to-end encrypted folders the server cannot read.",
       "desktopTitle": "Desktop app + folder sync",
-      "desktopBody": "The same explorer as a Windows, Linux or macOS app: several accounts at once, live two-way sync from the tray — an edit on either side arrives in about a second — a portable build on every platform for machines you may not install software on, and “filex mount” to attach a remote server as a Linux folder or a Windows drive.",
+      "desktopBody": "The same explorer as a Windows, Linux or macOS app: several accounts at once, live two-way sync from the tray - an edit on either side arrives in about a second - a portable build on every platform for machines you may not install software on, and “filex mount” to attach a remote server as a Linux folder or a Windows drive.",
       "embedTitle": "Embeddable · MCP for agents",
       "embedBody": "Drop the real file manager into your product as a Vue 3, React or framework-free web component, and hand AI agents a REST surface scoped by API key and a native MCP server.",
       "openTitle": "Open source · MIT",
-      "openBody": "MIT licensed — code, docs & releases:"
+      "openBody": "MIT licensed - code, docs & releases:"
     }
   },
   "queue": {
@@ -1278,7 +1627,7 @@
     "prefs": {
       "title": "Your notifications",
       "inApp": "In-app bell",
-      "inAppHint": "Turning this off empties your bell. Nothing stops being recorded — an admin still sees every event.",
+      "inAppHint": "Turning this off empties your bell. Nothing stops being recorded - an admin still sees every event.",
       "browser": "Browser notifications",
       "browserHint": "Raise a notification outside the tab when something new arrives. Clicking it opens the file, folder or share it is about.",
       "enableBrowser": "Allow notifications",
@@ -1289,7 +1638,7 @@
       "permUnsupported": "This browser cannot show notifications",
       "desktopHandled": "The desktop app shows these itself",
       "saved": "Preference saved",
-      "movedToSettings": "Your own notification settings — the bell, browser pop-ups, which events — are in your user settings.",
+      "movedToSettings": "Your own notification settings - the bell, browser pop-ups, which events - are in your user settings.",
       "openSettings": "Open my notification settings"
     },
     "adminTitle": "Notifications admin",
@@ -1361,9 +1710,13 @@
       "quota_full": "Storage full",
       "queue_stuck": "Queue stuck",
       "auth_fail_spike": "Failed sign-ins rising",
+      "auth_provider_down": "Sign-in provider down",
+      "ldap_legacy_account_elsewhere": "Old directory account in another tenant",
       "disk_full": "Disk full",
       "admin_test": "Test notification",
-      "webhook_test": "Webhook test"
+      "webhook_test": "Webhook test",
+      "tenant_domain_suspended": "Own domain stopped working",
+      "tenant_domain_restored": "Own domain works again"
     },
     "scopeEveryone": "Everyone",
     "webhookStatus": {
@@ -1373,7 +1726,7 @@
       "pending": "Pending"
     },
     "webhookNone": "no webhook is set up",
-    "webhooksMoved": "Where events are delivered — the default webhook and every target — is set up on the Webhooks page.",
+    "webhooksMoved": "Where events are delivered - the default webhook and every target - is set up on the Webhooks page.",
     "webhooksLink": "Open Webhooks",
     "unreadHere": "{n} unread in this list",
     "scopeAdmins": "Administrators",
@@ -1432,7 +1785,7 @@
         "enabled": "Enabled",
         "description": "Description"
       },
-      "empty": "No rules yet — every path uses the default mode.",
+      "empty": "No rules yet - every path uses the default mode.",
       "created": "Rule created",
       "updated": "Rule updated",
       "deleted": "Rule deleted",
@@ -1479,7 +1832,7 @@
       "defaultMode": "Default mode (catch-all)",
       "cronPreset": "Preset",
       "cronRaw": "Cron expression",
-      "cronHint": "Standard 5-field cron — e.g. '0 3 * * *' = every night 03:00. Pick \"Custom\" to enter your own expression.",
+      "cronHint": "Standard 5-field cron - e.g. '0 3 * * *' = every night 03:00. Pick \"Custom\" to enter your own expression.",
       "saved": "Settings saved"
     },
     "cron": {
@@ -1525,7 +1878,7 @@
     "restoreModalTitle": "Restore this version?",
     "restoreModalBody": "Replace the live file content with version v{n}.",
     "snapshotCurrent": "Snapshot the current content first",
-    "snapshotCurrentHint": "Recommended — the current state becomes a new version, so the restore is reversible.",
+    "snapshotCurrentHint": "Recommended - the current state becomes a new version, so the restore is reversible.",
     "purgeModalTitle": "Permanently delete this version?",
     "purgeModalBody": "Version v{n} will be removed from history and the underlying storage object will be deleted. This cannot be undone.",
     "restored": "Restored version v{n}",
@@ -1555,7 +1908,8 @@
       "trash": "Emptying the trash",
       "archive": "Archive",
       "archiveCreate": "Creating archive",
-      "archiveExtract": "Extracting archive"
+      "archiveExtract": "Extracting archive",
+      "thumbs": "Repairing thumbnails"
     },
     "progress": "{done} / {total} files · {percent}%",
     "progressPercent": "{percent}%",
@@ -1571,7 +1925,7 @@
   },
   "duplicates": {
     "title": "Duplicate files",
-    "subtitle": "Copies grouped by identical size + etag — read-only report",
+    "subtitle": "Copies grouped by identical size + etag - read-only report",
     "summary": "{groups} group, {waste} wasted in total | {groups} groups, {waste} wasted in total",
     "stats": {
       "groups": "Duplicate groups",
@@ -1597,10 +1951,10 @@
     "allEvents": "All events",
     "eventsHint": "Leave everything unchecked to receive every event.",
     "events": {
-      "file_uploaded": "File uploaded — a write created a file that did not exist",
-      "file_updated": "File updated — a write replaced the bytes of an existing file",
-      "file_upload_failed": "Upload failed — bytes filex had already acknowledged could not be stored",
-      "file_infected": "Virus found — the scan flagged a file and quarantined it into the trash",
+      "file_uploaded": "File uploaded - a write created a file that did not exist",
+      "file_updated": "File updated - a write replaced the bytes of an existing file",
+      "file_upload_failed": "Upload failed - bytes filex had already acknowledged could not be stored",
+      "file_infected": "Virus found - the scan flagged a file and quarantined it into the trash",
       "file_deleted": "File deleted permanently",
       "file_trashed": "File moved to the trash",
       "file_moved": "File moved or renamed",
@@ -1611,7 +1965,7 @@
       "comment_added": "Comment added to a file or folder",
       "e2e_escrow_used": "Encrypted folder opened with the escrow key instead of its password",
       "e2e_password_changed": "The password of an encrypted folder was changed, or reset with its recovery key",
-      "plugin_notice": "App notification — an installed app sent a message (signature request, finished job, …)"
+      "plugin_notice": "App notification - an installed app sent a message (signature request, finished job, …)"
     },
     "secretSet": "Secret set",
     "secretUnset": "No secret",
@@ -1651,7 +2005,7 @@
   "protection": {
     "title": "Protection",
     "subtitle": "Trash retention, version policy, share-link life, drafts and antivirus",
-    "unsupported": "The server does not support this version — the protection settings API was not found. This page activates after a backend update.",
+    "unsupported": "The server does not support this version - the protection settings API was not found. This page activates after a backend update.",
     "savedOk": "Protection settings saved",
     "trash": {
       "title": "Trash retention",
@@ -1673,7 +2027,7 @@
       "label": "Maximum link life (days)",
       "hint": "0 = no limit. Default 7.",
       "errMin": "Enter an integer greater than or equal to 0",
-      "overMax": "{n} existing link outlives this limit. It keeps working — revoke it under Shares if you want it gone. | {n} existing links outlive this limit. They keep working — revoke them under Shares if you want them gone."
+      "overMax": "{n} existing link outlives this limit. It keeps working - revoke it under Shares if you want it gone. | {n} existing links outlive this limit. They keep working - revoke them under Shares if you want them gone."
     },
     "drafts": {
       "title": "Drafts",
@@ -1684,19 +2038,19 @@
     },
     "av": {
       "title": "Antivirus",
-      "desc": "Files written to filex are scanned in the background with ClamAV — reached either through a scanner binary on this server or through a clamd daemon over the network or a unix socket. Infected files are moved to the trash and a file.infected event is emitted. Scanning never blocks a write.",
+      "desc": "Files written to filex are scanned in the background with ClamAV - reached either through a scanner binary on this server or through a clamd daemon over the network or a unix socket. Infected files are moved to the trash and a file.infected event is emitted. Scanning never blocks a write.",
       "binary": "Answering scanner",
       "setupHint": "No scanner is configured. Pick a mode below, or see:",
       "maxScan": {
         "title": "Largest file scanned",
-        "desc": "Files bigger than this are skipped, not blocked — they are stored and served as usual, they are simply never handed to ClamAV. In binary mode each file is copied to a temporary file before the scanner runs, so this is a disk and time budget there as well as a policy; in daemon mode the bytes are streamed straight to clamd.",
+        "desc": "Files bigger than this are skipped, not blocked - they are stored and served as usual, they are simply never handed to ClamAV. In binary mode each file is copied to a temporary file before the scanner runs, so this is a disk and time budget there as well as a policy; in daemon mode the bytes are streamed straight to clamd.",
         "label": "Megabytes",
         "hint": "Between {min} and {max} MB. Takes effect on the next file scanned, with no restart.",
         "errRange": "Enter a whole number between {min} and {max}."
       },
       "window": {
         "title": "Editor save-scan window",
-        "desc": "A file created in the built-in text editor is scanned straight away. A save to a file that already exists schedules one scan this many minutes later, and further saves inside that window join it rather than queueing more — so a burst of Ctrl+S costs one scan, and that scan reads the file's final state. The trade: a saved file can sit unscanned for up to this long after the last save.",
+        "desc": "A file created in the built-in text editor is scanned straight away. A save to a file that already exists schedules one scan this many minutes later, and further saves inside that window join it rather than queueing more - so a burst of Ctrl+S costs one scan, and that scan reads the file's final state. The trade: a saved file can sit unscanned for up to this long after the last save.",
         "label": "Minutes",
         "hint": "Between {min} and {max} minutes. Takes effect immediately, with no restart; scans already scheduled keep their original time.",
         "errRange": "Enter a whole number between {min} and {max}."
@@ -1704,10 +2058,10 @@
       "reachable": "Reachable",
       "unreachable": "Not answering",
       "address": "clamd address",
-      "restartPending": "Saved. The antivirus switch, mode and address take effect the next time the server restarts — until then it keeps running with the configuration it started with.",
+      "restartPending": "Saved. The antivirus switch, mode and address take effect the next time the server restarts - until then it keeps running with the configuration it started with.",
       "power": {
         "label": "Scan uploaded files",
-        "desc": "Takes effect at the next restart, in both directions — turning this on does not start scanning, and turning it off does not stop it, until the server is restarted.",
+        "desc": "Takes effect at the next restart, in both directions - turning this on does not start scanning, and turning it off does not stop it, until the server is restarted.",
         "onAtRestart": "Antivirus scanning will be enabled the next time the server restarts.",
         "offAtRestart": "Antivirus scanning will be disabled the next time the server restarts."
       },
@@ -1719,7 +2073,7 @@
         },
         "hint": {
           "binary": "Runs a scanner found on this server's PATH. Set FILEX_CLAMAV_BIN to name a specific one.",
-          "daemon": "Streams each file to a running clamd. Use this when ClamAV is its own container — no shared filesystem is needed."
+          "daemon": "Streams each file to a running clamd. Use this when ClamAV is its own container - no shared filesystem is needed."
         },
         "addrLabel": "clamd address",
         "addrHint": "host:port (port 3310 if omitted), or a unix socket path such as /var/run/clamav/clamd.ctl.",
@@ -1727,6 +2081,197 @@
         "errAddrRequired": "Daemon mode needs a clamd address.",
         "savedAtRestart": "Saved. The new transport takes effect the next time the server restarts."
       }
+    }
+  },
+  "loginSecurity": {
+    "title": "Sign-in security",
+    "subtitle": "Limits wrong password attempts at every door - the web form, WebDAV, FTP and SFTP - and shows who is locked out.",
+    "limit": {
+      "title": "Sign-in attempt limit",
+      "desc": "After this many wrong attempts inside the counting window, the account or the address is locked. Each new lock in a row lasts twice as long as the last, up to the longest lock.",
+      "enabled": "Limit wrong sign-in attempts",
+      "enabledHint": "Switch it off only when something in front of filex already limits sign-ins.",
+      "accountMaxFails": "Wrong attempts per account",
+      "ipMaxFails": "Wrong attempts per address",
+      "windowSeconds": "Counting window",
+      "lockBaseSeconds": "First lock",
+      "lockMaxSeconds": "Longest lock",
+      "hintAttempts": "Between {min} and {max}. Default {default}.",
+      "hintSeconds": "In seconds ({human}). Between {min} and {max}; default {default}.",
+      "errRange": "Enter a whole number between {min} and {max}.",
+      "errOrder": "The longest lock cannot be shorter than the first lock.",
+      "saved": "Sign-in limits saved"
+    },
+    "allowlist": {
+      "title": "Allowed addresses",
+      "desc": "Addresses and networks that are never counted against the per-address limit, and may still sign in to a locked account - your office, your monitoring.",
+      "entry": "Address or network",
+      "placeholder": "203.0.113.7 or 10.0.0.0/8",
+      "empty": "No address is exempt.",
+      "addMine": "Add my address ({ip})",
+      "yourAddress": "Your address is {ip}",
+      "mineListed": "On the list",
+      "mineNotListed": "Not on the list",
+      "remove": "Remove {entry}",
+      "saved": "Allowed addresses saved"
+    },
+    "proxies": {
+      "title": "Trusted proxies",
+      "desc": "filex believes the client address in X-Forwarded-For and X-Real-IP only when the request comes from one of these. A wrong list lets anyone claim any address, or makes every visitor look like your proxy.",
+      "entry": "Another proxy address or network",
+      "placeholder": "203.0.113.7, 198.51.100.0/24",
+      "addressesHint": "A proxy that the switches above do not cover - on the host through a published port, on another machine, a CDN's edge in front of your own proxy: its address or network (CIDR).",
+      "noAddresses": "No other addresses.",
+      "inForce": "In force",
+      "classesTitle": "Whole classes of address",
+      "class": {
+        "auto": "Automatic (auto)",
+        "autoHint": "Worked out from where filex runs: this machine and, in a container, the container networks it is attached to - never their gateways, never the LAN.",
+        "loopback": "This machine (loopback)",
+        "loopbackHint": "A proxy on the same machine as filex.",
+        "private": "Private networks",
+        "privateHint": "The RFC 1918 and RFC 4193 private ranges: every machine on your LAN and every Docker network, gateways included.",
+        "linkLocal": "Link-local addresses",
+        "linkLocalHint": "Addresses a machine gives itself on a network segment."
+      },
+      "trustsNobody": "No proxy is trusted: the address a request comes from is always the client's own, and X-Forwarded-For is never read.",
+      "source": {
+        "setting": "Set here",
+        "env": "From the FILEX_TRUSTED_PROXIES environment variable",
+        "auto": "Automatic: the built-in default"
+      },
+      "override": "Saving stores this list here, and it takes precedence over the FILEX_TRUSTED_PROXIES environment variable. Remove the saved list to go back to the variable, or to the automatic default when the variable is empty.",
+      "reset": "Remove the saved list",
+      "resetConfirm": "Remove the saved list of trusted proxies? The FILEX_TRUSTED_PROXIES environment variable, or the automatic default, is in force again.",
+      "resetDone": "Saved list removed",
+      "saved": "Trusted proxies saved",
+      "auto": {
+        "title": "What automatic resolves to",
+        "notInUse": "Not in force: the list in force does not use it. Saving with this switch on puts it in force.",
+        "believes": "Trusted",
+        "thisMachine": "this machine",
+        "excluded": "Never trusted",
+        "excludedHint": "Gateways and filex's own address: what the host relays (a published port's docker-proxy, a host process) or the container runtime relays (rootless Podman) arrives from them.",
+        "interfaces": "Network interfaces",
+        "runtimeLabel": "Runtime: {runtime}",
+        "env": {
+          "plain": "filex runs directly on this machine, not in a container: only this machine is trusted. A proxy on another machine is named below.",
+          "container": "filex runs in a container on a network of its own: the other containers on that network - a proxy container in front of filex - are trusted.",
+          "host-network": "filex runs in a container with host networking: it sees the host's own network, so only this machine is trusted.",
+          "kubernetes": "filex runs in a Kubernetes pod: the pod's own network is trusted. An ingress controller on another node is outside it - add your cluster's pod network (CIDR) below.",
+          "podman-rootless": "filex runs in a rootless Podman container: its connections are relayed, so only this machine is trusted.",
+          "unknown": "filex could not tell how it is connected, so only this machine is trusted."
+        },
+        "runtime": {
+          "docker": "Docker",
+          "podman": "Podman",
+          "kubernetes": "Kubernetes",
+          "containerd": "containerd",
+          "container": "container"
+        },
+        "reason": {
+          "container-network": "container network - trusted",
+          "lan": "on the LAN (macvlan or ipvlan) - not trusted",
+          "tunnel": "tunnel (user-mode networking or a VPN) - not trusted",
+          "host": "the host's own interface - not trusted",
+          "link-local-only": "link-local addresses only - not trusted",
+          "down": "down - not trusted",
+          "rootless": "rootless networking - not trusted",
+          "other": "another kind of interface - not trusted"
+        },
+        "warning": {
+          "unreadable": "filex could not read how it is connected, so automatic trusts this machine only. Name your proxy below.",
+          "ambiguous": "What filex read about its network contradicts itself, so automatic trusts this machine only. Name your proxy below."
+        }
+      },
+      "forwarders": {
+        "title": "A peer sends forwarded addresses and is not trusted",
+        "desc": "These sent X-Forwarded-For or X-Real-IP, but filex does not trust them: it ignored the header and counted every request as theirs. Is one of them your proxy? Trust it, and filex believes the client address it forwards.",
+        "seen": "{count} request, last {when} | {count} requests, last {when}",
+        "public": "public address",
+        "relay": "gateway or filex's own address",
+        "trust": "Trust {address}",
+        "showAll": "Show all ({n})",
+        "showFewer": "Show fewer",
+        "more": "{n} more not listed here.",
+        "confirm": "Trust {address} as a proxy?\n\nfilex will believe the client address it forwards. If {address} is not your proxy, whoever sends from it chooses the address they are counted by: they can dodge the per-address limit or claim an address on the allow-list.",
+        "confirmPublic": "{address} is a public address. Trust it only if it is your own proxy or your CDN's edge, never a visitor's.",
+        "confirmRelay": "{address} is an address relayed connections arrive from - a container network's gateway, or filex's own address. Whatever the host or the container runtime relays arrives from it, a published port included. Trust it only when nothing but your proxy can reach that port (published on 127.0.0.1, or firewalled).",
+        "trusted": "{address} is trusted now"
+      }
+    },
+    "locks": {
+      "title": "Locks",
+      "desc": "Accounts and addresses being counted for wrong attempts. A lock ends by itself; lift it here to let the person in now.",
+      "empty": "Nobody is locked or being counted.",
+      "onlyLocked": "Only locks in force",
+      "columns": {
+        "scope": "Kind",
+        "subject": "Account or address",
+        "fails": "Wrong attempts",
+        "status": "Status",
+        "step": "Lock step",
+        "last": "Last wrong attempt",
+        "door": "Door"
+      },
+      "scope": {
+        "account": "Account",
+        "ip": "Address"
+      },
+      "status": {
+        "locked": "Locked for {time}",
+        "counting": "Counting"
+      },
+      "attempts": "{fails} of {limit}",
+      "unlock": "Lift the lock",
+      "unlockAll": "Lift all locks",
+      "unlockConfirm": "Lift the lock on {subject}?",
+      "unlockAllConfirm": "Lift every lock in force?",
+      "unlocked": "Locks lifted: {n}"
+    },
+    "attempts": {
+      "title": "Recent sign-in events",
+      "desc": "Wrong attempts, locks, releases, allow-list passes and changes to these settings, newest first - whichever door an administrator used. Passwords are never recorded.",
+      "empty": "No sign-in events yet.",
+      "columns": {
+        "at": "When",
+        "action": "Event",
+        "identifier": "Account",
+        "ip": "Address",
+        "door": "Door",
+        "reason": "Reason"
+      },
+      "action": {
+        "failed": "Wrong attempt",
+        "locked": "Locked",
+        "unlocked": "Lock lifted",
+        "allowlist_pass": "Allow-list pass",
+        "settings_changed": "Settings changed"
+      },
+      "via": {
+        "panel": "Admin panel",
+        "api": "API key",
+        "mcp": "MCP",
+        "other": "Other"
+      },
+      "changed": "Changed: {fields}",
+      "allLocks": "All locks ({n})",
+      "reason": {
+        "invalid_credentials": "Wrong password",
+        "invalid_totp": "Wrong 2FA code",
+        "expired": "The lock ran out",
+        "admin": "Lifted by an administrator",
+        "other": "Other"
+      },
+      "door": {
+        "web": "Web form",
+        "dav": "WebDAV",
+        "ftp": "FTP",
+        "sftp": "SFTP",
+        "s3": "S3",
+        "other": "Other"
+      },
+      "filter": "Event"
     }
   },
   "branding": {
@@ -1738,7 +2283,7 @@
     "logoHelp": "An image URL, a site-relative path, or an uploaded file stored inline (max 256 KB).",
     "logoUpload": "Upload file",
     "logoNotImage": "Please choose an image file.",
-    "logoTooBig": "The image exceeds the 256 KB inline limit — use a smaller file or host it as a URL.",
+    "logoTooBig": "The image exceeds the 256 KB inline limit - use a smaller file or host it as a URL.",
     "accent": "Accent color",
     "accentHelp": "Hex color (#rrggbb) used for buttons and links on public pages.",
     "accentInvalid": "Enter a valid hex color like #2f6ceb.",
@@ -1762,15 +2307,15 @@
     "subtitle": "Tracks published releases and applies what the policy allows",
     "current": "Running version",
     "available": "New version",
-    "upToDate": "Up to date — nothing to do",
+    "upToDate": "Up to date - nothing to do",
     "checkNow": "Check now",
     "applyNow": "Upgrade now",
     "applied": "{version} installed",
     "willAutoApply": "Will be applied automatically (inside the maintenance window)",
-    "restartRequired": "{version} is installed on disk, but this process is still the old build — restart filex to activate it.",
+    "restartRequired": "{version} is installed on disk, but this process is still the old build - restart filex to activate it.",
     "howTo": "How to upgrade",
-    "packageHowTo": "{manager} installed this filex, so {manager} upgrades it too — filex does not replace a binary that a package manager owns.",
-    "packageHowToUnknown": "A package manager installed this filex, so upgrade it there — filex does not replace a binary that a package manager owns.",
+    "packageHowTo": "{manager} installed this filex, so {manager} upgrades it too - filex does not replace a binary that a package manager owns.",
+    "packageHowToUnknown": "A package manager installed this filex, so upgrade it there - filex does not replace a binary that a package manager owns.",
     "releaseNotes": "Release notes",
     "includes": "This upgrade also includes",
     "security": "security",
@@ -1778,7 +2323,7 @@
     "disabled": "Update checking is off",
     "unsupported": "This server does not support the update API yet. The page activates after a backend upgrade.",
     "step": {
-      "none": "—",
+      "none": "-",
       "patch": "patch (z)",
       "minor": "minor (y)",
       "major": "major (x)"
@@ -1812,19 +2357,26 @@
     }
   },
   "desktop": {
-    "handoff": "You can return to the desktop app — authorization complete.",
+    "handoff": "You can return to the desktop app - authorization complete.",
     "handoffError": "Authorizing the desktop app failed. Close this tab and try signing in from the app again.",
     "codeHint": "If the app did not open, copy this code into its waiting screen:",
     "copy": "Copy",
     "copied": "Copied"
   },
   "connections": {
-    "subtitle": "How to reach this server from your own computer — mount it, or connect with an S3 client, over SFTP, or with the filex app.",
+    "subtitle": "How to reach this server from your own computer - mount it, or connect with an S3 client, over SFTP, or with the filex app.",
     "advanced": "Manage storages"
+  },
+  "pluginLog": {
+    "title": "Log",
+    "empty": "Nothing logged yet.",
+    "live": "Live - refreshed every 2 seconds",
+    "repeated": "×{count}",
+    "firstAt": "First at {when}"
   },
   "pluginRequests": {
     "title": "Install requests",
-    "subtitle": "An API key cannot install, upgrade or remove a plugin: an agent, a script or the CLI leaves a request here instead. What the source answered is frozen on the request — the manifest, the SHA-256, the permissions — and approving installs exactly that.",
+    "subtitle": "An API key cannot install, upgrade or remove a plugin: an agent, a script or the CLI leaves a request here instead. What the source answered is frozen on the request - the manifest, the SHA-256, the permissions - and approving installs exactly that.",
     "expiresAfter": "A request nobody decides expires after {count} day. | A request nobody decides expires after {count} days.",
     "pendingCount": "{count} waiting",
     "showHistory": "Show decided requests",
@@ -1884,6 +2436,7 @@
     "superseded": "The source of {name} has changed since the request was made, so nothing was installed. The request is closed as “Source changed”."
   },
   "plugins": {
+    "logsTitle": "{name} log",
     "title": "Plugins",
     "subtitle": "Storage drivers that live outside filex. A plugin is a program filex runs (or a service it connects to); once it is running, its driver appears in the ordinary storage picker with the config form the plugin itself describes.",
     "add": "Install a plugin",
@@ -1898,9 +2451,9 @@
     "errName": "A name is required",
     "errFile": "Choose the plugin binary to upload",
     "nameHint": "Lower-case letters, digits, - and _ (max 32). Names the plugin's folder on the server; the storage driver name comes from the plugin itself.",
-    "fileHint": "The plugin program, built for the server's operating system and architecture — not for your own machine.",
+    "fileHint": "The plugin program, built for the server's operating system and architecture - not for your own machine.",
     "shaHint": "Required: a URL is not a promise about bytes. filex checks it after downloading and refuses a mismatch.",
-    "remoteHint": "filex only connects here — nothing is launched. The token is the one the service expects; it is sealed with FILEX_SECRET_KEY and never shown again.",
+    "remoteHint": "filex only connects here - nothing is launched. The token is the one the service expects; it is sealed with FILEX_SECRET_KEY and never shown again.",
     "trustWarning": "A plugin runs with filex's own privileges and is handed the credentials of every storage created on it. Install only plugins you trust.",
     "supertenantOnly": "Storage plugins are managed by the platform operator.",
     "disabled": "Storage plugins are disabled on this instance.",
@@ -1945,11 +2498,11 @@
     },
     "conformance": {
       "verified": "Verified",
-      "unverified": "Unverified — probes owed",
+      "unverified": "Unverified - probes owed",
       "failed": "{count} probe failed | {count} probes failed",
-      "unverifiedHint": "No report: the plugin offers no self-test endpoint, or verification is off on this instance. Nothing failed — nothing was checked.",
+      "unverifiedHint": "No report: the plugin offers no self-test endpoint, or verification is off on this instance. Nothing failed - nothing was checked.",
       "view": "Conformance report",
-      "reportTitle": "Conformance report — {name}",
+      "reportTitle": "Conformance report - {name}",
       "summary": "{pass} passed, {fail} failed, {skip} skipped",
       "ranAt": "Probed {when}",
       "scratchLabel": "against {where}",
@@ -1990,12 +2543,12 @@
       "label": "Signature",
       "required": "This instance only accepts signed plugins: paste the detached signature over the binary's SHA-256, hex or base64, made with a key the operator trusts. Without it the install is refused."
     },
-    "sourceHint": "A GitHub repository (owner/name — filex reads the filex-storage.json attached to its latest release) or the https address of a filex-storage.json. filex checks it daily and tells you when a newer version is there; nothing is installed without you.",
+    "sourceHint": "A GitHub repository (owner/name - filex reads the filex-storage.json attached to its latest release) or the https address of a filex-storage.json. filex checks it daily and tells you when a newer version is there; nothing is installed without you.",
     "checkUpdates": "Check for updates",
     "updates": {
       "checked": "Update check done: {waiting} waiting for your approval.",
       "none": "Update check done: every plugin with a source is up to date.",
-      "failed": "Some sources could not be read — each row says why."
+      "failed": "Some sources could not be read - each row says why."
     },
     "update": {
       "available": "Update available",
@@ -2005,7 +2558,8 @@
     },
     "actions": {
       "reviewUpdate": "Review update",
-      "setSource": "Update source…"
+      "setSource": "Update source…",
+      "logs": "Log"
     },
     "review": {
       "title": "Update {name}",
@@ -2026,12 +2580,12 @@
       "emailRequired": "Enter an email address.",
       "emailInvalid": "This is not an email address. Write it as name{'@'}example.com.",
       "usernameEmpty": "Enter a username.",
-      "usernameAt": "A username cannot contain {'@'} — that belongs to an email address.",
+      "usernameAt": "A username cannot contain {'@'} - that belongs to an email address.",
       "usernameShort": "A username needs at least {min} characters.",
       "usernameLong": "A username can be at most {max} characters.",
       "usernameDigit": "A username cannot start with a digit.",
-      "usernameChar": "“{char}” cannot be used in a username. Use a–z, 0–9, dot, dash or underscore.",
-      "usernameSpace": "A username cannot contain spaces. Use a–z, 0–9, dot, dash or underscore.",
+      "usernameChar": "“{char}” cannot be used in a username. Use a-z, 0-9, dot, dash or underscore.",
+      "usernameSpace": "A username cannot contain spaces. Use a-z, 0-9, dot, dash or underscore.",
       "usernameReserved": "“{name}” is reserved; choose another username."
     }
   },
@@ -2039,9 +2593,10 @@
     "title": "Apps",
     "tabs": {
       "storage": "Storage plugins",
-      "apps": "Apps"
+      "apps": "Apps",
+      "defaults": "Default apps"
     },
-    "subtitle": "WebAssembly apps that add rows to the file menu and run as jobs — signing, conversion, anything a manifest describes. An app runs inside filex with only the permissions it asked for and you granted.",
+    "subtitle": "Apps add things to do with files: commands in the file menu that run as jobs (signing, conversion), editors that open a kind of file in an interface of their own (diagrams, text), or a language. Each runs inside filex with only the permissions it asked for and you granted.",
     "install": "Install an app",
     "supertenantOnly": "Apps are managed by the platform operator.",
     "installed": "{name} installed",
@@ -2054,7 +2609,7 @@
     "updates": {
       "checked": "Update check done: {waiting} waiting for your approval.",
       "none": "Update check done: every app is up to date.",
-      "failed": "{count} app could not be checked — its row says why, under its version. | {count} apps could not be checked — their rows say why, under their versions."
+      "failed": "{count} app could not be checked - its row says why, under its version. | {count} apps could not be checked - their rows say why, under their versions."
     },
     "update": {
       "available": "Update available",
@@ -2069,7 +2624,7 @@
       "notChecked": "Not checked yet",
       "noSource": "Installed from a file: there is no source to check for updates",
       "noManifestAddress": "Installed from an address filex did not keep: upgrade it once from its URL to have it checked for updates",
-      "previous": "Version {version} is kept to go back to"
+      "previous": "Version {version} is kept to go back to (replaced {when})"
     },
     "compat": {
       "bad": "Not compatible with this filex",
@@ -2078,7 +2633,7 @@
     "runtime": {
       "on": "Apps are on",
       "off": "Apps are off on this instance",
-      "archBad": "This server's processor cannot run the WebAssembly engine, so no app can start here.",
+      "archBad": "This server's processor cannot run the WebAssembly engine, and the app platform starts only with it: no app can be installed or run here, not even one that is only an interface or a language.",
       "signature": "Only signed apps are accepted on this instance.",
       "engines": "Engines",
       "devBuild": "This is a development build ({version}): the filex versions apps say they need are not checked.",
@@ -2117,7 +2672,7 @@
     },
     "empty": {
       "title": "No apps installed",
-      "description": "Install one from a GitHub repository: enter owner/name, filex reads its filex-app.json, fetches the module it names and shows every permission the app asks for before anything is installed."
+      "description": "Install one from a GitHub repository: enter owner/name, filex reads its filex-app.json, fetches the module or the interface package it names (a language needs neither) and shows every permission the app asks for before anything is installed."
     },
     "wizard": {
       "title": "Install an app",
@@ -2133,14 +2688,14 @@
         "url": "From a URL"
       },
       "repo": "Repository",
-      "repoHint": "owner/name. filex reads filex-app.json from the repository at the ref (the default branch when empty) and fetches the module the manifest names, checking its SHA-256.",
+      "repoHint": "owner/name. filex reads filex-app.json from the repository at the ref (the default branch when empty) and fetches the module or the interface package the manifest names (a language needs neither), checking its SHA-256.",
       "ref": "Ref (tag, branch or commit)",
-      "wasm": "Module (.wasm) — leave empty for a language pack or an app that is only an interface",
+      "wasm": "Module (.wasm) - leave empty for a language pack or an app that is only an interface",
       "manifest": "Manifest (filex-app.json)",
       "signature": "Signature",
       "signatureHint": "Optional: an ed25519 signature over the module's SHA-256, hex or base64.",
       "signatureRequired": "This instance only accepts signed apps: paste the ed25519 signature over the module's SHA-256, hex or base64, made with a key the operator trusts.",
-      "url": "Module URL — empty for a language pack",
+      "url": "Module URL - empty for a language pack",
       "manifestUrl": "Manifest URL",
       "sha256": "SHA-256",
       "shaHint": "Required with a module URL: a URL is not a promise about bytes. filex checks the module after downloading it and refuses a mismatch. For a language pack it is optional and pins the manifest.",
@@ -2163,8 +2718,8 @@
         "manifestSha256": "Manifest SHA-256"
       },
       "errRepo": "Enter the repository as owner/name.",
-      "errFiles": "Choose the manifest (filex-app.json) — and the module (.wasm), unless the app is a language pack.",
-      "errUrl": "Enter the manifest URL — and, for an app with a module, the module URL and its 64-character SHA-256.",
+      "errFiles": "Choose the manifest (filex-app.json) - and the module (.wasm), unless the app is a language pack.",
+      "errUrl": "Enter the manifest URL - and, for an app with a module, the module URL and its 64-character SHA-256.",
       "errors": {
         "permissions_incomplete": "Every permission in the manifest has to be granted; missing: {missing}. Review the list again and retry.",
         "permissions_changed": "The new version asks for permissions the installed one was not granted: {missing}. Review them and confirm again.",
@@ -2173,7 +2728,7 @@
         "signature_required": "This instance only accepts signed apps. Add the signature and try again.",
         "signature_invalid": "The signature does not verify against any trusted key.",
         "name_taken": "An app with this name is already installed. Go back to the review and choose the upgrade offered there, or use Upgrade on its row.",
-        "describe_mismatch": "The module describes itself differently from its manifest — the build and the manifest do not belong together.",
+        "describe_mismatch": "The module describes itself differently from its manifest - the build and the manifest do not belong together.",
         "sha256_required": "The module is not pinned by a SHA-256, and a downloaded module must be. Enter the hash, or ask the app’s author to put it in the manifest.",
         "too_large": "The module is larger than this server accepts.",
         "demo_refused": "Apps cannot be installed on the demo instance.",
@@ -2182,18 +2737,18 @@
         "up_to_date": "The app’s source has nothing newer than the installed version any more.",
         "fetch": {
           "bad_repo": "Write the repository as owner/name, for example BRF-Tech/filex-convert.",
-          "manifest_not_found": "No filex-app.json was found in {where} (tried: {refs}). Check that the repository exists and is public, that filex-app.json is at its root, and — if you entered a ref — that the tag or branch exists.",
-          "module_not_found": "The manifest was found, but the module it names is not there: {where}. The release may not have its plugin.wasm attached yet — check the release, or enter a different ref.",
+          "manifest_not_found": "No filex-app.json was found in {where} (tried: {refs}). Check that the repository exists and is public, that filex-app.json is at its root, and - if you entered a ref - that the tag or branch exists.",
+          "module_not_found": "The manifest was found, but the module it names is not there: {where}. The release may not have its plugin.wasm attached yet - check the release, or enter a different ref.",
           "unreachable": "The server could not reach {where}. Check that it can reach the internet (or that host), then try again.",
           "http_status": "{where} answered with HTTP {status}. Try again later, or check the address.",
-          "bad_url": "“{where}” is not an address filex can download from: use https:// (plain http:// only for this machine).",
+          "bad_url": "“{where}” is not an address filex downloads apps from: it must be an https:// address on the public internet, not this machine or the private network.",
           "missing_url": "Enter both the module URL and the manifest URL.",
           "too_large": "What {where} sent is larger than this server accepts.",
           "changed": "{where} answered a different version while it was being read. Try again in a moment."
         }
       },
-      "languagePackNote": "Only languages for filex itself — no module, nothing runs.",
-      "alreadyInstalled": "“{name}” is already installed here (version {version}). Installing it a second time is not possible — upgrade the installed one to {next} from this same source instead.",
+      "languagePackNote": "Only languages for filex itself - no module, nothing runs.",
+      "alreadyInstalled": "“{name}” is already installed here (version {version}). Installing it a second time is not possible - upgrade the installed one to {next} from this same source instead.",
       "upgradeInstead": "Upgrade it to {version} instead",
       "fromSource": "The newer version is read from where the app was installed from: {source}",
       "jump": "Version {from} → {to}",
@@ -2204,7 +2759,8 @@
       "newPermission": "New",
       "incompatible": "{name} {version} works with filex {requires}; this is filex {filex}. It cannot be installed here.",
       "enginesMissing": "This server does not have {engines}. The app installs, but what it does with them will not work until they are installed and filex is restarted.",
-      "ui": "Interface (ui.zip) — for an app with its own interface",
+      "officeMissing": "Office documents are converted by {name}, and none is connected to this server. The app installs; what it does with office documents works once an administrator connects {name} under External services - no restart needed.",
+      "ui": "Interface (ui.zip) - for an app with its own interface",
       "uiGroup": {
         "title": "Interface",
         "badge": "Has its own interface",
@@ -2244,6 +2800,28 @@
         "isSigned": "signed",
         "isUnsigned": "unsigned",
         "notes": "Release notes"
+      },
+      "fileTypes": {
+        "title": "File types",
+        "desc": "Where this app goes for each kind it opens or draws thumbnails of. Nothing changed keeps the default order; you can change it later in Plugins → Default apps.",
+        "descUpgrade": "The kinds this version adds, and only those: the order of the kinds the app already handled stays as it is. Nothing changed keeps the default order; you can change it later in Plugins → Default apps.",
+        "col": {
+          "kind": "Kind",
+          "capability": "For",
+          "current": "Now",
+          "place": "This app"
+        },
+        "capability": {
+          "open": "Opening",
+          "thumbnail": "Thumbnails"
+        },
+        "place": {
+          "first": "First",
+          "last": "After them",
+          "off": "Off"
+        },
+        "nobody": "Nobody",
+        "notSaved": "Installed, but some file type choices were not saved: {list}"
       }
     },
     "detail": {
@@ -2319,14 +2897,23 @@
           "skipped": "Skipped"
         }
       },
-      "logs": {
-        "title": "Log",
-        "empty": "Nothing logged yet.",
-        "live": "Live — refreshed every 2 seconds"
-      },
       "grantedTitle": "What it was allowed to do",
       "previous": "Kept version",
-      "previousText": "{version}, replaced {when}"
+      "previousText": "{version}, replaced {when}",
+      "thumbs": {
+        "title": "Thumbnails",
+        "desc": "This app draws the thumbnails of {kinds}. The limits below hold every file it is handed.",
+        "field": {
+          "max_input_mb": "Largest file sent (MB)",
+          "timeout_s": "Time per file (seconds)",
+          "memory_mb": "Memory (MB)",
+          "concurrency": "Files at once"
+        },
+        "hint": "Default {def}; {min} to {max}. Empty or 0 is the default.",
+        "outOfRange": "A whole number between {min} and {max} (0 is the default).",
+        "saved": "Thumbnail limits saved.",
+        "order": "Which kinds it is asked for first is decided in Plugins → Default apps."
+      }
     },
     "kind": {
       "languagePack": "Language pack"
@@ -2346,11 +2933,56 @@
     "rollbackConfirm": "Put {name} back to {version}? Everybody moves to it at once; {current} is kept, so you can go forward again the same way.",
     "rolledBack": "{name} is back to {version}."
   },
+  "defaultApps": {
+    "title": "Default apps",
+    "desc": "Which app opens each kind of file, and which draws its thumbnail. A kind is listed when something besides filex handles it, or when you have changed it.",
+    "off": "Apps are off on this server: filex alone opens and draws every kind of file.",
+    "empty": "No app opens or draws a kind of file here yet.",
+    "readonly": "Only an administrator signed in to this panel can change these. An API key and the demo can read them.",
+    "supertenantOnly": "Which app opens and draws which kind of file is decided by the platform operator.",
+    "builtin": "filex (built-in)",
+    "onlyoffice": "ONLYOFFICE",
+    "none": "None",
+    "offList": "Off: {names}",
+    "col": {
+      "kind": "Kind",
+      "open": "Opens with",
+      "thumbnail": "Thumbnails",
+      "status": "Order"
+    },
+    "status": {
+      "default": "Default",
+      "custom": "Changed"
+    },
+    "actions": {
+      "edit": "Edit",
+      "view": "Show",
+      "reset": "Back to the default",
+      "resetNothing": "This kind already has the default order."
+    },
+    "editor": {
+      "title": ".{ext} files",
+      "open": "Opens with",
+      "openHint": "People choose among the ones that are on; the first is what a file opens in until they choose.",
+      "openNone": "Nothing opens this kind besides filex.",
+      "openAllOff": "Every opener is off: files of this kind open in filex's own viewer.",
+      "thumbnail": "Draws thumbnails",
+      "thumbnailHint": "The first that draws the file wins; when it cannot, the next one is asked.",
+      "thumbnailNone": "Nothing draws thumbnails of this kind.",
+      "thumbnailAllOff": "Every handler is off: files of this kind get no thumbnail.",
+      "on": "On",
+      "off": "Off",
+      "up": "Move up",
+      "down": "Move down"
+    },
+    "saved": ".{ext}: saved.",
+    "resetDone": ".{ext}: back to the default order."
+  },
   "usage": {
     "title": "Usage & cost",
     "subtitle": "What your storage provider reports you used, priced with the table below.",
     "savedOk": "Saved.",
-    "unconfigured": "Nothing is configured yet. Pick a provider and tell filex where its daily report lands — until then there is nothing to read, which is not the same as spending nothing.",
+    "unconfigured": "Nothing is configured yet. Pick a provider and tell filex where its daily report lands - until then there is nothing to read, which is not the same as spending nothing.",
     "config": {
       "title": "Where the report comes from",
       "hint": "Backblaze B2 writes a usage report once a day into a bucket of its own. Attach that bucket as a read-only storage, then name it here."
@@ -2386,7 +3018,7 @@
       "uploaded": "Uploaded",
       "downloaded": "Downloaded",
       "ops": "Operations",
-      "accountOps": "Account-level row. Reported separately by the provider and NOT added to the buckets above — the same transactions appear in both."
+      "accountOps": "Account-level row. Reported separately by the provider and NOT added to the buckets above - the same transactions appear in both."
     },
     "trend": {
       "title": "Daily"
@@ -2428,7 +3060,7 @@
       "ai": "AI assistant"
     },
     "subtitle": {
-      "profile": "Your name, email and picture — what other people see.",
+      "profile": "Your name, email and picture - what other people see.",
       "preferences": "How this app looks and reads on your devices.",
       "notifications": "What reaches your bell, and what reaches your desktop.",
       "security": "Your password and second factor.",
@@ -2459,7 +3091,7 @@
       "palette": "Color palette",
       "paletteHint": "Which colors that variant is made of. Every palette has a light and a dark version, so this and the setting above work together.",
       "folderView": "Default folder view",
-      "folderViewHint": "How a folder you have never changed opens. A folder you have changed keeps its own view — changing this does not touch it.",
+      "folderViewHint": "How a folder you have never changed opens. A folder you have changed keeps its own view - changing this does not touch it.",
       "fvMode": "View",
       "fvSort": "Sort by",
       "fvDir": "Direction",
@@ -2482,11 +3114,11 @@
       "openTriggerDouble": "Double-click",
       "openTriggerSingle": "Single-click",
       "desktopApp": "Desktop app",
-      "desktopAppHint": "The reminder in the corner of the app can be closed for good — these downloads stay here."
+      "desktopAppHint": "The reminder in the corner of the app can be closed for good - these downloads stay here."
     },
     "notifications": {
       "eventsTitle": "What to tell me about",
-      "eventsHint": "Turning one off keeps it out of your bell. Nothing stops being recorded — an administrator still sees every event.",
+      "eventsHint": "Turning one off keeps it out of your bell. Nothing stops being recorded - an administrator still sees every event.",
       "events": {
         "file_uploaded": "A new file arrives",
         "file_updated": "A file is changed",
@@ -2520,7 +3152,7 @@
   },
   "appearance": {
     "title": "Appearance",
-    "subtitle": "Compose a theme in your own colors, set it as the default for everyone, and — if you really need it — paste your own CSS.",
+    "subtitle": "Compose a theme in your own colors, set it as the default for everyone, and - if you really need it - paste your own CSS.",
     "saved": "Instance themes",
     "noThemes": "No themes yet. Compose one below and it appears beside the built-in palettes for everyone.",
     "new": "New theme",
@@ -2541,7 +3173,7 @@
     "radius": "Corner radius (px)",
     "radiusHelp": "The other three radii follow from this one.",
     "font": "Font family",
-    "fontHelp": "A plain CSS font stack. No url() — embed a face through the custom CSS panel instead.",
+    "fontHelp": "A plain CSS font stack. No url() - embed a face through the custom CSS panel instead.",
     "preview": "Live preview",
     "previewHelp": "Painted with the same theme variables the product uses, so this is what you get.",
     "previewUpload": "Upload",
@@ -2556,13 +3188,24 @@
     "deletedOk": "Theme deleted.",
     "defaultOk": "Instance default set.",
     "deleteConfirm": "Delete the theme “{name}”? Anybody using it goes back to the default palette.",
-    "deleteFallbackNote": "Deleting a theme puts everybody using it back on the default palette — nobody is left on a theme that no longer exists.",
+    "deleteFallbackNote": "Deleting a theme puts everybody using it back on the default palette - nobody is left on a theme that no longer exists.",
     "importOk": "“{name}” imported.",
     "importBad": "That file is not a filex theme.",
     "contrastTitle": "Some pairings are below the readability bar",
     "col": {
       "name": "Theme",
       "id": "Palette id"
+    },
+    "pages": {
+      "own": "Colors of their own for the share and sign-in pages",
+      "help": "Off: the share page and the sign-in page take their colors from the palette above."
+    },
+    "pageToken": {
+      "shareGroundTop": "Share page background, top",
+      "shareGroundBottom": "Share page background, bottom",
+      "shareCard": "Share page card",
+      "signInGround": "Sign-in page background",
+      "signInCard": "Sign-in page card"
     },
     "token": {
       "bg": "Page background",
@@ -2591,7 +3234,7 @@
       "warnTitle": "Read this before you turn it on",
       "warnScope": "It never applies to the sign-in page or to this screen, so you can always get back here to switch it off.",
       "warnNetwork": "{'@'}import is stripped and every url() that is not a data: URI is made inert, so a stylesheet cannot call home.",
-      "warnLie": "Within the screens it does reach, CSS can still hide, cover or relabel a control — including a delete confirmation. Only paste CSS you wrote.",
+      "warnLie": "Within the screens it does reach, CSS can still hide, cover or relabel a control - including a delete confirmation. Only paste CSS you wrote.",
       "warnOperator": "Instance operators only. On a multi-tenant installation a tenant administrator cannot set this.",
       "enable": "Apply custom CSS",
       "enableHelp": "Off by default. Turn it off again here at any time.",
@@ -2613,8 +3256,8 @@
     "missingPath": "Missing {param} query parameter."
   },
   "appLock": {
-    "refused": "{app} is holding this file — it cannot be changed until the app lets it go.",
-    "refusedReason": "{app} is holding this file ({reason}) — it cannot be changed until the app lets it go.",
+    "refused": "{app} is holding this file - it cannot be changed until the app lets it go.",
+    "refusedReason": "{app} is holding this file ({reason}) - it cannot be changed until the app lets it go.",
     "someApp": "An app"
   },
   "forms": {
@@ -2631,7 +3274,7 @@
   },
   "permissions": {
     "title": "Roles",
-    "subtitle": "A role is a named set of permissions. Everyone has exactly one role: Administrator (everything, locked), User, Viewer, or a custom role, picked on the person’s own page. A person’s own exceptions beat their role.",
+    "subtitle": "A role is a named set of permissions. Everyone has exactly one role: Administrator (everything, locked), User, Viewer, or a custom role, picked on the person’s own page - or, when they have none of their own, given by a group they are in. A person’s own exceptions beat their role.",
     "items": {
       "files": {
         "download": {
@@ -2738,7 +3381,7 @@
       "admin": {
         "users": {
           "label": "Manage users",
-          "hint": "Users, their permissions, quotas and password resets — never an administrator's account."
+          "hint": "Users, their permissions, quotas and password resets - never an administrator's account."
         },
         "grants": {
           "label": "Manage folder access",
@@ -2795,13 +3438,19 @@
       "override": "exception for this person",
       "viewer_ceiling": "read-only account",
       "role_off": "role “{name}” is switched off",
-      "app_default": "the app’s default"
+      "app_default": "the app’s default",
+      "rule_group": "role “{name}” from the group “{group}”",
+      "role_off_group": "role “{name}” from the group “{group}” is switched off"
     },
     "apps": {
       "hint": "Permissions an installed app lets you give or take away, per role and per person.",
       "default": "Default",
       "defaultAllowed": "Default (allowed)",
       "defaultDenied": "Default (denied)",
+      "effect": {
+        "allow": "Allow",
+        "deny": "Deny"
+      },
       "resetAll": "Reset to defaults",
       "holders": {
         "viewer": "App default: everyone",
@@ -2822,8 +3471,10 @@
       "saved": "Permissions saved",
       "settingsTitle": "Limits from roles",
       "exceptionsTitle": "Exceptions for this person",
-      "builtinRole": "Role: {role} — change it in the account details above.",
-      "readOnlyRoleNote": "“{role}” can only look at files, so adding, changing, deleting and sharing cannot be allowed as exceptions. Tick one of them in the role (or pick another role) to allow it."
+      "builtinRole": "Role: {role} - change it in the account details above.",
+      "readOnlyRoleNote": "“{role}” can only look at files, so adding, changing, deleting and sharing cannot be allowed as exceptions. Tick one of them in the role (or pick another role) to allow it.",
+      "groupRole": "Role: {role}, through the group “{group}”. Their own role, picked above, would replace it.",
+      "groupReadOnlyNote": "“{role}”, from the group “{group}”, can only look at files, so this account is a Viewer while it is in the group: its own Editor and Owner folder shares count as Viewer too."
     },
     "rules": {
       "add": "New role",
@@ -2850,12 +3501,14 @@
       "summaryDeny": "Denies: {list}",
       "summaryLimits": "Limits: {list}",
       "members": "{count} member | {count} members",
-      "locked": "Everything, always — cannot be changed",
+      "locked": "Everything, always - cannot be changed",
       "builtin": "Built-in",
       "builtinSummary": "Its permissions are set from the row’s actions",
       "membersColumn": "People",
       "custom": "Custom",
       "editBuiltin": "Edit the {role} role",
+      "viewBuiltin": "View the {role} role",
+      "builtinPlatformOwned": "The built-in roles belong to the whole platform and its operator manages them. For permissions of your own, create a role.",
       "builtinSaved": "Role saved",
       "viewerCeilingNote": "A Viewer can never add, change, delete or share files; those stay off.",
       "plusGroups": "starting role for SSO groups: {list}",
@@ -2874,13 +3527,228 @@
       "translationsHint": "Everyone sees the role in the language they use filex in. Where a language is left blank, they see the name and description above.",
       "translationsCount": "{count} language | {count} languages",
       "nameIn": "Role name ({language})",
-      "descriptionIn": "Description ({language})"
+      "descriptionIn": "Description ({language})",
+      "groups": "{count} group | {count} groups",
+      "deleteMoveGroups": "Groups holding it: {count}. They get the role you pick, or none for User or Viewer.",
+      "viaGroups": "{count} member through a group | {count} members through groups",
+      "startingRoleLegacy": "This only sets the role of a new account, once, at its first sign-in. For membership that follows the identity provider at every sign-in, link a group to the SSO group instead (Admin → Groups) and give the group this role."
     },
     "customBadge": "Exceptions",
     "twoFactor": {
       "title": "Two-factor authentication required",
       "body": "Your administrator requires two-factor authentication for this account. Set it up to continue.",
       "action": "Set up now"
+    }
+  },
+  "groups": {
+    "title": "Groups",
+    "subtitle": "Named sets of people. Share a folder with a group like with a person, and give a group a role: everyone in it without a role of their own gets it. People join by hand here, or through an SSO group their sign-in carries.",
+    "editTitle": "Group",
+    "add": "New group",
+    "create": "Create",
+    "search": "Search groups…",
+    "empty": "No groups yet.",
+    "noMatch": "No group matches.",
+    "members": "{count} member | {count} members",
+    "folders": "{count} folder | {count} folders",
+    "savedOk": "Group saved",
+    "deletedOk": "Group deleted",
+    "deleteConfirm": "Delete the group “{name}”? Its folder access goes with it. Its members keep their accounts, and anyone who had its role goes back to their built-in role.",
+    "fields": {
+      "name": "Name",
+      "description": "Description",
+      "role": "Role",
+      "noRole": "No role",
+      "roleHint": "Everyone in the group gets this role unless they have a role of their own.",
+      "sso": "SSO groups",
+      "ssoHint": "One per line, exactly as the sign-in carries it: an OIDC claim, an LDAP memberOf group, an operating-system group or a proxy header. People whose sign-in carries one join the group, and leave it when it stops.",
+      "ssoAdminOnly": "Only an administrator can link a group to SSO groups.",
+      "priority": "Role priority",
+      "priorityHint": "For someone in several groups that give a role: the group with the highest priority decides (equal: the older group). A switched-off role is skipped for the next one.",
+      "priorityAdminOnly": "Only an administrator can change which group’s role wins."
+    },
+    "membersTitle": "Members",
+    "addMember": "Add a person by name or email…",
+    "noMembers": "Nobody is in this group yet.",
+    "remove": "Remove from the group",
+    "removeConfirm": "Remove {name} from the group?",
+    "removeSsoConfirm": "{name} is in this group through SSO. Remove them now? They join again at their next sign-in if the identity provider still puts them in it.",
+    "source": {
+      "manual": "Added",
+      "sso": "SSO",
+      "ssoHint": "In the group through SSO - kept in step with the identity provider at each sign-in."
+    },
+    "foldersTitle": "Folder access",
+    "foldersHint": "Give the group a folder from the file explorer: Share → People, then pick the group like a person.",
+    "sourceColumn": "How they joined",
+    "levelColumn": "Level",
+    "noFolders": "No folder is shared with this group yet.",
+    "level": {
+      "viewer": "Viewer",
+      "editor": "Editor",
+      "owner": "Owner"
+    },
+    "userCard": {
+      "title": "Groups",
+      "none": "Not in any group.",
+      "pick": "Pick a group…",
+      "add": "Add to a group",
+      "addButton": "Add",
+      "removeConfirm": "Remove {name} from “{group}”?",
+      "roleFromGroup": "With no role of their own, they have the role “{role}” through the group “{group}”."
+    },
+    "prioritySummary": "priority {n}"
+  },
+  "tenants": {
+    "title": "Tenants",
+    "subtitle": "Every tenant of this platform: its sign-in name (realm), its own address, the storages its people reach and its accounts. Only the platform operator manages tenants.",
+    "editTitle": "Tenant",
+    "add": "New tenant",
+    "create": "Create",
+    "search": "Search tenants…",
+    "empty": "No tenants yet.",
+    "noMatch": "No tenant matches.",
+    "modeOff": "Multi-tenant mode is off (FILEX_MULTI_TENANT): only the platform's own tenant can sign in. The other tenants and everything they have are kept, and their people sign in again when it is turned back on.",
+    "platform": "Platform",
+    "platformHint": "The platform's own tenant: its people sign in with an empty realm, and its administrators administer every tenant.",
+    "signinColumn": "Sign-in",
+    "signin": {
+      "ownOidc": "Own SSO",
+      "shared": "Shared"
+    },
+    "storagesTitle": "Storages",
+    "peopleColumn": "People",
+    "stateColumn": "State",
+    "state": {
+      "active": "Active",
+      "suspended": "Suspended"
+    },
+    "storageCount": "{count} storage | {count} storages",
+    "peopleCount": "{count} account | {count} accounts",
+    "generalTitle": "General",
+    "addressTitle": "Address",
+    "oidcTitle": "Own SSO (OIDC)",
+    "oidcHint": "The tenant's own identity provider, used on its own address. Empty: its people sign in with a password or through the platform's providers.",
+    "realmSuggestedHint": "Suggested from the slug; you can change it now. Once the tenant is created it never changes: it is part of its people's addresses (alex{'@'}realm.local) and of the user names they save in their apps (realm/alex).",
+    "realmNewHint": "Lower-case letters, digits and dashes. It never changes once the tenant is created.",
+    "realmSuggesting": "Finding a realm…",
+    "realmLockedHint": "The realm never changes: it is part of this tenant's account addresses (alex{'@'}{realm}.local) and of the user names its people saved in their apps ({realm}/alex). Changing it would cut both off.",
+    "platformRealm": "None: an empty realm",
+    "platformRealmHint": "The platform's own tenant has no realm: its people sign in with the Realm field left empty.",
+    "platformAlwaysOn": "The platform's own tenant cannot be suspended.",
+    "platformNoDelete": "The platform's own tenant cannot be deleted.",
+    "secretSet": "Set (type a new one to replace it)",
+    "secretSetHint": "Stored and never shown. Leave it empty to keep it.",
+    "savedOk": "Tenant saved",
+    "createdOk": "Tenant created",
+    "deletedOk": "Tenant deleted",
+    "storagesHint": "The storages this tenant's people reach. A storage linked to no tenant is the platform's.",
+    "platformStoragesHint": "The platform's own tenant reaches every storage; a link here only marks the storage as its own.",
+    "linkStorage": "Link a storage",
+    "chooseStorage": "Choose a storage…",
+    "link": "Link",
+    "unlink": "Unlink",
+    "unlinkConfirm": "Unlink {storage} from this tenant? The storage and its files stay; this tenant's people no longer reach it.",
+    "noStorages": "No storage is linked.",
+    "deleteConfirm": "Delete the tenant “{name}”? Its storages are unlinked, never deleted, and their files stay.",
+    "deleteAccounts": "Also delete its {count} account (its open links close) | Also delete its {count} accounts (their open links close)",
+    "fields": {
+      "name": "Name",
+      "slug": "Slug",
+      "slugHint": "A short name for the tenant, unique on this platform. The realm is suggested from it.",
+      "slugEditHint": "Changing it does not change the realm.",
+      "realm": "Realm",
+      "enabled": "Can sign in",
+      "enabledHint": "Off suspends the tenant: none of its people can sign in. Nothing is deleted.",
+      "host": "Own address",
+      "hostHint": "The host the tenant is reached at (files.acme.example). Its sign-in page names the tenant there, so its people type no realm. Empty: they sign in on the platform's address with their realm.",
+      "cookieDomain": "Cookie domain",
+      "cookieDomainHint": "Shares the session across the tenant's subdomains (.acme.example). Empty: derived from the address. Set it when the address is a bare domain or its parent is a public suffix (.com.tr).",
+      "oidcIssuer": "Issuer URL",
+      "oidcClientId": "Client ID",
+      "oidcClientSecret": "Client secret",
+      "oidcRedirectUrl": "Redirect URL",
+      "oidcRedirectUrlHint": "Empty: https://<address>/api/auth/oidc/callback.",
+      "roleClaim": "Role claim",
+      "adminGroup": "Administrator group",
+      "adminGroupHint": "People whose sign-in carries this group are the tenant's administrators."
+    },
+    "errors": {
+      "slug_taken": "Another tenant already has this slug.",
+      "host_taken": "Another tenant already has this address.",
+      "realm_invalid": "Only lower-case letters, digits and dashes, at most 63, starting and ending with a letter or a digit.",
+      "realm_reserved": "This realm is reserved.",
+      "realm_empty": "A tenant needs a realm.",
+      "realm_taken": "Another tenant already has this realm.",
+      "realm_immutable": "A realm never changes.",
+      "realm_none": "Nothing realm-shaped is left of this slug: type a realm."
+    }
+  },
+  "tenantSelf": {
+    "title": "My tenant",
+    "subtitle": "Your tenant's own sign-in providers, the ones the platform gives it, and its own domains.",
+    "signinTitle": "Sign-in",
+    "signinHint": "Your tenant's own OIDC or LDAP. Its people sign in through them with your realm; nobody else's people do.",
+    "insecure": "Allow insecure and internal-network providers",
+    "insecureHint": "Off: this tenant's own providers may not reach a private or internal address, and an LDAP must use ldaps:// or StartTLS. On: both are allowed, for a directory inside your own network. Every change is in the audit log.",
+    "insecureOn": "The platform allows this tenant's providers to reach internal addresses and plain ldap://.",
+    "guarded": "Your providers reach public addresses only, and an LDAP is encrypted (ldaps:// or StartTLS).",
+    "addOwn": "Add own {kind}",
+    "providerAdded": "Provider added, switched off: fill it in, test it and switch it on.",
+    "confirmFailed": "Its test failed. Switch it on anyway?",
+    "sharedTitle": "Provided by the platform",
+    "sharedHint": "The platform operator decides which of the platform's providers serve your tenant.",
+    "domainsTitle": "Addresses and own domains",
+    "platformAddress": "Your tenant's address on the platform:",
+    "noTenantDomain": "This installation gives tenants no address of their own, so a domain cannot be pointed at one (FILEX_TENANT_DOMAIN).",
+    "domainsHint": "To bring your own domain, create a CNAME record from it to {target}, then add it here. It works as soon as the record is seen, and stops working (until it is back) if the record goes. Use a name under your domain (files.acme.example): a bare domain cannot carry a CNAME.",
+    "addDomain": "Own domain",
+    "add": "Add",
+    "domain": "Domain",
+    "domainStatus": "State",
+    "domainDetail": "Detail",
+    "certificate": "Certificate",
+    "noDomains": "No own domain yet.",
+    "checkNow": "Check now",
+    "bringCertificate": "Bring a certificate",
+    "removeCertificate": "Remove own certificate",
+    "deleteDomainConfirm": "Remove {domain} from this tenant? It stops working at once.",
+    "activeSince": "Working since {when}",
+    "pointAt": "Waiting for a CNAME to {target}",
+    "ownCertificate": "Own, until {when}",
+    "ownCertificateSoon": "Own, ends {when}: bring a new one",
+    "certByProxy": "By the proxy",
+    "acmeNone": "By filex (ACME): not obtained yet",
+    "acmeObtained": "By filex (ACME), until {when}",
+    "acmeFailed": "By filex (ACME): could not be obtained ({when})",
+    "acmeReason": "The ACME authority said: \"{reason}\"",
+    "certificateHint": "The certificate (with its chain) and its private key for {domain}, in PEM. The key is stored sealed and never shown again.",
+    "certificatePem": "Certificate (PEM)",
+    "keyPem": "Private key (PEM)",
+    "certificateSaved": "Certificate saved",
+    "ftpsNote": "FTPS presents the server's one certificate: a client that checks the name refuses your domain on FTPS. SFTP and WebDAV are not affected.",
+    "status": {
+      "pending": "Waiting",
+      "active": "Working",
+      "suspended": "Stopped"
+    },
+    "why": {
+      "no_record": "{domain} does not resolve at all",
+      "no_cname": "{domain} has address records of its own, not a CNAME to {target}",
+      "points_elsewhere": "Its CNAME points at {found}, not {target}",
+      "wildcard_cname": "{target} is a CNAME to {found}: the platform's record for *.{tenant_domain} must be address records (A/AAAA)",
+      "dns_failed": "The DNS could not be asked ({detail}); nothing was changed"
+    },
+    "domainErrors": {
+      "domain_invalid": "This is not a domain name a tenant can bring (a name with at least two labels, letters, digits and dashes).",
+      "domain_taken": "This domain is already in use.",
+      "domain_reserved": "This name is the platform's own.",
+      "no_tenant_domain": "This installation gives tenants no address to point a domain at.",
+      "certificate_invalid": "This is not a certificate and key in PEM.",
+      "certificate_key_mismatch": "The private key does not belong to the certificate.",
+      "certificate_wrong_name": "The certificate is not for this domain.",
+      "certificate_expired": "The certificate has expired.",
+      "certificate_needs_secret_key": "A private key is stored sealed, and this installation has no FILEX_SECRET_KEY."
     }
   }
 }

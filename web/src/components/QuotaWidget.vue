@@ -99,7 +99,7 @@ const tooltip = computed(() => {
   return t('quota.tooltip', {
     used: usedLabel.value,
     limit: limitLabel.value,
-    percent: percentLabel.value ?? '—',
+    percent: percentLabel.value ?? '-',
   });
 });
 
@@ -208,7 +208,7 @@ async function refresh() {
               </dd>
               <dt class="text-zinc-500 dark:text-zinc-400">{{ t('quota.percent') }}</dt>
               <dd :class="['text-end tabular-nums font-medium', textTone]">
-                {{ percentLabel ?? '—' }}
+                {{ percentLabel ?? '-' }}
               </dd>
             </dl>
           </template>

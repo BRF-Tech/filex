@@ -6,7 +6,7 @@
 //	POST /api/admin/plugin-requests                — leave a request (API key or session)
 //	GET  /api/admin/plugin-requests[?status=…]     — list (pending by default; `all` for every state)
 //	GET  /api/admin/plugin-requests/{id}           — one request, with its frozen manifest and review
-//	POST /api/admin/plugin-requests/{id}/approve   — SESSION ONLY: install what the request froze
+//	POST /api/admin/plugin-requests/{id}/approve   - SESSION ONLY: install what the request froze; {"associations"?: [...]}
 //	POST /api/admin/plugin-requests/{id}/reject    — SESSION ONLY: {"reason"?: "…"}
 //
 // ⚠⚠ Why this exists (owner, 2026-09-28): an API key may no longer install,
@@ -35,6 +35,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/plugin"
@@ -46,6 +47,12 @@ import (
 // PluginRequests is the handler set.
 type PluginRequests struct {
 	Svc *pluginreq.Service
+	// Assoc and Apps draw an app request's File types group and write the
+	// approving administrator's choices (0.50, docs/APP-PLUGINS.md → Default
+	// apps): the same rows the install wizard shows, and for an upgrade only
+	// the kinds it adds. Nil (app plugins off): no group, nothing placed.
+	Assoc *assoc.Service
+	Apps  *wasmplugin.Registry
 }
 
 // NewPluginRequests constructs the handler.
@@ -122,6 +129,16 @@ type pluginRequestWire struct {
 	// Review (the dry run) are in a single request's answer, not the list.
 	Manifest json.RawMessage `json:"manifest,omitempty"`
 	Review   json.RawMessage `json:"review,omitempty"`
+	// FileTypes is the File types group of a pending app request (one request's
+	// answer only): what the app would open or draw thumbnails of, who handles
+	// each kind NOW and where the app lands by default - worked out when it is
+	// read, not frozen with the review, because the administrator's order can
+	// change between the request and the approval. An upgrade lists only the
+	// kinds it adds.
+	FileTypes []assoc.InstallKind `json:"file_types,omitempty"`
+	// AssociationErrors are the File types choices an approval could not
+	// write (the app is installed either way).
+	AssociationErrors []string `json:"association_errors,omitempty"`
 }
 
 // requestReview is the part of a stored review the wire reads back.
@@ -292,7 +309,11 @@ func (h *PluginRequests) Get(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err, nil, langOf(r))
 		return
 	}
-	body := map[string]any{"request": pluginRequestView(req, langOf(r), true)}
+	view := pluginRequestView(req, langOf(r), true)
+	if req.Status == model.PluginRequestPending {
+		view.FileTypes = h.fileTypesOf(r, req)
+	}
+	body := map[string]any{"request": view}
 	if req.Status == model.PluginRequestPending {
 		body["message"] = waitingMessage
 	}
@@ -308,12 +329,77 @@ func (h *PluginRequests) Approve(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	req, result, err := h.Svc.Approve(r.Context(), id, actorOf(r), langOf(r))
+	var body struct {
+		// Associations are the File types group's choices (assoc.Placement),
+		// as the install wizard sends them. Optional: nothing chosen keeps the
+		// default order.
+		Associations []assoc.Placement `json:"associations"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "bad json"})
+			return
+		}
+	}
+	// What an upgrade's app handled BEFORE it is replaced: the kinds it adds
+	// are the only ones its choices may place.
+	var before map[string]bool
+	if pending, gerr := h.Svc.Get(r.Context(), id); gerr == nil && pending.Kind == model.PluginRequestKindApp &&
+		pending.Op == model.PluginRequestOpUpgrade && pending.PluginID != nil && h.Apps != nil {
+		if was, ok := h.Apps.ByID(*pending.PluginID); ok {
+			before = handledBy(was)
+		} else {
+			before = map[string]bool{}
+		}
+	}
+	var detail map[string]any
+	if len(body.Associations) > 0 {
+		detail = map[string]any{"file_types": body.Associations}
+	}
+	req, result, err := h.Svc.ApproveWith(r.Context(), id, actorOf(r), langOf(r), detail)
 	if err != nil {
 		h.fail(w, err, req, langOf(r))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"request": pluginRequestView(req, langOf(r), false), "plugin": result})
+	view := pluginRequestView(req, langOf(r), false)
+	if st, ok := result.(*wasmplugin.Status); ok && st != nil && h.Assoc != nil && len(body.Associations) > 0 {
+		var only map[string]bool
+		if before != nil {
+			only = map[string]bool{}
+			if now, ok := h.Apps.ByName(st.Name); ok {
+				only = assoc.NewKinds(before, handledBy(now))
+			}
+		}
+		view.AssociationErrors = h.Assoc.PlaceForApp(r.Context(), st.Name, body.Associations, only, actorIDOf(r))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"request": view, "plugin": result})
+}
+
+// fileTypesOf is a pending app request's File types group, as it stands now:
+// the frozen manifest's handlers against the administrator's current order;
+// for an upgrade, only the kinds the installed version does not handle.
+func (h *PluginRequests) fileTypesOf(r *http.Request, req *model.PluginRequest) []assoc.InstallKind {
+	if h.Assoc == nil || req.Kind != model.PluginRequestKindApp || strings.TrimSpace(req.ManifestJSON) == "" {
+		return nil
+	}
+	m, err := wasmplugin.ParseManifest([]byte(req.ManifestJSON))
+	if err != nil {
+		return nil
+	}
+	open, thumb := wasmplugin.ManifestHandlers(m)
+	if len(open)+len(thumb) == 0 {
+		return nil
+	}
+	rows := h.Assoc.InstallKinds(r.Context(), open, thumb)
+	if req.Op == model.PluginRequestOpUpgrade && req.PluginID != nil && h.Apps != nil {
+		if was, ok := h.Apps.ByID(*req.PluginID); ok {
+			rows = assoc.OnlyNewInstallKinds(rows, handledBy(was))
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows
 }
 
 // Reject closes a request without installing anything: session only.

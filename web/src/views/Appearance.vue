@@ -51,6 +51,7 @@ import {
   draftFromStored,
   draftToTokens,
   newDraft,
+  PAGE_TOKEN_FIELDS,
   slugify,
   THEME_KEY_RE,
   type ThemeDraft,
@@ -506,6 +507,43 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- #74 - the share page and the sign-in page: in the palette's own
+               tones unless the operator gives them colours of their own. Off,
+               nothing is stored for them (lib/themeTokens PAGE_TOKEN_FIELDS). -->
+          <div class="space-y-2" data-testid="theme-pages">
+            <Toggle
+              v-model="draft.pages.own"
+              :label="t('appearance.pages.own')"
+              :description="t('appearance.pages.help')"
+              name="theme-pages-own"
+            />
+            <div v-if="draft.pages.own" class="grid sm:grid-cols-2 gap-x-4 gap-y-2">
+              <div v-for="tok in PAGE_TOKEN_FIELDS" :key="tok.key">
+                <label class="label-base block mb-1" :for="`page-${tok.key}`">
+                  {{ t(tok.labelKey) }}
+                </label>
+                <div class="flex items-center gap-2">
+                  <input
+                    :id="`page-${tok.key}`"
+                    type="color"
+                    :value="draft.pages[variant][tok.key]"
+                    class="h-8 w-10 shrink-0 cursor-pointer rounded border border-zinc-200 dark:border-zinc-700 bg-transparent p-0.5"
+                    :data-testid="`page-${tok.key}`"
+                    :aria-label="t(tok.labelKey)"
+                    @input="(e) => (draft.pages[variant][tok.key] = (e.target as HTMLInputElement).value)"
+                  />
+                  <input
+                    type="text"
+                    :value="draft.pages[variant][tok.key]"
+                    class="input-base px-2 py-1 text-xs font-mono"
+                    :data-testid="`pagehex-${tok.key}`"
+                    @input="(e) => (draft.pages[variant][tok.key] = (e.target as HTMLInputElement).value)"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="grid sm:grid-cols-2 gap-4">
             <Input
               :model-value="draft.radius"
@@ -538,7 +576,7 @@ onBeforeUnmount(() => {
             </p>
             <ul class="mt-1 space-y-0.5">
               <li v-for="w in warnings" :key="w.labelKey">
-                {{ t(w.labelKey) }} — {{ w.ratio.toFixed(2) }}:1 &lt; {{ w.min }}:1
+                {{ t(w.labelKey) }} - {{ w.ratio.toFixed(2) }}:1 &lt; {{ w.min }}:1
               </li>
             </ul>
           </div>

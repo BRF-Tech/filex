@@ -8,7 +8,9 @@
 //   · Allow / Deny put the key in the saved body — a built-in role's `apps`,
 //     a custom role's `settings.apps`, a person's exceptions — and Default
 //     takes it OUT (Default is "no decision", not a third value);
-//   · "Default" says what it comes to for that role or person;
+//   · "Default" says what it comes to for that role or person — for a role,
+//     as the SERVER says it (the catalogue's `default_for`, the preview's
+//     holder role); the editor keeps no copy of either rule;
 //   · a delegated administrator sees a person's app rows read-only — the
 //     server refuses app keys from anyone but an administrator (403);
 //   · a preset and "Clear exceptions" are the catalogue's: they leave a
@@ -53,6 +55,9 @@ const { withApps, withoutApps, roles } = vi.hoisted(() => {
         label: { en: 'Request signatures', tr: 'İmza isteme' },
         description: { en: 'Ask other people to sign a document.' },
         default: 'user',
+        // The server's answer (perm.AppDefaultFor): what `default` comes to
+        // on each built-in role. The editors read it; they work nothing out.
+        default_for: { viewer: false, user: true, admin: true },
       },
     ],
   };
@@ -65,9 +70,22 @@ const { withApps, withoutApps, roles } = vi.hoisted(() => {
     updateRule: vi.fn(async (id: number, b: object) => ({ ...b, id })),
     forUser: vi.fn(),
     setOverrides: vi.fn(),
+    // The built-in role a custom role's people would be on is the SERVER's
+    // answer (perm.HolderRole, POST /api/admin/roles/preview): each test says
+    // what the server answers — nothing here works it out.
+    previewHolder: vi.fn(),
   };
   return { withApps, withoutApps, roles };
 });
+
+/**
+ * The catalogue with the app permission's `default_for` replaced — or taken
+ * away (`undefined`). The manifest's `default` stays 'user' throughout, so a
+ * label that follows `default` instead of `default_for` shows up here.
+ */
+function saying(defaultFor: Record<string, boolean> | undefined) {
+  return { ...withApps, apps: withApps.apps.map((a) => ({ ...a, default_for: defaultFor })) };
+}
 
 /** What the built-in roles answer unless a test says otherwise: no decisions. */
 async function noDecisions(_role?: string) {
@@ -77,8 +95,10 @@ async function noDecisions(_role?: string) {
 vi.mock('@/api/roles', () => ({ RolesApi: roles }));
 
 import BuiltinRoleEditor from '@/components/BuiltinRoleEditor.vue';
+import { HOLDER_PREVIEW_DELAY_MS } from '@/lib/appPermissions';
 import RoleEditor from '@/components/RoleEditor.vue';
 import UserRolesCard from '@/components/UserRolesCard.vue';
+import { unmountAll } from '../helpers/teardown';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () {
@@ -89,8 +109,8 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
   };
 }
 
-async function mountIt(view: unknown, props: object, locale = 'en'): Promise<VueWrapper> {
-  const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { en, tr } });
+async function mountIt(view: unknown, props: object, locale = 'en', messages: object = { en, tr }): Promise<VueWrapper> {
+  const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: messages as never });
   const w = mount(view as never, { props, global: { plugins: [i18n] }, attachTo: document.body });
   await flushPromises();
   return w;
@@ -147,7 +167,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   roles.getDefaults.mockReset();
   roles.getDefaults.mockImplementation(noDecisions);
-  document.body.innerHTML = '';
+  roles.previewHolder.mockReset();
+  roles.previewHolder.mockResolvedValue('user');
 });
 
 describe('built-in role editor', () => {
@@ -178,7 +199,7 @@ describe('built-in role editor', () => {
 
     // Saved decisions come back on the next open, and Default removes one.
     roles.getDefaults.mockResolvedValueOnce({ permissions: ['files.download'], preset: '', apps: { [KEY]: 'deny' } });
-    document.body.innerHTML = '';
+    unmountAll();
     await mountIt(BuiltinRoleEditor, { modelValue: true, role: 'user', catalogue: withApps });
     await openApps();
     expect(choice('deny').getAttribute('aria-checked')).toBe('true');
@@ -196,7 +217,34 @@ describe('built-in role editor', () => {
     // No Turkish description: the English one, not an empty line.
     expect(q(`[data-testid="perm-row-${KEY}"]`).textContent).toContain('Ask other people to sign a document.');
     expect(choice('inherit').textContent?.trim()).toBe(TR.apps.defaultAllowed);
-    expect(choice('deny').textContent?.trim()).toBe(TR.effect.deny);
+    expect(choice('deny').textContent?.trim()).toBe(TR.apps.effect.deny);
+  });
+
+  // The rule (the last layer of perm.Result.AppAllowed) is the server's:
+  // 0.49.0 worked it out here from the manifest's `default` and could say
+  // "allowed" where the server answers 403. Here the server says the
+  // opposite of what that copy would, and the label follows the server.
+  it("Default is the catalogue's default_for, not worked out from the manifest's default", async () => {
+    const odd = saying({ viewer: true, user: false, admin: true });
+    await mountIt(BuiltinRoleEditor, { modelValue: true, role: 'user', catalogue: odd });
+    await openApps();
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.defaultDenied);
+    expect(choice('inherit').dataset.default).toBe('denied');
+    // The hint under the label is the manifest's own word, as it was.
+    expect(q(`[data-testid="perm-app-default-${KEY}"]`).textContent?.trim()).toBe(EN.apps.holders.user);
+
+    unmountAll();
+    await mountIt(BuiltinRoleEditor, { modelValue: true, role: 'viewer', catalogue: odd });
+    await openApps();
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.defaultAllowed);
+    expect(choice('inherit').dataset.default).toBe('allowed');
+  });
+
+  it('a catalogue that does not say leaves "Default" as it is', async () => {
+    await mountIt(BuiltinRoleEditor, { modelValue: true, role: 'user', catalogue: saying(undefined) });
+    await openApps();
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.default);
+    expect(choice('inherit').dataset.default).toBe('unknown');
   });
 
   it('no app declares a permission: no Apps group', async () => {
@@ -234,6 +282,7 @@ describe('custom role editor', () => {
   });
 
   it("Default is the answer of the built-in role the role's people are on", async () => {
+    roles.previewHolder.mockResolvedValue('user');
     // The User role has taken it away from everybody on User.
     roles.getDefaults.mockImplementation(async (role?: string) => ({
       permissions: [],
@@ -247,18 +296,92 @@ describe('custom role editor', () => {
     expect(choice('inherit').dataset.default).toBe('denied');
   });
 
-  it("a read-only role's people are on Viewer, whose app default does not include a user permission", async () => {
+  it("the server says the role's people are on Viewer, whose app default does not include a user permission", async () => {
+    roles.previewHolder.mockResolvedValue('viewer');
     const readOnly = { ...rule, permissions: ['files.download'], settings: {} };
     await mountIt(RoleEditor, { modelValue: true, rule: readOnly, catalogue: withApps, storages: [] });
     await openApps();
+    // The editor asked about the ticks it has, and did not work it out itself.
+    expect(roles.previewHolder).toHaveBeenCalledTimes(1);
+    expect(roles.previewHolder.mock.calls[0][0]).toEqual({ permissions: ['files.download'], effects: {}, conditions: {} });
     expect(choice('inherit').textContent?.trim()).toBe(EN.apps.defaultDenied);
     expect(choice('inherit').dataset.default).toBe('denied');
+  });
+
+  // Lesson #759: 0.49.0 kept a copy of perm.HolderRole in the editor. Now
+  // the editor asks again once the ticks rest, and uses only the answer to
+  // its latest question.
+  it('asks again when the ticks change; an answer to an older question is not used', async () => {
+    const answers: Array<(role: string) => void> = [];
+    roles.previewHolder.mockImplementation(() => new Promise((resolve) => answers.push(resolve)));
+    const readOnly = { ...rule, permissions: ['files.download'], settings: {} };
+    await mountIt(RoleEditor, { modelValue: true, rule: readOnly, catalogue: withApps, storages: [] });
+    await openApps();
+    // Not answered yet: "Default", never a guess.
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.default);
+    expect(choice('inherit').dataset.default).toBe('unknown');
+
+    await click(q('[data-testid="perm-row-files.delete"] input[type="checkbox"]'));
+    expect(roles.previewHolder, 'not on every tick: once they rest').toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, HOLDER_PREVIEW_DELAY_MS + 50));
+    await flushPromises();
+    expect(roles.previewHolder).toHaveBeenCalledTimes(2);
+    expect((roles.previewHolder.mock.calls[1][0] as { permissions: string[] }).permissions.sort()).toEqual(['files.delete', 'files.download']);
+
+    answers[1]('user');
+    await flushPromises();
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.defaultAllowed);
+    answers[0]('viewer');
+    await flushPromises();
+    expect(choice('inherit').textContent?.trim(), 'the answer about the old ticks came late').toBe(EN.apps.defaultAllowed);
+  });
+
+  it("the holder role's Default is read from the catalogue's default_for", async () => {
+    // The server says the role's people are on Viewer, and that the app's
+    // default gives Viewer the permission — whatever the manifest's word.
+    roles.previewHolder.mockResolvedValue('viewer');
+    const readOnly = { ...rule, permissions: ['files.download'], settings: {} };
+    await mountIt(RoleEditor, { modelValue: true, rule: readOnly, catalogue: saying({ viewer: true, user: false, admin: true }), storages: [] });
+    await openApps();
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.defaultAllowed);
+    expect(choice('inherit').dataset.default).toBe('allowed');
+  });
+
+  it("the built-in role's own decision still comes before the app's default", async () => {
+    roles.previewHolder.mockResolvedValue('viewer');
+    roles.getDefaults.mockImplementation(async (role?: string) => ({
+      permissions: [],
+      preset: '',
+      apps: role === 'viewer' ? { [KEY]: 'allow' } : {},
+    }));
+    const readOnly = { ...rule, permissions: ['files.download'], settings: {} };
+    await mountIt(RoleEditor, { modelValue: true, rule: readOnly, catalogue: withApps, storages: [] });
+    await openApps();
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.defaultAllowed);
+  });
+
+  it('a catalogue that does not say what the default comes to leaves "Default" as it is', async () => {
+    roles.previewHolder.mockResolvedValue('user');
+    await mountIt(RoleEditor, { modelValue: true, rule: { ...rule, settings: {} }, catalogue: saying(undefined), storages: [] });
+    await openApps();
+    expect(roles.previewHolder).toHaveBeenCalledTimes(1);
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.default);
+    expect(choice('inherit').dataset.default).toBe('unknown');
+  });
+
+  it('a server that cannot say leaves "Default" as it is', async () => {
+    roles.previewHolder.mockRejectedValue({ response: { status: 404 } });
+    await mountIt(RoleEditor, { modelValue: true, rule: { ...rule, settings: {} }, catalogue: withApps, storages: [] });
+    await openApps();
+    expect(choice('inherit').textContent?.trim()).toBe(EN.apps.default);
+    expect(choice('inherit').dataset.default).toBe('unknown');
   });
 
   it('no app declares a permission: no Apps group, and the built-in roles are not even read', async () => {
     await mountIt(RoleEditor, { modelValue: true, rule, catalogue: withoutApps, storages: [] });
     expect(document.body.querySelector('[data-testid="perm-group-apps"]')).toBeNull();
     expect(roles.getDefaults).not.toHaveBeenCalled();
+    expect(roles.previewHolder).not.toHaveBeenCalled();
   });
 });
 
@@ -373,6 +496,29 @@ describe("a person's exceptions", () => {
     await click(q('[data-testid="perm-apps-reset"]'));
     await click(q('[data-testid="builtin-role-save"]'));
     expect(roles.putDefaults).toHaveBeenLastCalledWith(['files.download'], 'user', {});
+  });
+
+  // The owner's call (2026-09-29): an app's Allow / Deny are keys of their
+  // own (`permissions.apps.effect.*`), so renaming the apps' Deny — to
+  // "Block", say — does not rename every Deny in the role editors. Same words
+  // today; this pins that they are separate KEYS.
+  it("an app's Allow / Deny are words of their own, not the catalogue's", async () => {
+    asAdministrator(true);
+    roles.catalogue.mockResolvedValue(withApps);
+    roles.forUser.mockResolvedValue(personAnswer({}, { allowed: true, kind: 'app_default', inherited: true, inheritedKind: 'app_default' }));
+    const renamed = JSON.parse(JSON.stringify(en)) as typeof en;
+    renamed.permissions.apps.effect = { allow: 'Let', deny: 'Block' };
+    await mountIt(UserRolesCard, { userId: 2, role: 'user' }, 'en', { en: renamed, tr });
+    await openApps();
+    expect(choice('allow').textContent?.trim()).toBe('Let');
+    expect(choice('deny').textContent?.trim()).toBe('Block');
+    // The Apps group's own shortcuts say the same words as its rows.
+    const appsHeader = q('[data-testid="perm-group-apps"]').firstElementChild as HTMLElement;
+    const shortcuts = Array.from(appsHeader.querySelectorAll('button')).map((b) => b.textContent?.trim());
+    expect(shortcuts).toEqual(expect.arrayContaining(['Let', 'Block']));
+    // A catalogue permission keeps the catalogue's words.
+    expect(q('[data-testid="perm-files.delete-deny"]').textContent?.trim()).toBe(EN.effect.deny);
+    expect(q('[data-testid="perm-files.delete-allow"]').textContent?.trim()).toBe(EN.effect.allow);
   });
 
   it('no app declares a permission: no Apps group', async () => {

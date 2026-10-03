@@ -153,7 +153,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
     label: t('explore.cols.mime'),
     sortable: true,
     width: 150,
-    format: (h) => h.mime || '\u2014',
+    format: (h) => h.mime || '-',
     sortValue: (h) => h.mime || null,
   },
   {
@@ -208,7 +208,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
            2026-09-21). The folders are said, not hidden. -->
       <StatCard
         :label="t('search.stats.files')"
-        :value="stats ? formatNumber(stats.file_count ?? stats.document_count, locale) : '—'"
+        :value="stats ? formatNumber(stats.file_count ?? stats.document_count, locale) : '-'"
         :hint="stats?.folder_count != null ? t('search.stats.foldersToo', { n: formatNumber(stats.folder_count, locale) }, stats.folder_count) : undefined"
         :icon="Database"
         icon-tone="brand"
@@ -216,13 +216,13 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
       />
       <StatCard
         :label="t('search.stats.size')"
-        :value="stats ? formatBytes(stats.index_size_bytes, locale) : '—'"
+        :value="stats ? formatBytes(stats.index_size_bytes, locale) : '-'"
         :icon="Database"
         icon-tone="emerald"
       />
       <StatCard
         :label="t('search.stats.lastBuilt')"
-        :value="stats?.last_built_at ? formatRelative(stats.last_built_at, locale) : '—'"
+        :value="stats?.last_built_at ? formatRelative(stats.last_built_at, locale) : '-'"
         :icon="RefreshCcw"
         icon-tone="amber"
       />
@@ -297,7 +297,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
             <template v-else>{{ seg.text }}</template>
           </template>
         </span>
-        <template v-else>—</template>
+        <template v-else>-</template>
       </template>
       <template #cell-storage_name="{ row }">
         <Badge tone="zinc" size="xs">{{ row.storage_name }}</Badge>

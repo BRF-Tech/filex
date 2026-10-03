@@ -73,7 +73,7 @@ function raise() {
       <section class="fe-e2e-settings__section">
         <h3 class="fe-e2e-settings__head">{{ t('e2e.settings.level') }}</h3>
         <p class="fe-e2e-settings__value" data-testid="e2e-settings-level">
-          {{ levelLabel }}<span v-if="level === 'pending'"> — {{ t('e2e.level.pending') }}</span>
+          {{ levelLabel }}<span v-if="level === 'pending'"> - {{ t('e2e.level.pending') }}</span>
         </p>
         <p class="fe-e2e-settings__hint">{{ levelHint }}</p>
 

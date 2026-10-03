@@ -78,7 +78,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
     label: t('common.storage'),
     sortable: true,
     width: 140,
-    format: (h) => storageName(h.storage_id) || '—',
+    format: (h) => storageName(h.storage_id) || '-',
     sortValue: (h) => storageName(h.storage_id),
   },
   {

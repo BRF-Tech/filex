@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -82,6 +83,20 @@ type Node struct {
 	// named, so a name never outlives the trip through the trash it was for.
 	DeletedBy *int64 `json:"deleted_by,omitempty"`
 
+	// UnavailableReason is what the storage answered when the sync last asked
+	// whether this row's object still exists and got neither "yes" nor "not
+	// found" (migration 00078, issue #104): a plugin that does not speak Stat
+	// for it, a permission it lacks, a backend error. Empty for an ordinary
+	// row. A row that carries one is listed with a warning, and every
+	// operation on it - and below it, for a folder - is refused with 409
+	// ENTRY_UNAVAILABLE until the storage answers for it again.
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
+	// UnavailableAt is when the storage last gave that answer.
+	UnavailableAt *time.Time `json:"unavailable_at,omitempty"`
+	// Unavailable is UnavailableReason != "", set by the store when it reads
+	// the row, so a JSON reader (the AI/MCP answers) has a flag to test.
+	Unavailable bool `json:"unavailable,omitempty"`
+
 	// OwnerName is the owner's display name, resolved in one batched lookup by
 	// the API layer for the rows it is about to return. Never persisted, and
 	// empty for a system row — the client decides what to call "nobody".
@@ -109,6 +124,59 @@ type Thumbnail struct {
 	Height      int        `json:"height,omitempty"`
 	Error       string     `json:"error,omitempty"`
 	GeneratedAt *time.Time `json:"generated_at,omitempty"`
+	// SourceSig is the ContentFingerprint of the bytes the latest render
+	// read (migration 00075). A row whose signature is not the node's
+	// current one was drawn from other content: thumb.Assess re-renders it.
+	// Empty on rows drawn before 0.50.
+	SourceSig string `json:"source_sig,omitempty"`
+	// AttemptedAt is when the latest render started, whatever it ended in.
+	AttemptedAt *time.Time `json:"attempted_at,omitempty"`
+	// Generator is who drew the picture: "builtin", or "app:<name>@<version>"
+	// (migration 00077). Empty when nobody did, and on rows from before 0.50.
+	Generator string `json:"generator,omitempty"`
+	// Attempts is who was asked, in order, and what each answered: a JSON
+	// list of {"h": handler, "r": "ok" | reason} (thumb.Attempt). Empty on
+	// rows drawn before 0.50; "[]" when every handler was switched off.
+	Attempts string `json:"attempts,omitempty"`
+}
+
+// ThumbnailProblem is one file whose thumbnail failed or was skipped, as the
+// repair tool lists them (Store.ListThumbnailProblems).
+type ThumbnailProblem struct {
+	NodeID      int64      `json:"node_id"`
+	StorageID   int64      `json:"storage_id"`
+	Path        string     `json:"path"`
+	Name        string     `json:"name"`
+	Size        int64      `json:"size"`
+	State       string     `json:"state"`
+	Error       string     `json:"error,omitempty"`
+	AttemptedAt *time.Time `json:"attempted_at,omitempty"`
+	// Attempts: see Thumbnail.Attempts.
+	Attempts string `json:"attempts,omitempty"`
+}
+
+// ContentFingerprint identifies the version of a node's content without
+// reading it: the backend's etag when it reports one, otherwise size and
+// modification time (to the millisecond).
+//
+// ⚠⚠ The ONE definition of "the content changed". The search index decides
+// whether to extract a file's text again with it, and the thumbnail pipeline
+// whether to draw a file again. A second, slightly different rule would have
+// one of them re-running on every pass while the other never noticed.
+// What each driver gives it, and what slips through, is in
+// docs/thumbnails.md (Design notes) and sync/etag.go objectDrift.
+func (n *Node) ContentFingerprint() string {
+	if n == nil {
+		return ""
+	}
+	if n.Etag != "" {
+		return n.Etag
+	}
+	var mt int64
+	if n.BackendMtime != nil {
+		mt = n.BackendMtime.UnixMilli()
+	}
+	return fmt.Sprintf("%d:%d", n.Size, mt)
 }
 
 // NodeVersion is a historical snapshot of a node's content.

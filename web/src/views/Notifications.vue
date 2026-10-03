@@ -326,7 +326,7 @@ const columns = computed<DataColumn<NotificationRow>[]>(() => [
             v-if="webhookReason(row)"
             data-testid="notif-webhook-reason"
             :class="row.webhook_status === 'failed' ? 'text-rose-500' : 'text-zinc-500'"
-            >{{ ' — ' + webhookReason(row) }}</span
+            >{{ ' - ' + webhookReason(row) }}</span
           >
         </div>
       </template>

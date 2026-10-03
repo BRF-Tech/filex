@@ -68,6 +68,7 @@ const { catalogue, accounting, roles, usersApi } = vi.hoisted(() => {
     setOverrides: vi.fn(),
     allOverrides: vi.fn(async () => ({})),
     userRole: vi.fn(async () => 7 as number | null),
+    userRoleDetail: vi.fn(async () => ({ role_id: 7 as number | null, group_role: null })),
     setUserRole: vi.fn(),
   };
   const people = [
@@ -87,6 +88,7 @@ const { catalogue, accounting, roles, usersApi } = vi.hoisted(() => {
 
 vi.mock('@/api/roles', () => ({ RolesApi: roles }));
 vi.mock('@/api/users', () => ({ UsersApi: usersApi }));
+vi.mock('@/api/groups', () => ({ GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []) } }));
 vi.mock('@/api/storages', () => ({ StoragesApi: { list: vi.fn(async () => []) } }));
 vi.mock('@/api/quota', () => ({
   quotaApi: {
@@ -101,6 +103,7 @@ import Users from '@/views/Users.vue';
 import UserEdit from '@/views/UserEdit.vue';
 import RoleEditor from '@/components/RoleEditor.vue';
 import UserRolesCard from '@/components/UserRolesCard.vue';
+import { unmountAll } from '../helpers/teardown';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () {
@@ -144,7 +147,6 @@ async function type(sel: string, value: string) {
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
-  document.body.innerHTML = '';
 });
 
 describe('Role editor: other languages', () => {
@@ -201,7 +203,7 @@ describe('Role editor: other languages', () => {
 
 describe('A custom role is named in the panel’s language', () => {
   it('the Roles table, with its description, and the delete-and-move dialog', async () => {
-    const w = await mountAt(Roles, { locale: 'tr' });
+    await mountAt(Roles, { locale: 'tr' });
     expect(q('[data-testid="role-name-rule-7"]').textContent).toContain('Muhasebe');
     expect(q('[data-testid="role-name-rule-7"]').textContent).not.toContain('Accounting');
     expect(q('[data-testid="role-description-rule-7"]').textContent).toBe('Faturalar ve ödemeler');
@@ -213,8 +215,7 @@ describe('A custom role is named in the panel’s language', () => {
       assignments: { '2': 8 },
       builtinMembers: { admin: 1, user: 1, viewer: 0 },
     } as never);
-    w.unmount();
-    document.body.innerHTML = '';
+    unmountAll();
     const w2 = await mountAt(Roles, { locale: 'tr' });
     await openRowMenu(w2, 'role-actions-rule-8');
     await pickMenuItem('role-actions-rule-8-delete');

@@ -29,7 +29,7 @@ import {
   type PersonUsage,
 } from '@brftech/filex-core/src/lib/storageLine';
 
-const DRIVE = 'Diyetlif-Bulut-Depolama';
+const DRIVE = 'Globex-Cloud-Storage';
 /** The install the report came from: no quota, 523.5 MB uploaded. */
 const uploader: PersonUsage = { used_bytes: 523_457_650, quota_bytes: 0, unlimited: true };
 /** The same drive, measured by `/api/files/quota/storages`. */

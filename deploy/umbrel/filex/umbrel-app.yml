@@ -2,31 +2,31 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.49.0"
+version: "0.50.0"
 releaseNotes: |-
-  filex v0.49.0 — 2026-09-28
-  • Everyone has one role, and a role is a list of permissions you choose
-  • An app can declare permissions an administrator hands out per role and per person
-  • An app is told which of its own permissions the person holds
-  • An API key asks for a plugin; an administrator installs it
-  • Administration can be delegated
+  filex v0.50.0 - 2026-10-02
+  • SSO identity tools
+  • show_refusal_reason on every LDAP, PAM and Windows provider (off by default).
+  • e2e/realenv: filex against real servers, in Docker.
+  • ONLYOFFICE: after "Download failed", the editor says which failure it was
+  • filex encrypt: the command-line twin of *Encrypt with E2EE…
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
   filex is a fast, self-hosted file manager with a single-binary backend and a
   modern web UI. Browse, upload, preview, rename, share and edit files across
-  pluggable storage backends — local folders, S3/MinIO, SFTP, WebDAV, FTP and
+  pluggable storage backends - local folders, S3/MinIO, SFTP, WebDAV, FTP and
   SMB/NAS shares.
 
 
   It also works the other way round: the same tree is reachable AS S3, SFTP,
   FTPS, NFS and WebDAV, so rclone, restic, aws s3, WinSCP, a backup job or a
-  media player can point straight at it — with the same permissions, trash and
+  media player can point straight at it - with the same permissions, trash and
   quota as the web UI. `filex mount` attaches it as a folder on Linux or a
   drive letter on Windows.
 
 
-  Browsing opens on Home — your storages, what you opened last, what you
+  Browsing opens on Home - your storages, what you opened last, what you
   starred. + New makes a folder or a document: Markdown, text, CSV or code
   straight away, and Word, Excel, PowerPoint or OpenDocument once an
   ONLYOFFICE server is connected. The templates are real documents compiled
@@ -41,9 +41,11 @@ description: >-
   Highlights: public share links with PIN and expiry, file-drop upload links,
   resumable uploads, full-text search, thumbnails of the file itself (a PDF's
   first page, a video's first frame that is not black, a text file's first
-  lines), trash and file versioning, end-to-end encrypted folders (encrypted
+  lines, an SVG, what is inside an archive) and folders drawn with the files
+  that came into them last, trash and file versioning, end-to-end encrypted folders (encrypted
   in your browser, so the server only ever holds ciphertext) each with a
-  recovery key shown once, role-based access control, TOTP 2FA, optional SSO
+  recovery key shown once, role-based access control with groups, TOTP 2FA, a
+  sign-in attempt limit on the web form, WebDAV, FTPS and SFTP, optional SSO
   (OIDC/LDAP), a desktop app with two-way folder sync, an embeddable web
   component, and an AI/MCP API for agents. An open folder keeps itself current
   over a WebSocket, so a file somebody else uploads appears without a refresh.

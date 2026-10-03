@@ -64,10 +64,7 @@ describe('admin Storages — the administrator order', () => {
       { id: 3, name: 'Archive', driver: 's3', enabled: true, read_only: true, sort_order: null },
     ];
   });
-  afterEach(() => {
-    closeRowMenus();
-    document.body.innerHTML = '';
-  });
+  afterEach(() => closeRowMenus());
 
   it('is THE table (DataTable) under its own id, with no sortable column to fight the order', async () => {
     const w = mountPage();

@@ -51,7 +51,7 @@ describe('the Trash’s own columns', () => {
     expect(head.join(' | ')).not.toContain(en['col.modified']);
 
     const row = w.get('.fe-list__row');
-    expect(row.get('.fe-list__col--mod').text()).not.toBe('—');
+    expect(row.get('.fe-list__col--mod').text()).not.toBe('-');
     expect(row.get('.fe-list__col--mod').text()).toContain('2026');
     expect(row.get('.fe-list__col--location').text()).toBe('depo/Projeler');
     expect(row.get('.fe-list__col--remaining').text()).toBe('29 days');
@@ -79,7 +79,7 @@ describe('the Trash’s own columns', () => {
       trashed('c.txt', '2026-09-22T11:11:26Z', null),
     ]);
     const left = w.findAll('.fe-list__row .fe-list__col--remaining').map((c) => c.text());
-    expect(left).toEqual(['1 day', en['trash.days_remaining_due'], '—']);
+    expect(left).toEqual(['1 day', en['trash.days_remaining_due'], '-']);
   });
 
   it('an ordinary folder keeps its ordinary columns', () => {

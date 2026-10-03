@@ -55,7 +55,7 @@ describe('who put it in the Trash', () => {
       w.findAll('.fe-list__row').find((r) => r.text().includes(name))!.get('.fe-list__col--owner');
     expect(cell('mine.txt').text()).toBe(en['owner.you']);
     expect(cell('bobs.txt').text()).toBe('Bob Marley');
-    expect(cell('gone.txt').text()).toBe('—');
+    expect(cell('gone.txt').text()).toBe('-');
     expect(cell('gone.txt').attributes('title'), 'the dash does not say why').toBe(en['trash.deleted_by_nobody']);
   });
 

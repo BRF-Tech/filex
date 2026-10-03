@@ -89,15 +89,13 @@ func (h *Manager) vfIndexMerged(w http.ResponseWriter, r *http.Request, s *model
 		return false
 	}
 	rows, diskOnly := mergeListing(nodes, objs)
-	for _, n := range rows {
-		if n.Type != model.NodeTypeFile {
-			continue
-		}
-		if t, terr := h.Store.GetThumbnail(r.Context(), n.ID); terr == nil && t != nil {
-			n.Thumb = t
-		}
-	}
+	// A drifted row here is the disk's copy (mergeListing): the refresher sees
+	// the file that is there and records THAT as the thumbnail's source.
+	hydrateThumbs(r.Context(), h.Store, h.ThumbRefresh, rows)
 	files := projectFileNodes(s.Name, rows, dirsOnly, set, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), rows))
+	if h.folderPreviewsOn() {
+		annotateFolderPreviews(r.Context(), h.Store, h.ThumbRefresh, h.ThumbSigner, s.ID, rows, set, files)
+	}
 	files = append(files, projectDriverObjects(s.Name, clean, diskOnly, dirsOnly, set)...)
 	sort.SliceStable(files, func(i, j int) bool {
 		di, dj := files[i]["type"] == "dir", files[j]["type"] == "dir"
@@ -121,7 +119,9 @@ func (h *Manager) vfIndexMerged(w http.ResponseWriter, r *http.Request, s *model
 //     (uploadExpectHolds). The stored row is the reconcile's to update.
 //   - An entry with no row (or a row of another kind) is the disk's.
 //   - A row with no entry is dropped — it is not there — unless it is an
-//     upload whose bytes are still on their way to the storage.
+//     upload whose bytes are still on their way to the storage, or an entry
+//     the storage could not answer for (issue #104): that one is listed, with
+//     its warning, exactly as the catalogue's own listing shows it.
 func mergeListing(nodes []*model.Node, objs []storage.Object) (rows []*model.Node, diskOnly []storage.Object) {
 	byName := make(map[string]*model.Node, len(nodes))
 	for _, n := range nodes {
@@ -152,8 +152,12 @@ func mergeListing(nodes []*model.Node, objs []storage.Object) (rows []*model.Nod
 		rows = append(rows, n)
 	}
 	for _, n := range nodes {
-		if _, left := byName[n.Name]; left && n.DeletedAt == nil && n.Type == model.NodeTypeFile &&
-			n.TransferState != "" && n.TransferState != model.TransferStateStored {
+		_, unlisted := byName[n.Name]
+		if !unlisted || n.DeletedAt != nil {
+			continue
+		}
+		inFlight := n.Type == model.NodeTypeFile && n.TransferState != "" && n.TransferState != model.TransferStateStored
+		if inFlight || n.Unavailable {
 			rows = append(rows, n)
 		}
 	}

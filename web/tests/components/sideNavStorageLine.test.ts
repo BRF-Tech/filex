@@ -20,7 +20,7 @@ function line(quota: Record<string, unknown> | null, locale = 'tr') {
     props: {
       expanded: true,
       activeView: '',
-      storages: [{ name: 'Diyetlif-Bulut-Depolama' }],
+      storages: [{ name: 'Globex-Cloud-Storage' }],
       locale,
       showIdentitySurfaces: true,
       quota,

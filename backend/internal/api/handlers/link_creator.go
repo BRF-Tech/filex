@@ -12,7 +12,7 @@ import (
 // linkCreatorAllows reports whether a public link may still answer: the
 // person who made it must STILL be allowed to make it — share.links for a
 // download link, share.upload_links for a file request (drop) — at the level
-// that permission needs on the item (≥editor, acl.NeedLevel). Burak,
+// that permission needs on the item (≥editor, acl.NeedLevel). The maintainer,
 // 2026-09-28: when someone loses the right to share, the links they already
 // handed out close ("linkler kapanır").
 //

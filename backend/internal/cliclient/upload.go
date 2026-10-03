@@ -88,7 +88,7 @@ func (c *Client) treeDestRoot(ctx context.Context, localDir, remote string, rp R
 	}
 	base := filepath.Base(abs)
 	if base == "." || base == string(filepath.Separator) || base == "/" {
-		return RemotePath{}, fmt.Errorf("cannot derive a folder name from %s — give a full remote target instead", localDir)
+		return RemotePath{}, fmt.Errorf("cannot derive a folder name from %s - give a full remote target instead", localDir)
 	}
 	return rp.Join(base), nil
 }

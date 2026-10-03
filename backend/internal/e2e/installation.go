@@ -187,7 +187,7 @@ type InstallationMismatchError struct {
 
 func (e *InstallationMismatchError) Error() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s changed after installation — refusing to start.\n\n", e.Setting)
+	fmt.Fprintf(&b, "%s changed after installation - refusing to start.\n\n", e.Setting)
 	fmt.Fprintf(&b, "  this installation was initialised with: %s\n", describeEscrow(e.Pinned))
 	fmt.Fprintf(&b, "  the environment now says:               %s\n\n", describeEscrow(e.Supplied))
 
@@ -209,8 +209,8 @@ func (e *InstallationMismatchError) Error() string {
 		b.WriteString("    own recovery key, for the rest of its life.\n\n")
 		b.WriteString("If that is what you want, set this alongside the key and start again:\n\n")
 		fmt.Fprintf(&b, "  %s=1\n\n", EnvEscrowAdopt)
-		b.WriteString("filex records the adoption — how it was authorised and when, kept\n")
-		b.WriteString("separate from the first-boot record — and then ignores the flag, so you\n")
+		b.WriteString("filex records the adoption - how it was authorised and when, kept\n")
+		b.WriteString("separate from the first-boot record - and then ignores the flag, so you\n")
 		b.WriteString("can drop it again on the next deploy. The recorded timestamp is the\n")
 		b.WriteString("line between the folders the escrow key opens and the ones it does not.\n\n")
 		b.WriteString("If it is NOT what you want:\n")
@@ -223,7 +223,7 @@ func (e *InstallationMismatchError) Error() string {
 		b.WriteString("So:\n")
 		b.WriteString("  - changing the escrow KEY now would leave every existing folder\n")
 		b.WriteString("    openable only by the OLD private key, while new folders needed\n")
-		b.WriteString("    the new one — two half-working key sets and no way to tell which\n")
+		b.WriteString("    the new one - two half-working key sets and no way to tell which\n")
 		b.WriteString("    is which from the outside.\n")
 		b.WriteString("  - turning escrow OFF now would not un-escrow anything already\n")
 		b.WriteString("    created; the old private key would keep opening those folders,\n")

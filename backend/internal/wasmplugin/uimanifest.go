@@ -127,7 +127,7 @@ func (m *Manifest) checkNewDocuments() ([]Permission, error) {
 		writes = writes || p == PermFilesWrite
 	}
 	if !writes {
-		return nil, fmt.Errorf("manifest: new_documents need the files:write permission — a new document is saved by the app")
+		return nil, fmt.Errorf("manifest: new_documents need the files:write permission - a new document is saved by the app")
 	}
 	var perms []Permission
 	seen := map[string]bool{}
@@ -153,7 +153,7 @@ func (m *Manifest) checkNewDocuments() ([]Permission, error) {
 		}
 		v, ok := m.View(d.View)
 		if !ok || v.Placement != "viewer" || v.UI == "" {
-			return nil, fmt.Errorf("manifest: new_documents[%d] (.%s): view %q is not one of the app's viewer views — a new document opens in one", i, d.Ext, d.View)
+			return nil, fmt.Errorf("manifest: new_documents[%d] (.%s): view %q is not one of the app's viewer views - a new document opens in one", i, d.Ext, d.View)
 		}
 		a := v.Applies
 		a.Multi = true
@@ -229,7 +229,7 @@ func checkExternalURL(raw string, mirrored bool) error {
 	// nothing that could end a directive, break the structured field
 	// (quote, backslash, non-ASCII) or widen the pattern (`( ) { } * + ? :`).
 	if !plainExternalRe.MatchString(raw) {
-		return fmt.Errorf("%q: an external address is a plain https URL — a lower-case host, and a path of letters, digits, . _ ~ @ - / and %%HH escapes only (no user, port name, query, fragment, wildcard, quote, space, backslash or other character)", raw)
+		return fmt.Errorf("%q: an external address is a plain https URL - a lower-case host, and a path of letters, digits, . _ ~ @ - / and %%HH escapes only (no user, port name, query, fragment, wildcard, quote, space, backslash or other character)", raw)
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Opaque != "" {
@@ -414,7 +414,7 @@ func (m *Manifest) checkUI() error {
 		e.As = strings.ToLower(strings.TrimSpace(e.As))
 		switch {
 		case e.As == "script":
-			return fmt.Errorf("manifest: ui.external[%d]: a script is never loaded from outside the package — the package's sha256 is what the administrator approved, and a script from anywhere else would make it mean nothing. Put the script in the bundle", i)
+			return fmt.Errorf("manifest: ui.external[%d]: a script is never loaded from outside the package - the package's sha256 is what the administrator approved, and a script from anywhere else would make it mean nothing. Put the script in the bundle", i)
 		case e.As == "connect":
 			return fmt.Errorf("manifest: ui.external[%d]: an interface does not talk to the network. Ask your module (engine.call) for the data; the module's http:<host> permission is approved by the administrator and every request goes through the server", i)
 		case !uiExternalAs[e.As]:
@@ -434,7 +434,7 @@ func (m *Manifest) checkUI() error {
 		seenURL[e.URL] = true
 		for _, lang := range m.Languages {
 			if strings.TrimSpace(e.Reason[lang]) == "" {
-				return fmt.Errorf("manifest: ui.external[%d] (%s) has no %q reason, but the app declares that language — the administrator reads it before allowing the address", i, e.URL, lang)
+				return fmt.Errorf("manifest: ui.external[%d] (%s) has no %q reason, but the app declares that language - the administrator reads it before allowing the address", i, e.URL, lang)
 			}
 		}
 		if !mirrored {
@@ -466,7 +466,7 @@ func (m *Manifest) checkUI() error {
 		}
 	}
 	if views == 0 {
-		return fmt.Errorf("manifest: the ui block is opened by no view — give a view `ui: \"index.html\"`")
+		return fmt.Errorf("manifest: the ui block is opened by no view - give a view `ui: \"index.html\"`")
 	}
 	docPerms, err := m.checkNewDocuments()
 	if err != nil {
@@ -504,7 +504,7 @@ func (m *Manifest) NeedsModule() bool {
 	if m.IsLanguagePack() {
 		return false
 	}
-	if m.UI == nil || len(m.PublicPages) > 0 {
+	if m.UI == nil || len(m.PublicPages) > 0 || m.Thumbnails != nil {
 		return true
 	}
 	for _, v := range m.Views {
@@ -534,6 +534,9 @@ func (m *Manifest) moduleOnlyReason() string {
 	}
 	if len(m.PublicPages) > 0 {
 		return "it declares public pages"
+	}
+	if m.Thumbnails != nil {
+		return "it draws thumbnails (the module's thumbnail export)"
 	}
 	for _, v := range m.Views {
 		if v.UI == "" {

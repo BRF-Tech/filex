@@ -103,8 +103,16 @@ func LoginHostFrom(ctx context.Context) string {
 // on a failure to home, DELETE the row rather than leave a half-created
 // supertenant account behind.
 func ProvisionUser(ctx context.Context, store ProvisionStore, h TenantHoming, driver, email, role string) (*model.User, error) {
-	var providerID int64
-	if h.MultiTenant {
+	return provision(ctx, store, h, 0, "", driver, email, role)
+}
+
+// provision is the one creation path behind ProvisionUser and
+// ProvisionFirstLogin. pinned, when non-zero, is the tenant the caller is
+// already bound to (a per-tenant OIDC realm) and skips the host/pin lookup;
+// subject is stamped as the account's oidc_subject.
+func provision(ctx context.Context, store ProvisionStore, h TenantHoming, pinned int64, subject, driver, email, role string) (*model.User, error) {
+	providerID := pinned
+	if providerID == 0 && h.MultiTenant {
 		p, err := h.resolveProvider(ctx, store)
 		if err != nil {
 			slog.Warn(driver+": refusing to provision a directory account with no tenant",
@@ -123,9 +131,9 @@ func ProvisionUser(ctx context.Context, store ProvisionStore, h TenantHoming, dr
 	if providerID == 0 {
 		return u, nil
 	}
-	// ⚠⚠ Empty oidc_subject: SetUserProvider overwrites the column
-	// unconditionally, and a directory account has no OIDC subject to keep.
-	if err := store.SetUserProvider(ctx, u.ID, providerID, ""); err != nil {
+	// ⚠⚠ SetUserProvider overwrites the oidc_subject column unconditionally:
+	// a directory account passes "" (it has none to keep), an OIDC one its sub.
+	if err := store.SetUserProvider(ctx, u.ID, providerID, subject); err != nil {
 		if derr := store.DeleteUser(ctx, u.ID); derr != nil {
 			// Naming the row is the only way an operator can find and remove a
 			// stranded supertenant account.
@@ -143,24 +151,86 @@ func ProvisionUser(ctx context.Context, store ProvisionStore, h TenantHoming, dr
 	return u, nil
 }
 
-// resolveProvider picks the tenant: the login's host first, then the pin.
-func (h TenantHoming) resolveProvider(ctx context.Context, store ProvisionStore) (*model.Provider, error) {
+// providerLookup is the slice of the store resolveProvider needs.
+type providerLookup interface {
+	GetProviderByHost(ctx context.Context, host string) (*model.Provider, error)
+	GetProviderBySlug(ctx context.Context, slug string) (*model.Provider, error)
+}
+
+// resolveProvider picks the tenant: the realm the sign-in named, then the
+// login's host, then the pin.
+func (h TenantHoming) resolveProvider(ctx context.Context, store providerLookup) (*model.Provider, error) {
+	p, _, err := h.Home(ctx, store)
+	return p, err
+}
+
+// Home is the tenant a directory account of this sign-in belongs in, and
+// whether the operator's pin is what said so:
+//
+//  1. the realm the sign-in NAMED (typed, or the tenant's own address —
+//     LoginRealm); the platform's own realm named outright homes nobody (a
+//     directory account is never made in the supertenant, see
+//     ErrNoTenantForLogin);
+//  2. the login's host (a caller that stamped only WithLoginHost);
+//  3. the driver's `provider` pin;
+//
+// else ErrNoTenantForLogin. Nothing here on a single-tenant install
+// (MultiTenant false): (nil, false, nil).
+//
+// ⚠ The tenant it names is also the realm a directory account's derived
+// address is made in (`alex@acme.local`, identity.DeriveEmail): an account
+// always carries its own tenant's realm, however the sign-in found it.
+func (h TenantHoming) Home(ctx context.Context, store providerLookup) (*model.Provider, bool, error) {
+	if !h.MultiTenant {
+		return nil, false, nil
+	}
+	if lr := LoginRealmFrom(ctx); lr != nil && lr.Named {
+		if lr.Tenant == nil || lr.Tenant.IsSupertenant {
+			return nil, false, ErrNoTenantForLogin
+		}
+		return lr.Tenant, false, nil
+	}
+	return h.hostOrPin(ctx, store)
+}
+
+// DirectoryRealm is the realm a directory provider derives addresses in for
+// this sign-in: the realm of the tenant Home names, "" when it names none (the
+// platform's own tenant, a single-tenant install). viaPin reports that the
+// driver's pin chose the tenant — call NoteHome once the person is signed in.
+func (h TenantHoming) DirectoryRealm(ctx context.Context, store providerLookup) (realm string, home *model.Provider, viaPin bool) {
+	p, pin, err := h.Home(ctx, store)
+	if err != nil || p == nil {
+		return "", nil, false
+	}
+	return p.LoginRealm(), p, pin
+}
+
+// NoteHome tells the sign-in's realm that a driver's pin homed it (see
+// LoginRealm.NotePinned). A no-op for anything else.
+func NoteHome(ctx context.Context, home *model.Provider, viaPin bool) {
+	if viaPin && home != nil {
+		LoginRealmFrom(ctx).NotePinned(home.ID)
+	}
+}
+
+// hostOrPin is the tenant of the login's host, else the pin's (viaPin).
+func (h TenantHoming) hostOrPin(ctx context.Context, store providerLookup) (*model.Provider, bool, error) {
 	if host := LoginHostFrom(ctx); host != "" {
 		// GetProviderByHost already filters on enabled=1, so a suspended tenant
 		// cannot gain members.
 		if p, err := store.GetProviderByHost(ctx, host); err == nil && p != nil {
-			return p, nil
+			return p, false, nil
 		}
 	}
 	if pin := strings.TrimSpace(h.Pin); pin != "" {
 		p, err := store.GetProviderBySlug(ctx, pin)
 		if err != nil {
-			return nil, fmt.Errorf("%w: pinned provider %q: %v", ErrNoTenantForLogin, pin, err)
+			return nil, false, fmt.Errorf("%w: pinned provider %q: %v", ErrNoTenantForLogin, pin, err)
 		}
 		if p == nil {
-			return nil, fmt.Errorf("%w: pinned provider %q does not exist", ErrNoTenantForLogin, pin)
+			return nil, false, fmt.Errorf("%w: pinned provider %q does not exist", ErrNoTenantForLogin, pin)
 		}
-		return p, nil
+		return p, true, nil
 	}
-	return nil, ErrNoTenantForLogin
+	return nil, false, ErrNoTenantForLogin
 }

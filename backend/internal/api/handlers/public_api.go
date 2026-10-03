@@ -268,6 +268,11 @@ type PublicShare struct {
 	Unlocked bool   `json:"unlocked"`
 	Expired  bool   `json:"expired"`
 	Revoked  bool   `json:"revoked"`
+	// Unavailable: the item behind the link (or a folder above it) is an
+	// entry the storage could not answer for (#104). The link is alive and
+	// may answer again; until then the page says so instead of offering a
+	// download that would fail. Told once the PIN gate is open, like the node.
+	Unavailable bool `json:"unavailable,omitempty"`
 	// Locked reports the PIN gate being shut after five wrong answers. It is
 	// NOT a reason the link is dead — it lifts by itself.
 	Locked     bool       `json:"locked"`
@@ -352,6 +357,7 @@ func (h *PublicAPI) describe(r *http.Request, sh *model.Share, unlocked bool) Pu
 			if out.Subject == "" {
 				out.Subject = node.Name
 			}
+			out.Unavailable = linkTargetUnavailable(r.Context(), h.Store, node.StorageID, node.Path)
 		}
 		// ⚠ The file's name is BEHIND the PIN, like its bytes. A subject the
 		// sharer wrote is theirs to reveal; a name the sharer never chose is
@@ -764,7 +770,7 @@ func (h *PublicAPI) enqueueAsCreator(w http.ResponseWriter, r *http.Request, sh 
 // the package.
 func (h *PublicAPI) jobRefused(w http.ResponseWriter, code int, kind string) {
 	writeJSON(w, code, map[string]string{"error": kind,
-		"message": "this link can no longer be used: the person who sent it can no longer start this step on the document — please ask them for a new link"})
+		"message": "this link can no longer be used: the person who sent it can no longer start this step on the document - please ask them for a new link"})
 }
 
 // File serves a copy an app page exposed (`pub:N`), Range-capable.
@@ -845,6 +851,12 @@ func (h *PublicAPI) Entries(w http.ResponseWriter, r *http.Request) {
 	rel, ok := cleanShareRel(r.URL.Query().Get("path"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	// A folder the storage could not answer for (#104) is not listed: the
+	// listing would be the driver's error, or whatever it last had.
+	if linkTargetUnavailable(r.Context(), h.Store, node.StorageID, joinShareRel(node.Path, rel)) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "unavailable", "code": CodeEntryUnavailable})
 		return
 	}
 	if h.Apps == nil || h.Apps.StorageResolver == nil {

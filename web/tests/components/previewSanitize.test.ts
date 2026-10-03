@@ -21,13 +21,14 @@ import PreviewModal from '@brftech/filex-core/src/modals/PreviewModal.vue';
 import IpynbViewer from '@brftech/filex-core/src/viewers/IpynbViewer.vue';
 import type { FileNode } from '@brftech/filex-core/src/types/FileNode';
 import { activeContent, BENIGN_MARKDOWN, VECTORS } from '../fixtures/previewVectors';
+import { teardownDom } from '../helpers/teardown';
 
 const mdNode = (basename: string): FileNode =>
   ({ path: `main://${basename}`, basename, type: 'file', extension: 'md', size: 100 }) as FileNode;
 
 async function renderedMarkdown(text: string): Promise<HTMLElement> {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(text, { status: 200 })));
-  const w = mount(PreviewModal, {
+  mount(PreviewModal, {
     attachTo: document.body,
     props: {
       open: true,
@@ -45,9 +46,7 @@ async function renderedMarkdown(text: string): Promise<HTMLElement> {
     },
     { timeout: 5000 },
   );
-  const el = document.querySelector('.fe-preview__md') as HTMLElement;
-  afterCleanup.push(() => w.unmount());
-  return el;
+  return document.querySelector('.fe-preview__md') as HTMLElement;
 }
 
 async function renderedNotebook(nb: unknown): Promise<HTMLElement> {
@@ -61,15 +60,14 @@ async function renderedNotebook(nb: unknown): Promise<HTMLElement> {
     },
     { timeout: 5000 },
   );
-  afterCleanup.push(() => w.unmount());
   return w.element as HTMLElement;
 }
 
-const afterCleanup: Array<() => void> = [];
-afterEach(() => {
-  while (afterCleanup.length) afterCleanup.pop()!();
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.unstubAllGlobals();
-  document.body.innerHTML = '';
 });
 
 describe('the Markdown preview draws inline HTML inert', () => {

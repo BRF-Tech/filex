@@ -13,6 +13,7 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import type { AppPlugin } from '@/api/appPlugins';
 import { updateRank, updateView } from '@/lib/appPluginUpdates';
+import { formatDate } from '@/lib/format';
 
 const WIRE = path.resolve(__dirname, '../../../backend/internal/api/handlers/testdata/wire');
 const check = JSON.parse(readFileSync(path.join(WIRE, 'app-plugin-update-check.json'), 'utf8'));
@@ -42,14 +43,36 @@ describe('updateView', () => {
       [en.appPlugins.compat.bad, 'rose'],
       [en.appPlugins.update.available, 'sky'],
     ]);
+    const replaced = pack.previous!.replaced_at;
     expect(v.lines).toEqual([
       'Works with filex >=0.45.0 <0.47.0; this is 0.47.0. It keeps running.',
       '1.0.0 → 1.1.0',
-      'Version 0.9.0 is kept to go back to',
+      `Version 0.9.0 is kept to go back to (replaced ${formatDate(replaced, 'en')})`,
     ]);
     expect(v.reviewable).toBe(true);
     expect(updateRank(pack)).toBeLessThan(updateRank(sign));
-    expect(updateView(pack, tOf('tr'), 'tr').lines[2]).toBe('0.9.0 sürümü geri dönmek için saklanıyor');
+    expect(updateView(pack, tOf('tr'), 'tr').lines[2]).toBe(
+      `0.9.0 sürümü geri dönmek için saklanıyor (${formatDate(replaced, 'tr')} tarihinde değiştirildi)`,
+    );
+  });
+
+  it('the kept version says when it was replaced: every value the code passes has a place in both texts', () => {
+    // The line was called with {version} and {when}, and the texts carried
+    // only {version}: the date was worked out and thrown away.
+    const src = readFileSync(path.resolve(__dirname, '../../src/lib/appPluginUpdates.ts'), 'utf8');
+    const call = src.match(/t\('appPlugins\.update\.previous', \{([^}]*)\}/);
+    expect(call, 'the line is still built from appPlugins.update.previous').not.toBeNull();
+    const passed = [...call![1].matchAll(/(\w+):/g)].map((m) => m[1]).sort();
+    expect(passed).toEqual(['version', 'when']);
+    for (const text of [en.appPlugins.update.previous, tr.appPlugins.update.previous]) {
+      const holes = [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
+      expect(holes, text).toEqual(passed);
+    }
+    for (const locale of ['en', 'tr'] as const) {
+      const line = updateView(pack, tOf(locale), locale).lines.at(-1)!;
+      expect(line).not.toMatch(/[{}]/);
+      expect(line).toContain(formatDate(pack.previous!.replaced_at, locale));
+    }
   });
 
   it('⚠⚠ nothing updates itself: no "updated automatically", no switch said to be off', () => {

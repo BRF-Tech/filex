@@ -424,7 +424,7 @@ func (r *Registry) Tick(ctx context.Context, p *Installed, now, windowEnd time.T
 	in := wire.TickInput{
 		Now: now.UTC(), WindowStart: now.UTC(), WindowEnd: windowEnd.UTC(),
 		MaxItems: MaxScheduleItems, MaxPaths: MaxSchedulePaths,
-		Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p),
+		Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(ctx, p),
 	}
 	inb, _ := json.Marshal(in)
 	budget := time.Duration(TickTimeout(p.Manifest)) * time.Second
@@ -528,7 +528,7 @@ func LocalizeNote(note, lang string) string {
 	if json.Unmarshal([]byte(note), &rec) == nil && rec.V == 2 {
 		line := tallied{Scheduled: rec.N[0], Beyond: rec.N[1], Refused: rec.N[2], Reason: rec.Why}.In(lang)
 		if a := strings.TrimSpace(rec.App.Get(lang)); a != "" {
-			line = a + " — " + line
+			line = a + " - " + line
 		}
 		return line
 	}

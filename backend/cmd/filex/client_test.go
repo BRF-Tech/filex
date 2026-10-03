@@ -18,7 +18,8 @@ func TestClientCmd_TreeBuilds(t *testing.T) {
 	for _, sub := range c.Commands() {
 		names[sub.Name()] = true
 	}
-	for _, want := range []string{"login", "ls", "upload", "download", "mkdir", "rm", "mv", "search", "share"} {
+	for _, want := range []string{"login", "ls", "upload", "download", "mkdir", "rm", "mv", "cp", "search", "share",
+		"trash", "versions", "tag", "actions", "run", "archive", "plugins"} {
 		assert.True(t, names[want], "missing subcommand %s", want)
 	}
 	// Persistent connection flags live on the parent.

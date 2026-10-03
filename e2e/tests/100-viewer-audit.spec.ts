@@ -189,9 +189,17 @@ test.describe('Viewer audit — per-extension UI mount', () => {
       // (useMonacoLoader.preloadEditor). Navigating away aborts those
       // in-flight chunks, and a sink armed while they were still loading
       // recorded every one as "failed to load" — for all 25 viewers, none of
-      // which had anything wrong with it. about:blank takes the aborts before
-      // anyone is listening; the session is in sessionStorage and survives it.
-      await page.goto('about:blank');
+      // which had anything wrong with it. Leaving takes the aborts before
+      // anyone is listening.
+      //
+      // ⚠ A page of filex's own origin, not about:blank. The session is a
+      // bearer token in sessionStorage, written a moment before this; WebKit
+      // swaps the page into another process for a cross-origin navigation, and
+      // once in a while the token had not reached the new one: the 0.50 final
+      // run lost "yaml" in WebKit to a GET /api/auth/me 401 right after the
+      // hop, signed out on the login page, with every other viewer green. The
+      // same-origin page aborts the chunks just the same.
+      await page.goto('/healthz');
       const sink = instrumentPage(page);
       try {
 

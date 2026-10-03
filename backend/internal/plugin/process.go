@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -36,6 +37,13 @@ type Process struct {
 	// OnDown is called each time the process is gone (exit, kill, failed
 	// handshake), before any restart.
 	OnDown func(err error)
+	// Prepare is called before EVERY start, the first and each restart. It
+	// verifies the binary and answers the file to execute (a private copy of
+	// what it verified) and how to dispose of that copy once the process is
+	// gone. An error refuses the plugin (no restart): a binary that does not
+	// verify now will not verify in a minute. Nil runs Binary as it is - for
+	// tests of the supervisor alone.
+	Prepare func() (exe string, done func(), err error)
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -191,27 +199,23 @@ func (p *Process) runOnce(ctx context.Context) error {
 	if err := os.MkdirAll(p.SockDir, 0o700); err != nil {
 		return fmt.Errorf("plugin socket dir: %w", err)
 	}
-	cmd := exec.Command(p.Binary)
-	cmd.Dir = filepath.Dir(p.Binary)
-	cmd.Env = buildEnv(os.Environ(), []string{
-		"FILEX_PLUGIN_TOKEN=" + p.Token,
-		"FILEX_PLUGIN_SOCKET_DIR=" + p.SockDir,
-		"FILEX_PLUGIN_NAME=" + p.Name,
-		"FILEX_PLUGIN_PROTOCOL=1",
-	})
-	// Its own process group and resource ceilings — see limits_unix.go for
-	// what these are and, more importantly, what they are not.
-	applyLimits(cmd)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
+	// ⚠⚠ Verified at THIS start, not once: the supervisor restarts what died,
+	// and a file replaced on disk since the last start - by the plugin itself,
+	// which runs as filex's user, or by anything else that can write there -
+	// used to be run unchecked by the next restart.
+	exe := p.Binary
+	if p.Prepare != nil {
+		e, done, err := p.Prepare()
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrRefused, err)
+		}
+		exe = e
+		if done != nil {
+			defer done()
+		}
 	}
-	stderr, err := cmd.StderrPipe()
+	cmd, stdout, stderr, err := p.spawn(exe)
 	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", p.Binary, err)
 	}
 	// Bind the child's lifetime to filex's where the platform can (Windows job
@@ -279,7 +283,7 @@ func (p *Process) runOnce(ctx context.Context) error {
 		return ErrStopped
 	}
 
-	addr, err := ParseAddress(addrLine)
+	addr, err := parseHandshake(addrLine, p.SockDir)
 	if err != nil {
 		terminate(cmd)
 		<-waitCh
@@ -322,6 +326,50 @@ func (p *Process) runOnce(ctx context.Context) error {
 		client.Close()
 		return ErrStopped
 	}
+}
+
+// spawn starts exe as the plugin, with its pipes.
+//
+// ⚠ A copy written a moment ago can be refused with ETXTBSY ("text file
+// busy"): another goroutine's fork, made while the copy was still open for
+// writing, holds that descriptor until its own exec. The answer is to try
+// again a few times, with a fresh Cmd each time.
+func (p *Process) spawn(exe string) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 20 * time.Millisecond)
+		}
+		cmd := exec.Command(exe)
+		// The working directory is the plugin's own, whatever file runs.
+		cmd.Dir = filepath.Dir(p.Binary)
+		cmd.Env = buildEnv(os.Environ(), []string{
+			"FILEX_PLUGIN_TOKEN=" + p.Token,
+			"FILEX_PLUGIN_SOCKET_DIR=" + p.SockDir,
+			"FILEX_PLUGIN_NAME=" + p.Name,
+			"FILEX_PLUGIN_PROTOCOL=1",
+		})
+		// Its own process group and resource ceilings - see limits_unix.go for
+		// what these are and, more importantly, what they are not.
+		applyLimits(cmd)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if err := cmd.Start(); err != nil {
+			lastErr = err
+			if errors.Is(err, syscall.ETXTBSY) {
+				continue
+			}
+			return nil, nil, nil, err
+		}
+		return cmd, stdout, stderr, nil
+	}
+	return nil, nil, nil, lastErr
 }
 
 // envAllowed is the whole of what a plugin inherits from filex's environment.

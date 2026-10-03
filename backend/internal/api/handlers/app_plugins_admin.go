@@ -14,6 +14,7 @@
 //	GET/PUT /api/admin/app-plugins/{id}/settings
 //	GET/PUT /api/admin/app-plugins/{id}/overrides
 //	GET    /api/admin/app-plugins/{id}/logs?after=N
+//	GET/PUT /api/admin/app-plugins/{id}/thumbnails - the app's thumbnail limits (internal/wasmplugin/thumbnails.go)
 //
 // ⚠ Instance-wide, never tenant-scoped, for the same reason storage plugins
 // are: a plugin's actions appear in every tenant's file menu. Only the
@@ -38,6 +39,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -53,6 +55,10 @@ type AppPluginsAdmin struct {
 	DisabledReason string
 	// Audit records an administrator's forced unlock; nil = not recorded.
 	Audit func(ctx context.Context, userID *int64, action string, storageID int64, rel, ip string) error
+	// Assoc keeps which app opens and draws which kind (internal/assoc): the
+	// install review's File types group, the choices made there, and the
+	// rules an app's removal takes it out of. Nil: none of that.
+	Assoc *assoc.Service
 }
 
 // NewAppPluginsAdmin constructs the handler.
@@ -97,7 +103,7 @@ func (h *AppPluginsAdmin) runtimeFacts(ctx context.Context) map[string]any {
 	}
 	facts := map[string]any{
 		"enabled": true, "arch_ok": true, "disabled_reason": "",
-		"requires_signature": h.Registry.RequiresSignature(), "engines": h.Registry.Engines(),
+		"requires_signature": h.Registry.RequiresSignature(), "engines": h.Registry.Engines(ctx),
 		"engine_names":    engineNames(),
 		"dir":             h.Registry.Dir(),
 		"filex_version":   wasmplugin.FilexVersion(),
@@ -113,11 +119,16 @@ func (h *AppPluginsAdmin) runtimeFacts(ctx context.Context) map[string]any {
 // engineNames is every engine id with the name a person reads
 // (enginebin.DisplayName): the panel printed "libreoffice", "rsvg" beside the
 // install review's "LibreOffice", "librsvg" for the same programs. ONE
-// spelling, the server's, so the panel keeps no list of its own.
+// spelling, the server's, so the panel keeps no list of its own. An engine's
+// old name (`libreoffice`) is in it too, read as the engine it stands for: an
+// app built before 0.50 still names it in its permissions.
 func engineNames() map[string]string {
 	out := map[string]string{}
 	for _, id := range enginebin.Names() {
 		out[id] = enginebin.DisplayName(id)
+		for _, alias := range enginebin.AliasesOf(id) {
+			out[alias] = enginebin.DisplayName(alias)
+		}
 	}
 	return out
 }
@@ -376,9 +387,17 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 			}
 			granted = body.Permissions
 		}
+		var placements []assoc.Placement
+		if a := strings.TrimSpace(r.FormValue("associations")); a != "" {
+			if err := json.Unmarshal([]byte(a), &placements); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad associations json"})
+				return nil, false
+			}
+		}
 		return &wasmplugin.InstallInput{
 			Manifest: manifest, Wasm: wasmR, UI: uiR, Signature: r.FormValue("signature"),
 			Source: "upload", Granted: granted, DryRun: dry, Lang: langOf(r), ActorID: actorIDOf(r),
+			Placements: placements,
 		}, true
 	}
 
@@ -392,6 +411,8 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 		wasmplugin.URLInput
 		FromSource  bool     `json:"from_source"`
 		Permissions []string `json:"permissions"`
+		// Associations are the File types group's choices (assoc.Placement).
+		Associations []assoc.Placement `json:"associations"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -425,6 +446,7 @@ func (h *AppPluginsAdmin) readInstall(w http.ResponseWriter, r *http.Request, up
 	in.DryRun = dry
 	in.Lang = langOf(r)
 	in.ActorID = actorIDOf(r)
+	in.Placements = req.Associations
 	return in, true
 }
 
@@ -449,10 +471,61 @@ func (h *AppPluginsAdmin) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if dry != nil {
+		h.fileTypesOf(r, dry, nil)
 		writeJSON(w, http.StatusOK, dry)
 		return
 	}
-	writeJSON(w, http.StatusCreated, st)
+	writeJSON(w, http.StatusCreated, installedBody{Status: st, AssociationErrors: h.place(r, st.Name, in.Placements, nil)})
+}
+
+// installedBody is an install's answer: the app, and the File types choices
+// that could not be written (the app is installed either way; the screen
+// says which kinds kept their order).
+type installedBody struct {
+	*wasmplugin.Status
+	AssociationErrors []string `json:"association_errors,omitempty"`
+}
+
+// fileTypesOf fills the review's File types group: the kinds the app would
+// open or draw, who handles each now and where the app lands by default.
+// was is the installed version an upgrade replaces: its review lists only
+// the kinds the new version ADDS (the order the administrator has for the
+// others is not reopened by an upgrade).
+func (h *AppPluginsAdmin) fileTypesOf(r *http.Request, dry *wasmplugin.DryRunAnswer, was *wasmplugin.Installed) {
+	if h.Assoc == nil || dry == nil || dry.Manifest == nil {
+		return
+	}
+	open, thumb := wasmplugin.ManifestHandlers(wasmplugin.ParseManifestForReview(dry.Manifest))
+	if len(open)+len(thumb) == 0 {
+		return
+	}
+	rows := h.Assoc.InstallKinds(r.Context(), open, thumb)
+	if was != nil {
+		rows = assoc.OnlyNewInstallKinds(rows, handledBy(was))
+	}
+	if len(rows) > 0 {
+		dry.FileTypes = rows
+	}
+}
+
+// handledBy is every capability and kind an installed app handles
+// (assoc.KindKey).
+func handledBy(p *wasmplugin.Installed) map[string]bool {
+	if p == nil {
+		return map[string]bool{}
+	}
+	return assoc.HandledKinds(wasmplugin.ManifestHandlers(p.Manifest))
+}
+
+// place writes the File types choices of an install or an upgrade that
+// succeeded (assoc.PlaceForApp: only this app's handlers; with only set, only
+// the kinds an upgrade adds).
+func (h *AppPluginsAdmin) place(r *http.Request, app string, placements []assoc.Placement, only map[string]bool) []string {
+	if h.Assoc == nil || len(placements) == 0 {
+		return nil
+	}
+	auth.AddAuditDetail(r.Context(), "file_types", placements)
+	return h.Assoc.PlaceForApp(r.Context(), app, placements, only, actorIDOf(r))
 }
 
 func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
@@ -470,16 +543,27 @@ func (h *AppPluginsAdmin) Upgrade(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// What the installed version handles, read BEFORE it is replaced: an
+	// upgrade's File types choices may place only the kinds it adds.
+	before := handledBy(p)
 	st, dry, err := h.Registry.Upgrade(r.Context(), p.Row.ID, in)
 	if err != nil {
 		h.fail(w, err)
 		return
 	}
 	if dry != nil {
+		h.fileTypesOf(r, dry, p)
 		writeJSON(w, http.StatusOK, dry)
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	var only map[string]bool
+	if len(in.Placements) > 0 {
+		only = map[string]bool{}
+		if now, ok := h.Registry.ByID(p.Row.ID); ok {
+			only = assoc.NewKinds(before, handledBy(now))
+		}
+	}
+	writeJSON(w, http.StatusOK, installedBody{Status: st, AssociationErrors: h.place(r, st.Name, in.Placements, only)})
 }
 
 func (h *AppPluginsAdmin) Patch(w http.ResponseWriter, r *http.Request) {
@@ -552,7 +636,63 @@ func (h *AppPluginsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
+	// Its handlers leave every Default apps rule; the others keep their order.
+	if h.Assoc != nil {
+		_ = h.Assoc.PruneApp(r.Context(), p.Row.Name)
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ThumbLimits answers GET /api/admin/app-plugins/{id}/thumbnails: the app's
+// thumbnail limits in force, as stored, the defaults, the bounds, the kinds.
+func (h *AppPluginsAdmin) ThumbLimits(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r) {
+		return
+	}
+	p, ok := h.plugin(w, r)
+	if !ok {
+		return
+	}
+	ans, err := h.Registry.ThumbLimits(r.Context(), p.Row.ID)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ans)
+}
+
+// PutThumbLimits answers PUT /api/admin/app-plugins/{id}/thumbnails: a
+// signed-in administrator's, like every change to what an app is handed.
+func (h *AppPluginsAdmin) PutThumbLimits(w http.ResponseWriter, r *http.Request) {
+	if !h.gate(w, r) || !requireSession(w, r, "changing an app's thumbnail limits") {
+		return
+	}
+	p, ok := h.plugin(w, r)
+	if !ok {
+		return
+	}
+	var req wasmplugin.ThumbLimits
+	if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	before, _ := h.Registry.ThumbLimits(r.Context(), p.Row.ID)
+	ans, err := h.Registry.PutThumbLimits(r.Context(), p.Row.ID, req)
+	if err != nil {
+		var ie *wasmplugin.InstallError
+		if errors.As(err, &ie) && ie.Code == wasmplugin.ErrCodeOutOfRange {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": ie.Code, "message": ie.Message, "field": ie.Where})
+			return
+		}
+		h.fail(w, err)
+		return
+	}
+	auth.SetAuditTarget(r.Context(), strconv.FormatInt(p.Row.ID, 10), p.Row.Name)
+	if before != nil {
+		auth.AddAuditDetail(r.Context(), "before", before.Stored)
+	}
+	auth.AddAuditDetail(r.Context(), "after", ans.Stored)
+	writeJSON(w, http.StatusOK, ans)
 }
 
 func (h *AppPluginsAdmin) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -789,7 +929,17 @@ func (h *AppPluginsAdmin) Unlock(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": "nothing is locked there"})
 		return
 	}
-	if h.Audit != nil {
+	rel := strings.Trim(req.Path, "/")
+	if auth.Audited(r.Context()) {
+		// The door that records this request (the panel's AuditMiddleware, the
+		// /api/ai/admin route, the admin_app_unlock MCP tool) writes ONE row,
+		// named for what happened. The hook below wrote a second one beside the
+		// door's generic `app-plugins.delete` row.
+		auth.SetAuditAction(r.Context(), "app_plugin.unlock", "file")
+		auth.SetAuditTarget(r.Context(), rel, "")
+		auth.AddAuditDetail(r.Context(), "storage_id", req.StorageID)
+		auth.AddAuditDetail(r.Context(), "path", rel)
+	} else if h.Audit != nil {
 		var uid *int64
 		if u := auth.UserFrom(r.Context()); u != nil {
 			id := u.ID
@@ -867,7 +1017,13 @@ func (h *AppPluginsAdmin) ImportSigningCA(w http.ResponseWriter, r *http.Request
 		_ = h.Audit(r.Context(), uid, "app_plugin.signing_ca_import", 0, row.Subject, clientIP(r))
 	}
 	list, _ := h.Registry.CAs(r.Context(), signingTenantOf(r))
-	writeJSON(w, http.StatusOK, map[string]any{"imported": true, "subject": row.Subject, "authorities": list})
+	// What importing THIS authority means, said now rather than discovered:
+	// a general-purpose one hands filex a key everything else trusts too.
+	warnings := wasmplugin.ImportNotes(certPEM)
+	if warnings == nil {
+		warnings = []wasmplugin.CANote{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"imported": true, "subject": row.Subject, "authorities": list, "warnings": warnings})
 }
 
 // formFileBytes reads one uploaded part, or nothing.

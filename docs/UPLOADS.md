@@ -4,14 +4,14 @@ filex has two write paths, and the difference between them is who waits.
 
 | Path | When | What happens |
 |---|---|---|
-| **Direct** — `POST /api/files/manager?action=upload` | small files, every existing integration | one multipart request; the client waits for the storage backend to finish writing |
-| **Staged** — `/api/files/upload/*` | large files, slow or distant backends, anything that must survive a dropped connection | the bytes land in filex's own staging area first, are acknowledged, and are transferred to the backend afterwards by a background job |
+| **Direct** - `POST /api/files/manager?action=upload` | small files, every existing integration | one multipart request; the client waits for the storage backend to finish writing |
+| **Staged** - `/api/files/upload/*` | large files, slow or distant backends, anything that must survive a dropped connection | the bytes land in filex's own staging area first, are acknowledged, and are transferred to the backend afterwards by a background job |
 
 The direct path is fine for a 20 KB text file and is not going anywhere. The
 staged path exists because on a slow backend the progress bar shows the
 *backend's* speed, and a 4 GB upload over a flaky link starts from zero.
 
-There used to be a third path — `POST /api/files/upload/init` — which handed the
+There used to be a third path - `POST /api/files/upload/init` - which handed the
 browser presigned S3 URLs. It is still served for older embedders, but it
 requires a driver that implements multipart: `local`, `sftp`, `ftp` and `webdav`
 answer `501 storage does not support multipart upload`, and on that path filex
@@ -20,7 +20,7 @@ path replaces it everywhere and works on **every** driver, including `local`,
 `sftp`, `ftp`, `webdav` and an OS-mounted NAS.
 
 ⚠ A [storage plugin](PLUGINS.md) declaring `multipart` also implements that
-interface, so `init` does **not** 501 on it — but it hands back no part URLs
+interface, so `init` does **not** 501 on it - but it hands back no part URLs
 (its multipart exists for the staged commit, where filex pushes the parts), so
 the browser is left with nothing to PUT to. That is another reason not to reach
 for this path.
@@ -33,21 +33,21 @@ for this path.
 |---|---|---|---|
 | Web explorer / desktop explorer / embeds (`@brftech/filex-core`) | `?action=upload` | staged, chunked | a dropped connection, **and a page reload** (see *Resuming in a browser*) |
 | CLI (`filex client upload`, `filex client upload -r`) | `?action=upload` | staged, chunked | a dropped connection **and a process restart** |
-| `filex sync` / the desktop app's folder sync | same code as the CLI — `cliclient.uploadFile` | | |
-| Public drop links (`/d/{token}`) | synchronous write | staged ingest | — (one request; staging removes the *wait*, not the retry) |
-| ShareX (`/api/sharex/upload`) | synchronous write | staged ingest | — |
-| AI / REST (`/api/ai/upload`, MCP `file_write`) | synchronous write | staged ingest | — |
-| Upload tickets (`/u/{ticket}`, MCP `file_upload_ticket`) | synchronous write | staged ingest | — (one request, single-use ticket) |
+| `filex sync` / the desktop app's folder sync | same code as the CLI - `cliclient.uploadFile` | | |
+| Public drop links (`/d/{token}`) | synchronous write | staged ingest | - (one request; staging removes the *wait*, not the retry) |
+| ShareX (`/api/sharex/upload`) | synchronous write | staged ingest | - |
+| AI / REST (`/api/ai/upload`, MCP `file_write`) | synchronous write | staged ingest | - |
+| Upload tickets (`/u/{ticket}`, MCP `file_upload_ticket`) | synchronous write | staged ingest | - (one request, single-use ticket) |
 
-"Large" means **above the chunk size** — `FILEX_UPLOAD_CHUNK_SIZE`, 8 MiB by
-default — on every one of them, so the word means the same thing everywhere.
+"Large" means **above the chunk size** - `FILEX_UPLOAD_CHUNK_SIZE`, 8 MiB by
+default - on every one of them, so the word means the same thing everywhere.
 
 ### Upload tickets: the agent's way past its own context
 
 An AI agent is the one client that cannot simply POST a local file: everything it
 sends goes inside a tool call, and on MCP that means through the model's context,
 where a 130 MB file (~173 MB base64) does not fit at all. A **ticket** splits the
-operation — the agent's authorized call pins the destination, and the URL it gets
+operation - the agent's authorized call pins the destination, and the URL it gets
 back accepts exactly one upload **with no credentials**, so an agent holding no
 filex token can still run `curl -T`. On the wire the redeem is just another
 whole-body upload, so everything below (staging, the disk guard, quota) applies
@@ -63,8 +63,8 @@ the synchronous write, unchanged.
 ### Resuming in a browser
 
 The server holds the bytes, so a dropped connection costs one chunk. What a
-browser cannot survive on its own is *itself* — a reloaded tab, a crashed
-renderer — because nothing in memory outlives it and the platform will not hand
+browser cannot survive on its own is *itself* - a reloaded tab, a crashed
+renderer - because nothing in memory outlives it and the platform will not hand
 a `File` back without a fresh user gesture.
 
 So `packages/core` writes a bookmark to `localStorage` (`filex:uploads:v1`)
@@ -72,7 +72,7 @@ holding the upload id, the destination and the file's identity (name, size,
 `lastModified`). Picking the same file again continues the same staged session:
 `GET /api/files/upload/{id}` gives the offset, and the UI says *"Resuming X from
 62 %"* rather than silently starting over. A file whose size or mtime changed
-does **not** inherit the session — splicing a new tail onto an old head is the
+does **not** inherit the session - splicing a new tail onto an old head is the
 one way a resumable upload corrupts data. Bookmarks expire after 24 h, matching
 `FILEX_UPLOAD_STAGING_TTL`, so a note never outlives the bytes it describes.
 
@@ -105,7 +105,7 @@ when the file is no longer that:
 
 | `expect` | The write goes ahead only if |
 |---|---|
-| *(absent)* | always — every client that does not send it behaves exactly as before |
+| *(absent)* | always - every client that does not send it behaves exactly as before |
 | `none` | nothing exists at the target yet |
 | `<size>:<last_modified>` | the target is a file whose listing shows exactly this size and `last_modified` (Unix ms) |
 
@@ -116,8 +116,8 @@ it spelled the check wrong. The comparison is against the same catalogue row the
 listing is built from, so a signature a client read from a listing always
 matches while the file is untouched.
 
-`filex sync` sends it on every upload — the server version its plan was made
-from — so a save in the browser that lands between the engine's listing and its
+`filex sync` sends it on every upload - the server version its plan was made
+from - so a save in the browser that lands between the engine's listing and its
 upload is refused instead of silently replaced, and the next pass keeps both
 versions ([Folder sync](SYNC.md#when-both-sides-change-the-same-file-at-once)).
 An older server ignores the field and writes unconditionally.
@@ -148,34 +148,34 @@ without a translation layer.
 
 | Field | Meaning |
 |---|---|
-| `path` | destination **directory**, `adapter://sub/dir` — sanitised by the same guard every other mutation uses |
+| `path` | destination **directory**, `adapter://sub/dir` - sanitised by the same guard every other mutation uses |
 | `name` | file name (basename only; `..`, `/`, `\` are refused) |
 | `size` | exact byte length. It is verified before anything reaches the driver |
-| `mime` | optional. Advisory only — the mime actually stored is sniffed from the bytes, as on the direct path |
+| `mime` | optional. Advisory only - the mime actually stored is sniffed from the bytes, as on the direct path |
 | `hash` | optional `sha256:<hex>` or `md5:<hex>`, verified at commit |
-| `chunk_size` | optional. The server's answer is binding — use the `chunk_size` it returns |
+| `chunk_size` | optional. The server's answer is binding - use the `chunk_size` it returns |
 
 Refusals worth knowing:
 
-* `403` — no write permission on the destination, or the storage is read-only.
-* `409` — a folder already exists with that name.
-* `413 QUOTA_EXCEEDED` — quota is **reserved at begin**, see below.
-* `507 NO_DISK_SPACE` — the staging filesystem has less than `size × 1.2` free.
-* `501` — the driver cannot write at all, or staging is not configured.
+* `403` - no write permission on the destination, or the storage is read-only.
+* `409` - a folder already exists with that name.
+* `413 QUOTA_EXCEEDED` - quota is **reserved at begin**, see below.
+* `507 NO_DISK_SPACE` - the staging filesystem has less than `size × 1.2` free.
+* `501` - the driver cannot write at all, or staging is not configured.
 
-### PUT — one chunk
+### PUT - one chunk
 
 `Content-Range: bytes A-B/total` (B inclusive, RFC 9110). `A` must land on the
-grid `begin` handed out — `A % chunk_size == 0` — and the body must be exactly
+grid `begin` handed out - `A % chunk_size == 0` - and the body must be exactly
 as long as the range claims. That makes the part number derivable
 (`A / chunk_size + 1`), which is what lets chunks arrive **out of order** and a
 retried chunk simply overwrite itself.
 
-A body shorter than the announced range — the shape a dropped connection takes —
+A body shorter than the announced range - the shape a dropped connection takes -
 is refused with `400 SHORT_CHUNK` and **the offset does not move**. Accepting a
 partial chunk is how a resumable upload silently corrupts a file.
 
-### GET — the resume oracle
+### GET - the resume oracle
 
 `offset` is the resume point and it is authoritative. A client that lost its
 state (tab closed, process restarted, app reinstalled) asks here and continues
@@ -189,13 +189,13 @@ Verifies the size (and the hash, when one was declared), then:
    so the file is listed the moment the commit is accepted;
 2. submits an `upload-commit` op and answers `202` with `op_id` and `node_id`.
 
-Poll `GET /api/files/ops/{op_id}` — the same tray endpoint copy/move/delete use —
+Poll `GET /api/files/ops/{op_id}` - the same tray endpoint copy/move/delete use -
 for the transfer. `ok` means the bytes are on the driver and the node is
 `stored`; `failed` means the staging directory has been kept and `commit` can be
 called again to retry, without re-uploading a byte.
 
 ⚠ **`ok` is only answered once the node says `stored`.** After the driver write
-two catalogue writes remain — the backend's metadata and the `stored` flip —
+two catalogue writes remain - the backend's metadata and the `stored` flip -
 and they used to be fire-and-forget, with the staging and the session deleted
 right after whatever had happened. One failed write (a database busy under a
 large scan) left a file that was listed, entirely on the storage, and
@@ -207,7 +207,7 @@ transfer is reported `failed`, the staging is kept, the file stays readable from
 it, and `commit` retries as above.
 
 ⚠ **The `202` is not success.** It says filex holds every byte, not that the
-storage does — the transfer happens afterwards, and it can fail. So the browser
+storage does - the transfer happens afterwards, and it can fail. So the browser
 client (`useUploadChunked`) waits for that op by default, showing a
 `transferring` phase, and reports a failed transfer as a failed upload. A caller
 that genuinely wants the old behaviour passes `waitForTransfer: false`. On the
@@ -216,14 +216,24 @@ a `file.upload_failed` notification, carrying the reason, to whoever uploaded.
 Before v0.32.1 none of that happened: the only trace was one `WARN` line in the
 server log while the user was looking at a finished upload (GitHub #16).
 
-A commit may carry the same overwrite precondition as the multipart upload —
+A commit may carry the same overwrite precondition as the multipart upload -
 `POST /api/files/upload/{id}/commit?expect=…`, see
 [conditional uploads](#conditional-uploads-expect). It is checked at the commit
 because that is the moment the file is replaced, which for a large upload can
 be minutes after the client last looked; a refused commit leaves the staged
 bytes in place, so retrying costs a request, not the file.
 
-### DELETE — abort
+`e2e_convert=1` on the commit marks it as an end-to-end
+[conversion write](E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have):
+ciphertext replacing the plaintext it was made from, inside a folder whose key
+file says a conversion is under way. Only then is no version kept of what it
+replaces; anything else is an ordinary overwrite. The browser's in-place
+encryption of a file over 200 MB sends both (`?e2e_convert=1&expect=…`), and
+so does [`filex encrypt`](CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)
+for every file it sends staged (on the multipart path the same two travel as
+form fields).
+
+### DELETE - abort
 
 Deletes the staging directory and the session row. Refused with `409` while a
 transfer is running; wait for the op or let it fail.
@@ -257,7 +267,7 @@ transfer is running; wait for the op or let it fail.
 **Numbered parts, not one append-only file.** A single `<id>.part` plus a byte
 offset would serve a sequential resumable client and nothing else. The
 [S3-compatible endpoint](PROTOCOLS.md)'s `UploadPart` is built directly on this
-layer — its upload id *is* the staging id — and it receives parts out of order,
+layer - its upload id *is* the staging id - and it receives parts out of order,
 numbered, each needing its own ETag. The numbered store
 serves both: the sequential protocol is the special case where parts arrive in
 order, and the per-part md5 makes the S3 composite ETag
@@ -273,15 +283,15 @@ chunk leaves no debris.
 `offset` is the total size of the **contiguous run of parts from part 1**. It is
 not "how many bytes are staged": a part written past a hole is kept and reported
 in `received`, but it does not move `offset` until the hole is filled. That is
-what a sequential client needs — resuming from anything else would upload a file
+what a sequential client needs - resuming from anything else would upload a file
 with a gap in it.
 
 ### Staging boundaries vs backend boundaries
 
 **Staging part sizes belong to the client; backend part sizes belong to the
-driver.** On commit, a driver that implements `storage.PartUploader` — S3, and
-any [storage plugin](PLUGINS.md) that declares `multipart` — gets a real
-multipart upload with the parts **re-chunked** to at least 5 MiB — S3 rejects
+driver.** On commit, a driver that implements `storage.PartUploader` - S3, and
+any [storage plugin](PLUGINS.md) that declares `multipart` - gets a real
+multipart upload with the parts **re-chunked** to at least 5 MiB - S3 rejects
 any smaller non-final part, and it does so at `CompleteMultipartUpload`, i.e.
 after every byte has already been sent. A client that sent 1 MiB chunks must not
 be able to break the backend. Every other driver gets one `Writer.Write` over
@@ -297,7 +307,7 @@ SigV4 signs the SHA256 of the payload, so the S3 SDK reads a part once to hash
 it and then rewinds to send it. Cutting parts with `io.LimitReader` drops the
 `Seek` the staging reader has, and the request then dies inside the client
 before a byte is sent, with `failed to compute payload hash: failed to seek body
-to start, request stream is not seekable` — an error that names the SDK rather
+to start, request stream is not seekable` - an error that names the SDK rather
 than the call, and reads like a broken object store (GitHub #16).
 
 It is the **scheme** that decides whether this bites, not the provider: over
@@ -306,38 +316,38 @@ hashes the body, so a plain reader has always worked; over `http://` the payload
 hash binds the body to the signature and the body must be read twice. Every S3
 endpoint filex had been pointed at was HTTPS, which is why this survived to a
 release. Parts are therefore cut with a rewindable window over the staging
-reader, and the S3 driver makes any body rewindable — in memory when it is
-small, through a temp file when it is not — before handing it to the SDK.
+reader, and the S3 driver makes any body rewindable - in memory when it is
+small, through a temp file when it is not - before handing it to the SDK.
 
 ---
 
 ## Quota, the disk guard, and GC
 
 **Quota is reserved at `begin`**, not settled at commit. The reservation is
-derived from the open rows themselves — the sum of `total_size` over the user's
-`staging` and `committing` uploads — so it is released the moment a row leaves
+derived from the open rows themselves - the sum of `total_size` over the user's
+`staging` and `committing` uploads - so it is released the moment a row leaves
 that set (commit, abort or sweep) and it can never drift from the rows it
 describes. Without it a staged upload would be invisible to the ceiling until it
 committed, and a user could stage far past their limit.
 
 **The disk guard** refuses at `begin` when the staging filesystem has less than
 `size × 1.2` free. The whole object passes through staging, so accepting an
-upload that cannot fit only moves the failure to the worst possible moment — and
+upload that cannot fit only moves the failure to the worst possible moment - and
 takes the rest of the instance's disk with it. A probe that cannot measure (an
 unsupported platform, a permission problem) does **not** refuse: a guard that
 blocks every upload because it cannot read a number is worse than no guard.
 
 **GC.** A staging directory idle for longer than `FILEX_UPLOAD_STAGING_TTL`
 (default 24 h) is swept, together with its row, and every removal is logged with
-its id, path and staged size. `committing` rows are never swept — their bytes are
+its id, path and staged size. `committing` rows are never swept - their bytes are
 being read right now. `failed` rows are, once they too have been idle for a full
 TTL, so a permanently failing upload does not keep its bytes forever. Directories
 with no row at all (a crash between `mkdir` and the `INSERT`) age out by their
 own mtime.
 
 **Purging a file releases its staging immediately.** A node whose transfer failed
-keeps its only copy of the bytes in staging — deliberately, so a retry costs
-nothing — but once the file is deleted **permanently** (trash emptied, retention
+keeps its only copy of the bytes in staging - deliberately, so a retry costs
+nothing - but once the file is deleted **permanently** (trash emptied, retention
 expiry, "delete permanently") those bytes have no referent at all, and waiting
 out a 24-hour idle TTL for a file the user has already destroyed is just disk
 nobody gets back. The row is looked up **by node id**, so only the staging that
@@ -374,7 +384,7 @@ upload:
 ```
 
 ⚠ Put the staging directory on a filesystem with room for the largest upload you
-expect — the whole object passes through it.
+expect - the whole object passes through it.
 
 ---
 
@@ -409,8 +419,8 @@ curl -s https://filex.example/api/files/ops/42 -b cookies.txt
 Everything the direct path runs, in the same order and through the same helpers:
 the kind-conflict guard, mime sniffing (including the ZIP-based office-format
 refinement), the node upsert, the search index, the thumbnail job, the
-`writehook` gate — which is what fans out to the antivirus scan, the write
-webhook and notifications — and the realtime folder-change event.
+`writehook` gate - which is what fans out to the antivirus scan, the write
+webhook and notifications - and the realtime folder-change event.
 The event's `meta.origin` is `manager`, same as a direct upload, with
 `meta.staged = true` added so a consumer can tell which path it came from.
 
@@ -437,16 +447,16 @@ absence from a listing as a deletion and will not move it to trash. The bytes
 stay in staging and `commit` can be called again.
 
 **When the session is gone, the storage decides.** A node can still end up
-`staged` or `failed` with no session behind it — the process died between the
+`staged` or `failed` with no session behind it - the process died between the
 driver write and the flip, or an older version released the staging without
 flipping. Two passes settle it, on the same evidence:
 
 - the **storage sync**, for every row it walks;
-- a **boot pass**, once per start, after the first staging sweep — for storages
+- a **boot pass**, once per start, after the first staging sweep - for storages
   nobody scans (`ondemand`).
 
 A row is marked `stored` only when **no staging session references it** (while
-one does, the session owns the bytes — in flight, or failed and retryable) **and
+one does, the session owns the bytes - in flight, or failed and retryable) **and
 the object at its key has the committed size and is not older than the commit**
 (`backend_mtime` for an overwrite, the row's creation for a new file, with two
 seconds of clock skew allowed). A settled file is re-indexed, gets its thumbnail
@@ -470,19 +480,19 @@ one helper (`internal/filebody`), which answers "staging" while
 | Folder-share browse | `GET /s/{token}/f/*` |
 | WebDAV `GET` / `PROPFIND`, including `Range` | `GET /dav/{storage}/…` |
 | Thumbnails | the `thumb` pipeline |
-| OnlyOffice fetch, archive zip/unzip, AI/MCP read + zip/unzip, versioning snapshots, antivirus, content indexing | — |
+| OnlyOffice fetch, archive zip/unzip, AI/MCP read + zip/unzip, versioning snapshots, antivirus, content indexing | - |
 
 Three rules decide what a reader sees:
 
 * **Metadata is the committed metadata.** `Stat` answers with the size that was
   committed and an ETag computed from the staged parts
   (`md5(concat(part md5s))-N`), not with the backend's absence. On an overwrite
-  the previous ETag is deliberately replaced at commit time — keeping it would
+  the previous ETag is deliberately replaced at commit time - keeping it would
   let a client holding the old file revalidate, get a `304` and keep the version
   it was just told had been replaced.
 * **A failed transfer keeps serving.** The staging directory is kept on failure
   so the transfer can be retried without re-sending a byte. The node moves to
-  `failed`, and a `failed` node reads from staging exactly like a `staged` one —
+  `failed`, and a `failed` node reads from staging exactly like a `staged` one -
   those bytes are the only copy, and the driver has nothing.
 * **Staged with no staging is an error, never a body.** A `failed` session that
   the sweeper removes after a full idle TTL leaves a `failed` node with no bytes
@@ -493,7 +503,7 @@ Three rules decide what a reader sees:
   the answer is to settle the node (see *When the session is gone* above), not
   to guess on the read path.
 
-Ranged reads work out of staging too — the assembled staging reader seeks across
+Ranged reads work out of staging too - the assembled staging reader seeks across
 part boundaries, so a video is scrubbable and a download resumable before its
 bytes have reached the backend. Public share links keep their existing
 whole-body behaviour (one request is one download against the link's cap).
@@ -501,7 +511,7 @@ whole-body behaviour (one request is one download against the link's cap).
 Two things are deliberately NOT staging-aware, because their problem is the
 listing rather than the read:
 
-* the **cached folder-share ZIP** (`?zip=…`, `internal/sharezip`) — its file list
+* the **cached folder-share ZIP** (`?zip=…`, `internal/sharezip`) - its file list
   and its cache key both come from `drv.List`, so a staged file is invisible to
   it and an overwritten one signs with pre-overwrite metadata. Making only its
   reads staging-aware would produce a *cached* archive keyed by stale metadata,
@@ -510,5 +520,5 @@ listing rather than the read:
   so an in-flight overwrite is archived with the committed bytes.
 * the **public folder-share browse listing**, for the same reason: a staged file
   that has never existed on the backend is not in `drv.List`, so it is not shown
-  on the page — though it downloads correctly once addressed at
+  on the page - though it downloads correctly once addressed at
   `/s/{token}/f/<name>`. The app's own listing is DB-backed and shows it.

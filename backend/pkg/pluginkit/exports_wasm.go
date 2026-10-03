@@ -30,6 +30,11 @@ func exportTick() int32 { return finish(dispatchTick(pdk.Input())) }
 //go:wasmexport ui_call
 func exportUICall() int32 { return finish(dispatchUICall(pdk.Input())) }
 
+// One file's thumbnail, for an app whose manifest has a `thumbnails` block.
+//
+//go:wasmexport thumbnail
+func exportThumbnail() int32 { return finish(dispatchThumbnail(pdk.Input())) }
+
 // Reserved: nothing calls this yet, and the `events:<name>` permission that
 // would gate it is refused at install until something does.
 //

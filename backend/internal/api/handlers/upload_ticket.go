@@ -25,6 +25,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // Upload tickets exist for the one file an agent CANNOT hand to filex: a large
@@ -75,6 +76,9 @@ type uploadTicket struct {
 	Owner     *model.User
 	MaxBytes  int64
 	ExpiresAt time.Time
+	// AllowPlaintext is the minter's allow_plaintext, carried to the redeem:
+	// the redeemer cannot be asked, and the write is the minter's.
+	AllowPlaintext bool
 	// claimedAt is non-zero while a redeem is in flight. A failed transfer
 	// clears it so the agent can retry with the same URL.
 	claimedAt time.Time
@@ -174,6 +178,9 @@ type uploadTicketRequest struct {
 	Path             string `json:"path"`
 	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
 	MaxBytes         int64  `json:"max_bytes,omitempty"`
+	// AllowPlaintext: the destination is in an end-to-end encrypted folder
+	// and the upload is stored there UNENCRYPTED on purpose (ai_e2e.go).
+	AllowPlaintext bool `json:"allow_plaintext,omitempty"`
 }
 
 // uploadTicketInfo is what a minting caller gets back.
@@ -219,10 +226,21 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 	if s.ReadOnly {
 		return nil, storage.ErrReadOnly
 	}
+	// Everything the redeem's WriteStream will ask, asked now, so the agent
+	// learns before it transfers 130 MB: the write gate (filex's own names,
+	// an encrypted folder's key file, an app's lock), the grant, and an
+	// encrypted destination without allow_plaintext.
+	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
+		return nil, err
+	}
 	if err := a.can(ctx, s, rel, a.writeNeed(ctx, s, rel)); err != nil {
 		return nil, err
 	}
-	// A folder as `path` would write a file at the folder's own key — the
+	ctx = withPlaintextConsent(ctx, req.AllowPlaintext)
+	if err := a.plaintextRefusal(ctx, s, aiParent(rel)); err != nil {
+		return nil, err
+	}
+	// A folder as `path` would write a file at the folder's own key - the
 	// kind conflict EnsureFileTarget exists to prevent. Catch it at mint time
 	// so the agent learns before it transfers 130 MB, not after.
 	drv, err := a.resolver(s.ID)
@@ -254,10 +272,11 @@ func (a *aiOps) CreateUploadTicket(ctx context.Context, req uploadTicketRequest)
 
 	dest := joinAdapterPath(s.Name, rel)
 	tok, err := a.tickets.mint(&uploadTicket{
-		Path:      dest,
-		Owner:     auth.UserFrom(ctx),
-		MaxBytes:  max,
-		ExpiresAt: time.Now().Add(ttl),
+		Path:           dest,
+		Owner:          auth.UserFrom(ctx),
+		MaxBytes:       max,
+		ExpiresAt:      time.Now().Add(ttl),
+		AllowPlaintext: req.AllowPlaintext,
 	})
 	if err != nil {
 		return nil, err
@@ -287,7 +306,7 @@ func (h *AI) UploadTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := h.ops.CreateUploadTicket(r.Context(), body)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, info)
@@ -359,7 +378,7 @@ func ticketRefusal(w http.ResponseWriter, status int, code, hint string, extra m
 func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 	if !h.limiter.allow(clientIP(r)) {
 		ticketRefusal(w, http.StatusTooManyRequests, "rate_limited",
-			"Too many upload attempts from this address. Wait a minute, then retry the same URL — the ticket is still valid.", nil)
+			"Too many upload attempts from this address. Wait a minute, then retry the same URL - the ticket is still valid.", nil)
 		return
 	}
 	tok := chi.URLParam(r, "ticket")
@@ -371,7 +390,7 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 				"This ticket has expired. Mint a new one (file_upload_ticket / POST /api/ai/upload/ticket) and upload to the new URL.", nil)
 		case errors.Is(err, errTicketInFlight):
 			ticketRefusal(w, http.StatusConflict, "ticket_in_use",
-				"Another transfer is already using this ticket. Wait for it to finish — do not start a second upload to the same URL.", nil)
+				"Another transfer is already using this ticket. Wait for it to finish - do not start a second upload to the same URL.", nil)
 		default:
 			// Unknown and already-redeemed are the SAME answer: a consumed
 			// ticket must not be distinguishable from one that never existed.
@@ -402,7 +421,7 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 	if size > t.MaxBytes {
 		h.tickets.release(tok)
 		ticketRefusal(w, http.StatusRequestEntityTooLarge, "file_too_large",
-			"The file is larger than this ticket allows. THE TICKET IS STILL VALID — retry the same URL with a file of at most max_bytes; you do not need a new ticket.",
+			"The file is larger than this ticket allows. THE TICKET IS STILL VALID - retry the same URL with a file of at most max_bytes; you do not need a new ticket.",
 			map[string]any{"max_bytes": t.MaxBytes, "sent_bytes": size})
 		return
 	}
@@ -414,6 +433,7 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 		ctx = auth.WithUser(ctx, t.Owner)
 		ctx = quotastore.WithOwner(ctx, t.Owner.ID)
 	}
+	ctx = withPlaintextConsent(ctx, t.AllowPlaintext)
 
 	entry, err := h.ops.WriteStream(ctx, t.Path, src, size)
 	if err != nil {
@@ -438,6 +458,8 @@ func (h *TicketUpload) failWrite(w http.ResponseWriter, err error, dest string, 
 		code, status = "read_only", http.StatusForbidden
 	case errors.Is(err, errAIForbidden):
 		code, status = "forbidden", http.StatusForbidden
+	case errors.Is(err, errE2EPlaintext):
+		code, status = "e2e_plaintext_refused", http.StatusConflict
 	}
 	slog.Error("upload ticket: write failed",
 		slog.String("dest", dest),
@@ -446,10 +468,12 @@ func (h *TicketUpload) failWrite(w http.ResponseWriter, err error, dest string, 
 		slog.String("err", err.Error()),
 	)
 	hint := map[string]string{
-		"storage_unavailable": "The storage backend refused the write — this is not your request. The ticket is still valid: retry it later, and tell the user storage is down if it keeps failing.",
+		"storage_unavailable": "The storage backend refused the write - this is not your request. The ticket is still valid: retry it later, and tell the user storage is down if it keeps failing.",
 		"quota_exceeded":      "The ticket owner is out of storage. Free space or raise the quota; retrying will not help until then.",
 		"read_only":           "The destination storage is read-only. Mint a ticket for a writable storage instead.",
 		"forbidden":           "The ticket owner no longer has permission to write there. Ask for access, or mint a ticket for a path you can write.",
+		"e2e_plaintext_refused": "The destination is now inside an end-to-end encrypted folder, and filex holds no key to encrypt the upload with. " +
+			"Upload it through the filex web UI with the folder unlocked, or mint a new ticket with allow_plaintext=true to store it unencrypted on purpose.",
 	}[code]
 	ticketRefusal(w, status, code, hint, nil)
 }

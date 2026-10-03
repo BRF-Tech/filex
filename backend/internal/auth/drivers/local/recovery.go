@@ -75,7 +75,9 @@ func (r *RecoveryLogin) Login(ctx context.Context, identifier, password string) 
 			slog.String("identifier", identifier))
 		return nil, "", auth.ErrUnauthorized
 	}
-	u, err := identity.Resolve(ctx, r.store, identifier)
+	// In the sign-in's realm, when there is one: the bootstrap administrator
+	// is the platform's own, so a tenant's realm never finds it.
+	u, err := auth.ResolveAccount(ctx, r.store, identifier)
 	if err != nil {
 		if errors.Is(err, identity.ErrNotFound) {
 			return nil, "", auth.ErrUnauthorized

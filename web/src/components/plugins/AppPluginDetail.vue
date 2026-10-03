@@ -40,9 +40,11 @@
  *     one decided — and a table of the work it asked for. Read-only: the
  *     schedule is the app's own, and an administrator watching it is not the
  *     same as an administrator editing it.
+ *   • Thumbnails (0.50): only for an app that draws them - the kinds, and
+ *     its limits (AppPluginThumbLimits).
  *   • The log polls `?after=<next>` every 2 s while the drawer is open.
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { RouterLink } from 'vue-router';
 import { ExternalLink, LockOpen, RotateCcw, Save } from 'lucide-vue-next';
@@ -54,24 +56,25 @@ import {
   type AppPluginActionOverride,
   type AppPluginDetail,
   type AppPluginManifestAction,
-  type AppPluginLogLine,
   type AppPluginLock,
   type AppPluginScheduleItem,
   type PluginApplies,
 } from '@/api/appPlugins';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
-import { formatDate, formatDateFull } from '@/lib/format';
+import { formatDate } from '@/lib/format';
 import { lockReasonText, pluginLabelOf, splitList, storageFieldOf, StorageFields } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import PluginLogPanel from '@/components/plugins/PluginLogPanel.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Select from '@/components/ui/Select.vue';
 import Input from '@/components/ui/Input.vue';
 import ChipInput from '@/components/ui/ChipInput.vue';
 import Modal from '@/components/ui/Modal.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
+import AppPluginThumbLimits from './AppPluginThumbLimits.vue';
 
 const props = defineProps<{
   plugin: AppPlugin | null;
@@ -113,38 +116,12 @@ const locksLoading = ref(false);
 const unlocking = ref('');
 const confirmUnlock = ref<AppPluginLock | null>(null);
 
-const logs = ref<AppPluginLogLine[]>([]);
-const logNext = ref(0);
-let logTimer: ReturnType<typeof setInterval> | undefined;
-
-const LOG_POLL_MS = 2000;
-const LOG_CAP = 500;
-
-function stopLogs() {
-  if (logTimer) {
-    clearInterval(logTimer);
-    logTimer = undefined;
-  }
-}
-
-async function pollLogs() {
+/* The log: the panel both kinds of plugin share (PluginLogPanel), asking
+   this app's endpoint. */
+async function fetchLogs(after: number) {
   const p = props.plugin;
-  if (!p) return;
-  try {
-    const res = await AppPluginsApi.logs(p.id, logNext.value);
-    if (res.lines.length) logs.value = [...logs.value, ...res.lines].slice(-LOG_CAP);
-    logNext.value = res.next;
-  } catch {
-    /* a missed poll is not an error worth a toast; the next tick retries */
-  }
-}
-
-function startLogs() {
-  stopLogs();
-  logs.value = [];
-  logNext.value = 0;
-  void pollLogs();
-  logTimer = setInterval(() => void pollLogs(), LOG_POLL_MS);
+  if (!p) return { lines: [], next: after };
+  return AppPluginsApi.logs(p.id, after);
 }
 
 /**
@@ -256,15 +233,10 @@ watch(
     detail.value = null;
     if (p) {
       void load();
-      startLogs();
-    } else {
-      stopLogs();
     }
   },
   { immediate: true },
 );
-
-onBeforeUnmount(stopLogs);
 
 /**
  * What the app was granted, in words: the rows the install review showed
@@ -336,9 +308,9 @@ const kindOptions = computed(() => KINDS.map((k) => ({ value: k, label: t(`appPl
 
 /**
  * Extensions the manifest offers only while an engine is on the server
- * (`applies.engine_ext`, which the signing work adds: `{libreoffice: [docx,
- * odt]}` beside `ext: [pdf]`). Read defensively — a host without the field
- * sends none.
+ * (`applies.engine_ext`, e.g. `{office: [docx, odt]}` beside `ext: [pdf]`:
+ * the office engine is the connected ONLYOFFICE). Read defensively - a host
+ * without the field sends none.
  *
  * ⚠⚠ The editor lists them WITH the rest and the server stores only what the
  * admin changed, resolving engines at every read
@@ -563,12 +535,6 @@ function shortJob(id: string): string {
   return id.length > 12 ? id.slice(0, 8) + '…' : id;
 }
 
-function levelTone(level: string): 'rose' | 'amber' | 'zinc' {
-  if (level === 'error') return 'rose';
-  if (level === 'warn' || level === 'warning') return 'amber';
-  return 'zinc';
-}
-
 /** An override row's one verb, behind its one pinned `Actions` control. The
  *  row offers `Customise` until it HAS an override and `Reset to manifest`
  *  once it does — one verb at a time, as before, now named in a menu rather
@@ -630,7 +596,7 @@ function onLockAction(key: string, row: AppPluginLock) {
             <dt class="text-zinc-500">{{ t('appPlugins.detail.signature') }}</dt>
             <dd>{{ detail.signed ? t('appPlugins.detail.signed') : t('appPlugins.detail.unsigned') }}</dd>
             <dt class="text-zinc-500">{{ t('appPlugins.detail.sha256') }}</dt>
-            <dd class="break-all font-mono sm:col-span-3">{{ detail.sha256 || '—' }}</dd>
+            <dd class="break-all font-mono sm:col-span-3">{{ detail.sha256 || '-' }}</dd>
             <template v-if="detail.ui">
               <dt class="text-zinc-500">{{ t('appPlugins.wizard.uiGroup.sha256') }}</dt>
               <dd class="break-all font-mono sm:col-span-3" data-testid="app-plugin-ui-sha256">{{ detail.ui.sha256 }}</dd>
@@ -682,6 +648,9 @@ function onLockAction(key: string, row: AppPluginLock) {
             </div>
           </template>
         </section>
+
+        <!-- Thumbnails (0.50): an app that draws them, its limits. -->
+        <AppPluginThumbLimits v-if="detail.manifest.thumbnails" :plugin-id="detail.id" />
 
         <!-- Action overrides -->
         <section class="space-y-3">
@@ -794,7 +763,7 @@ function onLockAction(key: string, row: AppPluginLock) {
                count stopped climbing, is diagnosed from exactly those two. -->
           <p class="text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-schedule-wakeup">
             <span class="font-medium">
-              {{ t('appPlugins.detail.schedule.next', { when: wakeup ? formatDate(wakeup.due_at, locale) : '—' }) }}
+              {{ t('appPlugins.detail.schedule.next', { when: wakeup ? formatDate(wakeup.due_at, locale) : '-' }) }}
             </span>
             <template v-if="lastDecision">
               ·
@@ -820,7 +789,7 @@ function onLockAction(key: string, row: AppPluginLock) {
           >
             <template #cell-action_id="{ row }">
               <div>
-                <div class="font-medium">{{ row.action_id || '—' }}</div>
+                <div class="font-medium">{{ row.action_id || '-' }}</div>
                 <div class="font-mono text-[11px] text-zinc-500">{{ row.key }}</div>
               </div>
             </template>
@@ -854,7 +823,7 @@ function onLockAction(key: string, row: AppPluginLock) {
                 v-if="row.job_id"
                 :to="{ name: 'queue' }"
                 class="tbl-mono text-brand-600 hover:underline dark:text-brand-400"
-                :title="`${t('appPlugins.detail.schedule.openQueue')} — ${row.job_id}`"
+                :title="`${t('appPlugins.detail.schedule.openQueue')} - ${row.job_id}`"
                 :data-testid="`schedule-job-${row.key}`"
               >{{ shortJob(row.job_id) }}</RouterLink>
               <span v-else class="text-[11px] text-zinc-500">{{ t('appPlugins.detail.schedule.notQueued') }}</span>
@@ -889,7 +858,7 @@ function onLockAction(key: string, row: AppPluginLock) {
               </div>
             </template>
             <template #cell-reason="{ row }">
-              <div class="max-w-xs break-words text-xs" data-testid="app-plugin-lock-reason">{{ lockReasonText(row, locale) || '—' }}</div>
+              <div class="max-w-xs break-words text-xs" data-testid="app-plugin-lock-reason">{{ lockReasonText(row, locale) || '-' }}</div>
             </template>
             <template #cell-until="{ row }">
               <span class="text-xs">{{ row.until ? formatDate(row.until, locale) : t('appPlugins.detail.locks.noEnd') }}</span>
@@ -898,21 +867,9 @@ function onLockAction(key: string, row: AppPluginLock) {
         </section>
       </template>
 
-      <!-- Log -->
-      <section class="space-y-2">
-        <div class="flex items-baseline justify-between">
-          <h3 class="text-sm font-semibold">{{ t('appPlugins.detail.logs.title') }}</h3>
-          <span class="text-[11px] text-zinc-500">{{ t('appPlugins.detail.logs.live') }}</span>
-        </div>
-        <div class="max-h-64 overflow-auto rounded-lg border border-zinc-200 bg-zinc-50 p-2 font-mono text-[11px] dark:border-zinc-800 dark:bg-zinc-950" data-testid="app-plugin-logs">
-          <p v-if="!logs.length" class="text-zinc-500">{{ t('appPlugins.detail.logs.empty') }}</p>
-          <div v-for="line in logs" :key="line.seq" class="flex gap-2 whitespace-pre-wrap break-words">
-            <span class="shrink-0 text-zinc-500" :title="formatDateFull(line.ts, locale)">{{ formatDate(line.ts, locale) }}</span>
-            <Badge :tone="levelTone(line.level)" size="xs">{{ line.level }}</Badge>
-            <span>{{ line.msg }}</span>
-          </div>
-        </div>
-      </section>
+      <!-- Log: the panel the storage plugins' page shows too. Keyed by the
+           app, so another app's page starts from its own log. -->
+      <PluginLogPanel :key="plugin?.id" :fetch="fetchLogs" :active="!!plugin" testid="app-plugin-logs" />
     </div>
 
     <!-- ⚠ Confirmed, never one click: lifting a lock overrules an app that is

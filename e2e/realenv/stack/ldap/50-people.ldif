@@ -1,0 +1,28 @@
+dn: ou=people,dc=example,dc=test
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=test
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=dave,ou=people,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: dave
+cn: Dave Directory
+sn: Directory
+mail: dave@beta.test
+userPassword: dave-pass
+
+dn: uid=erin,ou=people,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: erin
+cn: Erin Outsider
+sn: Outsider
+mail: erin@beta.test
+userPassword: erin-pass
+
+dn: cn=beta-staff,ou=groups,dc=example,dc=test
+objectClass: groupOfUniqueNames
+cn: beta-staff
+uniqueMember: uid=dave,ou=people,dc=example,dc=test

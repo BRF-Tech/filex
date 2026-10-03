@@ -28,8 +28,13 @@ const DefaultProviderSlug = "default"
 // admins see every tenant. There must be at most one, it should be a hardened
 // realm, and a local bootstrap admin remains the break-glass path.
 type Provider struct {
-	ID       int64  `json:"id"`
-	Slug     string `json:"slug"`
+	ID   int64  `json:"id"`
+	Slug string `json:"slug"`
+	// Realm is the tenant's sign-in name (migration 00073, package tenant):
+	// the sign-in form's Realm field and `realm/name` over SFTP. Set when the
+	// tenant is created and never changed — UpdateProvider does not write it.
+	// Empty for the supertenant, which is signed in to with an empty realm.
+	Realm    string `json:"realm"`
 	Name     string `json:"name"`
 	Host     string `json:"host,omitempty"`
 	AuthType string `json:"auth_type"`
@@ -51,8 +56,37 @@ type Provider struct {
 	IsSupertenant bool `json:"is_supertenant"`
 	Enabled       bool `json:"enabled"`
 
+	// AllowInsecureAuth lets this tenant's own sign-in providers reach an
+	// internal address and plain ldap:// (migration 00076,
+	// docs/TENANT-ADMIN.md). Off by default; only a platform super
+	// administrator sets it (db.Store.SetProviderAllowInsecureAuth), and
+	// UpdateProvider never writes it.
+	AllowInsecureAuth bool `json:"allow_insecure_auth"`
+
+	// OIDCTrustEmail is the tenant's own OIDC's "trust this provider's email
+	// addresses" (migration 00079, docs/SSO.md): every address it sends counts
+	// as verified, `email_verified` or not. Off for a tenant made from 0.50 on;
+	// ON for the ones an upgrade found (OIDCTrustEmailByUpgrade). Written by
+	// db.Store.SetProviderOIDCTrustEmail only; UpdateProvider never writes it.
+	OIDCTrustEmail bool `json:"oidc_trust_email"`
+	// OIDCTrustEmailByUpgrade: the value above is the one the upgrade to 0.50
+	// set, to keep the old behaviour, and nobody has saved it since. Filled
+	// by the API from the upgrade's record, not a column.
+	OIDCTrustEmailByUpgrade bool `json:"oidc_trust_email_by_upgrade,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// LoginRealm is the realm this tenant's accounts are addressed by: its Realm,
+// or "" for the supertenant — the platform's own tenant is signed in to with
+// an empty realm, and a tenant that became the supertenant (the flag moved to
+// it) keeps its old realm only as a second name.
+func (p *Provider) LoginRealm() string {
+	if p == nil || p.IsSupertenant {
+		return ""
+	}
+	return p.Realm
 }
 
 // ProviderStorage links a tenant to a storage (M:N; 1:1 in the current UI).

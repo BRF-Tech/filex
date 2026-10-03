@@ -1,0 +1,21 @@
+filex SVG thumbnail engine (engine.wasm.gz)
+
+engine.wasm.gz is built from rust/ by build.sh. It links the crates listed in
+rust/Cargo.lock; their licenses, as published on crates.io:
+
+  resvg, usvg, kurbo, simplecss, svgtypes         Apache-2.0 OR MIT
+  tiny-skia, tiny-skia-path                        BSD-3-Clause
+  fontdb, harfrust, rgb, imagesize, float-cmp,
+  color_quant, simd-adler32, strict-num,
+  xmlwriter, pico-args                             MIT
+  arrayref                                         BSD-2-Clause
+  slotmap, zlib-rs                                 Zlib
+  unicode-ident                                    (MIT OR Apache-2.0) AND Unicode-3.0
+  every other crate in rust/Cargo.lock             MIT OR Apache-2.0, with
+                                                   Zlib, 0BSD or Unlicense
+                                                   as further options
+
+The glue in rust/src/lib.rs is part of filex (MIT, see LICENSE at the
+repository root).
+
+resvg: https://github.com/linebender/resvg

@@ -21,7 +21,7 @@
  *      slash is actually painted.
  *
  * ⚠ Arabic is filex's right-to-left TEST fixture — not published, not
- * advertised, in no screenshot (Burak, 2026-09-19). Spanish is the real,
+ * advertised, in no screenshot (the maintainer, 2026-09-19). Spanish is the real,
  * shipped pack on this machine when it is there, and skipped when it is not.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
@@ -29,6 +29,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
 import { arabicPack, installLangPack, removeLangPack } from '../helpers/langPack';
+import { WEB_PREFS_URL, readWebPrefs, restoreWebPrefs } from '../helpers/prefs';
 
 const STORAGE = `e2e-notifcells-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -40,6 +41,9 @@ const ES_PACK = process.env.FILEX_E2E_LANG_PACK_ES ?? 'G:/filex-lang-es/filex-ap
 
 let api: APIRequestContext;
 const AR = arabicPack();
+
+/** The admin's preference document as this spec found it, put back after. */
+let prefsBefore: Record<string, unknown> = {};
 
 /** Install a pack by its manifest, whatever its direction. */
 async function installManifest(path: string): Promise<string> {
@@ -67,10 +71,19 @@ async function removeByName(name: string): Promise<void> {
  * electrónico". The account's language is applied the moment the session is
  * read (`fetchMe` → `applyAccountLocale`), which is also how a real person
  * gets it.
+ *
+ * ⚠⚠ BOTH account copies. `users.locale` is the WEAKER one: the preference
+ * document (`/api/me/prefs`) outranks it (web/src/i18n `chosenLocale`), so a
+ * `locale` any earlier spec left in the shared admin's document silently won
+ * — measured in the 0.50 three-engine run: Firefox opened the Arabic case in
+ * English because the document said `en`. Set where it lives, put back
+ * exactly in `afterAll`.
  */
 async function openIn(page: Page, locale: string) {
   const set = await api.patch('/api/auth/profile', { data: { locale } });
   expect(set.ok(), `profile locale ${locale}: ${set.status()}`).toBe(true);
+  const pref = await api.put(WEB_PREFS_URL, { data: { prefs: { ...prefsBefore, locale } } });
+  expect(pref.ok(), `prefs locale ${locale}: ${pref.status()}`).toBe(true);
   await loginAs(page);
   await page.goto('/admin/notifications');
   /* ⚠ Wait for the CELL, not for the wrapper the fix puts in it: a break-test
@@ -164,6 +177,7 @@ test.describe('The admin Notifications page draws its cells in one piece, in eve
 
   test.beforeAll(async ({ playwright, baseURL }) => {
     api = await newAuthedRequest(playwright, baseURL!);
+    prefsBefore = await readWebPrefs(api);
     await dropStorageByName(api, STORAGE);
     await seedLocalStorage(api, STORAGE, MOUNT);
     // A write at the ROOT of the storage: the notification it raises names
@@ -192,6 +206,7 @@ test.describe('The admin Notifications page draws its cells in one piece, in eve
 
   test.afterAll(async () => {
     if (!api) return;
+    await restoreWebPrefs(api, prefsBefore).catch(() => undefined);
     await api.patch('/api/auth/profile', { data: { locale: 'en' } }).catch(() => undefined);
     await removeLangPack(api, AR).catch(() => undefined);
     await dropStorageByName(api, STORAGE);

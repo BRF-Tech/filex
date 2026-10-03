@@ -45,7 +45,7 @@ func opID(t *testing.T, raw []byte) int64 {
 	return ans.Op.ID
 }
 
-// Burak, 2026-09-22: on a read-only storage "Dönüştür…" is offered, the
+// The maintainer, 2026-09-22: on a read-only storage "Dönüştür…" is offered, the
 // wizard asks where the result should go, and the result lands in the folder
 // chosen. The server is the one that decides: the folder is checked like any
 // write — its storage, the person's level there, filex's own folders — and a

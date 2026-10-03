@@ -252,7 +252,7 @@ func (h *Update) instructions(d update.Decision) []string {
 	steps := []string{"filex self-update"}
 	if d.Step == update.StepMajor {
 		steps = []string{
-			"# major release — read the notes first: " + d.Target.NotesURL,
+			"# major release - read the notes first: " + d.Target.NotesURL,
 			"filex self-update --to " + ver,
 		}
 	}

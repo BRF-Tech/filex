@@ -88,7 +88,7 @@ func (r Report) Report(t TB, strict bool) {
 			t.Errorf("%s: %s", f.Where, f.Message)
 			continue
 		}
-		t.Logf("warning — %s: %s", f.Where, f.Message)
+		t.Logf("warning - %s: %s", f.Where, f.Message)
 	}
 }
 
@@ -126,9 +126,11 @@ var Permissions = map[string]bool{
 	"settings": true, "state": true, "public_pages": true, "schedule": true,
 }
 
-// KnownEngines are the engines a plugin may ask for.
+// KnownEngines are the engines a plugin may ask for. `office` is the office
+// engine (the connected ONLYOFFICE Document Server, since filex 0.50);
+// `libreoffice` is its earlier name, still accepted for the same engine.
 var KnownEngines = map[string]bool{
-	"ffmpeg": true, "imagemagick": true, "libreoffice": true,
+	"ffmpeg": true, "imagemagick": true, "office": true, "libreoffice": true,
 	"ghostscript": true, "poppler": true, "rsvg": true,
 }
 
@@ -168,7 +170,7 @@ func InspectSurface(m wire.Manifest, s *wire.Surface) Report {
 			return
 		}
 		if !NodeTypes[n.Type] {
-			r = r.err(where, "unknown node type %q — filex has no component for it (catalogue: %s)", n.Type, catalogue())
+			r = r.err(where, "unknown node type %q - filex has no component for it (catalogue: %s)", n.Type, catalogue())
 		}
 		if len(n.Children) > 0 && !LayoutNodes[n.Type] {
 			r = r.warn(where, "node type %q carries children; only %s is a layout node", n.Type, "row")
@@ -217,7 +219,7 @@ func InspectSurface(m wire.Manifest, s *wire.Surface) Report {
 		}
 	}
 	if primary > 1 {
-		r = r.err("surface.actions", "%d primary buttons — one step asks ONE thing, so at most one primary button plus Back", primary)
+		r = r.err("surface.actions", "%d primary buttons - one step asks ONE thing, so at most one primary button plus Back", primary)
 	}
 	if len(s.Actions) == 0 && !s.Done && s.Job == nil {
 		r = r.warn("surface.actions", "a screen with no buttons that neither closes (done) nor queues a job is a dead end")
@@ -283,19 +285,19 @@ func inspectFields(where string, fields []wire.Field, values map[string]any) Rep
 				}
 				seen[o.Value] = fmt.Sprintf("[%d]", j)
 				if o.Label != "" && labels[o.Label] {
-					r = r.warn(ow, "two buttons carry the same label %q — the person cannot tell them apart", o.Label)
+					r = r.warn(ow, "two buttons carry the same label %q - the person cannot tell them apart", o.Label)
 				}
 				labels[o.Label] = true
 			}
 			if v, ok := values[f.Key]; ok && v != nil {
 				if _, isList := v.([]string); f.Multi && !isList {
 					if _, isAny := v.([]any); !isAny {
-						r = r.warn(w, "multi select, but its value is %T — a multi select's value is a LIST of option values", v)
+						r = r.warn(w, "multi select, but its value is %T - a multi select's value is a LIST of option values", v)
 					}
 				}
 				if s, isStr := v.(string); !f.Multi && !isStr && v != nil {
 					_ = s
-					r = r.warn(w, "single select, but its value is %T — it should be one option value as a string", v)
+					r = r.warn(w, "single select, but its value is %T - it should be one option value as a string", v)
 				}
 			}
 		} else if f.Multi {
@@ -304,7 +306,7 @@ func inspectFields(where string, fields []wire.Field, values map[string]any) Rep
 		r = append(r, inspectCondition(w, "show_when", f.ShowWhen, f.Key, present)...)
 		r = append(r, inspectCondition(w, "required_when", f.RequiredWhen, f.Key, present)...)
 		if f.ShowWhen != nil && f.Required && f.RequiredWhen == nil {
-			r = r.warn(w, "the field is hidden by show_when but always required; a hidden required field cannot be filled — use required_when")
+			r = r.warn(w, "the field is hidden by show_when but always required; a hidden required field cannot be filled - use required_when")
 		}
 	}
 	// A hidden field's value is dropped before the job runs; a screen that
@@ -340,7 +342,7 @@ func inspectCondition(where, what string, c *wire.Condition, self string, presen
 		return r.err(where, "%s points at the field itself", what)
 	}
 	if _, ok := present[c.Key]; !ok {
-		r = r.err(where, "%s looks at %q, which is not a field of this form — the rule can never be true", what, c.Key)
+		r = r.err(where, "%s looks at %q, which is not a field of this form - the rule can never be true", what, c.Key)
 		return r
 	}
 	if len(c.Equals) == 0 {
@@ -427,7 +429,7 @@ func inspectList(where string, n wire.Node) Report {
 		}
 		known[c.Key] = true
 		if c.Width != nil && (*c.Width < 60 || *c.Width > 900) {
-			r = r.warn(cw, "width %v is outside 60–900 px; it is clamped to what a person could drag it to", *c.Width)
+			r = r.warn(cw, "width %v is outside 60-900 px; it is clamped to what a person could drag it to", *c.Width)
 		}
 		if c.Align != "" && c.Align != "left" && c.Align != "right" && c.Align != "center" {
 			r = r.err(cw, "align %q is not left, right or center", c.Align)
@@ -471,6 +473,68 @@ func inspectList(where string, n wire.Node) Report {
 }
 
 // ── reading a surface ──────────────────────────────────────────────────
+
+// CheckJobResult fails t when filex would not do what a job's answer asks
+// (InspectJobResult). Warnings are logged.
+func CheckJobResult(t TB, m wire.Manifest, out *wire.ActionRunOutput) {
+	t.Helper()
+	InspectJobResult(m, out).Report(t, false)
+}
+
+// InspectJobResult measures a job's answer against what the host does with
+// it. The one part of a job result's `surface` filex acts on is `open`: when
+// the job ends, the person who queued it is sent to one of the files the job
+// produced, with one of the app's own screens on it (a conversion, then the
+// app's next screen on what it wrote). The host DROPS the request, silently for
+// the person, when
+//
+//   - the path is neither empty (the first output) nor the ref of one of
+//     this job's outputs - a job may send its person only to what it made;
+//   - the job produced nothing to open;
+//   - the screen is not one of the app's own, or it names both an action and
+//     a view.
+func InspectJobResult(m wire.Manifest, out *wire.ActionRunOutput) Report {
+	var r Report
+	if out == nil {
+		return r.err("result", "the job answered nothing")
+	}
+	if out.Surface == nil {
+		return r
+	}
+	s := out.Surface
+	if len(s.Nodes) > 0 || len(s.Actions) > 0 || s.Job != nil || s.Done || len(s.Toast) > 0 || len(s.Errors) > 0 {
+		r = r.warn("result.surface", "filex acts only on `open` in a job's answer; the screen's other parts are never drawn")
+	}
+	o := s.Open
+	if o == nil {
+		return r
+	}
+	if o.Action != "" && o.View != "" {
+		r = r.err("result.surface.open", "names both an action and a view - filex drops it")
+	}
+	if o.Action != "" && !hasAction(m, o.Action) {
+		r = r.err("result.surface.open", "names the action %q, which the manifest does not declare - filex drops it", o.Action)
+	}
+	if o.View != "" && !hasView(m, o.View) {
+		r = r.err("result.surface.open", "names the view %q, which the manifest does not declare - filex drops it", o.View)
+	}
+	if len(out.Outputs) == 0 {
+		return r.err("result.surface.open", "the job produced no file to open - filex drops it")
+	}
+	if path := strings.TrimSpace(o.Path); path != "" {
+		mine := false
+		for _, w := range out.Outputs {
+			if w.Ref == path {
+				mine = true
+				break
+			}
+		}
+		if !mine {
+			r = r.err("result.surface.open", "path %q is not the ref of one of this job's outputs - a job sends its person only to what it made, so filex drops it (leave it empty for the first output)", o.Path)
+		}
+	}
+	return r
+}
 
 // WalkNodes visits every node of a surface, depth first, with a readable
 // path for messages.

@@ -94,7 +94,7 @@ function gotoSearch() {
             {{ personInitial(auth.user, localeTag(locale)) || '?' }}
           </span>
           <span class="hidden sm:inline truncate max-w-[12rem]">
-            {{ personName(auth.user) || '—' }}
+            {{ personName(auth.user) || '-' }}
           </span>
           <ChevronDown class="h-4 w-4 opacity-60" />
         </MenuButton>
@@ -153,7 +153,7 @@ function gotoSearch() {
             </MenuItem>
             <!-- Which filex this is, at the foot of the menu: not a row,
                  nothing to press — the line somebody reads out when asked
-                 "which version are you on?" (Burak, 2026-09-24). The same
+                 "which version are you on?" (the maintainer, 2026-09-24). The same
                  piece the explorer's avatar menu and user settings draw. -->
             <template v-if="productVersionLine(caps.data.version)">
               <div class="divider" />

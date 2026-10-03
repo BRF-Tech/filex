@@ -143,7 +143,7 @@ async function main() {
   check('a drag of nothing starts nothing', started === false, String(started));
 
   // ── 6. placeholders: a drag starts instantly, whatever the size ──
-  // The route Burak asked for (2026-08-29): hand the OS an empty stand-in,
+  // The route the maintainer asked for (2026-08-29): hand the OS an empty stand-in,
   // find out where it landed, download the real bytes there. No size ceiling
   // and no waiting. Everything here is real except the OS drag loop itself,
   // which FILEX_TEST_NO_OS_DRAG holds back (see beginOsDrag in main.ts).

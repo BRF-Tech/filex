@@ -25,7 +25,7 @@ export default defineConfig({
   title: 'filex',
   titleTemplate: ':title · filex',
   description:
-    'Self-hosted file manager — one Go binary, an embeddable UI, storage that plugs in ' +
+    'Self-hosted file manager - one Go binary, an embeddable UI, storage that plugs in ' +
     '(local, S3, SFTP, WebDAV, FTP, SMB), apps that plug in, and a language pack for your ' +
     'own language. Reachable back as S3, SFTP, FTPS, NFS or WebDAV.',
   lang: 'en-US',
@@ -66,7 +66,7 @@ export default defineConfig({
   head: [
     ['link', { rel: 'icon', type: 'image/png', href: '/logo.png' }],
     ['meta', { name: 'theme-color', content: '#2f6ceb' }],
-    ['meta', { property: 'og:title', content: 'filex — self-hosted file manager' }],
+    ['meta', { property: 'og:title', content: 'filex - self-hosted file manager' }],
     ['meta', { property: 'og:site_name', content: 'filex' }]
   ],
 
@@ -103,7 +103,7 @@ export default defineConfig({
         text: 'Without a browser',
         collapsed: false,
         items: [
-          { text: 'Protocols — S3 · SFTP · FTPS · NFS', link: '/PROTOCOLS' },
+          { text: 'Protocols - S3 · SFTP · FTPS · NFS', link: '/PROTOCOLS' },
           { text: 'WebDAV', link: '/WEBDAV' },
           { text: 'filex mount', link: '/PROTOCOLS#filex-mount' }
         ]
@@ -140,10 +140,12 @@ export default defineConfig({
           { text: 'Notifications & Webhooks', link: '/NOTIFICATIONS' },
           { text: 'RBAC, folder access & API tokens', link: '/RBAC' },
           { text: 'Roles & per-user permissions', link: '/PERMISSIONS' },
+          { text: 'Groups', link: '/GROUPS' },
           { text: 'End-to-end encryption', link: '/E2E-ENCRYPTION' },
           { text: 'End-to-end encryption roadmap', link: '/E2E-ROADMAP' },
           { text: 'Replication', link: '/REPLICATION' },
           { text: 'Multi-tenancy', link: '/MULTI-TENANCY' },
+          { text: 'Tenant self-service & own domains', link: '/TENANT-ADMIN' },
           { text: 'Right-to-left languages', link: '/RTL' }
         ]
       },
@@ -156,7 +158,8 @@ export default defineConfig({
           { text: 'OnlyOffice', link: '/ONLYOFFICE' },
           { text: 'ShareX', link: '/SHAREX' },
           { text: 'SSO (OIDC)', link: '/SSO' },
-          { text: 'LDAP', link: '/LDAP' }
+          { text: 'LDAP', link: '/LDAP' },
+          { text: 'OS accounts', link: '/OS-LOGIN' }
         ]
       },
       {

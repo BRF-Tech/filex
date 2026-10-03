@@ -17,12 +17,18 @@
 package main
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
+	"image"
+	"image/color"
+	"image/png"
 	"strconv"
 	"strings"
 	"time"
@@ -176,7 +182,22 @@ func init() {
 				if _, err := pluginkit.OpenInput("in:99"); err == nil || !strings.Contains(err.Error(), "not_found") {
 					return nil, errors.New("expected not_found for a ref outside the scope")
 				}
-				return &wire.ActionRunOutput{OK: true, Outputs: outs, Message: wire.Text{"en": "done", "tr": "bitti"}}, nil
+				answer := &wire.ActionRunOutput{OK: true, Outputs: outs, Message: wire.Text{"en": "done", "tr": "bitti"}}
+				// then / then_action / then_path: the job's result sends its
+				// person to one of its outputs with a screen on it (filex #78,
+				// `surface.open` on a job). then_path "last" names the last
+				// output by its ref; any other value is sent as it is, which
+				// is how a test asks for a path the host must drop.
+				view, _ := in.Params["then"].(string)
+				act, _ := in.Params["then_action"].(string)
+				at, asked := in.Params["then_path"].(string)
+				if view != "" || act != "" || asked {
+					if at == "last" {
+						at = outs[len(outs)-1].Ref
+					}
+					answer.Surface = &wire.Surface{Open: &wire.OpenRequest{Path: at, View: view, Action: act}}
+				}
+				return answer, nil
 			},
 			// gather writes one sibling per input carrying the note the
 			// `picks` screen collected, so a test can count the files the
@@ -650,6 +671,10 @@ func init() {
 		// The app's own interface asking its module (`ui_call`). The tests
 		// install this module with a widened manifest that has a `ui` block
 		// and an interface view; describe stays a subset.
+		// thumbnail (0.50): installed with a manifest widened by a
+		// `thumbnails` block (thumbnails_test.go). What it does follows the
+		// file's name; see thumbnail() below.
+		Thumbnail: thumbnail,
 		UI: map[string]pluginkit.UICallFunc{
 			// echo: what the call carried — the view, the method, the params
 			// and the files the interface was opened with, read through their
@@ -694,6 +719,13 @@ func init() {
 				}
 			},
 			"wizard": func(in *wire.ViewEventInput) (*wire.Surface, error) {
+				// Its one button queues `upper` on the page's file and asks the
+				// job to bring the person back to THIS page on the result - the
+				// shape of the signing app's "Convert to PDF" (filex #78, e2e
+				// 192). Asked for by the button, on both events.
+				if in.ActionID == "upper" && (in.Event == "submit" || in.Event == "action") {
+					return &wire.Surface{Job: &wire.JobRequest{ActionID: "upper", Params: map[string]any{"then": "wizard"}}}, nil
+				}
 				// Echoes what a home page's frame and a signed-in person's
 				// request hand a view (v3.1): the section asked for and the
 				// actor's address.
@@ -713,7 +745,8 @@ func init() {
 				}
 				return &wire.Surface{Title: wire.Text{"en": "Wizard", "tr": "Wizard"}, Section: section,
 					Sections: []wire.Section{{ID: "a", Label: wire.Text{"en": "A", "tr": "A"}}, {ID: "b", Label: wire.Text{"en": "B", "tr": "B"}}},
-					Nodes:    []wire.Node{{Type: "text", Props: map[string]any{"text": map[string]string{"en": "page " + in.Event + " section=" + section + " ip=" + ip + " ro=" + ro + " locale=" + in.Context.Locale + " perms=" + perms}}}}}, nil
+					Nodes:    []wire.Node{{Type: "text", Props: map[string]any{"text": map[string]string{"en": "page " + in.Event + " section=" + section + " ip=" + ip + " ro=" + ro + " locale=" + in.Context.Locale + " perms=" + perms}}}},
+					Actions:  []wire.SurfaceAction{{ID: "upper", Label: wire.Text{"en": "Upper-case", "tr": "Büyük harf"}, Primary: true}}}, nil
 			},
 			"picks": func(in *wire.ViewEventInput) (*wire.Surface, error) {
 				// Every answer says how many files the host handed this event
@@ -771,4 +804,122 @@ func init() {
 			},
 		},
 	})
+}
+
+// thumbnail draws the fixture's thumbnails. By the file's name:
+//
+//   - probe.*: tries every host function a thumbnail call must NOT reach,
+//     and the reads it may do, and fails with what each answered;
+//   - net.*:   asks the granted host, then draws;
+//   - other.*: asks a host it was not granted, and fails with the answer;
+//   - slow.*:  never returns (the time limit);
+//   - huge.*:  answers a PNG header that claims 5000 x 5000 pixels;
+//   - gif.*:   answers a GIF;
+//   - empty.*: answers no image;
+//   - anything else: a 4 x 4 PNG the colour of the file's first byte.
+func thumbnail(in *wire.ThumbnailInput) (*wire.ThumbnailOutput, error) {
+	name := in.File.Name
+	switch {
+	case strings.HasPrefix(name, "probe."):
+		var parts []string
+		code := func(what string, err error) {
+			c := "ok"
+			if err != nil {
+				c = err.Error()
+				if he, ok := err.(*pluginkit.HostError); ok {
+					c = he.Code
+				}
+			}
+			parts = append(parts, what+"="+c)
+		}
+		data, err := pluginkit.ReadInput(in.File.Ref)
+		code("read", err)
+		parts = append(parts, "bytes="+strconv.Itoa(len(data)))
+		_, err = pluginkit.OpenInput("in:1")
+		code("other", err)
+		_, err = pluginkit.CreateOutput("x.txt")
+		code("create", err)
+		code("state", pluginkit.StateSet(in.File.Ref, "k", "v"))
+		_, err = pluginkit.UsersLookup("a")
+		code("users", err)
+		_, err = pluginkit.NotifySend(pluginkit.Notice{Title: wire.Text{"en": "x"}, Severity: "info"})
+		code("notify", err)
+		code("mail", pluginkit.MailSend("a@example.test", "s", "b"))
+		_, err = pluginkit.FileLock(in.File.Ref, 1, "x")
+		code("lock", err)
+		_, err = pluginkit.EngineRun(pluginkit.EngineRequest{Engine: "ffmpeg", Args: []string{"-version"}})
+		code("engine", err)
+		_, err = pluginkit.ShareCreate(pluginkit.PageCreate{Ref: in.File.Ref, PageID: "x"})
+		code("share", err)
+		parts = append(parts, "path="+in.File.Path+in.File.PathRel)
+		return nil, errors.New("probe:" + strings.Join(parts, ","))
+	case strings.HasPrefix(name, "net."):
+		resp, err := pluginkit.HTTPDo(pluginkit.HTTPRequest{URL: "https://example.test/thumb", Method: "POST", BodyB64: base64.StdEncoding.EncodeToString([]byte(name))})
+		if err != nil {
+			return nil, err
+		}
+		_ = resp
+	case strings.HasPrefix(name, "other."):
+		if _, err := pluginkit.HTTPDo(pluginkit.HTTPRequest{URL: "https://other.test/thumb"}); err != nil {
+			return nil, errors.New("other:" + err.Error())
+		}
+		return nil, errors.New("other: allowed")
+	case strings.HasPrefix(name, "slow."):
+		n := 0
+		for {
+			n++
+			if n < 0 {
+				break
+			}
+		}
+		return nil, errors.New("unreachable")
+	case strings.HasPrefix(name, "huge."):
+		return &wire.ThumbnailOutput{Image: pngHeader(5000, 5000)}, nil
+	case strings.HasPrefix(name, "gif."):
+		return &wire.ThumbnailOutput{Image: []byte{0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x3B}}, nil
+	case strings.HasPrefix(name, "empty."):
+		return &wire.ThumbnailOutput{}, nil
+	}
+	data, err := pluginkit.ReadInput(in.File.Ref)
+	if err != nil {
+		return nil, err
+	}
+	shade := uint8(0x80)
+	if len(data) > 0 {
+		shade = data[0]
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			img.Set(x, y, color.RGBA{shade, 0x20, 0x40, 0xFF})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return &wire.ThumbnailOutput{Image: buf.Bytes()}, nil
+}
+
+// pngHeader is a PNG signature and an IHDR chunk claiming w x h pixels -
+// enough for a decoder's DecodeConfig, nothing to decode.
+func pngHeader(w, h uint32) []byte {
+	var b bytes.Buffer
+	b.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+	chunk := func(typ string, data []byte) {
+		_ = binary.Write(&b, binary.BigEndian, uint32(len(data)))
+		b.WriteString(typ)
+		b.Write(data)
+		crc := crc32.NewIEEE()
+		crc.Write([]byte(typ))
+		crc.Write(data)
+		_ = binary.Write(&b, binary.BigEndian, crc.Sum32())
+	}
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], w)
+	binary.BigEndian.PutUint32(ihdr[4:], h)
+	ihdr[8], ihdr[9] = 8, 6
+	chunk("IHDR", ihdr)
+	chunk("IEND", nil)
+	return b.Bytes()
 }

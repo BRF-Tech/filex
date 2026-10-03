@@ -287,4 +287,37 @@ export const PluginsApi = {
   async remove(id: number): Promise<void> {
     await api.delete(`/admin/plugins/${id}`);
   },
+
+  /** The plugin's log above the cursor (issue #104): its starts and failures,
+   *  and the storage sync's answers it could not make sense of. The same shape
+   *  as an app plugin's (PluginLogPanel reads both). */
+  async logs(id: number, after = 0): Promise<PluginLogPage> {
+    const { data } = await api.get<{ lines?: PluginLogLine[]; next?: number }>(`/admin/plugins/${id}/logs`, {
+      params: { after },
+    });
+    return { lines: data.lines ?? [], next: data.next ?? after };
+  },
 };
+
+/** One line of a plugin's log (backend internal/pluginlog). A line repeated
+ *  comes back with the same `id`, a higher `count` and `last`. */
+export interface PluginLogLine {
+  /** Stays the same when the line repeats (absent from a server before 0.50). */
+  id?: number;
+  /** The cursor (`?after=`); it moves on when the line repeats. */
+  seq: number;
+  /** When it was first written. */
+  ts: string;
+  /** When it last repeated. */
+  last?: string;
+  /** How many times in a row (1 for most lines). */
+  count?: number;
+  level: string;
+  msg: string;
+}
+
+/** A page of a plugin's log: the lines above the cursor and the next cursor. */
+export interface PluginLogPage {
+  lines: PluginLogLine[];
+  next: number;
+}

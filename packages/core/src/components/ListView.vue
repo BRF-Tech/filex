@@ -23,6 +23,8 @@ import { useLocale } from '../composables/useLocale';
 import { inlineStartX } from '../lib/direction';
 import { lockOf, lockWords } from '../lib/appLock';
 import { linkWordsFor } from '../lib/symlink'; /* issue #34 — a link that will not open */
+import { unavailableWordsFor } from '../lib/unavailable'; /* issue #104 - an entry the storage could not answer for */
+import { thumbNoteWords } from '../lib/thumbNote'; /* 0.50 - why a file has no thumbnail */
 import { checkMod, clickMod, useRowTouch, type ClickMod } from '../composables/useRowTouch';
 import {
   arrivedFromOutside,
@@ -48,7 +50,7 @@ import {
   type SortKey,
 } from '../lib/sortOrder'; /* surucu:d1-sort */
 import { matchedInContent, snippetSegments } from '../lib/snippet'; /* bul:s3 */
-import { drawsAsPage, previewKindFor } from '../lib/filePreview'; /* tablo:t1 */
+import { drawsAsPage, previewKindFor, thumbTypeBadge } from '../lib/filePreview'; /* tablo:t1 */
 import { applyDragGhost } from '../lib/dragGhost'; /* wiring:c4 */
 import { displayParentDirOf } from '../lib/listing'; /* Location column — one split rule for every view */
 import { trashTimeLeft } from '../lib/trashTimeLeft'; /* one "time left" sentence, shared with the admin Trash page */
@@ -69,6 +71,7 @@ import {
 import DataTable, { type DataColumn } from './DataTable.vue';
 import StarButton from './StarButton.vue';
 import ThumbTile from './ThumbTile.vue';
+import FolderMosaic from './FolderMosaic.vue';
 
 const props = defineProps<{
   files: FileNode[];
@@ -176,6 +179,10 @@ const emit = defineEmits<{
    * found. The view knows what it drew; it says so.
    */
   (e: 'display-order', nodes: FileNode[]): void;
+  /** The pointer came to rest on a folder row, or left it (useFolderPeek:
+   *  the pane shows what is inside). */
+  (e: 'peek', node: FileNode, el: Element, pointerType: string): void;
+  (e: 'peek-end'): void;
 }>();
 
 const {
@@ -208,6 +215,18 @@ function lockTitleOf(n: FileNode): string {
    target, so it is not one of these. */
 function linkOf(n: FileNode) {
   return linkWordsFor(n, { t });
+}
+
+/* issue #104 - an entry the storage could not answer for: "!" with the
+   sentence and the storage's own answer, from the one module (lib/unavailable)
+   the details panel and the refused-open toast read too. */
+function unavailableOf(n: FileNode) {
+  return unavailableWordsFor(n, { t });
+}
+/** Why the file has no thumbnail, when the reason is its own (lib/thumbNote,
+ *  the same rule in the list, the grid and the gallery). */
+function thumbNoteOf(n: FileNode) {
+  return thumbNoteWords(n, { t });
 }
 
 function isSelected(n: FileNode): boolean {
@@ -327,7 +346,7 @@ function isPinnedSpecial(n: FileNode): boolean {
 }
 
 function displayDate(ms: number | undefined): string {
-  return formatDate(ms, { time: true }) || '—';
+  return formatDate(ms, { time: true }) || '-';
 }
 
 /**
@@ -361,7 +380,7 @@ function fullDate(ms: number | undefined): string {
  * sort of small lie that sends someone looking for it on disk.
  */
 function typeLabel(n: FileNode): string {
-  if (isPinnedSpecial(n)) return '—';
+  if (isPinnedSpecial(n)) return '-';
   return typeLabelFor(n, t);
 }
 
@@ -384,6 +403,17 @@ function typeLabel(n: FileNode): string {
 function thumbOf(n: FileNode): string | null {
   if (n.type === 'dir') return null;
   if (previewKindFor(n)) return null;
+  return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
+}
+
+/** Some folder here has files to show: every folder row then draws the
+ *  small folder (FolderMosaic). Folder previews off: none does. */
+const folderPreviews = computed(() => props.files.some((n) => n.type === 'dir' && (n.preview?.length ?? 0) > 0));
+
+/** A folder's newest file (FolderMosaic): its thumbnail whatever its kind. A
+ *  text file's row draws its first lines itself (thumbOf skips it), but on a
+ *  folder's print the server's drawing of those lines is the picture. */
+function printSrc(n: FileNode): string | null {
   return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
 }
 
@@ -607,12 +637,20 @@ function nameTitle(n: FileNode): string {
 }
 
 function rowAttrs(n: FileNode): Record<string, unknown> {
-  return {
+  const attrs: Record<string, unknown> = {
     tabindex: 0,
     'aria-label': nodeDisplayName(n) /* wiring:c4 */,
     'data-fe-path': n.path /* wiring:d1 — middle-click open-in-new-tab delegation */,
     draggable: 'true',
   };
+  // A folder row shows what is inside when the pointer rests on it (the same
+  // peek the grid's folder cards have).
+  if (n.type === 'dir') {
+    attrs.onPointerenter = (ev: PointerEvent) => emit('peek', n, ev.currentTarget as Element, ev.pointerType);
+    attrs.onPointerleave = () => emit('peek-end');
+    attrs.onPointerdown = () => emit('peek-end');
+  }
+  return attrs;
 }
 
 function rowClass(n: FileNode) {
@@ -729,12 +767,12 @@ function ownerTitle(n: FileNode): string {
 /* ── Deleted by (the Trash) ───────────────────────────────────────────────
  *
  * "You", the account's name, or a dash. ⚠ Not "System": a row nobody is named
- * on may have been removed outside filex (the scanner found it gone) OR
- * trashed before filex kept this, and "System" would be a false answer for
- * the second. The dash says "not recorded", and its hover text says why. */
+ * on may have been quarantined by the virus scan OR trashed before filex
+ * kept this, and "System" would be a false answer for the second. (An item
+ * deleted outside filex is not in the trash at all since 0.48.) The dash says "not recorded", and its hover text says why. */
 function deleterLabel(n: FileNode): string {
   if (deletedByViewer(n)) return t('owner.you');
-  if (deleterIdOf(n) === null) return '—';
+  if (deleterIdOf(n) === null) return '-';
   return deleterNameOf(n) || t('owner.unknown');
 }
 
@@ -828,18 +866,40 @@ const tableGroups = computed(() =>
            an <img> puts a 'Files' MIME on the dataTransfer and the parent's
            upload handler re-uploads the thing you were only moving) and the
            type tile until then. -->
-      <ThumbTile
-        v-else
+      <!-- Folder previews (0.50): the newest file rising out of the row's
+           small folder (FolderMosaic, the list's shape), in the icon's box.
+           Once any folder here has files to show, every folder is drawn so
+           (an empty one empty), and the rows keep one look. -->
+      <FolderMosaic
+        v-else-if="row.type === 'dir' && folderPreviews"
+        shape="mini"
         :node="row"
-        :src-of="thumbOf"
-        class="fe-list__icon fe-list__icon--img"
-        :class="{ 'fe-thumb--page': drawsAsPage(row) }"
-        alt=""
-        aria-hidden="true"
-      >
-        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
-        <span class="fe-list__icon fe-list__icon--svg" aria-hidden="true" v-html="fileIconTile(row)"></span>
-      </ThumbTile>
+        :src-of="printSrc"
+        class="fe-list__icon"
+      />
+      <!-- 0.50: a thumbnail drawn on paper (an office page, a PDF, a text, an
+           archive's list) is, at 24 pixels, a white square on a white row, and
+           the row looked as if it had lost its icon. ThumbTile puts a small
+           badge in the colour of the type tile in its inline-end corner while
+           the picture is there (lib/filePreview thumbTypeBadge); the box below
+           is what the badge is placed against, and it is exactly the tile's
+           size, so no row moves. List view only: the grid and the gallery
+           draw their pictures large enough to read. -->
+      <span v-else class="fe-list__thumb">
+        <ThumbTile
+          :node="row"
+          :src-of="thumbOf"
+          :type-badge="thumbTypeBadge(row)"
+          :note="thumbNoteOf(row)"
+          class="fe-list__icon fe-list__icon--img"
+          :class="{ 'fe-thumb--page': drawsAsPage(row) }"
+          alt=""
+          aria-hidden="true"
+        >
+          <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/fileIcons -->
+          <span class="fe-list__icon fe-list__icon--svg" aria-hidden="true" v-html="fileIconTile(row)"></span>
+        </ThumbTile>
+      </span>
       <div class="fe-list__name-wrap">
         <span class="fe-list__name" :title="nameTitle(row)">
           <!-- ⚠ RTL: `<bdi>` — the name is the person's text, not the
@@ -889,6 +949,15 @@ const tableGroups = computed(() =>
         data-testid="symlink-badge"
         :data-link-state="linkOf(row)!.state"
       ><span class="fe-symlink__glyph" aria-hidden="true">&#128279;</span>{{ linkOf(row)!.badge }}</span>
+      <!-- issue #104 - an entry the storage could not answer for. -->
+      <span
+        v-if="unavailableOf(row)"
+        class="fe-unavailable"
+        role="img"
+        :title="unavailableOf(row)!.full"
+        :aria-label="unavailableOf(row)!.full"
+        data-testid="unavailable-badge"
+      >{{ unavailableOf(row)!.badge }}</span>
       <span v-if="isPlainDir(row) && !typeColumnShown" class="fe-list__kind">{{ t('node.folder') }}</span>
     </template>
 

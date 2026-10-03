@@ -13,6 +13,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { DENSITY_KEY, getDensity, setDensity } from '@brftech/filex-core/src/lib/density';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
+
+// setDensity() writes the density to the account 400 ms later.
+answerAccountPrefs();
 
 const TOOLBAR = path.resolve(
   __dirname,

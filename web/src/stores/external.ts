@@ -49,6 +49,8 @@ export const useExternalServicesStore = defineStore('external-services', () => {
   const callbackProbes = ref<Record<string, ExternalTestResult['serviceToFilex']>>({});
   /** What the server's own probe saw when it failed (issue #17), per service. */
   const serverDetails = ref<Record<string, string | null>>({});
+  /** The last Test was about the form's unsaved values (issue #80), per service. */
+  const unsavedTests = ref<Record<string, boolean>>({});
 
   async function fetch(): Promise<void> {
     loading.value = true;
@@ -80,15 +82,23 @@ export const useExternalServicesStore = defineStore('external-services', () => {
     const nextDetail = { ...serverDetails.value };
     delete nextDetail[id];
     serverDetails.value = nextDetail;
+    const nextUnsaved = { ...unsavedTests.value };
+    delete nextUnsaved[id];
+    unsavedTests.value = nextUnsaved;
   }
 
-  /** Probe from THIS browser. Safe to call unawaited; it never throws. */
-  async function probeBrowser(id: ExternalService['id']): Promise<BrowserProbeResult | null> {
+  /**
+   * Probe from THIS browser. Safe to call unawaited; it never throws. `url`
+   * is the address to probe when it is not the saved one (the form's, for
+   * "Test now").
+   */
+  async function probeBrowser(id: ExternalService['id'], url?: string | null): Promise<BrowserProbeResult | null> {
     const svc = items.value.find((s) => s.id === id);
-    if (!svc || !svc.url) return null;
+    const target = url !== undefined ? url : svc?.url;
+    if (!svc || !target) return null;
     browserProbing.value = { ...browserProbing.value, [id]: true };
     try {
-      const res = await probeExternalFromBrowser(id, svc.url);
+      const res = await probeExternalFromBrowser(id, target);
       browserProbes.value = { ...browserProbes.value, [id]: res };
       return res;
     } catch {
@@ -108,12 +118,20 @@ export const useExternalServicesStore = defineStore('external-services', () => {
   /**
    * Run BOTH probes. The server result and the browser result are stored
    * separately and reported separately — that separation is the fix.
+   *
+   * ⚠ `draft` is the form's values. "Test now" used to test the SAVED row
+   * while the box held another address (issue #80); with a draft both probes
+   * are about what is in the boxes, and nothing is saved.
    */
-  async function test(id: ExternalService['id']): Promise<ExternalTestResult> {
-    const [server] = await Promise.all([ExternalApi.test(id), probeBrowser(id)]);
+  async function test(id: ExternalService['id'], draft?: ExternalServiceUpdate): Promise<ExternalTestResult> {
+    const [server] = await Promise.all([
+      ExternalApi.test(id, draft),
+      probeBrowser(id, draft ? (draft.url ?? '') : undefined),
+    ]);
     publicUrl.value = server.publicURL || publicUrl.value;
     callbackProbes.value = { ...callbackProbes.value, [id]: server.serviceToFilex };
     serverDetails.value = { ...serverDetails.value, [id]: server.serverDetail };
+    unsavedTests.value = { ...unsavedTests.value, [id]: server.unsaved };
     items.value = items.value.map((s) =>
       s.id === id
         ? {
@@ -137,6 +155,7 @@ export const useExternalServicesStore = defineStore('external-services', () => {
     browserProbing,
     callbackProbes,
     serverDetails,
+    unsavedTests,
     fetch,
     update,
     test,

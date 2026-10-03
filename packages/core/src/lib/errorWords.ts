@@ -179,6 +179,9 @@ const CODE_FIELD_WORDS: Readonly<Record<string, string>> = {
   DRAFT_LIMIT: 'err.draft_limit',
   FOLDER_GONE: 'err.draft_folder_gone',
   DRAFTS_UNAVAILABLE: 'err.drafts_unavailable',
+  /* Issue #104 - an entry the storage could not answer for (lib/unavailable).
+     By status alone the 409 read "Already exists / conflict". */
+  ENTRY_UNAVAILABLE: 'err.entry_unavailable',
 };
 
 function codeFieldWordsWith(fields: Record<string, unknown>, t: T): string {
@@ -360,6 +363,7 @@ export type JobErrorCode =
   | 'app_removed'
   | 'action_removed'
   | 'engine_missing'
+  | 'office_unconfigured'
   | 'cancelled'
   | 'app';
 
@@ -433,6 +437,10 @@ export function jobFailure(
       return { text: t('opc.status.aborted') };
     case 'engine_missing':
       return withDetail(t(admin ? 'opc.err.engine_missing_admin' : 'opc.err.engine_missing', { engine }));
+    case 'office_unconfigured':
+      // 0.50: office documents are converted by the connected ONLYOFFICE;
+      // none is connected. Not "install a program": connect a server.
+      return withDetail(t(admin ? 'opc.err.office_unconfigured_admin' : 'opc.err.office_unconfigured'));
     case 'app': {
       // The app's own words, meant for the person (wasmplugin CallError:
       // "safe for a user; the guest's own words") — unless they are plumbing.

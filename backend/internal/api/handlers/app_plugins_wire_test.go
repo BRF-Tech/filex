@@ -172,8 +172,10 @@ func TestAppPluginWireFixtures(t *testing.T) {
 			// Both said at the review since v0.43.0's sweep: the name is
 			// taken (and by which install, for "upgrade it instead"), and
 			// which engines the app asks for are not on this server.
-			Installed:      &wasmplugin.DryRunInstalled{ID: 7, Version: "0.2.0"},
-			EnginesMissing: []wasmplugin.DryRunEngine{{ID: "libreoffice", Name: "LibreOffice"}},
+			Installed: &wasmplugin.DryRunInstalled{ID: 7, Version: "0.2.0"},
+			// A binary engine, and the office engine under its pre-0.50 name:
+			// a document server to connect, which the review says apart.
+			EnginesMissing: []wasmplugin.DryRunEngine{{ID: "ffmpeg", Name: "FFmpeg"}, {ID: "libreoffice", Name: "ONLYOFFICE", Kind: wasmplugin.DryRunEngineOffice}},
 			Compat:         &wasmplugin.Compat{Requires: ">=0.47.0", OK: true, Filex: "0.47.0"},
 		},
 		// POST /api/admin/app-plugins/{id}/upgrade?dry_run=1 — an upgrade's

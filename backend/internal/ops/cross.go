@@ -23,7 +23,7 @@ package ops
 //     carried is walked once and then refused (Skipped, below).
 //
 // ⚠ A cross-storage MOVE deletes the source outright — it does not go through
-// the trash. That is Burak's call (2026-08-29): the point of moving between
+// the trash. That is the maintainer's call (2026-08-29): the point of moving between
 // depolar is usually to free the first one, and a trashed copy would keep the
 // bytes (and the quota) until the trash is emptied. The delete only runs after
 // the destination has been written AND stat-verified — and not at all when the
@@ -142,7 +142,7 @@ func (e *SkipsError) Error() string {
 		noun = "entry was"
 	}
 	if e.SourceKept {
-		fmt.Fprintf(&b, "copied, but the source was kept: %d %s not carried, and a move deletes only what it carried — ", n, noun)
+		fmt.Fprintf(&b, "copied, but the source was kept: %d %s not carried, and a move deletes only what it carried - ", n, noun)
 	} else {
 		fmt.Fprintf(&b, "copied, but %d %s left out: ", n, noun)
 	}
@@ -296,7 +296,7 @@ func (s *Service) crossTransfer(ctx context.Context, srcDrv, dstDrv storage.Driv
 	// The bytes are on the far side and verified; the original goes away.
 	del, ok := srcDrv.(storage.Deleter)
 	if !ok {
-		return fmt.Errorf("copied to destination, but the source storage cannot delete %q — remove it by hand", src)
+		return fmt.Errorf("copied to destination, but the source storage cannot delete %q - remove it by hand", src)
 	}
 	if err := del.Delete(ctx, src); err != nil {
 		return fmt.Errorf("copied to destination, but deleting the source failed: %w", err)
@@ -401,7 +401,7 @@ func transferFile(ctx context.Context, srcDrv, dstDrv storage.Driver, wr storage
 		return fmt.Errorf("wrote %q but could not verify it: %w", dst, serr)
 	}
 	if stat.Size > 0 && got.Size != stat.Size {
-		return fmt.Errorf("destination %q is %d bytes, source is %d — transfer incomplete", dst, got.Size, stat.Size)
+		return fmt.Errorf("destination %q is %d bytes, source is %d - transfer incomplete", dst, got.Size, stat.Size)
 	}
 
 	// Carry the file's own timestamp where the target can hold one. Best

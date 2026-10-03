@@ -24,7 +24,7 @@ export function formatBytes(n: number, locale = 'en'): string {
 }
 
 export function formatNumber(n: number | null | undefined, locale = 'en'): string {
-  if (n == null || !Number.isFinite(n)) return '—';
+  if (n == null || !Number.isFinite(n)) return '-';
   return new Intl.NumberFormat(localeTag(locale)).format(n);
 }
 
@@ -34,7 +34,7 @@ export function formatNumber(n: number | null | undefined, locale = 'en'): strin
  * precision the quota bars always used.
  */
 export function formatPercent(pct: number | null | undefined, locale = 'en'): string {
-  if (pct == null || !Number.isFinite(pct)) return '—';
+  if (pct == null || !Number.isFinite(pct)) return '-';
   const digits = Math.abs(pct) < 10 ? 1 : 0;
   return new Intl.NumberFormat(localeTag(locale), {
     style: 'percent',
@@ -57,7 +57,7 @@ export function fileCountOf(s: { stats?: { file_count?: number } | null; file_co
 
 /** An instant with its clock — the explorer's listing format (`formatWhen`). */
 export function formatDate(input: string | Date | null | undefined, locale = 'en'): string {
-  return formatWhen(input, locale, { time: true }) || '—';
+  return formatWhen(input, locale, { time: true }) || '-';
 }
 
 /**
@@ -65,13 +65,13 @@ export function formatDate(input: string | Date | null | undefined, locale = 'en
  * behind a short date (`formatWhenFull`, what the explorer's hover shows).
  */
 export function formatDateFull(input: string | Date | null | undefined, locale = 'en'): string {
-  return formatWhenFull(input, locale) || '—';
+  return formatWhenFull(input, locale) || '-';
 }
 
 export function formatRelative(input: string | Date | null | undefined, locale = 'en'): string {
-  if (!input) return '—';
+  if (!input) return '-';
   const d = input instanceof Date ? input : new Date(input);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return '-';
 
   const diffMs = d.getTime() - Date.now();
   const abs = Math.abs(diffMs);
@@ -105,12 +105,30 @@ export function ipOnly(ip: string | null | undefined): string {
 }
 
 /**
+ * What a public demo's server writes in place of an address it will not show
+ * (backend handlers/demo_redact.go `demoMaskedIP`): the visitors' addresses
+ * and the operator's allow-list, on the audit log and the Sign-in security
+ * page. A fixed wire value - never shown as it is.
+ */
+export const DEMO_MASKED_ADDRESS = 'hidden on the demo';
+
+/**
+ * An address as a page shows it: without the client's source port (ipOnly),
+ * and the demo's mask said in the reader's language (`hidden` - pass
+ * `t('demo.hiddenAddress')`).
+ */
+export function shownAddress(v: string | null | undefined, hidden: string): string {
+  if ((v ?? '').trim() === DEMO_MASKED_ADDRESS) return hidden;
+  return ipOnly(v);
+}
+
+/**
  * A length of time, in the largest unit that fits, in the viewer's language
  * ("45 sec" / "45 sn"). It printed "45s" / "3m" / "2h" — English letters under
  * every language.
  */
 export function formatDuration(seconds: number, locale = 'en'): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  if (!Number.isFinite(seconds) || seconds < 0) return '-';
   const [value, unit] =
     seconds < 60
       ? [seconds, 'second']

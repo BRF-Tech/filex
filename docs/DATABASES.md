@@ -1,7 +1,7 @@
 # Databases
 
 filex keeps its file tree, users, shares, settings and job queue in one
-database. Three engines are supported, and — since v0.38.0 — all three are
+database. Three engines are supported, and - since v0.38.0 - all three are
 actually exercised: every change runs the migrations, compares the schema each
 dialect builds against the SQLite one, and performs the writes an install makes
 in its first five minutes, against a real PostgreSQL and a real MySQL server.
@@ -36,18 +36,18 @@ hand.
 
 > **PostgreSQL's locale.** Without the search index, a file-name search asks
 > PostgreSQL to compose and lower-case the stored name (`normalize`, PostgreSQL
-> 13+, and `lower`) the way filex folds the query — see
+> 13+, and `lower`) the way filex folds the query - see
 > [SEARCH.md](SEARCH.md#capital-letters-and-the-turkish-i). `lower` follows the
 > database's locale: create the database with a UTF-8 locale that is not `C`
 > (the official `postgres` image's default, `en_US.utf8`, is fine), or only
-> `A`–`Z` change case and `şubat` misses `ŞUBAT.pdf`.
+> `A`-`Z` change case and `şubat` misses `ŞUBAT.pdf`.
 
 ## Supported versions
 
 | Engine | filex | Checked on every change (CI) | Also measured |
 |---|---|---|---|
-| SQLite | every release | bundled driver | — |
-| PostgreSQL | v0.38.0+ | PostgreSQL 17 | — |
+| SQLite | every release | bundled driver | - |
+| PostgreSQL | v0.38.0+ | PostgreSQL 17 | - |
 | MySQL | **v0.41.0+** | MySQL 8.4 (`mysql:8.4`) | 8.0.46 by hand, 2026-09-14 |
 | MariaDB | **v0.41.0+** | not in CI | 11.4.13 by hand, 2026-09-14 |
 
@@ -59,8 +59,8 @@ now cover each of them.
 
 ## The queue follows the database
 
-The persistent job queue — content extraction, antivirus scans, replica
-retries, thumbnails — lives in your database unless you point it elsewhere.
+The persistent job queue - content extraction, antivirus scans, replica
+retries, thumbnails - lives in your database unless you point it elsewhere.
 
 | `FILEX_QUEUE_DRIVER` | What it does |
 |---|---|
@@ -80,16 +80,16 @@ containers (`test:go:engines`). They are worth knowing about because they
 describe exactly what is guaranteed:
 
 - **The migrations apply** from an empty database, and applying them a second
-  time — what every restart does — changes nothing.
+  time - what every restart does - changes nothing.
 - **The schemas match.** Each dialect's tables and columns are compared against
   SQLite's, name by name. Types are not compared (`TEXT`, `VARCHAR(190)` and
   `JSONB` are legitimate per-engine answers); names are, because a name that
   differs is a query that fails. The comparison also catches a column that is
-  `NOT NULL` with no default where SQLite supplies one — an `INSERT` that works
+  `NOT NULL` with no default where SQLite supplies one - an `INSERT` that works
   on SQLite and fails there.
 - **The writes work.** Registering a storage, creating the admin, recording a
   file, saving a setting, configuring an external service, tagging, starring,
-  thumbnailing and sharing — on every engine.
+  thumbnailing and sharing - on every engine.
 - **The queue contract holds** on every queue driver, including coalescing,
   priority order and scheduled delivery.
 - **Every SQL statement in the shared store prepares on a real MySQL server**,
@@ -101,7 +101,7 @@ describe exactly what is guaranteed:
   differ only by case, accent or a trailing space.
 - **A file-name search without the index gives one answer on every engine**:
   every word required, ranked before the limit, and the stored name compared
-  through the same normaliser as the query — decomposed names, Turkish
+  through the same normaliser as the query - decomposed names, Turkish
   capitals, the four i's as one letter.
 
 Run them yourself against throwaway servers:
@@ -130,7 +130,7 @@ tree is a cache of what is on the backends, and the sync worker rebuilds it.
 the database and not on the backend, so none of it survives: users, shares,
 grants and settings, but also tags, stars, comments, version history (its bytes
 stay on the backend under `.versions/`, keyed by node ids that no longer exist), recents,
-each person's remembered folder views — and who owns each file. A re-synced
+each person's remembered folder views - and who owns each file. A re-synced
 file is found by the scanner, and a file the scanner found is recorded as
 belonging to **System**, so the Owner column and the Owner filter start empty.
 Plan it as a migration, not a switch of a variable.
@@ -138,12 +138,12 @@ Plan it as a migration, not a switch of a variable.
 ## Backups
 
 Three things hold state filex cannot rebuild: the **database**, the **storage
-backends**, and **`FILEX_SECRET_KEY`** — a restored database without the key
+backends**, and **`FILEX_SECRET_KEY`** - a restored database without the key
 that sealed its S3 access keys is a database whose access keys no longer
 verify. The search index and the thumbnail cache under the data directory are
 rebuildable, and `<data-dir>/cache` should be actively excluded.
 
-For SQLite the database is one file — stop filex or use
+For SQLite the database is one file - stop filex or use
 `sqlite3 instance.sqlite ".backup out.sqlite"`, never a plain copy of a live
 WAL database. For PostgreSQL and MySQL use their own tooling. See
 [DEPLOYMENT.md](DEPLOYMENT.md#backup--restore) for the whole picture.

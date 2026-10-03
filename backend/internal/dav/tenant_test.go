@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -79,7 +80,7 @@ func newTenantHarness(t *testing.T) *tenantHarness {
 }
 
 // addTenant creates a provider, an enabled storage linked to it, and an
-// admin-role user belonging to it — one olivov-style tenant.
+// admin-role user belonging to it — one tenant of a multi-tenant deployment.
 func (ha *tenantHarness) addTenant(t *testing.T, slug, storageName, email string, supertenant bool) (*model.Provider, *model.Storage, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -87,9 +88,18 @@ func (ha *tenantHarness) addTenant(t *testing.T, slug, storageName, email string
 	// Enabled matters: auth.LoginAllowed refuses a disabled provider, so a
 	// harness that forgets it gets 401 everywhere and every scoping
 	// assertion passes for the wrong reason.
-	p, err := ha.raw.CreateProvider(ctx, &model.Provider{
-		Slug: slug, Name: slug, AuthType: "local", IsSupertenant: supertenant, Enabled: true,
-	})
+	var p *model.Provider
+	var err error
+	if supertenant {
+		// The platform's own tenant already exists and there is at most one:
+		// its accounts are the ones an empty realm signs in to (#128).
+		p, err = ha.raw.GetSupertenant(ctx)
+		require.NotNil(t, p)
+	} else {
+		p, err = ha.raw.CreateProvider(ctx, &model.Provider{
+			Slug: slug, Name: slug, AuthType: "local", Enabled: true,
+		})
+	}
 	require.NoError(t, err)
 
 	st := ha.addStorage(t, storageName, false, false)
@@ -98,7 +108,7 @@ func (ha *tenantHarness) addTenant(t *testing.T, slug, storageName, email string
 	password := "TenantPass!1"
 	hash, err := local.HashPassword(password)
 	require.NoError(t, err)
-	// role=admin on purpose: olivov's tenant admins hold filex role admin,
+	// role=admin on purpose: a multi-tenant deployment's tenant admins hold filex role admin,
 	// which is what made this reachable.
 	u, err := ha.raw.CreateUser(ctx, email, hash, model.RoleAdmin, "en", "UTC")
 	require.NoError(t, err)
@@ -110,16 +120,18 @@ func (ha *tenantHarness) addTenant(t *testing.T, slug, storageName, email string
 // TestDAV_TenantScoping — a tenant admin (role=admin, provider not the
 // supertenant) must see and reach only their own provider's storages.
 //
-// Before the fix /dav resolved storages globally: olivov's diyetlif admin
-// mounted https://files.diyetlif.com.tr/dav/ in Finder and got all ten
+// Before the fix /dav resolved storages globally: a multi-tenant deployment's globex admin
+// mounted https://files.globex.com.tr/dav/ in Finder and got all ten
 // tenants' storages listed, read-write, with DELETE hard-deleting rather
 // than going to trash (H4, 2026-08-05).
 func TestDAV_TenantScoping(t *testing.T) {
 	ha := newTenantHarness(t)
-	_, ownSt, pass := ha.addTenant(t, "diyetlif", "Dosyalar", "berk@diyetlif.test", false)
-	_, otherSt, _ := ha.addTenant(t, "arasboya", "ArasboyaDosyalar", "admin@arasboya.test", false)
+	_, ownSt, pass := ha.addTenant(t, "globex", "Dosyalar", "bob@globex.test", false)
+	_, otherSt, _ := ha.addTenant(t, "initech", "InitechDosyalar", "admin@initech.test", false)
 
-	const me = "berk@diyetlif.test"
+	// A tenant's person names the realm where the address does not (#128): the
+	// test server's address is the platform's.
+	const me = "globex/bob@globex.test"
 
 	t.Run("root lists only own storage", func(t *testing.T) {
 		resp := ha.req(t, "PROPFIND", "/dav/", me, pass, "", map[string]string{"Depth": "1"})
@@ -170,10 +182,10 @@ func TestDAV_TenantScoping(t *testing.T) {
 // admin of the supertenant provider, which is the platform operator.
 func TestDAV_SupertenantSeesAll(t *testing.T) {
 	ha := newTenantHarness(t)
-	_, opsSt, pass := ha.addTenant(t, "olivov", "OlivovDosyalar", "ops@olivov.test", true)
-	_, tenantSt, _ := ha.addTenant(t, "diyetlif", "Dosyalar", "berk@diyetlif.test", false)
+	_, opsSt, pass := ha.addTenant(t, "hosting", "HostingFiles", "ops@hosting.test", true)
+	_, tenantSt, _ := ha.addTenant(t, "globex", "Dosyalar", "bob@globex.test", false)
 
-	resp := ha.req(t, "PROPFIND", "/dav/", "ops@olivov.test", pass, "", map[string]string{"Depth": "1"})
+	resp := ha.req(t, "PROPFIND", "/dav/", "ops@hosting.test", pass, "", map[string]string{"Depth": "1"})
 	require.Equal(t, http.StatusMultiStatus, resp.StatusCode)
 	body := bodyString(t, resp)
 	require.Contains(t, body, opsSt.Name)
@@ -189,7 +201,7 @@ func TestDAV_SupertenantSeesAll(t *testing.T) {
 // exactly this dangling state.
 func TestDAV_UnresolvableProviderSeesNothing(t *testing.T) {
 	ha := newTenantHarness(t)
-	_, st, _ := ha.addTenant(t, "diyetlif", "Dosyalar", "berk@diyetlif.test", false)
+	_, st, _ := ha.addTenant(t, "globex", "Dosyalar", "bob@globex.test", false)
 
 	ctx := context.Background()
 	password := "Orphan!1"
@@ -199,7 +211,17 @@ func TestDAV_UnresolvableProviderSeesNothing(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ha.raw.SetUserProvider(ctx, u.ID, 99999, ""))
 
+	// Its password names no realm that is its tenant's, so it cannot sign in
+	// with one at all (#128)...
 	resp := ha.req(t, "PROPFIND", "/dav/", "orphan@nowhere.test", password, "", map[string]string{"Depth": "1"})
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	// ...and a credential that names its account by itself — an API token —
+	// signs it in to a scope that grants nothing.
+	const tok = "orphan-token-0123456789abcdef"
+	_, err = ha.raw.CreateAPIToken(ctx, &model.APIToken{UserID: u.ID, Label: "orphan", TokenHash: apitoken.HashToken(tok), Scopes: "read,write,delete"})
+	require.NoError(t, err)
+	resp = ha.req(t, "PROPFIND", "/dav/", "orphan@nowhere.test", tok, "", map[string]string{"Depth": "1"})
 	require.Equal(t, http.StatusMultiStatus, resp.StatusCode)
 	require.False(t, strings.Contains(bodyString(t, resp), st.Name),
 		"a user whose provider doesn't resolve must see no storages")
@@ -212,10 +234,10 @@ func TestDAV_UnresolvableProviderSeesNothing(t *testing.T) {
 // every tenant's storages over /dav.
 //
 // That is what makes POST /api/admin/users ignoring provider_id a security
-// problem and not just an inconvenience (olivov G1).
+// problem and not just an inconvenience (a production report, 2026-08-05).
 func TestDAV_NewUsersLandInTheSupertenant(t *testing.T) {
 	ha := newTenantHarness(t)
-	_, st, _ := ha.addTenant(t, "diyetlif", "Dosyalar", "berk@diyetlif.test", false)
+	_, st, _ := ha.addTenant(t, "globex", "Dosyalar", "bob@globex.test", false)
 
 	ctx := context.Background()
 	password := "Fresh!1"

@@ -76,8 +76,8 @@ func TestSeedFromEnv_OnlyIfAbsent(t *testing.T) {
 	assert.Equal(t, "Existing", sts[0].Name)
 }
 
-// TestSeedDefaultStorage_S3 — an s3 default storage carries the bundled-MinIO
-// endpoint + creds into its config blob.
+// TestSeedDefaultStorage_S3 — an s3 default storage carries the bundled S3
+// server's endpoint, region and creds into its config blob.
 func TestSeedDefaultStorage_S3(t *testing.T) {
 	_, store := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -85,7 +85,7 @@ func TestSeedDefaultStorage_S3(t *testing.T) {
 	cfg := config.Default()
 	cfg.Seed.Storage = config.SeedStorage{
 		Driver: "s3", Bucket: "filex", Prefix: "files",
-		Endpoint: "http://minio:9000", Region: "auto",
+		Endpoint: "http://versitygw:7070", Region: "us-east-1",
 		AccessKey: "ak", SecretKey: "sk", PathStyle: true,
 	}
 
@@ -97,7 +97,8 @@ func TestSeedDefaultStorage_S3(t *testing.T) {
 	assert.Equal(t, "s3", sts[0].Driver)
 	blob := string(sts[0].ConfigJSON)
 	assert.Contains(t, blob, "filex")
-	assert.Contains(t, blob, "minio:9000")
+	assert.Contains(t, blob, "versitygw:7070")
+	assert.Contains(t, blob, "us-east-1")
 }
 
 // TestSeedDefaultStorage_RawConfig — an existing external storage (sftp) is

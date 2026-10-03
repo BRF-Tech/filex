@@ -236,7 +236,7 @@ func TestProfileSave_KeepsTheReservedNameItHolds(t *testing.T) {
 	}
 	testutil.LoginAs(t, srv, client, "boss@example.com", pw)
 
-	body, _ := json.Marshal(map[string]string{"username": "admin", "display_name": "Burak"})
+	body, _ := json.Marshal(map[string]string{"username": "admin", "display_name": "Alice"})
 	req, _ := http.NewRequest(http.MethodPatch, srv.URL+"/api/auth/profile", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)

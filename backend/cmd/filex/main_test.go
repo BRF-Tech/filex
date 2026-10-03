@@ -17,7 +17,7 @@ import (
 func buildRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "filex",
-		Short:   "filex — self-hosted file manager",
+		Short:   "filex - self-hosted file manager",
 		Version: version.String(),
 	}
 	root.PersistentFlags().StringVar(&configPath, "config", "", "path to config.yaml")

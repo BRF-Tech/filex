@@ -19,7 +19,7 @@ func TestBytes_TheInterfacesSizes(t *testing.T) {
 	assert.Equal(t, "1,5 MB", Bytes("tr", 1_500_000))
 	assert.Equal(t, "12.5 GB", Bytes("en", 12_500_000_000))
 	assert.Equal(t, "2 KB", Bytes("en", 2000))
-	assert.Equal(t, "—", Bytes("en", -1))
+	assert.Equal(t, "-", Bytes("en", -1))
 }
 
 func TestBytes_AUnitWordComesFromThePack(t *testing.T) {

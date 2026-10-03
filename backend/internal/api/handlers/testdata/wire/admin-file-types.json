@@ -1,0 +1,140 @@
+{
+  "editable": true,
+  "enabled": true,
+  "kinds": [
+    {
+      "ext": "apk",
+      "mime": "application/vnd.android.package-archive",
+      "open": {
+        "custom": false,
+        "off": [],
+        "on": [
+          {
+            "id": "builtin"
+          }
+        ]
+      },
+      "thumbnail": {
+        "custom": false,
+        "off": [],
+        "on": [
+          {
+            "app": "pkglist",
+            "id": "app:pkglist",
+            "label": {
+              "en": "Package contents",
+              "tr": "Paket içeriği"
+            },
+            "version": "0.1.0"
+          }
+        ]
+      }
+    },
+    {
+      "ext": "drawio",
+      "mime": "application/vnd.jgraph.mxfile",
+      "open": {
+        "custom": false,
+        "off": [],
+        "on": [
+          {
+            "app": "drawio",
+            "id": "app:drawio/editor",
+            "label": {
+              "en": "draw.io",
+              "tr": "draw.io"
+            },
+            "version": "1.2.0",
+            "view": "editor"
+          },
+          {
+            "app": "zeta",
+            "id": "app:zeta/viewer",
+            "label": {
+              "en": "Zeta viewer",
+              "tr": "Zeta görüntüleyici"
+            },
+            "version": "2.0.0",
+            "view": "viewer"
+          },
+          {
+            "id": "builtin"
+          }
+        ]
+      },
+      "thumbnail": {
+        "custom": false,
+        "off": [],
+        "on": []
+      }
+    },
+    {
+      "ext": "jar",
+      "mime": "application/java-archive",
+      "open": {
+        "custom": false,
+        "off": [],
+        "on": [
+          {
+            "id": "builtin"
+          }
+        ]
+      },
+      "thumbnail": {
+        "custom": false,
+        "off": [],
+        "on": [
+          {
+            "app": "pkglist",
+            "id": "app:pkglist",
+            "label": {
+              "en": "Package contents",
+              "tr": "Paket içeriği"
+            },
+            "version": "0.1.0"
+          }
+        ]
+      }
+    },
+    {
+      "ext": "png",
+      "mime": "image/png",
+      "open": {
+        "custom": false,
+        "off": [],
+        "on": [
+          {
+            "id": "builtin"
+          }
+        ]
+      },
+      "thumbnail": {
+        "custom": true,
+        "off": [
+          {
+            "app": "pngplus",
+            "id": "app:pngplus",
+            "label": {
+              "en": "PNG+",
+              "tr": "PNG+"
+            },
+            "version": "1.0.0"
+          }
+        ],
+        "on": [
+          {
+            "id": "builtin"
+          }
+        ],
+        "rule": {
+          "off": [
+            "app:pngplus"
+          ],
+          "order": [
+            "builtin"
+          ]
+        }
+      }
+    }
+  ]
+}

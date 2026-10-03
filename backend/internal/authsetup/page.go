@@ -16,7 +16,26 @@ import (
 // they are added to the chain. `local` and `api-token` are not among them:
 // password sign-in is the environment's to decide (see the package comment)
 // and API tokens are always on.
-var Managed = []string{"oidc", "ldap", "proxy-header"}
+var Managed = []string{"oidc", "ldap", "proxy-header", "windows", "pam"}
+
+// OSProviders are the managed providers that sign people in with an account of
+// the operating system filex runs on. They differ from the rest in two ways the
+// page and the tests rely on: a first sign-in opens an account only when the
+// operator says so (auto_create defaults to OFF, where every other provider
+// defaults to ON), and switching one on needs a test that PASSED - never a
+// confirmation over a failed one.
+var OSProviders = []string{"windows", "pam"}
+
+// IsOS reports whether a provider is an operating-system sign-in.
+func IsOS(name string) bool {
+	name = Canonical(name)
+	for _, m := range OSProviders {
+		if m == name {
+			return true
+		}
+	}
+	return false
+}
 
 // IsManaged reports whether the page may configure a provider.
 func IsManaged(name string) bool {
@@ -37,6 +56,8 @@ const (
 	FieldText   FieldKind = "text"
 	FieldSecret FieldKind = "secret"
 	FieldBool   FieldKind = "bool"
+	// FieldMultiline is text that keeps its line breaks (a PEM certificate).
+	FieldMultiline FieldKind = "multiline"
 )
 
 // Field is one setting a managed provider takes on the page.
@@ -60,6 +81,16 @@ var Schema = map[string][]Field{
 		{Key: "scopes", Kind: FieldText},
 		{Key: "role_claim", Kind: FieldText},
 		{Key: "admin_group", Kind: FieldText},
+		// First sign-in rule (auth.ProvisionFirstLogin). Group → role is not a
+		// field: it is the permission rules that target an SSO group.
+		{Key: "auto_create", Kind: FieldBool, Default: "true"},
+		{Key: "allowed_groups", Kind: FieldText},
+		// Take every address the provider sends as verified (authoidc
+		// TrustEmailKey). Off by default: an address it does not mark
+		// `email_verified: true` signs in to no existing account that is not
+		// yet bound to the person's SSO identity, and opens a new account
+		// switched off (docs/SSO.md, "Which account an SSO sign-in opens").
+		{Key: "trust_email", Kind: FieldBool, Default: "false"},
 	},
 	"ldap": {
 		{Key: "url", Kind: FieldText, Required: true},
@@ -70,7 +101,44 @@ var Schema = map[string][]Field{
 		{Key: "email_attr", Kind: FieldText},
 		{Key: "start_tls", Kind: FieldBool},
 		{Key: "ca_file", Kind: FieldText},
+		// A private CA pasted as PEM text: what a tenant's own directory uses
+		// (it names no file on the server, docs/TENANT-ADMIN.md).
+		{Key: "ca_pem", Kind: FieldMultiline},
 		{Key: "protocol_login", Kind: FieldBool, Default: "true"},
+		// First sign-in rule (auth.ProvisionFirstLogin): open an account for a
+		// directory person on their first sign-in, and only for members of these
+		// groups (comma list; read from group_attr, default memberOf).
+		{Key: "auto_create", Kind: FieldBool, Default: "true"},
+		{Key: "allowed_groups", Kind: FieldText},
+		{Key: "group_attr", Kind: FieldText, Default: "memberOf"},
+		// Tell a person whose password was right why the first-login rule
+		// refused them (auth.RefusedAfterPassword). OFF by default: the form
+		// would then confirm a directory password to anybody guessing.
+		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false"},
+	},
+	// The Linux PAM sign-in (auth/drivers/pam): filex runs the command set here
+	// — by default `sudo -n /usr/bin/pamtester filex <user> authenticate
+	// acct_mgmt`, the password on stdin — and never anything else. Only the
+	// pieces below are configurable; the argument vector has a fixed shape.
+	"pam": {
+		{Key: "pamtester_path", Kind: FieldText, Default: "/usr/bin/pamtester"},
+		{Key: "service", Kind: FieldText, Default: "filex"},
+		{Key: "use_sudo", Kind: FieldBool, Default: "true"},
+		{Key: "sudo_path", Kind: FieldText, Default: "/usr/bin/sudo"},
+		{Key: "timeout_seconds", Kind: FieldText, Default: "10"},
+		{Key: "max_concurrent", Kind: FieldText, Default: "4"},
+		{Key: "protocol_login", Kind: FieldBool, Default: "true"},
+		// The e-mail domain of the machine's accounts (alex → alex@corp.example).
+		// Empty: alex@<FILEX_OS_LOGIN_EMAIL_TOKEN> — the token is NOT a field:
+		// it is chosen once at installation (identity.EmailToken).
+		{Key: "email_domain", Kind: FieldText},
+		// First sign-in rule. auto_create defaults to OFF for this provider:
+		// an operating-system account is not a filex account until an
+		// administrator says so (the tested account is the one exception).
+		{Key: "auto_create", Kind: FieldBool, Default: "false"},
+		{Key: "allowed_groups", Kind: FieldText},
+		// As for ldap: tell a refusal after a right password; off by default.
+		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false"},
 	},
 	"proxy-header": {
 		{Key: "trusted_proxies", Kind: FieldText, Required: true},
@@ -79,7 +147,31 @@ var Schema = map[string][]Field{
 		{Key: "header_name", Kind: FieldText},
 		{Key: "header_roles", Kind: FieldText},
 		{Key: "admin_role", Kind: FieldText},
-		{Key: "auto_provision", Kind: FieldBool, Default: "true"},
+		// auto_provision is the older name of auto_create, kept so a saved
+		// value still reads; DriverConfig lets auto_create win when both are
+		// stored, and the page writes auto_create.
+		{Key: "auto_provision", Kind: FieldBool},
+		{Key: "auto_create", Kind: FieldBool, Default: "true"},
+		// Judged against the values of the roles header.
+		{Key: "allowed_groups", Kind: FieldText},
+	},
+	// The Windows account of the machine filex runs on (auth/drivers/windows).
+	// There is no field for a test account: it is sent with the test request
+	// and used once (auth.TestAccount), never a setting.
+	"windows": {
+		// First sign-in rule (auth.ProvisionFirstLogin). OFF by default for an
+		// operating-system provider: an account that already exists signs in
+		// either way, and nobody new gets one unless the operator says so.
+		{Key: "auto_create", Kind: FieldBool, Default: "false"},
+		// Judged against the groups of the account's Windows token.
+		{Key: "allowed_groups", Kind: FieldText},
+		// The default domain for a name typed with none: a NetBIOS name (CORP)
+		// or a DNS name (corp.example). Empty = the machine's own accounts.
+		{Key: "domain", Kind: FieldText},
+		{Key: "protocol_login", Kind: FieldBool, Default: "true"},
+		// As for ldap: tell a refusal after a right password (the first-login
+		// rule, a system account the SID names); off by default.
+		{Key: "show_refusal_reason", Kind: FieldBool, Default: "false"},
 	},
 }
 
@@ -275,15 +367,24 @@ func Save(ctx context.Context, store db.Store, next *Stored) error {
 }
 
 // DriverConfig turns stored rows into the map the driver's Init reads —
-// secrets opened, booleans as booleans, defaults filled — plus whether an
-// LDAP provider also judges passwords on the file protocols.
+// secrets opened, booleans as booleans, defaults filled — plus whether a
+// directory provider (LDAP, Windows) also judges passwords on the file
+// protocols.
 //
 // ⚠ The opened map lives in memory only, for the length of a build or a
 // test. It is never logged and never sent anywhere but the driver.
 func DriverConfig(s *Stored, box *secretbox.Box, opts Options) (map[string]any, bool, error) {
 	cfg := map[string]any{}
 	for _, f := range Schema[s.Name] {
+		if s.Name == "proxy-header" && f.Key == "auto_provision" {
+			continue // folded into auto_create below
+		}
 		v, ok := s.Values[f.Key]
+		if (!ok || v == "") && s.Name == "proxy-header" && f.Key == "auto_create" {
+			// The older name: a value saved as auto_provision still decides.
+			v = s.Values["auto_provision"]
+			ok = v != ""
+		}
 		if !ok || v == "" {
 			v = f.Default
 		}
@@ -326,9 +427,24 @@ func DriverConfig(s *Stored, box *secretbox.Box, opts Options) (map[string]any, 
 		}
 	case "ldap":
 		cfg["multi_tenant"] = opts.MultiTenant
+		if opts.LoginEmailToken != "" {
+			cfg["email_token"] = opts.LoginEmailToken
+		}
+		directory, _ = cfg["protocol_login"].(bool)
+	case "pam":
+		cfg["multi_tenant"] = opts.MultiTenant
+		if opts.LoginEmailToken != "" {
+			cfg["email_token"] = opts.LoginEmailToken
+		}
 		directory, _ = cfg["protocol_login"].(bool)
 	case "proxy-header":
 		cfg["multi_tenant"] = opts.MultiTenant
+	case "windows":
+		cfg["multi_tenant"] = opts.MultiTenant
+		if opts.LoginEmailToken != "" {
+			cfg["email_token"] = opts.LoginEmailToken
+		}
+		directory, _ = cfg["protocol_login"].(bool)
 	}
 	return cfg, directory, nil
 }
@@ -409,7 +525,7 @@ func UpgradeLegacy(ctx context.Context, store db.Store, box *secretbox.Box, log 
 		if err := store.UpsertSetting(ctx, settingKey(name, keyLegacy), "true"); err != nil {
 			return err
 		}
-		log.Warn("auth: identity provider settings saved before v0.43.0 were never applied; imported switched OFF — review them on Admin → Identity providers and enable them there",
+		log.Warn("auth: identity provider settings saved before v0.43.0 were never applied; imported switched OFF - review them on Admin → Identity providers and enable them there",
 			slog.String("provider", name))
 	}
 	return store.UpsertSetting(ctx, SchemaSetting, schemaV2)

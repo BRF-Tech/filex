@@ -59,6 +59,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { githubSlug } from '../.vitepress/github-slug.mjs'
 import { exportRules, neutralize } from './neutralize.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -182,6 +183,39 @@ function sentence(text) {
 const CONVENTIONAL =
   /^(feat|fix|perf|refactor|docs|test|build|ci|chore|style|revert)(?:\(([^)]+)\))?(!?):\s*(.+)$/
 
+// The em dash and the en dash, built from their code points so this file
+// carries neither character (web/tests/i18n/noLongDashesDocs.test.ts reads it).
+const EM_DASH = String.fromCharCode(0x2014)
+const EN_DASH = String.fromCharCode(0x2013)
+const LONG_DASH = new RegExp('[' + EM_DASH + EN_DASH + ']', 'g')
+/** `v0.9.0 - ` in front of a release commit's summary, whichever dash it used. */
+const VERSION_LEAD = new RegExp(/^v?\d+\.\d+\.\d+\s*/.source + '[' + EM_DASH + EN_DASH + '-]?' + /\s*/.source)
+
+/**
+ * The page says "-" wherever a release body says an em dash or an en dash.
+ *
+ * ⚠ Why here and not in the data: nothing a person reads on filex's surfaces
+ * carries a long dash (owner's ruling, 2026-09-30), but a published GitHub
+ * release body is history and stays as it was written, and
+ * data/releases.json is a cache of those bodies. So the render cleans what
+ * GitHub hands over, every time, and a refresh can never bring one back.
+ *
+ * A wrapped sentence whose line STARTS with the dash would turn into a list
+ * item as "- …", so that dash moves to the end of the line before it.
+ */
+export function plainDashes(markdown) {
+  const lines = String(markdown).split('\n')
+  for (let i = 1; i < lines.length; i++) {
+    const lead = lines[i].match(/^\s*(?:>\s*)*/)[0]
+    const rest = lines[i].slice(lead.length)
+    if (rest[0] !== EM_DASH && rest[0] !== EN_DASH) continue
+    if (!lines[i - 1].replace(/^\s*(?:>\s*)*/, '').trim()) continue
+    lines[i - 1] = lines[i - 1].replace(/\s+$/, '') + ' -'
+    lines[i] = lead + rest.slice(1).replace(/^[ \t]+/, '')
+  }
+  return lines.join('\n').replace(LONG_DASH, '-')
+}
+
 /**
  * The goreleaser body carries a `## Changelog` section of
  * `* <40-char sha> <conventional commit subject>` lines under `### <group>`
@@ -216,7 +250,7 @@ function parseChangelog(body) {
     const scope = m ? m[2] : null
     const text = m ? m[4] : subject
 
-    // `chore(release): v0.9.0 — olivov multi-tenant isolation, strict-S3 …`
+    // `chore(release): v0.9.0 - multi-tenant isolation, strict-S3 …`
     // is the release's own one-line summary. Promote it to the headline and
     // drop the bullet: the version is already the heading.
     // The release's OWN commit, in either shape this project has used:
@@ -229,7 +263,7 @@ function parseChangelog(body) {
     const bare = subject.match(/^release:\s*(v?\d+\.\d+\.\d+.*)$/i)
     if (bare || (type === 'chore' && scope === 'release')) {
       const raw2 = bare ? bare[1] : text
-      const tail = raw2.replace(/^v?\d+\.\d+\.\d+\s*[—–-]?\s*/, '').trim()
+      const tail = raw2.replace(VERSION_LEAD, '').trim()
       if (tail && !/^v?\d+\.\d+\.\d+$/.test(tail)) headline = sentence(tail)
       continue
     }
@@ -381,22 +415,93 @@ function esc(text) {
  * CHANGELOG.md; this page holds every release, so `#removed` matched nothing
  * (the anchor gate's dead link on v0.48.1, 2026-09-28) and `#changed` landed
  * in another release's section without a word of warning.
+ *
+ * ⚠ The same holds for a SECTION of a page this tree has: a heading renamed
+ * after the release was published (v0.49.0's notes link
+ * `CLI.md#filex-decrypt--an-encrypted-folder-offline`, spelled with an em dash
+ * until the dash left the docs, 2026-09-30) keeps the page and loses the
+ * fragment, so the reader lands at the top of the right page instead of on a
+ * fragment the anchor gate reports as dead.
  */
 export function relativeLinks(text, docsRoot = docsDir) {
   const REPO = 'https://github.com/BRF-Tech/filex/blob/main/'
   const published = (rel) => fs.existsSync(path.join(docsRoot, rel.replace(/#.*$/, '')))
+  const here = (rel) => {
+    const [page, fragment] = rel.split('#')
+    if (fragment === undefined || !page.endsWith('.md')) return rel
+    return headingIds(path.join(docsRoot, page)).has(fragment) ? rel : page
+  }
   return String(text)
     .replace(/\[([^\]\n]+)\]\(#[^)\s]*\)/g, '$1')
     .replace(/\]\((?!https?:|\/|#|mailto:)([^)\s]+)\)/g, (_m, href) => {
     const docs = href.match(/^(?:\.\/)?docs\/(.+)$/)
-    if (docs) return published(docs[1]) ? `](./${docs[1]})` : `](${REPO}docs/${docs[1]})`
+    if (docs) return published(docs[1]) ? `](./${here(docs[1])})` : `](${REPO}docs/${docs[1]})`
     // Already relative to this directory and pointing at a page we publish.
     if (/^(?:\.\/)?[A-Za-z0-9._-]+\.md(?:#.*)?$/.test(href)) {
       const page = href.replace(/^\.\//, '')
-      return published(page) ? `](./${page})` : `](${REPO}docs/${page})`
+      return published(page) ? `](./${here(page)})` : `](${REPO}docs/${page})`
     }
     return `](${REPO}${href.replace(/^\.\//, '')})`
   })
+}
+
+/**
+ * The heading ids a docs page gets, by the site's own slug rule
+ * (`../.vitepress/github-slug.mjs`) applied to each heading's text the way
+ * markdown-it-anchor reads it: code and link text kept, markup, images and
+ * HTML dropped, a repeated id numbered `-1`, `-2`.
+ *
+ * ⚠ Only used to decide whether a release body's fragment still lands. A
+ * heading this misreads costs its fragment (the link still reaches the page),
+ * never a dead link.
+ */
+const headingIdCache = new Map()
+export function headingIds(file) {
+  if (headingIdCache.has(file)) return headingIdCache.get(file)
+  const ids = new Set()
+  let fence = null
+  let text = ''
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch {
+    // no page, no ids
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const f = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+    if (f) {
+      if (!fence) fence = f[1][0]
+      else if (f[1][0] === fence) fence = null
+      continue
+    }
+    if (fence) continue
+    const h = line.match(/^\s{0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$/)
+    if (!h) continue
+    const custom = h[1].match(/\{#([^}\s]+)\}\s*$/)
+    const base = custom ? custom[1] : githubSlug(headingText(h[1]))
+    let id = base
+    for (let n = 1; ids.has(id); n++) id = `${base}-${n}`
+    ids.add(id)
+  }
+  headingIdCache.set(file, ids)
+  return ids
+}
+
+/** A heading's markdown as the text its id is made from. */
+function headingText(md) {
+  return md
+    .split(/(`[^`]*`)/)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part.slice(1, -1)
+        : part
+            .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+            .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+            .replace(/<[^>]+>/g, '')
+            .replace(/\\([\\`*_{}[\]()#+\-.!|])/g, '$1')
+            .replace(/(^|[^\p{L}\p{N}])_+(?=[\p{L}\p{N}])/gu, '$1')
+            .replace(/([\p{L}\p{N}])_+(?=[^\p{L}\p{N}]|$)/gu, '$1')
+    )
+    .join('')
 }
 
 /**
@@ -431,14 +536,14 @@ function firstLine(rel, highlight) {
   for (const g of rel.groups) {
     if (g.items.length) {
       const it = g.items[0]
-      return it.scope ? `${it.scope} — ${it.text}` : it.text
+      return it.scope ? `${it.scope} - ${it.text}` : it.text
     }
   }
   if (rel.prose) {
     const p = rel.prose.split('\n').find((l) => l.trim() && !/^[#>*\-|]/.test(l.trim()))
     if (p) return p.trim()
   }
-  return '—'
+  return '-'
 }
 
 function renderRelease(rel, highlight) {
@@ -468,7 +573,7 @@ function renderRelease(rel, highlight) {
     out.push(`**${group.title}**`)
     out.push('')
     for (const item of group.items) {
-      out.push(item.scope ? `- **${esc(item.scope)}** — ${esc(item.text)}` : `- ${esc(item.text)}`)
+      out.push(item.scope ? `- **${esc(item.scope)}** - ${esc(item.text)}` : `- ${esc(item.text)}`)
     }
     out.push('')
   }
@@ -489,11 +594,11 @@ function renderPage(releases, highlights, meta) {
   out.push('---')
   out.push('title: Releases')
   out.push(
-    'description: Every filex release with a plain-English summary of what changed — generated from the GitHub releases at release time.'
+    'description: Every filex release with a plain-English summary of what changed - generated from the GitHub releases at release time.'
   )
   out.push('---')
   out.push('')
-  out.push('<!-- GENERATED FILE — do not edit by hand. Your edits will be overwritten.')
+  out.push('<!-- GENERATED FILE - do not edit by hand. Your edits will be overwritten.')
   out.push(`     Source:      GitHub Releases for ${REPO}`)
   out.push('     Generator:   docs-site/scripts/fetch-releases.mjs')
   out.push('     Summaries:   docs-site/data/release-highlights.json (hand-written)')
@@ -508,18 +613,18 @@ function renderPage(releases, highlights, meta) {
     `[GitHub releases](https://github.com/${REPO}/releases) by \`npm run releases\`, which is`
   )
   out.push(
-    'run once when a release is cut — not by the site build, which would rewrite this'
+    'run once when a release is cut - not by the site build, which would rewrite this'
   )
   out.push('file on every contributor who ran it.')
   out.push('')
   out.push(
-    'Whether filex installs a release by itself depends on which part of the version moved —'
+    'Whether filex installs a release by itself depends on which part of the version moved -'
   )
   out.push('see [Updates](./UPDATES.md).')
   out.push('')
 
   if (latest) {
-    out.push(`::: tip Latest — ${latest.tag}, ${humanDate(latest.date)}`)
+    out.push(`::: tip Latest - ${latest.tag}, ${humanDate(latest.date)}`)
     const lead = highlights[latest.tag] || latest.headline || firstLine(latest, null)
     out.push(esc(lead))
     out.push(':::')
@@ -570,7 +675,7 @@ function renderPage(releases, highlights, meta) {
   )
   out.push('')
 
-  return out.join('\n')
+  return plainDashes(out.join('\n'))
 }
 
 // ---------------------------------------------------------------------------
@@ -614,7 +719,7 @@ async function main() {
 
   if (process.env.FILEX_RELEASES_OFFLINE === '1') {
     loud([
-      'FILEX_RELEASES_OFFLINE=1 — the GitHub fetch was skipped on purpose.',
+      'FILEX_RELEASES_OFFLINE=1 - the GitHub fetch was skipped on purpose.',
       'The Releases page is being rendered from data/releases.json.'
     ])
     stale = true
@@ -629,7 +734,7 @@ async function main() {
       if (fetched.length === 0 && cachedCount > 0) {
         throw new Error(
           `GitHub answered 200 with an empty release list while the cache holds ${cachedCount}` +
-            ' — an outage, not a repository that lost every release'
+            ' - an outage, not a repository that lost every release'
         )
       }
       releases = fetched
@@ -637,7 +742,7 @@ async function main() {
     } catch (err) {
       stale = true
       loud([
-        'RELEASES: GitHub could not be reached — the page was NOT refreshed.',
+        'RELEASES: GitHub could not be reached - the page was NOT refreshed.',
         `  reason: ${err.message}`,
         cached && cached.releases && cached.releases.length
           ? `  falling back to the committed cache (${cached.releases.length} releases,` +
@@ -683,7 +788,7 @@ async function main() {
 
   if (!wroteCache && !wrotePage) {
     console.log(
-      `[releases] nothing to do — ${releases.length} releases, unchanged since ` +
+      `[releases] nothing to do - ${releases.length} releases, unchanged since ` +
         `${generatedAt}. Both files left exactly as they were.`
     )
     return
@@ -695,7 +800,7 @@ async function main() {
     .map((f) => path.relative(process.cwd(), f))
     .join(' + ')
   console.log(
-    `[releases] wrote ${written} — ` +
+    `[releases] wrote ${written} - ` +
       `${releases.length} releases, ${summarised} with a hand-written summary`
   )
 }

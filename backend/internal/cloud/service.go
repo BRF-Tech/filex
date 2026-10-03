@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // Sentinel error kinds the handler maps to HTTP statuses.
@@ -168,6 +169,17 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (*SignupResult,
 	} else if existing != nil {
 		return nil, fmt.Errorf("%w: slug %q is taken", ErrConflict, slug)
 	}
+	// The slug becomes the tenant's realm too (its sign-in name, set once and
+	// never changed — package tenant), so it has to be one: not a reserved
+	// realm, and not another tenant's.
+	if err := tenant.CheckRealm(slug); err != nil {
+		return nil, fmt.Errorf("%w: slug %q cannot be a realm: %v", ErrInvalid, slug, err)
+	}
+	if existing, err := s.store.GetProviderByRealm(ctx, slug); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return nil, fmt.Errorf("%w: slug %q is taken", ErrConflict, slug)
+	}
 
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -181,6 +193,7 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (*SignupResult,
 	// a provider row; Enabled=false parks it until the e-mail verifies.
 	p, err := s.store.CreateProvider(ctx, &model.Provider{
 		Slug:     slug,
+		Realm:    slug,
 		Name:     name,
 		Host:     host,
 		AuthType: model.AuthTypeLocal,

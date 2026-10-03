@@ -123,7 +123,10 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 // a database that is down. The client still gets its single 401 either way —
 // handlers.Auth.Login answers 401 for any error.
 func (d *Driver) Login(ctx context.Context, email, password string) (*model.User, string, error) {
-	user, err := identity.Resolve(ctx, d.store, email)
+	// Inside the sign-in's realm on a multi-tenant install (auth.LoginRealm,
+	// identity.ResolveIn): another tenant's account is never found, whatever
+	// was typed. identity.Resolve exactly, everywhere else.
+	user, err := auth.ResolveAccount(ctx, d.store, email)
 	if err != nil {
 		if errors.Is(err, identity.ErrNotFound) {
 			slog.Debug("local: login refused",
@@ -192,6 +195,23 @@ func IssueSession(ctx context.Context, store db.Store, userID int64) (string, er
 		return "", err
 	}
 	return tok, nil
+}
+
+// LoginWith is the Login of every driver that judges a password elsewhere (a
+// directory, the operating system): it runs the driver's verify, and for the
+// account that came back mints the browser session and stamps the sign-in.
+// One copy, so a session is never minted differently by one driver.
+func LoginWith(ctx context.Context, store db.Store, verify func(ctx context.Context, identifier, password string) (*model.User, error), identifier, password string) (*model.User, string, error) {
+	user, err := verify(ctx, identifier, password)
+	if err != nil {
+		return nil, "", err
+	}
+	tok, err := IssueSession(ctx, store, user.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	_ = store.TouchLastLogin(ctx, user.ID)
+	return user, tok, nil
 }
 
 // SessionAuthenticatorName is the chain name of the session-only validator.

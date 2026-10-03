@@ -2,17 +2,17 @@
 
 Push screenshots, images, files, and text captures from
 [ShareX](https://getsharex.com/) (the Windows screenshot & upload tool) straight
-into filex and get back a **public, browser‑viewable link** in one step.
+into filex and get back a **public, browser-viewable link** in one step.
 
-filex exposes a single token‑authenticated endpoint —
-`POST /api/sharex/upload` — that stores the capture, indexes it, mints a public
+filex exposes a single token-authenticated endpoint -
+`POST /api/sharex/upload` - that stores the capture, indexes it, mints a public
 [`/s/{token}` share link](SHARING.md#share-links-download), and returns it as
-JSON. Ready‑to‑import ShareX configs live in [`docs/sharex/`](sharex/):
+JSON. Ready-to-import ShareX configs live in [`docs/sharex/`](sharex/):
 
 | File | ShareX destination | Use |
 |------|--------------------|-----|
 | [`image.sxcu`](sharex/image.sxcu) | Image uploader | screenshots / captured images |
-| [`file.sxcu`](sharex/file.sxcu)   | File uploader  | any file (drag‑drop, clipboard, "Upload file") |
+| [`file.sxcu`](sharex/file.sxcu)   | File uploader  | any file (drag-drop, clipboard, "Upload file") |
 | [`text.sxcu`](sharex/text.sxcu)   | Text uploader  | text/code snippets (ShareX sends these as a file) |
 
 - [1. Create a token in filex](#1-create-a-token-in-filex)
@@ -32,15 +32,15 @@ the MCP server use).
 1. Open the filex admin UI and go to **API / MCP** (left sidebar → *Access* →
    **API / MCP**, at `/admin/api-mcp`).
 2. Click **New token**, give it a label (e.g. `ShareX`), and select the
-   **`write`** scope. That is the only scope the uploader needs — `write` covers
+   **`write`** scope. That is the only scope the uploader needs - `write` covers
    both storing the file and minting its share link. The account the token
    belongs to needs edit rights on the target folder and the `share.links`
    permission, as for any public link. At least one scope has
-   to be ticked — a token is never issued with none — and `write` alone is
-   the least‑privilege choice.
+   to be ticked - a token is never issued with none - and `write` alone is
+   the least-privilege choice.
 3. Optionally bind the token to a **root folder** (confinement) so every ShareX
    upload is restricted to that subtree.
-4. Copy the **plaintext token** — it is shown **once**. Only its hash is stored;
+4. Copy the **plaintext token** - it is shown **once**. Only its hash is stored;
    if you lose it you must issue a new one.
 
 ---
@@ -51,13 +51,13 @@ For each of the three `.sxcu` files:
 
 1. In ShareX: **Destinations → Custom uploader settings…**
 2. Click **Import → From file…** and pick the `.sxcu`
-   (double‑clicking a `.sxcu` in Explorer also imports it).
+   (double-clicking a `.sxcu` in Explorer also imports it).
 3. Select the imported uploader on the left, then in **Headers** replace
    `YOUR_TOKEN_HERE` with the token you copied in step 1. (The value belongs to
-   the `X-Filex-Token` header — leave the header name unchanged.)
+   the `X-Filex-Token` header - leave the header name unchanged.)
 4. Click **Test** to confirm you get a URL back.
 
-Then point ShareX at these uploaders — **Destinations** menu:
+Then point ShareX at these uploaders - **Destinations** menu:
 
 - **Image uploader** → *filex (image)*
 - **File uploader** → *filex (file)*
@@ -67,8 +67,8 @@ Now the usual capture hotkeys (e.g. **Ctrl+PrtSc** for a region grab) upload to
 filex and copy the link to your clipboard.
 
 > **⚠ Set your host name first.** The bundled configs ship with a placeholder,
-> `https://YOUR-FILEX-HOST/api/sharex/upload`. Edit the **Request URL** — in the
-> `.sxcu` file before importing, or in ShareX afterwards — to point at your own
+> `https://YOUR-FILEX-HOST/api/sharex/upload`. Edit the **Request URL** - in the
+> `.sxcu` file before importing, or in ShareX afterwards - to point at your own
 > instance. A real host name here would send every screenshot you take to
 > somebody else's server.
 
@@ -85,19 +85,19 @@ The endpoint replies with:
 ShareX parses `url` from the response (`URL` field = `{json:url}`) and gives you
 that link.
 
-- It is a normal filex **share link** (`/s/{token}`) — public and
-  account‑free for whoever opens it.
+- It is a normal filex **share link** (`/s/{token}`) - public and
+  account-free for whoever opens it.
 - The **`?inline=1`** suffix makes the file render **in the browser**
-  (`Content-Disposition: inline`) instead of forcing a download — so pasted
+  (`Content-Disposition: inline`) instead of forcing a download - so pasted
   screenshots and text snippets just *show*. (Drop the suffix, or use the
   Share/Permissions dialog, if you'd rather force a download.) An HTML or
   SVG file renders sandboxed, without scripts.
 - Uploads land in a **`sharex/` folder** at the token's root by default. Each
-  capture is stored under a random‑prefixed filename, so every upload gets its
-  own fresh link — a same‑named capture never overwrites or repoints an earlier
+  capture is stored under a random-prefixed filename, so every upload gets its
+  own fresh link - a same-named capture never overwrites or repoints an earlier
   one.
 - The link has **no download limit**, and it lives as long as the instance's
-  **share-link ceiling** allows — `share.max_ttl_days`, **7 days** unless an
+  **share-link ceiling** allows - `share.max_ttl_days`, **7 days** unless an
   admin changed it on the Protection page ([SHARING.md](SHARING.md)). A
   screenshot link pasted into a ticket today stops working next week on a
   default install; raise the ceiling (or set it to `0`) if your captures need
@@ -158,19 +158,19 @@ stripped, and a confined token can still only write inside its own root.
 
 ## Troubleshooting
 
-- **`missing file field` (400)** — the uploader's **Body** must be
+- **`missing file field` (400)** - the uploader's **Body** must be
   *Form data (multipart/form-data)* and **File form name** must be `file`.
-- **`token missing scope: write` (403)** — the token lacks the `write` scope;
+- **`token missing scope: write` (403)** - the token lacks the `write` scope;
   issue a new one on the API / MCP page with `write` selected.
-- **`access denied: your account lacks the share.links permission` (403)** —
+- **`access denied: your account lacks the share.links permission` (403)** -
   the token is fine, the account behind it may not make public links: its
   role or an exception withholds `share.links`
   ([PERMISSIONS.md](PERMISSIONS.md)). The same holds when a link that used to
   open answers 404 later: a link answers only while its creator may still make
   it ([SHARING.md](SHARING.md#a-link-follows-its-creator)).
-- **401 unauthorized** — the `X-Filex-Token` header value is wrong or the token
-  was revoked. Re‑copy it (tokens are shown only once at creation).
-- **Link downloads instead of previewing** — confirm the returned URL still ends
-  with `?inline=1`; some clients strip query strings when re‑sharing.
-- **Wrong host** — the `.sxcu` **Request URL** must point at your filex host's
+- **401 unauthorized** - the `X-Filex-Token` header value is wrong or the token
+  was revoked. Re-copy it (tokens are shown only once at creation).
+- **Link downloads instead of previewing** - confirm the returned URL still ends
+  with `?inline=1`; some clients strip query strings when re-sharing.
+- **Wrong host** - the `.sxcu` **Request URL** must point at your filex host's
   `/api/sharex/upload`.

@@ -535,7 +535,7 @@ async function saveVersions() {
           <div>
             <span class="text-zinc-500 dark:text-zinc-400">{{ t('protection.av.binary') }}</span>
             <code class="ms-2 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs dark:bg-zinc-800">
-              {{ antivirus.binary || '—' }}
+              {{ antivirus.binary || '-' }}
             </code>
           </div>
           <div v-if="antivirus.address">

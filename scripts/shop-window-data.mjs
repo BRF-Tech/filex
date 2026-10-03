@@ -134,7 +134,7 @@ export const EXTERNAL_SENTINELS = [
  */
 export const REPO_ABOUT =
   'Self-hosted file manager: one Go binary, a full web UI, and storage that ' +
-  'plugs in — local, S3, SFTP, WebDAV, FTP, SMB. The same tree is also ' +
+  'plugs in - local, S3, SFTP, WebDAV, FTP, SMB. The same tree is also ' +
   'reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone, restic, WinSCP ' +
   'or a scanner land where the browser does. Embeddable UI, desktop app, ' +
   'built-in MCP server. MIT.';
@@ -372,5 +372,38 @@ export const SCREENSHOTS = [
     // explorer's table, each row's name read in the panel's language.
     file: `${SHOTS_ROOT_REL}/roles/roles-list-1440.png`,
     depicts: ['web/src/views/Roles.vue', 'web/src/lib/roleName.ts'],
+  },
+  // ── v0.50.0: groups, sign-in security, Default apps, folder previews
+  //    (e2e/shots/groups.mjs, loginsecurity.mjs, defaultapps.mjs, thumbnails.mjs) ──
+  {
+    // Admin → Groups: each group's role, priority, members, folders and SSO
+    // links in the explorer's table.
+    file: `${SHOTS_ROOT_REL}/groups/groups-list-1440.png`,
+    depicts: ['web/src/views/Groups.vue'],
+  },
+  {
+    // The sharing panel: a group suggested beside people, Owner asked in the dialog.
+    file: `${SHOTS_ROOT_REL}/groups/share-group-1440.png`,
+    depicts: ['packages/core/src/modals/PermissionsModal.vue'],
+  },
+  {
+    file: `${SHOTS_ROOT_REL}/loginsecurity/login-security-1440.png`,
+    depicts: ['web/src/views/LoginSecurity.vue', 'web/src/components/loginSecurity/AddressListEditor.vue'],
+  },
+  {
+    // The sign-in form on a locked account: the message and the button counting down.
+    file: `${SHOTS_ROOT_REL}/loginsecurity/login-locked-1440.png`,
+    depicts: ['web/src/views/Login.vue'],
+  },
+  {
+    // Plugins → Default apps: every kind something besides filex handles, one with a rule.
+    file: `${SHOTS_ROOT_REL}/defaultapps/default-apps-1440.png`,
+    depicts: ['web/src/components/plugins/DefaultAppsTab.vue'],
+  },
+  {
+    // The grid over folders drawn with the files that came into them last,
+    // the SVGs drawn by the built-in engine.
+    file: `${SHOTS_ROOT_REL}/thumbnails/folders-grid-1440.png`,
+    depicts: ['packages/core/src/components/FolderMosaic.vue', 'packages/core/src/components/ThumbTile.vue'],
   },
 ];

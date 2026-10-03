@@ -343,5 +343,5 @@ func (f *mtFix) seedViewer(t *testing.T, email string) *http.Client {
 	require.NoError(t, err)
 	require.NotNil(t, a.ProviderID)
 	require.NoError(t, f.Store.SetUserProvider(ctx, u.ID, *a.ProviderID, ""))
-	return mtLogin(t, f.Srv, email, mtUserPass)
+	return mtLogin(t, f.Srv, "alpha", email, mtUserPass)
 }

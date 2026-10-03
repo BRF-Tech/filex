@@ -80,13 +80,16 @@ async function waitForHealth(url, proc, deadlineMs = 45_000) {
   throw new Error(`no healthy instance at ${url}`);
 }
 
+/** The office engine's names (enginebin.Office and its alias). */
+const OFFICE_ENGINES = new Set(['office', 'libreoffice']);
+
 /**
  * Boots `filex serve` from FILEX_BIN (else bin/filex[.exe]) on a free loopback
  * port with a fresh data directory, and returns what a script needs to talk to
  * it. `env` adds to — never replaces — the variables every shot instance gets.
  *
  * `engines` names the conversion engines the scene's picture depends on
- * (`imagemagick`, `libreoffice`, … — the keys of the server's own probe,
+ * (`imagemagick`, `ffmpeg`, … - the keys of the server's own probe,
  * backend/internal/wasmplugin/engines.go). When THIS host lacks any of them
  * the same build is run inside the full container image instead, which carries
  * them all — see bootInContainer. `SHOTS_ENGINES=host|container` forces one
@@ -105,6 +108,20 @@ async function waitForHealth(url, proc, deadlineMs = 45_000) {
  * come from the environment, and `--listen` exits with "unknown flag".
  */
 export async function bootInstance({ name, admin, env = {}, engines = [] }) {
+  // ⚠ 0.50: the office engine (`office`, formerly `libreoffice`) is the
+  // ONLYOFFICE Document Server filex is CONNECTED to, not a program a host or
+  // the full image carries. The instance is pointed at one - the real one in
+  // SHOTS_ONLYOFFICE_URL / SHOTS_ONLYOFFICE_JWT, else a placeholder that makes
+  // the engine "connected" for a picture that converts nothing - and the
+  // engine leaves the list of programs to look for.
+  if (engines.some((e) => OFFICE_ENGINES.has(e))) {
+    env = {
+      FILEX_ONLYOFFICE_URL: process.env.SHOTS_ONLYOFFICE_URL || 'http://onlyoffice-shots.invalid',
+      FILEX_ONLYOFFICE_JWT: process.env.SHOTS_ONLYOFFICE_JWT || 'filex-shots-placeholder',
+      ...env,
+    };
+    engines = engines.filter((e) => !OFFICE_ENGINES.has(e));
+  }
   const mode = engines.length ? String(process.env.SHOTS_ENGINES || 'auto').toLowerCase() : 'host';
   if (!['auto', 'host', 'container'].includes(mode)) {
     throw new Error(`SHOTS_ENGINES=${mode}: expected auto, host or container`);
@@ -520,6 +537,130 @@ export async function shot(target, set, file) {
   mkdirSync(out, { recursive: true });
   await target.screenshot({ path: join(out, file) });
   log(`wrote ${set}/${file}`);
+}
+
+/**
+ * Close every toast still on screen, and wait for the layer to be empty.
+ *
+ * ⚠ A toast is a notice about the LAST thing that happened; the picture is
+ * about the screen. One left over from the install sat across two lines of
+ * the app's own grants in the first v0.43.0 take. (apps.mjs, defaultapps.mjs.)
+ */
+export async function dismissToasts(page) {
+  const layer = page.getByTestId('toast-layer');
+  for (let i = 0; i < 12 && (await layer.locator('button').count()) > 0; i++) {
+    await layer.locator('button').first().click({ timeout: 2_000 }).catch(() => {});
+    await sleep(150);
+  }
+  await sleep(250);
+}
+
+/**
+ * Shoots a dialog whole: `dialog` (a locator) after the window is grown to
+ * hold all of it, then the window back to `restore`.
+ *
+ * ⚠⚠ An install review is TALLER than the window - nine permissions, each
+ * with a sentence - and an element screenshot of something taller than the
+ * viewport is stitched by the browser. Over a dialog that floats above a
+ * scrolling page the stitch came back as the top of the review, a grey band,
+ * and the page underneath bleeding through it (v0.43.0, first take: 1344x3308
+ * of which two thirds were nothing). So the window is grown to hold the whole
+ * dialog, and it is MEASURED to fit before the shutter. (apps.mjs,
+ * defaultapps.mjs.)
+ */
+export async function shootWhole(page, dialog, set, file, { restore = { width: 1440, height: 1000 } } = {}) {
+  let fits = '';
+  for (let i = 0; i < 5; i++) {
+    const box = await dialog.boundingBox();
+    const view = page.viewportSize();
+    if (!box || !view) throw new Error(`${file}: the dialog has no box to measure`);
+    if (box.y >= 0 && box.y + box.height <= view.height) {
+      fits = 'yes';
+      break;
+    }
+    fits = `${Math.ceil(box.y + box.height)}px of dialog in a ${view.height}px window`;
+    await page.setViewportSize({ width: view.width, height: Math.min(2600, Math.ceil(box.y + box.height + 48)) });
+    await sleep(300);
+  }
+  if (fits !== 'yes') throw new Error(`${file}: the dialog does not fit the window (${fits}) - the picture would be stitched`);
+  await shot(dialog, set, file);
+  await page.setViewportSize(restore);
+  await sleep(300);
+}
+
+// ── measuring a page (jsdom has no layout) ────────────────────────────────
+
+/**
+ * What does not fit on the page as it stands, in a real browser. Returns the
+ * problems; an empty list is a pass. ⚠ Nothing is "close enough": a
+ * horizontal scroll bar on the page, a piece of the page's own content that
+ * starts left of / ends right of the window, or two controls on top of each
+ * other is a failure.
+ *
+ * `frames` are the test ids of tables (the explorer's DataTable): their cells
+ * scroll inside their own frame, so the frame is what must fit.
+ */
+export async function layoutProblems(page, { frames = [] } = {}) {
+  return page.evaluate((frames) => {
+    const problems = [];
+    const root = document.documentElement;
+    if (root.scrollWidth > root.clientWidth + 1) problems.push(`the page scrolls sideways (${root.scrollWidth} > ${root.clientWidth})`);
+    const view = window.innerWidth;
+    const rtl = getComputedStyle(root).direction === 'rtl';
+    const inTable = (el) => el.closest('.fe-list__scroll, .fe-list__body, .fe-list__head');
+    const parts = 'main form, main fieldset, main h1, main h2, main p, main li, main code, main label, main button, main input, main select';
+    for (const el of document.querySelectorAll(parts)) {
+      if (inTable(el)) continue;
+      const rects = [...el.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
+      for (const r of rects) {
+        if (r.left < -0.5 || r.right > view + 0.5) {
+          problems.push(`${el.tagName.toLowerCase()} "${(el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 40)}" sticks out: ${Math.round(r.left)}..${Math.round(r.right)} of ${view}${rtl ? ' (rtl)' : ''}`);
+        }
+      }
+    }
+    for (const id of frames) {
+      for (const box of document.querySelectorAll(`[data-testid="${id}"]`)) {
+        const r = box.getBoundingClientRect();
+        if (r.right > view + 0.5 || r.left < -0.5) problems.push(`${id} sticks out: ${Math.round(r.left)}..${Math.round(r.right)} of ${view}`);
+      }
+    }
+    const boxes = [...document.querySelectorAll('main input, main select, main button')]
+      .filter((e) => !inTable(e))
+      .map((e) => ({ e, r: e.getBoundingClientRect() }))
+      .filter(({ r }) => r.width > 0 && r.height > 0);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i].r;
+        const b = boxes[j].r;
+        const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        if (w > 2 && h > 2 && !boxes[i].e.contains(boxes[j].e) && !boxes[j].e.contains(boxes[i].e)) {
+          problems.push(`two controls overlap: "${(boxes[i].e.textContent || boxes[i].e.name || '').trim().slice(0, 24)}" and "${(boxes[j].e.textContent || boxes[j].e.name || '').trim().slice(0, 24)}"`);
+        }
+      }
+    }
+    return problems;
+  }, frames);
+}
+
+/**
+ * The language the panel opens in. The account's preference document outranks
+ * this browser's copy of it, so both are set; ⚠ newContext's own init script
+ * writes 'en' on every navigation, and a later init script runs after it — the
+ * last one registered decides.
+ */
+export async function setLanguage(admin, page, locale) {
+  await admin.patch('/api/auth/profile', { locale });
+  await admin.json('/api/me/prefs?surface=web', { method: 'PUT', body: JSON.stringify({ prefs: { locale } }) });
+  await page.addInitScript((l) => localStorage.setItem('filex.locale', l), locale);
+}
+
+/** Throws unless `el`'s visible text says every one of `wants`. */
+export async function mustSay(el, what, wants) {
+  const text = (await el.innerText()).replace(/\s+/g, ' ');
+  for (const w of wants) {
+    if (!text.includes(w)) throw new Error(`${what} does not say "${w}": "${text.slice(0, 600)}"`);
+  }
 }
 
 // ── a document worth signing ──────────────────────────────────────────────

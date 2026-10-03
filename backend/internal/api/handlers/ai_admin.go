@@ -17,13 +17,18 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/archivecli"
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/external"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/pluginreq"
@@ -57,6 +62,10 @@ import (
 type AIAdmin struct {
 	store db.Store
 
+	// demoMode: a public playground - the admin tools' writes are refused
+	// (invoke), as api.DemoGuard refuses the routes'.
+	demoMode bool
+
 	dash        *Dashboard
 	settings    *Settings
 	users       *Users
@@ -74,6 +83,7 @@ type AIAdmin struct {
 	queue       *Queue
 	notif       *Notifications
 	audit       *Audit
+	loginSec    *LoginSecurity
 	grants      *Grants
 	// Plugins: READ and REQUEST only (plugin_requests.go). The install,
 	// upgrade, remove, switch and approve handlers are deliberately not
@@ -81,6 +91,21 @@ type AIAdmin struct {
 	plugins    *Plugins
 	appPlugins *AppPluginsAdmin
 	pluginReqs *PluginRequests
+	// tenants is the tenant lifecycle (handlers/providers.go): the same
+	// handler as Admin → Tenants, platform operator only, in-handler.
+	tenants *Providers
+	// fileTypes: READ only - which app opens and draws which kind. A change
+	// needs an administrator signed in to the panel (file_types_admin.go).
+	fileTypes *FileTypesAdmin
+	// webhooks: the webhook TARGETS (v2, Admin → Notifications → Webhooks),
+	// beside the older single webhook config notif carries.
+	webhooks *WebhooksAdmin
+	// protection: trash retention, versions kept, link lifetime, drafts and
+	// antivirus - the Protection page's handler, with its validation.
+	protection *Protection
+	// archives: the archive engine's settings (formats, limits) - the Archives
+	// page's handler. Nil when no engine is wired.
+	archives *ArchiveAdmin
 }
 
 // AIAdminDeps carries the shared services the wrapped admin handlers need.
@@ -113,6 +138,10 @@ type AIAdminDeps struct {
 	// giving (issue #17).
 	PublicURL    string
 	PublicURLSet bool
+	// ReversePath is the panel's third-leg check (ExternalAdmin.ReversePath),
+	// so admin_external_test measures the document server's route back to
+	// filex and its JWT the way the page's Test does. Nil = not measured.
+	ReversePath func(ctx context.Context, t *onlyoffice.Target) onlyoffice.ReverseResult
 	// AuthLive is the running set of sign-in providers, so the admin MCP
 	// tools change sign-in through the same handler, with the same guards, as
 	// the page (handlers/auth_providers.go).
@@ -124,6 +153,19 @@ type AIAdminDeps struct {
 	AppPlugins               *wasmplugin.Registry
 	AppPluginsDisabledReason string
 	PluginRequests           *pluginreq.Service
+	// Assoc backs the Default apps tool (read only): which app opens and
+	// draws which kind of file. Nil = app plugins are off.
+	Assoc *assoc.Service
+	// LoginGuard + EnvTrustedProxies back the sign-in security tools: the same
+	// handler the panel uses, over the same running limiter.
+	LoginGuard        *loginguard.Guard
+	EnvTrustedProxies string
+	// MultiTenant mirrors FILEX_MULTI_TENANT for the tenant tools: the list
+	// says whether tenants can sign in at all (maintenance mode when off).
+	MultiTenant bool
+	// ArchiveEngine backs the archive settings tools: the same engine the
+	// panel's Archives page reads and probes. Nil = those tools answer 503.
+	ArchiveEngine *archivecli.Service
 }
 
 // newTrashWithOps is the trash handler with the queue "empty the trash now"
@@ -140,8 +182,9 @@ func newTrashWithOps(svc *trash.Service, store db.Store, o *ops.Service) *Trash 
 func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 	return &AIAdmin{
 		store:       d.Store,
+		demoMode:    d.DemoMode,
 		dash:        newDemoAwareDashboard(d),
-		settings:    NewSettings(d.Store),
+		settings:    newDemoAwareSettings(d),
 		users:       NewUsers(d.Store),
 		usersAdm:    NewUsersAdmin(d.Store),
 		storages:    newDemoAwareStorages(d),
@@ -157,11 +200,37 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		queue:       newQueueWithStore(d.Queue, d.Store),
 		notif:       NewNotifications(d.Notify, d.Store, acl.New(d.Store)),
 		audit:       newDemoAwareAudit(d),
+		loginSec:    newDemoAwareLoginSecurity(d),
 		grants:      NewGrants(d.Store, acl.New(d.Store)),
 		plugins:     NewPlugins(d.Plugins, false),
 		appPlugins:  NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason),
 		pluginReqs:  newAIPluginRequests(d),
+		tenants:     newDemoAwareProviders(d),
+		fileTypes:   NewFileTypesAdmin(d.Assoc, false),
+		webhooks:    NewWebhooksAdmin(d.Store, d.Notify),
+		protection:  NewProtection(d.Store),
+		archives:    newAIArchiveAdmin(d),
 	}
+}
+
+// newAIArchiveAdmin is the Archives page's handler over the panel's engine,
+// nil when no engine is wired (archivesOr answers 503 then).
+func newAIArchiveAdmin(d AIAdminDeps) *ArchiveAdmin {
+	if d.ArchiveEngine == nil {
+		return nil
+	}
+	return NewArchiveAdmin(d.Store, d.ArchiveEngine)
+}
+
+// archivesOr is the archive settings handler pick names, or a 503 when this
+// server has no archive engine.
+func (a *AIAdmin) archivesOr(pick func(*ArchiveAdmin) http.HandlerFunc) http.HandlerFunc {
+	if a.archives == nil {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "archive settings are not available on this server"})
+		}
+	}
+	return pick(a.archives)
 }
 
 // newAIPluginRequests is the request handler the admin tools use: the
@@ -237,6 +306,9 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Post("/{id}/sync", a.storages.TriggerSync)
 		r.Get("/{id}/sync-runs", a.storagesAdm.SyncRuns)
 		r.Get("/{id}/drift", a.storagesAdm.Drift)
+		// The order storages are listed in (issue #57); static, so chi
+		// matches it before /{id}.
+		r.Put("/order", a.storages.SetOrder)
 	})
 
 	r.Route("/sync-runs", func(r chi.Router) {
@@ -265,7 +337,10 @@ func (a *AIAdmin) Register(r chi.Router) {
 
 	r.Route("/auth-providers", func(r chi.Router) {
 		r.Get("/", a.authProv.List)
+		r.Post("/", a.authProv.Create)
 		r.Patch("/{name}", a.authProv.Update)
+		r.Delete("/{name}", a.authProv.Delete)
+		r.Put("/{name}/tenants", a.authProv.SetTenants)
 		r.Post("/{name}/test", a.authProv.Test)
 	})
 
@@ -318,8 +393,35 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Post("/{id}/read", a.notif.MarkRead)
 	})
 
+	// Webhook targets (v2): the platform operator's, asked in the handler
+	// (requireSupertenant), as on /api/admin/webhooks.
+	r.Route("/webhooks", func(r chi.Router) {
+		r.Get("/", a.webhooks.List)
+		r.Post("/", a.webhooks.Create)
+		r.Patch("/{id}", a.webhooks.Update)
+		r.Delete("/{id}", a.webhooks.Delete)
+		r.Post("/{id}/test", a.webhooks.Test)
+	})
+
+	// Protection and archive settings: the panel's handlers, with their
+	// validation - not admin_settings_set's raw keys.
+	r.Get("/protection", a.protection.Get)
+	r.Patch("/protection", a.protection.Patch)
+	r.Get("/archives", a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Get }))
+	r.Patch("/archives", a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Patch }))
+	r.Post("/archives/test", a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Test }))
+
 	r.Route("/audit", func(r chi.Router) {
 		r.Get("/", a.audit.List)
+	})
+
+	// Sign-in security: settings, locks, the sign-in trail.
+	r.Route("/login-security", func(r chi.Router) {
+		r.Get("/", a.loginSec.Get)
+		r.Patch("/", a.loginSec.Patch)
+		r.Get("/locks", a.loginSec.Locks)
+		r.Post("/unlock", a.loginSec.Unlock)
+		r.Get("/attempts", a.loginSec.Attempts)
 	})
 
 	// RBAC grants — the elevated admin principal is owner-exempt, so Create's
@@ -328,6 +430,9 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Get("/", a.grants.AdminList)
 		r.Post("/", a.grants.Create)
 		r.Delete("/{id}", a.grants.AdminDelete)
+		// A group's grant (PR #78) is numbered apart from a person's: the
+		// same id can name both, so it has its own route, as on /api/admin.
+		r.Delete("/groups/{id}", a.grants.AdminDeleteGroup)
 	})
 
 	// Plugins: read them, and leave install requests. ⚠⚠ Nothing here
@@ -338,18 +443,42 @@ func (a *AIAdmin) Register(r chi.Router) {
 		r.Get("/", a.plugins.List)
 		r.Post("/updates/check", a.plugins.CheckUpdates)
 		r.Get("/{id}", a.plugins.Get)
+		r.Get("/{id}/logs", a.plugins.Logs)
 	})
 	r.Route("/app-plugins", func(r chi.Router) {
 		r.Get("/", a.appPlugins.List)
 		r.Post("/updates/check", a.appPlugins.CheckUpdates)
 		r.Get("/{id}", a.appPlugins.Get)
 		r.Get("/{id}/logs", a.appPlugins.Logs)
+		// The files apps have frozen (a document out for signature), and
+		// lifting one by force - audited as app_plugin.unlock. Static, so chi
+		// matches it before /{id}.
+		r.Get("/locks", a.appPlugins.Locks)
+		r.Delete("/locks", a.appPlugins.Unlock)
 	})
 	r.Route("/plugin-requests", func(r chi.Router) {
 		r.Get("/", a.pluginReqs.List)
 		r.Post("/", a.pluginReqs.Create)
 		r.Get("/{id}", a.pluginReqs.Get)
 	})
+
+	// Tenants (providers): the platform operator's, asked inside the handler
+	// (requireSupertenant), so a tenant administrator's token is refused here
+	// exactly as on /api/admin/providers.
+	r.Route("/providers", func(r chi.Router) {
+		r.Get("/", a.tenants.List)
+		r.Post("/", a.tenants.Create)
+		r.Get("/realm-suggestion", a.tenants.RealmSuggestion)
+		r.Get("/{id}", a.tenants.Get)
+		r.Patch("/{id}", a.tenants.Update)
+		r.Delete("/{id}", a.tenants.Delete)
+		r.Post("/{id}/storages", a.tenants.LinkStorage)
+		r.Delete("/{id}/storages/{storageID}", a.tenants.UnlinkStorage)
+	})
+
+	// Default apps: read only. Changing who opens or draws a kind is the
+	// panel's, with a signed-in administrator (file_types_admin.go).
+	r.Get("/file-types", a.fileTypes.List)
 }
 
 // ───── in-process invoker (powers the MCP admin tools) ─────
@@ -360,6 +489,20 @@ func (a *AIAdmin) Register(r chi.Router) {
 // body, then drives the handler with a buffered recorder. No socket, no
 // re-auth, no duplicated handler logic.
 func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.HandlerFunc, method, path string, urlParams map[string]string, query url.Values, body any) (int, []byte) {
+	// ⚠⚠ The admin_* MCP tools run the admin handlers IN-PROCESS - past every
+	// route, so past api.DemoGuard. On a public demo /api/admin and
+	// /api/ai/admin refuse every state-changing request; this is the same
+	// refusal for the third door onto the same surface (2026-10-01: an
+	// admin-scoped token's admin_login_security_unlock and admin_settings_set
+	// went through on a demo).
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+	default:
+		if a.demoMode {
+			b, _ := json.Marshal(DemoRefusal())
+			return http.StatusForbidden, b
+		}
+	}
 	var rdr io.Reader
 	hasBody := false
 	if body != nil {
@@ -390,6 +533,12 @@ func (a *AIAdmin) invoke(ctx context.Context, principal *model.User, h http.Hand
 	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// The caller's address (resolved once, by AIMCP.ServeHTTP) is this
+	// request's too, so a handler that reads it - "your address" on the sign-in
+	// security answer - reads the agent's, not an empty one.
+	if ip := clientip.FromContext(ctx); ip != "" {
+		req.RemoteAddr = ip
+	}
 
 	rec := newBufRecorder()
 	h(rec, req)
@@ -418,6 +567,9 @@ func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, me
 		return // only successful writes
 	}
 	action, targetType, targetID := auth.AIAdminAction(method, path, urlParams["id"], urlParams["name"])
+	if a, tt := detail.Action(); a != "" {
+		action, targetType = auth.DoorAction(a, true), tt
+	}
 	if action == "" {
 		return
 	}
@@ -425,7 +577,10 @@ func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, me
 		Action:     action,
 		TargetType: targetType,
 		TargetID:   targetID,
-		CreatedAt:  time.Now(),
+		// The address the MCP call came from (AIMCP.ServeHTTP carries it down),
+		// as every other door's row has it.
+		IP:        clientip.FromContext(callCtx),
+		CreatedAt: time.Now(),
 	}
 	// elevatedPrincipal preserves the bound user's real ID (only the role is
 	// lifted to admin), so the audit row attributes the change correctly.
@@ -433,19 +588,12 @@ func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, me
 		uid := principal.ID
 		entry.UserID = &uid
 	}
-	// Stamp which token + username acted — MCP calls ride the API-token
-	// middleware, so both live on the tool-call context.
+	// Stamp which token + username acted, and that the door was MCP - MCP
+	// calls ride the API-token middleware, so both live on the tool-call
+	// context.
 	entry.Metadata = detail.Into(entry.Metadata)
 	entry.TargetID, entry.Metadata = detail.ApplyTarget(entry.TargetID, entry.Metadata)
-	if tok := auth.TokenFrom(callCtx); tok != nil {
-		if entry.Metadata == nil {
-			entry.Metadata = map[string]interface{}{}
-		}
-		entry.Metadata["token_id"] = tok.ID
-		if tu := auth.TokenUserFrom(callCtx); tu != "" {
-			entry.Metadata["token_username"] = tu
-		}
-	}
+	entry.Metadata = auth.StampTokenDoor(callCtx, entry.Metadata, auth.ViaMCP)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := a.store.InsertAuditEntry(ctx, entry); err != nil {
@@ -486,9 +634,18 @@ func (b *bufRecorder) Write(p []byte) (int, error) {
 
 // adminOut is the structured result every admin_* MCP tool returns: the
 // underlying HTTP status plus the handler's raw JSON body.
+//
+// ⚠⚠ Result is `any` holding a json.RawMessage, never a json.RawMessage
+// field. The SDK derives the tool's OUTPUT SCHEMA from this type and
+// validates every answer against it: a json.RawMessage is a []byte, so the
+// schema allowed only null or an array, and every tool whose handler answers
+// an object - most of them - came back as a JSON-RPC error "validating tool
+// output" although the handler had run (measured 2026-10-01; an agent was told
+// the change it had just made failed). `any` is any JSON; the RawMessage
+// inside still marshals as the handler's bytes.
 type adminOut struct {
-	Status int             `json:"status"`
-	Result json.RawMessage `json:"result"`
+	Status int `json:"status"`
+	Result any `json:"result" jsonschema:"the handler's JSON answer (an object or a list)"`
 }
 
 // Shared MCP tool input shapes. `map[string]any` fields infer to a permissive
@@ -524,6 +681,13 @@ type adminIDBodyIn struct {
 type adminNameBodyIn struct {
 	Name string         `json:"name" jsonschema:"name of the target (provider/external service)"`
 	Body map[string]any `json:"body" jsonschema:"JSON request body object"`
+}
+
+// adminNameOptBodyIn is adminNameBodyIn with the body optional: a tool that
+// used to take a name alone and now MAY carry a request body.
+type adminNameOptBodyIn struct {
+	Name string         `json:"name" jsonschema:"name of the target (provider/external service)"`
+	Body map[string]any `json:"body,omitempty" jsonschema:"optional JSON request body object"`
 }
 
 // reqSpec is the request an admin tool maps its typed input to.
@@ -612,7 +776,9 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.users.Create, method: http.MethodPost, path: "/api/ai/admin/users", body: in.Body}
 		})
-	regAdminTool(r, "admin_users_update", "Update a user by id. body may include any of {password, display_name, role, locale, timezone}.",
+	regAdminTool(r, "admin_users_update", "Update a user by id. body may include any of {password, display_name, role, locale, timezone, enabled, sso_unlink}. "+
+		"sso_unlink: true removes the account's SSO bind (issuer + subject): its next SSO sign-in is matched by its email address again. "+
+		"Switching an account on (enabled: true) approves one an SSO sign-in opened switched off (disabled_reason pending_approval).",
 		func(in adminIDBodyIn) reqSpec {
 			return reqSpec{handler: a.users.Update, method: http.MethodPatch, path: "/api/ai/admin/users/" + itoa(in.ID),
 				urlParams: idParam(in.ID), body: in.Body}
@@ -652,10 +818,29 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 			return reqSpec{handler: a.storages.Delete, method: http.MethodDelete, path: "/api/ai/admin/storages/" + itoa(in.ID),
 				urlParams: idParam(in.ID)}
 		})
-	regAdminTool(r, "admin_storages_sync", "Trigger an immediate sync run for a storage by id.",
-		func(in adminIDIn) reqSpec {
+	regAdminTool(r, "admin_storages_sync", "Trigger an immediate sync run for a storage by id - the whole storage, or with path one folder of it (a rescan of that folder, the panel's Rescan this folder).",
+		func(in adminStorageSyncIn) reqSpec {
+			var q url.Values
+			if in.Path != "" {
+				q = url.Values{"path": {in.Path}}
+			}
 			return reqSpec{handler: a.storages.TriggerSync, method: http.MethodPost, path: "/api/ai/admin/storages/" + itoa(in.ID) + "/sync",
-				urlParams: idParam(in.ID)}
+				urlParams: idParam(in.ID), query: q}
+		})
+	regAdminTool(r, "admin_storages_sync_runs", "A storage's own sync runs, newest first. filters: {limit, offset}.",
+		func(in adminIDFiltersIn) reqSpec {
+			return reqSpec{handler: a.storagesAdm.SyncRuns, method: http.MethodGet, path: "/api/ai/admin/storages/" + itoa(in.ID) + "/sync-runs",
+				urlParams: idParam(in.ID), query: filtersToQuery(in.Filters)}
+		})
+	regAdminTool(r, "admin_storages_drift", "A storage's drift report: what its syncs found changed outside filex. filters: {limit}.",
+		func(in adminIDFiltersIn) reqSpec {
+			return reqSpec{handler: a.storagesAdm.Drift, method: http.MethodGet, path: "/api/ai/admin/storages/" + itoa(in.ID) + "/drift",
+				urlParams: idParam(in.ID), query: filtersToQuery(in.Filters)}
+		})
+	regAdminTool(r, "admin_storages_order", "Set the order storages are listed in for everyone (issue #57): ids is every storage's id in the new order; [] goes back to the default. A person's own order (Settings) still comes first for them.",
+		func(in adminStorageOrderIn) reqSpec {
+			return reqSpec{handler: a.storages.SetOrder, method: http.MethodPut, path: "/api/ai/admin/storages/order",
+				body: map[string]any{"ids": in.IDs}}
 		})
 	regAdminTool(r, "admin_storages_test", "Test a driver+config connection without saving. body: {driver, config}.",
 		func(in adminBodyIn) reqSpec {
@@ -678,7 +863,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.sharesAdm.List, method: http.MethodGet, path: "/api/ai/admin/shares", query: filtersToQuery(in.Filters)}
 		})
-	regAdminTool(r, "admin_shares_revoke", "Revoke a share by id (soft — keeps audit trail).",
+	regAdminTool(r, "admin_shares_revoke", "Revoke a share by id (soft - keeps audit trail).",
 		func(in adminIDIn) reqSpec {
 			return reqSpec{handler: a.sharesAdm.Revoke, method: http.MethodPost, path: "/api/ai/admin/shares/" + itoa(in.ID) + "/revoke",
 				urlParams: idParam(in.ID)}
@@ -694,24 +879,24 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.trash.List, method: http.MethodGet, path: "/api/ai/admin/trash", query: filtersToQuery(in.Filters)}
 		})
-	regAdminTool(r, "admin_trash_restore", "Restore a trashed node. body: {node_id}.",
-		func(in adminBodyIn) reqSpec {
-			return reqSpec{handler: a.trash.Restore, method: http.MethodPost, path: "/api/ai/admin/trash/restore", body: in.Body}
+	regAdminTool(r, "admin_trash_restore", "Restore trashed nodes. body: {node_id} restores one at once; with queued: true, body: {node_ids: [...]} (at most 1000) is judged entry by entry and queued as a job of the operations queue - 202 {ops}, follow them with op_get - which is what a folder on an object store needs (the panel's Trash page asks it that way).",
+		func(in adminQueuedBodyIn) reqSpec {
+			return reqSpec{handler: a.trash.Restore, method: http.MethodPost, path: "/api/ai/admin/trash/restore", body: in.Body, query: queuedQuery(in.Queued)}
 		})
 	regAdminTool(r, "admin_trash_empty", "Purge trash. body: {older_than_days?, storage_id?} (0/omitted wipes everything soft-deleted). "+
 		"Answers with the final counts when the purge finishes within a few seconds; otherwise 202 {running: true, total, purged, …} "+
-		"while it goes on in the background — follow it with admin_trash_empty_status.",
+		"while it goes on in the background - follow it with admin_trash_empty_status.",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.trash.AdminEmpty, method: http.MethodPost, path: "/api/ai/admin/trash/empty", body: in.Body}
 		})
-	regAdminTool(r, "admin_trash_empty_status", "Progress of the latest admin_trash_empty: {op_id, running, queued, cancelled, total, purged, failed, bytes, started_at, finished_at, error}. Cancel a running one with POST /api/files/ops/{op_id}/cancel.",
+	regAdminTool(r, "admin_trash_empty_status", "Progress of the latest admin_trash_empty: {op_id, running, queued, cancelled, total, purged, failed, bytes, started_at, finished_at, error}. Stop it with the op_cancel tool {id: op_id} (a token holding write), or Cancel in the queue tray.",
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.trash.EmptyStatus, method: http.MethodGet, path: "/api/ai/admin/trash/empty"}
 		})
-	regAdminTool(r, "admin_trash_purge", "Hard-delete a single trashed node by id.",
-		func(in adminIDIn) reqSpec {
+	regAdminTool(r, "admin_trash_purge", "Hard-delete a single trashed node by id. With queued: true it is a job of the operations queue - 202 {op}, follow it with op_get - as a large folder on an object store needs.",
+		func(in adminQueuedIDIn) reqSpec {
 			return reqSpec{handler: a.trash.Purge, method: http.MethodDelete, path: "/api/ai/admin/trash/" + itoa(in.ID),
-				urlParams: idParam(in.ID)}
+				urlParams: idParam(in.ID), query: queuedQuery(in.Queued)}
 		})
 
 	// ── search index ──
@@ -729,15 +914,33 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.authProv.List, method: http.MethodGet, path: "/api/ai/admin/auth-providers"}
 		})
-	regAdminTool(r, "admin_auth_providers_update", "Change an identity provider managed on the Identity providers page (oidc, ldap, proxy-header) and apply it at once. body: {enabled?, config?: {field: value}, confirm_failed_test?}. A provider the environment defines is read-only; switching one on whose test fails needs confirm_failed_test; the last way an administrator can sign in cannot be switched off.",
+	regAdminTool(r, "admin_auth_providers_update", "Change an identity provider managed on the Identity providers page (oidc, ldap, proxy-header, windows, pam) and apply it at once. body: {enabled?, config?: {field: value}, confirm_failed_test?, test_account?: {username, password}}. A provider the environment defines is read-only; switching one on whose test fails needs confirm_failed_test; the last way an administrator can sign in cannot be switched off. The operating-system providers (windows, pam = Linux PAM) are tested by signing a real account in: send test_account (used once, never stored or logged); their test must pass - confirm_failed_test does not override it - and the account that passed becomes a super administrator. Fields: windows = auto_create (default false), allowed_groups, domain, protocol_login, show_refusal_reason (default false; on, a person whose password was right but who is refused is told why, which also confirms the password to anybody guessing - ldap and pam take it too); pam = see the Identity providers page; oidc = trust_email (default false; on, every email address the provider sends counts as verified - email_verified or not - so anybody who can set an address there can sign in to the account with it; off, an unverified address opens no account not yet bound to its SSO identity and a new account opens switched off for an administrator to approve). A provider's set_by_upgrade names fields whose value the upgrade to 0.50 set.",
 		func(in adminNameBodyIn) reqSpec {
 			return reqSpec{handler: a.authProv.Update, method: http.MethodPatch, path: "/api/ai/admin/auth-providers/" + in.Name,
 				urlParams: nameParam(in.Name), body: in.Body}
 		})
-	regAdminTool(r, "admin_auth_providers_test", "Test an auth provider by name.",
-		func(in adminNameIn) reqSpec {
+	regAdminTool(r, "admin_auth_providers_create", "Make another sign-in provider of a kind (a second LDAP, an OIDC for some tenants only). body: {driver: oidc|ldap|pam|windows|proxy-header, slug?, label?, enabled?, config?: {field: value}, tenants?: [tenant ids], confirm_failed_test?, test_account?}. Saved like admin_auth_providers_update (the real test first); it serves the platform's own tenant unless tenants names others. The first provider of each kind is the one named by the driver (oidc, ldap, ...): change it with admin_auth_providers_update.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.authProv.Create, method: http.MethodPost, path: "/api/ai/admin/auth-providers", body: in.Body}
+		})
+	regAdminTool(r, "admin_auth_providers_delete", "Delete a sign-in provider made with admin_auth_providers_create (by its slug). The first provider of a kind is switched off instead, and an environment provider is the environment's. Refused when it is the last way an administrator can sign in (a tenant's: pass confirm_tenant_lockout in body).",
+		func(in adminNameOptBodyIn) reqSpec {
+			var q url.Values
+			if v, _ := in.Body["confirm_tenant_lockout"].(bool); v {
+				q = url.Values{"confirm_tenant_lockout": {"1"}}
+			}
+			return reqSpec{handler: a.authProv.Delete, method: http.MethodDelete, path: "/api/ai/admin/auth-providers/" + in.Name,
+				urlParams: nameParam(in.Name), query: q}
+		})
+	regAdminTool(r, "admin_auth_providers_set_tenants", "Say which tenants sign in through a sign-in provider (multi-tenant installs). body: {tenants: [tenant ids], confirm_tenant_lockout?}. The list replaces the provider's bindings. A tenant's own provider serves that tenant only. Removing the last way an administrator of the platform's own tenant can sign in is refused; a tenant's needs confirm_tenant_lockout.",
+		func(in adminNameBodyIn) reqSpec {
+			return reqSpec{handler: a.authProv.SetTenants, method: http.MethodPut, path: "/api/ai/admin/auth-providers/" + in.Name + "/tenants",
+				urlParams: nameParam(in.Name), body: in.Body}
+		})
+	regAdminTool(r, "admin_auth_providers_test", "Test an auth provider by name. Optional body: {config?: {field: value} (unsaved edits), test_account?: {username, password}} - the operating-system providers (windows, pam) sign in for real with test_account as their last step (used once, never stored or logged, nothing is changed).",
+		func(in adminNameOptBodyIn) reqSpec {
 			return reqSpec{handler: a.authProv.Test, method: http.MethodPost, path: "/api/ai/admin/auth-providers/" + in.Name + "/test",
-				urlParams: nameParam(in.Name)}
+				urlParams: nameParam(in.Name), body: in.Body}
 		})
 
 	// ── external services ──
@@ -750,10 +953,10 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 			return reqSpec{handler: a.external.Update, method: http.MethodPatch, path: "/api/ai/admin/external/" + in.Name,
 				urlParams: nameParam(in.Name), body: in.Body}
 		})
-	regAdminTool(r, "admin_external_test", "Run a health probe against an external service by name.",
-		func(in adminNameIn) reqSpec {
+	regAdminTool(r, "admin_external_test", "Run a health probe against an external service by name. Optional body: {enabled?, url?, secret?, callback_url?} - values that are not saved, tested as they are and stored nowhere (the answer says unsaved: true); without a body the saved configuration is tested. For onlyoffice the answer also measures the document server's route back to filex (service_to_filex) and whether it enforces JWT.",
+		func(in adminNameOptBodyIn) reqSpec {
 			return reqSpec{handler: a.external.Test, method: http.MethodPost, path: "/api/ai/admin/external/" + in.Name + "/test",
-				urlParams: nameParam(in.Name)}
+				urlParams: nameParam(in.Name), body: in.Body}
 		})
 
 	// ── replica ──
@@ -778,6 +981,19 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 	regAdminTool(r, "admin_replica_failures_list", "List replica failures. filters: {unresolved, limit, offset}.",
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.replica.ListFailures, method: http.MethodGet, path: "/api/ai/admin/replica/failures", query: filtersToQuery(in.Filters)}
+		})
+	regAdminTool(r, "admin_replica_failures_count", "How many replica failures are unresolved: {count}.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.replica.CountFailures, method: http.MethodGet, path: "/api/ai/admin/replica/failures/count"}
+		})
+	regAdminTool(r, "admin_replica_fix", "Queue a retry for every unresolved replica failure (the panel's Fix all). A failure whose retry is still waiting is not queued twice (already_queued counts them).",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.replica.FixAll, method: http.MethodPost, path: "/api/ai/admin/replica/fix"}
+		})
+	regAdminTool(r, "admin_replica_fix_one", "Queue a retry for one replica failure: {path, op} as admin_replica_failures_list names it (op: write | delete | move | copy). queued: false = a retry of it was already waiting.",
+		func(in adminReplicaFixOneIn) reqSpec {
+			return reqSpec{handler: a.replica.FixOne, method: http.MethodPost, path: "/api/ai/admin/replica/fix-one",
+				body: map[string]any{"path": in.Path, "op": in.Op}}
 		})
 	regAdminTool(r, "admin_replica_report_get", "Get the latest replica status report.",
 		func(_ adminVoidIn) reqSpec {
@@ -869,28 +1085,103 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 				urlParams: idParam(in.ID)}
 		})
 
+	// ── webhook targets (v2) ──
+	regAdminTool(r, "admin_webhooks_list", "List the webhook targets (Admin, Notifications, Webhooks): {targets: [{id, name, url, secret_set, events, enabled, last_status, ...}]}. A secret is never shown. The platform operator's only in multi-tenant mode.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.webhooks.List, method: http.MethodGet, path: "/api/ai/admin/webhooks"}
+		})
+	regAdminTool(r, "admin_webhooks_create", "Add a webhook target. body: {name, url, secret?, events: [event names], enabled?} - the events are the ones NOTIFICATIONS.md lists. The url is checked as the page checks it.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.webhooks.Create, method: http.MethodPost, path: "/api/ai/admin/webhooks", body: in.Body}
+		})
+	regAdminTool(r, "admin_webhooks_update", "Change a webhook target by id. body: any of {name, url, secret, events, enabled}; a field left out stays as it is.",
+		func(in adminIDBodyIn) reqSpec {
+			return reqSpec{handler: a.webhooks.Update, method: http.MethodPatch, path: "/api/ai/admin/webhooks/" + itoa(in.ID),
+				urlParams: idParam(in.ID), body: in.Body}
+		})
+	regAdminTool(r, "admin_webhooks_delete", "Delete a webhook target by id.",
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.webhooks.Delete, method: http.MethodDelete, path: "/api/ai/admin/webhooks/" + itoa(in.ID),
+				urlParams: idParam(in.ID)}
+		})
+	regAdminTool(r, "admin_webhooks_test", "Send a test event to one webhook target by id now and answer what came back.",
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.webhooks.Test, method: http.MethodPost, path: "/api/ai/admin/webhooks/" + itoa(in.ID) + "/test",
+				urlParams: idParam(in.ID)}
+		})
+
 	// ── audit ──
 	regAdminTool(r, "admin_audit_list", "List audit log entries. filters: {user_id, action, from, to, limit, offset}.",
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.audit.List, method: http.MethodGet, path: "/api/ai/admin/audit", query: filtersToQuery(in.Filters)}
 		})
 
+	// ── sign-in security ──
+	regAdminTool(r, "admin_login_security_get", "Sign-in attempt limits: settings (per-account and per-address limits, window, lock lengths, IP allow-list, trusted proxies), the bounds, the trusted-proxy list in force and its source (setting, env or auto), what `auto` resolved to and why (trusted_proxies_auto: environment, networks, excluded gateways, interfaces, warning), the peers that send X-Forwarded-For without being trusted (untrusted_forwarders), and the address filex sees this call coming from.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.loginSec.Get, method: http.MethodGet, path: "/api/ai/admin/login-security"}
+		})
+	regAdminTool(r, "admin_login_security_update", "Change sign-in attempt limits. body is a partial object: {enabled, account_max_fails, ip_max_fails, window_seconds, lock_base_seconds, lock_max_seconds, ip_allowlist:[addresses or CIDR], trusted_proxies:[addresses, CIDR, auto, loopback, private, link-local, none]} - a trusted_proxies list replaces the default (auto), so keep `auto` in it to add a proxy on top of the automatic set (e.g. [\"auto\", \"192.0.2.10\"]); an empty list removes the saved one.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.loginSec.Patch, method: http.MethodPatch, path: "/api/ai/admin/login-security", body: in.Body}
+		})
+	regAdminTool(r, "admin_login_security_locks", "List the sign-in counters: who is being counted and who is locked, until when. filters: {locked:1, scope:account|ip, limit}.",
+		func(in adminFiltersIn) reqSpec {
+			return reqSpec{handler: a.loginSec.Locks, method: http.MethodGet, path: "/api/ai/admin/login-security/locks", query: filtersToQuery(in.Filters)}
+		})
+	regAdminTool(r, "admin_login_security_unlock", "Lift a sign-in lock. body is {scope:'account'|'ip', subject:'<identifier or address>'} or {all:true} for every lock in force.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.loginSec.Unlock, method: http.MethodPost, path: "/api/ai/admin/login-security/unlock", body: in.Body}
+		})
+	regAdminTool(r, "admin_login_security_attempts", "The sign-in trail: wrong attempts, locks, releases and allow-list passes, newest first. filters: {action:login.failed|login.locked|login.unlocked|login.allowlist_pass, from, to, limit, offset}.",
+		func(in adminFiltersIn) reqSpec {
+			return reqSpec{handler: a.loginSec.Attempts, method: http.MethodGet, path: "/api/ai/admin/login-security/attempts", query: filtersToQuery(in.Filters)}
+		})
+
 	// ── RBAC grants (per-file/folder permissions) ──
-	regAdminTool(r, "admin_grants_list", "List every per-file/folder RBAC grant (who has what level, on which path, in which storage).",
+	regAdminTool(r, "admin_grants_list", "List every per-file/folder RBAC grant (who has what level, on which path, in which storage). Each row has kind \"user\" (a person's, user_id) or \"group\" (a group's, group_id): the two kinds are numbered apart, so revoke a user row with admin_grant_revoke and a group row with admin_group_grant_revoke.",
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.grants.AdminList, method: http.MethodGet, path: "/api/ai/admin/grants"}
 		})
-	regAdminTool(r, "admin_grant_set", "Grant a user access to a path. body: {path:\"<adapter>://<rel>\", user_id, level: viewer|editor|owner}. The storage must have RBAC enabled; a viewer account may only be granted viewer.",
+	regAdminTool(r, "admin_grant_set", "Grant a user - or, with group_id instead of user_id, a group (every member) - access to a path. body: {path:\"<adapter>://<rel>\", user_id | group_id, level: viewer|editor|owner}. The storage must have RBAC enabled; a viewer account may only be granted viewer (a group takes any level: each member stays capped by their own account).",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.grants.Create, method: http.MethodPost, path: "/api/ai/admin/grants", body: in.Body}
 		})
-	regAdminTool(r, "admin_grant_revoke", "Revoke a grant by its id (from admin_grants_list).",
+	regAdminTool(r, "admin_grant_revoke", "Revoke a person's grant by its id (a row of admin_grants_list with kind \"user\"). A group's row has its own numbering: use admin_group_grant_revoke for it.",
 		func(in adminIDIn) reqSpec {
 			return reqSpec{handler: a.grants.AdminDelete, method: http.MethodDelete, path: "/api/ai/admin/grants/" + itoa(in.ID),
 				urlParams: idParam(in.ID)}
 		})
+	regAdminTool(r, "admin_group_grant_revoke", "Revoke a group's grant by its id (a row of admin_grants_list with kind \"group\").",
+		func(in adminIDIn) reqSpec {
+			return reqSpec{handler: a.grants.AdminDeleteGroup, method: http.MethodDelete, path: "/api/ai/admin/grants/groups/" + itoa(in.ID),
+				urlParams: idParam(in.ID)}
+		})
+
+	// ── protection and archive settings (validated, as on their pages) ──
+	regAdminTool(r, "admin_protection_get", "The Protection settings (Admin, Protection): trash_retention_days, versions_keep_n, share_max_ttl_days (with shares_over_max_ttl), drafts_limit (with its bounds) and the antivirus status. The platform operator's only in multi-tenant mode.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.protection.Get, method: http.MethodGet, path: "/api/ai/admin/protection"}
+		})
+	regAdminTool(r, "admin_protection_update", "Change Protection settings, validated as the page validates them (a value out of bounds is refused, not stored - unlike admin_settings_set's raw keys). body: any of {trash_retention_days (1-3650), versions_keep_n (0-1000, 0 = unlimited), share_max_ttl_days (0-3650), drafts_limit, av_enabled, av_mode, av_clamd_addr, av_save_scan_window_minutes, av_max_scan_mb}; the three av_enabled/av_mode/av_clamd_addr take effect at the next restart (restart_pending).",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.protection.Patch, method: http.MethodPatch, path: "/api/ai/admin/protection", body: in.Body}
+		})
+	regAdminTool(r, "admin_archives_get", "The archive settings (Admin, Archives): enabled, default_format, allowed_formats, max_entries, max_expanded_bytes, timeout_seconds, and the providers (the built-in reader, 7-Zip) with what each can create and extract.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Get }), method: http.MethodGet, path: "/api/ai/admin/archives"}
+		})
+	regAdminTool(r, "admin_archives_update", "Change the archive settings, validated as the page validates them. body: any of {enabled, default_format, allowed_formats, max_entries, max_expanded_bytes, timeout_seconds}.",
+		func(in adminBodyIn) reqSpec {
+			return reqSpec{handler: a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Patch }), method: http.MethodPatch, path: "/api/ai/admin/archives", body: in.Body}
+		})
+	regAdminTool(r, "admin_archives_test", "Probe the archive provider now: pack and unpack a small password-protected 7z in the work folder, and answer what happened.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.archivesOr(func(h *ArchiveAdmin) http.HandlerFunc { return h.Test }), method: http.MethodPost, path: "/api/ai/admin/archives/test"}
+		})
 
 	registerPluginTools(r, a)
+	registerTenantTools(r, a)
 }
 
 // pluginModel is said in every plugin tool's description, so an agent learns
@@ -911,9 +1202,9 @@ type pluginRequestIn struct {
 	Ref         string `json:"ref,omitempty" jsonschema:"app: git tag or branch (default: main, then master)"`
 	ManifestURL string `json:"manifest_url,omitempty" jsonschema:"app: the https address of its filex-app.json"`
 	URL         string `json:"url,omitempty" jsonschema:"app: the module's address (with manifest_url); storage: the plugin binary's https address"`
-	SHA256      string `json:"sha256,omitempty" jsonschema:"the sha256 the bytes at url must have; optional — the server hashes what it finds and freezes that"`
+	SHA256      string `json:"sha256,omitempty" jsonschema:"the sha256 the bytes at url must have; optional - the server hashes what it finds and freezes that"`
 	Source      string `json:"source,omitempty" jsonschema:"storage: owner/name of a GitHub repository whose latest release has filex-storage.json, or the https address of a filex-storage.json"`
-	Reason      string `json:"reason" jsonschema:"why the plugin is needed, in a sentence or two — the administrator reads it before deciding (required)"`
+	Reason      string `json:"reason" jsonschema:"why the plugin is needed, in a sentence or two - the administrator reads it before deciding (required)"`
 }
 
 func (in pluginRequestIn) body(op string) map[string]any {
@@ -950,7 +1241,7 @@ func registerPluginTools(r *adminReg, a *AIAdmin) {
 			return reqSpec{handler: a.plugins.Get, method: http.MethodGet, path: "/api/ai/admin/plugins/" + itoa(in.ID), urlParams: idParam(in.ID)}
 		})
 	regAdminTool(r, "admin_plugins_check_updates", "Ask every storage plugin's source for a newer version now and answer the list with "+
-		"what was found. Installs nothing: a newer version waits for an administrator — request it with admin_plugin_request_upgrade."+pluginModel,
+		"what was found. Installs nothing: a newer version waits for an administrator - request it with admin_plugin_request_upgrade."+pluginModel,
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.plugins.CheckUpdates, method: http.MethodPost, path: "/api/ai/admin/plugins/updates/check"}
 		})
@@ -973,14 +1264,31 @@ func registerPluginTools(r *adminReg, a *AIAdmin) {
 			return reqSpec{handler: a.appPlugins.Logs, method: http.MethodGet, path: "/api/ai/admin/app-plugins/" + itoa(in.ID) + "/logs",
 				urlParams: idParam(in.ID), query: q}
 		})
+	regAdminTool(r, "admin_app_locks_list", "The files apps have frozen (a document out for signature): {locks: [{storage_id, storage, path, plugin_name, reason, ...}]}. filters: {storage_id}.",
+		func(in adminFiltersIn) reqSpec {
+			return reqSpec{handler: a.appPlugins.Locks, method: http.MethodGet, path: "/api/ai/admin/app-plugins/locks", query: filtersToQuery(in.Filters)}
+		})
+	regAdminTool(r, "admin_app_unlock", "Lift an app's lock on a file by force: {storage_id, path} as admin_app_locks_list names it. The app is not asked - a signing it was waiting for may not finish - and the unlock is audited (app_plugin.unlock).",
+		func(in adminAppUnlockIn) reqSpec {
+			return reqSpec{handler: a.appPlugins.Unlock, method: http.MethodDelete, path: "/api/ai/admin/app-plugins/locks",
+				body: map[string]any{"storage_id": in.StorageID, "path": in.Path}}
+		})
+	regAdminTool(r, "admin_file_types_list", "Default apps: every kind of file (extension) something besides filex handles, and every kind "+
+		"with an administrator's rule - for each, who OPENS it and who draws its THUMBNAILS, in the order they are asked (`on`), "+
+		"the ones switched off (`off`), and whether that order is the default or a rule (`custom`). Handlers are `builtin`, "+
+		"`app:<app>/<view>` (opens) and `app:<app>` (thumbnails). Read only: changing it needs an administrator signed in to the "+
+		"admin panel (Plugins → Default apps).",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.fileTypes.List, method: http.MethodGet, path: "/api/ai/admin/file-types"}
+		})
 	regAdminTool(r, "admin_app_plugins_check_updates", "Ask every app's source for a newer version now and answer the list with "+
-		"what was found. Installs nothing: every newer version waits for an administrator — request it with admin_plugin_request_upgrade."+pluginModel,
+		"what was found. Installs nothing: every newer version waits for an administrator - request it with admin_plugin_request_upgrade."+pluginModel,
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.appPlugins.CheckUpdates, method: http.MethodPost, path: "/api/ai/admin/app-plugins/updates/check"}
 		})
 
 	regAdminTool(r, "admin_plugin_request_install", "Ask an administrator to INSTALL a plugin. filex fetches the source now "+
-		"(the install review's dry run) and freezes what it found — the manifest, the sha256, the permissions it asks for — "+
+		"(the install review's dry run) and freezes what it found - the manifest, the sha256, the permissions it asks for - "+
 		"then the request waits for an administrator signed in to the admin panel (Plugins → Install requests). Nothing is installed "+
 		"by this call, and you cannot approve it: the administrator installs exactly the frozen bytes, or the request becomes "+
 		"`superseded` when the source has changed by then. Asking again for the same source answers the pending request. "+
@@ -990,16 +1298,16 @@ func registerPluginTools(r *adminReg, a *AIAdmin) {
 		func(in pluginRequestIn) reqSpec {
 			return reqSpec{handler: a.pluginReqs.Create, method: http.MethodPost, path: "/api/ai/admin/plugin-requests", body: in.body("install")}
 		})
-	regAdminTool(r, "admin_plugin_request_upgrade", "Ask an administrator to UPGRADE an installed plugin (name or plugin_id) — by "+
+	regAdminTool(r, "admin_plugin_request_upgrade", "Ask an administrator to UPGRADE an installed plugin (name or plugin_id) - by "+
 		"default to the newer version its own source has (what admin_app_plugins_check_updates / admin_plugins_check_updates "+
 		"reported); an app may name another github_repo or manifest_url. Like admin_plugin_request_install, it freezes what "+
-		"the source answers now (version, sha256, the permissions — the ones it ADDS are what the administrator approves) and "+
+		"the source answers now (version, sha256, the permissions - the ones it ADDS are what the administrator approves) and "+
 		"waits for an administrator in the admin panel; nothing is upgraded by this call and you cannot approve it.",
 		func(in pluginRequestIn) reqSpec {
 			return reqSpec{handler: a.pluginReqs.Create, method: http.MethodPost, path: "/api/ai/admin/plugin-requests", body: in.body("upgrade")}
 		})
 	regAdminTool(r, "admin_plugin_requests_list", "List plugin requests: filters {status: pending (default) | approved | rejected | "+
-		"expired | superseded | all}. Each says who asked, why, what was frozen and — once decided — who decided and why."+pluginModel,
+		"expired | superseded | all}. Each says who asked, why, what was frozen and - once decided - who decided and why."+pluginModel,
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.pluginReqs.List, method: http.MethodGet, path: "/api/ai/admin/plugin-requests", query: filtersToQuery(in.Filters)}
 		})
@@ -1009,6 +1317,56 @@ func registerPluginTools(r *adminReg, a *AIAdmin) {
 		func(in adminIDIn) reqSpec {
 			return reqSpec{handler: a.pluginReqs.Get, method: http.MethodGet, path: "/api/ai/admin/plugin-requests/" + itoa(in.ID), urlParams: idParam(in.ID)}
 		})
+}
+
+// adminStorageSyncIn is admin_storages_sync's input: a storage, and
+// optionally one folder of it to rescan.
+type adminStorageSyncIn struct {
+	ID   int64  `json:"id" jsonschema:"numeric id of the storage"`
+	Path string `json:"path,omitempty" jsonschema:"rescan only this folder (storage-relative, e.g. projects/2026); empty = the whole storage"`
+}
+
+// adminIDFiltersIn is a row id plus query filters.
+type adminIDFiltersIn struct {
+	ID      int64          `json:"id" jsonschema:"numeric id of the target row"`
+	Filters map[string]any `json:"filters,omitempty" jsonschema:"optional query filters (e.g. limit, offset)"`
+}
+
+// adminStorageOrderIn is the storage order: every id, in order.
+type adminStorageOrderIn struct {
+	IDs []int64 `json:"ids" jsonschema:"every storage id in the order they are listed; [] = the default order"`
+}
+
+// adminQueuedBodyIn is a body that may be run as a job of the queue.
+type adminQueuedBodyIn struct {
+	Body   map[string]any `json:"body" jsonschema:"JSON request body object"`
+	Queued bool           `json:"queued,omitempty" jsonschema:"run it as a job of the operations queue (202; follow it with op_get)"`
+}
+
+// adminQueuedIDIn is a row id that may be acted on as a job of the queue.
+type adminQueuedIDIn struct {
+	ID     int64 `json:"id" jsonschema:"numeric id of the target row"`
+	Queued bool  `json:"queued,omitempty" jsonschema:"run it as a job of the operations queue (202; follow it with op_get)"`
+}
+
+// queuedQuery is `?queued=1` when asked.
+func queuedQuery(queued bool) url.Values {
+	if !queued {
+		return nil
+	}
+	return url.Values{"queued": {"1"}}
+}
+
+// adminReplicaFixOneIn names one replica failure.
+type adminReplicaFixOneIn struct {
+	Path string `json:"path" jsonschema:"the failure's path, as admin_replica_failures_list names it"`
+	Op   string `json:"op" jsonschema:"the failure's operation: write | delete | move | copy"`
+}
+
+// adminAppUnlockIn names one app lock.
+type adminAppUnlockIn struct {
+	StorageID int64  `json:"storage_id" jsonschema:"the lock's storage id"`
+	Path      string `json:"path" jsonschema:"the locked file's storage-relative path"`
 }
 
 // adminStrIDIn is the input for queue tools (the queue uses opaque string ids,
@@ -1062,5 +1420,6 @@ func filtersToQuery(m map[string]any) url.Values {
 func newExternalAdminWithPublicURL(d AIAdminDeps) *ExternalAdmin {
 	h := NewExternalAdmin(d.Store, d.Caps, d.External, d.EnvManagedExternal)
 	h.AttachPublicURL(d.PublicURL, d.PublicURLSet)
+	h.ReversePath = d.ReversePath
 	return h
 }

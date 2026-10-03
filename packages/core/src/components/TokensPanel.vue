@@ -125,7 +125,7 @@ onMounted(async () => {
  */
 function defaultLabel(): string {
   const p = (props.protocol || '').toUpperCase();
-  if (p) return props.host ? `${p} — ${props.host}` : p;
+  if (p) return props.host ? `${p} - ${props.host}` : p;
   return t('conn.tokens.defaultName', { date: new Date().toISOString().slice(0, 10) });
 }
 
@@ -176,7 +176,7 @@ const columns = computed<DataColumn<ApiToken>[]>(() => [
     label: t('conn.tokens.col.label'),
     sortable: true,
     width: 200,
-    format: (row) => row.label || '—',
+    format: (row) => row.label || '-',
   },
   { id: 'scopes', label: t('conn.tokens.col.scopes'), sortable: true, width: 200 },
   {

@@ -17,32 +17,41 @@ that lets you assemble the stack you actually need.
 
 ## Images
 
-Sizes are what you download (the compressed layers), measured on v0.31.0.
-On disk after `docker pull` they unpack to roughly four times that — **164 MB**
-for `slim` and **1.26 GB** for `full` (`docker images`, same tags, same day).
-Both numbers are real; the compressed one is what a registry page shows you and
-the other is what your disk loses, so neither belongs in a sentence alone.
+Sizes are what you download (the compressed layers). On disk after
+`docker pull` they unpack to more - **164 MB** for `slim` (`docker images`,
+v0.31.0) and **~550 MB** for `full`. Both numbers are real; the compressed one
+is what a registry page shows you and the other is what your disk loses, so
+neither belongs in a sentence alone.
+
+⚠ **0.50 took LibreOffice out of `full`.** Office documents - their thumbnails
+and the apps' office conversions - come from the ONLYOFFICE Document Server
+you connect under External services, on every tag, and filex runs no
+LibreOffice anywhere. The full recipe with LibreOffice and its Java runtime
+measured **642 MB** compressed and **1.6 GB** on disk on alpine:3.24; without
+them, **225 MB** and **550 MB** (the gzip and the size of the image's
+filesystem, built from `docker/Dockerfile` on 2026-10-02).
 
 | Tag | Size | Includes |
 |---|---|---|
-| `ghcr.io/brf-tech/filex:latest` | ~510 MB | The full toolchain. Alias for `full`. |
-| `ghcr.io/brf-tech/filex:full` | ~510 MB | + ffmpeg, ghostscript, poppler-utils, libreoffice, a headless JRE, rsvg-convert, fonts. |
+| `ghcr.io/brf-tech/filex:latest` | ~225 MB | The full toolchain. Alias for `full`. |
+| `ghcr.io/brf-tech/filex:full` | ~225 MB | + ffmpeg, ghostscript, poppler-utils, ImageMagick with `imagemagick-heic` and libheif's HEVC decoder `libheif-libde265` (HEIC, HEIF and AVIF thumbnails through libheif, since 0.50; +3 MB), rsvg-convert (the SVG fallback; SVG thumbnails are built in on every image since 0.50), fonts. No LibreOffice and no JRE since 0.50: office documents are the connected ONLYOFFICE's on every tag. On `:slim` a file whose tool is missing is listed under Admin → Tools → Thumbnail repair with the tool it needs. |
 | `ghcr.io/brf-tech/filex:slim` | **~43 MB** | The Go binary and the embedded admin UI. Nothing else. |
-| `:vX.Y.Z` / `:full-vX.Y.Z` | ~510 MB | Pinned full. |
+| `:vX.Y.Z` / `:full-vX.Y.Z` | ~225 MB | Pinned full. |
 | `:slim-vX.Y.Z` | ~43 MB | Pinned slim. |
 
-The Go binary is identical in both — `slim` simply has none of the programs the
+The Go binary is identical in both - `slim` simply has none of the programs the
 thumbnailer shells out to.
 
-**Which one do you want?** `latest` if you want previews of PDFs, office
-documents and video, which is most people. `slim` if filex is a file manager
+**Which one do you want?** `latest` if you want previews of PDFs, video and
+audio, which is most people (office documents are previewed by a connected
+ONLYOFFICE on either). `slim` if filex is a file manager
 for you and not a preview generator: it pulls in seconds and carries a fraction
 of the attack surface. Image thumbnails work in both, because those are
 produced in pure Go.
 
 filex probes for each external tool at start and reports what it found on
 `/api/files/capabilities`, so on `slim` a video thumbnail is a disabled feature
-with a stated reason — not a crash and not a silent failure. It also says so in
+with a stated reason - not a crash and not a silent failure. It also says so in
 the log on the way up, naming the kinds it cannot draw and the package each one
 wants, because the visible symptom is a grid of plain type tiles and that reads
 as a design choice rather than a missing program.
@@ -59,11 +68,11 @@ docker build -t ghcr.io/brf-tech/filex:slim -f docker/Dockerfile.slim .
 ```
 
 Both Dockerfiles are multi-stage:
-1. `frontend-build` — node 20 + pnpm, builds packages + admin UI
-2. `embed-prep` — stages the dist files
-3. `backend-build` — golang 1.25, builds with `//go:embed` consuming the staged dist
-4. runtime — `alpine:3.24`; this is the only stage where slim and full differ.
-   Both start `tini` as PID 1, which runs the entrypoint, which `exec`s filex —
+1. `frontend-build` - node 20 + pnpm, builds packages + admin UI
+2. `embed-prep` - stages the dist files
+3. `backend-build` - golang 1.25, builds with `//go:embed` consuming the staged dist
+4. runtime - `alpine:3.24`; this is the only stage where slim and full differ.
+   Both start `tini` as PID 1, which runs the entrypoint, which `exec`s filex -
    see [The init process](#the-init-process-pid-1)
 
 Pass build-args to embed version metadata into the binary:
@@ -87,10 +96,10 @@ docker build \
 | `filex-full`  | `full`       | Full image with thumbnail tools |
 | `onlyoffice`  | `onlyoffice` | OnlyOffice Document Server |
 | `postgres`    | `postgres`   | Postgres 16 (set `FILEX_DB_DRIVER=postgres`) |
-| `minio`       | `minio`      | S3-compatible blob store |
+| `versitygw`   | `versitygw`  | S3 server (Versity S3 Gateway; [STORAGE.md → A local S3 server](STORAGE.md#a-local-s3-server)) |
 
 The production-shaped stack in [`deploy/compose/docker-compose.full.yml`](../deploy/compose/docker-compose.full.yml)
-adds two more profiles — `drawio` and **`clamav`** (the `convert` side-car was
+adds two more profiles - `drawio` and **`clamav`** (the `convert` side-car was
 removed in 0.48: conversion is the Convert app). The last one
 is how antivirus is meant to be run under Docker: **the filex images ship no
 scanner** (ClamAV plus its signature database is close to a gigabyte), so
@@ -109,7 +118,7 @@ services:
       - clamav-db:/var/lib/clamav        # keep signatures across restarts
 ```
 
-⚠ `FILEX_CLAMAV_ADDR` — like every `FILEX_CLAMAV*` variable except `_BIN` — is
+⚠ `FILEX_CLAMAV_ADDR` - like every `FILEX_CLAMAV*` variable except `_BIN` - is
 a **seed**, read on a boot where the setting has no stored row and never again.
 After that the switch, the mode and the address live on *Settings → Protection*
 ([PROTECTION.md](PROTECTION.md#antivirus-clamav)).
@@ -120,12 +129,12 @@ Bring up with:
 docker compose up                                     # filex slim only
 docker compose --profile full up                      # filex with thumb tools
 docker compose --profile onlyoffice up                # filex + OnlyOffice
-docker compose --profile postgres --profile minio up  # full self-hosted stack
+docker compose --profile postgres --profile versitygw up  # full self-hosted stack
 ```
 
 You can mix profiles freely:
 ```bash
-docker compose --profile full --profile onlyoffice --profile postgres --profile minio up -d
+docker compose --profile full --profile onlyoffice --profile postgres --profile versitygw up -d
 ```
 
 ### `.env`
@@ -150,9 +159,9 @@ FILEX_ONLYOFFICE_JWT=please-change-me-shared-with-filex
 # --- Postgres ---
 POSTGRES_PASSWORD=changeme
 
-# --- MinIO ---
-MINIO_USER=filex
-MINIO_PASSWORD=changeme-very-long
+# --- S3 server (versitygw) ---
+S3_ACCESS_KEY=filex
+S3_SECRET_KEY=changeme-very-long
 ```
 
 `docker-compose.yml` references all of these with safe defaults; secrets that
@@ -163,13 +172,14 @@ have no safe default use `${VAR:?msg}` and will fail-fast if missing.
 ## Volume layout
 
 ```
-./data                       # FILEX_DATA_DIR — sqlite, search.bleve, thumbs,
+./data                       # FILEX_DATA_DIR - sqlite, search.bleve, thumbs,
                              #   cache, uploads, ssh, ftps, plugins, dav
 ./storage-local              # default 'local' driver root (mounted into /var/lib/filex/local-storage)
 filex-onlyoffice-data/       # docker volume (OnlyOffice docs)
 filex-onlyoffice-logs/       # docker volume
 filex-postgres-data/         # docker volume
-filex-minio-data/            # docker volume
+filex-s3-data/               # docker volume (S3 objects, plain files)
+filex-s3-versions/           # docker volume (older object versions)
 ```
 
 Use bind mounts (`./data`) when you want easy host-side backup; use named
@@ -204,7 +214,7 @@ the cost is paid on the first start and never again.
 
 This is safe to turn on for an install that has been running as root: the
 chown is what makes the existing database readable to the new user. It is
-one-way in practice — after it, removing `PUID` puts you back to root,
+one-way in practice - after it, removing `PUID` puts you back to root,
 which can still read files owned by anyone.
 
 ### `--user` / `user:` / `runAsUser` (Docker's and Kubernetes' way)
@@ -229,8 +239,8 @@ pretending to honour it.
 
 ### What is *not* chowned
 
-⚠ Only the data directory. The folders holding your files — a `local`
-storage root, an NFS or SMB mount, anything you bind at `/srv/files` — are
+⚠ Only the data directory. The folders holding your files - a `local`
+storage root, an NFS or SMB mount, anything you bind at `/srv/files` - are
 left exactly as they are. They may be shared with other software, they may
 be enormous, and re-owning them is not a container's decision to make. If
 filex cannot write to a storage after you set `PUID`, fix that folder's
@@ -260,10 +270,10 @@ orphaned process**.
 
 ⚠ The second one is why it is there. Images up to v0.42.2 ran filex itself as
 PID 1, and PID 1 inherits every process whose parent exits. LibreOffice, which
-draws office-document thumbnails, leaves helper processes behind (`gpgconf`,
+drew office-document thumbnails until 0.50, left helper processes behind (`gpgconf`,
 `gpgsm`, `gpg`); the Go runtime only ever waits for the children it started
 itself, so nobody collected them. Measured on one deployment: **19,110 zombie
-processes in ten days**, until the container's task limit was full — at which
+processes in ten days**, until the container's task limit was full - at which
 point the healthcheck could not fork `wget` and every thumbnail failed with
 `can't fork`. On an older image this counts them, and `init: true` (below) is
 the workaround:
@@ -277,28 +287,80 @@ needed. Docker's own init becomes PID 1 and tini runs under it; `-s` registers
 tini as a subreaper, so it still collects what is orphaned beneath it instead of
 warning that it cannot.
 
-**Kubernetes** needs nothing either — the image's entrypoint is tini whatever
+**Kubernetes** needs nothing either - the image's entrypoint is tini whatever
 the pod spec says, as long as you do not replace it.
 
 ⚠ **If you override the entrypoint** (`--entrypoint`, compose `entrypoint:`, a
-Kubernetes `command:`), you replace tini too. Keep it in front —
-`["/sbin/tini", "-s", "--", …]` — or run with `init: true`.
+Kubernetes `command:`), you replace tini too. Keep it in front -
+`["/sbin/tini", "-s", "--", …]` - or run with `init: true`.
 
 ---
 
 ## Reverse proxies
 
-filex always assumes a reverse-proxy in production and **honours
-`X-Forwarded-*` unconditionally** — there is nothing to switch on.
+filex assumes a reverse proxy in production. The forwarded headers are read
+two ways:
+
+- **The client's address** (`X-Forwarded-For`, `X-Real-IP`) is believed
+  **only from a trusted proxy** - `FILEX_TRUSTED_PROXIES`, and by default
+  **`auto`**: in a container on a network of its own, filex trusts the other
+  containers on that network (a Caddy, nginx, Traefik or cloudflared
+  container in front of it) - never the network's gateway, never its own
+  address, never the LAN. It is the address the sign-in attempt limit counts
+  by and the access and audit logs record. Up to 0.49 this header was believed
+  from anyone ([CONFIGURATION.md → Trusted proxies](CONFIGURATION.md#trusted-proxies)).
+- **`X-Forwarded-Proto`** is read from any peer: it marks the session cookie
+  `Secure` and picks `https` for the addresses filex builds from the request.
+
+What `auto` trusts in Docker, measured on Docker 29:
+
+| The proxy | It reaches filex from | Trusted by `auto` |
+|---|---|---|
+| A container on the same network (`reverse_proxy filex:5212`) | its own address on that network, e.g. `172.18.0.3` | **yes** |
+| A container on another network filex is also attached to | its address on that network | **yes** (every network filex is on counts) |
+| On the **host**, through a port published on `127.0.0.1` (`proxy_pass http://127.0.0.1:5212`) | the network's **gateway**, e.g. `172.18.0.1` - `docker-proxy` relays it | **no** |
+| On the host, dialling the container's address | the gateway | **no** |
+| On another machine of the LAN, through the published port | its own LAN address | **no** |
+| filex with `network_mode: host` | - | only `127.0.0.1` / `::1` |
+| A peer on a macvlan / ipvlan network filex is on | its LAN address | **no** (a bridge network filex is also on still counts) |
+
+⚠ **A proxy on the host or on another machine must be listed**, or every
+visitor resolves to the proxy's address and shares one sign-in counter. The
+**Sign-in security** page names a peer that sends forwarded addresses without
+being trusted and offers to add it (`auto, <address>`); by hand:
+
+```yaml
+services:
+  filex:
+    environment:
+      # nginx on the host, reaching the container through 127.0.0.1:5212
+      FILEX_TRUSTED_PROXIES: "auto, 172.30.0.1"
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24   # a fixed subnet, so the gateway stays 172.30.0.1
+```
+
+Trust the gateway **only when the published port is reachable by your proxy
+alone** - published on `127.0.0.1` (`127.0.0.1:5212:5212`) or firewalled:
+whatever `docker-proxy` relays arrives from that address, and a stranger who
+reaches the port could otherwise choose the address they are counted by. A
+proxy on another machine is listed by its own address. A proxy that reaches
+filex over `100.64.0.0/10` (Tailscale, Cloudflare WARP) and a CDN in front of
+your proxy are listed too.
 
 ⚠ Earlier revisions of this page told you to set `FILEX_TRUST_PROXY_HEADERS`.
-No such variable is read anywhere in filex; setting it to `true` changed
-nothing, and — the direction that matters — setting it to `false` did **not**
-stop the forwarded headers from being trusted. Terminate at a proxy you
-control, and do not expose filex directly to clients that can set
-`X-Forwarded-For` themselves.
+No such variable is read anywhere in filex; the one that decides is
+`FILEX_TRUSTED_PROXIES`. Published with **no** proxy in front, nothing needs
+setting: `auto` trusts no client on the LAN (until 0.50's `auto`, the rule was
+to set `none` there).
 
 ### nginx
+
+nginx on the **host** reaches the container through the published port, so
+it arrives from the Docker gateway: list it (above), or run nginx as a
+container on filex's network.
 
 ```nginx
 server {
@@ -358,10 +420,12 @@ files.example.com {
 ### Cloudflare Tunnel
 
 Add a public hostname pointing to `http://filex:5212` and CF will set the
-correct `X-Forwarded-*` headers automatically.
+correct `X-Forwarded-*` headers automatically. A `cloudflared` container on
+filex's network is trusted by `auto`; one installed on the host reaches the
+published port from the gateway and is listed like nginx on the host.
 
 ⚠ **Leave WebSocket support on.** filex serves a WebSocket at `GET /api/ws`,
-and an open explorer that has one **does not poll** — the 12 s re-listing is
+and an open explorer that has one **does not poll** - the 12 s re-listing is
 only the fallback for a socket that failed. Block the upgrade and every
 browser silently degrades to a folder that refreshes twice a minute, which is
 the shape of "I upload a file and it shows up ten minutes later". The MCP
@@ -369,10 +433,10 @@ stream at `/api/ai/mcp` needs the same. See
 [Realtime](REALTIME.md) and [Deployment](DEPLOYMENT.md).
 
 ⚠ **Keep cache rules off filex's host.** Every `/api/` answer carries
-`Cache-Control: no-store` — thumbnails, file content and share downloads say
+`Cache-Control: no-store` - thumbnails, file content and share downloads say
 `private, …`, and the four answers that say who the instance is (branding,
 themes, the offered languages and a language's strings) say `public, no-cache`
-with an ETag, the same for every visitor — and Cloudflare honors it by default. A rule whose edge TTL *ignores* origin headers does not. A zone-wide
+with an ETag, the same for every visitor - and Cloudflare honors it by default. A rule whose edge TTL *ignores* origin headers does not. A zone-wide
 "cache everything" rule written for a website on the same domain once kept
 `/api/auth/me` for two hours and showed one user's identity to everyone who
 asked. Scope such rules to the website's own hosts, e.g.
@@ -384,15 +448,18 @@ asked. Scope such rules to the website's own hosts, e.g.
 
 Three options:
 
-1. **Reverse proxy terminates** (recommended) — set
+1. **Reverse proxy terminates** (recommended) - set
    `FILEX_PUBLIC_URL=https://...`. filex itself listens plain HTTP on 5212 and
-   already honours the forwarded headers.
-2. **Cloudflare Tunnel** — same as above, but Cloudflare is the proxy.
+   reads `X-Forwarded-Proto` from the proxy; the client address in
+   `X-Forwarded-For` / `X-Real-IP` is believed only from a trusted proxy -
+   by default (`auto`) a container on filex's own network
+   ([Reverse proxies](#reverse-proxies)).
+2. **Cloudflare Tunnel** - same as above, but Cloudflare is the proxy.
 
 ⚠ There is no third option. This page used to offer "filex direct TLS" via
 `FILEX_TLS_CERT` / `FILEX_TLS_KEY`: **the HTTP server has no TLS listener** and
 neither variable is read, so an operator who set both got plain HTTP on 5212
-with no warning — the worst possible outcome for a setting whose entire purpose
+with no warning - the worst possible outcome for a setting whose entire purpose
 is encryption. (The `cert_file` / `key_file` pair that does exist belongs to the
 **FTPS** endpoint; see [PROTOCOLS.md](PROTOCOLS.md).) Put a proxy in front.
 
@@ -420,25 +487,25 @@ docker compose exec postgres pg_dump -U filex filex | gzip > /backup/filex.sql.g
 ### Storage backends
 Backup is per-storage-driver: snapshot the host path for `local`, lifecycle
 S3 versioning + lifecycle for `s3`, etc. filex keeps no canonical state of
-the file bytes — the storage is the source of truth.
+the file bytes - the storage is the source of truth.
 
 ### What's safe to lose
 
-- `data/search.bleve/` — Bleve index. Rebuilt from the DB if missing.
-- `data/thumbs/`  — Cache. Regenerated lazily; a cached file is released when
+- `data/search.bleve/` - Bleve index. Rebuilt from the DB if missing.
+- `data/thumbs/`  - Cache. Regenerated lazily; a cached file is released when
   its node is purged, and orphans are swept every `FILEX_THUMBS_SWEEP_INTERVAL`.
-- `data/cache/`   — read cache for slow storages.
-- `data/uploads/` — staging for chunked and resumable uploads. In-flight
+- `data/cache/`   - read cache for slow storages.
+- `data/uploads/` - staging for chunked and resumable uploads. In-flight
   uploads will need to retry. ⚠ For a transfer that has not committed yet,
   this is the file's **only** copy.
 
 What's **not** safe to lose:
-- `data/instance.sqlite` — or `data/filex.db` under this repo's compose, or your
+- `data/instance.sqlite` - or `data/filex.db` under this repo's compose, or your
   Postgres/MySQL DB: auth, shares, audit, sync metadata.
-- `data/ssh/` + `data/ftps/` — SFTP host keys and the FTPS certificate.
+- `data/ssh/` + `data/ftps/` - SFTP host keys and the FTPS certificate.
   Regenerating them is a changed host key, and every client that connected
   before refuses the next connection until it is cleared.
-- `data/.first-run.txt` — initial admin password (only useful pre-first-login).
+- `data/.first-run.txt` - initial admin password (only useful pre-first-login).
 
 ---
 
@@ -450,7 +517,7 @@ docker compose up -d
 ```
 
 Migrations run automatically on container start (goose). Rollbacks are
-single-step and only intended for the same release line — across major
+single-step and only intended for the same release line - across major
 versions, **back up before upgrading**.
 
 To pin a version:

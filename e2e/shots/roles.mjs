@@ -130,7 +130,7 @@ async function main() {
     });
     const contractors = await admin.post('/api/admin/roles', {
       name: 'Contractors',
-      description: 'Outside staff — no deleting, links for a week at most',
+      description: 'Outside staff - no deleting, links for a week at most',
       enabled: true,
       permissions: without('files.delete', 'files.purge', 'access.nfs', 'access.s3'),
       settings: { share_link_max_days: 7, share_link_password_required: true, require_2fa: true },

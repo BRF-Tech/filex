@@ -49,6 +49,7 @@ func (d *Driver) Probe(ctx context.Context, cfg map[string]any, _ *http.Request)
 	if err := p.load(cfg); err != nil {
 		return append(out, auth.Check("address", auth.ProbeFail, "url", raw, "detail", err.Error()))
 	}
+	out = append(out, auth.FirstLoginCheck(cfg, p.groupAttr))
 
 	cctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()

@@ -47,6 +47,8 @@ const kind = computed(() => info.value?.kind ?? 'file');
 const node = computed(() => info.value?.node ?? null);
 const app = computed(() => info.value?.app ?? null);
 const entries = computed<PublicEntry[]>(() => info.value?.entries ?? []);
+/** #104: the storage could not answer for the item - nothing to download. */
+const unavailable = computed(() => info.value?.unavailable === true);
 
 /**
  * A picture is shown, everything else is offered.
@@ -111,6 +113,16 @@ const parent = computed(() => {
         </a>
       </div>
     </section>
+  </template>
+
+  <!-- ── #104: the storage could not answer for it ─────────────────────── -->
+  <template v-else-if="unavailable">
+    <div class="fe-ppage__file-one" data-testid="public-share-unavailable">
+      <p v-if="!node?.name" class="fe-surface__text">
+        <strong>{{ info?.subject }}</strong>
+      </p>
+      <p class="fe-surface__text fe-surface__text--muted" role="status">{{ t('public.unavailable') }}</p>
+    </div>
   </template>
 
   <!-- ── a folder ───────────────────────────────────────────────────── -->

@@ -6,11 +6,22 @@ test.describe('Login flow', () => {
     await page.goto('/admin/login');
     await page.getByLabel(/e-?mail|kullanıcı adı/i).fill('admin@local');
     await page.getByLabel(/password|parola/i).fill('definitely-wrong-password');
+    // ⚠ Measured on the WIRE and on the alert box, never on the sentence. The
+    // refusal's wording has changed under this test (0.50: "Email, username
+    // or password is wrong. Attempts left before a lock: 4."), and a word list
+    // goes stale with it while the product is right.
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/auth/login') && r.request().method() === 'POST');
     // Exact name disambiguates the local form submit from the OIDC
     // 'Sign in with SSO' button.
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    const res = await answer;
+    expect(res.status(), 'a wrong password is refused with 401').toBe(401);
     await expect(page).toHaveURL(/\/admin\/login/);
-    await expect(page.getByText(/invalid|hata|incorrect|geçersiz|unauthorized/i)).toBeVisible({ timeout: 5_000 });
+    const alert = page.locator('form').filter({ has: page.getByLabel(/password|parola/i) }).getByRole('alert');
+    await expect(alert).toBeVisible({ timeout: 5_000 });
+    // The box carries the attempts the server says are left, when it says so.
+    const body = (await res.json().catch(() => ({}))) as { remaining?: unknown };
+    if (typeof body.remaining === 'number') await expect(alert).toContainText(String(body.remaining));
   });
 
   // ⚠ Home, not the dashboard: since 0.41.0 every account, administrators

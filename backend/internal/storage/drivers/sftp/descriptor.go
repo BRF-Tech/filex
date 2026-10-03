@@ -1,6 +1,9 @@
 package sftp
 
-import "github.com/brf-tech/filex/backend/internal/storage"
+import (
+	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/storage/stall"
+)
 
 func intp(v int) *int { return &v }
 
@@ -17,7 +20,7 @@ func init() {
 		Driver:  "sftp",
 		Label:   "SFTP",
 		I18nKey: "storages.driver.sftp",
-		Fields: []storage.Field{
+		Fields: append([]storage.Field{
 			{
 				Key:         "host",
 				Type:        storage.FieldString,
@@ -117,6 +120,9 @@ func init() {
 				Default:     false,
 				Advanced:    true,
 			},
-		},
+			// How long a server that does not answer is waited for (issue
+			// #75, timeout.go): the same three settings, words and bounds as
+			// FTP's.
+		}, defaults.Fields(stall.ServerTexts(stall.AttemptText))...),
 	})
 }

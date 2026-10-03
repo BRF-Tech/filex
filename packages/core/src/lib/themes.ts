@@ -181,6 +181,16 @@ export const THEMES: ThemeDef[] = [
       '--fe-primary-ink': '#2559c9',
       '--fe-danger': '#dc2626',
       '--fe-danger-hover': '#b91c1c',
+      /* The outward-facing pages, as the stock palette defines them (#74):
+       * the share page's ground and card (variables.css `.fe.fe-ppage`) and
+       * the sign-in page's (`--fe-login-*`, which are the palette's own
+       * sunken ground and surface). Optional for every theme - PAGE_TOKENS
+       * below. */
+      '--fe-ppage-ground-1': '#f5f7fb',
+      '--fe-ppage-ground-2': '#e9edf4',
+      '--fe-ppage-card': '#ffffff',
+      '--fe-login-ground': '#f7f8fb',
+      '--fe-login-card': '#ffffff',
     },
     dark: {
       '--fe-bg': '#15171c',
@@ -201,6 +211,11 @@ export const THEMES: ThemeDef[] = [
       '--fe-primary-ink': '#7ba3ff',
       '--fe-danger': '#f87171',
       '--fe-danger-hover': '#ef4444',
+      '--fe-ppage-ground-1': '#12151a',
+      '--fe-ppage-ground-2': '#191e25',
+      '--fe-ppage-card': '#1f242c',
+      '--fe-login-ground': '#1a1d23',
+      '--fe-login-card': '#15171c',
     },
   },
   {
@@ -654,7 +669,7 @@ const themeId: Ref<string> = ref(
  * ⚠⚠ It is saved on the ACCOUNT, not only in this browser (`lib/prefs`).
  * A palette lived in `localStorage` alone until v3, which meant a person who
  * chose one on their laptop opened the product on their phone in the stock
- * colours and had to choose again — reported by Burak as exactly that. The
+ * colours and had to choose again — reported by the maintainer as exactly that. The
  * localStorage write stays as the FIRST-PAINT cache: it is what this browser
  * reads before the account's answer can arrive, so the window does not flash
  * the default on the way to the chosen one.
@@ -910,16 +925,109 @@ function cssDecls(map: ThemeTokenMap): string {
     .join('');
 }
 
+/* === The outward-facing pages (#74) ======================================
+ *
+ * The share page (`/s/`, `/d/`, an app's public page - core PublicShell) and
+ * the sign-in page are what a stranger sees of an installation, so the
+ * owner's rule (2026-10-01) is that they follow the operator's theme: a theme
+ * that DEFINES its own values for them gets those; one that does not gets
+ * them in its own tones. Both kinds of page live in the same light and dark
+ * maps as the rest of the palette - one theme, one shape (`ThemeDef`), the
+ * same export file - and every one of these tokens is OPTIONAL there.
+ *
+ *   share page - `--fe-ppage-ground-1` / `-ground-2` (the page's two-stop
+ *     wash) and `--fe-ppage-card`. Their stock values are hexes of their own
+ *     (variables.css `.fe.fe-ppage`, the default theme's map above), not the
+ *     palette's: a card on a page sits ABOVE its ground, which `--fe-bg` /
+ *     `--fe-bg-elev` say the other way round. So a theme without them must
+ *     have them worked out - `DERIVED_PUBLIC_PAGE` - or the page keeps the
+ *     stock greys under the theme's text and buttons, which is what it did.
+ *   sign-in page - `--fe-login-ground` / `--fe-login-card`. Their stock
+ *     values ARE the palette's (`var(--fe-bg-elev)` / `var(--fe-bg)`,
+ *     variables.css), so a theme without them is already in its own tones;
+ *     one that defines them is written like any other token.
+ *
+ * ⚠ The shadow (`--fe-ppage-shadow`) and the badge's ok colour stay stock: a
+ * shadow is not a colour the operator's validator can check (hex only), and
+ * ok is a signal, not taste (see "What is deliberately NOT themed" above). */
+
+/** The share page's own ground and card. */
+export const PUBLIC_PAGE_TOKENS = ['--fe-ppage-ground-1', '--fe-ppage-ground-2', '--fe-ppage-card'] as const;
+/** The sign-in page's ground and card. */
+export const LOGIN_PAGE_TOKENS = ['--fe-login-ground', '--fe-login-card'] as const;
+/** Every outward-facing page token a theme MAY define (none is required). */
+export const PAGE_TOKENS: readonly string[] = [...PUBLIC_PAGE_TOKENS, ...LOGIN_PAGE_TOKENS];
+
+/**
+ * The share page in a theme's own tones, for a theme that does not define it.
+ *
+ * Fitted to the stock page: light - the card IS the surface and the wash is
+ * the surface drawn 4% and 10% toward the ink (stock bg/ink give #f6f6f7 and
+ * #e9eaeb against the page's #f5f7fb / #e9edf4); dark - the card is lifted 8%
+ * toward the ink and the wash runs from the surface sunk 12% toward black to
+ * the surface lifted 4% (#26282d / #121419 / #1d1f24 against #1f242c /
+ * #12151a / #191e25). Mixed by the browser (`color-mix`), from the theme's
+ * own `--fe-bg` / `--fe-text` on the page's element, so a theme that is only
+ * a palette needs no colour maths here.
+ */
+export const DERIVED_PUBLIC_PAGE: Record<'light' | 'dark', Record<(typeof PUBLIC_PAGE_TOKENS)[number], string>> = {
+  light: {
+    '--fe-ppage-ground-1': 'color-mix(in srgb, var(--fe-bg) 96%, var(--fe-text))',
+    '--fe-ppage-ground-2': 'color-mix(in srgb, var(--fe-bg) 90%, var(--fe-text))',
+    '--fe-ppage-card': 'var(--fe-bg)',
+  },
+  dark: {
+    '--fe-ppage-ground-1': 'color-mix(in srgb, var(--fe-bg) 88%, #000000)',
+    '--fe-ppage-ground-2': 'color-mix(in srgb, var(--fe-bg) 96%, var(--fe-text))',
+    '--fe-ppage-card': 'color-mix(in srgb, var(--fe-bg) 92%, var(--fe-text))',
+  },
+};
+
+/** The share page's three tokens for one variant: each one the theme defines,
+ *  the derived one for each it does not. */
+export function publicPageTokens(theme: ThemeDef, variant: 'light' | 'dark'): ThemeTokenMap {
+  const own = theme[variant] ?? {};
+  const out: ThemeTokenMap = {};
+  for (const k of PUBLIC_PAGE_TOKENS) {
+    const v = typeof own[k] === 'string' ? own[k].trim() : '';
+    out[k] = v || DERIVED_PUBLIC_PAGE[variant][k];
+  }
+  return out;
+}
+
+const PUBLIC_PAGE_SET = new Set<string>(PUBLIC_PAGE_TOKENS);
+
+/** A palette map without the share page's tokens - those are written under the
+ *  page's own selectors, which outrank `:root,.fe`. */
+function withoutPublicPage(map: ThemeTokenMap): ThemeTokenMap {
+  const out: ThemeTokenMap = {};
+  for (const [k, v] of Object.entries(map)) if (!PUBLIC_PAGE_SET.has(k)) out[k] = v;
+  return out;
+}
+
 /**
  * Generate a stylesheet that mirrors styles/variables.css' selector
  * cascade 1:1 (light base → explicit-dark selectors → prefers-dark media
  * block) with the theme's palette. Appended after the bundled CSS it
  * overrides every surface — teleported context menus, modal backdrops —
  * in whichever mode they resolve to, without JS having to track them.
+ *
+ * The share page's tokens follow, under the page's own selectors
+ * (variables.css `.fe.fe-ppage` and its dark twins - the same specificity,
+ * later in the document, so the theme's win): what the theme defines, else
+ * its own tones (`publicPageTokens`).
  */
 export function generateThemeCss(theme: ThemeDef): string {
-  const light = cssDecls(theme.light);
-  const dark = cssDecls(theme.dark);
+  const light = cssDecls(withoutPublicPage(theme.light));
+  const dark = cssDecls(withoutPublicPage(theme.dark));
+  const pageLight = cssDecls(publicPageTokens(theme, 'light'));
+  const pageDark = cssDecls(publicPageTokens(theme, 'dark'));
+  const pageDarkSelectors = [
+    '.fe.fe-ppage.fe--theme-dark',
+    ":root[data-theme='dark'] .fe.fe-ppage",
+    ':root.dark .fe.fe-ppage',
+    '.dark .fe.fe-ppage',
+  ].join(',');
   const darkSelectors = [
     '.fe--theme-dark',
     ":root[data-theme='dark'] .fe",
@@ -939,7 +1047,10 @@ export function generateThemeCss(theme: ThemeDef): string {
     `/* filex theme: ${theme.id} */` +
     `:root,.fe{${light}}` +
     `${darkSelectors}{${dark}}` +
-    `@media (prefers-color-scheme: dark){${autoDarkSelectors}{${dark}}}`
+    `@media (prefers-color-scheme: dark){${autoDarkSelectors}{${dark}}}` +
+    `.fe.fe-ppage{${pageLight}}` +
+    `${pageDarkSelectors}{${pageDark}}` +
+    `@media (prefers-color-scheme: dark){.fe.fe-ppage:not(.fe--theme-light){${pageDark}}}`
   );
 }
 

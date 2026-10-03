@@ -3,12 +3,8 @@ package thumb
 import (
 	"context"
 	"crypto/md5"
-	"fmt"
 	"image"
 	"image/color"
-	"image/jpeg"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/image/font"
@@ -24,9 +20,6 @@ import (
 // centered — small enough that grid views don't look broken, and the
 // colour is hashed from the extension so similar files cluster visually.
 func (p *Pipeline) generateGeneric(_ context.Context, node *model.Node) error {
-	if err := os.MkdirAll(p.cacheDir, 0o755); err != nil {
-		return err
-	}
 	ext := strings.ToUpper(strings.TrimPrefix(extOf(node.Name), "."))
 	if ext == "" {
 		ext = "FILE"
@@ -53,12 +46,7 @@ func (p *Pipeline) generateGeneric(_ context.Context, node *model.Node) error {
 	}
 	d.DrawString(ext)
 
-	out, err := os.Create(filepath.Join(p.cacheDir, fmt.Sprintf("%d.jpg", node.ID)))
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	return jpeg.Encode(out, img, &jpeg.Options{Quality: 78})
+	return p.writeJPEG(node.ID, img, 78)
 }
 
 // colourForExt hashes the extension to a stable tint with a luminance-

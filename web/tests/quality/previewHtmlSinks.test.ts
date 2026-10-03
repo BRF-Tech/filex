@@ -88,3 +88,50 @@ describe('markup sinks in @brftech/filex-core', () => {
     expect(bad).toEqual([]);
   });
 });
+
+/**
+ * The admin app (web/src) has its own few sinks. Since #122 one of them draws
+ * markup that came from outside - a release's notes, Markdown a source
+ * published - so the admin app is held to the same question: every v-html is
+ * listed here with why it is safe, and none writes innerHTML.
+ */
+const WEB = resolve(__dirname, '../../src');
+const WEB_SINKS: Record<string, string[]> = {
+  // Static markup from lib/actionIcons.
+  'components/Sidebar.vue': ['item.svg'],
+  'views/AppHome.vue': ['icon'],
+  'views/AppScreen.vue': ['icon'],
+  // A release's notes: only markdownToSafeHtml's answer (markdown-it, then
+  // sanitizeHtml 'document').
+  'components/plugins/ReleaseNotes.vue': ['html'],
+};
+
+describe('markup sinks in the admin app', () => {
+  const all = files(WEB);
+
+  it('every v-html is listed, and the release notes draw only the sanitized pipeline', () => {
+    const unknown: string[] = [];
+    for (const f of all) {
+      const rel = relative(WEB, f).replace(/\\/g, '/');
+      const src = readFileSync(f, 'utf8');
+      for (const m of src.matchAll(/v-html="([^"]*)"/g)) {
+        if (!WEB_SINKS[rel]?.includes(m[1].trim())) unknown.push(`${rel}: v-html="${m[1].trim()}"`);
+      }
+    }
+    expect(unknown, 'a new markup sink in web/src: sanitize it and list it here').toEqual([]);
+    expect(readFileSync(join(WEB, 'components/plugins/ReleaseNotes.vue'), 'utf8')).toMatch(/markdownToSafeHtml\(/);
+  });
+
+  it('no innerHTML is written', () => {
+    const bad: string[] = [];
+    for (const f of all) {
+      const rel = relative(WEB, f).replace(/\\/g, '/');
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (/\.innerHTML\s*=(?!=)/.test(line)) bad.push(`${rel}:${i + 1}: ${line.trim()}`);
+        });
+    }
+    expect(bad).toEqual([]);
+  });
+});

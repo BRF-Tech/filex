@@ -79,7 +79,22 @@ export function preferenceAfterStartup(pref: boolean, supported: boolean, r: Log
  * portable .exe itself is what has to be run.
  */
 export function loginItemExecutable(env: Record<string, string | undefined>, execPath: string): string {
-  return env.APPIMAGE || env.PORTABLE_EXECUTABLE_FILE || execPath;
+  return env.APPIMAGE || env.PORTABLE_EXECUTABLE_FILE || linuxLauncherOf(execPath);
+}
+
+/**
+ * On Linux the Electron binary is `filex-app-bin` and `filex-app` beside it is
+ * the launcher that checks Chromium's sandbox first (build/linux/launcher.sh,
+ * put there by scripts/linux-launcher.cjs). `process.execPath` is the binary;
+ * anything written down to start the app LATER (the sign-in entry) names the
+ * launcher, so that start is checked like every other one.
+ */
+export const LINUX_BINARY_SUFFIX = '-bin';
+
+export function linuxLauncherOf(execPath: string): string {
+  const slash = Math.max(execPath.lastIndexOf('/'), execPath.lastIndexOf(String.fromCharCode(92)));
+  const base = execPath.slice(slash + 1);
+  return base === `filex-app${LINUX_BINARY_SUFFIX}` ? execPath.slice(0, execPath.length - LINUX_BINARY_SUFFIX.length) : execPath;
 }
 
 /** The exact command the OS runs at sign-in (see loginItemSpec in main.ts). */

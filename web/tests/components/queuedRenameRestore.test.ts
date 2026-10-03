@@ -4,7 +4,7 @@
 // puzzle-piece icon), so a folder being renamed would have read as an app
 // running. And a failed rename or restore said only "Failed": the server's
 // reason — the name is taken — is English, and was the admin's second line.
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 
@@ -12,10 +12,6 @@ import { normalizeOp } from '@brftech/filex-core/src/composables/usePendingOps';
 import { useOperations } from '@brftech/filex-core/src/composables/useOperations';
 import PendingOpsTray from '@brftech/filex-core/src/components/PendingOpsTray.vue';
 import OperationsCenter from '@brftech/filex-core/src/components/OperationsCenter.vue';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 async function centreWith(rows: Array<Record<string, unknown>>, locale: 'en' | 'tr' = 'en') {
   const center = useOperations();

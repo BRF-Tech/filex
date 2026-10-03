@@ -101,7 +101,7 @@ const bucketDays = computed<UsageDay[]>(() =>
 const perBucket = computed(() => {
   const by = new Map<string, { bucket: string; stored: number; down: number; up: number; ops: number }>();
   for (const d of bucketDays.value) {
-    const key = d.location ? `${d.bucket} (${d.location})` : d.bucket || '—';
+    const key = d.location ? `${d.bucket} (${d.location})` : d.bucket || '-';
     const cur = by.get(key) ?? { bucket: key, stored: 0, down: 0, up: 0, ops: 0 };
     // Storage is a daily reading, so the bucket's figure is its mean, not a sum.
     cur.stored += d.byte_hours > 0 ? d.byte_hours / 24 : d.stored_bytes;
@@ -144,7 +144,7 @@ const trend = computed(() => {
 const trendMax = computed(() => Math.max(1, ...trend.value.map((p) => p.bytes)));
 
 function money(n: number | undefined): string {
-  if (n === undefined) return '—';
+  if (n === undefined) return '-';
   const cur = cost.value?.currency || 'USD';
   try {
     return new Intl.NumberFormat(localeTag(locale.value), { style: 'currency', currency: cur }).format(n);
@@ -320,7 +320,7 @@ onMounted(load);
               :key="p.date"
               class="flex-1 bg-brand-500/70 hover:bg-brand-500 rounded-t"
               :style="{ height: `${Math.max(2, (p.bytes / trendMax) * 100)}%` }"
-              :title="`${p.date} — ${bytes(p.bytes)}`"
+              :title="`${p.date} - ${bytes(p.bytes)}`"
             />
           </div>
           <div class="flex justify-between text-[11px] text-zinc-500">

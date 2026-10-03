@@ -1,25 +1,25 @@
 # Storage plugins
 
-> Looking for the other kind of plugin — an **app** that adds actions to the
+> Looking for the other kind of plugin - an **app** that adds actions to the
 > file menu (convert, sign, send) rather than a storage backend? That is
 > [Apps (app plugins)](APP-PLUGINS.md): sandboxed WebAssembly, installed from
 > a GitHub URL with a permission review. This page is about storage drivers.
 
 filex speaks local disk, S3, SFTP, FTP, WebDAV and SMB out of the box. A
 **plugin** is how it speaks to something it has never heard of: your appliance,
-your company's object store, a research archive with its own API — anything
+your company's object store, a research archive with its own API - anything
 that can list, read and (optionally) write files.
 
 A plugin is **a separate program**. filex starts it and talks to it over a small
 HTTP/JSON protocol, so a plugin can be written in any language, ships on its own
 schedule, and cannot take filex down when it crashes. Once it is running, its
 driver appears in the ordinary storage picker with the config form the plugin
-itself describes — nothing about filex's frontend or its release cycle is
+itself describes - nothing about filex's frontend or its release cycle is
 involved.
 
 What a plugin *claims* is not taken on trust. Every capability it declares is
 **probed** before anybody can build a storage on it, and again against the
-configuration an operator types — see [Conformance](#conformance-a-plugin-has-to-prove-its-claims).
+configuration an operator types - see [Conformance](#conformance-a-plugin-has-to-prove-its-claims).
 A plugin that fails its own claims is refused, because a half-working driver
 produces failures the user reads as *filex* being broken.
 
@@ -36,7 +36,7 @@ Admin → Plugins → Storage plugins  Admin → Storages → Add storage
 ## Install one
 
 **Admin → Plugins → Storage plugins → Install a plugin**, in one of four ways.
-(The Plugins page has two tabs, **Storage plugins** and **Apps** — the other
+(The Plugins page has two tabs, **Storage plugins** and **Apps** - the other
 kind of plugin, [APP-PLUGINS.md](APP-PLUGINS.md). It opens on **Apps** when the
 app runtime is on and at least one app is installed.)
 
@@ -44,13 +44,13 @@ app runtime is on and at least one app is installed.)
 |---|---|---|
 | **Upload a binary** | The file is stored under `<data-dir>/plugins/<name>/`, hashed, and launched. | The normal case. |
 | **From its source** | A GitHub repository (`owner/name`) or the https address of a `filex-storage.json` ([Updates](#updates-from-a-source)): filex reads it, takes the build for **this server's** platform, holds it to the SHA-256 the feed names, and installs it as a URL install would. The source is kept, so newer versions are announced. | A plugin its author publishes with a feed. |
-| **From a URL** | Downloaded, checked against a **required** SHA256 (and the signature, when required) **before anything is executed**, then as above. The URL must point at a **public** host: private, loopback and link-local targets are refused, after DNS and on every redirect, so a plugin URL cannot become a probe of the server's own network. | Unattended installs, scripted setups. |
+| **From a URL** | Downloaded, checked against a **required** SHA256 (and the signature, when required) **before anything is executed**, then as above. The URL must point at a **public** host: private, loopback and link-local targets are refused, after DNS and on every redirect (at most five), so a plugin URL cannot become a probe of the server's own network; a redirect from `https://` to plain `http://` is refused too. Apps are downloaded by the same client ([APP-PLUGINS.md → Install one](APP-PLUGINS.md#install-one)); for development, `FILEX_PLUGIN_LOOPBACK_SOURCES=1` opens this machine to it ([CONFIGURATION.md](CONFIGURATION.md#storage-plugins)). | Unattended installs, scripted setups. |
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. **Remote = TLS**: `https://` anywhere; plain `http://` only when the address is on the private network (loopback, link-local, RFC 1918, ULA), because the token and every storage credential travel on that connection. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 
-![The Plugins page with the example plugin running](screenshots/v0.49.0/admin-plugins.png)
+![The Plugins page with the example plugin running](screenshots/v0.50.0/admin-plugins.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
-> of every storage created on it. Install only plugins you trust — the same
+> of every storage created on it. Install only plugins you trust - the same
 > judgement you would apply to a package you install on the server.
 
 > ⚠ The binary has to be built **for the server**, not for your laptop:
@@ -61,10 +61,10 @@ Installing does not end at "the file is on disk". filex starts the plugin, asks
 it to describe itself, and then **probes every capability it declared** against
 a throwaway area the plugin opens for exactly that (`POST /v1/selftest`). Only
 then is the driver registered. A plugin that fails a probe never reaches
-`running` — it lands in **Refused**, and the page shows the report: which probe
+`running` - it lands in **Refused**, and the page shows the report: which probe
 failed, what was expected, what happened.
 
-> ⚠ The install call answers **201 before any of that has happened** — describe
+> ⚠ The install call answers **201 before any of that has happened** - describe
 > and the probes run after the row exists. A script that treats the 201 as
 > success will happily report a plugin installed that filex has already refused;
 > read the *state* from `GET /api/admin/plugins`.
@@ -77,9 +77,18 @@ statements and only one of them is a promise.
 
 The **name** you choose (`[a-z0-9][a-z0-9_-]{0,31}`) names the plugin's folder
 and appears in logs. The **driver** name comes from the plugin itself, and the
-storage driver is always `plugin:<driver>` — a plugin can never shadow a
+storage driver is always `plugin:<driver>` - a plugin can never shadow a
 built-in driver, and two plugins cannot claim the same one (the second is
 refused, naming the first).
+
+⚠ **The driver name belongs to the plugin that was first accepted with it.**
+Every storage on `plugin:<driver>` hands its configuration - its credentials -
+to whichever plugin provides that name, so from 0.50.0 the name is kept on the
+plugin's row: another installed plugin may not take it, **even while the first
+one is switched off**, and a plugin may not trade it for another one later (an
+upgrade, a remote that now describes itself differently). Either is refused,
+naming the plugin or the name involved. To give a plugin another driver name,
+remove it and install it again.
 
 To turn the subsystem off entirely: **`FILEX_PLUGINS_DISABLED=1`**. Nothing is
 launched, no remote is contacted, and the admin API answers 503 saying so. In
@@ -88,15 +97,15 @@ that says whose surface it is.
 
 ### Install requests
 
-⚠⚠ **An API key cannot install, upgrade, switch or remove a storage plugin**
-— nor name the source its updates come from. Those need an administrator
+⚠⚠ **An API key cannot install, upgrade, switch or remove a storage plugin** -
+nor name the source its updates come from. Those need an administrator
 **signed in to the admin panel**; a key is refused `403 session_required`,
 whatever its scopes. A storage plugin's process runs with filex's rights and is
 handed every storage's credentials: the decision to run one is a person's.
 
 What a key can do is **leave a request**, exactly as for an app
 ([APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests) has the
-whole model): filex resolves the source now and freezes the build it found —
+whole model): filex resolves the source now and freezes the build it found -
 the feed's version and the binary's SHA-256 for this server's platform, or,
 for a plugin by address, the SHA-256 of the binary it downloaded and hashed
 (without running it). An administrator approves or rejects it under **Admin →
@@ -120,17 +129,17 @@ reads the list, one plugin and the update check, and may **Restart** one.
 |---|---|
 | **Running** | Described itself, driver registered, storages can open. |
 | **Starting…** | Launched; the handshake or describe has not finished. |
-| **Failed** | Exited or became unreachable. A binary is restarted with backoff — up to **ten starts in a row** that never come up, after which filex stops trying and says so (`not restarting until Restart`); a remote is re-checked every few seconds. |
-| **Refused** | filex will not use it: protocol mismatch, an invalid describe, a driver-name collision, a binary whose SHA256 no longer matches what was installed, a missing or bad signature where one is required, or **conformance failure** — it declared a capability it could not perform. `state_error` carries the reason. Fix it and choose **Restart** from the plugin's **Actions** menu. |
+| **Failed** | Exited or became unreachable. A binary is restarted with backoff - up to **ten starts in a row** that never come up, after which filex stops trying and says so (`not restarting until Restart`); a remote is re-checked every few seconds. |
+| **Refused** | filex will not use it: protocol mismatch, an invalid describe, a driver-name collision or a changed driver name, a binary whose SHA256 no longer matches what was installed (checked at **every** start, a restart after a crash included), a missing or bad signature where one is required, a handshake that names anything but its own socket or a loopback port, a remote that answers with a redirect, or **conformance failure** - it declared a capability it could not perform. `state_error` carries the reason. Fix it and choose **Restart** from the plugin's **Actions** menu. |
 | **Off** | Disabled by the toggle. The driver is unregistered, and storages on it stop opening. |
 
 **Removing** a plugin deletes its files and its registration. Storages created
-on it are **left alone** — they simply cannot open until the plugin is back.
+on it are **left alone** - they simply cannot open until the plugin is back.
 Deleting somebody's storages is not a decision **Delete** (in the plugin's
 **Actions** menu) makes; its confirmation says how many will be affected
 before you agree.
 
-**Upgrading** replaces the binary and keeps everything else — see
+**Upgrading** replaces the binary and keeps everything else - see
 [Upgrade in place](#upgrade-in-place). Do not remove-then-install to get a new
 version: removing takes the registration with it, and a storage whose driver has
 gone is a storage that cannot open.
@@ -139,7 +148,7 @@ gone is a storage that cannot open.
 
 ## Conformance: a plugin has to prove its claims
 
-A plugin declares its capabilities and filex acts on them — it registers a
+A plugin declares its capabilities and filex acts on them - it registers a
 driver whose method set matches, and every surface then offers those operations.
 If the plugin declared `write` and its write is broken, the user meets an upload
 button that fails, a trash move that fails and a version snapshot that fails,
@@ -161,10 +170,10 @@ user who uploads a file into a storage that cannot hold it.
 
 What runs, in order: `list` · `not_found` · `write` · `read` (bytes compared) ·
 `stat` (size and kind must agree with what was written) · `list_after_write` ·
-`range` (bytes 8–17 must be *those* bytes) · `set_mtime` (set, then re-stat —
+`range` (bytes 8-17 must be *those* bytes) · `set_mtime` (set, then re-stat -
 a timestamp that is accepted and dropped makes every sync run copy everything
 again) · `copy` · `move` (the source must be gone afterwards) · `mkdir` ·
-`delete` · `delete_idempotent` (deleting what is already gone must be a no-op —
+`delete` · `delete_idempotent` (deleting what is already gone must be a no-op -
 trash purge, sync and the ops worker all rely on that) · `presign` · `multipart`
 (one part, uploaded, completed, read back and compared) · `watch`. A capability
 that was not declared is reported as **skipped**, not passed.
@@ -176,7 +185,7 @@ because every later probe would fail with the same cause and bury it.
 
 - `presign` is verified to return an **absolute URL that parses**, not one a
   browser on another network can reach. filex may not share the client's
-  network, so it deliberately does not fetch it — a plugin that hands back a
+  network, so it deliberately does not fetch it - a plugin that hands back a
   loopback URL passes the probe and fails in every browser.
 - `watch` is verified to **open a stream**, not to deliver an event for every
   change. Requiring an event would mean requiring the plugin to notice a change
@@ -187,19 +196,19 @@ because every later probe would fail with the same cause and bury it.
 
 ⚠ The storage-side probes **write into your storage**: a folder named
 `.filex-conformance-<random>` at the storage root, removed when the run
-finishes. If you find one left behind, that is the report — a plugin whose
+finishes. If you find one left behind, that is the report - a plugin whose
 delete is broken is exactly what the delete probe catches. A read-only plugin
 creates nothing: its probes list and stat at the root and say plainly that the
 write half was not exercised.
 
 ### Modes
 
-`FILEX_PLUGIN_CONFORMANCE` — `enforce` (default) · `warn` · `off`.
+`FILEX_PLUGIN_CONFORMANCE` - `enforce` (default) · `warn` · `off`.
 
 | Mode | A plugin that fails its own claims |
 |---|---|
 | `enforce` | is **refused**, and a storage cannot be saved on it. |
-| `warn` | is registered anyway; the report is kept and shown. For somebody *writing* a plugin — never the default, because the cost of a broken claim is paid by the user. |
+| `warn` | is registered anyway; the report is kept and shown. For somebody *writing* a plugin - never the default, because the cost of a broken claim is paid by the user. |
 | `off` | is not probed at all. Both gates are skipped. |
 
 The mode is reported by the admin API and shown on the page, so nobody has to
@@ -214,14 +223,14 @@ discover that the safety net is down by meeting a broken storage.
 
 ## Upgrade in place
 
-`POST /api/admin/plugins/{id}/upgrade` — multipart, `file` (and `signature` when
+`POST /api/admin/plugins/{id}/upgrade` - multipart, `file` (and `signature` when
 this instance requires one). Admin → Plugins → Storage plugins → the plugin's
 **Actions** menu → **Upgrade** does the same thing.
 
 The row, the name, the driver and every storage built on it survive. What
 happens, in order: stop the plugin, put the new file in place, start it, run the
-conformance gate. If the new binary does not come up — a bad build, a wrong
-architecture, a capability it can no longer perform — **the previous binary is
+conformance gate. If the new binary does not come up - a bad build, a wrong
+architecture, a capability it can no longer perform - **the previous binary is
 restored and started again**, and the call answers `400` with both the failure
 and the plugin's current status. A failed upgrade costs an error message, not a
 plugin.
@@ -232,7 +241,7 @@ plugin.
 > swap; they recover on their own when it comes back.
 
 > ⚠ Only a **binary** plugin can be upgraded this way. A remote plugin is
-> upgraded where it runs — filex only holds its address.
+> upgraded where it runs - filex only holds its address.
 
 > ⚠ The file **keeps the name it was installed under**, whatever the upload is
 > called (`myfs-v2` replaces `myfs` *as* `myfs`). One name means one backup and
@@ -241,7 +250,7 @@ plugin.
 
 ## Updates from a source
 
-⚠⚠ **Nothing updates itself** — a storage plugin no more than an app
+⚠⚠ **Nothing updates itself** - a storage plugin no more than an app
 ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). A binary plugin may
 name an **update source**; filex reads it once a day (and when you press
 **Check for updates**) and **tells you** when a newer version for this
@@ -251,24 +260,25 @@ server's platform is there. Installing it is your decision.
   or a URL install, or **From its source**), or later from the row's
   **Actions → Update source…**; empty stops the checks. `PATCH
   /api/admin/plugins/{id}` `{"source": "…"}`.
-- **A source** is `owner/name` — the `filex-storage.json` attached to the
+- **A source** is `owner/name` - the `filex-storage.json` attached to the
   GitHub repository's **latest release**
-  (`https://github.com/<owner>/<name>/releases/latest/download/filex-storage.json`)
-  — or the https address of a `filex-storage.json` anywhere.
+  (`https://github.com/<owner>/<name>/releases/latest/download/filex-storage.json`) -
+  or the https address of a `filex-storage.json` anywhere.
 - **What the row says**: *Update available* and the jump (`1.0.0 → 1.1.0`),
-  a newer version that needs a newer filex, *Could not check* (and why — the
+  a newer version that needs a newer filex, *Could not check* (and why - the
   feed names another plugin, has no build for this platform, a build without
   its hash), or *Up to date*. The bell tells the administrators once per
   version (*"Storage plugin myfs 1.1.0 is available"*).
 - **Review update** (the row's **Actions**) shows the version jump, the
-  SHA-256 of the build for this platform, the source and its notes (plain
-  text). **Upgrade** — `POST /api/admin/plugins/{id}/upgrade`
-  `{"from_source": true}` — downloads that build, **refuses it unless its
+  SHA-256 of the build for this platform, the source and its notes (drawn
+  as Markdown through the explorer preview's pipeline and its sanitizer,
+  like an app's; nothing in them runs, a link opens in a new tab). **Upgrade** - `POST /api/admin/plugins/{id}/upgrade`
+  `{"from_source": true}` - downloads that build, **refuses it unless its
   SHA-256 is the one the feed names** (before anything is stopped), and then
   upgrades exactly as an uploaded file would ([Upgrade in
   place](#upgrade-in-place)): the signature on an instance that requires one,
   the conformance gate, the roll-back when the new binary does not come up.
-- **Check for updates** — `POST /api/admin/plugins/updates/check` — reads
+- **Check for updates** - `POST /api/admin/plugins/updates/check` - reads
   every source now and installs nothing: `{report: {checked_at, checked,
   available, failed}, plugins}`.
 - `FILEX_APP_PLUGIN_UPDATE_CHECK=0` stops the daily check for storage plugins
@@ -276,14 +286,14 @@ server's platform is there. Installing it is your decision.
   checks. A **remote** plugin is upgraded where it runs and has no source.
 
 **Publishing a feed** (for a plugin's author): attach a `filex-storage.json`
-to every release —
+to every release -
 
 ```json
 {
   "name": "myfs",
   "version": "1.3.0",
   "filex": ">=0.47.0",
-  "notes": "What changed, as plain text.",
+  "notes": "What changed, in Markdown: **Faster** listings.",
   "binaries": {
     "linux/amd64":   {"url": "https://github.com/acme/filex-myfs/releases/download/v1.3.0/myfs-linux-amd64",   "sha256": "…"},
     "linux/arm64":   {"url": "https://github.com/acme/filex-myfs/releases/download/v1.3.0/myfs-linux-arm64",   "sha256": "…"},
@@ -313,7 +323,7 @@ upgrade both refuse an unsigned or badly signed binary, and the admin API
 reports `requires_signature: true` so the UI can ask for the signature up front
 rather than after a rejection.
 
-What is signed is the binary's **sha256, hex-encoded and lower-cased** — not the
+What is signed is the binary's **sha256, hex-encoded and lower-cased** - not the
 file itself. That keeps verification cheap and lets you sign the same digest you
 already publish:
 
@@ -331,16 +341,16 @@ sha256sum myfs | cut -d' ' -f1 | tr -d '\n' > myfs.sha256
 FILEX_PLUGIN_TRUSTED_KEYS=3d40…e91b,7ac2… filex serve
 ```
 
-> ⚠ Enforcement is **off until a key is set** — which is the honest default for
+> ⚠ Enforcement is **off until a key is set** - which is the honest default for
 > a single-admin instance, and the wrong one for a shared server where "admin"
 > is several people.
 
 The signature is **kept beside the binary** as `<binary>.sig` and verified
 again at **every start**, not only at install: a trusted key set is a rule
 about what may run, not a check on one upload. So setting a key *does* reach
-plugins already installed — one installed before the keys were set has no
+plugins already installed - one installed before the keys were set has no
 `.sig` and is refused at its next start with `signature required (installed
-before trusted keys were set — reinstall)`; reinstall or upgrade it with a
+before trusted keys were set - reinstall)`; reinstall or upgrade it with a
 signature and it runs again.
 
 > ⚠ Rotation is why the setting takes a list: any one trusted key verifying is
@@ -351,8 +361,8 @@ signature and it runs again.
 ## ⚠⚠ A public demo must not offer this
 
 An instance running with `FILEX_DEMO_MODE` publishes an **admin** login. The
-plugin API is admin-only, so on that one instance "admin-only" means *anybody*
-— and installing a plugin makes filex execute an uploaded program on the host.
+plugin API is admin-only, so on that one instance "admin-only" means *anybody* -
+and installing a plugin makes filex execute an uploaded program on the host.
 
 So demo mode turns the subsystem **off** by default. `FILEX_PLUGINS_DISABLED=0`
 overrides it, deliberately, for somebody who knows what they are handing out.
@@ -360,11 +370,11 @@ overrides it, deliberately, for somebody who knows what they are handing out.
 > This default came from a measurement rather than a worry. On 2026-08-19 the
 > project's own public demo was checked: the credentials printed on its landing
 > page logged in as `role=admin`, and `GET /api/admin/plugins` answered `200`.
-> Nothing had been installed — and nothing was stopping it. A safe state that
+> Nothing had been installed - and nothing was stopping it. A safe state that
 > depends on the operator noticing is not a default.
 
 The same reasoning is why the surface is **supertenant-only** in multi-tenant
-mode: a tenant admin administers their tenant, not the machine — and why a demo
+mode: a tenant admin administers their tenant, not the machine - and why a demo
 also refuses the `local` storage driver, which is the other way to reach the
 host's filesystem from an admin session
 ([STORAGE.md](STORAGE.md#local)).
@@ -380,18 +390,18 @@ one slow plugin is one slow filex.
 | Waiting for a slot | 5 s, then refused | If every slot is busy the honest answer is "this storage is overloaded", not a request that hangs for a minute and fails anyway. |
 | Metadata operations | 60 s | `list`, `stat`, `delete`, `mkdir`, `move`, `copy`, `set_mtime`. Slowness there means trouble. |
 | Reads and writes | **no timeout** | A 20 GB upload is legitimately slow; a deadline would turn a working transfer into a failed one. |
-| Lifetime | bound to filex's | A plugin must not outlive its supervisor. Unix: a process group, so a helper the plugin forked goes with it. Windows: a **job object** with `KILL_ON_JOB_CLOSE`, which the kernel enforces even when filex is killed outright — measured, because otherwise the orphan holds its own `.exe` open and the next upgrade of that plugin fails. |
+| Lifetime | bound to filex's | A plugin must not outlive its supervisor. Unix: a process group, so a helper the plugin forked goes with it. Windows: a **job object** with `KILL_ON_JOB_CLOSE`, which the kernel enforces even when filex is killed outright - measured, because otherwise the orphan holds its own `.exe` open and the next upgrade of that plugin fails. |
 | Plugin stdout/stderr | 50 lines/s, burst 200 | A chatty debug build or a tight retry loop is otherwise filex filling the disk. Dropped lines are reported, once per window, rather than silently lost. |
 
 A refusal is counted separately from a failure (`outcome="busy"`, see
 [METRICS.md](METRICS.md#storage-plugins)): saturation is a sizing problem, not a
-bug to chase. Conformance probes are exempt from the ceiling — a probe must not
+bug to chase. Conformance probes are exempt from the ceiling - a probe must not
 be refused because users are keeping the plugin busy.
 
 > ⚠⚠ **filex is not a sandbox, and does not pretend to be one.** A plugin runs
 > as filex's own user with filex's own privileges. On Linux and macOS it is put
 > in its own **process group**, so a helper it spawned (an `rclone`, a mount, an
-> `ssh`) is killed with it instead of surviving to hold the socket — which is
+> `ssh`) is killed with it instead of surviving to hold the socket - which is
 > the failure that looks like "the plugin is stopped but the next start says
 > address already in use". Memory and file-descriptor limits are **not** set:
 > Go cannot apply an rlimit to a child between fork and exec, and setting one in
@@ -399,7 +409,7 @@ be refused because users are keeping the plugin busy.
 > POSIX sense, so a helper a plugin spawned **outlives a plugin stop or
 > restart** there, and dies only when filex itself exits and the job object
 > above closes. Real isolation
-> means namespaces, seccomp or a container runtime — run the plugin as a
+> means namespaces, seccomp or a container runtime - run the plugin as a
 > **remote** service in its own container if you need that.
 
 ---
@@ -409,14 +419,14 @@ be refused because users are keeping the plugin busy.
 A plugin driver is not a second-class mount. The same storage is served over
 **WebDAV**, **SFTP**, **FTPS**, **NFS** and the **S3 endpoint**
 ([PROTOCOLS.md](PROTOCOLS.md)), gets thumbnails, is walked by the sync worker,
-and counts against [quota](QUOTAS.md) — each of those has its own test against a
+and counts against [quota](QUOTAS.md) - each of those has its own test against a
 live plugin in this repository, so none of it is an assumption.
 
 Two behaviours are worth stating because they are the ones that would hurt:
 
 - ⚠⚠ **An unavailable plugin is an error, never an empty listing.** A
   `PROPFIND` against a storage whose plugin is down answers a failure, not
-  `200 OK` with nothing in it — a mirroring client that saw the second one would
+  `200 OK` with nothing in it - a mirroring client that saw the second one would
   delete the user's local copy. The storage recovers on its own when the plugin
   answers again: no filex restart, no re-saving the connection.
 - ⚠⚠ **A plugin outage does not wipe the index.** The sync run fails, is
@@ -424,12 +434,67 @@ Two behaviours are worth stating because they are the ones that would hurt:
   because nothing was lost. A read-only plugin refuses writes on every one of
   those surfaces, not just in the web UI.
 
+### An entry your Stat cannot answer for
+
+The sync removes an entry from the catalogue only when your driver's `Stat`
+answers **`not_found`** for it (`storage.ErrNotFound` in Go, the protocol's
+`not_found` code): the listing no longer holds it, and `Stat` confirms it is
+gone. Any other answer - your plugin does not implement `Stat` for folders, it
+lacks a permission, its backend failed - and filex cannot tell whether the
+entry still exists. Since 0.50 (issue #104) such an entry is **kept and marked
+unavailable**, file or folder:
+
+- the explorer lists it with a **!** badge whose tooltip says what happened and
+  shows your plugin's answer; the details panel says the same;
+- **nothing can be done with it, or with anything inside it**: opening,
+  previewing, downloading, browsing into it, moving, copying, renaming,
+  deleting, sharing, editing, archiving. The server refuses each one with
+  **`409 {"code": "ENTRY_UNAVAILABLE", "path", "reason"}`** - the explorer
+  only hides what the server would refuse anyway. The AI/MCP tools answer the
+  same; their listings carry `unavailable: true` and `unavailable_reason`;
+- a public link made **before** the mark keeps working as a link, but serves
+  nothing from it: the share page says the item cannot be opened right now, in
+  the visitor's language, and offers no download (its state carries
+  `unavailable: true`); a download, a zip or a file inside a shared folder
+  answers `409` with a page that says the same. The visitor never sees your
+  plugin's answer;
+- the next sync pass that gets an answer settles it: `Stat` succeeds, or the
+  listing holds the entry again, and the mark goes; `Stat` answers
+  `not_found`, and the entry goes.
+
+⚠ WebDAV, SFTP, FTPS, NFS and the S3 gateway do not read the mark: they talk
+to your driver directly, so their clients meet whatever your plugin answers
+for that path.
+
+Before 0.50 the entry stayed in the catalogue unchanged - live, clickable, and
+saying nothing - and a folder deleted outside filex on such a plugin never left
+it. The fix on your side is the contract the conformance run already checks
+for files: answer `not_found` for a path that does not exist, folders
+included.
+
+### Plugin log
+
+Every storage plugin has a **log** (Plugins → the plugin's **Actions** menu →
+**Log**; `GET /api/admin/plugins/{id}/logs?after=<seq>`, also on the admin API
+key routes), the same panel and the same rules as an app plugin's: its starts
+and failures, and each answer from your `Stat` that left an entry unavailable
+(the storage, the path and your answer). Each change of an entry's state is
+also written to the audit trail (`storage.entry_unavailable`,
+`storage.entry_available`).
+
+The sync asks again on every pass, so the same line keeps coming. It is written
+**once**: a line repeated within the last 50 is counted on the line already
+there (`count`, and `last`: when it last repeated), and the server log gets a
+warning or an error at most **once every five minutes**, with how many times it
+repeated in between (`repeated=`). The page keeps the newest 500 lines, in
+memory: the log starts empty when filex restarts.
+
 ---
 
 ## Write one (Go)
 
-The SDK makes a plugin three methods and a `Serve` call. Everything else —
-handshake, routing, streaming, error codes, instance bookkeeping — is done for
+The SDK makes a plugin three methods and a `Serve` call. Everything else -
+handshake, routing, streaming, error codes, instance bookkeeping - is done for
 you.
 
 ```go
@@ -478,16 +543,16 @@ func main() {
 Two complete, working examples live in the repository, and filex's own tests
 install and drive them, so neither can rot:
 
-- [`backend/examples/plugin-memfs`](../backend/examples/plugin-memfs/main.go) —
+- [`backend/examples/plugin-memfs`](../backend/examples/plugin-memfs/main.go) -
   the Go SDK in a single short file, in-memory, with a `SelfTest` area.
-- [`backend/examples/plugin-diskfs/plugin.py`](../backend/examples/plugin-diskfs/plugin.py) —
+- [`backend/examples/plugin-diskfs/plugin.py`](../backend/examples/plugin-diskfs/plugin.py) -
   **Python, standard library only, no SDK**: the same protocol implemented by
   hand, backed by a real directory, with every optional capability (ranged
   reads, move, copy, mkdir, mtimes, the change stream, `/v1/selftest` and
   multipart). It exists because “any language” is a claim worth proving rather
   than repeating; its [`acceptance.sh`](../backend/examples/plugin-diskfs/README.md)
-  drives the whole subsystem — conformance, a plugin that lies, multipart,
-  upgrade and rollback — through filex's own admin API.
+  drives the whole subsystem - conformance, a plugin that lies, multipart,
+  upgrade and rollback - through filex's own admin API.
 
 ```bash
 go build -o myfs ./cmd/myfs      # for the SERVER's platform
@@ -501,21 +566,21 @@ Add a method, gain a capability. There is no list to keep in step:
 | Implement | filex gains | If you don't |
 |---|---|---|
 | `Write` **and** `Delete` | uploads, rename, trash, versions | the storage is read-only everywhere in the UI |
-| `RangeReader` | ranged reads (video seek, partial downloads) | filex reads from the start and discards — correct, just slower |
+| `RangeReader` | ranged reads (video seek, partial downloads) | filex reads from the start and discards - correct, just slower |
 | `Mover` / `Copier` | server-side move / copy | emulated as copy+delete / read+write |
 | `Mkdirer` | real directories | treated like an object store: a no-op |
 | `Toucher` | a file's own mtime survives a sync | filex does not offer it (better than pretending) |
 | `Watcher` | event-driven sync instead of a poll, on a storage set to `fsnotify` | filex polls on its sync interval |
-| `Presigner` | share downloads redirect the visitor to your URL — the bytes never pass through filex | filex streams them from your plugin |
+| `Presigner` | share downloads redirect the visitor to your URL - the bytes never pass through filex. Only an absolute `https://` URL is followed; anything else is streamed through filex | filex streams them from your plugin |
 | `Multipart` (needs `Writer`) | resumable uploads: the staged-upload commit pushes parts instead of one long `PUT` | filex writes the whole object in one `Write` |
 
 > ⚠ `Write` and `Delete` travel **together**. A driver that can create files it
 > cannot remove breaks trash and versioning, so filex refuses the pair split at
-> registration — and the SDK reports the pair honestly rather than letting you
+> registration - and the SDK reports the pair honestly rather than letting you
 > discover it later. `multipart` without the pair is refused for the same
 > reason: a resumable upload is still an upload.
 
-> ⚠ Exactly one field should be marked **`Root: true`** — the field that scopes
+> ⚠ Exactly one field should be marked **`Root: true`** - the field that scopes
 > a storage inside your backend (a path, a prefix, a bucket). filex refuses to
 > mount a backend's root, so a plugin without one has every storage rejected.
 
@@ -526,30 +591,34 @@ Add a method, gain a capability. There is no list to keep in step:
 > and the first person to save a storage on it runs the probes for you.
 
 > ⚠⚠ **Only declare `presign` when the URL works from the client's network.**
-> Conformance can only check that a URL comes back and parses — filex may sit on
+> Conformance can only check that a URL comes back and parses - filex may sit on
 > a network the browser cannot see, so it will not fetch it for you. A plugin
 > that returns a loopback URL passes the probe and then breaks every share
-> download on that storage.
+> download on that storage. And it must be **`https://`**: from 0.50.0 a share
+> visitor is redirected only to an absolute https URL. A plain `http://` one (the
+> file in the clear, and a download browsers block from an https page) or
+> anything that is not a web address is served through filex instead, as if the
+> plugin had no `presign`.
 
 > ⚠ `Watcher` is now **consumed**, on a storage whose sync mode is `fsnotify`
 > and whose driver is not local (see [below](#watch-what-filex-does-with-your-change-stream)).
 > The previous release's docs said "nothing yet" and were right at the time;
 > the endpoint is no longer decoration.
 
-> ⚠ Return the SDK's errors — `pluginsdk.ErrNotFound`, `ErrReadOnly`,
+> ⚠ Return the SDK's errors - `pluginsdk.ErrNotFound`, `ErrReadOnly`,
 > `ErrUnsupported`. They become filex's own `storage.ErrNotFound` and friends, so
 > a missing file answers 404 rather than 500. **The conformance run tests this
 > directly**: `Stat` on a path that does not exist must map to `not_found`, or
-> the probe fails and the plugin is refused — a 500 where a 404 belongs is how a
+> the probe fails and the plugin is refused - a 500 where a 404 belongs is how a
 > missing file turns into "filex is broken".
 
 ### `watch`: what filex does with your change stream
 
 A storage set to **`sync_mode: fsnotify`** uses, in this order:
 
-1. **inotify**, when the driver is local — cheaper, and it sees changes made
+1. **inotify**, when the driver is local - cheaper, and it sees changes made
    outside filex on the same disk;
-2. **your stream**, when the driver implements `Watcher` — filex subscribes to
+2. **your stream**, when the driver implements `Watcher` - filex subscribes to
    `/v1/instances/{id}/watch` and re-scans on your events;
 3. **polling**, when there is neither.
 
@@ -561,7 +630,7 @@ what.
 
 > ⚠ A stream that **ends** is not the end of the storage. When your plugin
 > restarts or the connection drops, filex logs it and falls back to polling
-> rather than leaving the storage frozen with a stale index — the failure that
+> rather than leaving the storage frozen with a stale index - the failure that
 > would otherwise look like "filex stopped seeing my files".
 
 > ⚠ The initial scan still happens. The stream makes the index *current sooner*;
@@ -582,14 +651,22 @@ FILEX_PLUGIN_TOKEN=dev-token FILEX_PLUGIN_LISTEN=127.0.0.1:9099 go run ./cmd/myf
 > is accepted for loopback, link-local, RFC 1918 and ULA addresses (a name is
 > resolved first, and every address it resolves to has to be private). Anything
 > else is refused with `remote plugins outside the private network must use
-> https://` — the bearer token and every storage credential travel on that
-> connection. The rule is applied when the plugin is registered and again at
-> every start.
+> https://` - the bearer token and every storage credential travel on that
+> connection. The rule is applied when the plugin is registered, at every start,
+> and - from 0.50.0 - at **every connection**: a name that resolves to a public
+> address later is refused at the dial, so a DNS answer that changes cannot move
+> the token out of the private network.
+
+> ⚠ **filex does not follow a plugin's redirects** (0.50.0). The token and the
+> credentials go to the address you registered and nowhere else, so a remote
+> that answers `301`/`302`/`307` - an `http://` address a proxy upgrades to
+> `https://`, say - is refused with `the plugin answered with a redirect`.
+> Register the address it points to.
 
 While a capability is half-finished, run **that** filex with
 `FILEX_PLUGIN_CONFORMANCE=warn`: the probes still run and the report still
 appears, but a failure no longer refuses the plugin. Put it back to `enforce`
-before anyone else uses the instance — the point of the gate is that the person
+before anyone else uses the instance - the point of the gate is that the person
 who pays for a broken claim is the user, not you.
 
 ---
@@ -608,7 +685,7 @@ FILEX_PLUGIN_PROTOCOL=1              the protocol version this filex speaks
       or: FILEX-PLUGIN/1 tcp:127.0.0.1:PORT
 ```
 
-> ⚠ **The plugin does not see filex's own environment** — no `FILEX_*`
+> ⚠ **The plugin does not see filex's own environment** - no `FILEX_*`
 > variables, no secrets. Besides the four above, the process inherits only what
 > it needs to run: `PATH`, `HOME`, `TMPDIR`/`TMP`/`TEMP`, `LANG`, `LC_*`, `TZ`
 > and, on Windows, `SystemRoot`, `USERPROFILE`, `ProgramData`, `ComSpec`,
@@ -620,7 +697,7 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 | Method | Path | Body / notes |
 |---|---|---|
 | `GET` | `/v1/describe` | `{protocol, name, version, label, fields[], capabilities{}}` |
-| `POST` | `/v1/instances` | `{config}` → `{instance}` — one per storage row |
+| `POST` | `/v1/instances` | `{config}` → `{instance}` - one per storage row |
 | `DELETE` | `/v1/instances/{id}` | release it |
 | `GET` | `/v1/instances/{id}/list?path=` | `{objects: [...]}` |
 | `GET` | `/v1/instances/{id}/stat?path=` | one object |
@@ -630,7 +707,7 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 | `POST` | `/v1/instances/{id}/delete` · `/mkdir` | `{path}` |
 | `POST` | `/v1/instances/{id}/set-mtime` | `{path, mtime}` (RFC 3339) |
 | `GET` | `/v1/instances/{id}/watch` | `text/event-stream` of `{op, path, from}`, when you declare `watch` |
-| `POST` | `/v1/selftest` | → `{instance}` — a **throwaway** instance for the conformance probes. No config; back it with scratch space you are happy to lose. Answer `404`/`unsupported` if you have none: the plugin is then registered *unverified*. |
+| `POST` | `/v1/selftest` | → `{instance}` - a **throwaway** instance for the conformance probes. No config; back it with scratch space you are happy to lose. Answer `404`/`unsupported` if you have none: the plugin is then registered *unverified*. |
 | `POST` | `/v1/instances/{id}/presign-upload` | `{path, size}` → `{url, method?, headers?, expires_at}` (`presign`) |
 | `POST` | `/v1/instances/{id}/presign-download` | `{path, ttl_s}` → `{url, expires_at}` (`presign`) |
 | `POST` | `/v1/instances/{id}/multipart/init` | `{path, total_size, part_count}` → `{upload_id, part_urls?}` (`multipart`) |
@@ -640,7 +717,7 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 
 > ⚠⚠ **What your objects report decides how often filex re-reads them.** The
 > storage sync compares the object's `etag` when you return one, and its
-> **size and modification time to the second** when you do not — that is how
+> **size and modification time to the second** when you do not - that is how
 > `local`, `sftp`, `smb` and `ftp` work too. So a plugin whose mtime jitters
 > (a backend that reports the *access* time, or one that rounds differently on
 > every call) reports drift on every file on every pass: the catalogue is
@@ -651,7 +728,7 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 
 > ⚠ `multipart/part` is **one route with a slash in it**, not `multipart` with a
 > sub-resource. Splitting the path and switching on the first segment alone
-> makes every multipart call answer 404 — which is what the Python example did
+> makes every multipart call answer 404 - which is what the Python example did
 > until conformance caught it.
 
 > ⚠ `part_urls` is for the browser-chunked upload endpoint
@@ -661,23 +738,30 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 > `multipart/part` and ignores `part_urls`. Returning none is normal.
 
 Errors are `{"error": <code>, "message": <text>}`. Codes filex understands:
-`not_found`, `read_only`, `unsupported`, `invalid`, and **`no_instance`** —
+`not_found`, `read_only`, `unsupported`, `invalid`, and **`no_instance`** -
 answer that one for an id you do not recognise and filex re-creates the instance
 from the saved config and retries the call once. That is what makes a plugin
 restart invisible to the person using the file manager.
 
 > ⚠ **`multipart/part` is the one call that is not retried.** A part body can be
 > read only once, and a plugin that lost its instance has also lost the upload
-> the part belongs to — retrying would land a part in a different upload. The
+> the part belongs to - retrying would land a part in a different upload. The
 > caller starts the upload again instead.
 
 > ⚠ If you serve `/watch`, **flush the response headers immediately**. Written
 > but unflushed headers leave filex waiting for a response that has already been
-> produced — a watch that appears to hang on an idle backend.
+> produced - a watch that appears to hang on an idle backend.
 
 > ⚠ A plugin that listens on TCP must bind **loopback**. The token is the only
 > thing between the world and the storage credentials filex sends you; filex
 > refuses a handshake that advertises a non-loopback address.
+>
+> ⚠ And a unix socket must be **in `FILEX_PLUGIN_SOCKET_DIR`** - itself, not a
+> link to somewhere else (0.50.0). The handshake is `unix:<a socket in that
+> directory>` or `tcp:127.0.0.1:<port>` and nothing else: an `http(s)://`
+> address is a remote plugin's spelling, and a socket elsewhere is another
+> program's door. Either is refused, because filex sends its token and the
+> storages' credentials to whatever the handshake names.
 
 ---
 
@@ -687,21 +771,23 @@ restart invisible to the person using the file manager.
 |---|---|
 | Installed binaries | `<data-dir>/plugins/<name>/` |
 | Sockets a plugin creates | `<data-dir>/plugins/<name>/run/` (directory mode 0700; the SDK gives the socket 0600) |
-| A binary's signature | `<data-dir>/plugins/<name>/<binary>.sig` (mode 0600) — written at install/upgrade when a signature was supplied, verified again at every start while trusted keys are configured |
+| The copy a start runs | `<data-dir>/plugins/.verified/<name>-<random>/<binary>` (mode 0700): at every start - each restart after a crash included - filex checks the installed binary against its SHA256 and its stored signature **while copying it**, runs the copy, and removes it when the process ends. What runs is the bytes that were checked, whatever happens to the installed file meanwhile; leftovers are cleared the next time filex starts. The working directory is still the plugin's own folder |
+| A binary that is arriving | `<binary>.staged` beside it (mode 0600, not executable) until the SHA256 and the signature have passed; only then does it become the executable `<binary>` |
+| A binary's signature | `<data-dir>/plugins/<name>/<binary>.sig` (mode 0600) - written at install/upgrade when a signature was supplied, verified again at every start while trusted keys are configured |
 | Registration | the `plugins` table (migration 00029) |
-| Install requests an API key left | the `plugin_requests` table (migration 00070), shared with apps — [Install requests](#install-requests) |
-| A remote plugin's token | sealed with `FILEX_SECRET_KEY` — registering one without that key is refused rather than stored in plaintext |
+| Install requests an API key left | the `plugin_requests` table (migration 00070), shared with apps - [Install requests](#install-requests) |
+| A remote plugin's token | sealed with `FILEX_SECRET_KEY` - registering one without that key is refused rather than stored in plaintext |
 | The previous binary, during an upgrade | `<data-dir>/plugins/<name>/<binary>.previous` (and `<binary>.sig.previous`), removed once the new one is up (and used to roll back when it is not) |
-| Conformance probe leftovers | `.filex-conformance-<random>/` at a storage's root — named so an operator who finds one knows what made it |
+| Conformance probe leftovers | `.filex-conformance-<random>/` at a storage's root - named so an operator who finds one knows what made it |
 | Host implementation | [`backend/internal/plugin`](../backend/internal/plugin) |
-| Driver shapes | `internal/plugin/driver_shapes.go` — **generated**, 20 combinations: `go run ./internal/plugin/gen > internal/plugin/driver_shapes.go`. ⚠ Regenerate it after touching the generator: `TestGeneratedShapesAreCurrent` runs the generator and fails CI when the file differs (it skips under `go test -short`) |
+| Driver shapes | `internal/plugin/driver_shapes.go` - **generated**, 20 combinations: `go run ./internal/plugin/gen > internal/plugin/driver_shapes.go`. ⚠ Regenerate it after touching the generator: `TestGeneratedShapesAreCurrent` runs the generator and fails CI when the file differs (it skips under `go test -short`) |
 | SDK | [`backend/pkg/pluginsdk`](../backend/pkg/pluginsdk) |
-| Metrics | `filex_plugin_*` — see [METRICS.md](METRICS.md#storage-plugins) |
+| Metrics | `filex_plugin_*` - see [METRICS.md](METRICS.md#storage-plugins) |
 
 > ⚠ Why the shapes are generated rather than written: filex decides what a
 > storage can do by **type-asserting** optional interfaces wherever an
 > operation needs one, so a plugin that cannot write must be handed to filex as a value with
-> **no** `Write` method — not one that returns an error, or the UI offers an
+> **no** `Write` method - not one that returns an error, or the UI offers an
 > upload button that fails at the last moment. With five optional axes (write,
 > mtime, watch, presign, multipart) that is twenty structs, and twenty
 > hand-written structs is where somebody eventually embeds the wrong thing and a

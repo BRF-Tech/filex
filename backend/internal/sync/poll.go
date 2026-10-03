@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 )
 
 // RunOnce performs one full sync pass for the storage:
@@ -379,6 +380,15 @@ type entryBatch struct {
 	// reclaim: rows dropped for good (dropRows), whose per-node caches go
 	// (Worker.AttachReclaim).
 	reclaim []int64
+	// history: the snapshot keys of files dropped for good, deleted from the
+	// storage once the drop has committed (issue #104).
+	history []droppedHistory
+	// states: entries the storage could not answer for, or answered for
+	// again (unavailable.go), for Worker.AttachEntryState.
+	states []EntryState
+	// thumbs: files found drifted or settled, for the thumbnail refresher
+	// (Worker.AttachThumbs).
+	thumbs []*model.Node
 }
 
 // listedEntry is one entry of a directory's listing as applyListing left it.
@@ -511,6 +521,17 @@ func (s *storageSyncer) handOff(ctx context.Context, b *entryBatch) {
 		for _, id := range b.reclaim {
 			s.reclaim(ctx, id)
 		}
+	}
+	for _, h := range b.history {
+		versioning.Forget(ctx, s.driver, h.node, h.keys)
+	}
+	if s.entryState != nil {
+		for _, e := range b.states {
+			s.entryState(ctx, e)
+		}
+	}
+	if s.thumbs != nil && len(b.thumbs) > 0 {
+		s.thumbs(ctx, b.thumbs)
 	}
 }
 
@@ -695,6 +716,8 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 // object is demonstrably its bytes; then the row is updated if the backend's
 // copy drifted from it.
 func (s *storageSyncer) refreshEntry(ctx context.Context, existing *model.Node, obj storage.Object, c *walkCounts, b *entryBatch) {
+	// Listed again: the storage answers for it (issue #104).
+	s.answered(ctx, existing, b)
 	unstored := isUnstored(existing)
 	settled := unstored && s.settleTransfer(ctx, existing, obj)
 	drifted := false
@@ -746,10 +769,13 @@ func (s *storageSyncer) refreshEntry(ctx context.Context, existing *model.Node, 
 	// The row is re-read once and shared by both consumers: `existing`
 	// still carries the PRE-drift size, and the scanner's size ceiling
 	// has to be applied to the bytes that are actually there.
-	if (drifted || settled) && (s.index != nil || s.avScan != nil) {
+	if (drifted || settled) && (s.index != nil || s.avScan != nil || s.thumbs != nil) {
 		if fresh, _ := s.store.GetNode(ctx, existing.ID); fresh != nil {
 			b.index = append(b.index, fresh)
 			b.scan = append(b.scan, fresh)
+			// The same fresh row: its signature is the one a thumbnail of the
+			// bytes now on the backend must carry.
+			b.thumbs = append(b.thumbs, fresh)
 		}
 	}
 }
@@ -991,7 +1017,7 @@ func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, 
 		if s.rule.Skips(n.Path) {
 			continue
 		}
-		if !s.confirmGone(ctx, n) {
+		if !s.confirmGone(ctx, n, b) {
 			continue
 		}
 		gone = append(gone, n)
@@ -1036,7 +1062,18 @@ func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, 
 // shipped driver answers Stat for a folder (the S3 driver by the prefix still
 // having objects under it), exactly as the lazy catalogue's delete pass has
 // always asked it.
-func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node) bool {
+//
+// ⚠⚠ "I could not check" is not "it is there" either (issue #104). A row whose
+// Stat answers anything but "it is there" or "not found" is kept AND marked
+// unavailable (unavailable.go): listed with a warning, every operation on it
+// refused, until the storage answers for it again. Before, it was kept as if
+// nothing had happened - on a plugin storage whose Stat cannot answer for a
+// folder, a folder deleted outside filex stayed in the catalogue, clickable,
+// for good. A Stat that succeeds lifts the mark.
+//
+// The lazy catalogue's delete pass asks this same question (lazyCatalogue
+// confirmGone), so the two cannot answer it differently.
+func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node, b *entryBatch) bool {
 	if n.TransferState != "" && n.TransferState != model.TransferStateStored {
 		slog.Info("sync: keeping unstored node out of the tombstone pass",
 			slog.Int64("node", n.ID),
@@ -1054,13 +1091,16 @@ func (s *storageSyncer) confirmGone(ctx context.Context, n *model.Node) bool {
 			slog.Int64("node", n.ID),
 			slog.String("path", n.Path),
 			slog.String("storage", s.storage.Name))
+		s.answered(ctx, n, b)
 		return false
 	} else if !errors.Is(err, storage.ErrNotFound) {
-		slog.Warn("sync: could not confirm an object is gone, keeping it",
-			slog.Int64("node", n.ID),
-			slog.String("path", n.Path),
-			slog.String("storage", s.storage.Name),
-			slog.String("err", err.Error()))
+		// A run being stopped is not the storage's answer about anything.
+		if ctx.Err() == nil {
+			// Said through the entry-state hook (the plugin's log, which
+			// does not repeat itself), not here: this runs on every pass
+			// for as long as the storage keeps giving the same answer.
+			s.unanswered(ctx, n, err, b)
+		}
 		return false
 	}
 	return true

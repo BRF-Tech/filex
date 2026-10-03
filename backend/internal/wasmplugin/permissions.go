@@ -81,11 +81,32 @@ const (
 // events are real — the same rule as every other name the host does not know.
 const permPrefixEvents = "events:"
 
-// Engines a plugin may ask for are enginebin's list — the same table the
-// probe resolves, so a grant can never name an engine the server would not
-// know how to find. Availability on this server is a separate question
-// (enginebin.Probe); the grant only says the plugin may try.
-func knownEngine(name string) bool { _, ok := enginebin.Candidates[name]; return ok }
+// Engines a plugin may ask for are enginebin's list - the binaries the probe
+// resolves, the office engine, and `libreoffice`, the office engine's name
+// until 0.50 (an alias: an app built for LibreOffice still installs).
+// Availability on this server is a separate question; the grant only says the
+// plugin may try.
+func knownEngine(name string) bool { return enginebin.Known(name) }
+
+// sameEngineGrant is the permission that grants the same engine under its
+// other name (`engines:libreoffice` ↔ `engines:office`), "" when there is
+// none. The two are ONE grant: an app that moves from one name to the other
+// is not asking for anything new, and a grant stored under the old name keeps
+// working.
+func sameEngineGrant(p Permission) Permission {
+	name, ok := strings.CutPrefix(string(p), permPrefixEngines)
+	if !ok {
+		return ""
+	}
+	c := enginebin.Canonical(name)
+	if c != name {
+		return Permission(permPrefixEngines + c)
+	}
+	if a := enginebin.AliasesOf(c); len(a) > 0 {
+		return Permission(permPrefixEngines + a[0])
+	}
+	return ""
+}
 
 var bare = map[Permission]bool{
 	PermFilesRead: true, PermFilesWrite: true, PermFilesLock: true, PermSign: true, PermMailSend: true,
@@ -135,8 +156,14 @@ func ParsePermission(s string) (Permission, error) {
 			return "", fmt.Errorf("permission %q: expected ui-new:.<ext>", s)
 		}
 		return p, nil
+	case strings.HasPrefix(s, permPrefixThumbnail):
+		kind := strings.TrimPrefix(s, permPrefixThumbnail)
+		if !viewerKindOK(kind) {
+			return "", fmt.Errorf("permission %q: expected thumbnail:.<ext> or thumbnail:<type/subtype>", s)
+		}
+		return p, nil
 	case strings.HasPrefix(s, permPrefixEvents):
-		return "", fmt.Errorf("permission %q: filex does not deliver file events to apps yet, so this permission would grant nothing — leave it out", s)
+		return "", fmt.Errorf("permission %q: filex does not deliver file events to apps yet, so this permission would grant nothing - leave it out", s)
 	}
 	return "", fmt.Errorf("unknown permission %q", s)
 }
@@ -181,12 +208,21 @@ func NewGrants(perms []Permission) Grants {
 	return g
 }
 
-// Has answers a bare permission.
-func (g Grants) Has(p Permission) bool { return g[p] }
+// Has answers a permission. An engine is granted under either of its names
+// (sameEngineGrant).
+func (g Grants) Has(p Permission) bool {
+	if g[p] {
+		return true
+	}
+	if o := sameEngineGrant(p); o != "" {
+		return g[o]
+	}
+	return false
+}
 
-// HasEngine answers engines:<name>.
+// HasEngine answers engines:<name>, under either of the engine's names.
 func (g Grants) HasEngine(name string) bool {
-	return g[Permission(permPrefixEngines+name)]
+	return g.Has(Permission(permPrefixEngines + name))
 }
 
 // HasHost answers whether an outbound HTTP request to host is allowed:
@@ -229,7 +265,7 @@ func (g Grants) AllowedHosts() []string {
 func (g Grants) Missing(want []Permission) []Permission {
 	var out []Permission
 	for _, p := range want {
-		if !g[p] {
+		if !g.Has(p) {
 			out = append(out, p)
 		}
 	}
@@ -287,6 +323,8 @@ func (p Permission) Label(lang string) string {
 		return permText(lang, "ui_viewer", srvtext.Vars{"kind": strings.TrimPrefix(s, permPrefixUIViewer)})
 	case strings.HasPrefix(s, permPrefixUINew):
 		return permText(lang, "ui_new", srvtext.Vars{"ext": strings.TrimPrefix(s, permPrefixUINew)})
+	case strings.HasPrefix(s, permPrefixThumbnail):
+		return permText(lang, "thumbnail", srvtext.Vars{"kind": strings.TrimPrefix(s, permPrefixThumbnail)})
 	case strings.HasPrefix(s, permPrefixHTTP):
 		h := strings.TrimPrefix(s, permPrefixHTTP)
 		return permText(lang, "http", srvtext.Vars{"host": h})

@@ -21,6 +21,9 @@ const (
 	// Silent: a connection read got nothing from the peer (Conn) — no answer
 	// to a command, or a transfer that stopped.
 	Silent
+	// Send: the peer stopped taking an upload (a watched call that sends,
+	// Activity.Watch).
+	Send
 )
 
 // Error is an attempt cut for giving no sign of life. It is a timeout, and a
@@ -39,6 +42,8 @@ func (e *Error) What() string {
 		return fmt.Sprintf("no answer within %s of sending the request", limit)
 	case Body:
 		return fmt.Sprintf("the answer stopped arriving for %s", limit)
+	case Send:
+		return fmt.Sprintf("the store stopped taking the upload for %s", limit)
 	}
 	return fmt.Sprintf("the server sent nothing for %s", limit)
 }

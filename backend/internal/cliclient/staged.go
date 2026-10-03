@@ -372,9 +372,14 @@ func (c *Client) stagedStatus(ctx context.Context, id string) (*statusResponse, 
 // commitStaged finalises the upload; the server verifies size and the declared
 // digest before it accepts.
 func (c *Client) commitStaged(ctx context.Context, id, expect string) ([]byte, error) {
-	var q url.Values
+	q := url.Values{}
 	if expect != "" {
-		q = url.Values{"expect": {expect}}
+		q.Set("expect", expect)
+	}
+	// wiring:e2 convert - checked by the server at the commit, the moment the
+	// plaintext is replaced (e2e.go).
+	if isConversionWrite(ctx) {
+		q.Set("e2e_convert", "1")
 	}
 	req, err := c.newRequest(ctx, http.MethodPost, "/api/files/upload/"+id+"/commit", q, nil)
 	if err != nil {

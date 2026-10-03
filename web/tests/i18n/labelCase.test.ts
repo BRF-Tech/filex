@@ -66,6 +66,7 @@ const NAMES = new Set([
   'Esc', 'Claude', 'Keycloak', 'Authentik', 'Hetzner', 'Ubuntu', 'Apple', 'Silicon',
   'Active', 'Directory', 'Sunday', 'English', 'İngilizce',
   'Store', // "Microsoft Store": a product's name (install.dl.win_store)
+  'Arm', 'Intel', // processor makers, in "For Arm processors (arm64)" (install.dl.other_*)
   'Acme', 'Cloud', 'Bulut', // the placeholder's made-up company name
   // …and its made-up person, in the file-request page's "your name" box
   // (public.your_name_ph). A sample name is a name.

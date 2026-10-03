@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,9 @@ type Client struct {
 	// second), shared by every transfer of this client. nil = no limit.
 	DownLimit *RateLimiter
 	UpLimit   *RateLimiter
+	// OpPollInterval is how often WaitOp asks about a queued operation. 0
+	// means DefaultOpPollInterval.
+	OpPollInterval time.Duration
 }
 
 // newHTTPClient is an http.Client that cannot hang forever on a half-dead
@@ -147,6 +151,36 @@ func (c *Client) doJSON(req *http.Request) ([]byte, error) {
 		return nil, apiErrorFrom(resp.StatusCode, b)
 	}
 	return b, nil
+}
+
+// pageQuery is a paged listing's limit and offset, each omitted at 0 (the
+// server's own page).
+func pageQuery(limit, offset int) url.Values {
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		q.Set("offset", strconv.Itoa(offset))
+	}
+	return q
+}
+
+// getJSONInto GETs p with q, decodes the answer into out and returns the raw
+// body; what names the listing in a parse error.
+func (c *Client) getJSONInto(ctx context.Context, p string, q url.Values, what string, out any) ([]byte, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, p, q, nil)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.doJSON(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", what, err)
+	}
+	return raw, nil
 }
 
 // apiErrorFrom extracts the JSON error message when present, otherwise

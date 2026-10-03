@@ -28,7 +28,7 @@
  * web-component build — see web/tests/api/scopedStyles.test.ts.
  */
 import { ref, onMounted, onBeforeUnmount, computed, inject, watch } from 'vue';
-import type { FileApi, Grant, UserSuggestion } from '../composables/useFileApi';
+import type { FileApi, Grant, GroupSuggestion, UserSuggestion } from '../composables/useFileApi';
 import type { ShareInfo } from '../types/FileNode';
 import { shareCliCommand } from '../lib/shareCli';
 import {
@@ -153,6 +153,9 @@ const noAccount = ref(false);
 const createRole = ref<'user' | 'viewer'>('user');
 const inviteResult = ref<{ tempPassword?: string } | null>(null);
 const suggestions = ref<UserSuggestion[]>([]);
+// Groups (backend internal/group) matching what was typed: sharing with a
+// group shares with every member. Offered beside people in the same list.
+const groupSuggestions = ref<GroupSuggestion[]>([]);
 const showSuggest = ref(false);
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -375,18 +378,54 @@ function onEmailInput() {
   if (searchTimer) clearTimeout(searchTimer);
   if (q.length < 1) {
     suggestions.value = [];
+    groupSuggestions.value = [];
     showSuggest.value = false;
     return;
   }
   searchTimer = setTimeout(async () => {
     try {
-      const r = await props.api.searchUsers(q);
+      // A host API without groups (an older embed) simply offers none.
+      const [r, gr] = await Promise.all([
+        props.api.searchUsers(q),
+        props.api.searchGroups ? props.api.searchGroups(q) : Promise.resolve({ groups: [] }),
+      ]);
       suggestions.value = r.users ?? [];
-      showSuggest.value = suggestions.value.length > 0;
+      groupSuggestions.value = gr.groups ?? [];
+      showSuggest.value = suggestions.value.length > 0 || groupSuggestions.value.length > 0;
     } catch {
       showSuggest.value = false;
     }
   }, 180);
+}
+/** Shares with a whole group. A viewer account in it still reaches the item
+ *  as a viewer — the server caps each member — so any level is offered. */
+async function pickGroup(g: GroupSuggestion) {
+  if (addBlocked.value) return;
+  showSuggest.value = false;
+  // Owner lets every member manage this item's sharing - say so first, in
+  // the dialog (groupOwnerAsk): the browser's confirm() never shows in an
+  // embed's sandboxed iframe, where it answers "no" at once.
+  if (level.value === 'owner') {
+    groupOwnerAsk.value = { kind: 'add', group: g };
+    return;
+  }
+  await grantGroup(g, level.value);
+}
+async function grantGroup(g: GroupSuggestion, lvl: string) {
+  busy.value = true;
+  notice.value = '';
+  try {
+    await props.api.addPermission({ path: props.path, group_id: g.id, level: lvl, is_dir: !!props.isDir });
+    email.value = '';
+    suggestions.value = [];
+    groupSuggestions.value = [];
+    await reload();
+    notice.value = t('access.ui.access_granted');
+  } catch (e) {
+    notice.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    busy.value = false;
+  }
 }
 async function pickUser(u: UserSuggestion) {
   if (addBlocked.value) return;
@@ -467,26 +506,73 @@ function gotoShareWithMail() {
   notice.value = '';
   open.value = { ...open.value, link: true };
 }
+// A group's grant has its own id space on the server, so it is changed and
+// removed through its own calls.
+function isGroup(g: Grant): boolean {
+  return g.kind === 'group';
+}
+/** The question before a group is given Owner - asked in the dialog, never
+ *  with the browser's confirm(). "add" is a new grant, "change" raises one. */
+const groupOwnerAsk = ref<{ kind: 'add'; group: GroupSuggestion } | { kind: 'change'; grant: Grant } | null>(null);
+const groupOwnerAskName = computed(() => {
+  const a = groupOwnerAsk.value;
+  if (!a) return '';
+  return a.kind === 'add' ? a.group.name : (a.grant.group_name ?? '');
+});
+async function answerGroupOwner(yes: boolean) {
+  const a = groupOwnerAsk.value;
+  groupOwnerAsk.value = null;
+  if (!a) return;
+  if (a.kind === 'add') {
+    if (yes) await grantGroup(a.group, 'owner');
+    return;
+  }
+  if (yes) await setLevel(a.grant, 'owner');
+  else await reload(); // put the select back
+}
 async function changeLevel(g: Grant, newLevel: string) {
   if (newLevel === g.level) return;
+  if (isGroup(g) && newLevel === 'owner') {
+    groupOwnerAsk.value = { kind: 'change', grant: g };
+    return;
+  }
+  await setLevel(g, newLevel);
+}
+async function setLevel(g: Grant, newLevel: string) {
   busy.value = true;
-  try { await props.api.updatePermission(g.id, newLevel); await reload(); }
+  try {
+    if (isGroup(g)) await props.api.updateGroupPermission(g.id, newLevel);
+    else await props.api.updatePermission(g.id, newLevel);
+    await reload();
+  }
   catch (e) { notice.value = e instanceof Error ? e.message : String(e); }
   finally { busy.value = false; }
 }
 async function removeGrant(g: Grant) {
   busy.value = true;
-  try { await props.api.deletePermission(g.id); await reload(); }
+  try {
+    if (isGroup(g)) await props.api.deleteGroupPermission(g.id);
+    else await props.api.deletePermission(g.id);
+    await reload();
+  }
   catch (e) { notice.value = e instanceof Error ? e.message : String(e); }
   finally { busy.value = false; }
 }
 /* One rule for naming a person (lib/personName): the server's name, the
-   display name, the username, the address. */
+   display name, the username, the address. A group goes by its name. */
 function glabel(g: Grant): string {
+  if (isGroup(g)) return g.group_name || `#${g.group_id}`;
   return personName({ name: g.user_name, display_name: g.user_display_name, email: g.user_email }) || `#${g.user_id}`;
 }
 function ginitial(g: Grant): string {
+  if (isGroup(g)) return personInitial({ name: g.group_name }, localeTag(localeCode.value)) || '#';
   return personInitial({ name: g.user_name, display_name: g.user_display_name, email: g.user_email }, localeTag(localeCode.value)) || '?';
+}
+function gtitle(g: Grant): string | undefined {
+  return isGroup(g) ? t('access.ui.group_title', { name: g.group_name ?? '' }) : g.user_email;
+}
+function gkey(prefix: string, g: Grant): string {
+  return prefix + (isGroup(g) ? 'g' : 'u') + g.id;
 }
 
 // ── share actions ──
@@ -782,9 +868,17 @@ const linkSummary = computed(() => {
   if (shareMaxDl.value) bits.push(maxDlOptions.value.find((o) => o.v === shareMaxDl.value)?.l ?? '');
   return bits.filter(Boolean).join(' · ');
 });
+// People and groups counted apart: "1 person" over a list that holds one
+// group would say something that is not there.
 const peopleSummary = computed(() => {
-  const n = direct.value.length + inherited.value.length;
-  return n ? t('access.sum.people', { n }) : t('access.sum.people_none');
+  const all = [...direct.value, ...inherited.value];
+  const groups = all.filter(isGroup).length;
+  const people = all.length - groups;
+  if (!all.length) return t('access.sum.people_none');
+  const parts: string[] = [];
+  if (people) parts.push(t('access.sum.people', { n: people }));
+  if (groups) parts.push(t('access.sum.groups', { n: groups }));
+  return parts.join(' · ');
 });
 const dropSummary = computed(() =>
   dropShares.value.length ? t('access.sum.drop', { n: dropShares.value.length }) : t('access.sum.drop_none'),
@@ -1049,6 +1143,13 @@ async function nativeShare(body: { title: string; text: string }) {
                       :placeholder="t('access.ui.name_or_email')"
                       @input="onEmailInput" @keyup.enter="submitEmail" @focus="onEmailInput" />
                     <ul v-if="showSuggest" class="fe-share__suggest">
+                      <li v-for="g in groupSuggestions" :key="'g' + g.id" data-testid="share-suggest-group" @mousedown.prevent="pickGroup(g)">
+                        <span class="fe-share__av fe-share__av--sm fe-share__av--group">{{ personInitial({ name: g.name }, localeTag(localeCode)) }}</span>
+                        <span class="fe-share__suggesttxt">
+                          <span class="fe-share__suggestname">{{ g.name }}</span>
+                          <span class="fe-share__suggestmeta">{{ t('access.ui.group') }}<template v-if="g.description"> · {{ g.description }}</template></span>
+                        </span>
+                      </li>
                       <li v-for="u in suggestions" :key="u.id" @mousedown.prevent="pickUser(u)">
                         <span class="fe-share__av fe-share__av--sm">{{ personInitial(u, localeTag(localeCode)) }}</span>
                         <span class="fe-share__suggesttxt">
@@ -1066,6 +1167,17 @@ async function nativeShare(body: { title: string; text: string }) {
                   </button>
                 </div>
 
+                <div v-if="groupOwnerAsk" class="fe-share__invite" role="group" aria-live="polite" data-testid="share-group-owner-ask">
+                  <p class="fe-share__hint">{{ t('access.ui.group_owner_confirm', { name: groupOwnerAskName }) }}</p>
+                  <div class="fe-share__inviterow">
+                    <button type="button" class="fe-share__btn" :disabled="busy" data-testid="share-group-owner-no" @click="answerGroupOwner(false)">
+                      {{ t('common.cancel') }}
+                    </button>
+                    <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy" data-testid="share-group-owner-yes" @click="answerGroupOwner(true)">
+                      {{ t('access.ui.group_owner_give') }}
+                    </button>
+                  </div>
+                </div>
                 <div v-if="noAccount" class="fe-share__invite">
                   <p class="fe-share__hint">{{ t('access.ui.no_account_for_this_email_what_next') }}</p>
                   <div class="fe-share__inviterow">
@@ -1091,9 +1203,9 @@ async function nativeShare(body: { title: string; text: string }) {
                   <p v-if="!direct.length && !inherited.length" class="fe-share__empty">
                     {{ t('access.ui.not_shared_with_anyone_yet') }}
                   </p>
-                  <div v-for="g in direct" :key="'d' + g.id" class="fe-share__row">
-                    <span class="fe-share__av">{{ ginitial(g) }}</span>
-                    <span class="fe-share__person" :title="g.user_email">{{ glabel(g) }}</span>
+                  <div v-for="g in direct" :key="gkey('d', g)" class="fe-share__row">
+                    <span class="fe-share__av" :class="{ 'fe-share__av--group': isGroup(g) }">{{ ginitial(g) }}</span>
+                    <span class="fe-share__person" :title="gtitle(g)">{{ glabel(g) }}<span v-if="isGroup(g)" class="fe-share__kind">{{ t('access.ui.group') }}</span></span>
                     <select class="fe-share__select fe-share__select--sm" :value="g.level"
                       @change="changeLevel(g, ($event.target as HTMLSelectElement).value)">
                       <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
@@ -1103,9 +1215,9 @@ async function nativeShare(body: { title: string; text: string }) {
                       <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
                     </button>
                   </div>
-                  <div v-for="g in inherited" :key="'i' + g.id" class="fe-share__row fe-share__row--dim">
-                    <span class="fe-share__av fe-share__av--dim">{{ ginitial(g) }}</span>
-                    <span class="fe-share__person" :title="g.user_email">{{ glabel(g) }}</span>
+                  <div v-for="g in inherited" :key="gkey('i', g)" class="fe-share__row fe-share__row--dim">
+                    <span class="fe-share__av fe-share__av--dim" :class="{ 'fe-share__av--group': isGroup(g) }">{{ ginitial(g) }}</span>
+                    <span class="fe-share__person" :title="gtitle(g)">{{ glabel(g) }}<span v-if="isGroup(g)" class="fe-share__kind">{{ t('access.ui.group') }}</span></span>
                     <span class="fe-share__badge">{{ levelLabel(g.level) }}</span>
                     <span class="fe-share__from" :title="t('access.ui.inherited_from') + ': ' + (g.path_prefix || '/')">
                       {{ g.path_prefix || '/' }}

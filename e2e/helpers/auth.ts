@@ -1,4 +1,4 @@
-import type { Page, APIRequestContext } from '@playwright/test';
+import type { Page, APIRequestContext, Request } from '@playwright/test';
 
 export const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@local';
 export const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'admin';
@@ -52,8 +52,20 @@ export async function dismissInstallBanner(page: Page) {
  */
 export async function loginAs(page: Page, email = ADMIN_EMAIL, password = ADMIN_PASSWORD) {
   await dismissInstallBanner(page);
-  await page.goto('/admin/login');
-  await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(email);
+  // ⚠ What the browser could not fetch, kept until the form is there. A page
+  // that never starts is otherwise a 10 s timeout on an empty screen (task
+  // #81), and the reason is only in the trace (bootFailure below).
+  const failed: string[] = [];
+  const onFailed = (r: Request) => failed.push(`${r.method()} ${r.url()} -> ${r.failure()?.errorText ?? '(no reason)'}`);
+  page.on('requestfailed', onFailed);
+  try {
+    await page.goto('/admin/login');
+    await page.getByLabel(/e-?mail|kullanıcı adı/i).fill(email);
+  } catch (err) {
+    throw bootFailure(err, failed);
+  } finally {
+    page.off('requestfailed', onFailed);
+  }
   await page.getByLabel(/password|parola/i).fill(password);
   // `exact` per name, so neither matches "Sign in with SSO".
   const submit = page
@@ -76,6 +88,41 @@ export async function loginAs(page: Page, email = ADMIN_EMAIL, password = ADMIN_
   // (web/src/lib/startPage.ts). Waiting for /admin/dashboard timed out on a
   // login that had worked, and every spec behind this helper went red for it.
   await page.waitForURL(/\/admin\/(home|dashboard)([?#]|$)/);
+}
+
+/** Network errors that come from the machine's own network stack. */
+const HOST_NETWORK_ERRORS = /ERR_NO_BUFFER_SPACE|ERR_ADDRESS_IN_USE|ERR_INSUFFICIENT_RESOURCES/;
+
+/**
+ * The error for a sign-in page that did not start, naming what the browser
+ * could not fetch.
+ *
+ * ⚠⚠ Task #81, measured 2026-10-01: the "blank sign-in page, once in a few
+ * hundred loads" was a boot file whose connection failed in the OPERATING
+ * SYSTEM with `net::ERR_NO_BUFFER_SPACE` (WSAENOBUFS), in the same second as
+ * Windows' Tcpip event 4231: every ephemeral TCP port on the machine was in
+ * use. The request never left the browser, so the server log has no line for
+ * it, and a module that fails to load leaves an empty page. That is the host,
+ * not filex: say so instead of timing out on a blank screen. No retry here -
+ * a retry would hide the next real boot failure too.
+ */
+function bootFailure(err: unknown, failed: string[]): unknown {
+  if (!failed.length) return err;
+  const host = failed.some((f) => HOST_NETWORK_ERRORS.test(f));
+  const why = err instanceof Error ? err.message.split('\n')[0] : String(err);
+  return new Error(
+    [
+      `the sign-in page did not start: the browser could not fetch ${failed.length} request(s):`,
+      ...failed.map((f) => `  ${f}`),
+      ...(host
+        ? [
+            'This error comes from the HOST, not from filex: the machine ran out of TCP ports for new',
+            'connections (Windows: System log, Tcpip event 4231). See e2e/README.md, "A blank sign-in page".',
+          ]
+        : []),
+      `(${why})`,
+    ].join('\n'),
+  );
 }
 
 /**

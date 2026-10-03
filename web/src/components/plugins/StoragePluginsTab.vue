@@ -53,6 +53,8 @@ import Input from '@/components/ui/Input.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
+import PluginLogPanel from '@/components/plugins/PluginLogPanel.vue';
+import ReleaseNotes from './ReleaseNotes.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
@@ -94,6 +96,15 @@ const formSignature = ref('');
 const saving = ref(false);
 
 const reportOf = ref<Plugin | null>(null);
+
+/* The plugin's log (issue #104): its starts and failures, and the storage
+   sync's answers it could not make sense of. The app plugins' panel, asking
+   this plugin's endpoint. */
+const logsOf = ref<Plugin | null>(null);
+function fetchLogs(after: number) {
+  const p = logsOf.value;
+  return p ? PluginsApi.logs(p.id, after) : Promise.resolve({ lines: [], next: after });
+}
 
 const upgradeOf = ref<Plugin | null>(null);
 const upgradeFile = ref<File | null>(null);
@@ -542,6 +553,11 @@ function rowActions(row: Plugin): ContextAction[] {
       hidden: !row.conformance,
     },
     {
+      key: 'logs',
+      label: t('plugins.actions.logs'),
+      icon: 'details',
+    },
+    {
       key: 'review',
       label: t('plugins.actions.reviewUpdate'),
       icon: 'refresh',
@@ -571,6 +587,7 @@ function rowActions(row: Plugin): ContextAction[] {
 
 function onRowAction(key: string, row: Plugin) {
   if (key === 'report') reportOf.value = row;
+  else if (key === 'logs') logsOf.value = row;
   else if (key === 'upgrade') openUpgrade(row);
   else if (key === 'review') openReview(row);
   else if (key === 'source') openSource(row);
@@ -676,7 +693,7 @@ function onRowAction(key: string, row: Plugin) {
         <template #cell-driver="{ row }">
           <div>
             <span v-if="row.driver" class="tbl-mono">plugin:{{ row.driver }}</span>
-            <span v-else>—</span>
+            <span v-else>-</span>
             <span v-if="row.label" class="tbl-sub">{{ row.label }}</span>
           </div>
         </template>
@@ -705,7 +722,7 @@ function onRowAction(key: string, row: Plugin) {
         <template #cell-capabilities="{ row }">
           <div>
             <Badge v-for="c in capList(row)" :key="c" tone="zinc" size="xs" class="me-1">{{ c }}</Badge>
-            <span v-if="!row.capabilities">—</span>
+            <span v-if="!row.capabilities">-</span>
           </div>
         </template>
 
@@ -892,7 +909,7 @@ function onRowAction(key: string, row: Plugin) {
             {{
               t('plugins.upgrade.restored', {
                 state: t(`plugins.state.${upgradeRestored.state}`),
-                binary: upgradeRestored.binary || '—',
+                binary: upgradeRestored.binary || '-',
               })
             }}
           </p>
@@ -926,8 +943,8 @@ function onRowAction(key: string, row: Plugin) {
         </dl>
         <div v-if="reviewOf.update.notes" data-testid="plugin-review-notes">
           <h4 class="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{{ t('plugins.review.notes') }}</h4>
-          <!-- Plain text, as the source wrote it: never rendered as markup. -->
-          <p class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs text-zinc-600 dark:text-zinc-400">{{ reviewOf.update.notes }}</p>
+          <!-- Markdown through the explorer preview's pipeline and its sanitizer (ReleaseNotes). -->
+          <ReleaseNotes :notes="reviewOf.update.notes" testid="plugin-review-notes-md" />
         </div>
         <p class="text-xs text-zinc-500">{{ t('plugins.review.how') }}</p>
         <div
@@ -940,7 +957,7 @@ function onRowAction(key: string, row: Plugin) {
             {{
               t('plugins.upgrade.restored', {
                 state: t(`plugins.state.${reviewRestored.state}`),
-                binary: reviewRestored.binary || '—',
+                binary: reviewRestored.binary || '-',
               })
             }}
           </p>
@@ -1022,6 +1039,20 @@ function onRowAction(key: string, row: Plugin) {
 
         <div class="flex justify-end">
           <Button type="button" size="sm" variant="ghost" @click="reportOf = null">{{ t('common.close') }}</Button>
+        </div>
+      </div>
+    </Modal>
+
+    <Modal
+      :model-value="!!logsOf"
+      :title="logsOf ? t('plugins.logsTitle', { name: logsOf.name }) : ''"
+      size="lg"
+      @update:model-value="logsOf = null"
+    >
+      <div v-if="logsOf" class="space-y-3">
+        <PluginLogPanel :key="logsOf.id" :fetch="fetchLogs" :active="!!logsOf" testid="storage-plugin-logs" />
+        <div class="flex justify-end">
+          <Button type="button" size="sm" variant="ghost" @click="logsOf = null">{{ t('common.close') }}</Button>
         </div>
       </div>
     </Modal>

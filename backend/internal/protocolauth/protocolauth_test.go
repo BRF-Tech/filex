@@ -90,20 +90,22 @@ func TestMultiTenantPrincipalAlwaysCarriesAScope(t *testing.T) {
 	ctx := context.Background()
 
 	p1, err := store.CreateProvider(ctx, &model.Provider{
-		Slug: "diyetlif", Name: "diyetlif", AuthType: "local", Enabled: true,
+		Slug: "globex", Name: "globex", AuthType: "local", Enabled: true,
 	})
 	if err != nil {
 		t.Fatalf("provider: %v", err)
 	}
-	// role=admin on purpose: olivov's tenant admins hold filex role admin, and
+	// role=admin on purpose: a multi-tenant deployment's tenant admins hold filex role admin, and
 	// that is exactly what made the original leak reachable.
-	u := mkUser(t, store, "berk@diyetlif.test", model.RoleAdmin)
+	u := mkUser(t, store, "bob@globex.test", model.RoleAdmin)
 	if err := store.SetUserProvider(ctx, u.ID, p1.ID, ""); err != nil {
 		t.Fatalf("set provider: %v", err)
 	}
 
 	r := mkResolver(store, true)
-	p, err := r.Password(ctx, "berk@diyetlif.test", testPassword)
+	// A tenant's person names the realm where no address does (#128): an
+	// empty realm is the platform's own tenant.
+	p, err := r.Password(ctx, "globex/bob@globex.test", testPassword)
 	if err != nil {
 		t.Fatalf("Password: %v", err)
 	}

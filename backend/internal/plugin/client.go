@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +74,68 @@ func ParseAddress(s string) (Address, error) {
 	return Address{}, fmt.Errorf("plugin: unrecognised address %q (want unix:/path, tcp:127.0.0.1:port or http(s)://…)", s)
 }
 
+// parseHandshake reads the address a LAUNCHED plugin announced. Not every
+// spelling ParseAddress knows: a launched plugin listens on a unix socket in
+// the directory filex gave it (sockDir), or on a loopback port - never on a
+// socket somewhere else, and never at an http(s):// address, which is a
+// remote plugin's spelling. Whatever the handshake names is where filex sends
+// the token it minted and every storage credential, so a plugin that names
+// another plugin's socket, the Docker socket or a host on the internet is
+// refused rather than believed.
+func parseHandshake(line, sockDir string) (Address, error) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "unix:") && !strings.HasPrefix(line, "tcp:") {
+		return Address{}, fmt.Errorf("plugin: the handshake must name unix:<socket in its socket directory> or tcp:127.0.0.1:<port>, got %q", line)
+	}
+	addr, err := ParseAddress(line)
+	if err != nil {
+		return Address{}, err
+	}
+	if addr.Network != "unix" {
+		return addr, nil // tcp: ParseAddress already held it to loopback
+	}
+	// Both sides with their links resolved: a link inside the directory (or a
+	// linked subdirectory) pointing elsewhere is the same thing spelled
+	// differently.
+	dir, err := absReal(sockDir)
+	if err != nil {
+		return Address{}, fmt.Errorf("plugin: socket directory: %w", err)
+	}
+	sock, err := absReal(addr.Target)
+	if err != nil {
+		return Address{}, fmt.Errorf("plugin: the handshake names %s: %w", addr.Target, err)
+	}
+	if !within(dir, sock) {
+		return Address{}, fmt.Errorf("plugin: the handshake names %s, outside the plugin's socket directory %s", addr.Target, sockDir)
+	}
+	if fi, err := os.Stat(sock); err != nil || fi.IsDir() {
+		return Address{}, fmt.Errorf("plugin: the handshake names %s, which is not a socket", addr.Target)
+	}
+	addr.Target = sock
+	return addr, nil
+}
+
+// absReal is p made absolute with every link along it resolved.
+func absReal(p string) (string, error) {
+	a, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(a)
+}
+
+// within reports whether path lies strictly inside dir (both absolute and
+// clean).
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// errPluginRedirect: a plugin answered with a redirect. Its address is the
+// one the operator registered (or the plugin announced), and the token and
+// the storage credentials go there and nowhere else.
+var errPluginRedirect = errors.New("the plugin answered with a redirect, which filex does not follow - register the address it points to instead")
+
 // NewClient builds a client for addr authenticating with token.
 func NewClient(addr Address, token string) *Client {
 	tr := &http.Transport{
@@ -80,18 +144,31 @@ func NewClient(addr Address, token string) *Client {
 		IdleConnTimeout:     90 * time.Second,
 		// Reads and writes stream whole objects; only the connect is bounded.
 		ResponseHeaderTimeout: 60 * time.Second,
+		// The plugin's own address, never an environment proxy's: the token
+		// and the credentials are not for a third party.
+		Proxy: nil,
 	}
-	if addr.Network == "unix" {
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	switch {
+	case addr.Network == "unix":
 		path := addr.Target
 		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", path)
 		}
-	} else {
-		d := &net.Dialer{Timeout: 10 * time.Second}
+	case strings.HasPrefix(addr.URL, "http://"):
+		// Plain http carries the token in the clear, which is acceptable only
+		// inside the private network - at every dial, not only the first.
+		tr.DialContext = privateOnlyDial(d)
+	default:
 		tr.DialContext = d.DialContext
 	}
-	return &Client{base: addr.URL, token: token, http: &http.Client{Transport: tr}}
+	return &Client{base: addr.URL, token: token, http: &http.Client{
+		Transport: tr,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errPluginRedirect
+		},
+	}}
 }
 
 // Close releases idle connections.

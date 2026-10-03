@@ -232,7 +232,7 @@ async function main() {
     await next.click();
     await page.getByText('How should the request behave?').waitFor();
     await page.getByLabel(/Freeze the file while signatures are collected/).check();
-    await page.locator('[data-testid="surface-form"] textarea').fill('Please sign by Friday — the kick-off is on Monday. Thank you!');
+    await page.locator('[data-testid="surface-form"] textarea').fill('Please sign by Friday - the kick-off is on Monday. Thank you!');
     await next.click();
     await page.getByText('What happens when everybody has signed?').waitFor();
     await page.getByLabel(/Write an audit trail PDF/).check();

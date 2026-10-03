@@ -147,13 +147,13 @@ describe('the one notification feed', () => {
     expect(notif.unreadCount).toBe(3);
     expect(notif.feed.map((n) => n.id)).toEqual([3, 2, 1]);
     expect(listCalls).toHaveBeenCalledTimes(1);
-    expect(toasts).toEqual(['New file: arrived.txt — /arrived.txt']);
+    expect(toasts).toEqual(['New file: arrived.txt - /arrived.txt']);
 
     // The next quiet tick is quiet again.
     listCalls.mockClear();
     await tick();
     expect(listCalls).not.toHaveBeenCalled();
-    expect(toasts).toEqual(['New file: arrived.txt — /arrived.txt']);
+    expect(toasts).toEqual(['New file: arrived.txt - /arrived.txt']);
   });
 
   it('reading a row here does not make the next tick refetch or announce', async () => {

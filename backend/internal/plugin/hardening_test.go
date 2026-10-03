@@ -145,22 +145,22 @@ func TestRefusedAndPrivateHost(t *testing.T) {
 
 func TestCheckDownloadURLRefusesPrivateLiterals(t *testing.T) {
 	for _, u := range []string{"http://127.0.0.1:8080/x", "http://10.0.0.5/x", "http://169.254.169.254/latest", "http://[::1]/x", "http://[fd00::2]/x"} {
-		_, err := checkDownloadURL(u, true)
+		_, err := checkDownloadURL(u, &netguard.Policy{})
 		var rej RejectedError
 		if err == nil || !errors.As(err, &rej) {
 			t.Errorf("%s: want a rejection, got %v", u, err)
 		}
 		// An embedder that supplied its own client has taken the guard over.
-		if _, err := checkDownloadURL(u, false); err != nil {
+		if _, err := checkDownloadURL(u, nil); err != nil {
 			t.Errorf("%s: with the guard off only the scheme is checked, got %v", u, err)
 		}
 	}
 	for _, u := range []string{"ftp://x/y", "file:///etc/passwd", "http:///nohost", "not a url"} {
-		if _, err := checkDownloadURL(u, false); err == nil {
+		if _, err := checkDownloadURL(u, nil); err == nil {
 			t.Errorf("%s: should be refused whatever the guard says", u)
 		}
 	}
-	if _, err := checkDownloadURL("https://releases.example.com/memfs", true); err != nil {
+	if _, err := checkDownloadURL("https://releases.example.com/memfs", &netguard.Policy{}); err != nil {
 		t.Fatalf("a public https URL is what this is for: %v", err)
 	}
 }

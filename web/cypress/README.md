@@ -32,7 +32,7 @@ one line each:
   runs on every push and pull request.
 
 The practical difference is that a Cypress case can assert the UI and the API
-that feeds it in the same chain — `cy.request` next to `cy.get` — which is what
+that feeds it in the same chain - `cy.request` next to `cy.get` - which is what
 makes the contract sweeps (`70-admin-endpoints`, `65-manager-api`,
 `95-capabilities-sync`) cheap enough to be worth having. A Playwright spec doing
 the same would be a slower way to write the same assertion.
@@ -53,7 +53,7 @@ CYPRESS_ADMIN_PASSWORD=<from the vault> \
 ⚠ Never in CI, and never as the default. The default used to be
 `https://fm.example.com`, and that one line is why this suite was never automated: it
 needed a secret nobody could commit, it could not be aimed at the build under
-review, and a red run had two possible causes. It also hid real failures — see
+review, and a red run had two possible causes. It also hid real failures - see
 the traps below.
 
 `pnpm --filter @brftech/filex-admin cy:open` opens the interactive runner
@@ -68,7 +68,7 @@ cypress/
     00-smoke                 healthz, capabilities, the SPA boots
     05-routing               every admin route hydrates
     10 / 11 / 15-login…      auth happy + sad paths, logout
-    12-drive-front-door      /drive — the end-user prefix (v0.30.0)
+    12-drive-front-door      /drive - the end-user prefix (v0.30.0)
     13-navigation-ui         admin sidebar → route
     14-explorer-sidenav      the explorer nav panel: rail, drawer, views
     16-explorer-connections  "How to connect" + "API keys" from the panel
@@ -87,7 +87,7 @@ cypress/
                              an array"
     88…99                    PWA, webhooks, ONLYOFFICE, capabilities, public
   support/
-    e2e.ts                   global setup — read the two exception filters
+    e2e.ts                   global setup - read the two exception filters
     commands.ts              cy.apiLogin / cy.uiLogin / cy.adminGet
 ```
 
@@ -96,14 +96,14 @@ cypress/
 - **The install banner covers the sidebar.** `InstallPrompt.vue`'s wrapper is
   `fixed inset-x-0 bottom-0 z-40` with no `pointer-events-none` (its neighbour
   `PendingOpsTray` has one), so the whole bottom strip of every admin page is a
-  hit target — including the 256px the sidebar occupies. At the configured
+  hit target - including the 256px the sidebar occupies. At the configured
   1440x900 viewport that is thirteen nav destinations (Settings, Branding,
   Appearance, Protection, External, Replication, Queue, Notifications,
   Webhooks, Plugins, Usage, Audit, Updates) plus About, and Identity
   providers under Access, that neither Cypress nor a person can click without
   dismissing the banner first. `support/e2e.ts` dismisses it before every load
   using the product's own key; `90-pwa-install` opts back in.
-  **The overlap itself is NOT fixed — it is a real UI bug.**
+  **The overlap itself is NOT fixed - it is a real UI bug.**
 - **Cypress calls a link clipped outside a scrollable ancestor hidden.** The
   sidebar is `overflow-y-auto`, so anything below the fold needs
   `.scrollIntoView()` before `.click()`. Without it seven cases in
@@ -111,18 +111,18 @@ cypress/
 - **`ResizeObserver loop completed with undelivered notifications` is not an
   error.** It is a browser notice, and the explorer triggers it on any viewport
   change because it watches its own container to pick narrow mode. Cypress
-  fails the test on it unless it is filtered — which is why there was no
+  fails the test on it unless it is filtered - which is why there was no
   drawer/narrow coverage at all.
 - **A failing test makes the NEXT `cy.visit` in the same file hang for the full
   60-second page-load timeout.** One broken selector therefore reads as two
   failures and costs a minute. Fixing four real assertions took the same 47
   specs from 9m58s to well under three.
-- **Go serializes an empty slice as `null`, not `[]`** — `{"nodes": null}`,
+- **Go serializes an empty slice as `null`, not `[]`** - `{"nodes": null}`,
   `{"items": null}`. Assert the envelope, or seed a row and assert the array.
 - **`omitempty` fields are absent, not null.** `storages[].replica_target_id`
   only appears once a storage is paired.
 - **Do not hardcode a list of external slots.** The old specs asserted
-  `mermaid`, which this build has not had for a long time — they passed only
+  `mermaid`, which this build has not had for a long time - they passed only
   because production's `external` table still holds the row from an older
   version. Read the slots from `/api/files/capabilities` and assert the two
   endpoints agree.
@@ -133,23 +133,23 @@ cypress/
   native-install path only exists under a phone user-agent.
 - **Environment-dependent cases gate on the capability probe, never on a
   hostname.** `92-onlyoffice` reads `external.onlyoffice` and expects 503 when
-  the integration is off and a 4xx when it is on — on a host with a Document
+  the integration is off and a 4xx when it is on - on a host with a Document
   Server it becomes a stronger assertion with no code change.
 
 - **A `--port` you did not check can be somebody else's instance.** `filex serve`
-  fails to bind when a port is taken and exits — but `/healthz` answers anyway,
+  fails to bind when a port is taken and exits - but `/healthz` answers anyway,
   from the stranger, so the harness seeds and measures the wrong tree and
   reports a confident number about a build nobody asked about. It happened
   twice in one afternoon. `e2e/run.mjs` now refuses to continue unless the
   child it started reached its own listener without a bind error AND the
-  instance reports zero storages (`assertOurOwnInstance`) — read the comment
+  instance reports zero storages (`assertOurOwnInstance`) - read the comment
   there before weakening it: two earlier versions of that check sampled the
   race instead of waiting for its verdict, and both let a stranger through.
 - **A control character in a regex is invisible and always passes.**
   `14-explorer-sidenav` carried a literal 0x08 BACKSPACE where `\b` was meant,
-  so its `not.match` could never fail — the regression guard for the reported
+  so its `not.match` could never fail - the regression guard for the reported
   `.shared` tab-strip defect was decoration for as long as it existed. eslint's
-  `no-control-regex` had been reporting it. Scan for bytes < 0x09 and 0x0B–0x1F
+  `no-control-regex` had been reporting it. Scan for bytes < 0x09 and 0x0B-0x1F
   rather than reading the line.
 
 ## Credentials

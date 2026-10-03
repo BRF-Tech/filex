@@ -42,6 +42,10 @@ import {
   newDraft,
   slugify,
 } from '@/lib/themeTokens';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
+
+// setTheme() writes the palette to the account 400 ms later.
+answerAccountPrefs();
 
 const THEMES_GO = path.resolve(__dirname, '../../../backend/internal/api/handlers/themes.go');
 

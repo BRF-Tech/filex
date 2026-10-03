@@ -84,7 +84,28 @@ const (
 	// on this machine. A note, not a warning: split-horizon DNS is a real and
 	// working arrangement.
 	CodePublicURLUnresolved = "public_url_unresolved"
+	// CodeJWTNotEnforced: the document server took a conversion request that
+	// carried no token, so JWT is off on it. Measured by the Test, never
+	// guessed from the configuration (onlyoffice.CheckReversePath).
+	CodeJWTNotEnforced = "jwt_not_enforced"
 )
+
+// FieldSecret is the JWT secret field, for an advisory about JWT.
+const FieldSecret = "secret"
+
+// JWTNotEnforced is the warning for a document server that does not enforce
+// JWT. A warning, not a note: measured with ONLYOFFICE Docs 9.4 (e2e/realenv,
+// issue #80 S2), such a server still checks the token in filex's editor
+// configuration against its own secret and refuses it ("checkJwt error ...
+// invalid signature" in its log), so no document opens; it refuses to fetch
+// from private addresses, and its save callbacks arrive unsigned and filex
+// refuses them. It does NOT ignore filex's signature, as this said before.
+func JWTNotEnforced(serviceURL string) Advisory {
+	return Advisory{
+		Code: CodeJWTNotEnforced, Field: FieldSecret, Severity: SeverityWarning, Detail: serviceURL,
+		Message: "The document server accepted an unsigned request, so JWT is off on it. It still checks the token in filex's editor configuration, with its own secret, and refuses it, so documents do not open (\"The document security token is not correctly formed\"); it refuses to download from private addresses; and it sends its save callbacks unsigned, which filex refuses. Set JWT_ENABLED=true and JWT_SECRET to the same secret on the document server.",
+	}
+}
 
 // Advisory is one thing worth saying about a configuration that no probe from
 // this process can settle.
@@ -241,7 +262,7 @@ func Advise(in AdvisoryInput) []Advisory {
 					Code: CodeBrowserLoopbackHost, Field: FieldURL, Severity: SeverityWarning,
 					Detail: hostOf(serviceURL),
 					Message: fmt.Sprintf(
-						"This is a loopback address, but filex is published at %s — the people who open it are not on this host, and to their browser %q means their own machine.",
+						"This is a loopback address, but filex is published at %s - the people who open it are not on this host, and to their browser %q means their own machine.",
 						publicURL, hostOf(serviceURL)),
 				})
 			}
@@ -259,17 +280,17 @@ func Advise(in AdvisoryInput) []Advisory {
 			// that fires on a working setup is worse than none.
 			severity := SeverityWarning
 			msg := fmt.Sprintf(
-				"The document server fetches the document from filex and posts the save back to %s. Inside its own container that address is the document server, not filex. Set the callback URL — or FILEX_PUBLIC_URL — to an address the document server can reach.",
+				"The document server fetches the document from filex and posts the save back to %s. Inside its own container that address is the document server, not filex. Set the callback URL - or FILEX_PUBLIC_URL - to an address the document server can reach.",
 				publicURL)
 			if !publicURLSet {
 				msg = fmt.Sprintf(
-					"FILEX_PUBLIC_URL was never set, so it defaulted to %s. The document server fetches the document from filex and posts the save back to that address — inside its own container it is the document server, not filex.",
+					"FILEX_PUBLIC_URL was never set, so it defaulted to %s. The document server fetches the document from filex and posts the save back to that address - inside its own container it is the document server, not filex.",
 					publicURL)
 			}
 			if svcClass == ClassLoopback {
 				severity = SeverityNote
 				msg = fmt.Sprintf(
-					"Both filex (%s) and the document server are on loopback. That works only while they share one network namespace — host networking, or a single pod. If the document server runs in its own container, the save callback will not reach filex.",
+					"Both filex (%s) and the document server are on loopback. That works only while they share one network namespace - host networking, or a single pod. If the document server runs in its own container, the save callback will not reach filex.",
 					publicURL)
 			}
 			out = append(out, Advisory{

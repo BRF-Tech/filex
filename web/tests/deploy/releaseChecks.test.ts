@@ -69,7 +69,7 @@ describe('CHANGELOG.md', () => {
     expect(out).toContain('## [Unreleased]\n\n## [0.45.0] - 2026-09-26\n\n### Added\n\n- **A thing.**');
     expect(hasContent(unreleasedBody(out))).toBe(false);
     // The notes the stores and the release page are built from can read it.
-    expect(releaseNotes(out, '0.45.0')).toContain('filex v0.45.0 — 2026-09-26');
+    expect(releaseNotes(out, '0.45.0')).toContain('filex v0.45.0 - 2026-09-26');
     expect(releaseNotes(out, '0.45.0')).toContain('• A thing.');
   });
 

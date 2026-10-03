@@ -51,6 +51,7 @@ SPA, talking to pluggable storage / auth / DB drivers.
 │  │  Storage drivers  │  │  Search (Bleve)  │    │   Auth drivers   │    │
 │  │ local · s3 · sftp │  │  full-text +     │    │ local · oidc ·   │    │
 │  │ webdav · ftp· smb │  │  metadata        │    │ ldap · proxy_hdr │    │
+│  │                   │  │                  │    │ windows · pam    │    │
 │  └─────────┬─────────┘  └─────────┬────────┘    └─────────┬────────┘    │
 │            │                       │                       │             │
 │            ▼                       ▼                       ▼             │
@@ -69,7 +70,7 @@ SPA, talking to pluggable storage / auth / DB drivers.
 │  └──────┬───────┘         └────────┬────────┘        └─────────────┘    │
 │         │                          │                                      │
 │         ▼                          ▼                                      │
-│  Storage backends           ffmpeg / vips / gs / soffice                  │
+│  Storage backends           ffmpeg / vips / gs / ONLYOFFICE               │
 │  (local FS, S3, SFTP,       (full image only; absent in slim)             │
 │   WebDAV)                                                                 │
 │                                                                           │
@@ -99,7 +100,7 @@ A typical "list directory" call:
        SELECT * FROM files
        WHERE storage_id = $1 AND parent_path = '/sub'
        ORDER BY name LIMIT 1000
-   (1-5 ms even on 50k entries — indexed on (storage_id, parent_path))
+   (1-5 ms even on 50k entries - indexed on (storage_id, parent_path))
 4. For each row, mints a signed thumb_url (HMAC) if applicable
 5. Returns JSON { entries, total, storage }
 ```
@@ -127,7 +128,7 @@ a new driver = implement the interface + register at init.
 
 > A **storage** driver no longer has to be compiled in: a
 > [plugin](PLUGINS.md) is a separate program filex speaks HTTP/JSON to, and it
-> is registered in the same registry as `plugin:<name>` — with the capabilities
+> is registered in the same registry as `plugin:<name>` - with the capabilities
 > it declares probed before anything is registered at all.
 
 ### Storage driver
@@ -148,7 +149,7 @@ type Storage interface {
 }
 ```
 
-Built-ins: `local`, `s3`, `sftp`, `webdav`, `ftp`, `smb` — plus any installed
+Built-ins: `local`, `s3`, `sftp`, `webdav`, `ftp`, `smb` - plus any installed
 [plugin](PLUGINS.md), registered as `plugin:<name>`.
 
 ### Auth driver
@@ -163,36 +164,37 @@ type Provisioner interface {
 }
 ```
 
-Built-ins: `local` (bcrypt), `oidc`, `ldap`, `proxy_header`. Multiple drivers
-can be enabled simultaneously. A driver that redirects (`oidc`) gets its own
-button; the two that read a **password** (`local`, `ldap`) share the one form and
-are chained — `auth.LoginChain` tries them in the configured order and the first
-to accept wins, so `local` first keeps `admin@local` answerable while the
-directory is down. The same chain feeds the file protocols through
+Built-ins: `local` (bcrypt), `oidc`, `ldap`, `proxy-header`, `windows` and `pam`
+(the last two only from **Admin → Identity providers**). Multiple drivers can be
+enabled simultaneously. A driver that redirects (`oidc`) gets its own button;
+the four that read a **password** (`local`, `ldap`, `windows`, `pam`) share the
+one form and are chained - `auth.LoginChain` tries them in the configured order
+and the first to accept wins, so `local` first keeps `admin@local` answerable
+while the directory is down. The same chain feeds the file protocols through
 `protocolauth.Directory`.
 
 ### DB driver
 
 The DB layer is split:
 - **Migrations** via [goose](https://github.com/pressly/goose), as **one tree
-  per dialect** — `backend/db/migrations/{sqlite,postgres,mysql}/`, each
+  per dialect** - `backend/db/migrations/{sqlite,postgres,mysql}/`, each
   embedded by its own driver (`Driver.MigrationsFS()`). Same numbers, same
   table and column names, hand-written per engine: a reserved word, a
   `DEFAULT` an engine will not take on a `TEXT` column, or a statement block
   MySQL's driver refuses are not things one guarded file can express. A schema
-  comparison holds the three trees to the same names — see
+  comparison holds the three trees to the same names - see
   [DATABASES.md](DATABASES.md#what-supported-is-checked-to-mean).
 - **Queries** are hand-written behind the one `db.Store` interface. SQLite and
-  MySQL share an implementation — the placeholders and column names are
+  MySQL share an implementation - the placeholders and column names are
   identical, and the one construct they genuinely disagree on is rewritten at
   call time (`ON CONFLICT … excluded.x` → `ON DUPLICATE KEY UPDATE … VALUES(x)`,
   a no-op on SQLite). PostgreSQL has its own, because `$n` placeholders and
   `RETURNING` instead of `LastInsertId` are not a rewrite.
 
 Built-ins:
-- `sqlite` — `modernc.org/sqlite` (pure Go, no CGO)
-- `mysql`  — `go-sql-driver/mysql`
-- `postgres` — `jackc/pgx/v5`
+- `sqlite` - `modernc.org/sqlite` (pure Go, no CGO)
+- `mysql`  - `go-sql-driver/mysql`
+- `postgres` - `jackc/pgx/v5`
 
 ---
 
@@ -210,7 +212,7 @@ Laravel conventions of the sister projects.
 | `users`                      | account row; bcrypt hash for local; OIDC `sub`/`iss` |
 | `sessions`                   | session cookies + Bearer token cache |
 | `storages`                   | named storage instances + driver config (encrypted) |
-| `files`                      | DB-cached file tree, indexed by `(storage_id, parent_path)`. Every row also says whose it is — `owner_id` (who put it here), `last_actor_id` (who touched it last) and `external_upload` (it arrived through an anonymous drop link). `NULL` on either id means **system**: nobody put it here through filex, and no user row is invented for it. A trashed row also says who put it in the trash (`deleted_by`, `NULL` when nobody is recorded) |
+| `files`                      | DB-cached file tree, indexed by `(storage_id, parent_path)`. Every row also says whose it is - `owner_id` (who put it here), `last_actor_id` (who touched it last) and `external_upload` (it arrived through an anonymous drop link). `NULL` on either id means **system**: nobody put it here through filex, and no user row is invented for it. A trashed row also says who put it in the trash (`deleted_by`, `NULL` when nobody is recorded) |
 | `file_metadata`              | lightweight extended attrs (mime override, label, color tag) |
 | `shares`                     | public links: token, PIN, expiry, max_downloads, owner |
 | `share_downloads`            | individual download events (audit) |
@@ -279,7 +281,7 @@ loop:
     # trash) holds no bytes in the trash: not a trash entry, dropped (#74)
     drop_rows(db.files where storage_id=$id and deleted and path not in .filex-trash/)
 
-    # tombstone pass — a node not seen this run is a CANDIDATE, not a verdict
+    # tombstone pass - a node not seen this run is a CANDIDATE, not a verdict
     if seen < 0.7 * last_ok_run.seen:       # the whole listing looks wrong
       skip the pass entirely                # (a failed/aborted run is no baseline)
     for f in db.files where storage_id=$id and seen_at < run_started:
@@ -319,19 +321,19 @@ loop:
 A **folder rescan** (`POST /api/admin/storages/{id}/sync?path=`) runs the same
 walk from one catalogued folder's row (`Worker.RescanFolder`): the one-pass
 listing asks for that subtree only, the tombstone candidates are the stale rows
-strictly below the folder (an exact, character-counted prefix — never `LIKE`),
+strictly below the folder (an exact, character-counted prefix - never `LIKE`),
 the whole-listing guard compares against the folder's own live row count, and a
 listing that failed part-way skips the tombstone pass. It takes the storage's
 one-run lock and writes no `sync_runs` row.
 
 ⚠ Absence from a listing is not proof of deletion, and answering it with
-"move to trash" turns any unrelated bug into lost data — which is exactly
+"move to trash" turns any unrelated bug into lost data - which is exactly
 what happened in GitHub #16, where uploads that never reached S3 were trashed
 by the next run. So the pass has to be *right* about the deletion, and three
 things stand between a missing object and the trash:
 
 1. **A whole-listing guard.** If the run saw more than 30 % fewer entries than
-   the previous one, no deletions happen at all — that shape is a backend
+   the previous one, no deletions happen at all - that shape is a backend
    glitch, not a mass deletion.
 2. **Did filex ever store it?** A node whose `transfer_state` is not `stored`
    is in staging or is a failed upload. Its absence from the backend is the
@@ -341,11 +343,11 @@ things stand between a missing object and the trash:
 3. **A direct second opinion.** For the remaining candidates the driver is
    asked with `Stat`. Only a definite not-found counts; an object the listing
    missed but `Stat` can see is kept, and so is one that could not be checked
-   at all (permissions, timeout, 503) — "I could not check" must never read as
+   at all (permissions, timeout, 503) - "I could not check" must never read as
    "it is gone".
 
 A file genuinely deleted in the bucket still leaves filex, so deletions made
-outside filex are still reflected — but it leaves the **catalogue**, not into
+outside filex are still reflected - but it leaves the **catalogue**, not into
 the Trash (issue #74). The Trash is where filex keeps the bytes of what was
 deleted in filex; an object deleted elsewhere has no bytes there, and up to 0.47
 its row was listed in the Trash with a Restore that could bring nothing back.
@@ -361,15 +363,15 @@ that survive step 1, so a healthy sync costs nothing extra.
 Deleting a file in filex is a *rename*: the bytes move to
 `.filex-trash/<unix>-<rand>__<name>` and the node row is soft-deleted and
 retagged to that key ([TRASH-VERSIONING.md](TRASH-VERSIONING.md)). Quarantine
-is the same operation — the antivirus job produces an identical row
-([PROTECTION.md](PROTECTION.md)) — so nothing in the catalogue tells the two
+is the same operation - the antivirus job produces an identical row
+([PROTECTION.md](PROTECTION.md)) - so nothing in the catalogue tells the two
 apart.
 
 The walk used to descend into the trash bucket, find an object with no *live*
 row, find the soft-deleted one, and clear `deleted_at` on it. A file the user
 deleted therefore came back at the next pass, and an infected file left
 quarantine at the next pass: the security control expired on a timer nobody
-set. It fired on every pass, on every driver, with no condition attached —
+set. It fired on every pass, on every driver, with no condition attached -
 poll, fsnotify and driver-watch all funnel into the same full `RunOnce` walk,
 so there is no incremental mode in which it did not happen.
 
@@ -377,24 +379,24 @@ Two rules now stand in its place:
 
 1. **`.filex-trash/` is skipped.** The rows for everything in there already
    exist, retagged to the very keys sitting on the storage, and they are
-   maintained by the trash service — restore, retention purge — never by a
+   maintained by the trash service - restore, retention purge - never by a
    listing. (A consequence: `seen` no longer counts trashed objects, so a
    storage whose trash held more than 30 % of its objects trips the
    whole-listing guard once on the first pass after upgrading.)
 2. **A trashed row is never revived.** When an object turns up at a path where
-   a trashed row still sits — an out-of-band restore, or simply a new file with
-   an old name — the trashed row stays in the trash and the object is
+   a trashed row still sits - an out-of-band restore, or simply a new file with
+   an old name - the trashed row stays in the trash and the object is
    catalogued as a **new node**, which is indexed and treated as new
    everywhere. Bytes that reappear at a path are not the file that was deleted
    there; reviving the row would hand them another file's identity, version
    history, comments and shares, and nothing downstream would ever look at
    them again. Migration `00032` makes the `(storage_id, path_hash)` unique
-   index live-only so the new row is possible — the same thing `00018` did for
+   index live-only so the new row is possible - the same thing `00018` did for
    `(storage_id, parent_id, name)`.
 
    > "Treated as new" means catalogued, indexed **and scanned**. The walk
-   > hands every file it newly catalogues — and every file whose content
-   > drifted — to the antivirus queue, so a file that appears on a storage out
+   > hands every file it newly catalogues - and every file whose content
+   > drifted - to the antivirus queue, so a file that appears on a storage out
    > of band is scanned whether it lands on a fresh path or on one a trashed
    > row once held. See
    > [PROTECTION.md](PROTECTION.md#files-the-sync-discovers).
@@ -406,12 +408,12 @@ from), and a row the old walk minted for the trash's own bytes is dropped
 outright. Bytes are never touched by either.
 
 **`.versions/` and `.thumbs/` are filex's too, and the walk skips them the same
-way** (`versioning.IsInternalTree`, anchored at the storage root — the one list
+way** (`versioning.IsInternalTree`, anchored at the storage root - the one list
 the sync walk, a cross-storage copy and the public share pages all ask). The
 walk used to skip only the trash, so a full scan minted a system-owned row for
 every snapshot folder and file. Unseen once the walk stopped listing them, the
-*folder* rows would have gone to the trash in place — `confirmGone` has no
-object to `Stat` for a directory — and purging a trashed folder deletes its
+*folder* rows would have gone to the trash in place - `confirmGone` has no
+object to `Stat` for a directory - and purging a trashed folder deletes its
 prefix on the backend: every version of every file. So every row under those
 two trees, live or trashed, is dropped from the catalogue before the tombstone
 pass runs (deepest first, search documents included, backend untouched), and
@@ -420,7 +422,7 @@ that failed is a cleanup deferred, never a version history in the trash.
 
 `storage.Sync` compares the backend's etag when the driver reports one (S3,
 WebDAV PROPFIND) and the object's **size and modification time** when it does
-not — which is local, SFTP, SMB and FTP. Either way the walk is a full re-list;
+not - which is local, SFTP, SMB and FTP. Either way the walk is a full re-list;
 the fingerprint decides which rows it updates. What each of those catches, and
 the two kinds of external change that slip past the second one, is in
 [STORAGE.md → Drift detection](STORAGE.md#drift-detection-what-a-replaced-file-looks-like).
@@ -439,13 +441,13 @@ Two properties matter to everything else in this document:
 
 - **An explorer with a healthy socket does not poll.** The 12 s re-listing in
   `useRealtime.ts` is the fallback for a socket that failed. So a write that
-  emits no frame is not "slow to appear" — it does not appear at all until the
+  emits no frame is not "slow to appear" - it does not appear at all until the
   user navigates.
 - **Bursts are coalesced on the leading edge.** The first change in a quiet
   room goes out immediately and unmodified; everything after it is merged into
   one frame per window (200 ms, doubling to 1.5 s while the burst continues,
   reset when the folder goes quiet). A merged frame carries `count`. Nothing is
-  dropped — a burst always ends with a frame reflecting its final state.
+  dropped - a burst always ends with a frame reflecting its final state.
 
 Every write surface reaches the hub through the same post-write gate, and the
 five protocol servers reach it through `internal/protocolsync`, the one package
@@ -458,22 +460,22 @@ integrators are in [REALTIME.md](REALTIME.md).
 
 `ops_queue` is the durable work list behind antivirus scans, content
 extraction, thumbnails, and async copy/move/delete. Three drivers implement one
-interface — **sqlite** (in the app DB), **postgres** (`SELECT … FOR UPDATE SKIP
-LOCKED`) and **redis** — and a shared contract test runs the same suite against
+interface - **sqlite** (in the app DB), **postgres** (`SELECT … FOR UPDATE SKIP
+LOCKED`) and **redis** - and a shared contract test runs the same suite against
 all three.
 
 Three columns carry more meaning than their names suggest:
 
-- `priority` — claimed `ORDER BY priority DESC, enqueued_at ASC` on all three
+- `priority` - claimed `ORDER BY priority DESC, enqueued_at ASC` on all three
   drivers, which is what keeps an interactive scan ahead of a twenty-thousand
   file first import. ⚠ The redis driver ignored it entirely until v0.34.0; its
   pending set is now a **sorted set** whose score encodes priority and arrival,
   claimed by a single Lua script, converted from the old LIST at startup.
   Downgrading past that conversion is not supported.
-- `not_before` — a delayed operation, used by the editor's debounced save-scan.
+- `not_before` - a delayed operation, used by the editor's debounced save-scan.
   Deliberately a row rather than a timer in the process, so a deploy does not
   take every pending scan with it.
-- `dedup_key` — unique among **pending** rows only, so "one pending scan per
+- `dedup_key` - unique among **pending** rows only, so "one pending scan per
   file" holds while a save burst is arriving and is released the moment a
   worker claims the scan.
 
@@ -507,7 +509,7 @@ These are mounted at:
 
 | Route            | Source                       | Notes |
 |------------------|------------------------------|-------|
-| `/admin/*`       | `embed/admin/`               | SPA — fallthrough to `index.html` for client routing |
+| `/admin/*`       | `embed/admin/`               | SPA - fallthrough to `index.html` for client routing |
 | `/drive/*`       | `embed/admin/`               | The same SPA, end-user front door. vue-router reads its history base from the prefix that served the document, so a session that starts here stays on `/drive/…` |
 | `/files/edit`    | `embed/admin/`               | The standalone editor, outside both prefixes (`openPageBase`) |
 | `/embed.js`      | `embed/web/filex.js`         | Web Component bundle |
@@ -585,8 +587,8 @@ filemanager/
 │   │   ├── sync/                   # background sync worker
 │   │   └── thumb/                  # thumbnail pipeline
 │   ├── db/
-│   │   ├── migrations/             # goose .sql — sqlite/ postgres/ mysql/
-│   │   └── queries/                # sqlc definitions — not generated from;
+│   │   ├── migrations/             # goose .sql - sqlite/ postgres/ mysql/
+│   │   └── queries/                # sqlc definitions - not generated from;
 │   │                               #   the drivers hold the real SQL
 │   ├── embed/                      # populated by sync-embed.mjs
 │   ├── go.mod
@@ -600,7 +602,7 @@ filemanager/
 ├── web/                            # Vue 3 admin SPA (embedded)
 ├── demo/                           # standalone HTML demos
 ├── docker/
-│   ├── Dockerfile                  # the :latest / :full image, ~510 MB
+│   ├── Dockerfile                  # the :latest / :full image, ~225 MB
 │   ├── Dockerfile.slim             # the :slim image, ~43 MB, binary only
 │   └── Dockerfile.local            # local hot-fix builds from a host dist
 │

@@ -18,7 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
 
-// Burak, 2026-09-27: an app's rows in the "New" menu (`new_documents`). The
+// The maintainer, 2026-09-27: an app's rows in the "New" menu (`new_documents`). The
 // explorer is told them with the other document types, a person makes one
 // like any New document — a file, or a draft (issue #71) — and it is made of
 // the app's template (or nothing).

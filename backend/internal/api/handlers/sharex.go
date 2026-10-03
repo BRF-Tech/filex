@@ -130,7 +130,7 @@ func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
 	// the parent chain — and therefore the freshly written file — gets a cache row.
 	if folder != "" {
 		if err := h.ensureFolder(r.Context(), folder); err != nil {
-			writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+			writeAIError(w, err)
 			return
 		}
 	}
@@ -139,13 +139,13 @@ func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
 	// chunk threshold WriteStream stages it so this reply does not wait on the
 	// backend write.
 	if _, err := h.ops.WriteStream(r.Context(), dest, f, fh.Size); err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 
 	res, err := h.ops.CreateShare(r.Context(), dest, false, 0, 0)
 	if err != nil {
-		writeJSON(w, aiStatus(err), map[string]string{"error": err.Error()})
+		writeAIError(w, err)
 		return
 	}
 

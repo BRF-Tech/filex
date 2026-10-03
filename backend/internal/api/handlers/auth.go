@@ -1,17 +1,27 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
+	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/basepath"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
+	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 )
 
@@ -35,7 +45,29 @@ type Auth struct {
 	// OIDCLocalLogout (FILEX_OIDC_LOGOUT=local) keeps sign-out inside filex:
 	// the IdP's session is left open, as it was before RP-initiated logout.
 	OIDCLocalLogout bool
+	// Guard limits wrong sign-in attempts per account identifier and per
+	// address (internal/loginguard). Nil = no limit, which is what a handler
+	// built without one (a test, an embedder) had before.
+	Guard *loginguard.Guard
+	// EmailToken is the installation's e-mail token (FILEX_OS_LOGIN_EMAIL_TOKEN,
+	// identity.EmailToken): a realm's derived addresses end in it
+	// (`alex@acme.local`). "" = the default.
+	EmailToken string
+	// Handoffs holds the one-use tickets that carry a sign-in from the
+	// platform's address to a tenant's own (see handOff; auth.HandoffStore).
+	// Nil = no handoff: the session is opened where the person signed in, as
+	// before.
+	Handoffs *auth.HandoffStore
+	// Live is the running set of sign-in providers: the sign-in page asks it
+	// which methods a realm has (Methods). Nil on a harness that has none;
+	// Methods then answers from LocalAuth / OIDCAuth alone.
+	Live *authsetup.Live
 }
+
+// handoffTTL is how long a sign-in handed to a tenant's address may take to
+// arrive there: one browser navigation. Short on purpose — the ticket is a
+// session in all but name until it is spent.
+const handoffTTL = 60 * time.Second
 
 // NewAuth constructs an Auth handler.
 func NewAuth(store db.Store, local auth.LoginDriver, oidc auth.OIDCDriver, publicURL string, multiTenant bool, cookieDomain string) *Auth {
@@ -67,6 +99,11 @@ type loginReq struct {
 	// this key; it is only consulted when the resolved user has TOTP
 	// enabled.
 	TOTP string `json:"totp"`
+	// Realm is the tenant realm the person typed (docs/MULTI-TENANCY.md,
+	// Realms). Read on a multi-tenant install only — the form shows the field
+	// only there; a single-tenant install ignores it. Empty = the tenant the
+	// address names, else the platform's own.
+	Realm string `json:"realm"`
 }
 
 // Login authenticates email + password and sets the session cookie.
@@ -94,32 +131,105 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	// every one of them in the confine-exempt supertenant. See
 	// auth.WithLoginHost / auth.ProvisionUser.
 	ctx := auth.WithRequestLoginHost(r.Context(), r)
+
+	// Which tenant this sign-in is for (multi-tenant only; nil otherwise): the
+	// realm typed, the tenant's own address, else the platform's own tenant.
+	// Every account lookup below stays inside it (auth.ResolveAccount).
+	lr, realmErr := h.loginRealm(ctx, r, req.Realm)
+	ctx = auth.WithLoginRealm(ctx, lr)
+
+	// ⚠ The limit sits ABOVE the driver chain: it is asked before any password
+	// is compared (so a locked account refuses even the right one) and it is
+	// keyed by what was TYPED, not by an account row — an identifier that names
+	// nobody is counted and answered exactly like one that does. It does not
+	// know which driver (local, LDAP, recovery…) will judge the password. The
+	// realm is part of the key: `acme/alex` and `beta/alex` are two people.
+	att := loginguard.Attempt{Identifier: req.Email, Realm: lr.CounterRealm(), IP: clientIP(r), Protocol: loginguard.ProtoWeb}
+	if h.Guard != nil {
+		if v := h.Guard.Check(r.Context(), att); v.Blocked {
+			h.writeLocked(w, v.Scope, v.RetryAfter, v.Message(requestLang(r)))
+			return
+		}
+	}
+	if realmErr != nil {
+		if !errors.Is(realmErr, auth.ErrUnknownRealm) && !errors.Is(realmErr, auth.ErrRealmConflict) {
+			slog.Error("login: could not tell which tenant the sign-in is for", slog.String("err", realmErr.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sign-in could not be checked"})
+			return
+		}
+		// ⚠ A realm nobody has, or one that is not this address's tenant, is
+		// answered — and counted — exactly as a wrong password: the form must
+		// not tell a stranger which realms exist.
+		slog.Debug("login refused", slog.String("reason", realmErr.Error()),
+			slog.String("realm", lr.CounterRealm()), slog.String("identifier", req.Email))
+		h.loginFailed(w, r, att, loginguard.ReasonCredentials, "invalid credentials", false)
+		return
+	}
 	user, token, err := h.LocalAuth.Login(ctx, req.Email, req.Password)
+	if errors.Is(err, auth.ErrBusy) {
+		// Not a judgement of the password: the provider is at its limit of
+		// simultaneous attempts. Try again — and it does not count against the
+		// person.
+		w.Header().Set("Retry-After", "3")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "busy", "message": srvtext.Text(requestLang(r), "server.login.busy", nil),
+		})
+		return
+	}
 	if err != nil {
+		// A provider whose operator switched show_refusal_reason on refused a
+		// person whose password was RIGHT, and may say why
+		// (auth.RefusedAfterPassword): the first-login rule, a system account.
+		// A code, never words; not counted against the person, whose password
+		// was not wrong. With the setting off the provider answered plain
+		// ErrUnauthorized and this is never reached.
+		if reason := auth.SSOReason(err); reason != "" && errors.Is(err, auth.ErrUnauthorized) {
+			slog.Info("login refused after the password; the provider tells why",
+				slog.String("reason", reason), slog.String("identifier", req.Email))
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "sign-in refused", "reason": reason})
+			return
+		}
 		// ⚠ One answer for every failure, on purpose — see the comment on
 		// local.Driver.Login. The driver has already logged WHICH failure it
 		// was; what an anonymous caller learns must not depend on that.
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		h.loginFailed(w, r, att, loginguard.ReasonCredentials, "invalid credentials", false)
+		return
+	}
+	// ⚠ The last word on the tenant boundary: whatever a provider returned, an
+	// account of another tenant is not signed in to through this realm. The
+	// lookups already stay inside it; this is the check that does not depend
+	// on every provider having got that right.
+	if !lr.Admits(user) {
+		_ = h.Store.DeleteSession(r.Context(), token)
+		slog.Warn("login refused: the account is not in the realm the sign-in was for",
+			slog.Int64("user_id", user.ID), slog.String("realm", lr.CounterRealm()))
+		h.loginFailed(w, r, att, loginguard.ReasonCredentials, "invalid credentials", false)
 		return
 	}
 	// A disabled account is refused on its own terms. Folding it into the
 	// maintenance branch below would tell the user the whole platform is
 	// locked down when in fact only their account is.
+	//
+	// Both answers carry the gate as a reason code too (auth.LoginBlockReason),
+	// so the form says it in the reader's language, as the SSO page does.
 	if !user.Enabled {
 		_ = h.Store.DeleteSession(r.Context(), token)
 		writeJSON(w, http.StatusForbidden, map[string]any{
 			"error":    "this account is disabled",
 			"disabled": true,
+			"reason":   auth.SSOReasonAccountDisabled,
 		})
 		return
 	}
-	if !auth.LoginAllowed(r.Context(), h.Store, h.MultiTenant, user) {
+	if reason := auth.LoginBlockReason(r.Context(), h.Store, h.MultiTenant, user); reason != "" {
 		// Maintenance mode: multi-tenant is off but tenants exist — only the
-		// supertenant may sign in. See docs/MULTI-TENANCY.md.
+		// supertenant may sign in; or the account's tenant is suspended. See
+		// docs/MULTI-TENANCY.md.
 		_ = h.Store.DeleteSession(r.Context(), token)
 		writeJSON(w, http.StatusForbidden, map[string]any{
 			"error":       "sign-in is temporarily limited to the platform operator",
 			"maintenance": true,
+			"reason":      reason,
 		})
 		return
 	}
@@ -147,17 +257,211 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 			slog.Debug("login refused",
 				slog.String("reason", "invalid two-factor code"),
 				slog.String("identifier", req.Email))
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"error":         "invalid two-factor code",
-				"totp_required": true,
-			})
+			// A wrong second factor is a wrong attempt like any other: it
+			// counts against the same account and address. (A MISSING code,
+			// above, does not — that is the form asking for its second step.)
+			h.loginFailed(w, r, att, loginguard.ReasonTOTP, "invalid two-factor code", true)
 			return
 		}
+	}
+	if h.Guard != nil {
+		h.Guard.Succeeded(r.Context(), att)
+	}
+	if h.handOff(w, r, lr, user, token) {
+		return
 	}
 	h.setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":  user,
 		"token": token,
+	})
+}
+
+// loginRealm resolves the tenant a sign-in is for, on a multi-tenant install;
+// (nil, nil) on a single-tenant one, where the realm field does not exist.
+func (h *Auth) loginRealm(ctx context.Context, r *http.Request, typed string) (*auth.LoginRealm, error) {
+	if !h.MultiTenant || h.Store == nil {
+		return nil, nil
+	}
+	t := tenant.NormalizeRealm(typed)
+	return auth.ResolveLoginRealm(ctx, h.Store, t, t != "", requestHost(r), h.EmailToken)
+}
+
+// handOff finishes a sign-in typed on the platform's address for a tenant that
+// has an address of its own: the session belongs THERE — the cookie is
+// host-bound, and the tenant's page is the one with its branding, its
+// sign-out and its links — so instead of a cookie here the answer is a
+// handoff ticket (auth.HandoffStore, purpose auth.HandoffLogin) the browser
+// carries to the tenant's address (POST /api/auth/handoff).
+//
+// The ticket's actor and subject are the ONE account that just signed in; it
+// lives handoffTTL, is spent by its first use, and is honoured on the tenant's
+// host only. It travels in the URL fragment of the tenant's sign-in page, which
+// a browser never sends to a server — so no access log, proxy or Referer ever
+// sees it — and it is never logged or audited, only its issue, use and refusal.
+//
+// A tenant with no address of its own is signed in to right here: the session
+// is scoped by the account's tenant, not by the host (auth.TenantResolver).
+func (h *Auth) handOff(w http.ResponseWriter, r *http.Request, lr *auth.LoginRealm, u *model.User, session string) bool {
+	if h.Handoffs == nil || lr == nil || !lr.Named || lr.Tenant == nil || lr.Tenant.IsSupertenant || u == nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(lr.Tenant.Host))
+	if host == "" || host == requestHost(r) {
+		return false
+	}
+	// Another address of the same tenant (its platform subdomain, an own
+	// domain: docs/TENANT-ADMIN.md) is the tenant's page too: the session
+	// stays where the person is.
+	if here, err := h.Store.GetProviderByHost(r.Context(), requestHost(r)); err == nil && here != nil && here.ID == lr.Tenant.ID {
+		return false
+	}
+	origin := h.Tenants.ForProvider(r.Context(), lr.Tenant.ID)
+	if origin == "" || origin == h.Tenants.Fallback() {
+		return false
+	}
+	t := auth.HandoffTicket{Purpose: auth.HandoffLogin, ActorID: u.ID, SubjectID: u.ID, Host: host, ProviderID: lr.Tenant.ID}
+	code, err := h.Handoffs.Issue(t, handoffTTL)
+	if err != nil {
+		slog.Warn("login: could not hand the sign-in to the tenant's address; it stays here", slog.String("err", err.Error()))
+		return false
+	}
+	auth.AuditHandoff(r.Context(), h.Store, auth.AuditHandoffIssued, &t, requestHost(r), "")
+	// The session the provider opened on THIS host is not the one the person
+	// will use: the tenant's address mints its own when the ticket arrives.
+	_ = h.Store.DeleteSession(r.Context(), session)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"handoff": map[string]string{"origin": origin, "code": code},
+	})
+	return true
+}
+
+// Handoff completes a sign-in handed over by handOff: POST /api/auth/handoff
+// {"code"}, on the tenant's own address. Answers like Login — the session
+// cookie, and {user, token} — or 401 for a ticket that is unknown, spent,
+// expired, issued for another purpose, presented on another host (it is spent
+// all the same), or whose account may no longer sign in here
+// (auth.CheckHandoffTarget). Every refusal of a real ticket is audited.
+func (h *Auth) Handoff(w http.ResponseWriter, r *http.Request) {
+	if h.Handoffs == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	ctx := r.Context()
+	host := requestHost(r)
+	refuse := func(t *auth.HandoffTicket, err error) {
+		reason := auth.HandoffRefuseUnknown
+		var hr *auth.HandoffRefusal
+		if errors.As(err, &hr) {
+			reason = hr.Reason
+		}
+		auth.AuditHandoff(ctx, h.Store, auth.AuditHandoffRefused, t, host, reason)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired handoff"})
+	}
+	t, err := h.Handoffs.Redeem(req.Code, auth.HandoffLogin, host)
+	if err != nil {
+		refuse(t, err)
+		return
+	}
+	u, err := auth.CheckHandoffTarget(ctx, h.Store, h.MultiTenant, t, host)
+	if err != nil {
+		refuse(t, err)
+		return
+	}
+	token, err := authlocal.IssueSession(ctx, h.Store, u.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not open a session"})
+		return
+	}
+	auth.AuditHandoff(ctx, h.Store, auth.AuditHandoffUsed, t, host, "")
+	h.setSessionCookie(w, r, token)
+	writeJSON(w, http.StatusOK, map[string]any{"user": u, "token": token})
+}
+
+// oidcHandOff is handOff for an OIDC callback: when the account's tenant has
+// an address of its own and the callback arrived elsewhere, it issues the
+// handoff ticket and answers the tenant's sign-in page to bounce to, with the
+// ticket in the fragment; "" to open the session here.
+func (h *Auth) oidcHandOff(r *http.Request, u *model.User, session string) string {
+	if h.Handoffs == nil || !h.MultiTenant || u == nil || u.ProviderID == nil {
+		return ""
+	}
+	p, err := h.Store.GetProvider(r.Context(), *u.ProviderID)
+	if err != nil || p == nil || p.IsSupertenant || strings.TrimSpace(p.Host) == "" {
+		return ""
+	}
+	here := requestHost(r)
+	if here == "" || strings.EqualFold(here, strings.TrimSpace(p.Host)) {
+		return ""
+	}
+	// Any address of the tenant (an own domain, its platform subdomain) is
+	// already the tenant's: the session stays where it was made.
+	if at, err := h.Store.GetProviderByHost(r.Context(), here); err == nil && at != nil && at.ID == p.ID {
+		return ""
+	}
+	origin := h.Tenants.ForProvider(r.Context(), p.ID)
+	if origin == "" || origin == h.Tenants.Fallback() {
+		return ""
+	}
+	t := auth.HandoffTicket{Purpose: auth.HandoffLogin, ActorID: u.ID, SubjectID: u.ID, Host: strings.ToLower(strings.TrimSpace(p.Host)), ProviderID: p.ID}
+	code, err := h.Handoffs.Issue(t, handoffTTL)
+	if err != nil {
+		slog.Warn("oidc: could not hand the sign-in to the tenant's address; it stays here", slog.String("err", err.Error()))
+		return ""
+	}
+	auth.AuditHandoff(r.Context(), h.Store, auth.AuditHandoffIssued, &t, here, "")
+	_ = h.Store.DeleteSession(r.Context(), session)
+	return origin + "/admin/login#handoff=" + code
+}
+
+// loginFailed answers a wrong attempt: records it and says what is left.
+//
+// The body keeps `error` (the SPA and API clients match on it) and adds what
+// the person needs — `message` in their language, `remaining` tries and the
+// `limit` at which the lock falls. When this attempt tripped a lock the answer
+// is 429 with Retry-After instead.
+func (h *Auth) loginFailed(w http.ResponseWriter, r *http.Request, att loginguard.Attempt, reason, errText string, totp bool) {
+	lang := requestLang(r)
+	body := map[string]any{"error": errText}
+	if totp {
+		body["totp_required"] = true
+	}
+	if h.Guard == nil {
+		writeJSON(w, http.StatusUnauthorized, body)
+		return
+	}
+	o := h.Guard.Failed(r.Context(), att, reason)
+	body["message"] = o.Message(lang)
+	switch {
+	case o.Locked:
+		h.writeLocked(w, o.Scope, o.RetryAfter, body["message"].(string))
+	case o.Unlimited:
+		writeJSON(w, http.StatusUnauthorized, body)
+	default:
+		body["remaining"] = o.Remaining
+		body["limit"] = o.Limit
+		body["scope"] = o.Scope
+		writeJSON(w, http.StatusUnauthorized, body)
+	}
+}
+
+// writeLocked answers a refused attempt: 429, Retry-After, and the sentence.
+func (h *Auth) writeLocked(w http.ResponseWriter, scope string, wait time.Duration, message string) {
+	secs := loginguard.RetryAfterSeconds(wait)
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":       "too many attempts",
+		"message":     message,
+		"locked":      true,
+		"scope":       scope,
+		"retry_after": secs,
 	})
 }
 
@@ -228,14 +532,30 @@ func (h *Auth) idpLogoutURL(w http.ResponseWriter, r *http.Request, session stri
 	return lo.EndSessionURL(r, idToken, h.redirectBase(r)+page)
 }
 
-// OIDCStart redirects to the IdP.
+// OIDCStart redirects to the IdP: `?instance=<slug>&realm=<realm>` start one
+// OIDC of the tenant the address or the realm names (docs/TENANT-ADMIN.md).
+//
+// A start the tenant has no such OIDC for, or a realm nobody has, goes back
+// to the sign-in page (`?error=oidc`), like a failed callback: the start is a
+// browser navigation, and a JSON body would dead-end the person. No reason
+// code for those two: "this realm has no such SSO" against "no such realm"
+// would tell a stranger which realms exist. Any other failure to start goes
+// back the same way, with a code only when the person can act on it (too many
+// sign-ins in flight: try again shortly); its words stay in the log.
 func (h *Auth) OIDCStart(w http.ResponseWriter, r *http.Request) {
 	if !available(h.OIDCAuth) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OIDC not configured"})
 		return
 	}
 	if err := h.OIDCAuth.StartFlow(w, r); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if errors.Is(err, authsetup.ErrNoSSOForTenant) {
+			slog.Debug("oidc start refused", slog.String("reason", err.Error()))
+			http.Redirect(w, r, h.redirectBase(r)+oidcFailedPage(""), http.StatusFound)
+			return
+		}
+		reason := auth.SSOReason(err)
+		slog.Warn("oidc start failed", slog.String("err", err.Error()), slog.String("reason", reason))
+		http.Redirect(w, r, h.redirectBase(r)+oidcFailedPage(reason), http.StatusFound)
 	}
 }
 
@@ -250,17 +570,41 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The callback is a browser navigation (the IdP redirected here), so
 		// a JSON body would dead-end the user on a raw error page. Send them
-		// back to the login form with a generic marker instead; the SPA shows
-		// a friendly message and — critically — suppresses OIDC auto-redirect
-		// so a broken IdP can't cause a redirect loop.
-		slog.Warn("oidc callback failed", slog.String("err", err.Error()))
-		http.Redirect(w, r, base+"/admin/login?error=oidc", http.StatusFound)
+		// back to the login form instead; the SPA shows a friendly message and,
+		// critically, suppresses OIDC auto-redirect so a broken IdP can't
+		// cause a redirect loop.
+		//
+		// The marker carries a reason CODE when the person can act on it
+		// (auth.SSOReason: no account opened at a first sign-in, not in an
+		// allowed group, the IdP refused...), never the error's words. A
+		// failure with no code (an account in another tenant among them) gets
+		// the plain marker, byte for byte (auth/sso_refusal.go). The log keeps
+		// the whole error either way.
+		reason := auth.SSOReason(err)
+		slog.Warn("oidc callback failed", slog.String("err", err.Error()), slog.String("reason", reason))
+		http.Redirect(w, r, base+oidcFailedPage(reason), http.StatusFound)
 		return
 	}
-	if !auth.LoginAllowed(r.Context(), h.Store, h.MultiTenant, usr) {
-		// Maintenance mode (see docs/MULTI-TENANCY.md): tenant locked out.
+	if reason := auth.LoginBlockReason(r.Context(), h.Store, h.MultiTenant, usr); reason != "" {
+		// The account may not open a session (docs/MULTI-TENANCY.md): it is
+		// disabled, its tenant is suspended, or the install is in maintenance
+		// mode. The page says which; it used to say nothing at all.
 		_ = h.Store.DeleteSession(r.Context(), token)
-		http.Redirect(w, r, base+"/admin/login?maintenance=1", http.StatusFound)
+		slog.Warn("oidc sign-in refused", slog.String("reason", reason), slog.Int64("user_id", usr.ID))
+		page := "/admin/login?maintenance=1&reason=" + reason
+		if reason == auth.SSOReasonAccountDisabled || reason == auth.SSOReasonAccountPending {
+			page = oidcFailedPage(reason)
+		}
+		http.Redirect(w, r, base+page, http.StatusFound)
+		return
+	}
+	// A tenant with an address of its own whose person signed in through an
+	// identity provider on another address (a tenant with no address of its
+	// own that gained one, a shared OIDC started on the platform's page with
+	// the realm): the session belongs on the tenant's address, so it goes
+	// there in a handoff ticket, as a password sign-in does.
+	if target := h.oidcHandOff(r, usr, token); target != "" {
+		writeOIDCBounce(w, r, target)
 		return
 	}
 	h.setSessionCookie(w, r, token)
@@ -275,6 +619,18 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// surface. Under a base path (FILEX_BASE_PATH) the path carries it — still a
 	// fixed path, still on the host that served the callback.
 	writeOIDCBounce(w, r, basepath.Path(r.Context(), "/admin/"))
+}
+
+// oidcFailedPage is where a failed SSO sign-in sends the browser: the sign-in
+// page with the generic marker, and the reason code when there is one. The
+// code is one of auth's SSOReason* constants (plain ASCII words, nothing to
+// escape); "" gives exactly `/admin/login?error=oidc`, the answer every
+// unclassified failure gets.
+func oidcFailedPage(reason string) string {
+	if reason == "" {
+		return "/admin/login?error=oidc"
+	}
+	return "/admin/login?error=oidc&reason=" + url.QueryEscape(reason)
 }
 
 // oidcBounceTmpl is the 200 "signing in…" page that carries the session
@@ -324,11 +680,14 @@ func (h *Auth) redirectBase(r *http.Request) string {
 //  2. else derived from the provider host by dropping its first label
 //     (files.example.com → .example.com) — skipped when the remainder has
 //     no dot left (files.localhost);
-//  3. else the global FILEX_COOKIE_DOMAIN.
+//  3. else the global FILEX_COOKIE_DOMAIN;
+//  4. and whichever it is, none (host-only) when the request arrived on
+//     another address of the tenant (its platform subdomain, an own domain)
+//     that is not under it.
 //
 // ⚠ The derived form assumes the host is a subdomain OF the tenant apex
 // (files.<apex>, the documented layout). A tenant served on its bare apex —
-// or one whose derivation would land on a public suffix (diyetlif.com.tr →
+// or one whose derivation would land on a public suffix (globex.com.tr →
 // .com.tr, which browsers REJECT) — must set cookie_domain explicitly.
 func (h *Auth) cookieDomain(r *http.Request) string {
 	if !h.MultiTenant {
@@ -342,15 +701,38 @@ func (h *Auth) cookieDomain(r *http.Request) string {
 	if err != nil || p == nil {
 		return h.CookieDomain
 	}
+	d := h.CookieDomain
 	if p.CookieDomain != "" {
-		return p.CookieDomain
-	}
-	if p.Host != "" {
+		d = p.CookieDomain
+	} else if p.Host != "" {
 		if i := strings.Index(p.Host, "."); i > 0 && strings.Contains(p.Host[i+1:], ".") {
-			return p.Host[i:]
+			d = p.Host[i:]
 		}
 	}
-	return h.CookieDomain
+	// A tenant also answers on its platform subdomain and its own domains
+	// (docs/TENANT-ADMIN.md). There a Domain the request's host is not under
+	// is one the browser refuses outright, and with it the whole sign-in: the
+	// cookie is that address's alone. (On the tenant's own `host` the
+	// operator's setting stands, as before.)
+	if d != "" && !strings.EqualFold(bareHost(p.Host), host) && !hostUnder(host, d) {
+		return ""
+	}
+	return d
+}
+
+// bareHost is a provider's host without a port.
+func bareHost(h string) string {
+	h = strings.TrimSpace(h)
+	if x, _, err := net.SplitHostPort(h); err == nil {
+		return x
+	}
+	return h
+}
+
+// hostUnder reports whether host is the cookie domain d or a name under it.
+func hostUnder(host, d string) bool {
+	d = strings.ToLower(strings.Trim(strings.TrimSpace(d), "."))
+	return d != "" && (host == d || strings.HasSuffix(host, "."+d))
 }
 
 // requestHost extracts the bare lowercase hostname (no port) the client asked

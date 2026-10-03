@@ -24,7 +24,7 @@ func e2eEscrowCmd() *cobra.Command {
 		Short: "End-to-end encryption key escrow (install-time)",
 		Long: "Key escrow gives the operator a second way into E2E-encrypted folders.\n" +
 			"It is OFF unless " + e2e.EnvEscrowKey + " is set, and it is fixed for the\n" +
-			"life of an installation — see docs/E2E-ENCRYPTION.md.",
+			"life of an installation - see docs/E2E-ENCRYPTION.md.",
 	}
 	cmd.AddCommand(e2eEscrowKeygenCmd())
 	return cmd
@@ -42,7 +42,7 @@ func e2eEscrowKeygenCmd() *cobra.Command {
 			"recoverable from filex. Put it somewhere you would put a root password.\n\n" +
 			"Best run BEFORE the first boot, so every folder is covered. An\n" +
 			"installation that already exists can still adopt escrow by setting\n" +
-			e2e.EnvEscrowAdopt + "=1 alongside the key for one boot — but that is\n" +
+			e2e.EnvEscrowAdopt + "=1 alongside the key for one boot - but that is\n" +
 			"NOT retroactive: folders created before the adoption carry no\n" +
 			"escrow-wrapped key material, and no operator action adds one, because\n" +
 			"that needs the folder password and filex has never had it. Each such\n" +
@@ -65,24 +65,24 @@ func e2eEscrowKeygenCmd() *cobra.Command {
 				return nil
 			}
 			fmt.Fprintf(out, "escrow key id: %s  (%s, %d bits)\n\n", key.KID, e2e.EscrowAlg, key.Bits)
-			fmt.Fprintln(out, "── PUBLIC half — put this on the server ──────────────────────────────")
+			fmt.Fprintln(out, "── PUBLIC half - put this on the server ──────────────────────────────")
 			fmt.Fprintf(out, "%s=%s\n\n", e2e.EnvEscrowKey, pub)
-			fmt.Fprintln(out, "── PRIVATE half — SAVE THIS NOW. It is shown once. ───────────────────")
+			fmt.Fprintln(out, "── PRIVATE half - SAVE THIS NOW. It is shown once. ───────────────────")
 			fmt.Fprintln(out, priv)
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "What the private key does: opens any E2E-encrypted folder created")
 			fmt.Fprintln(out, "while this escrow key was configured, without the folder password.")
 			fmt.Fprintln(out, "What it does not do: open folders created before escrow was enabled")
-			fmt.Fprintln(out, "(including everything older than an adoption — see")
+			fmt.Fprintln(out, "(including everything older than an adoption - see")
 			fmt.Fprintln(out, e2e.EnvEscrowAdopt+"), or folders from an installation")
 			fmt.Fprintln(out, "configured with a different escrow key. Those folders' owners can")
 			fmt.Fprintln(out, "each grant this key a slot from the web UI, with the folder password;")
 			fmt.Fprintln(out, "nothing you do on the server can.")
 			fmt.Fprintln(out)
-			fmt.Fprintln(out, "Lose it and you lose the escrow path. filex has no copy — that is the")
+			fmt.Fprintln(out, "Lose it and you lose the escrow path. filex has no copy - that is the")
 			fmt.Fprintln(out, "point: a stolen filex database decrypts nothing.")
 			if fi, err := os.Stdout.Stat(); err == nil && fi.Mode()&os.ModeCharDevice == 0 {
-				fmt.Fprintln(os.Stderr, "filex: warning — the private key was written to a pipe or file, not a terminal.")
+				fmt.Fprintln(os.Stderr, "filex: warning - the private key was written to a pipe or file, not a terminal.")
 			}
 			return nil
 		},

@@ -20,19 +20,26 @@ import (
 	"github.com/brf-tech/filex/backend/internal/antivirus"
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
+	authoidc "github.com/brf-tech/filex/backend/internal/auth/drivers/oidc"
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/capability"
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/dbsetting"
 	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
 	"github.com/brf-tech/filex/backend/internal/ftpsrv"
+	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -57,6 +64,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenant"
+	"github.com/brf-tech/filex/backend/internal/tenantdomain"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -101,9 +109,12 @@ type Server struct {
 	srv             *http.Server
 	idx             *search.Index
 	pipeline        *thumb.Pipeline
-	resolver        func(int64) (storage.Driver, error)
-	mailer          *mailer.Service
-	zipWarmer       *sharezip.Warmer
+	// thumbRefresh draws what listings and the sync find missing or stale
+	// (thumb.Refresher). Nil when thumbnails are switched off.
+	thumbRefresh *thumb.Refresher
+	resolver     func(int64) (storage.Driver, error)
+	mailer       *mailer.Service
+	zipWarmer    *sharezip.Warmer
 	// sftp is the SFTP endpoint, nil when FILEX_SFTP is off. It owns a TCP
 	// listener of its own rather than a route on the HTTP server.
 	sftp *sftpsrv.Server
@@ -112,6 +123,12 @@ type Server struct {
 	ftps *ftpsrv.Server
 	// nfs is the NFSv3 endpoint, nil when FILEX_NFS is off.
 	nfs *nfssrv.Server
+	// box seals what filex must read back (sign-in secrets, a tenant's own
+	// certificate key): FILEX_SECRET_KEY.
+	box *secretbox.Box
+	// domains proves and keeps proving tenants' own domains
+	// (docs/TENANT-ADMIN.md); its periodic check runs from Run.
+	domains *tenantdomain.Service
 	// plugins supervises out-of-process storage drivers, nil when
 	// FILEX_PLUGINS_DISABLED. Held here so shutdown stops the processes it
 	// started — an orphaned plugin would keep a socket and the storage
@@ -181,6 +198,16 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// why that cannot live in the eight call sites (migration 00025).
 	var store db.Store = identitystore.New(accounting)
 
+	// Every tenant's platform subdomain, <realm>.<tenant domain>
+	// (FILEX_TENANT_DOMAIN, docs/TENANT-ADMIN.md): one process-wide answer
+	// every store wrapper's GetProviderByHost gives (db.ResolveExtraHost).
+	db.SetTenantDomain(cfg.TenantDomain)
+	switch cfg.TLS.Mode {
+	case "", config.TLSModeProxy, config.TLSModeACME:
+	default:
+		return nil, fmt.Errorf("FILEX_TLS_MODE: %q is neither %q nor %q", cfg.TLS.Mode, config.TLSModeProxy, config.TLSModeACME)
+	}
+
 	// Name the accounts that predate migration 00025. Idempotent and cheap
 	// (one query plus one UPDATE per unnamed account), so it runs on every
 	// start rather than as a one-shot: an account restored from an older dump,
@@ -233,7 +260,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		// The adoption boot itself. WARN, not INFO: this installation just
 		// gained a second key holder, and the sentence that follows is the
 		// one thing an operator must not discover later by experiment.
-		slog.Warn("e2e: key escrow ADOPTED on an existing installation — this is not retroactive: "+
+		slog.Warn("e2e: key escrow ADOPTED on an existing installation - this is not retroactive: "+
 			"folders created before now carry no escrow-wrapped key and can never be opened "+
 			"with the escrow key, because adding one needs the folder password and the server "+
 			"has never had it. Only folders created from now on are escrow-openable.",
@@ -243,6 +270,34 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			slog.String("installed_at", inst.PinnedAt))
 	}
 	/* /wiring:e2 */
+
+	// The sign-in limit, loaded before anything serves: its settings and its
+	// counters come from the table into memory once, here, and every decision
+	// after that is the memory's (internal/loginguard). A table that cannot be
+	// read leaves the defaults and an empty memory; the counters are read again
+	// at the next sweep.
+	loginGuard := loginguard.New(store)
+	if err := loginGuard.Load(ctx); err != nil {
+		slog.Warn("loginguard: started without the table's settings or counters", slog.Any("err", err))
+	}
+	// Which address a request came from. Forwarded headers are believed only
+	// from a trusted proxy: `login.trusted_proxies` (the admin page, held in
+	// the limiter's memory) wins over FILEX_TRUSTED_PROXIES, and with neither
+	// it is `auto` - loopback, plus the container networks filex is attached
+	// to minus their gateways (internal/clientip, auto.go). Set before
+	// anything serves, because the sign-in throttle counts by it; `auto` is
+	// worked out here, once, so its answer (and a warning, when it could not
+	// tell) is in the log at start whichever list is in force.
+	clientip.SetSource(loginGuard.TrustedProxySource(cfg.TrustedProxies))
+	clientip.RefreshAuto()
+	// Its housekeeping, every minute, for as long as the server runs (the same
+	// context as the other sweepers): the settings are read again — a change
+	// saved on another instance arrives within a minute — locks that ran out
+	// are released, owed writes retried, idle counters dropped, and `auto` is
+	// worked out again (a container can join a network at run time; the log
+	// hears of it only when the answer changes).
+	loginGuard.OnTick = func(context.Context) { clientip.RefreshAuto() }
+	go loginGuard.Run(ctx)
 
 	// Auth drivers.
 	//
@@ -261,84 +316,25 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// one LoginDriver): `FILEX_AUTH_DRIVERS=local,ldap` answered every
 	// directory account 401 in under a millisecond. authsetup's assemble
 	// chains every login driver, in order, exactly as this block used to.
-	driversFrom := cfg.Auth.DriversFrom
-	var envAuth []authsetup.Entry
-	for _, name := range cfg.Auth.Drivers {
-		switch normalizeDriverName(name) {
-		case "local":
-			d, err := authsetup.Build(ctx, store, "local", nil)
-			if err != nil {
-				return nil, fmt.Errorf("auth init local: %w", err)
-			}
-			envAuth = append(envAuth, authsetup.NewEnvEntry("local", driversFrom, nil, d, nil, false))
-		case "oidc":
-			oidcCfg := map[string]any{
-				"issuer":        cfg.Auth.OIDC.Issuer,
-				"client_id":     cfg.Auth.OIDC.ClientID,
-				"client_secret": cfg.Auth.OIDC.ClientSecret,
-				"redirect_url":  cfg.Auth.OIDC.RedirectURL,
-				"role_claim":    cfg.Auth.OIDC.RoleClaim,
-				"admin_group":   cfg.Auth.OIDC.AdminGroup,
-			}
-			// OIDC discovery often fails transiently when filex and the IdP
-			// boot together (compose restart, host reboot). One 502 used to
-			// leave SSO offline until a manual `docker restart` — this loop
-			// gives the IdP ~60s to come up before we give up.
-			var d auth.Driver
-			oidcErr := initWithBackoff(ctx, "oidc", func(c context.Context) error {
-				var err error
-				d, err = authsetup.Build(c, store, "oidc", oidcCfg)
-				return err
-			}, []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second})
-			if oidcErr != nil {
-				// The failure itself was just logged at ERROR by
-				// initWithBackoff (driver, error, attempt count); this line
-				// states the consequence and deliberately carries no `err`,
-				// so the error tracker files one issue, not two.
-				slog.Warn("oidc: SSO disabled until restart",
-					slog.String("driver", "oidc"),
-					slog.String("reason", oidcErr.Error()))
-			}
-			envAuth = append(envAuth, authsetup.NewEnvEntry("oidc", driversFrom, oidcCfg, d, oidcErr, false))
-		case "ldap":
-			ldapCfg := map[string]any{
-				"url":           cfg.Auth.LDAP.URL,
-				"bind_dn":       cfg.Auth.LDAP.BindDN,
-				"bind_password": cfg.Auth.LDAP.BindPassword,
-				"base_dn":       cfg.Auth.LDAP.BaseDN,
-				"user_filter":   cfg.Auth.LDAP.UserFilter,
-				"email_attr":    cfg.Auth.LDAP.EmailAttr,
-				"start_tls":     cfg.Auth.LDAP.StartTLS,
-				"ca_file":       cfg.Auth.LDAP.CAFile,
-				// Tenant homing for just-in-time accounts. Without these the
-				// driver falls back to db.CreateUser's hard-coded `default`
-				// provider, which is the confine-exempt supertenant.
-				"multi_tenant": cfg.MultiTenant,
-				"provider":     cfg.Auth.LDAP.Provider,
-			}
-			d, err := authsetup.Build(ctx, store, "ldap", ldapCfg)
-			if err != nil {
-				slog.Warn("ldap driver init failed", slog.String("err", err.Error()))
-			}
-			envAuth = append(envAuth, authsetup.NewEnvEntry("ldap", driversFrom, ldapCfg, d, err, cfg.Auth.LDAP.ProtocolLogin))
-		case "proxy-header", "proxyheader", "header-proxy":
-			phCfg := map[string]any{
-				"header_user":     "X-Auth-User",
-				"header_email":    cfg.Auth.Header.EmailHeader,
-				"header_roles":    cfg.Auth.Header.GroupHeader,
-				"trusted_proxies": cfg.Auth.Header.TrustedIPs,
-				"admin_role":      cfg.Auth.Header.AdminGroup,
-				"multi_tenant":    cfg.MultiTenant,
-				"provider":        cfg.Auth.Header.Provider,
-			}
-			d, err := authsetup.Build(ctx, store, "proxy-header", phCfg)
-			if err != nil {
-				slog.Warn("proxy-header driver init failed", slog.String("err", err.Error()))
-			}
-			envAuth = append(envAuth, authsetup.NewEnvEntry("proxy-header", driversFrom, phCfg, d, err, false))
-		default:
-			slog.Warn("unknown auth driver", slog.String("name", name))
+	//
+	// An operating-system provider (windows, pam) named here is refused with a
+	// warning of its own (envAuthEntries): it is switched on from the page only.
+	//
+	// The installation's e-mail token (FILEX_OS_LOGIN_EMAIL_TOKEN). A bad value
+	// stops the boot: it becomes part of every such account's address, and
+	// falling back silently would mint accounts under an address the operator
+	// never chose.
+	loginEmailToken := ""
+	if cfg.Auth.LoginEmailToken != "" {
+		tok, terr := identity.EmailToken(cfg.Auth.LoginEmailToken)
+		if terr != nil {
+			return nil, fmt.Errorf("FILEX_OS_LOGIN_EMAIL_TOKEN: %w", terr)
 		}
+		loginEmailToken = tok
+	}
+	envAuth, err := envAuthEntries(ctx, cfg, store, loginEmailToken)
+	if err != nil {
+		return nil, err
 	}
 
 	// The same key the app-plugin settings and the S3 access keys are sealed
@@ -348,12 +344,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		return nil, fmt.Errorf("secret key: %w", err)
 	}
 	authLive, err := authsetup.New(ctx, authsetup.Options{
-		Store:         store,
-		Box:           authBox,
-		MultiTenant:   cfg.MultiTenant,
-		RecoveryLogin: cfg.Auth.RecoveryLogin,
-		PublicURL:     cfg.PublicURL,
-		RetryBackoff:  []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second},
+		Store:           store,
+		Box:             authBox,
+		MultiTenant:     cfg.MultiTenant,
+		RecoveryLogin:   cfg.Auth.RecoveryLogin,
+		PublicURL:       cfg.PublicURL,
+		LoginEmailToken: loginEmailToken,
+		RetryBackoff:    []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second},
 	}, envAuth)
 	if err != nil {
 		return nil, fmt.Errorf("auth: %w", err)
@@ -469,18 +466,31 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	bgBody := filebody.New(store, stagingArea).WithCache(fileCache)
 
 	// Thumbnail pipeline.
-	pipelineCaps := thumb.Capabilities{Image: true}
+	// SVG: the built-in engine (thumb/svgwasm) draws SVGs on every install.
+	pipelineCaps := thumb.Capabilities{Image: true, SVG: true}
 	cap, _ := caps.Get(ctx)
 	if cap != nil {
 		pipelineCaps.Video = cap.Thumbs.Video
 		pipelineCaps.Audio = cap.Thumbs.Audio
 		pipelineCaps.PDF = cap.Thumbs.PDF
-		pipelineCaps.Office = cap.Thumbs.Office
 		pipelineCaps.SVG = cap.Thumbs.SVG
+		pipelineCaps.RSVG = enginebin.Probe().Has(enginebin.RSVG)
+		pipelineCaps.HEIF = cap.Thumbs.ImageMagick
 	}
-	logThumbCapabilities(pipelineCaps)
+	// enginebin.HEIC: the capabilities refresh above already ran the HEIC
+	// decode probe, so this is its cached answer.
+	logThumbCapabilities(pipelineCaps, enginebin.HEIC())
 	pipeline := thumb.New(store, cfg.Thumbs.CacheDir, pipelineCaps)
 	pipeline.AttachBody(bgBody)
+	pipeline.AttachSettings(store)
+	// Listings and the storage sync hand it what is missing or stale; it
+	// draws in the background (docs/thumbnails.md, Design notes). Only while
+	// thumbnails are on: FILEX_THUMBS_ENABLED=false must not be answered by
+	// every listing queueing renders.
+	var thumbRefresh *thumb.Refresher
+	if cfg.Thumbs.Enabled {
+		thumbRefresh = thumb.NewRefresher(pipeline, store, 4096)
+	}
 
 	// Share service. It owns the PIN gate for EVERY public link — /s/, /d/
 	// and an app plugin's page — so it is also what signs the unlock cookie a
@@ -497,16 +507,20 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// pre-warm that ran first would log "unknown driver" for every one of
 	// them. WaitReady bounds that wait; a plugin that is slower than it still
 	// registers, and its storages open on first use.
+	if cfg.PluginLoopbackSources {
+		slog.Warn("FILEX_PLUGIN_LOOPBACK_SOURCES is on: plugin and app downloads may reach this machine's own addresses - for development and tests only, never on a server")
+	}
 	var pluginMgr *plugin.Manager
 	if !cfg.PluginsDisabled {
 		pluginMgr, err = plugin.New(plugin.Options{
-			Store:       store,
-			Dir:         filepath.Join(cfg.DataDir, "plugins"),
-			SecretKey:   cfg.SecretKey,
-			Log:         slog.Default(),
-			Conformance: cfg.PluginConformance,
-			TrustedKeys: cfg.PluginTrustedKeys,
-			MaxInFlight: cfg.PluginMaxInFlight,
+			Store:           store,
+			Dir:             filepath.Join(cfg.DataDir, "plugins"),
+			SecretKey:       cfg.SecretKey,
+			Log:             slog.Default(),
+			Conformance:     cfg.PluginConformance,
+			TrustedKeys:     cfg.PluginTrustedKeys,
+			MaxInFlight:     cfg.PluginMaxInFlight,
+			LoopbackSources: cfg.PluginLoopbackSources,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("server: plugins: %w", err)
@@ -542,16 +556,19 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			// An app's public page IS a share (00046), so it is minted by the
 			// same service every other link is — same expiry ceiling, same PIN
 			// gate, same Shares list the administrator revokes from.
-			Share:          shareSvc,
-			Dir:            filepath.Join(cfg.DataDir, "app-plugins"),
-			SecretKey:      cfg.SecretKey,
-			TrustedKeys:    cfg.PluginTrustedKeys,
-			Demo:           cfg.Demo.Mode,
-			Log:            slog.Default(),
-			MaxInputBytes:  int64(cfg.AppPluginMaxInputMB) << 20,
-			MaxOutputBytes: int64(cfg.AppPluginMaxOutputMB) << 20,
-			MaxWasmBytes:   int64(cfg.AppPluginMaxWasmMB) << 20,
-			MaxUIBytes:     int64(cfg.AppPluginMaxUIMB) << 20,
+			Share:       shareSvc,
+			Dir:         filepath.Join(cfg.DataDir, "app-plugins"),
+			SecretKey:   cfg.SecretKey,
+			TrustedKeys: cfg.PluginTrustedKeys,
+			Demo:        cfg.Demo.Mode,
+			Log:         slog.Default(),
+			// HTTP is left nil on purpose: the registry's own client is the
+			// guarded one (netguard.DownloadClient).
+			LoopbackSources: cfg.PluginLoopbackSources,
+			MaxInputBytes:   int64(cfg.AppPluginMaxInputMB) << 20,
+			MaxOutputBytes:  int64(cfg.AppPluginMaxOutputMB) << 20,
+			MaxWasmBytes:    int64(cfg.AppPluginMaxWasmMB) << 20,
+			MaxUIBytes:      int64(cfg.AppPluginMaxUIMB) << 20,
 		})
 		if err != nil {
 			slog.Warn("app-plugins: runtime unavailable; continuing without them", slog.Any("err", err))
@@ -587,16 +604,29 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		srvtext.SetPacks(appPlugins)
 	}
 
+	// Default apps (internal/assoc): which handler opens a kind of file and
+	// which draws its thumbnails. Only with app plugins: without them filex
+	// alone opens and draws every kind, as before 0.50.
+	var assocSvc *assoc.Service
+	if appPlugins != nil {
+		assocSvc = assoc.New(store)
+		assocSvc.SetSource(appPlugins)
+		assocSvc.SetBuiltinThumb(thumb.BuiltinDraws)
+		pipeline.AttachApps(&appThumbs{assoc: assocSvc, reg: appPlugins})
+	}
+
 	srvObj := &Server{
-		cfg:        cfg,
-		plugins:    pluginMgr,
-		appPlugins: appPlugins,
-		store:      store,
-		sqlDB:      sqlDB,
-		worker:     worker,
-		idx:        idx,
-		pipeline:   pipeline,
-		storages:   map[int64]storage.Driver{},
+		cfg:          cfg,
+		box:          authBox,
+		plugins:      pluginMgr,
+		appPlugins:   appPlugins,
+		store:        store,
+		sqlDB:        sqlDB,
+		worker:       worker,
+		idx:          idx,
+		pipeline:     pipeline,
+		thumbRefresh: thumbRefresh,
+		storages:     map[int64]storage.Driver{},
 	}
 
 	// External services (OnlyOffice, drawio, converter) resolve from the
@@ -635,6 +665,20 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	ooSvc.LiveCallbackURL = func(ctx context.Context) string {
 		return extResolver.Get(ctx, external.OnlyOffice).CallbackURL
 	}
+
+	// Office thumbnails are the document server's (thumb/office.go): the
+	// pipeline asks it through the adapter, and the Default apps chain names
+	// it first for the office kinds while OnlyOffice is configured. Both read
+	// the configuration in force (cached for a second by extResolver), so
+	// configuring OnlyOffice in the admin page starts drawing without a
+	// restart, and the pictures LibreOffice drew before 0.50 go stale then.
+	pipeline.AttachOffice(&officeThumbs{svc: ooSvc})
+	if assocSvc != nil {
+		assocSvc.SetOnlyOfficeThumb(func(name, mime string) bool {
+			return thumb.OnlyOfficeDraws(name, mime) && ooSvc.EnabledCtx(context.Background())
+		})
+	}
+	logOfficeThumbs(ctx, ooSvc)
 
 	// Storage resolver — connects API handlers and pipeline to live drivers.
 	resolver := func(id int64) (storage.Driver, error) {
@@ -689,16 +733,23 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			return
 		}
 		// Drivers that hold a connection (sftp, ftp, smb) close it rather than
-		// leak one per edit. Driver does not require Close, so this is
-		// best-effort by contract, not by accident.
-		if c, ok := drv.(interface{ Close() error }); ok {
-			_ = c.Close()
-		}
+		// leak one per edit, and a storage plugin's driver releases the
+		// instance holding the storage's credentials. Driver does not require
+		// Close, so this is best-effort by contract, not by accident.
+		storage.CloseDriver(drv)
 	}
 
 	// Now that resolver exists, fill in dependents that need it.
 	caps.AttachStorageResolver(resolver)
 	ooSvc.StorageResolver = resolver
+
+	// The apps' office engine (`engines:office`, alias `engines:libreoffice`)
+	// IS this document server, read live like the rest: connecting OnlyOffice
+	// in the admin UI turns office conversions on without a restart, and no
+	// LibreOffice is looked for (0.50).
+	if appPlugins != nil {
+		appPlugins.SetOffice(officeEngine{svc: ooSvc})
+	}
 
 	// Async ops queue — DB-backed, restart-safe.
 	opsSvc := ops.NewForDialect(sqlDB, cfg.DB.Driver, resolver)
@@ -707,6 +758,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		slog.Warn("ops: migrate", slog.String("err", err.Error()))
 	}
 	srvObj.ops = opsSvc
+	// Admin → Tools → Thumbnail repair runs the one thumbnail walk
+	// (BackfillThumbs), the CLI's too.
+	opsSvc.SetThumbRepairer(thumbRepairer{s: srvObj})
 	if appPlugins != nil {
 		appPlugins.SetStorageResolver(resolver)
 		if cfg.MultiTenant {
@@ -738,7 +792,8 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		// as an ordinary plugin-action op, so unattended work and a person's
 		// work run through one executor.
 		appPlugins.SetJobQueue(opsSvc)
-		caps.SetAppPlugins(model.AppPluginsCapabilities{Enabled: true, Engines: appPlugins.Engines()})
+		caps.SetAppPlugins(model.AppPluginsCapabilities{Enabled: true})
+		caps.SetAppPluginEngines(appPlugins.Engines)
 	}
 
 	// Driver-based persistent queue. Bound to the same *sql.DB for the
@@ -837,6 +892,27 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			WebhookURL:   cfg.Notify.WebhookURL,
 			WebhookToken: cfg.Notify.WebhookToken,
 		})
+		// An operating-system sign-in provider (windows) the administrator
+		// switched on that can no longer start is left out of the running set;
+		// the administrators are told once per reason. A failure at boot (the
+		// providers are built before this exists) is raised by this call.
+		authLive.SetProviderAlarm(func(name, reason string) {
+			_, _ = srvObj.notify.Send(context.Background(), notify.Event{
+				Event:    notify.EventAuthProviderDown,
+				Severity: notify.SeverityWarning,
+				Title:    "Sign-in provider " + name + " could not start",
+				Body:     reason + ". It is left out until it can start; every other way to sign in keeps working.",
+				Meta:     map[string]any{"provider": name},
+			})
+		})
+		// An older directory account (keyed by a bare login name before the
+		// e-mail rule) that a sign-in found in ANOTHER tenant is left alone; the
+		// platform operator is told, once per account (auth.AdoptAccount). An
+		// operator event: no tenant administrator's bell carries it.
+		auth.SetLegacyAccountAlarm(func(ctx context.Context, e auth.LegacyAccountElsewhere) {
+			_, _ = srvObj.notify.Send(context.WithoutCancel(ctx),
+				notify.LegacyAccountElsewhere(e.Driver, e.Account, e.AccountTenant, e.LoginTenant))
+		})
 	}
 
 	/* koru:k2 av */
@@ -853,6 +929,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	antivirus.SeedSettings(ctx, store)
 	usage.SeedSettings(ctx, store)
 	drafts.SeedSettings(ctx, store)
+	// The SVG thumbnail limits (thumb/svglimits.go), editable in Settings and
+	// in Admin → Tools → Thumbnail repair.
+	dbsetting.SeedAll(ctx, store, thumb.SVGMaxMBSetting, thumb.SVGTimeoutSetting, thumb.FolderPreviewsSetting,
+		thumb.OfficeMaxMBSetting, thumb.OfficeSlotsSetting)
 	// ⚠⚠ This resolution is what the process RUNS with until it restarts.
 	// enabled / mode / clamd address are read once, here, because the lines
 	// below are the wiring itself: registering the queue handler and handing
@@ -981,6 +1061,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// The sync drops the row of an object gone from the storage for good
 	// (issue #74): the same per-node caches go, the same way.
 	worker.AttachReclaim(trashSvc.Reclaim)
+	// An entry the storage could not answer for (issue #104): the storage
+	// plugin's log and, when its state changes, the audit trail.
+	worker.AttachEntryState(entryStateReporter(store, pluginMgr))
+	if thumbRefresh != nil {
+		worker.AttachThumbs(thumbRefresh.ConsiderAll)
+	}
 	srvObj.trash = trashSvc
 
 	// Versioning service — snapshots before destructive writes; the API
@@ -1168,7 +1254,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	})
 	pluginRequests.StartSweeper(ctx)
 
+	srvObj.domains = newDomainService(cfg, store, srvObj.notify)
+	if cfg.TLS.ACME() {
+		// What filex's own ACME last did per address, for the tenant screen.
+		srvObj.domains.ACME = &tenantdomain.ACMEStatus{}
+	}
 	deps := &api.Deps{
+		Domains:                  srvObj.domains,
 		Cfg:                      cfg,
 		Store:                    scopedStore,
 		PluginRequests:           pluginRequests,
@@ -1178,6 +1270,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Caps:                     caps,
 		External:                 extResolver,
 		Thumbs:                   pipeline,
+		ThumbRefresh:             thumbRefresh,
 		Share:                    shareSvc,
 		OnlyOffice:               ooSvc,
 		Ops:                      opsSvc,
@@ -1194,6 +1287,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Plugins:                  pluginMgr,
 		AppPlugins:               appPlugins,
 		AppPluginsDisabledReason: appPluginsReason,
+		Assoc:                    assocSvc,
 		Embed:                    embedFS,
 		LocalAuth:                localDrv,
 		OIDCAuth:                 oidcDrv,
@@ -1205,6 +1299,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		AVScan:                   avEnqueue,          /* koru:k2 av */
 		AVScanAfterSave:          avEnqueueAfterSave, /* koru:k2 av — debounced editor save */
 		E2EEscrow:                escrowKey,          /* wiring:e2 — nil when escrow is off */
+		LoginGuard:               loginGuard,
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
 	// is composed inside api.BuildRouter (single Mount line, see
@@ -1458,7 +1553,7 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 	// the Convert app. Its row went with migration 00068; an environment that
 	// still names it is told, once, rather than silently ignored.
 	if strings.TrimSpace(os.Getenv("FILEX_CONVERT_URL")) != "" {
-		slog.Warn("FILEX_CONVERT_URL is no longer used: the iframe converter was removed; install the Convert app (Admin → Plugins → Apps) — docs/APP-PLUGINS.md")
+		slog.Warn("FILEX_CONVERT_URL is no longer used: the iframe converter was removed; install the Convert app (Admin → Plugins → Apps) - docs/APP-PLUGINS.md")
 	}
 	for _, d := range defaults {
 		cur, _ := store.GetExternalService(ctx, d.name)
@@ -1466,7 +1561,11 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 			// Not pinned by the environment: the row is the operator's.
 			continue
 		}
-		if cur != nil && cur.URL == d.url && (d.secret == "" || cur.SecretEnc == d.secret) &&
+		// ⚠ Switched on is part of the match. A row the administrator switched
+		// off on External services kept its URL, so it "matched" and stayed off
+		// across restarts - unseen while the OnlyOffice service fell back to the
+		// boot values, real once it stopped (0.50). Env pins the service on.
+		if cur != nil && cur.Enabled == (d.url != "") && cur.URL == d.url && (d.secret == "" || cur.SecretEnc == d.secret) &&
 			(d.callback == "" || external.CallbackURLFromOptions(cur.OptionsJSON) == d.callback) {
 			continue // already matches the environment; nothing to say
 		}
@@ -1479,6 +1578,7 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 			}
 			slog.Info("external service is pinned by the environment; re-asserting it over the stored row",
 				slog.String("name", d.name),
+				slog.Bool("stored_enabled", cur.Enabled),
 				slog.String("stored_url", cur.URL),
 				slog.String("env_url", d.url))
 		}
@@ -1605,6 +1705,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// the ones deleted from here on.
 	if s.pipeline != nil {
 		go s.pipeline.RunReaper(ctx, s.cfg.Thumbs.SweepInterval)
+	}
+	if s.thumbRefresh != nil {
+		go s.thumbRefresh.Run(ctx, 2)
 	}
 	if s.replicaCron != nil {
 		s.replicaCron.Start()
@@ -1766,6 +1869,16 @@ func (s *Server) Start(ctx context.Context) error {
 		go serveListener(ctx, "nfs", s.nfs.ListenAndServe)
 	}
 
+	// Tenants' own domains are looked at again every few hours: one whose
+	// CNAME stopped pointing at its tenant is suspended, one that points
+	// again comes back (docs/TENANT-ADMIN.md).
+	if s.cfg.MultiTenant && s.cfg.TenantDomain != "" && s.domains != nil {
+		go s.domains.Run(ctx, domainCheckEvery)
+	}
+	if s.cfg.TLS.ACME() {
+		s.serveOwnTLS(ctx)
+	}
+
 	slog.Info("filex listening", slog.String("addr", s.cfg.Listen))
 	if err := s.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
@@ -1870,6 +1983,133 @@ func (quotaMetrics) QuotaUsageDelta(_ int64, delta int64) {
 	}
 }
 
+// osDriverFromEnv is what the log says when FILEX_AUTH_DRIVERS (or the config
+// file's auth.drivers) names an operating-system provider. Those are switched
+// on from the Identity providers page only, because that is where their setup
+// is checked (a real sign-in with a test account) before they judge anybody's
+// password; the environment has no such check, so the entry is refused, the
+// boot goes on and every other provider in the list starts as usual.
+const osDriverFromEnv = "windows/pam is switched on from Admin → Identity providers, where its setup is checked; it cannot be set from the environment"
+
+// envAuthEntries builds the providers FILEX_AUTH_DRIVERS (or the config file)
+// names, in order. An operating-system provider (windows, pam) is refused with
+// osDriverFromEnv; a name nobody knows is logged and skipped. Only a `local`
+// that cannot be built stops the boot.
+func envAuthEntries(ctx context.Context, cfg config.Config, store db.Store, loginEmailToken string) ([]authsetup.Entry, error) {
+	driversFrom := cfg.Auth.DriversFrom
+	var envAuth []authsetup.Entry
+	// 0.50: the OIDC providers that existed before keep trusting the
+	// addresses they send (authsetup.UpgradeOIDCTrust, once, on a database
+	// that had accounts) - before any provider is built from it.
+	if store != nil {
+		if err := authsetup.UpgradeOIDCTrust(ctx, store, slog.Default()); err != nil {
+			slog.Warn("auth: the OIDC trust upgrade could not run; it is tried again at the next start", slog.Any("err", err))
+		}
+	}
+	for _, name := range cfg.Auth.Drivers {
+		if n := normalizeDriverName(name); authsetup.IsOS(n) {
+			slog.Warn(osDriverFromEnv, slog.String("name", n), slog.String("from", driversFrom))
+			continue
+		}
+		switch normalizeDriverName(name) {
+		case "local":
+			d, err := authsetup.Build(ctx, store, "local", nil)
+			if err != nil {
+				return nil, fmt.Errorf("auth init local: %w", err)
+			}
+			envAuth = append(envAuth, authsetup.NewEnvEntry("local", driversFrom, nil, d, nil, false))
+		case "oidc":
+			// FILEX_OIDC_TRUST_EMAIL, else the answer the upgrade to 0.50
+			// took once (authsetup.EnvTrustEmail).
+			trustEmail, trustByUpgrade := authsetup.EnvTrustEmail(ctx, store, cfg.Auth.OIDC.TrustEmail)
+			oidcCfg := map[string]any{
+				"issuer":        cfg.Auth.OIDC.Issuer,
+				"client_id":     cfg.Auth.OIDC.ClientID,
+				"client_secret": cfg.Auth.OIDC.ClientSecret,
+				"redirect_url":  cfg.Auth.OIDC.RedirectURL,
+				"role_claim":    cfg.Auth.OIDC.RoleClaim,
+				"admin_group":   cfg.Auth.OIDC.AdminGroup,
+				"trust_email":   trustEmail,
+			}
+			addFirstLogin(oidcCfg, cfg.Auth.OIDC.AutoCreate, cfg.Auth.OIDC.AllowedGroups)
+			// OIDC discovery often fails transiently when filex and the IdP
+			// boot together (compose restart, host reboot). One 502 used to
+			// leave SSO offline until a manual `docker restart` — this loop
+			// gives the IdP ~60s to come up before we give up.
+			var d auth.Driver
+			oidcErr := initWithBackoff(ctx, "oidc", func(c context.Context) error {
+				var err error
+				d, err = authsetup.Build(c, store, "oidc", oidcCfg)
+				return err
+			}, []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second})
+			if oidcErr != nil {
+				// The failure itself was just logged at ERROR by
+				// initWithBackoff (driver, error, attempt count); this line
+				// states the consequence and deliberately carries no `err`,
+				// so the error tracker files one issue, not two.
+				slog.Warn("oidc: SSO disabled until restart",
+					slog.String("driver", "oidc"),
+					slog.String("reason", oidcErr.Error()))
+			}
+			oe := authsetup.NewEnvEntry("oidc", driversFrom, oidcCfg, d, oidcErr, false)
+			if trustByUpgrade {
+				oe.SetByUpgrade = []string{authoidc.TrustEmailKey}
+			}
+			envAuth = append(envAuth, oe)
+		case "ldap":
+			ldapCfg := map[string]any{
+				"url":           cfg.Auth.LDAP.URL,
+				"bind_dn":       cfg.Auth.LDAP.BindDN,
+				"bind_password": cfg.Auth.LDAP.BindPassword,
+				"base_dn":       cfg.Auth.LDAP.BaseDN,
+				"user_filter":   cfg.Auth.LDAP.UserFilter,
+				"email_attr":    cfg.Auth.LDAP.EmailAttr,
+				"start_tls":     cfg.Auth.LDAP.StartTLS,
+				"ca_file":       cfg.Auth.LDAP.CAFile,
+				// Tenant homing for just-in-time accounts. Without these the
+				// driver falls back to db.CreateUser's hard-coded `default`
+				// provider, which is the confine-exempt supertenant.
+				"multi_tenant": cfg.MultiTenant,
+				"provider":     cfg.Auth.LDAP.Provider,
+			}
+			addFirstLogin(ldapCfg, cfg.Auth.LDAP.AutoCreate, cfg.Auth.LDAP.AllowedGroups)
+			if cfg.Auth.LDAP.GroupAttr != "" {
+				ldapCfg["group_attr"] = cfg.Auth.LDAP.GroupAttr
+			}
+			if cfg.Auth.LDAP.ShowRefusalReason {
+				ldapCfg["show_refusal_reason"] = true
+			}
+			if loginEmailToken != "" {
+				ldapCfg["email_token"] = loginEmailToken
+			}
+			d, err := authsetup.Build(ctx, store, "ldap", ldapCfg)
+			if err != nil {
+				slog.Warn("ldap driver init failed", slog.String("err", err.Error()))
+			}
+			envAuth = append(envAuth, authsetup.NewEnvEntry("ldap", driversFrom, ldapCfg, d, err, cfg.Auth.LDAP.ProtocolLogin))
+		case "proxy-header", "proxyheader", "header-proxy":
+			phCfg := map[string]any{
+				"header_user":     "X-Auth-User",
+				"header_email":    cfg.Auth.Header.EmailHeader,
+				"header_roles":    cfg.Auth.Header.GroupHeader,
+				"trusted_proxies": cfg.Auth.Header.TrustedIPs,
+				"admin_role":      cfg.Auth.Header.AdminGroup,
+				"multi_tenant":    cfg.MultiTenant,
+				"provider":        cfg.Auth.Header.Provider,
+			}
+			addFirstLogin(phCfg, cfg.Auth.Header.AutoCreate, cfg.Auth.Header.AllowedGroups)
+			d, err := authsetup.Build(ctx, store, "proxy-header", phCfg)
+			if err != nil {
+				slog.Warn("proxy-header driver init failed", slog.String("err", err.Error()))
+			}
+			envAuth = append(envAuth, authsetup.NewEnvEntry("proxy-header", driversFrom, phCfg, d, err, false))
+		default:
+			slog.Warn("unknown auth driver", slog.String("name", name))
+		}
+	}
+	return envAuth, nil
+}
+
 // normalizeDriverName folds one FILEX_AUTH_DRIVERS entry to the spelling the
 // loader switches on: lower case, trimmed, and `_` read as `-`.
 //
@@ -1926,14 +2166,19 @@ func queueDriverFor(cfg config.Config) string {
 // It matters because it is not a hypothetical configuration. filex ships
 // three ways and two of them arrive with none of these tools:
 //
-//	docker/Dockerfile       ffmpeg, ghostscript, poppler, libreoffice — all in
+//	docker/Dockerfile       ffmpeg, ghostscript, poppler, imagemagick - all in
 //	docker/Dockerfile.slim  none, deliberately, and documented as such
 //	the bare binary         whatever the operator's machine happens to have
 //
 // Every other subsystem that can be switched off by its surroundings already
 // says so at boot — see the antivirus line a few screens up, which is the
 // shape this follows.
-func logThumbCapabilities(c thumb.Capabilities) {
+//
+// heic is the HEIC decode probe's answer (enginebin.HEIC): ImageMagick on
+// PATH is not ImageMagick that decodes a phone photo (Ubuntu 24.04's libheif1
+// leaves its HEVC decoder to a plugin apt does not install), and that case
+// names the plugin, with ImageMagick's own words.
+func logThumbCapabilities(c thumb.Capabilities, heic enginebin.HEICStatus) {
 	missing := map[string]string{}
 	if !c.Video {
 		missing["video"] = "ffmpeg"
@@ -1944,14 +2189,18 @@ func logThumbCapabilities(c thumb.Capabilities) {
 	if !c.PDF {
 		missing["pdf"] = "ghostscript or poppler-utils (pdftoppm)"
 	}
-	if !c.Office {
-		missing["office"] = "libreoffice"
+	if !c.HEIF {
+		missing["heic/avif"] = "imagemagick (with libheif)"
+	} else if !heic.Decodes {
+		missing["heic"] = "libheif's HEVC decoder under imagemagick (libheif-plugin-libde265 on Debian/Ubuntu, " +
+			"libheif-libde265 on Alpine), then a restart; the probe said: " + heic.Detail
 	}
-	if !c.SVG {
-		missing["svg"] = "rsvg-convert"
-	}
+	// svg is not in this list: the built-in engine (thumb/svgwasm) draws SVGs
+	// on every install, and rsvg-convert is only its fallback. Nor is office:
+	// the OnlyOffice document server draws office documents, and whether it is
+	// configured is said on a line of its own (logOfficeThumbs).
 	if len(missing) == 0 {
-		slog.Info("thumbs: every preview kind available (image, video, audio, pdf, office, svg)")
+		slog.Info("thumbs: every preview kind available (image, heic/avif, video, audio, pdf, svg)")
 		return
 	}
 	kinds := make([]string, 0, len(missing))
@@ -1971,6 +2220,24 @@ func logThumbCapabilities(c thumb.Capabilities) {
 		slog.String("note", "the default docker image ships all of these; the slim image deliberately does not"))
 }
 
+// logOfficeThumbs names the engine office thumbnails come from: the
+// OnlyOffice document server, and whether it is configured. Without it an
+// office document shows its type icon, and the Thumbnail repair tab lists it
+// as "OnlyOffice is not configured" (no_tool:office); this line is where an
+// operator who wonders why reads it first. LibreOffice is not asked: it left
+// the image in 0.50.
+func logOfficeThumbs(ctx context.Context, oo *onlyoffice.Service) {
+	if oo.EnabledCtx(ctx) {
+		u := oo.LiveTarget(ctx).DocumentServerURL
+		slog.Info("thumbs: office documents are drawn by OnlyOffice",
+			slog.String("engine", "onlyoffice"), slog.String("document_server", u))
+		return
+	}
+	slog.Warn("thumbs: office documents get no thumbnail: OnlyOffice is not configured",
+		slog.String("engine", "onlyoffice"),
+		slog.String("configure", "Settings -> External services -> OnlyOffice (or FILEX_ONLYOFFICE_URL and FILEX_ONLYOFFICE_JWT)"))
+}
+
 // withRecoveryLogin and withSessionAuthenticator live in internal/authsetup
 // now, beside the one construction path that uses them; the names stay here
 // for the tests that pin their behaviour.
@@ -1978,3 +2245,15 @@ var (
 	withRecoveryLogin        = authsetup.WithRecoveryLogin
 	withSessionAuthenticator = authsetup.WithSessionAuthenticator
 )
+
+// addFirstLogin puts the first-login rule's settings (auth.ProvisionFirstLogin)
+// into an environment provider's configuration. An unset auto_create adds
+// nothing, so the driver's own default (open an account) applies.
+func addFirstLogin(m map[string]any, autoCreate *bool, allowedGroups string) {
+	if autoCreate != nil {
+		m["auto_create"] = *autoCreate
+	}
+	if allowedGroups != "" {
+		m["allowed_groups"] = allowedGroups
+	}
+}

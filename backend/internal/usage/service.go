@@ -227,11 +227,11 @@ func (s *Service) Report(ctx context.Context, from, to time.Time) (Report, error
 	}
 	if len(days) == 0 {
 		rep.Notes = append(rep.Notes,
-			"the provider has published no report for this range yet — B2 writes each day's file the following day")
+			"the provider has published no report for this range yet - B2 writes each day's file the following day")
 	}
 	if set.PricingIsDefault {
 		rep.Notes = append(rep.Notes,
-			"prices are filex's defaults ("+set.Pricing.Note+"), not your contract — check them against your invoice")
+			"prices are filex's defaults ("+set.Pricing.Note+"), not your contract - check them against your invoice")
 	}
 	return rep, nil
 }

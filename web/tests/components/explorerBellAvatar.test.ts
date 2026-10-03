@@ -39,6 +39,7 @@ import {
 import { accountMenuRows, explorerRowKey } from '@brftech/filex-core/src/lib/accountMenu';
 import { en } from '@brftech/filex-core/src/locales/en';
 import { tr } from '@brftech/filex-core/src/locales/tr';
+import { unmountAll } from '../helpers/teardown';
 
 const REPO = path.resolve(__dirname, '../../..');
 const read = (rel: string) => readFileSync(path.join(REPO, rel), 'utf8');
@@ -80,7 +81,6 @@ function transport() {
 }
 
 beforeEach(() => {
-  document.body.innerHTML = '';
   calls.length = 0;
   rows = [
     row({
@@ -110,7 +110,7 @@ describe('the core bell runs with no app around it', () => {
     await flushPromises();
     expect(w.find('[data-testid="unread-badge"]').text()).toBe('2');
     expect(w.find('[data-testid="notification-bell"]').attributes('aria-label')).toBe(
-      `${tr['notifications.bell']} — 2 okunmamış`,
+      `${tr['notifications.bell']} - 2 okunmamış`,
     );
   });
 
@@ -137,8 +137,7 @@ describe('the core bell runs with no app around it', () => {
     await plain.w.find('[data-testid="notification-bell"]').trigger('click');
     await flushPromises();
     expect(document.body.querySelector('[data-testid="notification-manage"]')).toBeNull();
-    plain.w.unmount();
-    document.body.innerHTML = '';
+    unmountAll();
 
     const admin = bell({ manageHref: 'https://files.example.com/admin/notifications' });
     await admin.w.find('[data-testid="notification-bell"]').trigger('click');

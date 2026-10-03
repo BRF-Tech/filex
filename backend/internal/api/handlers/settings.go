@@ -1,13 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 )
 
@@ -25,10 +29,35 @@ type Settings struct {
 	// ⚠ Two caches, not one: branding is keyed per HOST and overlaid per
 	// tenant, while the appearance payload is a single instance-wide answer.
 	Appearance *AppearanceSource
+	// LoginGuard holds the sign-in security settings (`login.*`) in memory; a
+	// write of one of them here makes it read them again, so the generic
+	// settings API cannot leave the limiter deciding with an old value.
+	// Nil-safe.
+	LoginGuard *loginguard.Guard
+	// DemoMode marks a public playground: the addresses in the sign-in
+	// security settings (the allow-list, the trusted proxies) are masked in
+	// what this page reads back (demo_redact.go maskSettingsForDemo).
+	DemoMode bool
+}
+
+// reloadLogin makes the sign-in limiter read its settings again after key was
+// written, when key is one of them.
+func (h *Settings) reloadLogin(key string) {
+	if h.LoginGuard != nil && loginguard.IsSettingKey(key) {
+		h.LoginGuard.Invalidate()
+	}
 }
 
 // NewSettings constructs a Settings handler.
 func NewSettings(store db.Store) *Settings { return &Settings{Store: store} }
+
+// newSettingsWithGuard is the settings handler the admin tools use: a write of
+// a `login.*` key there reaches the running limiter too, as on the panel.
+func newSettingsWithGuard(store db.Store, g *loginguard.Guard) *Settings {
+	s := NewSettings(store)
+	s.LoginGuard = g
+	return s
+}
 
 // AttachMailer wires the mailer so the SMTP "Test" button can verify / send.
 func (h *Settings) AttachMailer(m *mailer.Service) { h.Mailer = m }
@@ -88,6 +117,9 @@ func (h *Settings) List(w http.ResponseWriter, r *http.Request) {
 	}
 	redactSecretSettings(m)
 	overlayTenantBrandingSettings(r.Context(), m) /* wiring:e1 — tenant branding overlay */
+	if h.DemoMode {
+		maskSettingsForDemo(m)
+	}
 	writeJSON(w, http.StatusOK, m)
 }
 
@@ -147,7 +179,39 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	h.reloadLogin(key)
+	auditLoginSettings(r.Context(), map[string]string{key: req.Value}, true)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// auditLoginSettings files a write of sign-in security settings (`login.*`)
+// through this generic API the way the Sign-in security page files its own:
+// `login_security.update` with the fields and `changed_fields` - so the page's
+// trail shows it, once, whichever route and door made it. written holds the
+// keys this request wrote (key → value as stored); only when every one of
+// them is a sign-in setting (onlyLogin) is the row renamed. A batch that
+// mixes them with other settings stays ONE `settings.update` row - one
+// request, one row - naming the sign-in fields in `login_security_fields`.
+func auditLoginSettings(ctx context.Context, written map[string]string, onlyLogin bool) {
+	fields := []string{}
+	for k := range written {
+		if f := loginguard.FieldOf(k); f != "" {
+			fields = append(fields, f)
+		}
+	}
+	if len(fields) == 0 {
+		return
+	}
+	sort.Strings(fields)
+	if !onlyLogin {
+		auth.AddAuditDetail(ctx, "login_security_fields", fields)
+		return
+	}
+	auth.SetAuditAction(ctx, loginguard.ActionSettingsUpdate, "login_security")
+	for k, v := range written {
+		auth.AddAuditDetail(ctx, loginguard.FieldOf(k), v)
+	}
+	auth.AddAuditDetail(ctx, "changed_fields", fields)
 }
 
 // Update upserts multiple settings in a single request — the collection-level
@@ -195,6 +259,14 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	written := map[string]string{}
+	onlyLogin := true
+	for k, v := range raw {
+		if k != "" && v != nil && !loginguard.IsSettingKey(k) {
+			onlyLogin = false
+		}
+	}
+	defer func() { auditLoginSettings(r.Context(), written, onlyLogin) }()
 	for k, v := range raw {
 		if k == "" || v == nil {
 			continue
@@ -225,6 +297,8 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		h.reloadLogin(k)
+		written[k] = val
 	}
 	m, err := h.Store.ListSettings(r.Context())
 	if err != nil {
@@ -233,6 +307,9 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	redactSecretSettings(m)
 	overlayTenantBrandingSettings(r.Context(), m) /* wiring:e1 — tenant branding overlay */
+	if h.DemoMode {
+		maskSettingsForDemo(m)
+	}
 	writeJSON(w, http.StatusOK, m)
 }
 

@@ -15,7 +15,7 @@
 // filter popovers — survive), that a raised ancestor lifts the popup one above
 // itself, that the HIGHEST ancestor wins, and that a `z-index` on a `static`
 // element is correctly ignored, because it is inert in CSS too.
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { POPUP_BASE_Z, popupLayer } from '@brftech/filex-core/src/lib/popupLayer';
 
@@ -32,10 +32,6 @@ function chain(...styles: Array<Partial<CSSStyleDeclaration> | null>): HTMLEleme
   }
   return leaf;
 }
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 describe('popupLayer', () => {
   it('leaves the base layer alone when nothing in the chain is raised', () => {

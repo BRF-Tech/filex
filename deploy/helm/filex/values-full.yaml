@@ -1,4 +1,4 @@
-# Full install: bundled Postgres + Redis + MinIO, plus external ONLYOFFICE and
+# Full install: bundled Postgres + Redis + S3 server, plus external ONLYOFFICE and
 # draw.io wired in. Every add-on is a toggle — flip `enabled` to add/remove it.
 #
 # Usage:
@@ -17,13 +17,13 @@ queue:
 redis:
   enabled: true
 
-minio:
+versitygw:
   enabled: true
-  rootPassword: change-me-minio
+  secretKey: change-me-s3
 
-# Seed the bundled MinIO as the default storage on first boot — endpoint +
-# credentials are auto-filled from the minio block above, so files have a home
-# with zero admin-UI clicks.
+# Seed the bundled S3 server as the default storage on first boot - endpoint,
+# region and credentials are auto-filled from the versitygw block above, so
+# files have a home with zero admin-UI clicks.
 storage:
   type: s3
   s3:

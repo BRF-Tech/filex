@@ -17,9 +17,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -32,6 +34,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
@@ -260,6 +263,8 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
+	servers.Store(srv.URL, store)
+	t.Cleanup(func() { servers.Delete(srv.URL) })
 
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -271,11 +276,56 @@ func NewTestServerWith(t *testing.T, cfgMutate func(*config.Config), depsMutate 
 
 // LoginAs posts to /api/auth/login and returns the freshly-issued cookie
 // value. The cookie is also stored on the supplied client's jar.
+//
+// On a multi-tenant server it signs the person in the way a tenant's person
+// signs in on the platform's page: with THEIR OWN tenant's realm in the Realm
+// field (docs/MULTI-TENANCY.md, Realms) — found from the account in the
+// server's store, for a server this package built. The realm rules themselves
+// (an empty realm is the platform's own tenant, another tenant's account is
+// refused) are measured by requests that spell the realm out, never through
+// this helper.
 func LoginAs(t *testing.T, srv *httptest.Server, client *http.Client, email, password string) string {
+	t.Helper()
+	return LoginAsIn(t, srv, client, accountRealm(srv, email), email, password)
+}
+
+// servers maps a test server's URL to its store, so LoginAs can find an
+// account's realm.
+var servers sync.Map
+
+// accountRealm is the realm of the tenant the account named by identifier
+// belongs to, "" for the platform's own (or an unknown server or account).
+func accountRealm(srv *httptest.Server, identifier string) string {
+	if srv == nil {
+		return ""
+	}
+	v, ok := servers.Load(srv.URL)
+	if !ok {
+		return ""
+	}
+	store := v.(db.Store)
+	ctx := context.Background()
+	u, err := identity.Resolve(ctx, store, identifier)
+	if err != nil || u == nil || u.ProviderID == nil {
+		return ""
+	}
+	p, err := store.GetProvider(ctx, *u.ProviderID)
+	if err != nil {
+		return ""
+	}
+	return p.LoginRealm()
+}
+
+// LoginAsIn is LoginAs in a tenant realm: what a tenant's person types in the
+// sign-in form's Realm field on the platform's page of a multi-tenant install
+// (docs/MULTI-TENANCY.md, Realms). An empty realm is the platform's own; a
+// single-tenant server ignores the field.
+func LoginAsIn(t *testing.T, srv *httptest.Server, client *http.Client, realm, email, password string) string {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{
 		"email":    email,
 		"password": password,
+		"realm":    realm,
 	})
 	resp, err := client.Post(srv.URL+"/api/auth/login", "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -285,12 +335,64 @@ func LoginAs(t *testing.T, srv *httptest.Server, client *http.Client, email, pas
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("testutil: login: expected 200, got %d", resp.StatusCode)
 	}
+	raw, _ := io.ReadAll(resp.Body)
+	var answer struct {
+		Handoff *struct {
+			Origin string `json:"origin"`
+			Code   string `json:"code"`
+		} `json:"handoff"`
+	}
+	_ = json.Unmarshal(raw, &answer)
+	if answer.Handoff != nil {
+		return redeemHandoff(t, srv, client, answer.Handoff.Origin, answer.Handoff.Code)
+	}
 	for _, c := range resp.Cookies() {
 		if c.Name == authlocal.SessionCookieName {
 			return c.Value
 		}
 	}
 	t.Fatalf("testutil: login: no session cookie in response")
+	return ""
+}
+
+// redeemHandoff finishes a sign-in the server handed to a tenant's own address
+// (handlers.Auth.handOff) the way the browser does: the ticket is presented on
+// that address — the test server answers every Host — and the session it opens
+// is put in the client's jar for the server's URL, where the test goes on
+// making its requests (a session is scoped by its account's tenant, not by the
+// host).
+func redeemHandoff(t *testing.T, srv *httptest.Server, client *http.Client, origin, code string) string {
+	t.Helper()
+	u, err := url.Parse(origin)
+	if err != nil {
+		t.Fatalf("testutil: handoff origin %q: %v", origin, err)
+	}
+	body, _ := json.Marshal(map[string]string{"code": code})
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/auth/handoff", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("testutil: handoff: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = u.Host
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("testutil: handoff: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("testutil: handoff: expected 200, got %d", resp.StatusCode)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == authlocal.SessionCookieName && c.Value != "" {
+			if client.Jar != nil {
+				if su, perr := url.Parse(srv.URL); perr == nil {
+					client.Jar.SetCookies(su, []*http.Cookie{{Name: c.Name, Value: c.Value, Path: "/"}})
+				}
+			}
+			return c.Value
+		}
+	}
+	t.Fatalf("testutil: handoff: no session cookie in response")
 	return ""
 }
 

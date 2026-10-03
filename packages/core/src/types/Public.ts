@@ -143,6 +143,13 @@ export interface PublicShareInfo extends PublicLinkBase {
   node?: PublicNode | null;
   app?: PublicApp | null;
   /**
+   * The item (or a folder above it) is an entry its storage could not answer
+   * for (#104). The link is alive; the page says so instead of offering a
+   * download that would fail, and the server refuses one with a page that
+   * says the same.
+   */
+  unavailable?: boolean;
+  /**
    * A folder share's listing.
    *
    * ⚠ Not sent today — the server answers a folder share with its NAME and

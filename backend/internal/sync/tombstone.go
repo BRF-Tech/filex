@@ -43,7 +43,15 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 )
+
+// droppedHistory is a dropped file's snapshot keys, deleted from the storage
+// once the drop has committed (handOff).
+type droppedHistory struct {
+	node int64
+	keys []string
+}
 
 // dropRows removes from the catalogue, for good, rows whose objects are
 // confirmed gone from the storage, and returns how many of the LIVE ones it
@@ -56,7 +64,9 @@ import (
 //   - the foreign keys cascade its shares, version rows, thumbnail row,
 //     comments, tags, stars and per-user metadata;
 //   - its search document and its cached files (thumbnail, staging) are
-//     released through b, AFTER the caller's transaction commits (handOff).
+//     released through b, AFTER the caller's transaction commits (handOff);
+//   - so are a file's snapshots under `.versions/<id>/` (issue #104): their
+//     rows cascade with it, so their keys are read before the drop.
 //
 // Access grants are written about paths, not rows, and stay as they are.
 //
@@ -130,6 +140,13 @@ func (s *storageSyncer) dropRows(ctx context.Context, rows []*model.Node, b *ent
 				continue
 			}
 		}
+		// The file's snapshots under `.versions/<id>/`: their rows go with this
+		// one, so their keys are read now and the bytes deleted after the
+		// commit (handOff). Up to 0.49 they were left on the storage for good.
+		var history []string
+		if n.Type == model.NodeTypeFile {
+			history = versioning.Keys(ctx, s.store, n.ID)
+		}
 		if err := s.store.HardDeleteNode(ctx, n.ID); err != nil {
 			slog.Warn("sync: could not drop the row of an object gone from the storage",
 				slog.Int64("node", n.ID), slog.String("path", n.Path), slog.String("err", err.Error()))
@@ -140,6 +157,9 @@ func (s *storageSyncer) dropRows(ctx context.Context, rows []*model.Node, b *ent
 		}
 		b.unindex = append(b.unindex, n.ID)
 		b.reclaim = append(b.reclaim, n.ID)
+		if len(history) > 0 {
+			b.history = append(b.history, droppedHistory{node: n.ID, keys: history})
+		}
 	}
 	return dropped
 }

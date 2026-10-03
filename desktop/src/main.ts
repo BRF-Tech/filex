@@ -239,6 +239,17 @@ const HIDDEN_FLAG = '--hidden';
 // update the user never asked for must not end with a window appearing in front
 // of whatever they were doing. See applyUpdateQuietly().
 const UPDATED_FLAG = '--updated';
+// A TEST switch, and nothing but this switch on the command line turns it on:
+// every window the app opens is created and loads its page as usual — a test
+// drives that page over the DevTools protocol — but is never put on screen.
+// scripts/store-e2e.mjs starts the Store copy with it, on the desktop of
+// whoever cuts the release; without it a filex window sat in front of them for
+// the length of the run (2026-09-28, three times in one night). Unlike
+// HIDDEN_FLAG (the login item: no window at all) the windows exist. Every
+// show and focus in this file goes through showWindow/focusWindow, and
+// test/hidden-windows.test.ts fails on one that does not.
+const KEEP_WINDOWS_HIDDEN_FLAG = '--keep-windows-hidden';
+const keepWindowsHidden = process.argv.includes(KEEP_WINDOWS_HIDDEN_FLAG);
 
 let state: DesktopState = structuredClone(EMPTY_STATE);
 /** Watches the active account's bell and raises native notifications. */
@@ -453,6 +464,20 @@ function preload(name: string): string {
   return path.join(__dirname, name);
 }
 
+/** Puts a window on screen. The one way this file shows a window, so that
+ *  KEEP_WINDOWS_HIDDEN_FLAG holds for every one of them. */
+function showWindow(win: BrowserWindow | null | undefined): void {
+  if (!win || keepWindowsHidden) return;
+  win.show();
+}
+
+/** Brings a window forward. Held back by the same switch: under it nothing is
+ *  put in front of anybody, shown or not. */
+function focusWindow(win: BrowserWindow | null | undefined): void {
+  if (!win || keepWindowsHidden) return;
+  win.focus();
+}
+
 /**
  * The colour Electron paints the window with before the document has rendered
  * a single pixel.
@@ -492,7 +517,7 @@ function openShell(route: string, title: string, width = 720, height = 620): voi
     if (shellWindow.webContents.getURL() === target) shellWindow.webContents.reload();
     else void shellWindow.loadURL(target);
     shellWindow.setTitle(title);
-    shellWindow.focus();
+    focusWindow(shellWindow);
     return;
   }
   shellWindow = new BrowserWindow({
@@ -507,7 +532,7 @@ function openShell(route: string, title: string, width = 720, height = 620): voi
     backgroundColor: windowGround(),
     webPreferences: { preload: preload('preload-shell.cjs'), contextIsolation: true, sandbox: true },
   });
-  shellWindow.once('ready-to-show', () => shellWindow?.show());
+  shellWindow.once('ready-to-show', () => showWindow(shellWindow));
   shellWindow.on('closed', () => {
     shellWindow = null;
   });
@@ -516,8 +541,8 @@ function openShell(route: string, title: string, width = 720, height = 620): voi
 
 function openMainWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
-    mainWindow.focus();
+    showWindow(mainWindow);
+    focusWindow(mainWindow);
     return;
   }
   mainWindow = new BrowserWindow({
@@ -547,7 +572,7 @@ function openMainWindow(): void {
     ...docWindowChrome(),
     webPreferences: { preload: preload('preload-app.cjs'), contextIsolation: true, sandbox: true },
   });
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => showWindow(mainWindow));
 
   // Closing the window parks the app in the tray instead of killing it. A sync
   // client that stops syncing the moment its window is shut is not a sync
@@ -583,7 +608,7 @@ function openMainWindow(): void {
 /** Shows whichever surface matches the current state. */
 function route(): void {
   if (activeAccount(state)) openMainWindow();
-  else openShell('/connect', 'filex — Connect');
+  else openShell('/connect', 'filex - Connect');
 }
 
 // ─────────────────────── native notifications ───────────────────────
@@ -795,8 +820,8 @@ const TRAY_STRINGS: Bilingual = {
   resume: ['Resume sync', 'Eşitlemeyi sürdür'],
   pausedState: ['sync paused', 'eşitleme duraklatıldı'],
   syncingState: ['syncing…', 'eşitleniyor…'],
-  failingState: ['a folder could not be synced — see Settings', 'bir klasör eşitlenemedi — Ayarlar’a bak'],
-  updateReady: ['Update {v} ready — installs itself (or now)', '{v} güncellemesi hazır — kendiliğinden kurulur (ya da şimdi)'],
+  failingState: ['a folder could not be synced - see Settings', 'bir klasör eşitlenemedi - Ayarlar’a bak'],
+  updateReady: ['Update {v} ready - installs itself (or now)', '{v} güncellemesi hazır - kendiliğinden kurulur (ya da şimdi)'],
   settings: ['Settings…', 'Ayarlar…'],
   quit: ['Quit filex', "filex'ten çık"],
 };
@@ -821,7 +846,7 @@ function refreshTray(): void {
     Menu.buildFromTemplate([
       {
         label: acc
-          ? `${acc.email} — ${new URL(acc.serverUrl).host}${acc.signedOut ? ` (${trayText('signedOutSuffix')})` : ''}`
+          ? `${acc.email} - ${new URL(acc.serverUrl).host}${acc.signedOut ? ` (${trayText('signedOutSuffix')})` : ''}`
           : trayText('signedOut'),
         enabled: false,
       },
@@ -870,7 +895,7 @@ function refreshTray(): void {
 /** Finishes an authorization. THROWS on failure so a caller that has a UI (the
  *  manual code box) can show the reason inline instead of behind a modal. */
 async function completeAuth(state_: string, code: string): Promise<void> {
-  if (!pendingAuth) throw new Error('no sign-in is waiting — start again');
+  if (!pendingAuth) throw new Error('no sign-in is waiting - start again');
   // ⚠ Before the exchange, not at saveState: the exchange spends the one-time
   // code, and a token fetched only to be refused storage would also sit in
   // this process's state as a signed-in account until the app quits.
@@ -971,7 +996,7 @@ async function handleDeepLink(raw: string): Promise<void> {
   } catch (err) {
     signInFailure = failureOf(pendingState, parsed.state, err);
     log('auth', 'a sign-in link did not finish', { kind: signInFailure.kind, detail: signInFailure.detail });
-    openShell('/connect', 'filex — Connect');
+    openShell('/connect', 'filex - Connect');
   }
 }
 
@@ -2078,12 +2103,12 @@ const OPEN_WITH_STRINGS: Bilingual = {
     'Bu bilgisayardaki belgeye dokunulmadı.',
   ],
   bannerScratch: [
-    'filex is editing a copy — every save is written back to {file}',
-    'filex bir kopya üzerinde çalışıyor — her kayıt {file} dosyasına geri yazılır',
+    'filex is editing a copy - every save is written back to {file}',
+    'filex bir kopya üzerinde çalışıyor - her kayıt {file} dosyasına geri yazılır',
   ],
   bannerTwin: [
-    'Synced folder — saving goes to the server, and sync brings it back to {file}',
-    'Eşitlenen klasör — kayıt sunucuya gider, eşitleme {file} dosyasına geri getirir',
+    'Synced folder - saving goes to the server, and sync brings it back to {file}',
+    'Eşitlenen klasör - kayıt sunucuya gider, eşitleme {file} dosyasına geri getirir',
   ],
   savedBackTitle: ['filex saved your changes', 'filex değişikliklerini kaydetti'],
   savedBackBody: ['{name} on this computer is up to date.', 'Bu bilgisayardaki {name} güncel.'],
@@ -2207,7 +2232,7 @@ async function openDocuments(paths: string[]): Promise<void> {
 
   const acc = activeAccount(state) ?? state.accounts[0] ?? null;
   if (!acc) {
-    openShell('/connect', 'filex — Connect');
+    openShell('/connect', 'filex - Connect');
     await tellUser(
       'info',
       openText('signInTitle'),
@@ -2248,9 +2273,9 @@ async function openOneDocument(acc: Account, localPath: string): Promise<void> {
     (l) => !l.closing && sameLocalPath(l.record.localPath, localPath),
   );
   if (already && !already.window.isDestroyed()) {
-    already.window.show();
-    already.window.focus();
-    log('openwith', 'already open — focusing it', { localPath });
+    showWindow(already.window);
+    focusWindow(already.window);
+    log('openwith', 'already open - focusing it', { localPath });
     return;
   }
 
@@ -2358,7 +2383,7 @@ async function openViaScratch(acc: Account, localPath: string): Promise<void> {
   live.timer = setInterval(() => void pollOpenWith(id), openWithPollMs());
 }
 
-/* === yeni-pencere:v1 — document windows open frameless (Burak, 2026-09-16) ===
+/* === yeni-pencere:v1 — document windows open frameless (the maintainer, 2026-09-16) ===
  *
  * The OS title bar goes; the native window controls sit as an overlay in the
  * top-right OVER the document, and a thin strip along the very top edge drags
@@ -2394,9 +2419,16 @@ function docWindowChrome() {
  *  — a sign-in bounce, a reload after save). Buttons call `window.filexWin.*`
  *  (preload-editor); they opt out of the drag region or it swallows their click.
  *
- *  ⚠ The reserve is padding-top on the chromeless backdrop (the same trick the
- *  bottom open-with banner uses, mirrored) — box-sizing:border-box + the card at
- *  height:100% shrinks the viewer to sit BELOW the bar. */
+ *  ⚠ The reserve is core's own contract, `--fe-overlay-top` (packages/core
+ *  styles/variables.css, base.css `.fe-modal__backdrop`): the bar's height on
+ *  `:root`, and every window-sized layer core draws starts below it - the
+ *  chromeless viewer (its card is `100vh - --fe-overlay-top`) and any dialog
+ *  opened over it, as in the main window (ui/app.html sets it to its title
+ *  bar). It used to be an `!important` patch on the chromeless backdrop's
+ *  padding, which moved the viewer and nothing else: a dialog opened in a
+ *  document window still started under the bar. `:root` beats core's
+ *  `:where(:root)` default whichever stylesheet loads last, so nothing here
+ *  needs `!important`. The web keeps the default, 0. */
 function docChromeScript(): string {
   const H = DOC_CTL_H;
   const controls = IS_MAC
@@ -2425,7 +2457,7 @@ function docChromeScript(): string {
     if (!document.getElementById('filex-winbar-style')) {
       const st = document.createElement('style');
       st.id = 'filex-winbar-style';
-      st.textContent = '.fe-modal__backdrop--chromeless{box-sizing:border-box!important;align-items:stretch!important;padding-top:${H}px!important}.fe-modal__card--chromeless{height:100%!important;max-height:100%!important}';
+      st.textContent = ':root{--fe-overlay-top:${H}px}';
       document.head.appendChild(st);
     }
     if (!document.getElementById('filex-winbar')) {
@@ -2483,7 +2515,7 @@ function makeDocumentWindow(
     ...docWindowChrome(),
     webPreferences: { preload: preload('preload-editor.cjs'), contextIsolation: true, sandbox: true },
   });
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => showWindow(win));
   // ⚠ Keep the WINDOW title = the file name. /files/edit lives under the admin
   // SPA, which sets document.title to the Branding name ("BRF Teknoloji"); this
   // locks the taskbar entry to the `title` we set above.
@@ -2601,12 +2633,14 @@ function bannerScript(text: string): string {
     el.textContent = ${JSON.stringify(text)};
     // ⚠ Reserve the strip's height so it sits BELOW the editor, not on top of
     // it. /files/edit fills the viewport with a chromeless modal whose card is
-    // 100vh, and the viewers fill that card — so a fixed strip pinned at
+    // 100vh, and the viewers fill that card - so a fixed strip pinned at
     // bottom:0 lands squarely on the viewer's OWN bottom bar (for a spreadsheet
     // that is OnlyOffice's sheet-tab + zoom strip, which is exactly what the
-    // user needs to switch sheets). Shrinking the chromeless card by the
-    // measured strip height lifts that bar clear of the strip. Measured after
-    // the text is set — the strip is one nowrap line, so its height is stable.
+    // user needs to switch sheets). The measured strip height goes to core's
+    // --fe-overlay-bottom, which the chromeless viewer keeps clear of, the way
+    // the window bar uses --fe-overlay-top (docChromeScript) - no !important
+    // patch over core's rules. Measured after the text is set - the strip is
+    // one nowrap line, so its height is stable.
     const sid = 'filex-openwith-banner-style';
     let style = document.getElementById(sid);
     if (!style) {
@@ -2615,10 +2649,7 @@ function bannerScript(text: string): string {
       document.head.appendChild(style);
     }
     const h = el.offsetHeight || 30;
-    style.textContent =
-      '.fe-modal__backdrop--chromeless{box-sizing:border-box!important;' +
-        'align-items:stretch!important;padding-bottom:' + h + 'px!important}' +
-      '.fe-modal__card--chromeless{height:100%!important;max-height:100%!important}';
+    style.textContent = ':root{--fe-overlay-bottom:' + h + 'px}';
   })();`;
 }
 
@@ -2684,7 +2715,7 @@ async function beginOpenWithGrace(id: string): Promise<void> {
   const grace = openWithGraceMs();
   live.hardUntil = Date.now() + grace;
   live.until = live.hardUntil;
-  log('openwith', 'window closed — waiting for a final save', { id, graceMs: grace });
+  log('openwith', 'window closed - waiting for a final save', { id, graceMs: grace });
   if (grace === 0) await finishOpenWith(id);
 }
 
@@ -2961,7 +2992,7 @@ function wireIpc(): void {
   // waiting screen accepts it typed in. state + verifier are already held here,
   // so the user only ever copies the short code — never a token.
   ipcMain.handle('auth:completeManual', async (_e, code: string) => {
-    if (!pendingAuth) throw new Error('no sign-in is waiting — start again');
+    if (!pendingAuth) throw new Error('no sign-in is waiting - start again');
     const trimmed = String(code || '').trim();
     if (!trimmed) throw new Error('paste the code shown in your browser');
     try {
@@ -2998,7 +3029,7 @@ function wireIpc(): void {
     if (!activeAccount(state)) {
       mainWindow?.destroy();
       mainWindow = null;
-      openShell('/connect', 'filex — Connect');
+      openShell('/connect', 'filex - Connect');
     } else mainWindow?.reload();
     return publicState();
   });
@@ -3048,7 +3079,7 @@ function wireIpc(): void {
   });
 
   ipcMain.handle('auth:add', () => {
-    openShell('/connect', 'filex — Add an account');
+    openShell('/connect', 'filex - Add an account');
   });
 
   // Reconnect: the same browser sign-in, for the SAME server — so a user
@@ -3060,7 +3091,7 @@ function wireIpc(): void {
     const acc = state.accounts.find((a) => a.id === id);
     if (!acc) throw new Error('unknown account');
     pendingAuth = beginBrowserAuth(acc.serverUrl);
-    openShell('/reconnect', 'filex — Reconnect');
+    openShell('/reconnect', 'filex - Reconnect');
     return publicState();
   });
 
@@ -3598,7 +3629,7 @@ function wireIpc(): void {
     // go. Arming the watcher after it therefore arms it after the drop has
     // already happened — the creation event is long gone, nothing is ever
     // found, and the folder the user dropped stays exactly as the shell left
-    // it: EMPTY. (Measured 2026-08-29, Burak, translated from Turkish: "I drag a
+    // it: EMPTY. (Measured 2026-08-29, the maintainer, translated from Turkish: "I drag a
     // folder onto the desktop and its insides still come over empty". Single
     // files worked because a small selection is prepared in the background and
     // handed over as a real file, which needs no watcher at all — that is why
@@ -3664,7 +3695,7 @@ function wireIpc(): void {
           // ⚠⚠ NOT dialog.showErrorBox. This runs long after the gesture, on
           // the main process, and showErrorBox is MODAL: the box freezes the
           // whole app until somebody clicks it — which is what a user gets for
-          // having dragged a folder (measured 2026-08-29, Burak, translated from
+          // having dragged a folder (measured 2026-08-29, the maintainer, translated from
           // Turkish: "the filex you opened is throwing an error"). The failure is
           // reported where the user is looking (the explorer's toast) and, if the
           // window is not in front, as an OS notification they can ignore.
@@ -4065,7 +4096,7 @@ if (!app.requestSingleInstanceLock()) {
   // ⚠⚠ A file manager must not die of a background error. Electron's default
   // for an uncaught exception in the main process is a raw JavaScript error
   // box — modal, in the user's face, with a stack trace in it — and the app
-  // sits frozen behind it. Burak got exactly that (2026-08-29) because a
+  // sits frozen behind it. The maintainer got exactly that (2026-08-29) because a
   // response header made a transfer throw from inside an event handler, where
   // no try/catch could reach it. Anything that escapes is logged and shown as
   // an ordinary notification; the app keeps running, and the trail says what
@@ -4132,7 +4163,7 @@ if (!app.requestSingleInstanceLock()) {
       // Said once, at start: the sign-in window explains it to the user, and
       // this is what a bug report carries (src/keychain.ts).
       const k = keychain();
-      if (k !== 'ok') log('keychain', 'no usable OS keychain — accounts are neither read nor stored', { state: k });
+      if (k !== 'ok') log('keychain', 'no usable OS keychain - accounts are neither read nor stored', { state: k });
     }
     wireAuthHeaderInjection();
     // The supervisor keeps a `filex sync run --watch` alive per account. It is

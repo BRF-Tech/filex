@@ -82,6 +82,8 @@ const KIND_ICONS: Record<Operation['kind'], string> = {
   archive: 'M4 8V5h16v3zM5 8h14v12H5zM10 12h4',
   /* "Empty the trash" — the bin, with the lines of what is going. */
   trash: 'M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13M10.5 11v5M13.5 11v5',
+  /* "Repair thumbnails" (Admin → Tools): a picture, its frame and its hill. */
+  thumbs: 'M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9.5h.01',
   /* An app-plugin job — the puzzle piece its menu row wears (lib/actionIcons). */
   plugin:
     'M9.5 4.5a2 2 0 1 1 4 0h3a1.5 1.5 0 0 1 1.5 1.5v3a2 2 0 1 1 0 4v3a1.5 1.5 0 0 1-1.5 1.5h-3a2 2 0 1 1-4 0h-3A1.5 1.5 0 0 1 5 16v-3a2 2 0 1 1 0-4V6a1.5 1.5 0 0 1 1.5-1.5z',

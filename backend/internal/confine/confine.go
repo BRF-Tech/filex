@@ -14,11 +14,12 @@
 //     narrow, never widen past the token root.
 //
 // Enforcement is a single chi middleware that rewrites/validates every
-// path-bearing field of the request (query `?path=` and the JSON body
-// `path`/`item`/`target`/`sourceDir`/`source[]`/`items[].path`). Anything
-// outside the root is rejected 403; a root/empty path is rewritten to the
-// confined folder so listings open there. Because it sits in one place it
-// cannot miss an endpoint.
+// path-bearing field of the request (query `?path=` and the JSON body keys
+// BodyPathKeys lists, matched case-insensitively as encoding/json matches
+// them). Anything outside the root is rejected 403; a root/empty path is
+// rewritten to the confined folder so listings open there. It covers an
+// endpoint only through the keys it knows: a guard test holds every handler
+// request body to that list (api/handlers/confine_keys_test.go).
 package confine
 
 import (
@@ -229,6 +230,89 @@ func Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// The JSON body keys Middleware confines.
+//
+// ⚠⚠ A path a handler reads from a key that is NOT here is not confined by
+// this layer at all, and a `root:` token reaches anything in the storage
+// through it (lesson #543: `paths`, 2026-09-25; `sources`, `dest` and
+// `files[].source` of the archive routes, 2026-10-01). The guard test
+// api/handlers/confine_keys_test.go walks every request body the handlers
+// decode and goes red for a path-like key that is missing here.
+var (
+	// rewrittenKeys and rewrittenListKeys are rewritten to the qualified
+	// form, an empty path becoming the root itself - so a listing opens the
+	// confined folder.
+	rewrittenKeys = []string{"path", "item", "target", "sourceDir"}
+	// ⚠ `paths` too: the app doors (run, view events) and the selection
+	// archive take their files as a `paths` array, and before it was listed
+	// here a root-confined token reached any file of the storage through them
+	// (2026-09-25). The handlers check the root as well (rootAllows); this is
+	// the layer that catches a door that forgets to.
+	rewrittenListKeys = []string{"source", "paths"}
+	// rewrittenItemKeys: a list of objects whose field is a path.
+	rewrittenItemKeys = map[string]string{"items": "path"}
+
+	// checkedKeys, checkedListKeys and checkedItemKeys are only CHECKED: the
+	// value must lie inside the root as the handler reads it (holds) and is
+	// passed on unchanged. A rewrite would lose what these spellings mean to
+	// their handler: the trailing slash of the operations queue's `dest`
+	// ("copy INTO this folder"), a `/` that is the storage root, a path
+	// relative to the storage the body names by `storage_id`.
+	checkedKeys     = []string{"dest", "target_dir"}
+	checkedListKeys = []string{"sources"}
+	checkedItemKeys = map[string]string{"files": "source"}
+)
+
+// BodyPathKeys lists every JSON body key Middleware confines, spelled "key"
+// (a path), "key[]" (a list of paths) and "key[].field" (a list of objects
+// whose field is a path) - what the handlers' guard test holds their request
+// bodies to.
+func BodyPathKeys() []string {
+	var out []string
+	out = append(out, rewrittenKeys...)
+	out = append(out, checkedKeys...)
+	for _, k := range append(append([]string{}, rewrittenListKeys...), checkedListKeys...) {
+		out = append(out, k+"[]")
+	}
+	for k, f := range rewrittenItemKeys {
+		out = append(out, k+"[]."+f)
+	}
+	for k, f := range checkedItemKeys {
+		out = append(out, k+"[]."+f)
+	}
+	return out
+}
+
+// holds reports whether the client path p, read the way a handler reads it,
+// lies inside the root: a bare path is on the confined storage, and an empty
+// one (or `/`) is that storage's ROOT - not the confinement root enforce
+// turns it into.
+func (r Root) holds(p string) bool {
+	a, rel := split(p)
+	if a == "" {
+		a = r.Adapter
+	}
+	return r.contains(Root{Adapter: a, Rel: rel})
+}
+
+// oneOf answers which of keys k is, compared the way encoding/json compares
+// an object's key with a struct field's tag: case-insensitively (Unicode
+// simple folding - strings.EqualFold folds exactly as json does). "" for none.
+//
+// ⚠⚠ An exact comparison was a bypass of this whole layer: `{"PATH": …}` is
+// not the key "path" to a map, and IS the field tagged `json:"path"` to the
+// handler that decodes the body - so the path went through unchecked and the
+// handler used it (2026-10-01, save-text wrote outside a `root:` token's
+// folder that way).
+func oneOf(k string, keys []string) string {
+	for _, want := range keys {
+		if strings.EqualFold(k, want) {
+			return want
+		}
+	}
+	return ""
+}
+
 func confineBody(root Root, body []byte) ([]byte, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return body, nil
@@ -237,44 +321,79 @@ func confineBody(root Root, body []byte) ([]byte, error) {
 	if json.Unmarshal(body, &m) != nil {
 		return body, nil // not a JSON object — nothing to confine here
 	}
-	for _, key := range []string{"path", "item", "target", "sourceDir"} {
-		if v, ok := m[key].(string); ok && v != "" {
-			np, err := root.enforce(v)
-			if err != nil {
-				return nil, err
-			}
-			m[key] = np
+	itemKeys := func(km map[string]string) []string {
+		out := make([]string, 0, len(km))
+		for k := range km {
+			out = append(out, k)
 		}
+		return out
 	}
-	// ⚠ `paths` too: the app doors (run, view events) and the selection
-	// archive take their files as a `paths` array, and before it was listed
-	// here a root-confined token reached any file of the storage through them
-	// (2026-09-25). The handlers check the root as well (rootAllows); this is
-	// the layer that catches a door that forgets to.
-	for _, key := range []string{"source", "paths"} {
-		src, ok := m[key].([]any)
-		if !ok {
-			continue
-		}
-		for i, s := range src {
-			if ss, ok := s.(string); ok {
-				np, err := root.enforce(ss)
+	for key, val := range m {
+		switch {
+		case oneOf(key, rewrittenKeys) != "":
+			if v, ok := val.(string); ok && v != "" {
+				np, err := root.enforce(v)
 				if err != nil {
 					return nil, err
 				}
-				src[i] = np
+				m[key] = np
 			}
-		}
-	}
-	if items, ok := m["items"].([]any); ok {
-		for _, it := range items {
-			if im, ok := it.(map[string]any); ok {
-				if p, ok := im["path"].(string); ok {
-					np, err := root.enforce(p)
-					if err != nil {
-						return nil, err
+		case oneOf(key, rewrittenListKeys) != "":
+			if src, ok := val.([]any); ok {
+				for i, s := range src {
+					if ss, ok := s.(string); ok {
+						np, err := root.enforce(ss)
+						if err != nil {
+							return nil, err
+						}
+						src[i] = np
 					}
-					im["path"] = np
+				}
+			}
+		case oneOf(key, checkedKeys) != "":
+			if v, ok := val.(string); ok && v != "" && !root.holds(v) {
+				return nil, ErrOutOfRoot
+			}
+		case oneOf(key, checkedListKeys) != "":
+			if src, ok := val.([]any); ok {
+				for _, s := range src {
+					if ss, ok := s.(string); ok && ss != "" && !root.holds(ss) {
+						return nil, ErrOutOfRoot
+					}
+				}
+			}
+		case oneOf(key, itemKeys(rewrittenItemKeys)) != "":
+			field := rewrittenItemKeys[oneOf(key, itemKeys(rewrittenItemKeys))]
+			if items, ok := val.([]any); ok {
+				for _, it := range items {
+					im, ok := it.(map[string]any)
+					if !ok {
+						continue
+					}
+					for fk, fv := range im {
+						if p, ok := fv.(string); ok && strings.EqualFold(fk, field) {
+							np, err := root.enforce(p)
+							if err != nil {
+								return nil, err
+							}
+							im[fk] = np
+						}
+					}
+				}
+			}
+		case oneOf(key, itemKeys(checkedItemKeys)) != "":
+			field := checkedItemKeys[oneOf(key, itemKeys(checkedItemKeys))]
+			if items, ok := val.([]any); ok {
+				for _, it := range items {
+					im, ok := it.(map[string]any)
+					if !ok {
+						continue
+					}
+					for fk, fv := range im {
+						if p, ok := fv.(string); ok && p != "" && strings.EqualFold(fk, field) && !root.holds(p) {
+							return nil, ErrOutOfRoot
+						}
+					}
 				}
 			}
 		}

@@ -81,6 +81,15 @@ type User struct {
 	// immutably at JIT login. OIDCSubject pins the OIDC identity per provider.
 	ProviderID  *int64 `json:"provider_id,omitempty"`
 	OIDCSubject string `json:"-"`
+	// OIDCIssuer is the `iss` of the SSO identity the account is bound to,
+	// with OIDCSubject its `sub` (migration 00079): once bound, an SSO sign-in
+	// finds the account by that pair, and the same e-mail address arriving
+	// with another identity is refused (docs/SSO.md).
+	OIDCIssuer string `json:"-"`
+	// SSOLinked: the account is bound to an SSO identity (it has a subject).
+	// Filled by the store from OIDCIssuer/OIDCSubject, which are never sent:
+	// the users page offers "Remove SSO bind" on such an account.
+	SSOLinked bool `json:"sso_linked,omitempty"`
 	// Storage accounting (migration 00003). QuotaBytes == 0 means unlimited.
 	// Carried on the user so an admin table costs one call instead of one
 	// /quota request per row.
@@ -90,7 +99,18 @@ type User struct {
 	// session — local login, OIDC and /dav alike. Disabling is not a soft
 	// delete: files, quota and grants are untouched.
 	Enabled bool `json:"enabled"`
+	// DisabledReason says why the SERVER switched the account off (migration
+	// 00079): DisabledPendingApproval for an account an SSO sign-in opened
+	// whose address the identity provider did not confirm. "" for an account
+	// that is on, or that an administrator switched off; switching it on or
+	// off clears it. The users page shows it beside the disabled state.
+	DisabledReason string `json:"disabled_reason,omitempty"`
 }
+
+// DisabledPendingApproval is the DisabledReason of an account opened, switched
+// off, by an SSO sign-in whose identity provider did not say the e-mail
+// address was verified: an administrator switches it on to approve it.
+const DisabledPendingApproval = "pending_approval"
 
 // IsAdmin returns true if the user has the admin role.
 // PersonLabel is how filex names a person to anybody reading a screen: the

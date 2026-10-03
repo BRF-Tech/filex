@@ -1,6 +1,8 @@
 // Package enginebin answers one question for the whole server: which of the
-// heavy conversion programs — ffmpeg, ImageMagick, LibreOffice, Ghostscript,
-// poppler, rsvg — are installed here, and which binary each one is.
+// heavy conversion programs - ffmpeg, ImageMagick, Ghostscript, poppler,
+// rsvg - are installed here, and which binary each one is. It also names the
+// office engine (Office), which is not a program here but the connected
+// OnlyOffice Document Server, and its pre-0.50 name `libreoffice`.
 //
 // # Why there is exactly one answer
 //
@@ -30,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/brf-tech/filex/backend/pkg/pluginkit/officecmd"
 )
 
 // Engine ids. They are also the `engines:<id>` permission names a plugin
@@ -37,14 +41,26 @@ import (
 const (
 	FFmpeg      = "ffmpeg"
 	ImageMagick = "imagemagick"
-	LibreOffice = "libreoffice"
 	Ghostscript = "ghostscript"
 	Poppler     = "poppler"
 	RSVG        = "rsvg"
+	// Office is the office-document engine. It is not a program on this
+	// machine: it is the OnlyOffice Document Server filex is connected to,
+	// reached through its conversion API (internal/wasmplugin/office.go).
+	// So it is never probed here, and it is there exactly while a document
+	// server is configured.
+	Office = officecmd.Engine
+	// LibreOffice is the office engine's name until 0.50, kept as an ALIAS
+	// of Office: an app that asks for `engines:libreoffice` is granted, told
+	// about and run on the office engine, unchanged. Nothing named soffice is
+	// looked for or run any more (0.50: LibreOffice left the images, and a
+	// LibreOffice installed next to a bare binary is not used either - one
+	// office engine, the same everywhere).
+	LibreOffice = officecmd.LegacyEngine
 )
 
-// Candidates lists, per engine, the binaries that count as it, in order of
-// preference.
+// Candidates lists, per BINARY engine, the binaries that count as it, in
+// order of preference. The office engine has none (see Office).
 //
 // ⚠ ImageMagick: `magick` FIRST. It is the ImageMagick 7 entry point and the
 // only name that is ImageMagick on every platform; `convert` is the legacy
@@ -52,32 +68,71 @@ const (
 var Candidates = map[string][]string{
 	FFmpeg:      {"ffmpeg"},
 	ImageMagick: {"magick", "convert"},
-	LibreOffice: {"soffice", "libreoffice"},
 	Ghostscript: {"gs"},
 	Poppler:     {"pdftoppm"},
 	RSVG:        {"rsvg-convert"},
 }
 
-// Names lists every engine id, sorted.
-func Names() []string {
-	out := make([]string, 0, len(Candidates))
-	for k := range Candidates {
-		out = append(out, k)
+// aliases maps an engine's old name to the engine it now is.
+var aliases = map[string]string{LibreOffice: Office}
+
+// Canonical is the engine an id names: the id itself, or the engine an alias
+// stands for ("libreoffice" → "office").
+func Canonical(id string) string {
+	if c, ok := aliases[id]; ok {
+		return c
+	}
+	return id
+}
+
+// AliasesOf lists the old names that stand for an engine, sorted.
+func AliasesOf(id string) []string {
+	var out []string
+	for a, c := range aliases {
+		if c == id {
+			out = append(out, a)
+		}
 	}
 	sort.Strings(out)
 	return out
 }
 
+// Known reports whether id names an engine a plugin may ask for: a binary
+// engine, the office engine, or an alias of one.
+func Known(id string) bool {
+	if _, ok := Candidates[id]; ok {
+		return true
+	}
+	c := Canonical(id)
+	return c == Office
+}
+
+// Names lists every engine id, sorted - the binary engines and the office
+// engine, never an alias.
+func Names() []string {
+	out := make([]string, 0, len(Candidates)+1)
+	for k := range Candidates {
+		out = append(out, k)
+	}
+	out = append(out, Office)
+	sort.Strings(out)
+	return out
+}
+
 // DisplayName is an engine as a person reads it — the product's own
-// spelling. The id stays the machine's word (permissions, logs).
+// spelling. The id stays the machine's word (permissions, logs). An alias
+// reads as the engine it stands for: an app asking for `libreoffice` is
+// asking for what this server converts office documents with.
 func DisplayName(id string) string {
-	switch id {
+	switch Canonical(id) {
 	case FFmpeg:
 		return "FFmpeg"
 	case ImageMagick:
 		return "ImageMagick"
-	case LibreOffice:
-		return "LibreOffice"
+	case Office:
+		// The project's own spelling, the one every screen uses for it
+		// (web/tests/i18n/serviceNames.test.ts).
+		return "ONLYOFFICE"
 	case Ghostscript:
 		return "Ghostscript"
 	case Poppler:

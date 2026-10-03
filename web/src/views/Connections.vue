@@ -17,7 +17,7 @@
  * had (sync mode and interval, RBAC, sync runs, drift reports). The link in
  * the header is the door; do not grow a second one here.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
@@ -26,22 +26,15 @@ import '@brftech/filex-core/style.css';
 
 import { explorerAuth } from '@/lib/explorerConfig';
 import { getServerRoot } from '@/api/runtimeConfig';
-import { effectiveTheme } from '@/lib/theme';
+import { liveTheme } from '@/lib/theme';
 
 const { t, locale } = useI18n();
 const router = useRouter();
 
 // The panel is theme-aware but has no idea the admin shell toggles `.dark`
-// on <html>; hand it the resolved answer, like Explore.vue does.
-const currentTheme = ref<'light' | 'dark'>(effectiveTheme());
-let htmlObserver: MutationObserver | null = null;
-onMounted(() => {
-  htmlObserver = new MutationObserver(() => {
-    currentTheme.value = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  });
-  htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-});
-onBeforeUnmount(() => htmlObserver?.disconnect());
+// on <html>; hand it the mode the window is painted in (lib/theme →
+// `liveTheme`, one source for every screen - #74), like Explore.vue does.
+const currentTheme = liveTheme;
 
 const config = computed<ExplorerConfig>(() => ({
   // Same-origin: the Go binary serves this SPA and the API — under the base

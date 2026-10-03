@@ -397,7 +397,7 @@ func (e *Engine) applyPlan(ctx context.Context, led *ledger, actions []Action, l
 		switch {
 		case raced:
 			res.Raced = append(res.Raced, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
-			e.logf("~~ %s %s: %v — both versions are kept next pass", a.Kind, a.Rel, err)
+			e.logf("~~ %s %s: %v - both versions are kept next pass", a.Kind, a.Rel, err)
 		case err != nil:
 			res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", a.Kind, a.Rel, err))
 			res.Retry = append(res.Retry, parentDir(a.Rel))
@@ -853,7 +853,7 @@ func (e *Engine) resolveConflict(ctx context.Context, pc *passCtx, a Action, lp,
 	}
 	if same {
 		os.Remove(tmp)
-		e.logf("=  %s  (%s, but the same bytes on both sides — nothing to keep twice)", a.Rel, a.Reason)
+		e.logf("=  %s  (%s, but the same bytes on both sides - nothing to keep twice)", a.Rel, a.Reason)
 		res.Identical++
 		// Settled exactly as a download would be: both plan-time signatures,
 		// which is what the two sides held when the bytes were compared.
@@ -864,11 +864,11 @@ func (e *Engine) resolveConflict(ctx context.Context, pc *passCtx, a Action, lp,
 		// pushing a possibly stale local version over the server's is
 		// exactly what it is waiting to be told.
 		os.Remove(tmp)
-		e.logf("?  %s  (%s — held for a decision)", a.Rel, a.Reason)
+		e.logf("?  %s  (%s - held for a decision)", a.Rel, a.Reason)
 		return outcome{held: true}, nil
 	}
 
-	e.logf("!! %s  (%s) — keeping both", a.Rel, a.Reason)
+	e.logf("!! %s  (%s) - keeping both", a.Rel, a.Reason)
 	relDir := parentDir(a.Rel)
 	sideName := freeSideName(filepath.Dir(lp), relDir, a.ConflictName, pc.remote)
 	sidePath := filepath.Join(filepath.Dir(lp), sideName)

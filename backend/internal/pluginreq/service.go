@@ -656,6 +656,12 @@ func (e *Superseded) Error() string { return "superseded: " + e.Why }
 // source changed (the request is closed as superseded); any other failure
 // leaves the request pending, with the refusal kept on it.
 func (s *Service) Approve(ctx context.Context, id int64, who Actor, lang string) (*model.PluginRequest, any, error) {
+	return s.ApproveWith(ctx, id, who, lang, nil)
+}
+
+// ApproveWith is Approve with what else the administrator decided on the way
+// (0.50: the File types choices), written into the approval's audit row.
+func (s *Service) ApproveWith(ctx context.Context, id int64, who Actor, lang string, detail map[string]any) (*model.PluginRequest, any, error) {
 	if !s.claim(id) {
 		return nil, nil, refuse(http.StatusConflict, "busy", "this request is being approved right now")
 	}
@@ -706,7 +712,7 @@ func (s *Service) Approve(ctx context.Context, id int64, who Actor, lang string)
 	if _, err := s.o.Store.UpdatePluginRequest(ctx, r, true); err != nil {
 		return r, result, err
 	}
-	s.audit(ctx, AuditActionPluginRequestApprove, r, who, nil)
+	s.audit(ctx, AuditActionPluginRequestApprove, r, who, detail)
 	return r, result, nil
 }
 

@@ -42,6 +42,17 @@ type Source struct {
 	// (RuleNameFor). Not on the wire: rule_name stays the role's own name,
 	// and the admin pages hold the translations with the role itself.
 	RuleNames map[string]string `json:"-"`
+	// GroupID and GroupName say the custom role is the account's through a
+	// group (it has none of its own) — set on a SourceRule or SourceRoleOff
+	// answer only.
+	GroupID   int64  `json:"group_id,omitempty"`
+	GroupName string `json:"group_name,omitempty"`
+}
+
+// GroupRef names the group an account's custom role came from.
+type GroupRef struct {
+	ID   int64
+	Name string
 }
 
 // ruleSource is the Source for an answer role r gave.
@@ -66,9 +77,17 @@ type Input struct {
 	UserID     int64
 	Role       string
 	ProviderID *int64
-	// CustomRoleID is the one custom role the account holds
-	// (user_custom_roles); 0 is none.
+	// CustomRoleID is the one custom role the account holds: its own
+	// (user_custom_roles), else its groups' (EffectiveRole); 0 is none.
 	CustomRoleID int64
+	// ViaGroup is the group CustomRoleID came from; nil when it is the
+	// account's own.
+	ViaGroup *GroupRef
+	// Groups are the account's groups, for Loader.Preview only: filled from
+	// the store before the change, so a change can leave one out or alter
+	// one (a group deleted, its role cleared), and the role is then picked
+	// from them. Resolve does not read it.
+	Groups []*model.Group
 	// Defaults is the base set for role=user (model.SettingPermissionDefaults).
 	Defaults Set
 	// ViewerBase is the base set for role=viewer
@@ -94,6 +113,9 @@ type Result struct {
 	Settings model.PermRuleSettings
 	// Rules are the ids of the rules that applied, in input order.
 	Rules []int64
+
+	// ViaGroup is the group the account's custom role came from, or nil.
+	ViaGroup *GroupRef
 
 	// role and gen are what Loader's per-request memo checks an entry
 	// against before reusing it.
@@ -234,7 +256,17 @@ func (r *Result) decideAt(storageID int64, rel string, p Perm) (bool, Source) {
 		return r.Can(p), r.Why(p)
 	}
 	d, _ := Lookup(p)
-	return decide(d, r.base, r.baseSrc, &h, r.overrides, r.role)
+	ok, src := decide(d, r.base, r.baseSrc, &h, r.overrides, r.role)
+	return ok, r.viaGroup(src)
+}
+
+// viaGroup adds the group the custom role came from to an answer that the
+// role decided.
+func (r *Result) viaGroup(src Source) Source {
+	if r.ViaGroup != nil && (src.Kind == SourceRule || src.Kind == SourceRoleOff) {
+		src.GroupID, src.GroupName = r.ViaGroup.ID, r.ViaGroup.Name
+	}
+	return src
 }
 
 // decide is one permission's answer from its layers — shared by Resolve (the
@@ -282,9 +314,10 @@ func (r *Result) Why(p Perm) Source {
 //
 //  1. base — role=user: in.Defaults; role=viewer: in.ViewerBase (the
 //     Read-only preset when unset); other: nothing.
-//  2. the account's custom role (one per person, CustomRoleID), when it is
-//     enabled and in the account's tenant: its own list REPLACES the base,
-//     and its "different in some folders" part applies per path (CanAt).
+//  2. the account's custom role (one per person, CustomRoleID — its own, or
+//     else its groups', EffectiveRole), when it is enabled and in the
+//     account's tenant: its own list REPLACES the base, and its "different
+//     in some folders" part applies per path (CanAt).
 //  3. overrides — the user's own allow/deny; always wins over rules.
 //
 // Then two hard lines no layer can cross: role-only permissions (admin.full)
@@ -292,7 +325,7 @@ func (r *Result) Why(p Perm) Source {
 // permission. role=admin short-circuits everything: an administrator holds
 // every permission and is bound by no rule (they could edit the rule anyway).
 func Resolve(in Input) *Result {
-	res := &Result{Sources: make(map[Perm]Source, len(catalogue)), role: in.Role}
+	res := &Result{Sources: make(map[Perm]Source, len(catalogue)), role: in.Role, ViaGroup: in.ViaGroup}
 
 	if in.Role == model.RoleAdmin {
 		res.admin = true
@@ -352,7 +385,7 @@ func Resolve(in Input) *Result {
 		if allowed {
 			res.Allowed = res.Allowed.With(p)
 		}
-		res.Sources[p] = src
+		res.Sources[p] = res.viaGroup(src)
 	}
 	return res
 }

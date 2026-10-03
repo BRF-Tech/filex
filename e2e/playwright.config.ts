@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig, devices, type Project } from '@playwright/test';
 
 /**
  * Playwright config for the filex e2e suite.
@@ -7,7 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
  * port against a throwaway data dir and tears it down again:
  *
  *   node e2e/run.mjs local
- *   node e2e/run.mjs local --s3          # + MinIO and an s3 storage
+ *   node e2e/run.mjs local --s3          # + an S3 server and an s3 storage
  *
  * If you do drive Playwright directly, point it at a server you started
  * yourself and give it a deterministic admin:
@@ -32,6 +32,27 @@ const BROWSER_DEVICES: Record<string, string> = {
   chromium: 'Desktop Chrome',
   firefox: 'Desktop Firefox',
   webkit: 'Desktop Safari',
+};
+
+/**
+ * What an engine needs on top of its device to BE that device.
+ *
+ * ⚠⚠ Headless Firefox on Linux has no pointing device, so it answers
+ * `(hover: none)` and `(pointer: none)` — a desktop with no mouse. Every hover
+ * reveal the product keeps behind `@media (hover: hover)` (the card checkbox,
+ * the star, issue #26) is then simply not there, and a desktop spec fails on
+ * a screen no desktop Firefox user has (measured 2026-10-01: Chromium and
+ * WebKit headless both answer hover + fine; Firefox does once these two
+ * capability prefs say "fine pointer that hovers", the value a desktop with a
+ * mouse reports). The phone describes that need `hover: none` skip Firefox,
+ * which cannot emulate a phone at all.
+ */
+const ENGINE_USE: Record<string, Project['use']> = {
+  firefox: {
+    launchOptions: {
+      firefoxUserPrefs: { 'ui.primaryPointerCapabilities': 6, 'ui.allPointerCapabilities': 6 },
+    },
+  },
 };
 
 /**
@@ -85,7 +106,13 @@ export default defineConfig({
         { origin: BASE_URL, localStorage: [{ name: 'filex.openTrigger', value: 'single' }] },
       ],
     },
-    trace: 'on-first-retry',
+    // ⚠ retain-on-failure, not on-first-retry. A local run has no retries, so
+    // 'on-first-retry' recorded nothing there, and on CI it records the RETRY:
+    // the first attempt (the one that failed, often for a reason that does not
+    // come back) left no trace at all. A blank sign-in page seen once in a
+    // full run (task #81) could not be read browser-side for exactly this
+    // reason: was the missing chunk requested, pending or refused?
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     actionTimeout: 10_000,
@@ -99,7 +126,10 @@ export default defineConfig({
   // something engine-specific (the single encrypted file's save path, 173)
   // says so itself. The engines must match this Playwright's revisions:
   // `cd e2e && ./node_modules/.bin/playwright install firefox webkit`.
-  projects: selectedBrowsers().map((name) => ({ name, use: { ...devices[BROWSER_DEVICES[name]] } })),
+  projects: selectedBrowsers().map((name) => ({
+    name,
+    use: { ...devices[BROWSER_DEVICES[name]], ...(ENGINE_USE[name] ?? {}) },
+  })),
 
   // Optional: spin up the docker image automatically. Disabled by default
   // because most local runs already have a server up. CI sets E2E_AUTOSTART=1.

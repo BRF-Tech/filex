@@ -93,7 +93,7 @@ func (h *UsersAdmin) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"new_password": pw,
-		"warning":      "this password is shown ONCE — copy it now",
+		"warning":      "this password is shown ONCE - copy it now",
 	})
 }
 

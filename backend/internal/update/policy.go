@@ -278,7 +278,7 @@ func Decide(in Input) Decision {
 
 	if step == StepMajor {
 		d.Action = ActionInstruct
-		d.because(why{key: "major", en: "major release — read the upgrade notes first"})
+		d.because(why{key: "major", en: "major release - read the upgrade notes first"})
 		return d
 	}
 
@@ -307,12 +307,12 @@ func cannotApply(in Input) why {
 	if in.Mode == ModePackage {
 		if name := in.Manager.Label(); name != "" {
 			return why{key: "package", vars: map[string]string{"manager": name},
-				en: "installed with " + name + " — upgrade it with " + name + ", which keeps track of the installed version"}
+				en: "installed with " + name + " - upgrade it with " + name + ", which keeps track of the installed version"}
 		}
 		return why{key: "package_unknown",
-			en: "installed by a package manager — upgrade it there, so the package manager keeps track of the installed version"}
+			en: "installed by a package manager - upgrade it there, so the package manager keeps track of the installed version"}
 	}
-	return why{key: "container", en: "container install cannot replace its own image — use an external updater or upgrade manually"}
+	return why{key: "container", en: "container install cannot replace its own image - use an external updater or upgrade manually"}
 }
 
 // autoAllowed answers "may this move happen without asking?" plus the reason,
@@ -321,16 +321,16 @@ func autoAllowed(in Input, step Step, target Release, skipped []Release) (bool, 
 	pol := map[string]string{"policy": string(in.Policy)}
 	upTo, limit := reach(in.Policy, in.Current)
 	if upTo == BehaviorOff || upTo == BehaviorAnnounce {
-		return false, why{key: "announced_only", vars: pol, en: "policy is " + string(in.Policy) + " — updates are announced, not applied"}
+		return false, why{key: "announced_only", vars: pol, en: "policy is " + string(in.Policy) + " - updates are announced, not applied"}
 	}
 	if !target.AutoOK {
-		return false, why{key: "not_auto_ok", en: "release is not marked auto_ok — apply it deliberately"}
+		return false, why{key: "not_auto_ok", en: "release is not marked auto_ok - apply it deliberately"}
 	}
 	// A patch must not carry schema changes. If one does, it is a packaging
 	// mistake, and the safe reading is "this is not really a patch".
 	for _, r := range append(append([]Release{}, skipped...), target) {
 		if r.Migrations {
-			return false, why{key: "migrations", en: "release changes the database schema — confirm so a backup is taken first"}
+			return false, why{key: "migrations", en: "release changes the database schema - confirm so a backup is taken first"}
 		}
 	}
 	switch step {
@@ -341,9 +341,9 @@ func autoAllowed(in Input, step Step, target Release, skipped []Release) (bool, 
 		case upTo == BehaviorMinor:
 			return true, why{key: "minor_auto", en: "minor release under policy minor"}
 		case limit == LimitZeroMajor:
-			return false, why{key: "zero_minor", en: "0.x minor releases may break compatibility — confirm required"}
+			return false, why{key: "zero_minor", en: "0.x minor releases may break compatibility - confirm required"}
 		}
-		return false, why{key: "minor_needs_policy", vars: pol, en: "minor release — policy " + string(in.Policy) + " applies patches only"}
+		return false, why{key: "minor_needs_policy", vars: pol, en: "minor release - policy " + string(in.Policy) + " applies patches only"}
 	}
 	return false, why{key: "unhandled", en: "unhandled step"}
 }

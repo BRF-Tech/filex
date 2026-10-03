@@ -361,7 +361,7 @@ function onRowAction(key: string, row: AppPlugin) {
       </div>
     </header>
 
-    <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ t('appPlugins.subtitle') }}</p>
+    <p class="text-sm text-zinc-600 dark:text-zinc-400" data-testid="app-plugins-intro">{{ t('appPlugins.subtitle') }}</p>
 
     <div
       v-if="forbidden"
@@ -499,7 +499,7 @@ function onRowAction(key: string, row: AppPlugin) {
         <template #cell-version="{ row }">
           <div class="min-w-0 py-1" :data-testid="`app-plugin-updates-${row.name}`">
             <div class="flex min-w-0 flex-wrap items-center gap-1">
-              <span :data-testid="`app-plugin-version-${row.name}`">{{ row.version || '—' }}</span>
+              <span :data-testid="`app-plugin-version-${row.name}`">{{ row.version || '-' }}</span>
               <!-- ⚠ The label WRAPS inside its badge (max-w-full + a wrapping
                    span; a Badge is nowrap), because a 958 px table squeezes
                    this column below "Not compatible with this filex" and a

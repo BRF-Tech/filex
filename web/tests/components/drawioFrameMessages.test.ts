@@ -6,17 +6,17 @@
 // the payload (`source: 'convert-embed'`, `{event: 'save'}`) is only what the
 // sender chose to write, so it cannot be what decides.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 import DrawioViewer from '@brftech/filex-core/src/viewers/DrawioViewer.vue';
+import { teardownDom } from '../helpers/teardown';
 
-const mounted: VueWrapper[] = [];
-
-afterEach(() => {
-  mounted.splice(0).forEach((w) => w.unmount());
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  document.body.innerHTML = '';
 });
 
 const settle = async () => {
@@ -56,7 +56,6 @@ async function openDrawio(drawioUrl = `${DRAWIO}/`) {
     },
     attachTo: document.body,
   });
-  mounted.push(w);
   await settle();
   const frame = w.get('iframe').element as HTMLIFrameElement;
   const posted: Array<{ msg: { action?: string; xml?: string }; target: string }> = [];

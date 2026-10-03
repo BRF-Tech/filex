@@ -17,7 +17,7 @@
  * the page's language (PublicLinkPage).
  *
  * ⚠ Arabic is filex's right-to-left test fixture: not published, not
- * advertised, in no screenshot (Burak, 2026-09-19). It is here because it is
+ * advertised, in no screenshot (the maintainer, 2026-09-19). It is here because it is
  * the only language whose direction differs.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';

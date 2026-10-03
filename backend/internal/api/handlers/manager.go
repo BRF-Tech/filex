@@ -50,6 +50,12 @@ type Manager struct {
 	// ACL enforces per-user/per-item access control. nil disables
 	// enforcement (tests / list-only environments) → legacy all-access.
 	ACL *acl.Resolver
+	// ThumbRefresh draws in the background what a listing found missing or
+	// stale (hydrateThumbs). Nil: nothing is drawn from a listing.
+	ThumbRefresh ThumbRefresher
+	// FolderPreviews says whether folders show their pictures in a listing
+	// (thumb.FolderPreviewsSetting, cached by the pipeline). Nil: on.
+	FolderPreviews FolderPreviewSwitch
 	// ThumbSigner stamps the `thumb_url` this listing hands out, so a bare
 	// `<img src>` in an embed can fetch it with no header and no cookie. nil
 	// emits an unsigned URL, which authenticated clients still fetch fine.
@@ -189,6 +195,12 @@ func (h *Manager) allowed(ctx context.Context, s *model.Storage, rel string, nee
 // the level p needs on rel AND p itself, writing the refusal (legacyMsg when
 // the path is the reason, the permission refusal otherwise).
 func (h *Manager) require(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, p perm.Perm, legacyMsg string) bool {
+	// An entry the storage could not answer for, or anything inside one
+	// (issue #104): every verb that asks for a permission on a path asks
+	// here first, whatever the permission. 409 ENTRY_UNAVAILABLE.
+	if refuseUnavailable(w, r, h.Store, s, rel) {
+		return false
+	}
 	if h.ACL == nil {
 		return true
 	}
@@ -239,15 +251,22 @@ func (h *Manager) removeFromIndex(ctx context.Context, id int64) {
 // abort an office→PDF conversion mid-flight. Errors are swallowed —
 // the pipeline already logs internally and the grid view falls back
 // to the generic icon when no thumb is ready.
-func (h *Manager) dispatchThumb(n *model.Node) {
-	if h.Thumbs == nil || n == nil {
+func (h *Manager) dispatchThumb(n *model.Node) { dispatchThumb(h.Thumbs, n) }
+
+// dispatchThumb is the one "draw this file now, in the background" every
+// write handler without a protocolsync.Syncer of its own calls after the bytes
+// landed: the manager's writes, the text editor's save and a version restore.
+// A copy of the node goes to the goroutine; nil pipeline or node is a no-op.
+func dispatchThumb(p ThumbPipeline, n *model.Node) {
+	if p == nil || n == nil {
 		return
 	}
+	cp := *n
 	go func(node *model.Node) {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		_ = h.Thumbs.GenerateThumb(ctx, node)
-	}(n)
+		_ = p.GenerateThumb(ctx, node)
+	}(&cp)
 }
 
 // List dispatches between two query shapes on the same path:
@@ -453,6 +472,12 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown adapter: " + adapter})
 		return
 	}
+	// Into an entry the storage could not answer for (issue #104): no
+	// listing, search or change feed of it, and no preview or download
+	// (streamBody asks too). Its parent lists it, with the warning.
+	if refuseUnavailable(w, r, h.Store, current, rel) {
+		return
+	}
 
 	switch action {
 	case "index", "subfolders":
@@ -549,6 +574,11 @@ func (h *Manager) streamBody(w http.ResponseWriter, r *http.Request, s *model.St
 	rel = strings.TrimSpace(strings.TrimPrefix(rel, "/"))
 	if rel == "" || pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return
+	}
+	// Every body this serves - preview, download, a shared link's file - is
+	// refused for an entry the storage could not answer for (issue #104).
+	if refuseUnavailable(w, r, h.Store, s, rel) {
 		return
 	}
 	// RBAC: previewing/downloading a file needs ≥viewer on it. A download
@@ -817,20 +847,13 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 		}
 	}
 
-	// Hydrate Thumb so projectFileNodes can emit thumb_url. The
-	// store's ListNodesByParent doesn't JOIN thumbnails (kept lean for
-	// sync/walker callers), so we patch each file's Thumb here. N+1 at
-	// list time is fine for realistic dir sizes (≤ low thousands);
-	// switch to a batched lookup if profiles ever flag it.
-	for _, n := range nodes {
-		if n.Type != model.NodeTypeFile {
-			continue
-		}
-		if t, terr := h.Store.GetThumbnail(r.Context(), n.ID); terr == nil && t != nil {
-			n.Thumb = t
-		}
-	}
+	// Hydrate Thumb so projectFileNodes can emit thumb_url, and hand what is
+	// missing or stale to the refresher (hydrateThumbs).
+	hydrateThumbs(r.Context(), h.Store, h.ThumbRefresh, nodes)
 	files := projectFileNodes(s.Name, nodes, dirsOnly, set, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
+	if h.folderPreviewsOn() {
+		annotateFolderPreviews(r.Context(), h.Store, h.ThumbRefresh, h.ThumbSigner, s.ID, nodes, set, files)
+	}
 	h.respondIndex(w, r, s, rel, dirname, storageNames, dirsOnly, set, files, nil)
 }
 
@@ -863,12 +886,9 @@ func (h *Manager) respondIndex(w http.ResponseWriter, r *http.Request, s *model.
 	/* cold-cache: a freshly-created encrypted folder (marker uploaded seconds
 	   ago, sync not yet run) must still present its lock screen. The marker
 	   object is right there in the driver listing, so flag directly. */
-	for _, o := range objs {
-		if o.Name == e2e.MarkerName {
-			resp["e2e"] = true
-			resp["e2e_root"] = joinAdapterPath(s.Name, strings.Trim(rel, "/"))
-			break
-		}
+	if e2eMarkerAmong(objs) {
+		resp["e2e"] = true
+		resp["e2e_root"] = joinAdapterPath(s.Name, strings.Trim(rel, "/"))
 	}
 	/* /wiring:e2 */
 	writeJSON(w, http.StatusOK, resp)
@@ -888,7 +908,7 @@ func (h *Manager) annotateE2e(ctx context.Context, s *model.Storage, rel string,
 		if childRel == "" {
 			continue
 		}
-		if root, ok := e2e.FindRoot(ctx, h.Store, s.ID, childRel); ok && root == strings.Trim(childRel, "/") {
+		if e2e.IsRoot(ctx, h.Store, s.ID, childRel) {
 			entry["e2e"] = true
 		}
 	}
@@ -968,19 +988,15 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 		if isDir {
 			typ = "dir"
 		}
-		// filex's own entries — the same syspath.IsName rule the cache
-		// projector applies, so a cold listing and a warm one agree. Judged
-		// by the entry's NAME: what is listed here are the children of the
-		// folder that was asked for (see projectFileNodes for why not the path).
-		if syspath.IsName(o.Name) {
+		// filex's own entries and an encrypted folder's key file - the same
+		// syspath.Unlisted rule the cache projector applies, so a cold listing
+		// and a warm one agree. Judged by the entry's NAME: what is listed here
+		// are the children of the folder that was asked for (see
+		// projectFileNodes for why not the path). wiring:e2 - detection flags
+		// for the key file come from the response.
+		if syspath.Unlisted(o.Name) {
 			continue
 		}
-		/* wiring:e2 — hide the encrypted-folder marker (same contract as
-		   the DB projector; detection flags come from the response). */
-		if o.Name == e2e.MarkerName {
-			continue
-		}
-		/* /wiring:e2 */
 		rel := o.Path
 		if rel == "" {
 			rel = path.Join(dir, o.Name)
@@ -1242,14 +1258,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 
 	// Hydrate thumb metadata so search results carry the same
 	// thumb_url as the index listing (was always empty pre-v0.1.16).
-	for _, n := range nodes {
-		if n.Type != model.NodeTypeFile {
-			continue
-		}
-		if t, terr := h.Store.GetThumbnail(r.Context(), n.ID); terr == nil && t != nil {
-			n.Thumb = t
-		}
-	}
+	hydrateThumbs(r.Context(), h.Store, h.ThumbRefresh, nodes)
 
 	files := projectFileNodes(s.Name, nodes, false, nil, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
 	annotateAppBadges(r.Context(), h.Store, s.ID, files)
@@ -1455,6 +1464,17 @@ func (h *Manager) Read(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
+	// The bytes of an entry the storage could not answer for (issue #104):
+	// refused by id as by path.
+	if st, err := h.Store.GetStorage(r.Context(), storageID); err == nil && st != nil {
+		if known != nil && known.DeletedAt == nil {
+			if refuseUnavailableNode(w, r, h.Store, st, known) {
+				return
+			}
+		} else if refuseUnavailable(w, r, h.Store, st, aclRel) {
+			return
+		}
+	}
 	// ?download=1 asks for an attachment: that is a download, and needs
 	// files.download too (the inline read a viewer renders does not; see
 	// vfStream).
@@ -1642,17 +1662,14 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		// that one used `strings.Contains(o.Path, ".thumbs")`, which also hid a
 		// person's own `my.thumbs.txt`), and neither knew `.filex-open`, so it
 		// was listed to everyone (2026-09-21, the owner's report).
-		if syspath.IsName(n.Name) {
+		//
+		// wiring:e2 - the encrypted-folder marker is an implementation detail:
+		// syspath.Unlisted hides it from every listing/search projection (the
+		// client detects encryption via the response-level e2e/e2e_root flags
+		// and reads the marker itself through the preview endpoint).
+		if syspath.Unlisted(n.Name) {
 			continue
 		}
-		/* wiring:e2 — the encrypted-folder marker is an implementation
-		   detail: hidden from every listing/search projection (the client
-		   detects encryption via the response-level e2e/e2e_root flags and
-		   reads the marker itself through the preview endpoint). */
-		if n.Name == e2e.MarkerName {
-			continue
-		}
-		/* /wiring:e2 */
 		// RBAC: drop entries the caller isn't allowed to see.
 		if set != nil && !set.CanSee(n.Path) {
 			continue
@@ -1685,6 +1702,10 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 		if n.Type == model.NodeTypeSymlink {
 			entry["symlink"] = true
 		}
+		// An entry the storage could not answer for (issue #104): listed, so
+		// it does not just vanish, and flagged, so the explorer can say why
+		// nothing works on it (packages/core lib/unavailable).
+		unavailableFields(entry, n)
 		if n.Etag != "" {
 			entry["etag"] = n.Etag
 		}
@@ -1729,7 +1750,15 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 			// Stamped with a short-lived signature (thumbURL): this listing is
 			// the only place that knows the caller was allowed to see the node,
 			// and an <img> cannot carry that decision in a header.
-			entry["thumb_url"] = thumbURL(signer, n.ID)
+			entry["thumb_url"] = thumbURL(signer, n.ID, n.Thumb)
+		} else if !isDir {
+			// No picture, and the reason is the file's own (damaged,
+			// encrypted, too large): the explorer marks the file with it
+			// (thumb.NoteOf, docs/thumbnails.md → Why a file has no
+			// thumbnail). A reason that may pass gets no note.
+			if note := thumb.NoteOf(n.Thumb); note != "" {
+				entry["thumb_note"] = note
+			}
 		}
 		// No backend mtime (e.g. an empty folder on a synthetic-dir store —
 		// nothing to aggregate one from) — listingMtimeMillis falls back to

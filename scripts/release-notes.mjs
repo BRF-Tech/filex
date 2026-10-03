@@ -60,7 +60,7 @@ function clamp(s, max = MAX_LEN) {
   if (s.length <= max) return s;
   const cut = s.slice(0, max);
   const sp = cut.lastIndexOf(' ');
-  return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[.,;:—-]+$/, '')}…`;
+  return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[.,;:-]+$/, '')}…`;
 }
 
 /**
@@ -106,7 +106,7 @@ export function releaseNotes(changelog, version) {
   const date = sec.heading.match(/-\s*(\d{4}-\d{2}-\d{2})\s*$/)?.[1];
   const items = bullets(sec.body).map(headline).filter(Boolean);
 
-  const lines = [`filex v${version}${date ? ` — ${date}` : ''}`];
+  const lines = [`filex v${version}${date ? ` - ${date}` : ''}`];
   for (const it of items.slice(0, MAX_ITEMS)) lines.push(`• ${it}`);
   if (items.length === 0) lines.push('• Maintenance release.');
   lines.push(`Full changelog: ${CHANGELOG_URL}`);
@@ -215,7 +215,7 @@ export async function githubReleaseBody(changelog, version, { max = GITHUB_MAX }
   if (truncated) {
     out.push(
       `**This release has more to it than fits on one page.** The rest of the`,
-      `entry — and every earlier release — is in [CHANGELOG.md](${full}).`,
+      `entry - and every earlier release - is in [CHANGELOG.md](${full}).`,
       '',
     );
   } else {

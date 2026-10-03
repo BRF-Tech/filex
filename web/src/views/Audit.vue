@@ -5,7 +5,7 @@ import { RefreshCcw } from 'lucide-vue-next';
 
 import { useAuditStore } from '@/stores/audit';
 import type { AuditEntry } from '@/api/types';
-import { formatDate, ipOnly } from '@/lib/format';
+import { formatDate, shownAddress } from '@/lib/format';
 import { auditActionLabel, auditResourceOptions, auditTargetLabel } from '@/lib/auditLabel';
 
 import Button from '@/components/ui/Button.vue';
@@ -46,7 +46,7 @@ watch([action, from, to], () => {
  *  API keys stay distinguishable ("Ayşe · work" vs "Ayşe · fishapp"). The
  *  person is named the way every screen names them (core personName). */
 function whoOf(r: AuditEntry): string {
-  const who = personName({ name: r.user_name, email: r.user_email }) || '—';
+  const who = personName({ name: r.user_name, email: r.user_email }) || '-';
   const via = r.metadata?.token_username;
   return typeof via === 'string' && via ? `${who} · ${via}` : who;
 }
@@ -62,7 +62,7 @@ const resourceOptions = computed(() => [
 
 /** The row's target in words (kind + which one). */
 function targetOf(r: AuditEntry): string {
-  return auditTargetLabel(r.target_type, r.target_id, t, te, r.target_name) || '—';
+  return auditTargetLabel(r.target_type, r.target_id, t, te, r.target_name) || '-';
 }
 
 /* The explorer's table (DataTable), remembered under `admin.audit`.
@@ -102,8 +102,8 @@ const columns = computed<DataColumn<AuditEntry>[]>(() => [
     sortValue: (r) => targetOf(r),
   },
   /* ⚠ The address without the client's source port — rows written before
-   * v0.43.0 stored "127.0.0.1:54452". */
-  { id: 'ip', label: t('audit.fields.ip'), sortable: true, width: 130, format: (r) => ipOnly(r.ip) || '—' },
+   * v0.43.0 stored "127.0.0.1:54452" - and a public demo's mask in words. */
+  { id: 'ip', label: t('audit.fields.ip'), sortable: true, width: 130, format: (r) => shownAddress(r.ip, t('demo.hiddenAddress')) || '-' },
 ]);
 
 onMounted(load);
@@ -190,7 +190,7 @@ onMounted(load);
         <dt class="text-zinc-500">{{ t('audit.fields.target') }}</dt>
         <dd class="break-all">{{ targetOf(detail) }}</dd>
         <dt class="text-zinc-500">{{ t('audit.fields.ip') }}</dt>
-        <dd>{{ ipOnly(detail.ip) || '—' }}</dd>
+        <dd>{{ shownAddress(detail.ip, t('demo.hiddenAddress')) || '-' }}</dd>
       </dl>
       <details v-if="detail" class="mt-3 text-xs">
         <summary class="cursor-pointer text-zinc-500">{{ t('audit.rawRecord') }}</summary>

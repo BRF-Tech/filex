@@ -32,7 +32,7 @@ describe('api.storageUsage', () => {
       200,
       JSON.stringify({
         storages: [
-          { name: 'Diyetlif-Bulut-Depolama', used_bytes: 245276276422, file_count: 153943 },
+          { name: 'Globex-Cloud-Storage', used_bytes: 245276276422, file_count: 153943 },
           { name: 'arsiv', used_bytes: 10, file_count: 1, coverage: { complete: false, reason: 'lazy_on_open' } },
         ],
       }),
@@ -41,7 +41,7 @@ describe('api.storageUsage', () => {
     const rows = await api.storageUsage();
     expect(asked).toEqual(['https://files.example.com/api/files/quota/storages']);
     expect(rows).toEqual([
-      { name: 'Diyetlif-Bulut-Depolama', used_bytes: 245276276422, file_count: 153943 },
+      { name: 'Globex-Cloud-Storage', used_bytes: 245276276422, file_count: 153943 },
       { name: 'arsiv', used_bytes: 10, file_count: 1, coverage: { complete: false, reason: 'lazy_on_open' } },
     ]);
   });

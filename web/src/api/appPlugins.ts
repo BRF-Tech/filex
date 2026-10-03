@@ -1,6 +1,8 @@
 import axios from 'axios';
 
 import { api } from './client';
+import type { FileTypeHandler } from './fileTypes';
+import type { PluginLogLine } from './plugins';
 
 // App plugins — WebAssembly modules that add rows to the file menu and run as
 // ops jobs (/api/admin/app-plugins, backend/internal/wasmplugin,
@@ -107,6 +109,8 @@ export interface AppPluginManifest {
   /** Languages for filex ITSELF: `{tag: {filex key: text}}`. */
   ui_locales?: Record<string, Record<string, string>>;
   wasm?: { url?: string; sha256?: string };
+  /** The kinds of file the app draws thumbnails of (filex 0.50). */
+  thumbnails?: { applies: PluginApplies };
 }
 
 export type AppPluginState = 'running' | 'disabled' | 'refused' | 'failed' | string;
@@ -145,8 +149,9 @@ export interface AppPluginRuntime {
   disabled_reason: string;
   requires_signature: boolean;
   engines: Record<string, boolean>;
-  /** Engine id → the name a person reads (`libreoffice` → `LibreOffice`),
-   *  the server's one spelling (enginebin.DisplayName). */
+  /** Engine id → the name a person reads (`imagemagick` → `ImageMagick`,
+   *  `office` and its old name `libreoffice` → `ONLYOFFICE`), the server's
+   *  one spelling (enginebin.DisplayName). */
   engine_names: Record<string, string>;
   /** The filex apps' ranges are judged against (`0.47.0`, or a dev build's own string). */
   filex_version: string;
@@ -178,7 +183,7 @@ export interface AppPluginCompat {
  * need a newer filex: `version`, `requires`) · `check_failed` (the source
  * could not be read: `refusal`) · `failed` (only on a row filex 0.47 wrote:
  * its automatic update was tried and undone). `notes` are the source's
- * release notes for `version`, plain text.
+ * release notes for `version`: a GitHub release's body, Markdown as text.
  */
 export interface AppPluginUpdate {
   checked_at?: string;
@@ -190,7 +195,7 @@ export interface AppPluginUpdate {
   adds_module?: boolean;
   /** The refusal, in the shape an install answers (read it with `refusalOf`). */
   refusal?: Record<string, unknown>;
-  /** The source's notes for `version` (a GitHub release's body), plain text. */
+  /** The source's notes for `version` (a GitHub release's body): Markdown, as text. */
   notes?: string;
 }
 
@@ -438,8 +443,10 @@ export interface AppPluginDryRun {
    * run and when the name is free.
    */
   installed?: { id: number; version: string };
-  /** Engines the manifest asks for that this server does not have. */
-  engines_missing?: { id: string; name: string }[];
+  /** Engines the manifest asks for that this server does not have.
+   *  `kind: "office"` (0.50) is the office engine: a document server to
+   *  connect, not a program to install - the review says it apart. */
+  engines_missing?: { id: string; name: string; kind?: 'office' }[];
   kind?: AppPluginKind;
   /** A language pack's integrity is its manifest's: this is what was verified. */
   manifest_sha256?: string;
@@ -456,7 +463,63 @@ export interface AppPluginDryRun {
   engine?: boolean;
   /** Its own interface: the "Interface" group of the review. */
   ui?: AppPluginUI;
+  /**
+   * The review's File types group (0.50, an install only): every kind the app
+   * would open or draw thumbnails of, who handles it now, and where the app
+   * lands when nothing is chosen (assoc.InstallKind).
+   */
+  file_types?: AppPluginInstallKind[];
 }
+
+/** One kind the app would handle (assoc.InstallKind). */
+export interface AppPluginInstallKind {
+  capability: 'open' | 'thumbnail' | string;
+  ext: string;
+  mime?: string;
+  /** The new app's handler for the kind. */
+  handler: FileTypeHandler;
+  /** The handlers on for the kind now, in order. */
+  current: FileTypeHandler[];
+  /** Where the app lands with no choice: first, or after the others. */
+  default: AppPluginPlace;
+}
+
+/** Where an install puts the new app for one kind. */
+export type AppPluginPlace = 'first' | 'last' | 'off';
+
+/** One choice of the File types group, as the install body carries it. */
+export interface AppPluginPlacement {
+  capability: string;
+  ext: string;
+  handler: string;
+  place: AppPluginPlace;
+}
+
+/** An app's thumbnail limits (wasmplugin.ThumbLimits). 0 = the default. */
+export interface AppThumbLimits {
+  max_input_mb: number;
+  timeout_s: number;
+  memory_mb: number;
+  concurrency: number;
+}
+
+/** `GET/PUT …/{id}/thumbnails` (wasmplugin.ThumbLimitsAnswer). */
+export interface AppThumbLimitsAnswer {
+  /** In force. */
+  values: AppThumbLimits;
+  /** As the administrator stored them (0 = the default). */
+  stored: AppThumbLimits;
+  defaults: AppThumbLimits;
+  min: AppThumbLimits;
+  max: AppThumbLimits;
+  /** The kinds the app draws: extensions and media types. */
+  ext: string[];
+  mime: string[];
+}
+
+/** An install's answer: the app, and the File types choices that could not be
+ *  written (the app is installed either way). */
+export type AppPluginInstalled = AppPlugin & { association_errors?: string[] };
 
 /**
  * One live file lock (`GET /api/admin/app-plugins/locks`). An app froze the
@@ -482,12 +545,9 @@ export interface AppPluginLock {
   created_at: string;
 }
 
-export interface AppPluginLogLine {
-  seq: number;
-  ts: string;
-  level: string;
-  msg: string;
-}
+/** One line of an app's log - the shape every plugin log has (api/plugins
+ *  PluginLogLine, backend internal/pluginlog). */
+export type AppPluginLogLine = PluginLogLine;
 
 export interface AppPluginLogs {
   lines: AppPluginLogLine[];
@@ -577,11 +637,17 @@ export function refusalOf(raw: unknown): AppPluginInstallRefusal | null {
   };
 }
 
-/** Build the request body + config for one install source. */
+/**
+ * Build the request body + config for one install source. `associations` are
+ * the File types choices (an install only); left out of the body when there
+ * are none, so a body without them is exactly what it always was.
+ */
 function installPayload(
   source: AppPluginInstallSource,
   permissions: string[],
+  associations: AppPluginPlacement[] = [],
 ): { body: FormData | Record<string, unknown> } {
+  const extra = associations.length ? { associations } : {};
   if (source.kind === 'upload') {
     const form = new FormData();
     if (source.wasm) form.append('wasm', source.wasm);
@@ -589,16 +655,17 @@ function installPayload(
     if (source.ui) form.append('ui', source.ui);
     if (source.signature) form.append('signature', source.signature);
     form.append('grant', JSON.stringify({ permissions }));
+    if (associations.length) form.append('associations', JSON.stringify(associations));
     return { body: form };
   }
   if (source.kind === 'update') {
     return { body: { from_source: true, permissions } };
   }
   if (source.kind === 'github') {
-    return { body: { github_repo: source.repo, ref: source.ref ?? '', permissions } };
+    return { body: { github_repo: source.repo, ref: source.ref ?? '', permissions, ...extra } };
   }
   return {
-    body: { url: source.url ?? '', manifest_url: source.manifest_url, sha256: source.sha256 ?? '', permissions },
+    body: { url: source.url ?? '', manifest_url: source.manifest_url, sha256: source.sha256 ?? '', permissions, ...extra },
   };
 }
 
@@ -688,10 +755,17 @@ export const AppPluginsApi = {
     return data;
   },
 
-  /** Install. `permissions` must be exactly the manifest's list. */
-  async install(source: AppPluginInstallSource, permissions: string[]): Promise<AppPlugin> {
-    const { body } = installPayload(source, permissions);
-    const { data } = await api.post<AppPlugin>(BASE, body, { timeout: INSTALL_TIMEOUT_MS });
+  /**
+   * Install. `permissions` must be exactly the manifest's list; `associations`
+   * are the review's File types choices (none: the default order).
+   */
+  async install(
+    source: AppPluginInstallSource,
+    permissions: string[],
+    associations: AppPluginPlacement[] = [],
+  ): Promise<AppPluginInstalled> {
+    const { body } = installPayload(source, permissions, associations);
+    const { data } = await api.post<AppPluginInstalled>(BASE, body, { timeout: INSTALL_TIMEOUT_MS });
     return data;
   },
 
@@ -748,10 +822,20 @@ export const AppPluginsApi = {
     await api.delete(`${BASE}/${id}`);
   },
 
-  /** Same bodies as install; a manifest that asks for new permissions answers 409 `permissions_changed`. */
-  async upgrade(id: number, source: AppPluginInstallSource, permissions: string[]): Promise<AppPlugin> {
-    const { body } = installPayload(source, permissions);
-    const { data } = await api.post<AppPlugin>(`${BASE}/${id}/upgrade`, body, { timeout: INSTALL_TIMEOUT_MS });
+  /**
+   * Same bodies as install; a manifest that asks for new permissions answers
+   * 409 `permissions_changed`. `associations` are the review's File types
+   * choices, for the kinds the new version ADDS (the server refuses one for a
+   * kind the app already handled: its order stays as it is).
+   */
+  async upgrade(
+    id: number,
+    source: AppPluginInstallSource,
+    permissions: string[],
+    associations: AppPluginPlacement[] = [],
+  ): Promise<AppPluginInstalled> {
+    const { body } = installPayload(source, permissions, associations);
+    const { data } = await api.post<AppPluginInstalled>(`${BASE}/${id}/upgrade`, body, { timeout: INSTALL_TIMEOUT_MS });
     return data;
   },
 
@@ -801,5 +885,18 @@ export const AppPluginsApi = {
   async logs(id: number, after = 0): Promise<AppPluginLogs> {
     const { data } = await api.get<Partial<AppPluginLogs>>(`${BASE}/${id}/logs`, { params: { after } });
     return { lines: data.lines ?? [], next: data.next ?? after };
+  },
+
+  /** An app's thumbnail limits: in force, stored, the defaults, the bounds, its kinds. */
+  async thumbLimits(id: number): Promise<AppThumbLimitsAnswer> {
+    const { data } = await api.get<AppThumbLimitsAnswer>(`${BASE}/${id}/thumbnails`);
+    return data;
+  },
+
+  /** Store an app's thumbnail limits (0 = the default). 400 `out_of_range`
+   *  names the `field`; an API key gets 403 `session_required`. */
+  async putThumbLimits(id: number, limits: AppThumbLimits): Promise<AppThumbLimitsAnswer> {
+    const { data } = await api.put<AppThumbLimitsAnswer>(`${BASE}/${id}/thumbnails`, limits);
+    return data;
   },
 };

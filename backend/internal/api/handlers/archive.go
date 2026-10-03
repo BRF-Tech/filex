@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -124,6 +125,10 @@ type archiveRequest struct {
 	DestDir   string     `json:"dest,omitempty"`
 	Files     []addEntry `json:"files,omitempty"`
 	Password  string     `json:"password,omitempty"`
+	// keyless: the request came through an AI door (ai_doors.go), which
+	// holds no encryption key - landing.target skips an encrypted folder's
+	// key file then. Set from the request's context, never from the body.
+	keyless bool
 }
 
 // addEntry is one source for /archive/add.
@@ -141,6 +146,26 @@ type archiveListEntry struct {
 	Size  int64     `json:"size"`
 	Mtime time.Time `json:"mtime"`
 	IsDir bool      `json:"is_dir"`
+}
+
+// archiveOutOfRoot answers 403 when one of rels on storageID lies outside a
+// `root:` caller's folder, and reports whether it did - the archive routes'
+// own line behind confine.Middleware.
+//
+// ⚠⚠ The middleware learned the archive routes' keys only on 2026-10-01: it
+// rewrote `path` and nothing else here, so a `root:` token packed files from
+// outside its folder into an archive inside it (`sources` of create, and
+// `files[].source` of add) and extracted outside it (`dest`). Every path an
+// archive route reads is asked here as well, so a key the middleware does not
+// know is not a way out again (lesson #543).
+func archiveOutOfRoot(w http.ResponseWriter, r *http.Request, store db.Store, storageID int64, rels ...string) bool {
+	for _, rel := range rels {
+		if !rootAllows(r.Context(), store, storageID, strings.Trim(rel, "/")) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error()})
+			return true
+		}
+	}
+	return false
 }
 
 // List enumerates archive members.
@@ -161,8 +186,14 @@ func (a *Archive) List(w http.ResponseWriter, r *http.Request) {
 	}
 	req.StorageID = storageID
 	req.Path = rel
+	if archiveOutOfRoot(w, r, a.Store, storageID, rel) {
+		return
+	}
 	if !aclAllowID(r.Context(), a.ACL, a.Store, storageID, rel, acl.LevelViewer) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
+	if refuseUnavailableID(w, r, a.Store, storageID, rel) {
 		return
 	}
 	tmp, err := a.fetchToTemp(r, req.StorageID, req.Path)
@@ -241,6 +272,7 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path"})
 		return
 	}
+	req.keyless = keylessDoor(r.Context())
 	storageID, rel, err := a.resolveStorage(r.Context(), req.StorageID, req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -272,6 +304,11 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	}
 	dest = "/" + strings.TrimLeft(path.Clean("/"+dest), "/")
 	req.DestDir = dest
+	// The archive is read from its path and the members land under dest: both
+	// inside a `root:` caller's folder.
+	if archiveOutOfRoot(w, r, a.Store, req.StorageID, req.Path, dest) {
+		return
+	}
 
 	// The archive is read and the destination gains files: both named, not
 	// changed. Each member is judged where it lands, below.
@@ -285,6 +322,12 @@ func (a *Archive) Extract(w http.ResponseWriter, r *http.Request) {
 	// files.create there (≥editor).
 	if !aclAllowID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(req.Path, "/"), acl.LevelViewer) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
+	// Neither the archive nor the folder it unpacks into may be an entry the
+	// storage could not answer for (issue #104).
+	if refuseUnavailableID(w, r, a.Store, req.StorageID, strings.Trim(req.Path, "/")) ||
+		refuseUnavailableID(w, r, a.Store, req.StorageID, strings.Trim(dest, "/")) {
 		return
 	}
 	if v := aclCanID(r.Context(), a.ACL, a.Store, req.StorageID, strings.Trim(dest, "/"), perm.FilesCreate); !v.ok {
@@ -533,7 +576,14 @@ func (l *landing) target(name string) (string, bool) {
 	// document an app has frozen (measured before writegate: an archive
 	// holding `Sozlesmeler/NDA.docx` replaced the document under
 	// signature).
-	if gerr := writegate.Check(l.locks, 0, writegate.Writes(target)); gerr != nil {
+	// Through an AI door (ai_doors.go) the extraction holds no key either:
+	// an encrypted folder's key file is one of the names skipped, as the AI
+	// surface's own file_unzip skips it.
+	t := writegate.Writes(target)
+	if l.req.keyless {
+		t = keyless(t)
+	}
+	if gerr := writegate.Check(l.locks, 0, t); gerr != nil {
 		slog.Warn("archive: skipped member", slog.String("name", name), slog.String("why", gerr.Error()))
 		if errors.Is(gerr, writegate.ErrLocked) {
 			l.locked++
@@ -696,6 +746,14 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 			req.Files[i].Source = srcRel
 		}
 	}
+	if archiveOutOfRoot(w, r, a.Store, req.StorageID, req.Path) {
+		return
+	}
+	for _, f := range req.Files {
+		if archiveOutOfRoot(w, r, a.Store, req.StorageID, f.Source) {
+			return
+		}
+	}
 	if gate(w, r, a.ACL, req.StorageID, writegate.Writes(req.Path)) {
 		return
 	}
@@ -714,6 +772,12 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + f.Source})
 			return
 		}
+		if refuseUnavailableID(w, r, a.Store, req.StorageID, strings.Trim(f.Source, "/")) {
+			return
+		}
+	}
+	if refuseUnavailableID(w, r, a.Store, req.StorageID, strings.Trim(req.Path, "/")) {
+		return
 	}
 	drv, err := a.StorageResolver(req.StorageID)
 	if err != nil {

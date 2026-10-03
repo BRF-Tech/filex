@@ -9,9 +9,10 @@
 //   · asks the browser's own leave-page question while it holds edits.
 // An ordinary file gets none of it.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import PreviewModal from '@brftech/filex-core/src/modals/PreviewModal.vue';
 import type { FileNode } from '@brftech/filex-core/src/types/FileNode';
+import { teardownDom } from '../helpers/teardown';
 
 const KEY = '0123456789abcdef';
 const DRAFT_PATH = `docs://.filex-drafts/7/${KEY}/notes.md`;
@@ -77,13 +78,12 @@ function server(saveAnswers: Array<{ status: number; body: unknown }> = []) {
   return { calls };
 }
 
-let mounted: VueWrapper | null = null;
-afterEach(() => {
-  mounted?.unmount();
-  mounted = null;
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.unstubAllGlobals();
   vi.useRealTimers();
-  document.body.innerHTML = '';
 });
 
 async function editor(path: string, extra: Record<string, unknown> = {}) {
@@ -102,7 +102,6 @@ async function editor(path: string, extra: Record<string, unknown> = {}) {
       ...extra,
     },
   });
-  mounted = w;
   await settle();
   return w;
 }
@@ -118,6 +117,12 @@ describe('an ordinary file is not a draft', () => {
     expect(w.emitted('close')).toHaveLength(1);
     // It never even asked whether it was one.
     expect(s.calls.some((c) => c.url.startsWith('/api/files/drafts'))).toBe(false);
+  });
+
+  it('says its size in the header, an empty file’s "0 B" included', async () => {
+    server();
+    const w = await editor('docs://Documents/notes.md');
+    expect(w.get('.fe-viewer__meta').text()).toContain('0 B');
   });
 
   it('a path shaped like a draft that the server does not know is edited as the file it is', async () => {
@@ -138,6 +143,55 @@ describe('a draft’s editor', () => {
     expect(w.find('[data-testid="draft-save"]').exists()).toBe(true);
     expect(w.find('.fe-viewer__act--star').exists()).toBe(false);
     expect(w.findAll('.fe-viewer__act').some((b) => b.attributes('title') === 'Share')).toBe(false);
+  });
+
+  // The header used to say "0 B" - the size the draft had when New document
+  // made it - and kept saying it after the app had written 4.47 KB into the
+  // draft and after its Save (filextext, 0.48.0). The viewer has no live
+  // figure for a document being written, so it names none.
+  it('names no size in the header, while it is a draft and after its Save', async () => {
+    server([
+      { status: 200, body: { ok: true, path: 'docs://Documents/notes.md', name: 'notes.md', target_dir: 'docs://Documents' } },
+    ]);
+    const w = await editor(DRAFT_PATH);
+    const meta = () => (w.find('.fe-viewer__meta').exists() ? w.get('.fe-viewer__meta').text() : '');
+    expect(w.find('[data-testid="draft-bar"]').exists()).toBe(true);
+    expect(meta()).not.toContain('0 B');
+
+    const area = w.get('textarea.fe-preview__md-split-input');
+    await area.setValue('# typed into the draft\n');
+    await area.trigger('input');
+    await w.get('[data-testid="draft-save"]').trigger('click');
+    await settle();
+    expect(w.find('[data-testid="draft-saved-note"]').exists()).toBe(true);
+    expect(meta()).not.toContain('0 B');
+  });
+
+  // #85: after its Save the viewer shows a file, not a draft - the same row,
+  // moved to where the Save put it - and a file has Share and the star. Both
+  // stayed away: the viewer still answered "draft" from the path it had been
+  // opened on, and Share would have named that path, which no longer exists.
+  it('after its Save, offers Share and the star again, and shares the saved file', async () => {
+    server([
+      { status: 200, body: { ok: true, path: 'docs://Documents/notes.md', name: 'notes.md', target_dir: 'docs://Documents' } },
+    ]);
+    const w = await editor(DRAFT_PATH, { file: { ...node(DRAFT_PATH), id: 42 } });
+    const share = () => w.find('[data-testid="viewer-share"]');
+    expect(w.find('[data-testid="draft-bar"]').exists()).toBe(true);
+    expect(share().exists()).toBe(false);
+    expect(w.find('.fe-viewer__act--star').exists()).toBe(false);
+
+    await w.get('[data-testid="draft-save"]').trigger('click');
+    await settle();
+    expect(w.find('[data-testid="draft-saved-note"]').exists()).toBe(true);
+    expect(share().exists(), 'Share is back on the saved file').toBe(true);
+    expect(w.find('.fe-viewer__act--star').exists(), 'the star is back on the saved file').toBe(true);
+
+    await share().trigger('click');
+    const sent = w.emitted('share')?.[0]?.[0] as FileNode | undefined;
+    expect(sent?.path).toBe('docs://Documents/notes.md');
+    expect(sent?.basename).toBe('notes.md');
+    expect(sent?.id).toBe(42);
   });
 
   it('closing asks what should become of it — and “Keep in Drafts” is the default, changing nothing', async () => {

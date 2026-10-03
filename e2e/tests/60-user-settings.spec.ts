@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { loginAs, ADMIN_EMAIL, ADMIN_PASSWORD } from '../helpers/auth';
+import { readWebPrefs, restoreWebPrefs } from '../helpers/prefs';
+import { newAuthedRequest } from '../helpers/seed';
 
 /**
  * The user-settings dialog — language, password, two-factor.
@@ -22,7 +24,19 @@ test.describe('User settings — language + password + TOTP enroll', () => {
   // English label inherits a Turkish admin panel and fails for a reason that
   // has nothing to do with it. Put the account back by API, unconditionally,
   // so one red here cannot become ten reds elsewhere.
-  test.afterAll(async ({ request }) => {
+  //
+  // ⚠⚠ And the PREFERENCE DOCUMENT exactly as it was found. The "reset to en"
+  // click below writes `locale: 'en'` into it, a key that outranks
+  // `users.locale` for every later spec (helpers/prefs `readWebPrefs`).
+  let prefsBefore: Record<string, unknown> = {};
+
+  test.beforeAll(async ({ playwright, baseURL }) => {
+    const admin = await newAuthedRequest(playwright, baseURL ?? '');
+    prefsBefore = await readWebPrefs(admin);
+    await admin.dispose();
+  });
+
+  test.afterAll(async ({ request, playwright, baseURL }) => {
     const login = await request.post('/api/auth/login', {
       data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
     });
@@ -45,6 +59,9 @@ test.describe('User settings — language + password + TOTP enroll', () => {
         data: { locale: 'en' },
       })
       .catch(() => undefined);
+    const admin = await newAuthedRequest(playwright, baseURL ?? '');
+    await restoreWebPrefs(admin, prefsBefore);
+    await admin.dispose();
   });
 
   /** Opens the dialog through the deep link and waits for it to paint. */

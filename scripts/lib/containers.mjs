@@ -1,7 +1,8 @@
 // Docker, for the one screenshot scene whose picture depends on programs this
 // machine may not have: the converter wizard, which lists the conversion
-// engines the SERVER found (ffmpeg, ImageMagick, Ghostscript, poppler,
-// LibreOffice, rsvg) and names every missing one "Not installed on this
+// engines the SERVER found (ffmpeg, ImageMagick, Ghostscript, poppler, rsvg;
+// the office engine is a connected ONLYOFFICE, see e2e/shots/scene.mjs) and
+// names every missing one "Not installed on this
 // server". On a workstation without them that is a shop-window picture telling
 // strangers the feature is broken.
 //

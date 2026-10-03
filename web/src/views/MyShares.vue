@@ -247,7 +247,7 @@ const columns = computed<DataColumn<MyShareRow>[]>(() => [
     label: t('myShares.fields.storage'),
     sortable: true,
     width: 140,
-    format: (r) => r.storage_name || '—',
+    format: (r) => r.storage_name || '-',
   },
   {
     id: 'pin',
@@ -339,7 +339,7 @@ onMounted(load);
       <template #cell-item="{ row }">
         <div class="min-w-0">
           <span class="block max-w-xs truncate font-mono text-xs" :title="row.node_path || ''">
-            {{ row.node_path || '—' }}
+            {{ row.node_path || '-' }}
           </span>
           <!-- An app's link says what it is and opens the app's page for it. -->
           <router-link

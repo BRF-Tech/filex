@@ -317,6 +317,11 @@ func (a *Archive) DownloadTicket(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+		// Not skipped like a path that is gone: the person can see it in
+		// the listing, with its warning, and is told why (issue #104).
+		if refuseUnavailableID(w, r, a.Store, storageID, rel) {
+			return
+		}
 		set, ok := sets[storageID]
 		if !ok {
 			set = a.aclSetFor(ctx, storageID)
@@ -455,7 +460,7 @@ func (a *Archive) DownloadArchive(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, errTicketExpired):
-			http.Error(w, "this download link has expired — select the files again", http.StatusGone)
+			http.Error(w, "this download link has expired - select the files again", http.StatusGone)
 		case errors.Is(err, errTicketInFlight):
 			http.Error(w, "this download is already running", http.StatusConflict)
 		default:

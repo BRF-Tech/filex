@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/netguard"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
@@ -166,7 +168,7 @@ func (r *Registry) FetchURL(ctx context.Context, in URLInput) (*InstallInput, er
 		// module address for an app that has no module is a mistake worth
 		// saying out loud rather than a file quietly left unfetched.
 		if strings.TrimSpace(in.URL) != "" {
-			return nil, installErr(ErrCodeManifestInvalid, "this manifest is a language pack — it has no module, so leave the module address empty")
+			return nil, installErr(ErrCodeManifestInvalid, "this manifest is a language pack - it has no module, so leave the module address empty")
 		}
 		return &InstallInput{Manifest: manifest, SHA256: strings.TrimSpace(in.SHA256), Signature: in.Signature,
 			Source: "url", SourceURL: in.ManifestURL, ManifestURL: in.ManifestURL, Pinned: strings.TrimSpace(in.SHA256) != ""}, nil
@@ -240,8 +242,12 @@ func fetchFailure(err error, notFound, where string) *InstallError {
 	return ie
 }
 
-// fetch GETs a URL with a size cap. Only https (and http for loopback, for
-// tests) is accepted; redirects follow the client's policy.
+// fetch GETs a URL with a size cap - the one download every app install,
+// install request and update check goes through. Only https is accepted
+// (plain http for loopback only, which the registry's own client reaches only
+// with FILEX_PLUGIN_LOOPBACK_SOURCES); the client guards every dial and every
+// redirect (netguard.DownloadClient), and a literal private address is
+// refused here before any dial.
 func (r *Registry) fetch(ctx context.Context, raw string, limit int64) ([]byte, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -257,6 +263,11 @@ func (r *Registry) fetch(ctx context.Context, raw string, limit int64) ([]byte, 
 	default:
 		return nil, &fetchError{reason: FetchReasonBadURL, msg: fmt.Sprintf("unsupported scheme %q", u.Scheme)}
 	}
+	if r.fetchGuard != nil {
+		if ip := net.ParseIP(u.Hostname()); ip != nil && r.fetchGuard.Refused(ip) {
+			return nil, &fetchError{reason: FetchReasonBadURL, msg: u.Hostname() + " " + netguard.ErrPrivateTarget.Error() + "; apps are downloaded from public addresses only"}
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, &fetchError{reason: FetchReasonBadURL, msg: err.Error()}
@@ -264,6 +275,12 @@ func (r *Registry) fetch(ctx context.Context, raw string, limit int64) ([]byte, 
 	req.Header.Set("User-Agent", "filex-app-plugins/"+HostVersion)
 	resp, err := r.opts.HTTP.Do(req)
 	if err != nil {
+		// A refused address - by what a name resolved to, or on a redirect hop
+		// - and a redirect from https to http are about the ADDRESS, not the
+		// network being down: said as such.
+		if errors.Is(err, netguard.ErrPrivateTarget) || errors.Is(err, netguard.ErrDowngrade) {
+			return nil, &fetchError{reason: FetchReasonBadURL, msg: err.Error()}
+		}
 		return nil, &fetchError{reason: FetchReasonUnreachable, msg: err.Error()}
 	}
 	defer resp.Body.Close()

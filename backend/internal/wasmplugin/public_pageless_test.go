@@ -252,7 +252,7 @@ func TestShareCreate_PageLessObeysTheOrdinaryRules(t *testing.T) {
 	// ⭐ PIN bounds.
 	_, err = shareCreate(t, s, map[string]any{"pin": "12"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "4–12")
+	assert.Contains(t, err.Error(), "4-12")
 
 	// ⭐ Visit ceiling: max_visits is the share's download cap, so a spent
 	// link is dead by the same rule every other link is judged by.

@@ -180,6 +180,28 @@ describe('useThumbs', () => {
     expect(fetched).toHaveLength(2);
   });
 
+  // 0.50: the server draws a stale thumbnail again in the background and says
+  // so with a new `v` (the render's time) on the same file, same date. Keyed
+  // by path and date only, the tile kept the old picture for the session.
+  it('fetches a new render of the same file (v changed)', async () => {
+    const thumbs = useThumbs(undefined, api);
+    const first = pdf(7, { thumb_url: '/api/files/thumb/7?exp=100&sig=aa&v=1000' });
+    thumbs.src(first);
+    await arriveAll();
+
+    const redrawn = { ...first, thumb_url: '/api/files/thumb/7?exp=100&sig=aa&v=2000' };
+    expect(thumbs.src(redrawn)).toBeNull();
+    await started();
+    expect(fetched).toHaveLength(2);
+
+    const rotated = { ...redrawn, thumb_url: '/api/files/thumb/7?exp=300&sig=cc&v=2000' };
+    await arriveAll();
+    const shown = thumbs.src(redrawn);
+    expect(thumbs.src(rotated)).toBe(shown);
+    await started();
+    expect(fetched).toHaveLength(2);
+  });
+
   it('past its cap, drops the oldest thumbnail without fetching it again', async () => {
     // The cache holds 500. With more on screen, dropping the oldest used to
     // wake its tile, which fetched it again, whose arrival dropped the next

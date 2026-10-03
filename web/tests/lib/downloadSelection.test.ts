@@ -19,6 +19,7 @@ import {
   requestArchive,
   triggerFileNavigation,
 } from '@brftech/filex-core/src/lib/downloadSelection';
+import { teardownDom } from '../helpers/teardown';
 
 // happy-dom really tries to LOAD an iframe's src, which turns every assertion
 // below into a failed request to localhost and buries real failures in abort
@@ -28,10 +29,11 @@ beforeEach(() => {
     'fetch',
     vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => '', headers: new Map() }),
   );
-  document.body.innerHTML = '';
 });
-afterEach(() => {
-  document.body.innerHTML = '';
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.unstubAllGlobals();
 });
 

@@ -57,7 +57,7 @@ const NAMESPACES = {
  * ⚠⚠ filex must NEVER ship a 1.0.x. It would map to 1.0.x.0 — BELOW every
  * 0.x release already in the Store (1.0.4300.0 and up), and the Store only
  * accepts a package whose version is higher than the last one. The plan
- * (Burak, 2026-09-24) is to go from the last 0.x straight to 1.1.0.
+ * (the maintainer, 2026-09-24) is to go from the last 0.x straight to 1.1.0.
  *
  * Every other way to squeeze 0.x in costs something forever: "major + 1"
  * (0.43.1 → 1.43.1.0) would make filex 1.1 into Store 2.1, and the two

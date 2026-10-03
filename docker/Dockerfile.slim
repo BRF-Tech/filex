@@ -5,16 +5,21 @@
 # thumbnail that shells out to another program does not:
 #
 #   video      needs ffmpeg          PDF        needs ghostscript / pdftoppm
-#   office     needs libreoffice     SVG        needs rsvg-convert
+#   SVG        needs rsvg-convert (or is drawn in pure Go)
+#
+# Office documents need no program on ANY image since 0.50: their thumbnails
+# and the apps' office engine are the ONLYOFFICE Document Server filex is
+# connected to, so `slim` previews and converts them as soon as one is.
 #
 # filex probes for each tool at start (internal/capability) and reports what it
 # found on /api/files/capabilities, so a missing one is a disabled feature with
 # a reason, not a crash or a silent failure.
 #
-# ⚠ Since v0.43.0 the same missing engines also gate APP actions: an app's
-# "Convert…" or "Sign…" on an office document needs LibreOffice, and an
-# administrator sees that row greyed with the reason. Use latest/full if you
-# install apps that need an engine.
+# ⚠ Since v0.43.0 the same missing engines also gate APP actions: the
+# converter's video, HEIC or PDF-page targets need ffmpeg, ImageMagick or
+# poppler, and an administrator sees those greyed with the reason. Use
+# latest/full if you install apps that need an engine. (Its office targets need
+# a connected ONLYOFFICE on every image.)
 #
 # Use this image when you want a file manager, not a preview generator: it
 # pulls in seconds instead of minutes and has a fraction of the attack surface.
@@ -158,10 +163,10 @@ FROM alpine:3.24
 #                     The slim image runs no thumbnail tools, but plugins and
 #                     their helpers are processes too.
 #
-# Deliberately absent: ffmpeg, ghostscript, poppler-utils, libreoffice,
-# openjdk, rsvg-convert, imagemagick and the font packages. Together they are
-# ~470 MB compressed and the reason the full image exists. Adding one here
-# defeats the point of this file — put it in docker/Dockerfile instead.
+# Deliberately absent: ffmpeg, ghostscript, poppler-utils, rsvg-convert,
+# imagemagick and the font packages - the reason the full image exists.
+# Adding one here defeats the point of this file - put it in docker/Dockerfile
+# instead. (libreoffice and a JRE are in neither image since 0.50.)
 RUN apk --no-cache add \
         ca-certificates \
         tzdata \

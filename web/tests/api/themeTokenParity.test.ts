@@ -27,14 +27,22 @@
  * saying something extra, not a theme missing something.
  */
 import { describe, expect, it } from 'vitest';
-import { THEMES, DEFAULT_THEME_ID, type ThemeTokenMap } from '@brftech/filex-core/src/lib/themes';
+import { THEMES, DEFAULT_THEME_ID, PAGE_TOKENS, type ThemeTokenMap } from '@brftech/filex-core/src/lib/themes';
 
 /** Tokens a theme may declare beyond the shared set, and why. */
 const ALLOWED_EXTRAS: Record<string, string> = {
   '--fe-shadow': 'High Contrast replaces blur with a hard 1px outline',
   '--fe-shadow-sm': 'High Contrast replaces blur with a hard 1px outline',
   '--fe-font': 'Terminal ships a monospace face as part of the palette',
+  // #74 - the outward-facing pages. OPTIONAL for every theme, the stock one
+  // included: a theme that defines them gets its own share and sign-in pages,
+  // one that does not gets them in its own tones (lib/themes
+  // `publicPageTokens`). The stock map carries them as its own definition.
+  ...Object.fromEntries(PAGE_TOKENS.map((t) => [t, 'an outward-facing page: optional, derived when absent'])),
 };
+
+/** The tokens every theme must declare: the stock map's, less the optional extras. */
+const optional = (t: string) => t in ALLOWED_EXTRAS;
 
 const stock = THEMES.find((t) => t.id === DEFAULT_THEME_ID);
 
@@ -53,7 +61,7 @@ describe('theme token parity', () => {
   });
 
   it('every theme declares every token the stock palette declares, in BOTH variants', () => {
-    const shared = keys(stock!.light);
+    const shared = keys(stock!.light).filter((t) => !optional(t));
     const missing: string[] = [];
     for (const theme of THEMES) {
       for (const variant of ['light', 'dark'] as const) {

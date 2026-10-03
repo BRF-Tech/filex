@@ -222,7 +222,7 @@ async function test() {
 }
 
 function rowDuration(r: SyncRun): string {
-  if (!r.finished_at) return '—';
+  if (!r.finished_at) return '-';
   const ms = new Date(r.finished_at).getTime() - new Date(r.started_at).getTime();
   return formatDuration(ms / 1000, locale.value);
 }
@@ -250,7 +250,7 @@ const runColumns = computed<DataColumn<SyncRun>[]>(() => [
     sortable: true,
     sortDir: 'desc',
     width: 170,
-    format: (r: SyncRun) => (r.started_at ? formatDate(r.started_at, locale.value) : '—'),
+    format: (r: SyncRun) => (r.started_at ? formatDate(r.started_at, locale.value) : '-'),
     sortValue: (r: SyncRun) => (r.started_at ? Date.parse(r.started_at) : null),
   },
   {
@@ -547,7 +547,7 @@ onMounted(load);
           v-else-if="!drift"
           class="text-sm text-zinc-500"
         >
-          —
+          -
         </div>
         <div
           v-else

@@ -62,7 +62,7 @@ func (r *Registry) UICall(ctx context.Context, plugin, view string, storageID in
 	}
 	defer scope.Close()
 	in := wire.UICallInput{ViewID: view, Method: method, Params: params,
-		Context: wire.CallContext{Inputs: scope.Inputs(), Locale: locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p)}}
+		Context: wire.CallContext{Inputs: scope.Inputs(), Locale: locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(ctx, p)}}
 	if actor != nil {
 		a := r.wireActor(ctx, p, actor, actorIPFrom(ctx))
 		in.Context.Actor = &a

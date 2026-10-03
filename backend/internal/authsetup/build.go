@@ -39,7 +39,9 @@ import (
 	authldap "github.com/brf-tech/filex/backend/internal/auth/drivers/ldap"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	authoidc "github.com/brf-tech/filex/backend/internal/auth/drivers/oidc"
+	authpam "github.com/brf-tech/filex/backend/internal/auth/drivers/pam"
 	authproxyheader "github.com/brf-tech/filex/backend/internal/auth/drivers/proxyheader"
+	authwindows "github.com/brf-tech/filex/backend/internal/auth/drivers/windows"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
@@ -48,6 +50,9 @@ import (
 const (
 	OriginEnvironment = "environment"
 	OriginPage        = "page"
+	// OriginTenant: a tenant's administrator made it for their own tenant
+	// (docs/TENANT-ADMIN.md).
+	OriginTenant = "tenant"
 )
 
 // Canonical returns the name a provider is known by. The environment has
@@ -108,8 +113,20 @@ func Build(ctx context.Context, store db.Store, name string, cfg map[string]any)
 			return nil, err
 		}
 		return d, nil
+	case "pam":
+		d := authpam.New(store)
+		if err := d.Init(ctx, cfg); err != nil {
+			return nil, err
+		}
+		return d, nil
 	case "proxy-header":
 		d := authproxyheader.New(store)
+		if err := d.Init(ctx, cfg); err != nil {
+			return nil, err
+		}
+		return d, nil
+	case authwindows.DriverName:
+		d := authwindows.New(store)
 		if err := d.Init(ctx, cfg); err != nil {
 			return nil, err
 		}

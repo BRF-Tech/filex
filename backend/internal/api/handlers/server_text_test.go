@@ -159,7 +159,7 @@ func TestServerText_PublicPagesSpeakThePacksLanguage(t *testing.T) {
 	body := rec.Body.String()
 	assertNoBlankChrome(t, body)
 	assert.Contains(t, body, `<html lang="es" dir="ltr">`)
-	assert.Contains(t, body, "<title>Enviar archivos — entrada</title>")
+	assert.Contains(t, body, "<title>Enviar archivos - entrada</title>")
 	assert.Contains(t, body, "Drop your files here", "a key the pack lacks is English")
 	// The script's strings, with the plural forms the page's language has.
 	assert.Contains(t, body, `"drop_done_sub":"{count} archivos enviados."`)

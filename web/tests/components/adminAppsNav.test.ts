@@ -154,10 +154,14 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/duplicates', name: 'duplicates', component: Blank },
       { path: '/tagged', name: 'tagged', component: Blank },
       { path: '/users', name: 'users', component: Blank },
+      { path: '/groups', name: 'groups', component: Blank },
       { path: '/grants', name: 'grants', component: Blank },
       { path: '/roles', name: 'roles', component: Blank },
       { path: '/auth-providers', name: 'auth-providers', component: Blank },
+      { path: '/tenants', name: 'tenants', component: Blank },
+      { path: '/my-tenant', name: 'tenant-self', component: Blank },
       { path: '/api-mcp', name: 'api-mcp', component: Blank },
+      { path: '/login-security', name: 'login-security', component: Blank },
       { path: '/settings', name: 'settings', component: Blank },
       { path: '/branding', name: 'branding', component: Blank },
       // tema:v1 — the Appearance screen. ⚠ This stub must carry EVERY
@@ -171,6 +175,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/external', name: 'external', component: Blank },
       { path: '/replica', name: 'replica', component: Blank },
       { path: '/queue', name: 'queue', component: Blank },
+      { path: '/tools', name: 'tools', component: Blank },
       { path: '/notifications', name: 'notifications', component: Blank },
       { path: '/webhooks', name: 'webhooks', component: Blank },
       { path: '/plugins', name: 'plugins', component: Blank },
@@ -321,5 +326,38 @@ describe('admin panel — an app plugin\'s screen', () => {
     const w = await open('tr');
     expect(w.text()).toContain('Benim istediklerim');
     expect(w.text()).toContain('Gönderildi');
+  });
+});
+
+// Tenants (docs/TENANT-ADMIN.md) is the platform operator's page on a
+// multi-tenant install: a tenant's administrator would read 403 there, and a
+// single-tenant install has one tenant, its own.
+describe('admin sidebar - Tenants', () => {
+  function caps(realm: boolean, callerAdmin: boolean) {
+    const c = useCapabilitiesStore();
+    c.data = { ...c.data, realm: realm ? { enabled: true, locked_realm: null } : undefined, caller_admin: callerAdmin };
+  }
+
+  it('is absent on a single-tenant install', async () => {
+    signIn('admin');
+    caps(false, true);
+    const w = await sidebar();
+    expect(w.find('[data-testid="nav-tenants"]').exists()).toBe(false);
+  });
+
+  it('is absent for an administrator of a tenant', async () => {
+    signIn('admin');
+    caps(true, false);
+    const w = await sidebar();
+    expect(w.find('[data-testid="nav-tenants"]').exists()).toBe(false);
+  });
+
+  it('is there for the platform operator of a multi-tenant install', async () => {
+    signIn('admin');
+    caps(true, true);
+    const w = await sidebar();
+    const row = w.get('[data-testid="nav-tenants"]');
+    expect(row.text()).toBe(en.nav.tenants);
+    expect(row.attributes('href')).toBe('/admin/tenants');
   });
 });

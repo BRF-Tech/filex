@@ -68,9 +68,9 @@ const deltaColor = computed(
 </template>
 
 <style scoped>
-/* ⚠ Six of these share a row on a laptop, and the value had what was left of
-   ~110 px after a 40 px icon: "3,03 Ko" in French ran out of its card
-   (translator report, 2026-09-22). The card measures ITSELF: when it is
+/* ⚠ Six of these share a row (the Panel: from 1280 px), and the value had
+   what was left of ~110 px after a 40 px icon: "3,03 Ko" in French ran out
+   of its card (translator report, 2026-09-22). The card measures ITSELF: when it is
    narrow the icon steps aside and the number gets the whole width, and a
    value that still does not fit is cut with its full text in the tooltip —
    never drawn over the next card. */

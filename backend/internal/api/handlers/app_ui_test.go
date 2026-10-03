@@ -20,13 +20,17 @@ func uiBundleZip(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	for name, body := range map[string]string{
-		"index.html": "<!doctype html><html><head><script src=app.js></script></head><body>hi</body></html>",
-		"app.js":     "console.log(1)",
+	// A slice, not a map: the bytes (and so the sha256 a manifest pins) must
+	// be the same on every call. Ranging over a map wrote the two entries in
+	// either order, and a fixture that hashed one call and served another
+	// failed half the time with sha256_mismatch.
+	for _, e := range []struct{ name, body string }{
+		{"index.html", "<!doctype html><html><head><script src=app.js></script></head><body>hi</body></html>"},
+		{"app.js", "console.log(1)"},
 	} {
-		w, err := zw.Create(name)
+		w, err := zw.Create(e.name)
 		require.NoError(t, err)
-		_, _ = io.WriteString(w, body)
+		_, _ = io.WriteString(w, e.body)
 	}
 	require.NoError(t, zw.Close())
 	return buf.Bytes()

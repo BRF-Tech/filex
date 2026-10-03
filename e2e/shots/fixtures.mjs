@@ -6,8 +6,30 @@
 // Node's own zlib — no image library, no network.
 
 import { deflateSync } from 'node:zlib';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The real Office files the e2e suite already carries (scripts/_gen_fixtures.py).
+const OFFICE_FIXTURES = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/file-types');
+const OFFICE_SOURCE = { docx: 'letter.docx', xlsx: 'report.xlsx' };
+
+/**
+ * writeOfficeFile puts a real .docx or .xlsx at `dest` (the kind is its
+ * extension).
+ *
+ * ⚠ Not a few bytes of text with an Office name. 0.50 routes a file the sniff
+ * calls text/plain by its extension, so such a "docx" went to LibreOffice,
+ * which drew its 14 bytes as a blank page: the v0.50.0 release shots showed
+ * Roadmap.docx as an empty white tile and Proposal.docx / Q3 budget.xlsx with
+ * no icon at all in the list, and the details panel said text/plain.
+ */
+export function writeOfficeFile(dest) {
+  const kind = dest.slice(dest.lastIndexOf('.') + 1).toLowerCase();
+  const source = OFFICE_SOURCE[kind];
+  if (!source) throw new Error(`writeOfficeFile: no real fixture for .${kind} (${dest})`);
+  copyFileSync(join(OFFICE_FIXTURES, source), dest);
+}
 
 // ── minimal PNG encoder (8-bit RGB, no interlace) ─────────────────────────
 const CRC_TABLE = (() => {
@@ -130,7 +152,7 @@ A **self-hosted file manager**: one Go binary, pluggable storage, and a UI you c
 
 ## What you are looking at
 
-This folder is the demo fixture the project's screenshots are taken from — the same explorer you would run on your own server.
+This folder is the demo fixture the project's screenshots are taken from - the same explorer you would run on your own server.
 
 ## Try these
 
@@ -143,10 +165,10 @@ This folder is the demo fixture the project's screenshots are taken from — the
 
 Storage is a driver, not a directory: local disk, S3, FTP, SFTP, WebDAV and SMB/NAS all look the same from here. Nothing in the UI knows which one it is talking to.
 
-And it works the other way too — this same tree is reachable as **S3**, **SFTP**, **FTPS**, **NFS** and **WebDAV**, so rclone, restic, WinSCP or a scanner that only ever learned FTP can point straight at it.
+And it works the other way too - this same tree is reachable as **S3**, **SFTP**, **FTPS**, **NFS** and **WebDAV**, so rclone, restic, WinSCP or a scanner that only ever learned FTP can point straight at it.
 `;
 
-const NOTES = `# Release notes — draft
+const NOTES = `# Release notes - draft
 
 - Share links can now be capped at a number of downloads.
 - The share dialog shows a one-line curl for pulling a file onto a server.

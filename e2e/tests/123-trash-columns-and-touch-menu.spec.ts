@@ -58,7 +58,7 @@ test.describe('Trash and touch', () => {
     await expect(head).toContainText(/Time left|Kalan süre/);
     await expect(head).not.toContainText(/^Owner$|Sahibi/);
 
-    await expect(row.locator('.fe-list__col--mod')).not.toHaveText('—');
+    await expect(row.locator('.fe-list__col--mod')).not.toHaveText('-');
     await expect(row.locator('.fe-list__col--location')).toHaveText(`${STORAGE}/Raporlar`);
     await expect(row.locator('.fe-list__col--remaining')).toHaveText(/^\d+ (days?|gün)$/);
     // The owner's track says WHO DELETED IT in the Trash (161). What this line
@@ -71,6 +71,7 @@ test.describe('Trash and touch', () => {
 
   test.describe('on a phone', () => {
     test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+    test.skip(({ browserName }) => browserName === 'firefox', 'Playwright cannot emulate a phone in Firefox (isMobile is not supported there)');
 
     test('the row sheet lists verbs, not keyboard shortcuts', async ({ page }) => {
       await openExplorer(page);

@@ -1,6 +1,6 @@
 import { api } from './client';
 import { getApiBaseUrl } from './runtimeConfig';
-import type { LoginRequest, LoginResponse, MeResponse, User } from './types';
+import type { LoginMethods, LoginRequest, LoginResponse, MeResponse, User } from './types';
 
 export const AuthApi = {
   async me(): Promise<MeResponse> {
@@ -10,6 +10,13 @@ export const AuthApi = {
 
   async login(payload: LoginRequest): Promise<LoginResponse> {
     const { data } = await api.post<LoginResponse>('/auth/login', payload);
+    return data;
+  },
+
+  /** Redeems a sign-in handed over from the platform's address (see
+   *  LoginHandoff): the session is opened on THIS address. */
+  async handoff(code: string): Promise<LoginResponse> {
+    const { data } = await api.post<LoginResponse>('/auth/handoff', { code });
     return data;
   },
 
@@ -27,10 +34,32 @@ export const AuthApi = {
     return data ?? {};
   },
 
+  /**
+   * How a sign-in for a realm may go: its SSO buttons, whether the password
+   * form answers (docs/TENANT-ADMIN.md). The page asks when a realm is typed;
+   * a realm nobody has answers like a tenant with no SSO.
+   */
+  async methods(realm: string): Promise<LoginMethods> {
+    const { data } = await api.get<Partial<LoginMethods>>('/auth/methods', { params: realm ? { realm } : undefined });
+    return {
+      password: data.password !== false,
+      recovery: data.recovery === true,
+      sso: Array.isArray(data.sso) ? data.sso : [],
+    };
+  },
+
   /** A navigation, not a request — under the API base (and so under the base
-   *  path a sub-path deployment serves filex at). */
-  oidcStartUrl(provider: string = 'oidc', returnTo: string = '/admin/'): string {
+   *  path a sub-path deployment serves filex at). `instance` and `realm` pick
+   *  one SSO of one tenant (a tenant with no address of its own signs in on
+   *  the platform's). */
+  oidcStartUrl(
+    provider: string = 'oidc',
+    returnTo: string = '/admin/',
+    pick: { instance?: string; realm?: string } = {},
+  ): string {
     const qs = new URLSearchParams({ provider, return_to: returnTo });
+    if (pick.instance) qs.set('instance', pick.instance);
+    if (pick.realm) qs.set('realm', pick.realm);
     return `${getApiBaseUrl()}/auth/oidc/start?${qs.toString()}`;
   },
 

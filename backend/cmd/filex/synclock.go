@@ -57,7 +57,7 @@ func lockBusyLine(err error) string {
 	if errors.As(err, &be) {
 		err = be
 	}
-	return "lock: busy — " + err.Error()
+	return "lock: busy - " + err.Error()
 }
 
 // pairLocker is what the watcher needs from pairLocks.

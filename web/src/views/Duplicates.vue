@@ -128,19 +128,19 @@ onMounted(async () => {
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
       <StatCard
         :label="t('duplicates.stats.groups')"
-        :value="loaded ? formatNumber(groups.length, locale) : '—'"
+        :value="loaded ? formatNumber(groups.length, locale) : '-'"
         :icon="Copy"
         icon-tone="brand"
       />
       <StatCard
         :label="t('duplicates.stats.copies')"
-        :value="loaded ? formatNumber(totalCopies, locale) : '—'"
+        :value="loaded ? formatNumber(totalCopies, locale) : '-'"
         :icon="Layers"
         icon-tone="amber"
       />
       <StatCard
         :label="t('duplicates.stats.waste')"
-        :value="loaded ? formatBytes(totalWaste, locale) : '—'"
+        :value="loaded ? formatBytes(totalWaste, locale) : '-'"
         :icon="HardDrive"
         icon-tone="rose"
       />
@@ -203,7 +203,7 @@ onMounted(async () => {
             <span class="tabular-nums whitespace-nowrap">{{ formatBytes(row.size, locale) }}</span>
           </template>
           <template #cell-etag="{ row }">
-            <span class="tbl-mono tbl-clamp" :title="row.etag">{{ row.etag || '—' }}</span>
+            <span class="tbl-mono tbl-clamp" :title="row.etag">{{ row.etag || '-' }}</span>
           </template>
         </DataTable>
       </div>

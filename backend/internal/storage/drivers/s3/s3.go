@@ -332,7 +332,7 @@ func (d *Driver) Stat(ctx context.Context, p string) (storage.Object, error) {
 			// there is no object at the bare key to HeadObject. Falling
 			// straight through to ErrNotFound made every folder look missing:
 			// WebDAV stats the parent before a PUT and maps a miss to 409, so
-			// olivov could write to a storage root but into no subfolder, and
+			// a multi-tenant deployment could write to a storage root but into no subfolder, and
 			// PROPFIND on a folder 404'd (H3, 2026-08-05).
 			has, lerr := d.hasChildren(ctx, p)
 			if lerr != nil {

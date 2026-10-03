@@ -143,7 +143,7 @@ describe('refused before it is sent, in words', () => {
     await pick(w, [justUnder, over]);
     await flushPromises();
     expect(sent[0].files).toEqual(['ok.bin']);
-    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain('Not sent — larger than 1 MB.');
+    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain('Not sent - larger than 1 MB.');
   });
 
   it('more files than the submission may carry: the first ones go, the rest say why', async () => {
@@ -153,7 +153,7 @@ describe('refused before it is sent, in words', () => {
     await flushPromises();
     expect(sent[0].files).toEqual(['a.pdf', 'b.pdf']);
     expect(w.get('[data-testid="public-request-uploads"]').text()).toContain(
-      'Not sent — at most 2 files can be sent now.',
+      'Not sent - at most 2 files can be sent now.',
     );
   });
 });

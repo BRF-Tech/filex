@@ -350,6 +350,29 @@ func TestHolderRole(t *testing.T) {
 	require.Equal(t, model.RoleUser, HolderRole(scratch, Of(FilesDownload)), "writing in some folders needs it too")
 }
 
+// The role editor's answer (POST /api/admin/roles/preview) is RoleHolder on
+// the body as a save would store it, for a body that is not valid yet too.
+func TestPreviewHolderRole(t *testing.T) {
+	require.Equal(t, model.RoleViewer, PreviewHolderRole(model.PermissionRule{}), "no name, no list: may do nothing")
+	require.Equal(t, model.RoleUser, PreviewHolderRole(model.PermissionRule{Permissions: []string{"files.download", "files.delete"}}))
+	require.Equal(t, model.RoleViewer, PreviewHolderRole(model.PermissionRule{Permissions: []string{"files.download", "no.such"}}), "an unknown key is nothing")
+	scratch := model.PermissionRule{Permissions: []string{"files.download"}, Effects: map[string]string{"files.create": "allow"},
+		Conditions: model.PermRuleConditions{Paths: []string{"Drop"}}}
+	require.Equal(t, RoleHolder(&scratch), PreviewHolderRole(scratch))
+	require.Equal(t, model.RoleUser, PreviewHolderRole(scratch), "writing in some folders needs the User level")
+	deny := scratch
+	deny.Effects = map[string]string{"files.create": "deny"}
+	require.Equal(t, model.RoleViewer, PreviewHolderRole(deny), "a Deny in some folders asks nothing of the level")
+
+	// A path a save would drop names no folder, so the folder part is not
+	// there: what the stored role would be, not what the raw body says.
+	blank := scratch
+	blank.Conditions = model.PermRuleConditions{Paths: []string{"  ", "/"}}
+	require.Equal(t, model.RoleUser, RoleHolder(&blank), "the raw body looks place-scoped")
+	require.Equal(t, model.RoleViewer, PreviewHolderRole(blank))
+	require.Equal(t, []string{"  ", "/"}, blank.Conditions.Paths, "the caller's body is left as it was")
+}
+
 func TestViewerBaseIsEditableButCapped(t *testing.T) {
 	custom := Of(FilesDownload, FilesDelete) // delete is beyond a viewer
 	res := Resolve(Input{UserID: 1, Role: model.RoleViewer, ViewerBase: &custom})

@@ -10,6 +10,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -17,9 +19,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/external"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
@@ -69,10 +73,12 @@ type ExternalAdmin struct {
 	// it does not know a default is in play.
 	PublicURLSet bool
 	// ReversePath measures the third leg — the document server's route BACK to
-	// filex — by asking it to download a one-shot URL of ours and watching for
-	// the request. Nil when OnlyOffice is not wired, and only meaningful for
-	// that service: nothing else calls filex back.
-	ReversePath func(ctx context.Context) onlyoffice.ReverseResult
+	// filex — by asking it to download a one-shot URL of ours, through the same
+	// signed fetch endpoint a document uses, and watching for the request. It
+	// also asks whether the document server enforces JWT. A nil target means
+	// the configuration in force. Nil when OnlyOffice is not wired, and only
+	// meaningful for that service: nothing else calls filex back.
+	ReversePath func(ctx context.Context, t *onlyoffice.Target) onlyoffice.ReverseResult
 }
 
 // AttachPublicURL wires the process's public URL into the advisories. Kept out
@@ -225,9 +231,37 @@ func (h *ExternalAdmin) Update(w http.ResponseWriter, r *http.Request) {
 	h.Live.Invalidate()
 	resp := map[string]any{"ok": true, "env_managed": h.EnvManaged[name]}
 	if h.EnvManaged[name] {
-		resp["note"] = "Applied now, but this service is pinned by an environment variable and will be reset from it the next time filex restarts."
+		note := envPinnedNote(name)
+		resp["note"] = note
+		resp["env_var"] = externalEnvVar[name]
+		// The audit row says it too: "switched off" in the trail of an
+		// env-pinned service is "switched off until the next restart".
+		auth.AddAuditDetail(r.Context(), "env_managed", true)
+		auth.AddAuditDetail(r.Context(), "note", note)
 	}
+	auth.AddAuditDetail(r.Context(), "enabled", enabled)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// externalEnvVar names the environment variable that pins each service
+// (config.go; the config file's external_services.<name>.url does the same).
+var externalEnvVar = map[string]string{
+	external.OnlyOffice: "FILEX_ONLYOFFICE_URL",
+	external.Drawio:     "FILEX_DRAWIO_URL",
+}
+
+// envPinnedNote is what the PATCH answer and the audit row say about an edit
+// to a service the environment pins: it applies now, the next start writes
+// the environment back (switching the service on again if it was switched
+// off here), and removing the variable is how it goes for good. The External
+// services card says the same (external.envManagedHint).
+func envPinnedNote(name string) string {
+	v := externalEnvVar[name]
+	if v == "" {
+		v = "an environment variable"
+	}
+	return "Applied now, until filex restarts: this service is pinned by " + v +
+		", and the next start writes the environment's value back, switching the service on again if it was switched off here. To switch it off for good, remove " + v + "."
 }
 
 // Test runs an immediate health probe and returns the state.
@@ -244,44 +278,91 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "capability service unavailable"})
 		return
 	}
-	state, err := h.Caps.ProbeExternal(r.Context(), name)
-	if err != nil {
-		// "no rows in result set" → unknown service, not a probe
-		// failure. Surface that as 404 so callers (and Cypress) can
-		// distinguish "service down" from "you misspelled the name".
-		if strings.Contains(err.Error(), "no rows in result set") || strings.Contains(err.Error(), "not found") {
-			writeJSON(w, http.StatusNotFound, map[string]string{
-				"error": "unknown external service: " + name,
-				"name":  name,
+	// The values in the admin page's form, when it sent them. "Test now" used
+	// to probe the SAVED row while the box held another address, so an
+	// operator who typed a new URL and pressed Test was told about the old
+	// one (issue #80). The form's values are tested as they are, and nothing
+	// is saved: a Test must not switch every open editor over to an address
+	// that has not been checked yet. An empty body tests the saved row, as
+	// before.
+	var draft extPatchReq
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&draft); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+			return
+		}
+	}
+	var (
+		vals    testValues
+		unsaved bool
+	)
+	if cur, err := h.Store.GetExternalService(r.Context(), name); err == nil && cur != nil {
+		vals, unsaved = testValuesOf(cur, draft)
+	}
+	if unsaved && (!httpAddress(vals.url) || !httpAddress(vals.callback)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "url_invalid",
+			"message": srvtext.Text(langOf(r), "server.external.url_invalid", nil),
+		})
+		return
+	}
+	var state *model.ExternalServiceState
+	if unsaved {
+		// Probed, not stored: the row's verdict stays about the row.
+		state = h.Caps.ProbeExternalValues(name, vals.enabled, vals.url, vals.secret)
+	} else {
+		var err error
+		state, err = h.Caps.ProbeExternal(r.Context(), name)
+		if err != nil {
+			// "no rows in result set" → unknown service, not a probe
+			// failure. Surface that as 404 so callers (and Cypress) can
+			// distinguish "service down" from "you misspelled the name".
+			if strings.Contains(err.Error(), "no rows in result set") || strings.Contains(err.Error(), "not found") {
+				writeJSON(w, http.StatusNotFound, map[string]string{
+					"error": "unknown external service: " + name,
+					"name":  name,
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":           false,
+				"reachable":    false,
+				"error":        err.Error(),
+				"name":         name,
+				"checked_from": checkedFromServer,
+				"public_url":   h.PublicURL,
 			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":           false,
-			"reachable":    false,
-			"error":        err.Error(),
-			"name":         name,
-			"checked_from": checkedFromServer,
-			"public_url":   h.PublicURL,
-		})
-		return
 	}
 	// ⚠ Say WHAT was verified, and by whom. This probe left the filex
 	// process and nothing else: it says nothing about the browser that loads
 	// the editor, and nothing about the document server's route back to
 	// filex. A green light standing for three questions is exactly what sent
 	// issue #17 round a second time.
-	callbackURL := ""
-	if row, err := h.Store.GetExternalService(r.Context(), name); err == nil && row != nil {
-		callbackURL = external.CallbackURLFromOptions(row.OptionsJSON)
-	}
+	callbackURL := vals.callback
 	adv := h.advisories(r.Context(), name, state.URL, callbackURL, external.SystemLookup(r.Context(), 2*time.Second))
 	// The third leg, measured rather than disclaimed — when there is something
 	// to measure. A service with no URL or no secret cannot be asked anything,
 	// and a failed ask is reported as unchecked, never as a broken route.
 	reverse := onlyoffice.ReverseResult{}
 	if name == external.OnlyOffice && h.ReversePath != nil && state.State == "ok" {
-		reverse = h.ReversePath(r.Context())
+		var target *onlyoffice.Target
+		if unsaved {
+			// The probe is signed with the form's secret and verified against
+			// it, since that is what is being tested.
+			target = &onlyoffice.Target{
+				DocumentServerURL: vals.url, Secret: vals.secret, CallbackURL: vals.callback, Draft: true,
+			}
+		}
+		reverse = h.ReversePath(r.Context(), target)
+	}
+	// A document server that took a request with no token does not enforce
+	// JWT: it refuses filex's editor token, filters private addresses, and its
+	// save callbacks arrive unsigned, which filex refuses (issue #80). That is
+	// a warning on the card, translated by code like every other advisory.
+	if reverse.JWTEnforced != nil && !*reverse.JWTEnforced {
+		adv = append(adv, external.JWTNotEnforced(state.URL))
 	}
 	notChecked := []string{legBrowserToService}
 	if !reverse.Checked {
@@ -319,6 +400,9 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		// change exists to remove.
 		"server_reachable": state.State == "ok",
 		"has_warnings":     external.HasWarning(adv),
+		// unsaved: this result is about the values the request carried, which
+		// differ from the saved row. Nothing was stored.
+		"unsaved": unsaved,
 	}
 	// ⚠ Say WHAT is missing. "unconfigured" on a service that has a URL means
 	// the other half of its configuration is absent, and the operator is
@@ -328,6 +412,41 @@ func (h *ExternalAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		resp["error"] = "the URL is set but the JWT secret is not; OnlyOffice signs every editor session with it"
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// testValues is what a Test probes: the saved row, with the form's values
+// over it.
+type testValues struct {
+	enabled  bool
+	url      string
+	secret   string
+	callback string
+}
+
+// testValuesOf lays a Test's body over the saved row. unsaved reports whether
+// anything differs from the row. A secret that is empty (the form keeps the
+// stored one) or the "***" placeholder List returns is not a change.
+func testValuesOf(cur *db.ExternalService, d extPatchReq) (testValues, bool) {
+	saved := testValues{
+		enabled:  cur.Enabled,
+		url:      cur.URL,
+		secret:   cur.SecretEnc,
+		callback: external.CallbackURLFromOptions(cur.OptionsJSON),
+	}
+	v := saved
+	if d.Enabled != nil {
+		v.enabled = *d.Enabled
+	}
+	if d.URL != nil {
+		v.url = *d.URL
+	}
+	if d.Secret != nil && *d.Secret != "" && *d.Secret != redactedSecret {
+		v.secret = *d.Secret
+	}
+	if d.CallbackURL != nil {
+		v.callback = *d.CallbackURL
+	}
+	return v, v != saved
 }
 
 func nowOrZero() time.Time { return time.Now() }

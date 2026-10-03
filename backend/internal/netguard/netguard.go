@@ -7,10 +7,10 @@
 // a private address. The check therefore runs on the DIALLED address, after
 // DNS, and on every redirect hop — never on the string.
 //
-// It lives in its own package so the storage-plugin downloader
-// (internal/plugin) and the app-plugin outbound transport
-// (internal/wasmplugin) cannot drift apart: one list of refused ranges, one
-// guarded dialer, one error.
+// It lives in its own package so the plugin downloads (internal/plugin and
+// internal/wasmplugin share DownloadClient) and the app-plugin outbound
+// transport (internal/wasmplugin) cannot drift apart: one list of refused
+// ranges, one guarded dialer, one redirect rule, one error.
 package netguard
 
 import (
@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"syscall"
 	"time"
 )
 
@@ -129,11 +130,37 @@ func Private(ip net.IP) bool {
 	return ip != nil && (ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate())
 }
 
+// Policy widens what a guarded dial may reach beyond the public internet.
+// The zero value is the guard itself: public addresses only. An app's own
+// requests (http_request, asset_fetch) always use the zero value; only the
+// plugin DOWNLOADS (DownloadClient) take one from configuration.
+type Policy struct {
+	// Loopback lets a download reach this machine - 127.0.0.0/8 and ::1,
+	// nothing else that is private. Development and the end-to-end tests serve
+	// plugin sources from a loopback server (FILEX_PLUGIN_LOOPBACK_SOURCES); a
+	// server in service never needs it, and with it on, a manifest that names
+	// a loopback address makes filex send GET requests to its own services.
+	Loopback bool
+}
+
+// Refused is the package-level Refused with the policy's one exception.
+func (p Policy) Refused(ip net.IP) bool {
+	if p.Loopback && ip != nil && ip.IsLoopback() {
+		return false
+	}
+	return Refused(ip)
+}
+
 // DialContext is a net.Dialer's DialContext wrapped in the Refused check: the
 // name is resolved here, every answer is checked, and the connection is made
 // to the address that passed — so nothing can re-resolve to something else
 // between the check and the dial.
 func DialContext(dialer *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return Policy{}.DialContext(dialer)
+}
+
+// DialContext is the guarded dial under this policy.
+func (p Policy) DialContext(dialer *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	if dialer == nil {
 		dialer = &net.Dialer{Timeout: 10 * time.Second}
 	}
@@ -147,7 +174,7 @@ func DialContext(dialer *net.Dialer) func(ctx context.Context, network, addr str
 			return nil, err
 		}
 		for _, ip := range ips {
-			if Refused(ip.IP) {
+			if p.Refused(ip.IP) {
 				return nil, fmt.Errorf("%s %w", host, ErrPrivateTarget)
 			}
 		}
@@ -155,15 +182,81 @@ func DialContext(dialer *net.Dialer) func(ctx context.Context, network, addr str
 	}
 }
 
+// Control is a net.Dialer Control function that refuses a connection to an
+// address Refused names. It runs on the RESOLVED address, right before the
+// socket connects, so a name that resolves to something else between a check
+// and the dial (DNS rebinding) is caught too. For clients that take a
+// *net.Dialer and no dial function (an LDAP client).
+func Control(network, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	if Refused(net.ParseIP(host)) {
+		return fmt.Errorf("%s %w", host, ErrPrivateTarget)
+	}
+	return nil
+}
+
 // Transport returns an http.Transport that dials through the guard. Callers
 // set their own timeouts on the fields they care about; proxies are off,
 // because a proxy would do the resolving and the guard would never see it.
 func Transport(responseHeaderTimeout time.Duration) *http.Transport {
+	return Policy{}.Transport(responseHeaderTimeout)
+}
+
+// Transport is the guarded transport under this policy.
+func (p Policy) Transport(responseHeaderTimeout time.Duration) *http.Transport {
 	return &http.Transport{
 		Proxy:                  nil,
-		DialContext:            DialContext(&net.Dialer{Timeout: 10 * time.Second}),
+		DialContext:            p.DialContext(&net.Dialer{Timeout: 10 * time.Second}),
 		TLSHandshakeTimeout:    10 * time.Second,
 		ResponseHeaderTimeout:  responseHeaderTimeout,
 		MaxResponseHeaderBytes: 64 << 10,
 	}
+}
+
+// MaxRedirects is how many redirects a download follows.
+const MaxRedirects = 5
+
+// ErrDowngrade is a redirect from https:// to plain http://.
+var ErrDowngrade = errors.New("a redirect from https to plain http is not followed")
+
+// DownloadClient is the ONE client every plugin download goes through: a
+// storage plugin's binary, its source's feed and build, an app's manifest,
+// module and interface bundle - for an administrator's install, an install
+// request an API key leaves, and the daily update check alike. Each dial is
+// guarded (after DNS, so a public name that resolves inward is refused too),
+// every redirect hop dials through the same guard, the chain is capped at
+// MaxRedirects, and a redirect never leaves https for plain http: a download
+// that started encrypted is not finished in the clear, where anything on the
+// path may answer instead. timeout bounds the whole download, body included;
+// the callers cap the size.
+func (p Policy) DownloadClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport:     p.Transport(60 * time.Second),
+		Timeout:       timeout,
+		CheckRedirect: p.checkRedirect,
+	}
+}
+
+// checkRedirect is DownloadClient's redirect rule. The dial guards every hop
+// anyway; the literal check here only words the refusal by the hop.
+func (p Policy) checkRedirect(next *http.Request, via []*http.Request) error {
+	if len(via) >= MaxRedirects {
+		return errors.New("too many redirects")
+	}
+	switch next.URL.Scheme {
+	case "https":
+	case "http":
+		if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" {
+			return fmt.Errorf("redirect to %s: %w", next.URL.Redacted(), ErrDowngrade)
+		}
+	default:
+		return fmt.Errorf("redirect to %s:// is not followed", next.URL.Scheme)
+	}
+	if ip := net.ParseIP(next.URL.Hostname()); ip != nil && p.Refused(ip) {
+		return fmt.Errorf("redirect refused: %s %w", next.URL.Hostname(), ErrPrivateTarget)
+	}
+	return nil
 }

@@ -1,8 +1,8 @@
 {
   "name": "@brftech/filex-desktop",
   "private": true,
-  "version": "0.49.0",
-  "description": "filex desktop — the filex explorer in a window, with browser sign-in, background folder sync and secure token storage",
+  "version": "0.50.0",
+  "description": "filex desktop - the filex explorer in a window, with browser sign-in, background folder sync and secure token storage",
   "author": "BRF Tech <security@brf.sh>",
   "license": "MIT",
   "homepage": "https://filex.sh",

@@ -147,7 +147,7 @@ export function formatByteSize(
   bytes: number | null | undefined,
   opts: ByteSizeOptions = {},
 ): string {
-  const empty = opts.empty ?? '—';
+  const empty = opts.empty ?? '-';
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return empty;
 
   const base = opts.base ?? 1000;
@@ -563,7 +563,7 @@ export function useLocale(
   function formatNodeSize(n: { size?: number | null; size_partial?: boolean } | null | undefined): string {
     if (!n) return formatSize(null);
     if (!n.size_partial) return formatSize(n.size);
-    return typeof n.size === 'number' && n.size > 0 ? t('size.at_least', { size: formatSize(n.size) }) : '—';
+    return typeof n.size === 'number' && n.size > 0 ? t('size.at_least', { size: formatSize(n.size) }) : '-';
   }
 
   /** The hover text of a size `formatNodeSize` drew as partial, or undefined. */

@@ -2,7 +2,7 @@
   "name": "filemanager-monorepo",
   "private": true,
   "version": "0.1.0",
-  "description": "filex — self-hosted file manager: Go backend + multi-framework frontend (Vue/React/WC), reachable over HTTP, S3, SFTP, FTPS, NFS and WebDAV, single binary + Docker",
+  "description": "filex - self-hosted file manager: Go backend + multi-framework frontend (Vue/React/WC), reachable over HTTP, S3, SFTP, FTPS, NFS and WebDAV, single binary + Docker",
   "license": "MIT",
   "repository": {
     "type": "git",

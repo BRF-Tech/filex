@@ -53,17 +53,17 @@ export function refusalSentence(err: AppPluginInstallRefusal, t: Translate): str
   if (err.code === 'fetch_failed') {
     const reason = FETCH_REASONS.includes(err.reason) ? err.reason : 'unreachable';
     return t(`appPlugins.wizard.errors.fetch.${reason}`, {
-      where: err.where || '—',
-      refs: err.refs.join(', ') || '—',
-      status: err.status || '—',
+      where: err.where || '-',
+      refs: err.refs.join(', ') || '-',
+      status: err.status || '-',
     });
   }
   if (REFUSAL_CODES.includes(err.code)) {
     return t(`appPlugins.wizard.errors.${err.code}`, {
-      missing: err.missing.join(', ') || '—',
-      message: err.message || '—',
-      requires: err.requires || '—',
-      filex: err.filex || '—',
+      missing: err.missing.join(', ') || '-',
+      message: err.message || '-',
+      requires: err.requires || '-',
+      filex: err.filex || '-',
     });
   }
   return null;

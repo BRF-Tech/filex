@@ -102,7 +102,7 @@ test('only on open: listed from disk at once, and it says what it covers', async
   const notice = page.getByTestId('catalog-coverage');
   await expect(notice).toContainText('Only the folders people open on this storage are cataloged');
   // A folder nobody has opened has no size the catalog knows — not "0 B".
-  await expect(row(page, LAZY_B, 'fotolar').locator('.fe-list__col--size')).toHaveText('—');
+  await expect(row(page, LAZY_B, 'fotolar').locator('.fe-list__col--size')).toHaveText('-');
 
   // An administrator can have the whole storage cataloged once.
   await page.getByTestId('catalog-coverage-all').click();
@@ -113,7 +113,7 @@ test('only on open: listed from disk at once, and it says what it covers', async
   await page.getByTestId(`sidenav-storage-${LAZY_B}`).click();
   await expect(row(page, LAZY_B, 'belgeler')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('catalog-coverage')).toHaveCount(0);
-  await expect(row(page, LAZY_B, 'fotolar').locator('.fe-list__col--size')).not.toHaveText('—');
+  await expect(row(page, LAZY_B, 'fotolar').locator('.fe-list__col--size')).not.toHaveText('-');
 });
 
 test('click first, fill in the background: the pass converges on its own', async ({ page, request }) => {

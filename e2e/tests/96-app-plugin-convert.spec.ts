@@ -163,10 +163,14 @@ test.describe('App plugin: convert — install, choose a target, get the file', 
     // wizard closes on success, so the rows are gone by the time it returns.
     await installThroughWizard(page, APP);
     // Six engines: an app that may run ffmpeg is exactly what the review
-    // has to name before it runs anything.
-    for (const engine of ['ffmpeg', 'imagemagick', 'libreoffice', 'ghostscript', 'poppler', 'rsvg']) {
-      expect(APP.manifest?.permissions ?? []).toContain(`engines:${engine}`);
+    // has to name before it runs anything. The office engine is `office`
+    // since filex 0.50 (the connected ONLYOFFICE) and `libreoffice` in an
+    // older build of the converter - one engine, one grant.
+    const perms = APP.manifest?.permissions ?? [];
+    for (const engine of ['ffmpeg', 'imagemagick', 'ghostscript', 'poppler', 'rsvg']) {
+      expect(perms).toContain(`engines:${engine}`);
     }
+    expect(perms.some((p) => p === 'engines:office' || p === 'engines:libreoffice'), 'the office engine').toBe(true);
     await expect(page.getByTestId('app-plugin-convert')).toBeVisible();
   });
 

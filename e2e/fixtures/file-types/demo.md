@@ -1,4 +1,4 @@
-# filex — demo notes
+# filex - demo notes
 
 **filex** is a self-hosted file manager built for the example.com stack. This
 fixture exercises a broad markdown surface: headings, lists, code fences,
@@ -52,7 +52,7 @@ flowchart LR
 
 ## Quote
 
-> "filex is the answer to the question we never asked, but always needed."
-> — anonymous operator
+> "filex is the answer to the question we never asked, but always needed." -
+> anonymous operator
 
 See <https://github.com/brf-tech/filex> for source.

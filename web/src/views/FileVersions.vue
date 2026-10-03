@@ -248,7 +248,7 @@ function onRowAction(key: string, row: NodeVersion) {
       </template>
       <template #cell-etag="{ row }">
         <span v-if="row.etag" class="tbl-mono" :title="row.etag">{{ row.etag.slice(0, 12) }}…</span>
-        <span v-else>—</span>
+        <span v-else>-</span>
       </template>
     </DataTable>
 

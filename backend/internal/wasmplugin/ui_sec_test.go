@@ -319,7 +319,7 @@ func TestUISec_EveryPowerfulFeatureIsOff(t *testing.T) {
 	assert.False(t, got["autoplay"], "autoplay stays: a media app plays what was opened")
 }
 
-// Burak, 2026-09-27: `ui:package-fetch` — an interface may READ ITS OWN
+// The maintainer, 2026-09-27: `ui:package-fetch` — an interface may READ ITS OWN
 // PACKAGE (draw.io loads its stencils and translations that way), and
 // nothing else. The manifest says `ui.package_fetch: true`; the permission is
 // derived and on the review ("reads its own package"); connect-src and the
@@ -338,8 +338,8 @@ func TestUISec_PackageFetchReadsItsOwnVersionOnly(t *testing.T) {
 			}
 		}
 	}
-	assert.Equal(t, "Its interface reads its own package — the files of this version, nothing else", labels["en"])
-	assert.Equal(t, "Arayüzü kendi paketini okur — yalnız bu sürümün dosyalarını, başka hiçbir şeyi değil", labels["tr"])
+	assert.Equal(t, "Its interface reads its own package - the files of this version, nothing else", labels["en"])
+	assert.Equal(t, "Arayüzü kendi paketini okur - yalnız bu sürümün dosyalarını, başka hiçbir şeyi değil", labels["tr"])
 
 	plain, err := ParseManifest(uiManifest(t, nil))
 	require.NoError(t, err)

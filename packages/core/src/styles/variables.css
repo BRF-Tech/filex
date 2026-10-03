@@ -11,9 +11,16 @@
  * ⚠ `:where()`: zero specificity, so a host's `:root { --fe-overlay-top }`
  * wins whichever stylesheet loads first; and on `:root`, never on `.fe`,
  * because the backdrops carry `.fe` and a value there would shadow the
- * host's. */
+ * host's.
+ * `--fe-overlay-bottom` is the same contract for a strip at the BOTTOM of the
+ * window, and only the full-window viewer (Modal `chromeless`) keeps clear of
+ * it: the desktop's "editing a copy" note under an open-with document, which
+ * would otherwise cover the viewer's own bottom row (a spreadsheet's sheet
+ * tabs). A centred dialog never reaches the bottom edge, so nothing else
+ * reads it. */
 :where(:root) {
   --fe-overlay-top: 0px;
+  --fe-overlay-bottom: 0px;
 }
 
 :root {
@@ -97,6 +104,12 @@
   --fe-gap-sm: 8px;
   --fe-gap: 12px;
   --fe-gap-lg: 16px;
+  /* The viewer's edge chevrons: their size and their distance from the edge.
+   * The chevrons and the gutter a filled stage keeps for them
+   * (`.fe-viewer__stage--gutter`) both read these two, so they cannot
+   * disagree; `.fe-viewer` sets them smaller on a narrow screen. */
+  --fe-viewer-chev-size: var(--fe-h-lg);
+  --fe-viewer-chev-inset: var(--fe-gap);
 }
 
 .fe--theme-dark,
@@ -318,4 +331,22 @@
 }
 .fe.fe-ppage--wide {
   --fe-ppage-max: 880px;
+}
+/* ⚠ #74 - a THEME may define the three above for itself (its light and dark
+ * maps carry `--fe-ppage-ground-1`, `-ground-2`, `-card`); the stock values
+ * above are the default theme's own definition, and a theme that defines
+ * none gets them worked out from its own palette (lib/themes
+ * `publicPageTokens`, written by `generateThemeCss` under these same
+ * selectors). Without that, an operator theme painted the page's text and
+ * buttons and left these greys under them. */
+
+/* === The sign-in page's ground and card ================================
+ * The sign-in page (web Login.vue) is the other outward-facing page, so a
+ * theme may define it too. Unlike the share page it has always been painted
+ * from the palette - the sunken ground, the surface card - so the defaults
+ * ARE the palette's tokens, and a theme that defines nothing keeps exactly
+ * what it had. Declared on `:root`, where a theme's own values land. */
+:root {
+  --fe-login-ground: var(--fe-bg-elev);
+  --fe-login-card: var(--fe-bg);
 }

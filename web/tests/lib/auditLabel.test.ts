@@ -187,6 +187,20 @@ describe('audit labels — every writer, not only the middleware', () => {
     });
   }
 
+  it('a target the generic fallback names by its route reads as that resource', () => {
+    // ActionForPath's last case: `return seg + "." + verb, seg, id` - the
+    // segment of /api/admin/<seg>/..., e.g. `app-plugins` for an app's install.
+    const { t, te } = lookup(tr as Record<string, unknown>);
+    expect(auditTargetLabel('app-plugins', null, t, te)).toBe('Uygulama');
+    expect(auditTargetLabel('app-plugins', 'board', t, te)).toBe('Uygulama “board”');
+    const resources = Object.keys((tr as { audit: { resource: Record<string, string> } }).audit.resource);
+    const raw = resources.filter((r) => {
+      if (te(`audit.target.${r}`)) return false;
+      return auditTargetLabel(r.replace(/_/g, '-'), null, t, te) !== t(`audit.resource.${r}`);
+    });
+    expect(raw).toEqual([]);
+  });
+
   it('a row names its target when the server said which one', () => {
     const { t, te } = lookup(tr as Record<string, unknown>);
     expect(auditTargetLabel('user', '12', t, te, 'ayse@example.com')).toBe('Kullanıcı “ayse@example.com”');

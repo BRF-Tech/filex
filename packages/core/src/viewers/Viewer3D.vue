@@ -46,7 +46,7 @@ async function load(): Promise<void> {
   if (!isSupported.value) {
     error.value = props.t
       ? props.t('viewer.format_unsupported_3d')
-      : `3D format ".${props.ext}" not supported in browser preview — please download.`;
+      : `3D format ".${props.ext}" not supported in browser preview - please download.`;
     return;
   }
   try {

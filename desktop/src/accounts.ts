@@ -38,8 +38,8 @@ export function keychain(): KeychainState {
 export function keychainRefusal(k: KeychainState): Error {
   return new Error(
     k === 'plaintext'
-      ? 'no OS keychain answered (only the "basic_text" fallback, which anyone can decrypt) — refusing to store account tokens'
-      : 'OS keychain unavailable — refusing to store account tokens in plaintext',
+      ? 'no OS keychain answered (only the "basic_text" fallback, which anyone can decrypt) - refusing to store account tokens'
+      : 'OS keychain unavailable - refusing to store account tokens in plaintext',
   );
 }
 

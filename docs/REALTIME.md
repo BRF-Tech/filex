@@ -5,7 +5,7 @@ the server tells it that folder changed, and it draws a presence strip of who
 else is looking at it. Both travel over one WebSocket.
 
 This page is the contract: how the socket is authenticated, what comes down it,
-and — the part that decides how an integration behaves under load — how a burst
+and - the part that decides how an integration behaves under load - how a burst
 of changes is coalesced.
 
 ## The socket
@@ -52,8 +52,8 @@ absolute one can both match frames against what they asked for.
 or move also carries `new_name`. An overwrite announces as `upload`. `modify`
 (no `name`) is the folder-size refresh: about two seconds after a change, every
 folder from the changed one up to the storage root is told to repaint its size
-column — the folder's entries did not change. **It is advisory.** The only thing a client is required to do with a change
-frame is re-fetch the listing — `action`/`name` are there for toasts and for
+column - the folder's entries did not change. **It is advisory.** The only thing a client is required to do with a change
+frame is re-fetch the listing - `action`/`name` are there for toasts and for
 future incremental patching, and the sections below say exactly when they are
 not populated.
 
@@ -64,7 +64,7 @@ subscribed or not:
 {"type":"app.updated","app":"drawio","version":"1.3.0"}
 ```
 
-An administrator approved a version of an installed app — an upgrade, or
+An administrator approved a version of an installed app - an upgrade, or
 going back to the one before ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)).
 The explorer drops its cached menu rows and every open interface of that app
 offers to reload (the new interface has a new address). Like every frame it is
@@ -79,7 +79,7 @@ shapes make that concrete (both measured on 2026-09-06):
 - **One NFS write is not one change.** NFSv3 has no "close", so an NFS client
   sends an independent `WRITE` RPC per `wsize` chunk and the server commits on
   each one. A `cp -p` of a 5 MB file over a real mount produced **6**
-  announcements — one `CREATE` plus five 1 MiB `WRITE`s — for one file.
+  announcements - one `CREATE` plus five 1 MiB `WRITE`s - for one file.
 - **Extracting a 5 000-file zip produced 5 000 announcements**, one per member,
   over roughly three minutes.
 
@@ -102,12 +102,12 @@ Merged frames carry a `count`:
 
 | Field | Meaning |
 |---|---|
-| `count` absent | one change — every frame a client saw before coalescing existed, so an older reader needs no change |
+| `count` absent | one change - every frame a client saw before coalescing existed, so an older reader needs no change |
 | `count` > 1, `name` present | that many **identical** changes (the NFS case above: the same upload of the same name, over and over) |
 | `count` > 1, `name` absent | that many **different** changes; naming one of five thousand would be worse than naming none |
 
 ⚠ **Nothing is dropped, only merged.** A burst always ends with a frame that
-reflects its final state — a folder whose last frame was swallowed would show a
+reflects its final state - a folder whose last frame was swallowed would show a
 stale listing until the person navigated away and back, which is worse than the
 noise coalescing exists to remove.
 
@@ -122,7 +122,7 @@ debounces 200 ms with a 2 s ceiling for exactly that reason.
 
 ## Watching a whole tree (sync clients)
 
-A room is one folder, and a connection sits in one room at a time — the right
+A room is one folder, and a connection sits in one room at a time - the right
 shape for an explorer, which shows one folder. A client that **mirrors** a tree
 (the desktop sync engine, `filex sync run --watch`) needs every change at any
 depth, for several trees at once, without appearing in anybody's presence
@@ -136,7 +136,7 @@ strip. That is a watch:
   that folder.
 - **The set is replaced** by each `watch` message; `[]` clears it. Up to 1 000
   roots per connection.
-- **Silent**: a watcher is not a viewer — it is never listed in a presence
+- **Silent**: a watcher is not a viewer - it is never listed in a presence
   roster and never receives presence frames.
 - **Authorised like a subscribe**: the ticket's confinement, then RBAC ≥ viewer
   on the root, then the tenant boundary. Grants in filex are additive (a grant
@@ -166,10 +166,10 @@ and `presence` never mistakes one for the other:
 | Field | Meaning |
 |---|---|
 | `root` | the watched path, exactly as the client spelled it |
-| `dirs` | the changed folders **relative to `root`** (`""` is the root itself) — relative, because a confined client spells its root differently from the storage's absolute path |
+| `dirs` | the changed folders **relative to `root`** (`""` is the root itself) - relative, because a confined client spells its root differently from the storage's absolute path |
 | `action`/`name`/`new_name` | only when every merged change was the same one |
 | `count` | how many changes the frame stands for, when more than one |
-| `overflow` | more than 256 distinct folders changed — they are not named; treat the whole root as changed |
+| `overflow` | more than 256 distinct folders changed - they are not named; treat the whole root as changed |
 
 Each watch coalesces like a room (leading frame at once, then one merged frame
 per 200 ms → 1.5 s window), with one difference: **a watch never drops a
@@ -180,12 +180,12 @@ the merge and retries until it is delivered or the client disconnects.
 
 ⚠ The size-column refresh (`modify`, above) is **not** delivered to watches: the
 real change already was, and a mirror obeying it would re-list every ancestor
-folder after every save — its own uploads included.
+folder after every save - its own uploads included.
 
 ## Presence
 
-`presence` frames carry everyone **else** in the room — seeing yourself is
-noise — de-duplicated per identity, so two tabs from one person collapse to one
+`presence` frames carry everyone **else** in the room - seeing yourself is
+noise - de-duplicated per identity, so two tabs from one person collapse to one
 entry while two end users behind a single shared proxy token stay distinct
 (that is what `uid` is for; key your list on it, not on `id`).
 
@@ -194,7 +194,7 @@ when it is renamed is shown against `yeni.pdf` without their client having to
 notice. ⚠ That fix-up is applied for **every** change, coalesced or not.
 
 Avatars ride inside every presence frame, which is why the stored picture is
-capped small — see [Backend](BACKEND.md).
+capped small - see [Backend](BACKEND.md).
 
 ## When there is no socket
 
@@ -204,24 +204,24 @@ capped backoff and then falls back to re-listing the folder every **12 s**,
 surfacing a small "no live connection" badge. The page always keeps working.
 
 ⚠ A reverse proxy in front of filex must pass WebSocket upgrades through, and
-must preserve the `Host` header — the cookie-authenticated (same-origin) upgrade
+must preserve the `Host` header - the cookie-authenticated (same-origin) upgrade
 is origin-checked. See [Deployment](DEPLOYMENT.md).
 
 ## What does *not* announce itself
 
-The periodic **storage sync** — the walk that reconciles the catalogue with
-what is actually on the storage — repairs rows and the search index but emits
+The periodic **storage sync** - the walk that reconciles the catalogue with
+what is actually on the storage - repairs rows and the search index but emits
 no change frames. A file that appears **only** because the sync found it (it was
 written to the backing storage behind filex's back, not through filex) therefore
 does not push an open explorer; that folder updates on navigation, or on the
-next change made through filex. ⚠ Not on the 12 s poll — that timer only runs
+next change made through filex. ⚠ Not on the 12 s poll - that timer only runs
 while the socket is degraded (see above), so on a healthy connection there is
-nothing polling to pick the file up. Writes that go through filex — the web
-app, the API, WebDAV, SFTP, FTPS, S3, NFS — all announce.
+nothing polling to pick the file up. Writes that go through filex - the web
+app, the API, WebDAV, SFTP, FTPS, S3, NFS - all announce.
 
 **filex's own folders** never announce. A change inside `.filex-trash`,
-`.versions`, `.thumbs`, the desktop's `.filex-open` or `.filex-drafts` — a
-trash move, a version snapshot, a working copy or a draft being saved — and a
+`.versions`, `.thumbs`, the desktop's `.filex-open` or `.filex-drafts` - a
+trash move, a version snapshot, a working copy or a draft being saved - and a
 change that names one
 (the desktop creating `.filex-open` at the root) are dropped as the first
 thing `Hub.EmitChange` does, before any delivery: the one door the HTTP

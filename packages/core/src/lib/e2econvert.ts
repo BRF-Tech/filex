@@ -9,9 +9,15 @@
  * written back over itself as a CONVERSION WRITE — one the server keeps no
  * version of, because what it replaces is the plaintext being removed.
  *
+ * A file over the one-shot limit (200 MB) is converted too, as a STREAM
+ * (header 0x02) file read, encrypted and written as streams (`writeLarge`);
+ * it is left as it is only where the server cannot take it from a browser.
+ *
  * Idempotent and resumable by the magic: a file already converted is left
  * alone, so running this again after a stop, a reload or a failure continues
- * it. A write is conditional on the file being the one that was listed
+ * it. A large file stopped half-way is not half-converted: its write is one
+ * upload that replaces the file only when it commits, so until then the
+ * server still has the whole plaintext and the next run starts it over. A write is conditional on the file being the one that was listed
  * (`expect`), so a file changed meanwhile is not overwritten with an older
  * version of itself — it counts as failed, and the next run picks it up.
  *
@@ -47,6 +53,16 @@ export interface ConvertIo {
   write(dirWire: string, row: ConvertRow, data: Blob, expect: string | null): Promise<void>;
   /** Encrypt one file's bytes under the folder key. */
   encrypt(data: ArrayBuffer): Promise<ArrayBuffer>;
+  /**
+   * A file over `maxBytes` (the one-shot limit): read, encrypted as a STREAM
+   * (header 0x02) file and written over itself as a conversion write on the
+   * same condition as `write` - all as streams, so memory stays at a few
+   * chunks whatever the size. Resolves false when this server cannot take it
+   * from this browser (no staged upload, and too big to gather for a single
+   * POST); throws when it failed (changed meanwhile: 412, no permission, …).
+   * Absent: such files are left as they are and counted in `tooBig`.
+   */
+  writeLarge?(dir: string, row: ConvertRow, expect: string | null): Promise<boolean>;
   /** Asked between files. */
   stopped(): boolean;
 }
@@ -58,14 +74,21 @@ export interface ConvertProgress {
   done: number;
   /** Already encrypted — converted earlier, or uploaded encrypted. */
   skipped: number;
-  /** Too big for this browser's one-shot encryption. */
+  /**
+   * Over the one-shot limit and NOT converted: this server cannot take a file
+   * sent in pieces, and it is too big to gather for one POST (or the caller
+   * has no streamed write at all). Left as they are.
+   */
   tooBig: number;
+  /** Of `done`, files over the one-shot limit, written as STREAM (0x02). */
+  large?: number;
   /** Could not be read or written (changed meanwhile, no permission, …). */
   failed: number;
 }
 
 export interface ConvertOptions {
-  /** Files larger than this are counted in `tooBig` and left as they are. */
+  /** The one-shot limit: files larger than this go through `io.writeLarge`
+   *  (STREAM, 0x02), or are counted in `tooBig` when there is none. */
   maxBytes: number;
 }
 
@@ -107,7 +130,8 @@ export async function runConversion(
   }
   prog.total = files.length;
 
-  // 2. One file at a time: never more than one in memory.
+  // 2. One file at a time: never more than one in memory (and a large one
+  //    never whole).
   for (const { dir, row } of files) {
     if (io.stopped()) return;
     try {
@@ -116,7 +140,14 @@ export async function runConversion(
         continue;
       }
       if (typeof row.size === 'number' && row.size > opts.maxBytes) {
-        prog.tooBig++;
+        // wiring:e2 convert - over the one-shot limit: STREAM (0x02), the
+        // format an upload of the same file gets (lib/e2estream).
+        if (io.writeLarge && (await io.writeLarge(dir, row, expectOf(row)))) {
+          prog.done++;
+          prog.large = (prog.large ?? 0) + 1;
+        } else {
+          prog.tooBig++;
+        }
         continue;
       }
       const plain = await io.read(row.path);

@@ -16,7 +16,9 @@ import { createI18n } from "vue-i18n";
 import { createMemoryHistory, createRouter } from "vue-router";
 
 import en from "@/locales/en.json";
+import { useCapabilitiesStore } from "@/stores/capabilities";
 import { openRowMenu, pickMenuItem, menuEntries, closeRowMenus } from "../helpers/rowMenu";
+import { useToastStore } from "@/stores/toast";
 
 const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
   const catalogue = {
@@ -69,7 +71,10 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
     forUser: vi.fn(),
     setOverrides: vi.fn(),
     allOverrides: vi.fn(async () => ({})),
+    getDefaults: vi.fn(async () => ({ permissions: ["files.download", "access.desktop"], preset: "", apps: {} })),
+    putDefaults: vi.fn(async (permissions: string[]) => ({ permissions, preset: "", apps: {} })),
     userRole: vi.fn(async () => 7 as number | null),
+    userRoleDetail: vi.fn(async () => ({ role_id: 7 as number | null, group_role: null })),
     setUserRole: vi.fn(async (_id: number, r: number | string) => ({
       role_id: typeof r === "number" ? r : null,
       role: "user",
@@ -119,6 +124,9 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
 
 vi.mock("@/api/roles", () => ({ RolesApi: roles }));
 vi.mock("@/api/users", () => ({ UsersApi: usersApi }));
+vi.mock("@/api/groups", () => ({
+  GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []) },
+}));
 vi.mock("@/api/storages", () => ({
   StoragesApi: { list: vi.fn(async () => []) },
 }));
@@ -167,6 +175,7 @@ async function mountAt(
         component: { template: "<div />" },
       },
       { path: "/users", name: "users", component: { template: "<div />" } },
+      { path: "/groups", name: "groups", component: { template: "<div />" } },
       { path: "/:p(.*)*", component: { template: "<div />" } },
     ],
   });
@@ -201,7 +210,6 @@ async function choose(select: HTMLSelectElement, value: string) {
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
-  document.body.innerHTML = "";
 });
 
 describe("Roles page", () => {
@@ -224,6 +232,42 @@ describe("Roles page", () => {
     await openRowMenu(w, "role-actions-rule-7");
     expect(menuEntries().map((e) => e.label)).toEqual(["Edit role", "Delete"]);
     closeRowMenus();
+  });
+
+  // The built-in roles are one row for the whole platform, and the server
+  // refuses a tenant admin's save (requireSupertenant in PutDefaults). The page
+  // offers a tenant's admin the role to read — not a Save that always fails.
+  it("a tenant admin sees a built-in role read-only: the note, the grid locked, no Save", async () => {
+    const caps = useCapabilitiesStore();
+    caps.$patch({ loaded: true, data: { ...caps.data, caller_admin: false } });
+    const w = await mountAt(Roles);
+    await openRowMenu(w, "role-actions-builtin-user");
+    expect(menuEntries().map((e) => e.label)).toEqual(["View the User role"]);
+    await pickMenuItem("role-actions-builtin-user-edit");
+    await flushPromises();
+
+    expect(q('[data-testid="builtin-role-platform-note"]').textContent).toContain("create a role");
+    const boxes = Array.from(
+      document.body.querySelectorAll<HTMLInputElement>('[data-testid="builtin-role-user"] input[type="checkbox"]'),
+    );
+    expect(boxes.length).toBeGreaterThan(0);
+    expect(boxes.every((b) => b.disabled)).toBe(true);
+    expect(document.body.querySelector('[data-testid="builtin-role-save"]')).toBeNull();
+    expect(roles.putDefaults).not.toHaveBeenCalled();
+  });
+
+  it("the platform operator (or a single-tenant admin) still edits a built-in role", async () => {
+    const caps = useCapabilitiesStore();
+    caps.$patch({ loaded: true, data: { ...caps.data, caller_admin: true } });
+    const w = await mountAt(Roles);
+    await openRowMenu(w, "role-actions-builtin-user");
+    expect(menuEntries().map((e) => e.label)).toEqual(["Edit the User role"]);
+    await pickMenuItem("role-actions-builtin-user-edit");
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-testid="builtin-role-platform-note"]')).toBeNull();
+    await click(q('[data-testid="builtin-role-save"]'));
+    expect(roles.putDefaults).toHaveBeenCalledTimes(1);
   });
 
   it("asks before switching off a role people hold, and sends nothing on No", async () => {
@@ -385,6 +429,58 @@ describe("Role field on a person’s page", () => {
     await submitDetails();
     expect(roles.setUserRole).toHaveBeenCalledOnce();
     expect(roles.setUserRole).toHaveBeenCalledWith(2, "viewer");
+  });
+
+  it("a built-in role over a group's role asks first, and says when the group's still applies", async () => {
+    roles.forUser.mockResolvedValue({
+      user_id: 3,
+      role: "user",
+      overrides: {},
+      effective: { permissions: [], allowed: [], preset: "", settings: {}, rules: [], conditional_rules: [] },
+    });
+    const viaFinance = { role_id: 7, group_id: 1, group_name: "Finance" };
+    roles.userRoleDetail.mockResolvedValue({ role_id: null, group_role: viaFinance });
+    roles.setUserRole.mockResolvedValueOnce({ role_id: null, role: "user", group_role: viaFinance } as never);
+    const confirm = vi.spyOn(window, "confirm");
+    await mountAt(UserEdit, { path: "/users/3" });
+    expect(q('[data-testid="user-group-role"]').textContent).toContain("Finance");
+
+    confirm.mockReturnValueOnce(false);
+    await choose(roleSelect(), "viewer");
+    await submitDetails();
+    expect(confirm.mock.calls[0][0]).toContain("does not replace it");
+    expect(roles.setUserRole, "No sends nothing").not.toHaveBeenCalled();
+
+    confirm.mockReturnValueOnce(true);
+    await submitDetails();
+    expect(roles.setUserRole).toHaveBeenCalledWith(3, "viewer");
+    const toasts = useToastStore().toasts;
+    expect(toasts.at(-1)?.level).toBe("warn");
+    expect(toasts.at(-1)?.message).toContain("still applies");
+    roles.userRoleDetail.mockResolvedValue({ role_id: 7, group_role: null });
+  });
+});
+
+describe("Users list — a role from a group", () => {
+  it("shows the role in force and the group it comes from", async () => {
+    roles.listRules.mockResolvedValueOnce({
+      rules: [noDelete],
+      assignments: { "2": 7 },
+      groupAssignments: { "3": { role_id: 7, group_id: 1, group_name: "Finance" } },
+      builtinMembers: { admin: 1, user: 1, viewer: 0 },
+    } as never);
+    await mountAt(Users);
+    const row = [...document.body.querySelectorAll("tr, [role='row']")].find((r) => r.textContent?.includes("bob@local"));
+    expect(row?.textContent).toContain(noDelete.name);
+    expect(row?.textContent).toContain("through Finance");
+  });
+
+  it("someone with a role of their own shows that one badge — not the built-in one beside it", async () => {
+    await mountAt(Users);
+    const row = [...document.body.querySelectorAll("tr, [role='row']")].find((r) => r.textContent?.includes("demo@local"));
+    expect(row?.textContent).toContain(noDelete.name);
+    expect(row?.textContent).not.toContain(en.users.roles.user);
+    expect(row?.querySelector('[data-testid="user-role-via"]')).toBeNull();
   });
 });
 

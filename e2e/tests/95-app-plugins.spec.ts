@@ -76,6 +76,17 @@ async function pollForOp(
   return undefined;
 }
 
+/**
+ * The highest id the ops queue holds right now. A job queued after this call
+ * has a higher one, which is how a test tells ITS job from the finished rows
+ * the specs before it left (94 and the 1xx app specs sort before this file).
+ */
+async function newestOpId(request: APIRequestContext): Promise<number> {
+  const res = await request.get('/api/files/ops');
+  if (!res.ok()) throw new Error(`GET /api/files/ops: ${res.status()} ${await res.text()}`);
+  return ((await res.json()).ops as OpsRow[]).reduce((max, o) => Math.max(max, o?.id ?? 0), 0);
+}
+
 async function menuVerbs(page: Page, qualified: string): Promise<string[]> {
   const row = page.locator(`[data-fe-path="${qualified}"]`).first();
   await expect(row).toBeVisible();
@@ -181,24 +192,30 @@ test.describe('App plugins — install, run, output, public page', () => {
     const pngVerbs = await menuVerbs(page, `${STORAGE}://${PNG}`);
     expect(pngVerbs.some((v) => /upper-case|büyük harf/i.test(v)), `menu on .png: [${pngVerbs.join(', ')}]`).toBe(false);
 
+    // ⚠ A named type, not `typeof op[]`: with `op` starting out `undefined`
+    // TypeScript narrows that cast to `never[]` and the whole line stops
+    // being checked (`Property 'kind' does not exist on type 'never'`).
+    type OpRow = { id: number; kind: string; status: string; outputs?: { path: string }[] };
+    // ⚠ The ops list holds every app job the suite has run so far - 94 and
+    // the 1xx app specs sort before this file - and the newest
+    // `plugin-action` row is somebody else's until this click's job lands.
+    // Follow an id above every row the list held BEFORE the click.
+    await apiLogin(request);
+    const seen = await newestOpId(request);
+
     // Run it from the menu; the tray shows the job; the output lands.
     const row = page.locator(`[data-fe-path="${STORAGE}://${TXT}"]`).first();
     await row.click({ button: 'right' });
     await page.getByRole('menuitem', { name: /upper-case|büyük harf/i }).click();
 
-    await apiLogin(request);
     // The queue row is the proof the browser's click became a job; poll it
     // through the API rather than through the tray's animation.
     const deadline = Date.now() + 15_000;
-    // ⚠ A named type, not `typeof op[]`: with `op` starting out `undefined`
-    // TypeScript narrows that cast to `never[]` and the whole line stops
-    // being checked (`Property 'kind' does not exist on type 'never'`).
-    type OpRow = { id: number; kind: string; status: string; outputs?: { path: string }[] };
     let op: OpRow | undefined;
     while (Date.now() < deadline && !op) {
       const res = await request.get('/api/files/ops');
       const body = await res.json();
-      op = (body.ops as OpRow[]).find((o) => o?.kind === 'plugin-action');
+      op = (body.ops as OpRow[]).find((o) => o?.kind === 'plugin-action' && o.id > seen);
       if (!op) await new Promise((r) => setTimeout(r, 250));
     }
     expect(op, 'a plugin-action op was queued').toBeTruthy();
@@ -328,6 +345,9 @@ test.describe('App plugins — install, run, output, public page', () => {
     // land on the file AND open what the app asked for on it. A "please sign"
     // that drops somebody in a folder has made them find the screen
     // themselves, which for a signer is where the flow stops.
+    // The sign specs (113, 129, 130) sort before this file and leave `sign`
+    // rows behind: only a row queued after this point is the bell's.
+    const beforeBell = await newestOpId(request);
     await page.getByTestId('notification-bell').click();
     const notice = page.getByTestId('notification-row').first();
     await expect(notice).toBeVisible();
@@ -336,7 +356,7 @@ test.describe('App plugins — install, run, output, public page', () => {
     await expect(page).toHaveURL(/app=echo/);
     await expect(page).toHaveURL(/appAction=sign/);
     // The deep link ran the action, not just the navigation.
-    const queued = await pollForOp(request, (o) => o.action === 'sign');
+    const queued = await pollForOp(request, (o) => o.action === 'sign' && o.id > beforeBell);
     expect(queued, 'the bell click queued the app’s own action').toBeTruthy();
 
     // An administrator can lift it by force — the way out when an app dies

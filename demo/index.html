@@ -80,7 +80,7 @@
       status.textContent = `Ready · v${e.detail.capabilities.version}`;
     });
     fx.addEventListener('filex-error', (e) => {
-      status.textContent = `Error: ${e.detail.code} — ${e.detail.message}`;
+      status.textContent = `Error: ${e.detail.code} - ${e.detail.message}`;
       console.error('[filex]', e.detail);
     });
     fx.addEventListener('filex-share-created', (e) => {

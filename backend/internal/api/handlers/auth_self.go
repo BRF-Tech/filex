@@ -29,6 +29,7 @@ import (
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/identity"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 )
 
 // AuthSelf wraps the self-service profile/password/TOTP routes.
@@ -74,7 +75,31 @@ func (h *AuthSelf) Me(w http.ResponseWriter, r *http.Request) {
 			out["two_factor_required"] = res.Settings.Require2FA && !u.TOTPEnabled && u.OIDCSubject == "" && !u.IsAdmin()
 		}
 	}
+	// The account's realm, on a multi-tenant install and for a tenant's
+	// account only: what it writes in front of its name where no address says
+	// which tenant it is (`acme/alex` over SFTP, the sign-in form's Realm field
+	// on the platform's page). The connection guides print it. Absent on a
+	// single-tenant install (no tenant scope) and for the platform's own
+	// accounts.
+	if realm := callerRealm(r, h.Store); realm != "" {
+		out["realm"] = realm
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// callerRealm is the realm of the signed-in account's tenant on a multi-tenant
+// install — what it writes in front of its name where no address names the
+// tenant — or "" (single-tenant: no scope; the platform's own accounts: none).
+func callerRealm(r *http.Request, store db.Store) string {
+	sc, ok := tenant.FromContext(r.Context())
+	if !ok || sc == nil || sc.IsSupertenant || sc.ProviderID == 0 || store == nil {
+		return ""
+	}
+	p, err := store.GetProvider(r.Context(), sc.ProviderID)
+	if err != nil {
+		return ""
+	}
+	return p.LoginRealm()
 }
 
 type profileReq struct {

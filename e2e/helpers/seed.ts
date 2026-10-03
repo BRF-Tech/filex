@@ -82,17 +82,37 @@ export async function seedLocalStorage(
 /**
  * Best-effort cleanup — removes any storage with the given name. The
  * tests share a single DB so cleanup between runs avoids drift.
+ *
+ * ⚠⚠ Tried three times. A storage this misses is not one spec's problem:
+ * it is visible to every later spec on the shared server. Measured in the
+ * 0.50 three-engine run: one 30 s disk stall made 173's cleanup sign-in
+ * fail (401 after "context canceled"), its 1.1 GB storage stayed, and 25,
+ * 109 and 180 went red in other specs — the explorer opened on two
+ * storages, a non-admin was no longer storage-less.
  */
 export async function dropStorageByName(request: APIRequestContext, name: string) {
-  await apiLogin(request);
-  const list = await request.get('/api/admin/storages');
-  if (!list.ok()) return;
-  const items: Array<{ id: number; name: string }> = await list.json();
-  for (const item of items) {
-    if (item.name === name) {
-      await request.delete(`/api/admin/storages/${item.id}`);
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 5_000 * attempt));
+    try {
+      await apiLogin(request);
+      const list = await request.get('/api/admin/storages');
+      // Only what a stall answers is retried; any other refusal is the old
+      // best-effort shrug.
+      if (list.status() >= 500) throw new Error(`listing storages: ${list.status()}`);
+      if (!list.ok()) return;
+      const items: Array<{ id: number; name: string }> = await list.json();
+      for (const item of items) {
+        if (item.name !== name) continue;
+        const del = await request.delete(`/api/admin/storages/${item.id}`);
+        if (del.status() >= 500) throw new Error(`deleting storage ${name}: ${del.status()}`);
+      }
+      return;
+    } catch (err) {
+      last = err;
     }
   }
+  throw last;
 }
 
 /**

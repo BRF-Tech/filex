@@ -59,6 +59,23 @@ reg('doc', ['doc', 'docx', 'odt', 'rtf']);
 reg('sheet', ['xls', 'xlsx', 'ods', 'csv', 'tsv']);
 reg('slides', ['ppt', 'pptx', 'odp']);
 reg('archive', ['zip', 'tar', 'gz', 'bz2', '7z', 'rar', 'xz', 'zst']);
+/**
+ * Packages: archives with a purpose (a Java archive, an Android or Python
+ * package, an editor or browser extension, an installer). They take the
+ * archive family - its icon, its colour, its filter - but keep their own name
+ * in the Type column (`JAR`, `APK`), which says more than "Archive" would
+ * (`typeLabelKey`).
+ *
+ * ⚠ 0.50: an app that lists what a package holds (pkglist) draws these as a
+ * page, and with no family of their own they were the white square on a
+ * white row the list's type badge is there to prevent, badge-less.
+ */
+const PACKAGE_EXTS: ReadonlySet<string> = new Set([
+  'jar', 'war', 'ear', 'aar', 'apk', 'aab', 'apks', 'xapk', 'ipa', 'whl', 'egg', 'vsix',
+  'nupkg', 'snupkg', 'xpi', 'crx', 'appx', 'appxbundle', 'msix', 'msixbundle', 'deb', 'rpm',
+  'snap', 'gem', 'crate',
+]);
+reg('archive', [...PACKAGE_EXTS]);
 reg('code', [
   'js', 'ts', 'jsx', 'tsx', 'mjs', 'cjs', 'vue', 'py', 'go', 'rs', 'php', 'rb',
   'java', 'kt', 'swift', 'c', 'cpp', 'h', 'hpp', 'cs', 'css', 'scss', 'less',
@@ -452,6 +469,8 @@ export function typeLabelKey(node: {
   if (ext === 'fxe') return 'e2e.fxe.type'; /* wiring:e2 fxe */
   const own = EXT_TYPE_KEYS[ext];
   if (own) return own;
+  // A package is an archive by family, but its own name says more (PACKAGE_EXTS).
+  if (PACKAGE_EXTS.has(ext)) return null;
   return FAMILY_TYPE_KEYS[iconFamilyFor(node)] ?? null;
 }
 
@@ -470,6 +489,15 @@ export function typeLabelFor(
 ): string {
   const key = typeLabelKey(node);
   if (key) return t(key);
-  const ext = (node.extension || '').trim();
-  return ext ? ext.toUpperCase() : '—';
+  return extensionLabel(node) || '-';
+}
+
+/**
+ * The extension in capitals (`DOCX`, `PDF`), or '' when there is none: the
+ * Type column's third-tier fallback above and the list view's type badge on a
+ * page thumbnail (lib/filePreview `thumbTypeBadge`) both read it here, so the
+ * two never spell a kind differently.
+ */
+export function extensionLabel(node: { extension?: string | null }): string {
+  return (node.extension || '').trim().toUpperCase();
 }

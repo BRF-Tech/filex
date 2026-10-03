@@ -99,7 +99,7 @@ checksum:
 
 # ── Package managers: the CLI as `filex` ─────────────────────────────────
 #
-# Names (Burak, 2026-09-25): the CLI is plain `filex` in every package
+# Names (the maintainer, 2026-09-25): the CLI is plain `filex` in every package
 # manager — the command's own name — and the desktop app is `filex-app`
 # (desktop/scripts/pkg-manifests.mjs publishes that one after the installers
 # are built). Homebrew's own rule for an app beside a same-named tool is the
@@ -112,7 +112,7 @@ checksum:
 #
 # ⚠ `brews` (formulas) is deprecated for pre-built binaries; casks are what
 # Homebrew wants for them. A cask's download is quarantined on macOS, and the
-# binary is not signed with a Developer ID (no Developer ID — Burak's call), so
+# binary is not signed with a Developer ID (no Developer ID — the maintainer's call), so
 # the caveat says how to let it through. Removing the quarantine for people
 # (the documented xattr hook) is what Homebrew declines to make easy, and its
 # legacy postflight block is deprecated for third-party taps.
@@ -244,7 +244,7 @@ release:
   header: |
     ## filex v{{ .Version }}
 
-    Self-hosted file manager — Go single binary + multi-framework frontend.
+    Self-hosted file manager - Go single binary + multi-framework frontend.
 
     Download a binary below, or pull a Docker image:
 
@@ -267,10 +267,10 @@ release:
     ---
     **Verify:** `sha256sum -c checksums.txt`
 
-    - **Documentation** — <https://docs.filex.sh>
-    - **Report a bug** — <https://github.com/BRF-Tech/filex/issues>
-    - **Full changelog** — <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-    - **Every release** — <https://github.com/BRF-Tech/filex/releases>
+    - **Documentation** - <https://docs.filex.sh>
+    - **Report a bug** - <https://github.com/BRF-Tech/filex/issues>
+    - **Full changelog** - <https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+    - **Every release** - <https://github.com/BRF-Tech/filex/releases>
 
 # --- Optional: SBOM (syft) ---
 # Uncomment after installing syft into the goreleaser CI image.

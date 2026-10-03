@@ -1,4 +1,4 @@
-# filex — Unraid Community Applications template
+# filex - Unraid Community Applications template
 
 `filex.xml` follows the Unraid CA `<Container version="2">` template schema
 (modelled on the selfhosters.net template repository).
@@ -16,8 +16,8 @@
 
 | Field | Required | Notes |
 |---|---|---|
-| Files (`/srv/files`) | yes | The share to manage, e.g. `/mnt/user/files` — seeded as the default storage. |
-| Public URL (`FILEX_PUBLIC_URL`) | yes | `http://<server-ip>:5212` or your reverse-proxy URL — share links are built from it. A path in it (`https://example.com/filex`) is the sub-path filex is served under, and the proxy must pass that path through ([Base path](../../docs/CONFIGURATION.md#base-path)). |
+| Files (`/srv/files`) | yes | The share to manage, e.g. `/mnt/user/files` - seeded as the default storage. |
+| Public URL (`FILEX_PUBLIC_URL`) | yes | `http://<server-ip>:5212` or your reverse-proxy URL - share links are built from it. A path in it (`https://example.com/filex`) is the sub-path filex is served under, and the proxy must pass that path through ([Base path](../../docs/CONFIGURATION.md#base-path)). |
 | Admin Email / Password | no | Empty → random `admin@local` password printed once in the container log. |
 
 Data (DB, search index, thumbnails) lives in `/mnt/user/appdata/filex`.

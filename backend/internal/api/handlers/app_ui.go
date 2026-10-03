@@ -90,6 +90,14 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	// The kind it writes: the file it was opened with, or the new name.
+	target := strings.TrimSpace(q.Get("path"))
+	if target == "" {
+		target = strings.TrimSpace(q.Get("name"))
+	}
+	if !h.openAllowed(w, r, p, v, path.Base(strings.ReplaceAll(target, "\\", "/"))) {
+		return
+	}
 	// A save in chunks (app_ui_chunks.go): each chunk is one request under
 	// the proxy's body limit, and the file is written once, at the end.
 	if q.Get("chunk") == "start" || q.Get("session") != "" {

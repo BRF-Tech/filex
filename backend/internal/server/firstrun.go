@@ -92,7 +92,7 @@ func FirstRun(ctx context.Context, store db.Store, dataDir, adminEmail, adminPas
 		return FirstRunCredentials{}, fmt.Errorf("firstrun: mkdir datadir: %w", err)
 	}
 	path := filepath.Join(dataDir, ".first-run.txt")
-	body := fmt.Sprintf("filex first-run credentials\nWritten: %s\nEmail:    %s\nPassword: %s\n\nThis file is shown ONCE — change the password at /admin/dashboard?settings=1.\n",
+	body := fmt.Sprintf("filex first-run credentials\nWritten: %s\nEmail:    %s\nPassword: %s\n\nThis file is shown ONCE - change the password at /admin/dashboard?settings=1.\n",
 		time.Now().UTC().Format(time.RFC3339), email, pw)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		return FirstRunCredentials{}, fmt.Errorf("firstrun: write file: %w", err)

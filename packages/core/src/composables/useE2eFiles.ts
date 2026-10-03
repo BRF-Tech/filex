@@ -29,7 +29,7 @@ import { onBeforeUnmount, ref, type Ref } from 'vue';
 
 import type { FileNode } from '../types/FileNode';
 import type { FileApi, PendingOpDto } from './useFileApi';
-import { isStagedUnsupported, type UploadOptions, type UploadResult } from './useUploadChunked';
+import { isStagedUnsupported, type UploadJob, type UploadOptions, type UploadResult } from './useUploadChunked';
 import { requestFailure } from '../lib/errorWords';
 import {
   E2E_MARKER_NAME,
@@ -259,26 +259,50 @@ export function useE2eFiles(deps: E2eFilesDeps) {
     stream: ReadableStream<Uint8Array>,
     size: number,
     onProgress?: (bytes: number) => void,
+    /* wiring:e2 convert - `fields` go with the write wherever it lands: the
+       staged commit's query, or the single POST's form (`expect`,
+       `e2e_convert`). `signal` stops the upload in flight. */
+    extra: { fields?: Record<string, string>; signal?: AbortSignal } = {},
   ): Promise<void> {
     const file = new File([], name, { type: 'application/octet-stream' });
+    const { fields, signal } = extra;
+    if (signal?.aborted) {
+      await stream.cancel().catch(() => undefined);
+      throw new DOMException('Aborted by user', 'AbortError');
+    }
     if (size > deps.chunked.threshold()) {
       const source: UploadSource = streamUploadSource(stream, size);
+      let job: UploadJob | null = null;
+      const onAbort = () => job?.cancel();
+      signal?.addEventListener('abort', onAbort);
       try {
         await deps.chunked.uploadFile({
           path: dir,
           file,
           source,
-          onProgress: (job) => onProgress?.(job.uploadedBytes),
+          commitQuery: fields,
+          onProgress: (j) => {
+            job = j;
+            if (signal?.aborted) j.cancel();
+            onProgress?.(j.uploadedBytes);
+          },
         });
         return;
       } catch (err) {
         if (!isStagedUnsupported(err)) throw err;
-        if (size > E2E_BLOB_SAVE_LIMIT) throw new SaveTooLarge(size, E2E_BLOB_SAVE_LIMIT);
+        if (size > E2E_BLOB_SAVE_LIMIT) {
+          // Nothing read yet (the source is lazy): let the download go.
+          await stream.cancel().catch(() => undefined);
+          throw new SaveTooLarge(size, E2E_BLOB_SAVE_LIMIT);
+        }
+      } finally {
+        signal?.removeEventListener('abort', onAbort);
       }
     }
     const whole = await streamToFile(stream, name);
     if (whole.size !== size) throw new Error('e2e: the upload came out a different size than it should');
-    await api.uploadMultipart(dir, [whole], (p) => onProgress?.(Math.round((p / 100) * size)));
+    if (signal?.aborted) throw new DOMException('Aborted by user', 'AbortError');
+    await api.uploadMultipart(dir, [whole], (p) => onProgress?.(Math.round((p / 100) * size)), fields);
   }
 
   /** Move one item to the trash, queued where the server queues. */
@@ -994,6 +1018,45 @@ export function useE2eFiles(deps: E2eFilesDeps) {
   }
 
   /**
+   * wiring:e2 convert - a file over the one-shot limit, encrypted IN PLACE
+   * (docs/E2E-ENCRYPTION.md → "Encrypting a folder you already have"): read
+   * from the server as a stream, encrypted as a STREAM (0x02) file as it is
+   * read, and written over itself as a conversion write - on condition that
+   * it is still the file listed (`expect`). Nothing is held but the chunks in
+   * flight, whatever the size.
+   *
+   * Staged where the server has it. Where it has not, a single POST, which
+   * has to be gathered in memory first: up to E2E_BLOB_SAVE_LIMIT, and above
+   * that this resolves FALSE - this browser cannot convert it on this server,
+   * and the file is left as it is (the conversion says so and stays open).
+   */
+  async function convertLarge(
+    row: { path: string; basename: string; size?: number },
+    fmk: CryptoKey,
+    expect: string | null,
+    opts: { signal?: AbortSignal; onProgress?: (fraction: number) => void } = {},
+  ): Promise<boolean> {
+    const size = row.size;
+    if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) {
+      throw new Error('e2e: unknown file size');
+    }
+    const enc = await encryptFolderFileStream(fmk, size, await fetchBody(row.path));
+    const progress = opts.onProgress
+      ? (sent: number) => opts.onProgress!(enc.size > 0 ? Math.min(1, sent / enc.size) : 1)
+      : undefined;
+    try {
+      await uploadStream(wireParentPath(row.path), row.basename, enc.stream, enc.size, progress, {
+        fields: { e2e_convert: '1', ...(expect ? { expect } : {}) },
+        signal: opts.signal,
+      });
+    } catch (err) {
+      if (err instanceof SaveTooLarge) return false;
+      throw err;
+    }
+    return true;
+  }
+
+  /**
    * Re-wrap a large folder file's key during a re-key without reading it into
    * memory: the 97-byte header is re-wrapped, the body is re-sent unread.
    * True for an encrypted file (re-wrapped now, or already under the new
@@ -1090,6 +1153,7 @@ export function useE2eFiles(deps: E2eFilesDeps) {
     downloadFolderFile,
     downloadDecryptedZip,
     folderUploadSource,
+    convertLarge,
     rewrapLarge,
     revokeAll,
   };

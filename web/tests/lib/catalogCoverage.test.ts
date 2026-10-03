@@ -68,7 +68,7 @@ describe('a partial folder size', () => {
   it('is a lower bound, or not a number at all', () => {
     expect(en.formatNodeSize({ size: 1_200_000, size_partial: true })).toBe('≥ 1.2 MB');
     expect(tr.formatNodeSize({ size: 1_200_000, size_partial: true })).toBe('≥ 1,2 MB');
-    expect(en.formatNodeSize({ size: 0, size_partial: true })).toBe('—');
+    expect(en.formatNodeSize({ size: 0, size_partial: true })).toBe('-');
     expect(en.formatNodeSize({ size: 0 })).toBe('0 B');
     expect(en.formatNodeSize({ size: 1_200_000 })).toBe('1.2 MB');
   });

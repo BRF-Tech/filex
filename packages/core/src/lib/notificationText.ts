@@ -105,8 +105,8 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
   },
   // meta.signature is the ClamAV signature name; the path is the ORIGINAL one.
   'file.infected': {
-    en: { title: 'Virus found in {name}', body: '{signature} — {path}' },
-    tr: { title: '{name} dosyasında virüs bulundu', body: '{signature} — {path}' },
+    en: { title: 'Virus found in {name}', body: '{signature} - {path}' },
+    tr: { title: '{name} dosyasında virüs bulundu', body: '{signature} - {path}' },
   },
   'file.deleted': {
     en: { title: 'File deleted: {name}', body: '{path}' },
@@ -243,6 +243,25 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
   plugin_requested: {
     en: { title: 'Plugin request: {plugin} {version}', body: '{requester}: {reason}' },
     tr: { title: 'Eklenti isteği: {plugin} {version}', body: '{requester}: {reason}' },
+  },
+  // auth.AdoptAccount → notify.LegacyAccountElsewhere: the server catalogue
+  // (srvtext `server.auth_provider.legacy_elsewhere_*`) phrases it in every
+  // built-in language into meta.title_<lang>/body_<lang>, like an app's
+  // notice — one source for the words, the reader's language on screen.
+  ldap_legacy_account_elsewhere: {
+    en: { title: '{notice_title}', body: '{notice_body}' },
+    tr: { title: '{notice_title}', body: '{notice_body}' },
+  },
+  // tenantdomain.Service.Check → notify.TenantDomainChanged: a tenant's own
+  // domain stopped (or started again) routing. The server catalogue
+  // (srvtext `server.tenant_domain.*`) phrases it per language in meta.
+  tenant_domain_suspended: {
+    en: { title: '{notice_title}', body: '{notice_body}' },
+    tr: { title: '{notice_title}', body: '{notice_body}' },
+  },
+  tenant_domain_restored: {
+    en: { title: '{notice_title}', body: '{notice_body}' },
+    tr: { title: '{notice_title}', body: '{notice_body}' },
   },
   // replica/recorder.go NotifyReplicaFail: meta.{path,op,error}
   replica_fail: {
@@ -498,16 +517,23 @@ function noticeText(meta: Record<string, unknown>, prefix: string, lang: string 
  * Fill `{placeholders}`, then repair what the metadata could not supply.
  *
  * ⚠ An unresolved placeholder is deleted along with the punctuation that was
- * holding it: `"{signature} — {path}"` with no signature must read `"/a/b.txt"`,
- * not `"— /a/b.txt"`. This is the difference between a sentence with a missing
+ * holding it: `"{signature} - {path}"` with no signature must read `"/a/b.txt"`,
+ * not `"- /a/b.txt"`. This is the difference between a sentence with a missing
  * word and a sentence with a dangling dash, and only one of them looks like a
  * bug to the person reading it.
+ *
+ * The separator is a SPACED hyphen since the catalogues gave up the long
+ * dashes (2026-09-30), and only a spaced one is punctuation here: a path or a
+ * name may itself start or end with "-". The em dash is still trimmed, for a
+ * language pack written before that.
  */
 export function fillTemplate(tpl: string, vars: Record<string, string>): string {
   const filled = tpl.replace(/\{(\w+)\}/g, (_m, k: string) => vars[k] ?? '');
   return filled
     .replace(/\s*(—|→|:)\s*$/g, '')
     .replace(/^\s*(—|→|:)\s*/g, '')
+    .replace(/\s+-\s*$/g, '')
+    .replace(/^\s*-\s+/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }

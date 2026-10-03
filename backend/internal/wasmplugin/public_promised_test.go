@@ -261,7 +261,7 @@ func TestShareOfOutput_ObeysTheOrdinaryRules(t *testing.T) {
 	require.NoError(t, err)
 	_, err = shareCreate(t, s, map[string]any{"ref": ref, "pin": "12"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "4–12")
+	assert.Contains(t, err.Error(), "4-12")
 	assert.False(t, s.hasPromises(), "a refused ask promises nothing")
 
 	// ⭐ Audited, when the link becomes real, and still without the token.

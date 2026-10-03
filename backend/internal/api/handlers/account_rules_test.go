@@ -44,7 +44,7 @@ func TestProfile_TheEmailIsCheckedBeforeAnythingIsSaved(t *testing.T) {
 	_, store := testutil.NewTestDB(t)
 	ayse, err := store.CreateUser(ctx, "ayse@local", "x", model.RoleUser, "tr", "")
 	require.NoError(t, err)
-	_, err = store.CreateUser(ctx, "gokcil@local", "x", model.RoleUser, "tr", "")
+	_, err = store.CreateUser(ctx, "bob@local", "x", model.RoleUser, "tr", "")
 	require.NoError(t, err)
 	h := handlers.NewAuthSelf(store)
 
@@ -76,11 +76,11 @@ func TestProfile_TheEmailIsCheckedBeforeAnythingIsSaved(t *testing.T) {
 	assert.NotEqual(t, "Ayşe Y.", stored().DisplayName, "a refused save wrote the display name anyway")
 
 	// Another account's address: refused as taken, not reported as saved.
-	rec = patch(`{"email":"GOKCIL@local"}`, "tr")
+	rec = patch(`{"email":"BOB@local"}`, "tr")
 	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 	r = readRefusal(t, rec)
 	assert.Equal(t, "email_taken", r.Error)
-	assert.Equal(t, "gokcil@local başka bir hesaba ait.", r.Message)
+	assert.Equal(t, "bob@local başka bir hesaba ait.", r.Message)
 	assert.Equal(t, "ayse@local", stored().Email)
 
 	// Emptying it is refused too; the English reader gets English.
@@ -140,7 +140,7 @@ func TestProfile_AUsernameIsRefusedInTheReadersWords(t *testing.T) {
 func TestUsers_CreateRefusesTheAddressInWords(t *testing.T) {
 	ctx := context.Background()
 	_, store := testutil.NewTestDB(t)
-	_, err := store.CreateUser(ctx, "gokcil@local", "x", model.RoleUser, "tr", "")
+	_, err := store.CreateUser(ctx, "bob@local", "x", model.RoleUser, "tr", "")
 	require.NoError(t, err)
 	h := handlers.NewUsers(store)
 	create := func(body string) *httptest.ResponseRecorder {
@@ -158,9 +158,9 @@ func TestUsers_CreateRefusesTheAddressInWords(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Equal(t, "email_invalid", readRefusal(t, rec).Error)
 
-	rec = create(`{"email":"gokcil@local"}`)
+	rec = create(`{"email":"bob@local"}`)
 	require.Equal(t, http.StatusConflict, rec.Code, "a taken address is a conflict, not the driver's 500")
-	assert.Equal(t, "gokcil@local başka bir hesaba ait.", readRefusal(t, rec).Message)
+	assert.Equal(t, "bob@local başka bir hesaba ait.", readRefusal(t, rec).Message)
 }
 
 func strconvQuote(s string) string {

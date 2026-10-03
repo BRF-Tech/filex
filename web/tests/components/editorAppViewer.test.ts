@@ -1,14 +1,20 @@
 // The standalone editor tab (/files/edit, views/Editor.vue) opens a file in
-// the app's own interface exactly as the explorer's preview does (Burak,
+// the app's own interface exactly as the explorer's preview does (the maintainer,
 // 2026-09-27 — one surface): the same `viewer` views, the same "first app
 // for the type" rule, the same "Open with" choice (`app=` in the address).
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { createI18n } from 'vue-i18n';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
 import en from '@/locales/en.json';
 import Editor from '@/views/Editor.vue';
+import { teardownDom, unmountAll } from '../helpers/teardown';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
+
+// An app frame that opens writes "seen this version" to the account 400 ms
+// later (the editor tab's and the preview's alike).
+answerAccountPrefs();
 
 
 const VIEWS = [
@@ -30,12 +36,11 @@ const VIEWS = [
   },
 ];
 
-let mounted: VueWrapper | null = null;
-afterEach(() => {
-  mounted?.unmount();
-  mounted = null;
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   vi.restoreAllMocks();
-  document.body.innerHTML = '';
 });
 
 const settle = async () => {
@@ -57,9 +62,9 @@ async function openEditor(query: string) {
   await router.push(`/files/edit?${query}`);
   await router.isReady();
   const i18n = createI18n({ legacy: false, locale: 'en', messages: { en } });
-  mounted = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n] }, attachTo: document.body });
+  const w = mount({ template: '<router-view />' }, { global: { plugins: [router, i18n] }, attachTo: document.body });
   await settle();
-  return mounted;
+  return w;
 }
 
 const frameSrc = () => document.querySelector('iframe[data-testid="app-frame"]')?.getAttribute('src') ?? null;
@@ -78,8 +83,7 @@ describe('the editor tab opens an app’s own interface', () => {
   it('in filex’s own viewer when that was the choice, or when no app opens the type', async () => {
     await openEditor('path=main://doc.sketch&mode=edit&app=builtin');
     expect(frameSrc()).toBeNull();
-    mounted?.unmount();
-    mounted = null;
+    unmountAll();
     await openEditor('path=main://notes.txt&mode=edit');
     expect(frameSrc()).toBeNull();
   });
@@ -96,7 +100,10 @@ describe('pickAppViewer — the rule every surface uses', () => {
     expect(pickAppViewer(views, file)?.plugin).toBe('sketch');
     expect(pickAppViewer(views, file, 'board/main')?.plugin).toBe('board');
     expect(pickAppViewer(views, file, 'builtin')).toBeNull();
-    expect(pickAppViewer(views, file, 'gone/view')).toBeNull();
+    // 0.50: a choice that is not (or no longer) one of the handlers that are
+    // on falls to the next default, as a person's own choice does
+    // (docs/APP-PLUGINS.md → Default apps) - not to filex's viewer.
+    expect(pickAppViewer(views, file, 'gone/view')?.plugin).toBe('sketch');
     expect(pickAppViewer(views, { type: 'dir', extension: '', basename: 'x' })).toBeNull();
     expect(pickAppViewer(views, { type: 'file', extension: 'txt', basename: 'a.txt' })).toBeNull();
     expect(pickAppViewer([{ ...VIEWS[0], placement: 'modal' }] as never[], file), 'only viewers').toBeNull();

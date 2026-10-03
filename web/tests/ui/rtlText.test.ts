@@ -11,18 +11,12 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { describe, expect, it } from 'vitest';
+import { mount } from '@vue/test-utils';
 
 import ListView from '@brftech/filex-core/src/components/ListView.vue';
 import DataTable from '@brftech/filex-core/src/components/DataTable.vue';
 import { contentDir } from '@brftech/filex-core/src/lib/direction';
-
-const mounted: VueWrapper[] = [];
-afterEach(() => {
-  while (mounted.length) mounted.pop()!.unmount();
-  document.body.innerHTML = '';
-});
 
 describe('file names are isolated', () => {
   it('the explorer list draws each name inside a <bdi>', () => {
@@ -34,7 +28,6 @@ describe('file names are isolated', () => {
         locale: 'en',
       },
     });
-    mounted.push(w);
     const bdi = w.find('.fe-list__name bdi');
     expect(bdi.exists()).toBe(true);
     expect(bdi.text()).toBe(name);
@@ -53,7 +46,6 @@ describe('file names are isolated', () => {
         page: 1,
       },
     });
-    mounted.push(w);
     expect(w.find('.fe-list__row .fe-list__cell-text bdi').text()).toBe('r0');
     const pager = w.find('.tbl-pager__at');
     expect(pager.exists(), 'a 30-row list in pages of 10 draws its pager').toBe(true);

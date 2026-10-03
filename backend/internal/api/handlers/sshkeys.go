@@ -97,10 +97,18 @@ func (h *SSHKeys) List(w http.ResponseWriter, r *http.Request) {
 	// The login name a client must use. It is the username when the account has
 	// one, because an `@` in an SSH login has to be quoted in every client's
 	// config file.
-	out["login"] = u.Username
-	if out["login"] == "" {
-		out["login"] = u.Email
+	login := u.Username
+	if login == "" {
+		login = u.Email
 	}
+	// On a multi-tenant install a tenant's account writes its realm in front
+	// (`acme/alex`): SSH never tells the server which address the client
+	// dialled, so the realm is the only way SFTP can tell two tenants' `alex`
+	// apart. FTPS accepts the same spelling. (docs/PROTOCOLS.md)
+	if realm := callerRealm(r, h.Store); realm != "" {
+		login = realm + "/" + login
+	}
+	out["login"] = login
 	writeJSON(w, http.StatusOK, out)
 }
 

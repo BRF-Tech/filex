@@ -249,6 +249,9 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 	if !ownsStorage(w, r, destStorageID, "storage") {
 		return
 	}
+	if archiveOutOfRoot(w, r, a.Store, destStorageID, destRel) {
+		return
+	}
 	// The same write gate as `archive/add`, before the level check (a lock
 	// answers 423, not a bare 403): the archive written is a write, every
 	// file packed is named — never one of filex's own folders.
@@ -260,6 +263,9 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		if !v.WritePerm(w, r) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		}
+		return
+	}
+	if refuseUnavailableID(w, r, a.Store, destStorageID, destRel) {
 		return
 	}
 	destDriver, err := a.StorageResolver(destStorageID)
@@ -288,15 +294,26 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		if !ownsStorage(w, r, storageID, "storage") {
 			return
 		}
-		if gate(w, r, a.ACL, storageID, writegate.Names(rel)) {
+		// Packed from outside a `root:` caller's folder, into an archive
+		// inside it, would hand the folder's token every file it was kept from.
+		if archiveOutOfRoot(w, r, a.Store, storageID, rel) {
 			return
 		}
 		// Packing a file takes its bytes, as archive/download does:
-		// files.download on every selected item (≥viewer).
-		if v := aclCanID(r.Context(), a.ACL, a.Store, storageID, rel, perm.FilesDownload); !v.ok {
-			if !v.WritePerm(w, r) {
+		// files.download on every selected item (≥viewer), and never one of
+		// filex's own names. The rule the AI zip asks too (pack_source_rule.go).
+		if err := packSourceRefusal(r.Context(), a.ACL, a.Store, storageID, rel); err != nil {
+			var pr *packRefusal
+			if !errors.As(err, &pr) {
+				answerGate(w, err)
+				return
+			}
+			if !pr.v.WritePerm(w, r) {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission: " + raw})
 			}
+			return
+		}
+		if refuseUnavailableID(w, r, a.Store, storageID, rel) {
 			return
 		}
 		drv, err := a.StorageResolver(storageID)

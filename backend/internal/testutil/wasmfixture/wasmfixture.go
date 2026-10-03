@@ -68,6 +68,6 @@ func Require(t testing.TB, wasm string) {
 		t.Fatalf("%s: %v", wasm, err)
 	}
 	if newer != "" {
-		t.Fatalf("%s is older than %s beside it — the tests would run the module built before that change; rebuild it: %s", filepath.Base(wasm), newer, rebuild)
+		t.Fatalf("%s is older than %s beside it - the tests would run the module built before that change; rebuild it: %s", filepath.Base(wasm), newer, rebuild)
 	}
 }

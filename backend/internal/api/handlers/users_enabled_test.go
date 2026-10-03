@@ -30,7 +30,7 @@ func loginStatus(t *testing.T, client *http.Client, baseURL, email, password str
 }
 
 // TestAdminUsers_EnableDisable — cutting a user's file access without
-// deleting the account. olivov has the mail-side equivalent (Stalwart role
+// deleting the account. A multi-tenant deployment has the mail-side equivalent (Stalwart role
 // emptied) and needed the file-side one (G4, 2026-08-04).
 func TestAdminUsers_EnableDisable(t *testing.T) {
 	srv, client, store := testutil.NewTestServer(t)

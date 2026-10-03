@@ -44,6 +44,9 @@ type Versions struct {
 	Service *versioning.Service
 	// Index keeps the restored content searchable. Optional; nil skips it.
 	Index *search.Index
+	// Thumbs draws the restored content. ⚠ Before 0.50 a restore kept the
+	// picture of the version it replaced.
+	Thumbs ThumbPipeline
 	// ACL is the RBAC resolver. Nil = unwired (tests) and, per the aclAllowID
 	// contract, allows — the existence, tenancy and confinement checks above it
 	// still run.
@@ -127,10 +130,23 @@ func (h *Versions) authorizedNode(w http.ResponseWriter, r *http.Request, nodeID
 			}
 			return nil, false
 		}
-		return n, true
+		return h.writable(w, r, n)
 	}
 	if !aclAllowID(ctx, h.ACL, h.Store, n.StorageID, livePathOf(n), need) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return nil, false
+	}
+	if need >= acl.LevelEditor {
+		return h.writable(w, r, n)
+	}
+	return n, true
+}
+
+// writable refuses a snapshot or a restore of a file the storage could not
+// answer for (issue #104); its history can still be listed.
+func (h *Versions) writable(w http.ResponseWriter, r *http.Request, n *model.Node) (*model.Node, bool) {
+	if st, err := h.Store.GetStorage(r.Context(), n.StorageID); err == nil && st != nil &&
+		refuseUnavailableNode(w, r, h.Store, st, n) {
 		return nil, false
 	}
 	return n, true
@@ -293,6 +309,7 @@ func (h *Versions) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 	if fresh, gerr := h.Store.GetNode(r.Context(), req.NodeID); gerr == nil && fresh != nil {
 		protocolsync.New(h.Store, h.Index, nil, "").IndexNode(r.Context(), fresh)
+		dispatchThumb(h.Thumbs, fresh)
 		// ⚠⚠ The bytes in `.versions/` were never scanned. queue's Eligible()
 		// skips that prefix outright, deliberately: snapshotting is now what
 		// every destructive write does, so scanning each snapshot would

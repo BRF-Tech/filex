@@ -28,15 +28,15 @@ export const en: Record<string, string> = {
   'ctx.keep_online': 'Keep online only',
   'ctx.keep_reveal': 'Open local folder',
   'ctx.keep_inherited': 'Kept on this computer with its parent',
-  'keep.started': 'Will be kept on this computer — sync started',
+  'keep.started': 'Will be kept on this computer - sync started',
   'keep.failed': 'Could not keep on this computer',
   'keep.badge_kept': 'On this computer',
   'keep.badge_syncing': 'Syncing…',
   'keep.badge_cloud': 'Online only',
   'keep.badge_partial': 'Contains items kept on this computer',
-  'keep.strip_transfer': 'Syncing {name} — {done}/{total} ({pct}%)',
-  'keep.strip_inventory': 'Syncing {name} — scanning the server…',
-  'keep.strip_settling': 'Syncing {name} — settling…',
+  'keep.strip_transfer': 'Syncing {name} - {done}/{total} ({pct}%)',
+  'keep.strip_inventory': 'Syncing {name} - scanning the server…',
+  'keep.strip_settling': 'Syncing {name} - settling…',
   'ctx.paste': 'Paste',
   'ctx.info': 'Info',
   'ctx.duplicate': 'Duplicate',
@@ -108,7 +108,7 @@ export const en: Record<string, string> = {
   'archive.extracted_one': 'Extracted {count} file',
   'archive.extraction_queued': 'Archive extraction is running in the background',
   'archive.preparing_extract': 'Reading {name}… the whole archive is read before it can be extracted.',
-  'archive.already_preparing': 'Still reading {name} — it is extracted once that is done',
+  'archive.already_preparing': 'Still reading {name} - it is extracted once that is done',
   'archive.extraction_completed': 'Extraction completed',
   'archive.extraction_cancelled': 'Extraction cancelled after {count} files',
   'archive.extraction_cancelled_one': 'Extraction cancelled after {count} file',
@@ -167,12 +167,12 @@ export const en: Record<string, string> = {
   'ops.error': 'error',
 
   'node.trash': 'Trash',
-  /* gorunum:v1 — the singular kind, printed under a folder's name on a card
+  /* gorunum:v1 - the singular kind, printed under a folder's name on a card
    * and beside it in the list. The plural section heading is a different
    * string on purpose. */
   'node.folder': 'Folder',
 
-  // ——— Rich viewer chrome ———
+  // --- Rich viewer chrome ---
   'viewer.open_in_new_tab': 'Open in new tab',
   'viewer.loading': 'Loading…',
   'viewer.failed_to_load': 'Failed to load file',
@@ -212,12 +212,12 @@ export const en: Record<string, string> = {
   'viewer.epub_next': 'Next',
   /* ⚠ The old sentence named an ENVIRONMENT VARIABLE to every reader
      ("operator must wire FILEX_DRAWIO_URL"). A person who only wanted to look
-     at a diagram is told what they can do; `_admin` — someone who can fix it —
+     at a diagram is told what they can do; `_admin` - someone who can fix it -
      is told where. */
   'viewer.drawio.disabled': 'Diagrams cannot be opened here: this server has no draw.io. Download the file to open it elsewhere.',
   'viewer.drawio.disabled_admin': 'draw.io is not set up on this server. Set it up in the admin panel under External services.',
   'viewer.drawio.load_failed': 'This diagram could not be read. Download it to open it elsewhere.',
-  'viewer.drawio.save_failed': 'The diagram could not be saved. Your changes are still in the editor — try again.',
+  'viewer.drawio.save_failed': 'The diagram could not be saved. Your changes are still in the editor - try again.',
   'viewer.archive.entries': '{n} files',
   'viewer.archive.entries_one': '{n} file',
   'viewer.archive.empty': 'Archive is empty.',
@@ -232,7 +232,7 @@ export const en: Record<string, string> = {
   'viewer.name': 'Name',
   'viewer.size': 'Size',
 
-  // ——— cila:a — sorting / date groups / density ———
+  // --- cila:a - sorting / date groups / density ---
   'col.sort': 'Sort',
   'group.today': 'Today',
   'group.yesterday': 'Yesterday',
@@ -242,7 +242,7 @@ export const en: Record<string, string> = {
   'toolbar.density.compact': 'Compact view',
   'toolbar.density.comfortable': 'Comfortable view',
 
-  // ——— cila:c — command palette + shortcuts help + breadcrumb ———
+  // --- cila:c - command palette + shortcuts help + breadcrumb ---
   'palette.placeholder': 'Search files, folders or commands…',
   'palette.files': 'Files',
   'palette.commands': 'Commands',
@@ -271,7 +271,7 @@ export const en: Record<string, string> = {
   'shortcuts.paste': 'Paste',
   'breadcrumb.more': 'Folders in between',
 
-  // ——— State screens + undo snackbar + connection badge (cila:b) ———
+  // --- State screens + undo snackbar + connection badge (cila:b) ---
   'empty.hint': 'Drag and drop files here',
   'empty.upload': 'Upload files',
   'empty.search.title': 'No files match your search',
@@ -282,14 +282,14 @@ export const en: Record<string, string> = {
   'toast.undo': 'Undo',
   'toast.undone': 'Undone',
   'toast.undoing': 'Undoing…',
-  'toast.undo_queued': 'The undo is queued — the operations panel shows when it is done',
+  'toast.undo_queued': 'The undo is queued - the operations panel shows when it is done',
   'toast.undo_partial': 'Undone in part: {done} of {total}',
   'toast.undo_failed': 'Could not undo',
   'toast.renamed': 'Renamed',
   'toast.rename_queued': 'Renaming to “{name}”…',
   'toast.moved': 'Moved',
   'toast.trashed': 'Moved to trash',
-  /* i18n:hardcoded — toast copy that used to be Turkish string literals in
+  /* i18n:hardcoded - toast copy that used to be Turkish string literals in
      FileExplorer.vue, unreachable by any locale. */
   'toast.failed': 'Operation failed',
   /* ── errorWords (lib/errorWords): how a failure is SAID. ⚠ No status code,
@@ -310,17 +310,17 @@ export const en: Record<string, string> = {
   'err.status.503': 'Service unavailable',
   'err.status.504': 'A connected service took too long to answer',
   'err.status.other': 'The server refused this request.',
-  'err.upload_stalled': 'The upload stopped making progress. Try again — it continues where it stopped.',
+  'err.upload_stalled': 'The upload stopped making progress. Try again - it continues where it stopped.',
   'err.network': 'The server could not be reached. Check your connection and try again.',
   'err.read_only': 'This storage is read-only',
   'err.no_secret_key': 'This server has no encryption key set, so it cannot issue an access key. Ask an administrator to configure one.',
   'err.quota': 'Your storage quota is full.',
   'err.bad_kind': 'The server does not queue that kind of job this way.',
-  'err.not_cancellable': 'This job cannot be stopped once it has started — it finishes on its own.',
+  'err.not_cancellable': 'This job cannot be stopped once it has started - it finishes on its own.',
   'err.finished': 'This job has already finished.',
   'err.too_many': 'At most {max} items can be restored at once. Restore them in smaller groups.',
   'err.name_taken': 'Something with that name is already there. Rename what is there, then try again.',
-  'err.not_in_trash': 'It is no longer in the trash — it was restored or removed meanwhile, and nothing was deleted.',
+  'err.not_in_trash': 'It is no longer in the trash - it was restored or removed meanwhile, and nothing was deleted.',
   'err.save_failed': 'Your changes could not be saved.',
   'err.load_failed': 'This file could not be loaded.',
   'err.viewer_failed': 'The viewer for this file could not be started. Download the file to open it.',
@@ -329,14 +329,16 @@ export const en: Record<string, string> = {
   'opc.err.out_of_memory': 'The app ran out of memory on this file.',
   'opc.err.crashed': 'The app stopped unexpectedly.',
   'opc.err.app_removed': 'The app was removed before this job could run.',
-  'opc.err.action_removed': 'This action no longer exists — the app was updated.',
+  'opc.err.action_removed': 'This action no longer exists - the app was updated.',
   'opc.err.engine_missing': 'This needs a program the server does not have ({engine}). Ask your administrator.',
   'opc.err.engine_missing_admin': 'This needs {engine}, which is not installed on the server that runs filex. Install it there and try again.',
+  'opc.err.office_unconfigured': 'Office documents are converted by ONLYOFFICE, and none is connected to this server. Ask your administrator.',
+  'opc.err.office_unconfigured_admin': 'Office documents are converted by ONLYOFFICE Document Server, and none is connected. Connect one under External services and try again - no restart needed.',
   'toast.copied': 'Copied',
   'toast.deleted': 'Deleted',
   'toast.cut': 'Cut',
-  'toast.cut_ready': 'Cut — ready to paste',
-  'toast.copy_ready': 'Copied — ready to paste',
+  'toast.cut_ready': 'Cut - ready to paste',
+  'toast.copy_ready': 'Copied - ready to paste',
   'toast.same_folder_cut': 'Cannot cut into the same folder',
   'toast.restored': '{n} items restored',
   'toast.restoring': 'Restoring {n} items…',
@@ -357,7 +359,7 @@ export const en: Record<string, string> = {
   'toast.purged_partly': '{n} items deleted permanently; {failed} could not be deleted: {reason}',
   'toast.purged_partly_one': '{n} item deleted permanently; {failed} could not be deleted: {reason}',
   /* The Trash row a permanent delete is on its way for (the admin Trash
-     page's words: one sentence, both catalogues — lesson #447). */
+     page's words: one sentence, both catalogues - lesson #447). */
   'trash.purging': 'Deleting permanently…',
   'trash.row_busy': 'Something is already being done to this item',
   'dropzone.hint': 'Drop files here',
@@ -365,7 +367,7 @@ export const en: Record<string, string> = {
   'names.reserved': '“{name}” is reserved for filex’s own use. Choose another name.',
   /* ⚠ A missing or broken document server is said in words, never as the
      HTTP layer (it used to read `Config fetch 503: {"error":"onlyoffice not
-     configured"}`). `_admin` is what someone who can fix it reads — where to
+     configured"}`). `_admin` is what someone who can fix it reads - where to
      fix it; everybody else reads how to get the file anyway. */
   'viewer.office_unconfigured':
     'Office documents cannot be opened here: this server has no ONLYOFFICE document server. Download the file to open it on your computer.',
@@ -376,18 +378,33 @@ export const en: Record<string, string> = {
     'The ONLYOFFICE document server is not answering. Check it in the admin panel under External services.',
   'viewer.office_failed': 'This document could not be opened in ONLYOFFICE. Download it to open it on your computer.',
   'viewer.office_forbidden': 'You do not have permission to open this document in ONLYOFFICE.',
+  /* After ONLYOFFICE's "Download failed": which of its two failures it was,
+     as filex saw it (lib/officeDiagnosis, issue #80). */
+  'viewer.office_download_served':
+    'The document server downloaded this file from filex, but your browser could not load the converted copy from the document server. Check the X-Forwarded-Proto and X-Forwarded-Host headers on the reverse proxy in front of the document server.',
+  'viewer.office_download_not_requested':
+    'The document server never asked filex for this file. If the file was opened before, the document server may be using its own copy of it.',
+  'viewer.office_download_refused': 'filex refused the document server’s request for this file: {reason}.',
+  'viewer.office_fetch_reason.bad_link': 'the address was malformed',
+  'viewer.office_fetch_reason.signature_expired': 'the address had expired',
+  'viewer.office_fetch_reason.signature_bad': 'its signature did not match (the JWT secret changed, or the address was altered)',
+  'viewer.office_fetch_reason.not_found': 'the file no longer exists',
+  'viewer.office_fetch_reason.storage_unavailable': 'the storage could not be opened',
+  'viewer.office_fetch_reason.body_unavailable': 'the file’s contents could not be found',
+  'viewer.office_fetch_reason.object_missing': 'the file is missing from the storage',
+  'viewer.office_fetch_reason.read_failed': 'reading the file from the storage failed',
   /* The explorer's Open on a document the document server would open, when
-     there is none — shown to an administrator only (everyone else is not
+     there is none - shown to an administrator only (everyone else is not
      offered the entry at all; lib/serviceGate). */
-  'ctx.needs_onlyoffice': 'ONLYOFFICE is not set up — set it up in the admin panel under External services.',
-  'ctx.needs_drawio': 'draw.io is not set up — set it up in the admin panel under External services.',
+  'ctx.needs_onlyoffice': 'ONLYOFFICE is not set up - set it up in the admin panel under External services.',
+  'ctx.needs_drawio': 'draw.io is not set up - set it up in the admin panel under External services.',
   'viewer.pdf_inline_failed': 'Your browser could not display this PDF inline.',
   'viewer.too_large': 'File is too large (>1 MB).',
   'viewer.csv_rows': '{n} rows',
   'viewer.csv_rows_one': '{n} row',
   'presence.others': '{n} people',
   'presence.others_one': '{n} person',
-  'conn.offline': 'No live connection — changes may be delayed',
+  'conn.offline': 'No live connection - changes may be delayed',
   'conn.tooltip': 'Live connection to the server is unavailable; the list refreshes periodically. This notice disappears once the connection is back.',
 
   /* === bul:s3 === */
@@ -398,7 +415,7 @@ export const en: Record<string, string> = {
   'palette.save': 'Save search',
   'palette.saved.delete': 'Delete saved search',
   'search.in_content': 'In content',
-  'search.truncated': 'More results than shown — narrow your search',
+  'search.truncated': 'More results than shown - narrow your search',
 
   /* Catalog coverage (docs/LAZY-CATALOGUE.md, lib/catalogCoverage). One
      sentence per reason; the banner sits over a listing and over search
@@ -408,13 +425,13 @@ export const en: Record<string, string> = {
   'coverage.lazy_on_open': 'Only the folders people open on this storage are cataloged. Search, folder sizes and usage cover those folders only.',
   'coverage.search_some': 'Not everything on these storages is cataloged yet: {names}. This search may miss files there.',
   'coverage.catalog_all': 'Catalog everything',
-  'coverage.catalog_started': 'Sync started — the whole storage is being cataloged.',
+  'coverage.catalog_started': 'Sync started - the whole storage is being cataloged.',
   'coverage.catalog_running': 'Cataloging…',
   'coverage.cataloging': 'Cataloging {storage}… this runs in the background, and this page says when it is done.',
   'coverage.catalog_done': '{storage} is cataloged in full',
   'coverage.catalog_failed': 'Cataloging {storage} failed. The admin panel shows why, under the storage’s sync runs.',
   'coverage.catalog_stopped': 'Cataloging {storage} was stopped before it finished',
-  'coverage.catalog_joined': 'A scan of {storage} was already running — this page says when it is done.',
+  'coverage.catalog_joined': 'A scan of {storage} was already running - this page says when it is done.',
   'coverage.catalog_gone': '{storage} was removed while it was being cataloged',
   'coverage.catalog_unfollowed': 'Cataloging {storage} goes on in the background; the admin panel shows how it ends, under the storage’s sync runs',
   'size.at_least': '≥ {size}',
@@ -430,7 +447,7 @@ export const en: Record<string, string> = {
   /* === koru:k1 === */
   'toolbar.inspector': 'Details',
   'ctx.details': 'Details',
-  /* yildiz:s1 — starring is an action, so it has a verb in the menu. */
+  /* yildiz:s1 - starring is an action, so it has a verb in the menu. */
   'ctx.star': 'Star',
   'ctx.unstar': 'Unstar',
   'star.failed': 'Could not change the star',
@@ -441,14 +458,14 @@ export const en: Record<string, string> = {
   'inspector.items_one': '{n} item',
   'inspector.type': 'Type',
   'inspector.select_hint': 'Select an item to see its details.',
-  /* pane:p1 — the panel HOLDS the last selected thing (owner's ruling,
+  /* pane:p1 - the panel HOLDS the last selected thing (owner's ruling,
      2026-09-13), so it can be describing an item in the half of a split
      window nobody is looking at. This line says which one and where. */
-  'inspector.held': 'Last selected — in {where}',
+  'inspector.held': 'Last selected - in {where}',
   'inspector.close': 'Close',
   'inspector.section.general': 'General',
   'inspector.section.tags': 'Tags',
-  /* etiket:t1 — TagPicker's own chrome. It printed these three in English
+  /* etiket:t1 - TagPicker's own chrome. It printed these three in English
      regardless of the catalogue until 2026-09-13; `tags.open` is the chip's new
      "show me everything with this tag". */
   'tags.open': 'Open tag: {tag}',
@@ -456,7 +473,7 @@ export const en: Record<string, string> = {
   'tags.name': 'Tag name',
   'tags.remove': 'Remove tag',
 
-  /* etiket:k2 (v0.43.0) — the two KINDS of tag. Every place a tag is drawn
+  /* etiket:k2 (v0.43.0) - the two KINDS of tag. Every place a tag is drawn
      says which kind it is, in words as well as the icon, because until this
      release a tag was silently shared with every account on the server. */
   'tags.kind.label': 'Who sees this tag',
@@ -465,8 +482,8 @@ export const en: Record<string, string> = {
   'tags.kind.personal_help': 'Only you see it',
   'tags.kind.team_help': 'Everyone on your team who can see this file',
   'tags.kind.team_locked': 'Adding or removing a team tag needs edit permission on this file.',
-  'tags.chip.personal': 'Personal tag “{tag}” — only you see it',
-  'tags.chip.team': 'Team tag “{tag}” — everyone on your team who can see this file sees it',
+  'tags.chip.personal': 'Personal tag “{tag}” - only you see it',
+  'tags.chip.team': 'Team tag “{tag}” - everyone on your team who can see this file sees it',
   'tags.add_submit': 'Add',
   'inspector.section.versions': 'Versions',
   'inspector.section.permissions': 'Permissions',
@@ -505,10 +522,10 @@ export const en: Record<string, string> = {
   'inspector.shares.empty': 'No share links',
   'inspector.shares.copy': 'Copy link',
 
-  /* wiring:c1 — theme gallery */
+  /* wiring:c1 - theme gallery */
   'theme.menu': 'Theme',
   'theme.title': 'Theme gallery',
-  'theme.hint': 'A theme only changes the color palette — day or night is the choice above.',
+  'theme.hint': 'A theme only changes the color palette - day or night is the choice above.',
   'theme.mode.label': 'Appearance',
   'theme.mode.light': 'Day',
   'theme.mode.dark': 'Night',
@@ -524,19 +541,19 @@ export const en: Record<string, string> = {
   'theme.name.contrast': 'High contrast',
   'theme.name.gray': 'Soft gray',
   'theme.name.terminal': 'Terminal green',
-  /* === zaman:z3 — the time-zone picker (embed dialog + web settings) === */
+  /* === zaman:z3 - the time-zone picker (embed dialog + web settings) === */
   'tz.menu': 'Time zone',
   'tz.title': 'Time zone',
   'tz.label': 'Show dates in',
-  'tz.search': 'Search a city, country or offset — try "Istanbul" or "GMT+3"',
+  'tz.search': 'Search a city, country or offset - try "Istanbul" or "GMT+3"',
   'tz.default.device': "Use this device's zone ({zone})",
   'tz.default.account': "Use the account's zone ({zone})",
   'tz.default.host': "Use this site's default ({zone})",
   'tz.no_match': 'No zone matches “{query}”. Try a city, a country, or an offset like GMT+3.',
-  'tz.more': '{n} more — keep typing to narrow the list.',
+  'tz.more': '{n} more - keep typing to narrow the list.',
   'tz.hint': 'Saved in this browser only. Every date is stored as one moment in time and shown on the clock you pick here.',
   'tz.now': 'Right now in {zone}: {time}',
-  /* === wiring:c2 — customizable shortcuts + quick look === */
+  /* === wiring:c2 - customizable shortcuts + quick look === */
   'shortcuts.quicklook': 'Quick look',
   'shortcuts.customize': 'Customize',
   'shortcuts.settings.menu': 'Shortcuts',
@@ -550,17 +567,17 @@ export const en: Record<string, string> = {
   'shortcuts.settings.fixed': 'Fixed',
   'shortcuts.settings.customized': 'Customized',
   'shortcuts.settings.conflict': 'is already used by "{name}".',
-  'shortcuts.settings.conflict_fixed': 'is reserved by the fixed shortcut "{name}" — it cannot be used.',
+  'shortcuts.settings.conflict_fixed': 'is reserved by the fixed shortcut "{name}" - it cannot be used.',
   'shortcuts.settings.conflict_take': 'Unassign old and use here',
   'shortcuts.settings.conflict_cancel': 'Cancel',
   'quicklook.hint_close': 'close',
   'quicklook.hint_nav': 'previous/next',
   'quicklook.hint_open': 'open',
   /* === /wiring:c2 === */
-  /* === wiring:c3 — operations center === */
+  /* === wiring:c3 - operations center === */
   'opc.title': 'Operations',
-  'opc.aria_badge': '{n} operations — toggle operations center',
-  'opc.aria_badge_one': '{n} operation — toggle operations center',
+  'opc.aria_badge': '{n} operations - toggle operations center',
+  'opc.aria_badge_one': '{n} operation - toggle operations center',
   'opc.close': 'Close',
   'opc.active': 'In progress',
   'opc.history': 'History',
@@ -590,9 +607,17 @@ export const en: Record<string, string> = {
   'opc.kind.archive': 'Archive',
   'opc.kind.plugin': 'App',
   'opc.kind.trash': 'Empty trash',
+  'opc.kind.thumbs': 'Thumbnail repair',
+
+  /* A folder's contents on hover (FolderPeek, useFolderPeek). */
+  'peek.items': '{n} items',
+  'peek.items_one': '{n} item',
+  'peek.more': '+{n} more',
+  'peek.empty': 'Empty',
+  'peek.loading': 'Looking inside…',
   'opc.open': 'Open',
 
-  /* App plugins — rows a WebAssembly plugin adds to the file menu, and the
+  /* App plugins - rows a WebAssembly plugin adds to the file menu, and the
      jobs they queue (docs/APP-PLUGINS-API.md). "App" is what the feature is
      called on every surface; "plugin" is the wire word. */
   'plugin.queued': '{label} queued',
@@ -601,8 +626,9 @@ export const en: Record<string, string> = {
   'plugin.cancel_failed': 'Could not cancel the job',
   'plugin.not_applicable': 'This action does not apply to the selection',
   'plugin.read_only': 'This storage is read-only',
-  'plugin.needs_engine': '{name} is not installed on this server — install it and restart filex.',
+  'plugin.needs_engine': '{name} is not installed on this server - install it and restart filex.',
   'plugin.needs_other': '{name} is not available on this server.',
+  'plugin.needs_office': 'Office documents need {name}, which is not connected to this server - connect it under External services.',
   'plugin.confirm.title': 'Confirm',
   'plugin.confirm.cancel': 'Cancel',
   'plugin.confirm.run': 'Run',
@@ -619,7 +645,7 @@ export const en: Record<string, string> = {
   'appframe.keep_open': 'Keep editing',
   'appframe.save_close': 'Save and close',
   'appframe.updated': '{app} was updated to {version}.',
-  'appframe.updated_reload': 'An administrator approved a new version of {app}. Reload it to use the new version — save your work first.',
+  'appframe.updated_reload': 'An administrator approved a new version of {app}. Reload it to use the new version - save your work first.',
   'appframe.reload': 'Reload',
   'appframe.dismiss': 'Dismiss',
   'appframe.not_connected': '{app} did not start. Close it and open it again; if it keeps happening, tell your administrator.',
@@ -627,7 +653,7 @@ export const en: Record<string, string> = {
   'plugin.view.unsupported': 'This screen uses a component this version cannot draw ({type})',
   'plugin.view.error': 'The app answered with an error',
   'plugin.output_missing': 'The output is no longer where it was',
-  /* M2 — surface components (components/plugin/nodes/*) */
+  /* M2 - surface components (components/plugin/nodes/*) */
   'plugin.view.loading': 'Loading…',
   'plugin.view.preview_failed': 'The preview could not be loaded',
   'plugin.steps.label': 'Steps',
@@ -647,7 +673,7 @@ export const en: Record<string, string> = {
   'plugin.file.choose': 'Choose…',
   'plugin.file.clear': 'Clear',
   'plugin.file.none': 'Nothing chosen',
-  /* M3 — the sign track: signature-pad + pdf-fields nodes, and the outside
+  /* M3 - the sign track: signature-pad + pdf-fields nodes, and the outside
      participant's public page (views/PublicSurface.vue via usePublicPage). */
   'plugin.sig.mode_draw': 'Draw',
   'plugin.sig.mode_type': 'Type',
@@ -707,7 +733,7 @@ export const en: Record<string, string> = {
   'plugin.page.pin_hint': 'Enter the PIN you were given to continue',
   'plugin.page.pin_submit': 'Continue',
   'plugin.page.pin_wrong': 'That PIN is not right',
-  'plugin.page.pin_locked': 'Too many wrong PINs — wait a few minutes and try again',
+  'plugin.page.pin_locked': 'Too many wrong PINs - wait a few minutes and try again',
   'plugin.page.unavailable_title': 'This link is not available',
   'plugin.page.unavailable_text': 'It may have expired, been used up or been withdrawn. Ask the person who sent it for a new one.',
   'plugin.page.accepted_title': 'Received, thank you',
@@ -719,7 +745,7 @@ export const en: Record<string, string> = {
   'plugin.page.files': 'Documents',
   'plugin.page.open_file': 'Open {name} in a new tab',
   'plugin.page.footer': 'Served by filex',
-  /* === v3 — the ONE public shell: a share, a file request and an app's page
+  /* === v3 - the ONE public shell: a share, a file request and an app's page
      are one page with three bodies. These are the words the shell itself
      says, so they are the same words whichever link was followed. === */
   'public.served_by': 'Served by {name}',
@@ -730,8 +756,9 @@ export const en: Record<string, string> = {
   'public.up': 'Up one level',
   'public.download_all': 'Download everything',
   'public.browse': 'Look inside',
+  'public.unavailable': 'This cannot be opened right now: the storage it is on did not answer for it. Let whoever sent you the link know.',
   'public.folder_empty': 'There is nothing in this folder',
-  'public.drop_sub': 'Drop your files below, or pick them. You can only add to this folder — what is already in it stays hidden from you.',
+  'public.drop_sub': 'Drop your files below, or pick them. You can only add to this folder - what is already in it stays hidden from you.',
   'public.drop_here': 'Drop the files here',
   'public.or_choose': 'or click to choose them',
   'public.max_size': 'At most {size} per file',
@@ -746,21 +773,25 @@ export const en: Record<string, string> = {
     'Sent, but the server did not confirm it in time. It may still be saving it: check with whoever sent you this link before sending it again.',
   'public.your_name': 'Your name (optional)',
   'public.your_name_ph': 'e.g. Alex Smith',
-  'public.refused_ext': 'Not sent — this link does not accept this type of file.',
-  'public.refused_too_large': 'Not sent — larger than {size}.',
-  'public.refused_too_many': 'Not sent — at most {count} files can be sent now.',
-  'public.refused_too_many_one': 'Not sent — only {count} file can be sent now.',
-  /* === App plugins v2 — a `page` view, an app's lock on a file, the output
+  'public.refused_ext': 'Not sent - this link does not accept this type of file.',
+  'public.refused_too_large': 'Not sent - larger than {size}.',
+  'public.refused_too_many': 'Not sent - at most {count} files can be sent now.',
+  'public.refused_too_many_one': 'Not sent - only {count} file can be sent now.',
+  /* === App plugins v2 - a `page` view, an app's lock on a file, the output
      mode a job wrote in, and the faces + rules a signature field carries. === */
   'plugin.page_view.back': 'Back to the files',
   'plugin.page_view.queued_title': 'The job is queued',
-  'plugin.page_view.queued_text': 'filex is working on it. Its progress is in the operations tray, and you will be told when it lands.',
+  'plugin.page_view.queued_text': 'filex is working on it. This page says when it is done, and its progress is in the operations tray too.',
+  'plugin.page_view.finished_title': 'The job is done',
+  'plugin.page_view.finished_text': 'There is nothing more to do here. You can go back to the files or close this tab.',
+  'plugin.page_view.failed_title': 'The job did not finish',
+  'plugin.page_view.opening_title': 'Opening the result',
   'plugin.page_view.open_ops': 'Open the operations tray',
   'plugin.page_view.done_title': 'All done',
   'plugin.page_view.done_text': 'There is nothing more to do here. You can close this tab.',
   'plugin.page_view.error_title': 'This screen could not be opened',
   'plugin.page_view.retry': 'Try again',
-  'plugin.page_view.blocked': 'The new tab was blocked — allow pop-ups for this site, or the screen will open in a dialog',
+  'plugin.page_view.blocked': 'The new tab was blocked - allow pop-ups for this site, or the screen will open in a dialog',
   'plugin.output.sibling': 'new file',
   'plugin.output.version': 'new version',
   'plugin.output.sibling_title': 'The result lands as a new file beside the original',
@@ -774,15 +805,15 @@ export const en: Record<string, string> = {
   'plugin.pdf.rule_max': 'At most {max} characters',
   'plugin.pdf.err_number': 'Enter a number',
   'plugin.pdf.err_email': 'Enter a valid email address',
-  'plugin.pdf.err_min': 'Too short — at least {min} characters',
-  'plugin.pdf.err_max': 'Too long — at most {max} characters',
+  'plugin.pdf.err_min': 'Too short - at least {min} characters',
+  'plugin.pdf.err_max': 'Too long - at most {max} characters',
   'applock.badge': 'Locked',
   'applock.some_app': 'an app',
   'applock.held': '{app} locked this file',
   'applock.held_reason': '{app} locked this file: {reason}',
-  'applock.until': '— until {date}',
+  'applock.until': '- until {date}',
   'applock.inspector': 'Held by an app',
-  /* issue #34 — a symlink the server will NOT follow (lib/symlink). The badge
+  /* issue #34 - a symlink the server will NOT follow (lib/symlink). The badge
      is the short word on the row; `why` is the sentence behind it, shown on
      hover, in the details panel and in the toast when somebody tries to open
      one. ⚠ Broken and outside-of-root are DIFFERENT states and must read
@@ -796,12 +827,30 @@ export const en: Record<string, string> = {
   'symlink.why.outside_root':
     'A link whose target lies outside this storage, which is why it cannot be opened. An administrator can allow it with "Follow symlinks that leave this folder" in the storage\'s settings.',
   'symlink.why.broken':
-    'A link whose target no longer exists, so there is nothing to open. It has to be repaired or removed on the server — no setting can bring the target back.',
+    'A link whose target no longer exists, so there is nothing to open. It has to be repaired or removed on the server - no setting can bring the target back.',
   'symlink.why.unresolved':
     'A link on a remote server. filex cannot tell whether its target is inside this storage, so it does not follow it and cannot open it.',
   'symlink.why.unknown':
     'A link filex will not follow, so it cannot be opened. Its target is either outside this storage, missing, or on a remote server filex cannot resolve.',
   'symlink.inspector': 'A link that cannot be opened',
+  /* Issue #104 - an entry the storage could not answer for (lib/unavailable).
+     The sentence says what it means and what happens next; the storage's own
+     answer follows it ({reason}), usually in English. */
+  'unavailable.why.file':
+    'The storage could not say whether this file still exists. It cannot be opened or changed until the storage answers for it again; the next scan checks.',
+  'unavailable.why.dir':
+    'The storage could not say whether this folder still exists. Neither the folder nor anything inside it can be opened or changed until the storage answers for it again; the next scan checks.',
+  'unavailable.withReason': '{why} The storage answered: {reason}',
+  'unavailable.inspector': 'Unavailable',
+  /* 0.50 - why a file has no thumbnail, on the file itself (lib/thumbNote):
+     the marker's name and the sentence a resting pointer or a tap shows. */
+  'thumbNote.corrupt': 'Damaged',
+  'thumbNote.corrupt_why': 'No thumbnail: the file could not be read. It may be damaged or incomplete.',
+  'thumbNote.encrypted': 'Encrypted',
+  'thumbNote.encrypted_why': 'No thumbnail: the file is encrypted or protected by a password.',
+  'thumbNote.too_large': 'Too large',
+  'thumbNote.too_large_why': 'No thumbnail: the file is larger than the thumbnail size limit.',
+  'thumbNote.full': '{label}. {why}',
   'plugin.pdf.rule': 'Accepts',
   'plugin.pdf.rule_kind_any': 'Any text',
   'plugin.pdf.rule_kind_number': 'Numbers only',
@@ -814,7 +863,7 @@ export const en: Record<string, string> = {
   'plugin.pdf.date_example': 'Example',
   'opc.kind.archive-create': 'Creating archive',
   'opc.kind.archive-extract': 'Extracting archive',
-  /* === wiring:c4 — onboarding tour + accessibility + error card === */
+  /* === wiring:c4 - onboarding tour + accessibility + error card === */
   'tour.aria': 'Onboarding tour',
   'tour.restart': 'Restart the tour',
   'tour.skip': 'Skip tour',
@@ -829,12 +878,12 @@ export const en: Record<string, string> = {
     'This button opens the navigation panel: Home, Shared with me, Recent, Starred and Trash, with your storages and connections underneath.',
   'tour.step.new.title': 'Add something',
   'tour.step.new.desc':
-    'Everything new starts here — upload from this device, create a folder, or ask somebody else for a file. Dropping files onto the window uploads them as well.',
+    'Everything new starts here - upload from this device, create a folder, or ask somebody else for a file. Dropping files onto the window uploads them as well.',
   'tour.step.new.desc_fab':
     'This button uploads files from this device. Dropping files onto the window works as well.',
   'tour.step.search.title': 'Search',
   'tour.step.search.desc':
-    'This field searches the whole storage by name — separators and one typo are forgiven, so "invoice 2026" finds invoice_2026.pdf. Add tag:invoice to filter by tag. The sliders button opens advanced search, and {palette} opens the command palette, which runs commands too.',
+    'This field searches the whole storage by name - separators and one typo are forgiven, so "invoice 2026" finds invoice_2026.pdf. Add tag:invoice to filter by tag. The sliders button opens advanced search, and {palette} opens the command palette, which runs commands too.',
   'tour.step.crumb.title': 'Where you are',
   'tour.step.crumb.desc':
     'This trail is the address of the folder on screen. Click any step to go back up, and the chevron beside the last one lists the folders inside it.',
@@ -846,7 +895,7 @@ export const en: Record<string, string> = {
     'Change how this folder is drawn; your choice is remembered.',
   'tour.step.details.title': 'Details & sharing',
   'tour.step.details.desc':
-    'Select a file and open this panel for its details, its activity and its share links. For the full menu, right-click the file or use the button at the end of its row — "Share" there creates a link with an optional PIN and expiry.',
+    'Select a file and open this panel for its details, its activity and its share links. For the full menu, right-click the file or use the button at the end of its row - "Share" there creates a link with an optional PIN and expiry.',
   'tour.step.help.title': 'Shortcuts',
   'tour.step.help.desc':
     'Press {help} for the shortcut cheat-sheet and {palette} for the command palette. Theme and "Restart the tour" are in the "More actions" menu at the top right; your account and sign-out are behind the avatar beside it.',
@@ -857,7 +906,7 @@ export const en: Record<string, string> = {
   'list.aria': 'File list',
   'grid.aria': 'File grid',
 
-  /* === wiring:d1 — tabs + split pane === */
+  /* === wiring:d1 - tabs + split pane === */
   'tabs.strip': 'Tabs',
   'tabs.new': 'New tab',
   'tabs.close': 'Close tab',
@@ -865,12 +914,21 @@ export const en: Record<string, string> = {
   'tabs.split_off': 'Close split',
   'ctx.open_new_tab': 'Open in new tab',
   'ctx.open_with': 'Open with {app}',
+  'ctx.open_with_builtin': "Open with the built-in viewer",
+  'ctx.open_with_choose': "Choose an app…",
+  'openWith.title': "Open with",
+  'openWith.lead': "Which app should open {name}?",
+  'openWith.builtin': "filex viewer (built-in)",
+  'openWith.now': "Opens it now",
+  'openWith.always': "Always use this app for {ext} files",
+  'openWith.hint': "Kept on your account. You can change it in Settings, Default apps.",
+  'openWith.open': "Open",
   'shortcuts.group.tabs': 'Tabs',
   'shortcuts.tab_new': 'New tab',
   'shortcuts.tab_close': 'Close tab',
   'shortcuts.tab_next': 'Next tab',
   'shortcuts.tab_prev': 'Previous tab',
-  /* tus:t1 — the menu verbs */
+  /* tus:t1 - the menu verbs */
   'shortcuts.new_folder': 'New folder',
   'shortcuts.upload': 'Upload files',
   'shortcuts.refresh': 'Refresh the listing',
@@ -896,30 +954,30 @@ export const en: Record<string, string> = {
   'split.copy_queued': 'Copy queued',
   'split.move_queued': 'Move queued',
   'toast.move_kept_both': 'Move queued. A name was already taken there, so that item will be kept beside the existing one with “-copy” added. This move cannot be undone.',
-  'split.cross_copy': 'Different storages — copy queued instead',
+  'split.cross_copy': 'Different storages - copy queued instead',
   'dragout.downloading': 'Downloading into the folder you dropped on…',
-  'dragout.downloading_n': 'Downloading into the folder you dropped on — {n} files so far…',
-  'dragout.downloading_n_one': 'Downloading into the folder you dropped on — {n} file so far…',
+  'dragout.downloading_n': 'Downloading into the folder you dropped on - {n} files so far…',
+  'dragout.downloading_n_one': 'Downloading into the folder you dropped on - {n} file so far…',
   'dragout.stop': 'Stop',
   'dragout.stopping': 'Stopping…',
-  'dragout.stopped': 'Stopped — what had arrived stays in the folder',
-  'dragout.not_found': 'Could not find where it was dropped — a drop onto an application (rather than a folder) cannot be filled in',
+  'dragout.stopped': 'Stopped - what had arrived stays in the folder',
+  'dragout.not_found': 'Could not find where it was dropped - a drop onto an application (rather than a folder) cannot be filled in',
   'dragout.done': 'Download finished',
-  'dragout.ready': 'Files are ready — drag them to your desktop',
+  'dragout.ready': 'Files are ready - drag them to your desktop',
   'dragout.preparing': 'Getting them ready to drag…',
-  'split.cross_move': 'Different storages — move queued (bytes travel, then the original is removed)',
+  'split.cross_move': 'Different storages - move queued (bytes travel, then the original is removed)',
   /* === /wiring:d1 === */
-  /* wiring:d2 — gallery view */
+  /* wiring:d2 - gallery view */
   'toolbar.view.gallery': 'Gallery',
   'gallery.aria': 'File gallery',
   /* /wiring:d2 */
-  /* wiring:d3 — inspector node comments */
+  /* wiring:d3 - inspector node comments */
   'inspector.section.comments': 'Comments',
   'inspector.comments.empty': 'No comments yet.',
   'inspector.comments.placeholder': 'Write a comment…',
   'inspector.comments.send': 'Send',
   'inspector.comments.delete': 'Delete comment',
-  /* wiring:e2 — end-to-end encrypted folders */
+  /* wiring:e2 - end-to-end encrypted folders */
   'e2e.create.title': 'Create encrypted folder',
   'e2e.create.option': 'Create encrypted folder…',
   'e2e.create.pw_label': 'Folder password',
@@ -947,13 +1005,13 @@ export const en: Record<string, string> = {
   'e2e.unlock.damaged':
     'The password is right, but the folder key in the key file (.filex-e2e.json) does not open: the file is damaged. Try the recovery key.',
   'e2e.unlock.marker_missing': 'Could not read the key file (.filex-e2e.json).',
-  /* ikon:emoji — the listing marker's accessible name. The row used to print
+  /* ikon:emoji - the listing marker's accessible name. The row used to print
      a 🔒 and nothing else; the padlock that replaced it is aria-hidden inside
      the tile, so the span that carries it says this instead. */
   'e2e.badge': 'Encrypted folder',
-  'e2e.strip.label': 'Encrypted folder — unlocked',
+  'e2e.strip.label': 'Encrypted folder - unlocked',
   'e2e.strip.lock': 'Lock',
-  /* wiring:e2 password — changing a folder's password */
+  /* wiring:e2 password - changing a folder's password */
   'e2e.password.strip_action': 'Change password…',
   'e2e.password.title': 'Change the folder password',
   'e2e.password.reset_title': 'Set a new password for this folder',
@@ -961,7 +1019,7 @@ export const en: Record<string, string> = {
     'You opened this folder with its recovery key, so its password was lost or may be known to someone. Set a new one now. Closing this dialog locks the folder again.',
   'e2e.password.current': 'Current password',
   'e2e.password.recovery': 'Recovery key',
-  'e2e.password.use_recovery': 'I do not remember it — use the recovery key',
+  'e2e.password.use_recovery': 'I do not remember it - use the recovery key',
   'e2e.password.use_current': 'Use the current password instead',
   'e2e.password.new': 'New password',
   'e2e.password.current_required': 'Enter the current password, or use the recovery key.',
@@ -1005,8 +1063,8 @@ export const en: Record<string, string> = {
   'e2e.password.rekey_done': 'New folder key in place ({n} files re-wrapped). The old password opens nothing here any more.',
   'e2e.password.rekey_done_one': 'New folder key in place ({n} file re-wrapped). The old password opens nothing here any more.',
   'e2e.recovery.lead_replaced':
-    'The folder has a new key, so it has a new recovery key too — the old one no longer opens it. Shown once; filex keeps no copy.',
-  /* wiring:e2 names — encrypted file and folder names */
+    'The folder has a new key, so it has a new recovery key too - the old one no longer opens it. Shown once; filex keeps no copy.',
+  /* wiring:e2 names - encrypted file and folder names */
   'e2e.unlock.unsupported':
     'This folder needs a newer filex: it uses {features}, which this version does not understand. Nothing was changed.',
   'e2e.settings.open': 'Encryption settings…',
@@ -1053,6 +1111,11 @@ export const en: Record<string, string> = {
     '{n} files could not be encrypted (changed meanwhile, too large, or not writable). They are still plaintext; try again to continue.',
   'e2e.convert.partial_one':
     '{n} file could not be encrypted (changed meanwhile, too large, or not writable). It is still plaintext; try again to continue.',
+  'e2e.convert.too_large_here':
+    '{n} files are too large for this browser to send in one piece, and this server takes no upload in pieces, so they could not be encrypted where they are. They are still plaintext, and the folder stays unfinished until they are encrypted.',
+  'e2e.convert.too_large_here_one':
+    '{n} file is too large for this browser to send in one piece, and this server takes no upload in pieces, so it could not be encrypted where it is. It is still plaintext, and the folder stays unfinished until it is encrypted.',
+  'e2e.convert.large_progress': 'Encrypting “{name}”: {percent}%',
   'e2e.convert.busy': 'Encrypting the folder…',
   'e2e.convert.resume_title': 'Finish encrypting this folder',
   'e2e.convert.resume_body':
@@ -1064,14 +1127,14 @@ export const en: Record<string, string> = {
   'e2e.convert.done_one':
     'Folder encrypted ({n} file). Old versions deleted: {versions}; trash entries deleted: {trash}.',
   'e2e.convert.cleanup_failed':
-    'The folder is encrypted, but its old versions and trash entries could not be deleted — only the folder’s owner or an administrator can.',
+    'The folder is encrypted, but its old versions and trash entries could not be deleted - only the folder’s owner or an administrator can.',
   'e2e.names.locked_item': '🔒 Encrypted item',
   'e2e.names.unreadable_item': '🔒 Unreadable name',
   'e2e.names.key_failed':
     'The key file says the names in this folder are encrypted, but their key does not open with this one. Nothing was changed.',
   'e2e.names.write_failed': 'Could not write the name file of a long name, so nothing was uploaded.',
   'e2e.names.bad_name':
-    '“{name}” cannot be used in an encrypted folder: a name must be 1–255 bytes, with no slash, backslash or control character.',
+    '“{name}” cannot be used in an encrypted folder: a name must be 1-255 bytes, with no slash, backslash or control character.',
   'e2e.names.offer_cost':
     'What changes: WebDAV, the command line and desktop sync will see scrambled names, and filex 0.47 and older will refuse to open this folder. The server still sees how many items there are and how big they are.',
   'e2e.names.resume_title': 'Finish encrypting the names',
@@ -1094,13 +1157,12 @@ export const en: Record<string, string> = {
   'e2e.names.strip_fix': 'Fix {n} names (readable, or moved in from outside filex)',
   'e2e.names.strip_fix_one': 'Fix {n} name (readable, or moved in from outside filex)',
   'e2e.create.names_root_hint':
-    'The folder’s own name stays readable either way — it sits in a folder that is not encrypted. Pick a name that gives nothing away.',
+    'The folder’s own name stays readable either way - it sits in a folder that is not encrypted. Pick a name that gives nothing away.',
   'e2e.locked_toast': 'Folder locked',
-  'e2e.upload.too_big': 'Files over 200 MB cannot be uploaded to an encrypted folder (MVP limit)',
   'e2e.upload.locked': 'Unlock the folder first',
   'e2e.decrypting': 'Decrypting…',
   'e2e.decrypt_failed': 'Could not decrypt the file (password changed or file corrupted).',
-  /* wiring:e2 recovery — recovery keys + operator escrow */
+  /* wiring:e2 recovery - recovery keys + operator escrow */
   'e2e.create.escrow_title': 'This server holds a second key',
   'e2e.create.escrow_body':
     'Key escrow is enabled on this installation, so its operator can open this folder without your password. Using that key notifies you. Escrow is fixed when the server is installed and cannot be turned off for a folder.',
@@ -1108,7 +1170,7 @@ export const en: Record<string, string> = {
   'e2e.recovery.title': 'Save your recovery key',
   'e2e.recovery.title_upgraded': 'Your recovery key',
   'e2e.recovery.lead':
-    'This key opens the folder without its password. It is shown once — filex does not store it and cannot show it again.',
+    'This key opens the folder without its password. It is shown once - filex does not store it and cannot show it again.',
   'e2e.recovery.lead_upgraded':
     'This folder now has a recovery key. It opens the folder without its password, is shown once, and is not stored by filex.',
   'e2e.recovery.copy': 'Copy',
@@ -1116,7 +1178,7 @@ export const en: Record<string, string> = {
   'e2e.recovery.download': 'Download as a file',
   'e2e.recovery.warn_title': 'TREAT THIS LIKE A PASSWORD',
   'e2e.recovery.warn_body':
-    'Anyone holding this key can read the folder. Keep it somewhere separate from the password — a key stored next to the password protects you from forgetting, not from anyone else.',
+    'Anyone holding this key can read the folder. Keep it somewhere separate from the password - a key stored next to the password protects you from forgetting, not from anyone else.',
   'e2e.recovery.escrow_title': 'This server also holds a key',
   'e2e.recovery.escrow_body':
     'Key escrow is enabled here, so the operator of this installation can open this folder without your password. You are notified when that key is used.',
@@ -1135,7 +1197,7 @@ export const en: Record<string, string> = {
     'Opening a folder with the escrow key notifies its owner. Use it only when you are entitled to.',
   'e2e.recover.escrow_kid': 'Escrow key',
   'e2e.recover.escrow_predates':
-    'This installation has an escrow key, but this folder does not. It was created before escrow was turned on here, so its master key was never wrapped to the escrow identity. The escrow key will not open it. Nothing the operator can do changes that — adding a slot needs this folder\u2019s password, which the server has never had. The folder\u2019s owner can grant it: unlock with the password, then choose to give the operator a key. Until they do, use the password or the recovery key.',
+    'This installation has an escrow key, but this folder does not. It was created before escrow was turned on here, so its master key was never wrapped to the escrow identity. The escrow key will not open it. Nothing the operator can do changes that - adding a slot needs this folder\u2019s password, which the server has never had. The folder\u2019s owner can grant it: unlock with the password, then choose to give the operator a key. Until they do, use the password or the recovery key.',
   'e2e.recover.escrow_other_key':
     'This folder carries an escrow key from a DIFFERENT installation. It was created elsewhere and restored here, so this installation\u2019s escrow key does not open it. Only the private key belonging to the escrow key it was sealed to can.',
   'e2e.recover.escrow_placeholder': 'Paste the escrow private key (PKCS#8, base64 or PEM)',
@@ -1144,17 +1206,17 @@ export const en: Record<string, string> = {
   'e2e.recover.escrow_required': 'Paste the escrow private key.',
   'e2e.recover.wrong_recovery': 'That recovery key does not open this folder.',
   'e2e.recover.wrong_escrow':
-    'That escrow key does not open this folder. A folder created before escrow was turned on has no escrow slot until its owner grants one — until then, use the password or the recovery key.',
+    'That escrow key does not open this folder. A folder created before escrow was turned on has no escrow slot until its owner grants one - until then, use the password or the recovery key.',
   'e2e.recover.bad_escrow_key': 'That is not a readable private key (expected PKCS#8, base64 or PEM).',
   'e2e.recover.notify_failed':
     'Could not notify the folder owner, so the folder was not unlocked. Escrow use is always announced.',
   'e2e.recover.recovery_done': 'Unlocked with the recovery key',
-  'e2e.recover.escrow_done': 'Unlocked with the escrow key — the owner has been notified',
+  'e2e.recover.escrow_done': 'Unlocked with the escrow key - the owner has been notified',
   'e2e.recover.unlock': 'Unlock',
   'e2e.recover.busy': 'Unlocking…',
   'e2e.escrowoffer.title': 'Give the operator a key to this folder?',
   'e2e.escrowoffer.body':
-    'This folder was created before key escrow was turned on here, so the operator of this installation cannot open it. Right now — while your password is in memory — filex can seal this folder to the escrow key. Your files are not re-encrypted or moved; only the key file changes.',
+    'This folder was created before key escrow was turned on here, so the operator of this installation cannot open it. Right now - while your password is in memory - filex can seal this folder to the escrow key. Your files are not re-encrypted or moved; only the key file changes.',
   'e2e.escrowoffer.consequence':
     'What this means: the operator gains a second, permanent way into this folder, without your password. You are notified when that key is used, but that notification is an announcement rather than a control.',
   'e2e.escrowoffer.learn_more': 'What escrow can and cannot do',
@@ -1173,7 +1235,7 @@ export const en: Record<string, string> = {
   'e2e.escrowoffer.strip_action': 'Escrow key…',
   'e2e.upgrade.title': 'This folder has no recovery key',
   'e2e.upgrade.body':
-    'It was created before recovery keys existed, so its password is the only way in. Right now — and only right now, while the password is in memory — filex can add one. Your files are not re-encrypted or moved.',
+    'It was created before recovery keys existed, so its password is the only way in. Right now - and only right now, while the password is in memory - filex can add one. Your files are not re-encrypted or moved.',
   'e2e.upgrade.escrow_note':
     'Note: this installation has key escrow enabled, so adding a recovery key also lets its operator open this folder without your password.',
   'e2e.upgrade.accept': 'Create a recovery key',
@@ -1216,7 +1278,7 @@ export const en: Record<string, string> = {
   'conn.guide.fact.user': 'Username',
   'conn.guide.fact.password': 'Password',
   'conn.guide.webdav.summary': 'WebDAV mounts filex as a drive: Windows Explorer, macOS Finder, Linux, rclone and Cyberduck all speak it, and every change is mirrored back into filex.',
-  'conn.guide.webdav.userHint': 'Your username or your email — not your display name.',
+  'conn.guide.webdav.userHint': 'Your username or your email - not your display name.',
   'conn.guide.webdav.passwordHint': 'Your account password, or an API key (API keys, in the navigation panel). An account with two-factor authentication MUST use an API key: Basic auth has no second-factor slot.',
   'conn.guide.webdav.win.s1': 'Open File Explorer, right-click This PC and choose “Map network drive…”.',
   'conn.guide.webdav.win.s2': 'Pick a drive letter and enter {url} as the folder.',
@@ -1224,7 +1286,7 @@ export const en: Record<string, string> = {
   'conn.guide.webdav.win.cmdCaption': 'Command Prompt (same thing, without the wizard)',
   'conn.guide.webdav.win.limits': 'Windows has three built-in limits that look exactly like filex bugs: transfers stop at ~47.7 MB, folders with about a thousand files refuse to open (“Disk is not formatted”), and the WebClient service must be restarted after changing either.',
   'conn.guide.webdav.win.regCaption': 'Run as administrator, then reconnect the drive',
-  'conn.guide.webdav.win.https': 'HTTPS is mandatory. Windows sends Basic credentials over TLS only, and over plain http:// it silently refuses with no useful message. Do not set BasicAuthLevel to 2 — use TLS.',
+  'conn.guide.webdav.win.https': 'HTTPS is mandatory. Windows sends Basic credentials over TLS only, and over plain http:// it silently refuses with no useful message. Do not set BasicAuthLevel to 2 - use TLS.',
   'conn.guide.webdav.win.persist': 'The mapped drive does not survive a sign-out: since Windows 7 Basic credentials cannot be stored in Credential Manager, and /persistent:yes does not change that. Re-run the command from a logon script if you need it back automatically.',
   'conn.guide.webdav.win.service': 'If nothing mounts at all, make sure the WebClient service is running: sc config WebClient start= auto && net start WebClient.',
   'conn.guide.webdav.mac.s1': 'In Finder choose Go → Connect to Server… (⌘K).',
@@ -1233,8 +1295,8 @@ export const en: Record<string, string> = {
   'conn.guide.webdav.mac.note': 'The drive appears under Locations; each storage is a top-level folder.',
   'conn.guide.webdav.linux.mountCaption': 'davfs2, or the desktop file manager (GNOME Files, Dolphin)',
   'conn.guide.webdav.linux.gvfsComment': 'or paste this address into GNOME Files / Dolphin',
-  'conn.guide.webdav.linux.locks': 'davfs2 needs locking turned off. filex keeps WebDAV locks in process memory, so they do not survive a restart and are not shared between replicas — davfs2 assumes otherwise and hangs.',
-  'conn.guide.webdav.rclone.obscureCaption': 'rclone stores an obscured password — run this first and paste the output below',
+  'conn.guide.webdav.linux.locks': 'davfs2 needs locking turned off. filex keeps WebDAV locks in process memory, so they do not survive a restart and are not shared between replicas - davfs2 assumes otherwise and hangs.',
+  'conn.guide.webdav.rclone.obscureCaption': 'rclone stores an obscured password - run this first and paste the output below',
   'conn.guide.webdav.rclone.passPlaceholder': '<output of rclone obscure>',
   'conn.guide.webdav.rclone.useCaption': 'Using it',
   'conn.guide.webdav.duck.s1': 'New Bookmark → WebDAV (HTTPS).',
@@ -1247,16 +1309,16 @@ export const en: Record<string, string> = {
   'conn.guide.webdav.note.http': 'This server is reachable over plain http://. Windows will refuse to send your credentials at all, and every other client sends your password in the clear. Put filex behind TLS before mounting it.',
   // ── S3 endpoint: keys and the guide ──────────────────────────────
   'conn.s3keys.title': 'S3 access keys',
-  'conn.s3keys.lead': 'An access key lets any S3 client — rclone, restic, the AWS CLI, mc, s3fs, Cyberduck — connect to filex. It carries your own permissions and nothing more.',
+  'conn.s3keys.lead': 'An access key lets any S3 client - rclone, restic, the AWS CLI, mc, s3fs, Cyberduck - connect to filex. It carries your own permissions and nothing more.',
   'conn.s3keys.disabled': 'The S3 endpoint is switched off on this server (FILEX_S3). A key minted here will not connect until an operator turns it back on.',
-  'conn.s3keys.cannotMint': 'You are not signed in with an account that can mint access keys. The instructions below still apply — ask for a key and paste it in.',
+  'conn.s3keys.cannotMint': 'You are not signed in with an account that can mint access keys. The instructions below still apply - ask for a key and paste it in.',
   'conn.s3keys.label': 'What is it for? (laptop backup, CI, …)',
   'conn.s3keys.defaultLabel': 'access key',
   'conn.s3keys.everyBucket': 'Every bucket I can see',
   'conn.s3keys.prefix': 'Folder inside the bucket (optional)',
   'conn.s3keys.mint': 'Create key',
   'conn.s3keys.inheritNote': 'A key can only ever narrow what you already have: your grants, your tenant, your role. Confining it to one bucket or folder is the difference between a laptop backup and a credential that can read everything.',
-  'conn.s3keys.once': 'Copy the secret now — this is the only time it is shown.',
+  'conn.s3keys.once': 'Copy the secret now - this is the only time it is shown.',
   'conn.s3keys.accessKeyID': 'Access key ID',
   'conn.s3keys.secret': 'Secret key',
   'conn.s3keys.dismiss': 'I have copied it',
@@ -1272,7 +1334,7 @@ export const en: Record<string, string> = {
   'conn.s3keys.revoke': 'Revoke',
   'conn.s3keys.confirm': 'Sure?',
   'conn.s3keys.empty': 'No access keys yet.',
-  'conn.guide.s3.summary': 'The S3 endpoint makes filex the destination for anything that speaks S3 — backups, sync tools, SDKs — using the storages you already have.',
+  'conn.guide.s3.summary': 'The S3 endpoint makes filex the destination for anything that speaks S3 - backups, sync tools, SDKs - using the storages you already have.',
   'conn.guide.s3.keyPlaceholder': 'create a key above',
   'conn.guide.s3.secretPlaceholder': 'shown once, when you create the key',
   'conn.guide.s3.fact.endpoint': 'Endpoint',
@@ -1282,7 +1344,7 @@ export const en: Record<string, string> = {
   'conn.guide.s3.fact.key': 'Access key ID',
   'conn.guide.s3.fact.keyHint': 'The public half. It travels in every request.',
   'conn.guide.s3.fact.secret': 'Secret key',
-  'conn.guide.s3.fact.secretHint': 'Shown once, when the key is created. filex cannot show it again — create a new key if it is lost.',
+  'conn.guide.s3.fact.secretHint': 'Shown once, when the key is created. filex cannot show it again - create a new key if it is lost.',
   'conn.guide.s3.fact.region': 'Region',
   'conn.guide.s3.fact.regionHint': 'filex has no regions; any value works and is echoed back. Clients still insist on one.',
   'conn.guide.s3.fact.addressing': 'Addressing',
@@ -1307,21 +1369,21 @@ export const en: Record<string, string> = {
   'conn.guide.s3.duck.s2': 'Server: {host}.',
   'conn.guide.s3.duck.s3': 'Access key ID: {key}, secret as above.',
   'conn.guide.s3.duck.s4': 'Open the bookmark; the buckets are your filex storages.',
-  'conn.guide.s3.duck.pathStyle': 'In Preferences → S3, turn OFF "Use virtual host style" — this install has no wildcard S3 host.',
+  'conn.guide.s3.duck.pathStyle': 'In Preferences → S3, turn OFF "Use virtual host style" - this install has no wildcard S3 host.',
   'conn.guide.s3.sdk.note': 'Any SigV4 client works the same way: endpoint, key, secret, and path addressing when this install has no S3 host of its own.',
-  'conn.guide.s3.note.buckets': 'A bucket is a filex storage. A client can create folders and objects inside one, but not the bucket itself — that needs a driver and a path, which an S3 request cannot express.',
+  'conn.guide.s3.note.buckets': 'A bucket is a filex storage. A client can create folders and objects inside one, but not the bucket itself - that needs a driver and a path, which an S3 request cannot express.',
   'conn.guide.s3.note.permissions': 'The key sees exactly what you see. A bucket you may not open answers "no such bucket" rather than "forbidden", so the endpoint never reveals what exists.',
   'conn.guide.s3.note.trash': 'A delete goes to the filex trash, the same as everywhere else, and is recoverable until the retention policy sweeps it.',
-  'conn.guide.s3.note.mtime': 'Uploads carry their modification time, and the checksums clients send (Content-MD5, x-amz-checksum-*) are verified — a corrupted upload is refused rather than stored.',
+  'conn.guide.s3.note.mtime': 'Uploads carry their modification time, and the checksums clients send (Content-MD5, x-amz-checksum-*) are verified - a corrupted upload is refused rather than stored.',
   'conn.guide.s3.note.pathStyle': 'This install has no dedicated S3 host, so clients must be told to use path-style addressing. Without it a current SDK fails at DNS with an error that names neither filex nor the cause.',
   'conn.guide.s3.note.http': 'This endpoint is plain http://. Signatures still protect the request, but the objects travel in the clear. Put filex behind TLS before pointing a backup at it.',
   // ── SFTP endpoint: keys and the guide ────────────────────────────
   'conn.sshkeys.title': 'SSH keys',
-  'conn.sshkeys.lead': 'Register a public key and every SSH client — sftp, scp, WinSCP, FileZilla, rclone, sshfs — can connect without sending your password.',
+  'conn.sshkeys.lead': 'Register a public key and every SSH client - sftp, scp, WinSCP, FileZilla, rclone, sshfs - can connect without sending your password.',
   'conn.sshkeys.disabled': 'The SFTP endpoint is switched off on this server (FILEX_SFTP). A key registered here will not connect until an operator turns it back on.',
   'conn.sshkeys.cannotAdd': 'You are not signed in with an account that can register keys.',
   'conn.sshkeys.paste': 'Paste the contents of ~/.ssh/id_ed25519.pub',
-  'conn.sshkeys.name': 'Name (optional — the key comment is used otherwise)',
+  'conn.sshkeys.name': 'Name (optional - the key comment is used otherwise)',
   'conn.sshkeys.add': 'Add key',
   'conn.sshkeys.noCopyId': 'ssh-copy-id cannot work here: it appends to ~/.ssh/authorized_keys over a shell, and filex has none. This box is the way in.',
   'conn.sshkeys.col.name': 'Name',
@@ -1335,7 +1397,7 @@ export const en: Record<string, string> = {
   'conn.sshkeys.remove': 'Remove',
   'conn.sshkeys.confirm': 'Sure?',
   'conn.sshkeys.empty': 'No keys yet. Without one, clients sign in with your account password.',
-  'conn.guide.sftp.summary': 'SFTP makes filex reachable by anything that already speaks SSH — a backup job, a scanner, WinSCP, rclone, or a mounted folder.',
+  'conn.guide.sftp.summary': 'SFTP makes filex reachable by anything that already speaks SSH - a backup job, a scanner, WinSCP, rclone, or a mounted folder.',
   'conn.guide.sftp.fact.host': 'Host',
   'conn.guide.sftp.fact.hostHint': 'The same machine as the web app, on a port of its own.',
   'conn.guide.sftp.fact.port': 'Port',
@@ -1343,22 +1405,22 @@ export const en: Record<string, string> = {
   'conn.guide.sftp.fact.userHint': 'Your username. An @ in it would have to be quoted in most client config files, which is what the username avoids.',
   'conn.guide.sftp.fact.auth': 'Sign in with',
   'conn.guide.sftp.fact.authKey': 'your registered SSH key (or your password)',
-  'conn.guide.sftp.fact.authPassword': 'your account password — or register a key above',
+  'conn.guide.sftp.fact.authPassword': 'your account password - or register a key above',
   'conn.guide.sftp.fact.authHint': 'An API key works as a password too, and is revocable on its own. An account with two-factor sign-in must use an SSH key or an API key.',
   'conn.guide.sftp.fact.path': 'Path',
   'conn.guide.sftp.fact.pathHint': 'The first folder is a storage; the root lists the ones you may open.',
   'conn.guide.sftp.openssh.connectCaption': 'Connect, put, get',
-  'conn.guide.sftp.openssh.noShell': 'There is no shell here — only the SFTP subsystem. `ssh host command` is refused on purpose, and scp works because OpenSSH 9 speaks SFTP for it.',
+  'conn.guide.sftp.openssh.noShell': 'There is no shell here - only the SFTP subsystem. `ssh host command` is refused on purpose, and scp works because OpenSSH 9 speaks SFTP for it.',
   'conn.guide.sftp.key.tab': 'Set up a key',
   'conn.guide.sftp.key.s1': 'Generate a key pair on the machine that will connect (skip if you already have one).',
-  'conn.guide.sftp.key.s2': 'Copy the PUBLIC half — the .pub file, never the other one.',
+  'conn.guide.sftp.key.s2': 'Copy the PUBLIC half - the .pub file, never the other one.',
   'conn.guide.sftp.key.s3': 'Paste it into the box above and connect; no password is sent from then on.',
   'conn.guide.sftp.key.genCaption': 'On your own machine',
   'conn.guide.sftp.key.noCopyId': 'ssh-copy-id will NOT work against filex: it needs a shell to append to ~/.ssh/authorized_keys, and there is none. Paste the key above instead.',
   'conn.guide.sftp.winscp.s1': 'New site → File protocol: SFTP.',
   'conn.guide.sftp.winscp.s2': 'Host name: {host}, port: {port}.',
   'conn.guide.sftp.winscp.s3': 'User name: {user}. For a key: Advanced → SSH → Authentication → private key file.',
-  'conn.guide.sftp.winscp.s4': 'WinSCP needs a .ppk private key — use its own tool (Tools → PuTTYgen) to convert an OpenSSH key once.',
+  'conn.guide.sftp.winscp.s4': 'WinSCP needs a .ppk private key - use its own tool (Tools → PuTTYgen) to convert an OpenSSH key once.',
   'conn.guide.sftp.filezilla.s1': 'File → Site Manager → New site, Protocol: SFTP.',
   'conn.guide.sftp.filezilla.s2': 'Host: {host}, port: {port}.',
   'conn.guide.sftp.filezilla.s3': 'User: {user}. Logon type: Normal for a password, or Key file for a key.',
@@ -1368,21 +1430,21 @@ export const en: Record<string, string> = {
   'conn.guide.sftp.note.storages': 'The root is not a home directory: it lists the storages you may open, and the first path segment names one.',
   'conn.guide.sftp.note.permissions': 'The permission bits your client draws come from your access level here, so a file shown as read-only really is one for you.',
   'conn.guide.sftp.note.trash': 'A delete goes to the filex trash, the same as everywhere else, and is recoverable until the retention policy sweeps it.',
-  'conn.guide.sftp.note.totp': 'If your account has two-factor sign-in, the password will not work here — SSH has no way to ask for the code. Register an SSH key, or use an API key as the password.',
+  'conn.guide.sftp.note.totp': 'If your account has two-factor sign-in, the password will not work here - SSH has no way to ask for the code. Register an SSH key, or use an API key as the password.',
   'conn.guide.sftp.note.disabled': 'The SFTP endpoint is switched off on this server. These instructions will work once an operator enables it.',
   // ── FTPS ─────────────────────────────────────────────────────────
-  'conn.guide.ftps.summary': 'FTPS is here for the equipment that only ever learned FTP — scan-to-folder printers, EDI counterparties, older lab and industrial software. Always over TLS.',
+  'conn.guide.ftps.summary': 'FTPS is here for the equipment that only ever learned FTP - scan-to-folder printers, EDI counterparties, older lab and industrial software. Always over TLS.',
   'conn.guide.ftps.fact.host': 'Host',
   'conn.guide.ftps.fact.hostHint': 'The same machine as the web app, on a port of its own.',
   'conn.guide.ftps.fact.port': 'Port',
   'conn.guide.ftps.fact.portHint': 'The control channel. Data moves on a separate port from the passive range below.',
   'conn.guide.ftps.fact.mode': 'Encryption',
-  'conn.guide.ftps.fact.modeValue': 'FTPS — explicit TLS (AUTH TLS), required',
+  'conn.guide.ftps.fact.modeValue': 'FTPS - explicit TLS (AUTH TLS), required',
   'conn.guide.ftps.fact.modeHint': 'Plain FTP is refused before the password is read. Choose "Require explicit FTP over TLS", never "plain FTP" and never "implicit".',
   'conn.guide.ftps.fact.userHint': 'Your username, or your email. An API key works as the password too and can be revoked on its own.',
-  'conn.guide.ftps.fact.passwordHint': 'Your account password, or an API key. An account with two-factor sign-in must use an API key — FTP has no way to ask for the code.',
+  'conn.guide.ftps.fact.passwordHint': 'Your account password, or an API key. An account with two-factor sign-in must use an API key - FTP has no way to ask for the code.',
   'conn.guide.ftps.fact.pasv': 'Passive ports',
-  'conn.guide.ftps.fact.pasvHint': 'Data connections land here. If your firewall blocks this range the transfer HANGS with no error on either side — that is the classic FTP failure.',
+  'conn.guide.ftps.fact.pasvHint': 'Data connections land here. If your firewall blocks this range the transfer HANGS with no error on either side - that is the classic FTP failure.',
   'conn.guide.ftps.filezilla.s1': 'File → Site Manager → New site, Protocol: FTP.',
   'conn.guide.ftps.filezilla.s2': 'Host: {host}, port: {port}.',
   'conn.guide.ftps.filezilla.s3': 'Encryption: "Require explicit FTP over TLS". Logon type: Normal, user: {user}.',
@@ -1393,25 +1455,25 @@ export const en: Record<string, string> = {
   'conn.guide.ftps.curl.caption': 'Upload and download',
   'conn.guide.ftps.curl.sslReqd': '--ssl-reqd is not optional: it makes curl REQUIRE TLS instead of falling back to plaintext. This server refuses plaintext anyway, but the habit protects you against the servers that do not.',
   'conn.guide.ftps.lftp.caption': 'Connect',
-  'conn.guide.ftps.lftp.protectData': 'ssl-protect-data encrypts the FILE as well as the sign-in. Without it lftp signs in over TLS and then sends your file in the clear — which is the FTPS misconfiguration people actually ship.',
+  'conn.guide.ftps.lftp.protectData': 'ssl-protect-data encrypts the FILE as well as the sign-in. Without it lftp signs in over TLS and then sends your file in the clear - which is the FTPS misconfiguration people actually ship.',
   'conn.guide.ftps.rclone.useCaption': 'Use it',
   'conn.guide.ftps.printer.tab': 'Scanner / printer',
   'conn.guide.ftps.printer.s1': 'In the device\'s scan-to-FTP settings: server {host}, port {port}.',
-  'conn.guide.ftps.printer.s2': 'User: {user}, password as above. Create an API key for the device rather than using your own password — it can be revoked without changing anything else.',
-  'conn.guide.ftps.printer.s3': 'Path: {path} — or a folder inside it that you created first. The device cannot create a storage.',
+  'conn.guide.ftps.printer.s2': 'User: {user}, password as above. Create an API key for the device rather than using your own password - it can be revoked without changing anything else.',
+  'conn.guide.ftps.printer.s3': 'Path: {path} - or a folder inside it that you created first. The device cannot create a storage.',
   'conn.guide.ftps.printer.s4': 'Turn ON "SSL/TLS" or "FTPS explicit", and PASSIVE mode.',
-  'conn.guide.ftps.printer.noTLS': 'Plenty of scan-to-FTP firmware cannot do TLS at all. This server will not talk to such a device, and that is deliberate — the alternative is your documents and your password crossing the office network in the clear.',
+  'conn.guide.ftps.printer.noTLS': 'Plenty of scan-to-FTP firmware cannot do TLS at all. This server will not talk to such a device, and that is deliberate - the alternative is your documents and your password crossing the office network in the clear.',
   'conn.guide.ftps.note.tls': 'TLS is mandatory and there is no switch to turn it off. Plain FTP sends your password in the clear and your file after it.',
   'conn.guide.ftps.note.passive': 'Passive mode only. Active mode has the server dial back to the client, which does not survive NAT and is blocked by most firewalls.',
   'conn.guide.ftps.note.storages': 'The root is not a home directory: it lists the storages you may open, and the first path segment names one.',
   'conn.guide.ftps.note.trash': 'A delete goes to the filex trash, the same as everywhere else, and is recoverable until the retention policy sweeps it.',
   'conn.guide.ftps.note.prefer': 'If the client can speak SFTP, prefer it: one connection, one port, no passive-mode surprises.',
-  'conn.guide.ftps.note.selfSigned': 'This server is using a self-signed certificate. It encrypts the channel but proves nothing about who is on the other end — most clients will ask you to accept it once. Supply a real certificate for anything that matters.',
+  'conn.guide.ftps.note.selfSigned': 'This server is using a self-signed certificate. It encrypts the channel but proves nothing about who is on the other end - most clients will ask you to accept it once. Supply a real certificate for anything that matters.',
   'conn.guide.ftps.note.disabled': 'The FTPS endpoint is switched off on this server. These instructions will work once an operator enables it.',
   // ── NFS ──────────────────────────────────────────────────────────
   'conn.nfs.title': 'NFS exports',
-  'conn.nfs.lead': 'An export lets a machine on your network mount filex as a drive — a media player, a build server, a backup box.',
-  'conn.nfs.pathIsSecret': '⚠ The export path IS the password. NFS cannot ask a client who it is without Kerberos, so filex puts 32 random bytes in the path instead: whoever knows it can mount as you. Treat the mount line like a credential — /etc/fstab is world-readable on most systems.',
+  'conn.nfs.lead': 'An export lets a machine on your network mount filex as a drive - a media player, a build server, a backup box.',
+  'conn.nfs.pathIsSecret': '⚠ The export path IS the password. NFS cannot ask a client who it is without Kerberos, so filex puts 32 random bytes in the path instead: whoever knows it can mount as you. Treat the mount line like a credential - /etc/fstab is world-readable on most systems.',
   'conn.nfs.disabled': 'The NFS endpoint is switched off on this server (FILEX_NFS). An export created here will not mount until an operator turns it back on.',
   'conn.nfs.cannotMint': 'You are not signed in with an account that can create exports.',
   'conn.nfs.label': 'What is it for? (media player, backup box, …)',
@@ -1420,9 +1482,9 @@ export const en: Record<string, string> = {
   'conn.nfs.prefix': 'Folder inside the storage (optional)',
   'conn.nfs.allowCidrs': 'Allowed addresses, e.g. 192.168.1.0/24 (optional)',
   'conn.nfs.readOnly': 'Read-only',
-  'conn.nfs.readOnlyHint': 'Read-only is the safer default for a machine: it refuses every write through this mount whatever your own permissions are. An address list narrows it further — outside it, the mount is refused.',
+  'conn.nfs.readOnlyHint': 'Read-only is the safer default for a machine: it refuses every write through this mount whatever your own permissions are. An address list narrows it further - outside it, the mount is refused.',
   'conn.nfs.mint': 'Create export',
-  'conn.nfs.once': 'Copy this now — the path is shown only once and cannot be recovered.',
+  'conn.nfs.once': 'Copy this now - the path is shown only once and cannot be recovered.',
   'conn.nfs.dismiss': 'I have copied it',
   'conn.nfs.col.label': 'Label',
   'conn.nfs.col.scope': 'Limited to',
@@ -1438,14 +1500,14 @@ export const en: Record<string, string> = {
   'conn.nfs.revoke': 'Revoke',
   'conn.nfs.confirm': 'Sure?',
   'conn.nfs.empty': 'No exports yet.',
-  'conn.guide.nfs.summary': 'NFS mounts filex as a drive on a machine in your own network — the NAS protocol, for the devices that expect one.',
+  'conn.guide.nfs.summary': 'NFS mounts filex as a drive on a machine in your own network - the NAS protocol, for the devices that expect one.',
   'conn.guide.nfs.pathPlaceholder': 'create an export above',
   'conn.guide.nfs.fact.host': 'Host',
   'conn.guide.nfs.fact.hostHint': 'The same machine as the web app, on a port of its own.',
   'conn.guide.nfs.fact.port': 'Port',
   'conn.guide.nfs.fact.portHint': 'Both port= and mountport= must be set to this; filex serves the mount and NFS services on one port.',
   'conn.guide.nfs.fact.export': 'Export path',
-  'conn.guide.nfs.fact.exportHint': 'This is the credential. It is shown once, when you create the export, and is stored hashed — filex cannot show it again.',
+  'conn.guide.nfs.fact.exportHint': 'This is the credential. It is shown once, when you create the export, and is stored hashed - filex cannot show it again.',
   'conn.guide.nfs.fact.options': 'Mount options',
   'conn.guide.nfs.fact.optionsHint': 'nolock because filex does not run the NFS lock manager; nfsvers=3 because that is what this server speaks.',
   'conn.guide.nfs.linux.mountCaption': 'Mount it',
@@ -1461,7 +1523,7 @@ export const en: Record<string, string> = {
   'conn.guide.nfs.nas.s1': 'In the device\'s NFS settings: server {host}, port {port} (set both the NFS and the mount port if it asks for them separately).',
   'conn.guide.nfs.nas.s2': 'Remote path: the export path above, exactly as shown.',
   'conn.guide.nfs.nas.s3': 'NFS version 3, no locking. Create the export read-only unless the device genuinely needs to write.',
-  'conn.guide.nfs.note.unencrypted': 'NFSv3 is not encrypted. Anyone who can read the traffic sees your files, and anyone who learns the path can mount them. Use it on a home or office network, or over a VPN — never across the internet.',
+  'conn.guide.nfs.note.unencrypted': 'NFSv3 is not encrypted. Anyone who can read the traffic sees your files, and anyone who learns the path can mount them. Use it on a home or office network, or over a VPN - never across the internet.',
   'conn.guide.nfs.note.pathIsSecret': 'The export path is the whole credential. Revoke it from the list above if it leaks; there is nothing else to change.',
   'conn.guide.nfs.note.noPortmapper': 'There is no portmapper on port 111, so a client that is not told the port cannot find the server. That is why every command here carries port= and mountport=.',
   'conn.guide.nfs.note.uid': 'The user and group ids your client sends are ignored: the mount already knows whose it is. The permissions you see come from your access in filex.',
@@ -1469,9 +1531,9 @@ export const en: Record<string, string> = {
   'conn.guide.nfs.note.revoke': 'Revoking takes effect on the next request, not instantly: NFS has no session to end, so a client with the mount open sees its next operation fail.',
   'conn.guide.nfs.note.disabled': 'The NFS endpoint is switched off on this server. These instructions will work once an operator enables it.',
   'conn.tokens.title': 'API keys',
-  'conn.tokens.lead': 'FTPS, WebDAV and filex mount all sign in with an API key instead of your account password. Create one here — it can be revoked on its own, and an account with two-factor sign-in cannot use its password on these at all.',
+  'conn.tokens.lead': 'FTPS, WebDAV and filex mount all sign in with an API key instead of your account password. Create one here - it can be revoked on its own, and an account with two-factor sign-in cannot use its password on these at all.',
   'conn.tokens.mint': 'Create API key',
-  'conn.tokens.once': 'Copy it now — this is the only time it is shown. Only a hash is stored, so it cannot be shown again.',
+  'conn.tokens.once': 'Copy it now - this is the only time it is shown. Only a hash is stored, so it cannot be shown again.',
   'conn.tokens.dismiss': 'I have copied it',
   'conn.tokens.cannotMint': 'This session cannot create API keys. Sign in with your own account to create one.',
   'conn.tokens.empty': 'No API keys yet.',
@@ -1482,26 +1544,26 @@ export const en: Record<string, string> = {
   'conn.tokens.col.scopes': 'Permissions',
   'conn.tokens.col.used': 'Last used',
   'conn.tokens.revokeHint': 'Revoking stops a connection that is already open, not just the next sign-in: an SFTP or FTPS session is cut and a mount stops working within about half a minute.',
-  'conn.guide.mount.summary': 'filex mount attaches a remote filex server to a folder on this machine, over the same HTTPS the browser uses. It is the only one of these that works from anywhere — no LAN, no extra server, no third-party client.',
+  'conn.guide.mount.summary': 'filex mount attaches a remote filex server to a folder on this machine, over the same HTTPS the browser uses. It is the only one of these that works from anywhere - no LAN, no extra server, no third-party client.',
   'conn.guide.mount.fact.url': 'Server URL',
   'conn.guide.mount.fact.urlHint': 'The same address you use in the browser. Nothing else has to be reachable.',
   'conn.guide.mount.fact.token': 'API key',
   'conn.guide.mount.fact.tokenPlaceholder': 'create one under API keys',
-  'conn.guide.mount.fact.tokenHint': 'An API key, not your password — it can be revoked on its own, and an account with 2FA cannot use its password here at all.',
+  'conn.guide.mount.fact.tokenHint': 'An API key, not your password - it can be revoked on its own, and an account with 2FA cannot use its password here at all.',
   'conn.guide.mount.fact.remote': 'What to mount',
-  'conn.guide.mount.fact.remoteHint': 'Leave --remote off to see every storage as a folder, or name one storage — or a folder inside it — to mount just that.',
+  'conn.guide.mount.fact.remoteHint': 'Leave --remote off to see every storage as a folder, or name one storage - or a folder inside it - to mount just that.',
   'conn.guide.mount.linux.mountCaption': 'Mount it',
   'conn.guide.mount.linux.umountCaption': 'Unmount it',
   'conn.guide.mount.linux.umountWarn': 'Unmount with fusermount, not by killing the process. A mount whose process died without detaching leaves a folder where every ls hangs until somebody runs fusermount by hand.',
   'conn.guide.mount.linux.systemdCaption': 'Mount it at sign-in (systemd user unit)',
-  'conn.guide.mount.win.winfsp': 'Windows needs WinFsp installed once — it is free and open source: https://winfsp.dev. Nothing else, and no administrator rights after that.',
+  'conn.guide.mount.win.winfsp': 'Windows needs WinFsp installed once - it is free and open source: https://winfsp.dev. Nothing else, and no administrator rights after that.',
   'conn.guide.mount.win.mountCaption': 'Mount it as a drive',
   'conn.guide.mount.win.freeLetter': 'Pick a drive letter that is FREE. The letter is created by the mount, not attached to something that already exists, and pointing it at one that is in use fails with a message that does not say so.',
   'conn.guide.mount.win.stop': 'Stop it with Ctrl-C in that window. The drive disappears and nothing is left behind on this machine.',
   'conn.guide.mount.mac.unsupported': 'filex mount does not work on macOS. It needs macFUSE, whose license does not allow a program like filex to install it for you, and whose Go binding needs a C compiler filex deliberately does not require. The command refuses here rather than appearing to work and doing nothing.',
   'conn.guide.mount.mac.alternatives': 'On macOS, use the filex desktop app with folder sync (keeps the files on disk), or SFTP with a client that mounts drives.',
   'conn.guide.mount.note.notASync': 'This is not a sync. Nothing is copied to this machine except a small read cache, so a mount opens one file out of a hundred thousand without downloading the rest. If you want the files when you are offline, use folder sync instead.',
-  'conn.guide.mount.note.reachable': 'It reaches the server through whatever proxy or tunnel the browser goes through, because underneath it is the same API. Your permissions, your storages and — on a multi-tenant server — your tenant come with it.',
+  'conn.guide.mount.note.reachable': 'It reaches the server through whatever proxy or tunnel the browser goes through, because underneath it is the same API. Your permissions, your storages and - on a multi-tenant server - your tenant come with it.',
   'conn.guide.mount.note.wholeFileWrites': 'A file you write through the mount is uploaded when the program closes it, not while it is being written. Editing a very large file in place is slower here than a local disk; copying it in and out is not.',
   'conn.guide.mount.note.trash': 'A delete goes to the filex trash, the same as everywhere else, and is recoverable until the retention policy sweeps it.',
   'conn.guide.mount.note.revoke': 'Revoke the API key to stop a mount. It stops serving within half a minute, even if the mount is still attached.',
@@ -1516,8 +1578,7 @@ export const en: Record<string, string> = {
   'storages.fieldHelp.smbRoot': 'Sub-folder inside the share. Leave empty for the whole share.',
   'storages.fields.share': 'Share',
   'storages.fields.domain': 'Domain / workgroup',
-  'storages.fields.dialTimeout': 'Connect timeout (seconds)',
-  'storages.fieldHelp.disablePresign': 'On by default: uploads and the downloads behind public share links stream through filex, so the bucket endpoint never has to be reachable from a browser (a LAN-only MinIO just works). Turn it off only when the endpoint is reachable from your users\' browsers (AWS, a public MinIO) and you want them to talk to the bucket directly — faster for very large files, and the store must accept SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch).',
+  'storages.fieldHelp.disablePresign': 'On by default: uploads and the downloads behind public share links stream through filex, so the bucket endpoint never has to be reachable from a browser (a LAN-only MinIO just works). Turn it off only when the endpoint is reachable from your users\' browsers (AWS, a public MinIO) and you want them to talk to the bucket directly - faster for very large files, and the store must accept SDK-signed URLs (Ceph RGW / some Hetzner setups answer SignatureDoesNotMatch).',
   'storages.fieldHelp.endpoint': 'Leave empty for AWS S3. Any S3-compatible store needs its endpoint.',
   'storages.fieldHelp.hostKey': 'A single public key in authorized_keys / known_hosts line form.',
   'storages.fieldHelp.insecureSkipHostKey': 'Accepts any host key. Only for throwaway hosts.',
@@ -1530,7 +1591,7 @@ export const en: Record<string, string> = {
   'storages.fieldHelp.region': 'Defaults to "auto" when left empty.',
   'storages.fieldHelp.root': 'Sub-folder on the backend. Required: filex never mounts the account root.',
   'storages.fieldHelp.sftpAuth': 'Either a password or a private key is required.',
-  'storages.fieldHelp.tls': 'Plain FTP sends credentials in the clear — turn this on whenever the server supports it.',
+  'storages.fieldHelp.tls': 'Plain FTP sends credentials in the clear - turn this on whenever the server supports it.',
   'storages.fields.accessKey': 'Access key',
   'storages.fields.basePath': 'Base path',
   'storages.fields.bucket': 'Bucket',
@@ -1574,7 +1635,7 @@ export const en: Record<string, string> = {
   'storages.fieldHelp.totalTimeout': 'No new attempt starts unless it could finish within this many seconds of the first, so a server that is down is reported within this time. A transfer that is under way is not cut. A request that timed out is tried again only when this is at least twice the attempt timeout.',
 
 
-  /* === gezinti:g1 — navigation panel (SideNav) === */
+  /* === gezinti:g1 - navigation panel (SideNav) === */
   'sidenav.title': 'Navigation',
   'sidenav.views': 'Views',
   'sidenav.storages': 'Storages',
@@ -1584,7 +1645,7 @@ export const en: Record<string, string> = {
   'sidenav.starred': 'Starred',
   'sidenav.shared': 'Shared with me',
   // The mirror of the row above, and it sits right under it: what came in,
-  // and what went out. ⚠ "My shares", not "Shared by me" — the page lists
+  // and what went out. ⚠ "My shares", not "Shared by me" - the page lists
   // LINKS the person minted, not files they granted somebody access to.
   'sidenav.myshares': 'My shares',
   'sidenav.trash': 'Trash',
@@ -1592,14 +1653,14 @@ export const en: Record<string, string> = {
   'sidenav.expand': 'Expand navigation',
   'sidenav.close': 'Close navigation',
   // ⚠ `open`/`close` are the DRAWER's pair, `expand`/`collapse` the docked
-  // panel's, and they are not interchangeable — see the note on
+  // panel's, and they are not interchangeable - see the note on
   // `navToggleLabel` in Toolbar.vue. Below 560px the panel is a drawer over
   // the listing: it is not narrowed to a rail, it is not on screen at all, so
   // "expand" would promise a width change to something that has no width.
   'sidenav.open': 'Open navigation',
   'sidenav.storage.shared': 'Shared',
   'sidenav.storage.readOnly': 'Read-only',
-  // #57 — a storage row's order menu (right click, a long press, Shift+F10).
+  // #57 - a storage row's order menu (right click, a long press, Shift+F10).
   // "Sort by name" writes an order the person can keep adjusting; it is not a
   // mode. "Use default order" lets the person's own order go: the panel then
   // follows the administrator's order (or, with none, the server's). The two
@@ -1611,10 +1672,10 @@ export const en: Record<string, string> = {
   'sidenav.storage.defaultOrder': 'Use default order',
   'sidenav.storage.defaultOrder.none': 'Already in the default order',
   // ⚠ `toolbar.nav` is GONE, and nothing replaced it. It was the one label on
-  // the panel's collapse control, first as the noun "Navigation" — which names
+  // the panel's collapse control, first as the noun "Navigation" - which names
   // the panel and never says the button does anything to it, so the owner
   // could not find how to collapse the panel (2026-09-13: "yan menüyü kısıp
-  // açabilir olalım ya bence") — and then as the static stopgap "Show or hide
+  // açabilir olalım ya bence") - and then as the static stopgap "Show or hide
   // navigation". The four `sidenav.*` verbs above are the real fix: the label
   // is bound to `navOpen`, so it says *collapse* when it will collapse and
   // *expand* when it will expand.
@@ -1630,7 +1691,7 @@ export const en: Record<string, string> = {
   'empty.shared.hint': 'Folders and files other people share appear here',
   /* etiket:t1 */
   'sidenav.tags': 'Tags',
-  'sidenav.tags.empty': 'No tags yet — add one from a file’s right-click menu.',
+  'sidenav.tags.empty': 'No tags yet - add one from a file’s right-click menu.',
   'sidenav.tags.more': 'Show {count} more',
   'sidenav.tags.less': 'Show fewer',
   'sidenav.tags.personal': 'Personal',
@@ -1648,12 +1709,12 @@ export const en: Record<string, string> = {
   'conn.tokens.expiry': 'Expires in (days)',
   'conn.tokens.expiryNever': 'never',
   'conn.tokens.defaultName': 'API key {date}',
-  'conn.tokens.namePlaceholder': 'Name — e.g. backup script',
-  'conn.tokens.capNote': 'Your own access is the ceiling — a permission you do not have is refused, not granted.',
-  'conn.tokens.scopesRequired': 'Choose at least one permission — an API key is never issued with none.',
+  'conn.tokens.namePlaceholder': 'Name - e.g. backup script',
+  'conn.tokens.capNote': 'Your own access is the ceiling - a permission you do not have is refused, not granted.',
+  'conn.tokens.scopesRequired': 'Choose at least one permission - an API key is never issued with none.',
   /* === /gezinti:g1 === */
 
-  /* === surucu:d1 — the shell (GitHub #14); every profile, no longer a
+  /* === surucu:d1 - the shell (GitHub #14); every profile, no longer a
      `uiProfile: 'drive'` opt-in === */
   'drive.new': 'New',
   'drive.new.upload': 'Upload files',
@@ -1661,7 +1722,7 @@ export const en: Record<string, string> = {
   'drive.new.request': 'Request files',
   'drive.new.document': 'New document',
 
-  /* === belge:n1 — "New document": the picker under + New =================
+  /* === belge:n1 - "New document": the picker under + New =================
      Type names are NOT listed here. A tile reads its words from
      lib/fileIcons `typeLabelFor`, the same table the listing's Type column
      uses, so ".docx" is called the same thing in both places and a new type
@@ -1673,7 +1734,7 @@ export const en: Record<string, string> = {
   'newdoc.group.diagram': 'Diagrams',
   'newdoc.group.app': 'Apps',
   /* ⚠ One name per service, the name its own project uses: draw.io (not
-     "drawio", not "diagrams.net") and ONLYOFFICE — the QA sweep of
+     "drawio", not "diagrams.net") and ONLYOFFICE - the QA sweep of
      2026-09-21 found draw.io called three things on three screens. */
   'newdoc.withheld.onlyoffice': 'Office documents need a document server (ONLYOFFICE), which is not set up here.',
   'newdoc.withheld.drawio': 'Diagrams need draw.io, which is not set up here.',
@@ -1687,7 +1748,7 @@ export const en: Record<string, string> = {
   'newdoc.err.slash': 'A name cannot contain a slash.',
   'newdoc.err.exists': '{name} is already here. Choose another name.',
   'newdoc.err.bare_ext': 'Give the file a name, not only an extension.',
-  'newdoc.err.ext_needs_type': 'A .{ext} file has to be created as its own type — an empty one would not open. Choose that type, or another extension.',
+  'newdoc.err.ext_needs_type': 'A .{ext} file has to be created as its own type - an empty one would not open. Choose that type, or another extension.',
   'newdoc.hint.ext_added': 'This type keeps its extension, so the file will be created as {name}.',
   // Drafts (issue #71): a new document is a draft until its first save.
   'sidenav.drafts': 'Drafts',
@@ -1726,6 +1787,8 @@ export const en: Record<string, string> = {
   'err.draft_limit': 'You already keep as many drafts as this server allows ({limit}). Save or delete some in Drafts.',
   'err.draft_folder_gone': 'The folder this draft was meant for is not there any more.',
   'err.drafts_unavailable': 'Drafts are not available here.',
+  'err.entry_unavailable':
+    'This item is unavailable: the storage could not say whether it still exists. Try again after the next scan.',
   'newdoc.location': 'Location',
   'newdoc.location.none': 'Choose a folder',
   'newdoc.location.change': 'Change',
@@ -1734,7 +1797,7 @@ export const en: Record<string, string> = {
   'newdoc.creating': 'Creating…',
   'newdoc.cancel': 'Cancel',
   // ⚠ The top search field searches the WHOLE storage (and every storage at
-  // the root) — never only the open folder. The scope named here is therefore
+  // the root) - never only the open folder. The scope named here is therefore
   // the storage, not the folder; "Filter in this folder…" (FilterBar) is the
   // folder-scoped one. It used to say "Search in Photos" for a folder called
   // Photos, which was a lie (2026-09-19).
@@ -1745,7 +1808,7 @@ export const en: Record<string, string> = {
   'drive.storage.used_unlimited': '{used} used',
   'drive.storage.used_partial': 'at least {used} used',
   'drive.storage.label': 'Storage',
-  /* === gorunum:v3-shell — the Home view (the overview, inside the shell) ==
+  /* === gorunum:v3-shell - the Home view (the overview, inside the shell) ==
    * The section headings are `sidenav.storages` / `sidenav.recent` /
    * `sidenav.starred` and the two empty states are `empty.recent.*` /
    * `empty.starred.*`, on purpose: the block headed "Recent" on Home and the
@@ -1754,7 +1817,7 @@ export const en: Record<string, string> = {
    * what exists nowhere else is below. */
   'home.title': 'Home',
   'home.storages.empty': 'No storages yet',
-  'home.storages.hint': 'A storage is a place filex reads and writes — an administrator adds them.',
+  'home.storages.hint': 'A storage is a place filex reads and writes - an administrator adds them.',
   'drive.section.folders': 'Folders',
   'drive.section.files': 'Files',
   'filter.aria': 'Filters',
@@ -1782,7 +1845,7 @@ export const en: Record<string, string> = {
   'filter.size.1to10': '1 - 10 MB',
   'filter.size.10to100': '10 - 100 MB',
   'filter.size.gt100': 'Over 100 MB',
-  /* surucu:d1-actions — the ⋮ menu at the end of the filter row. Only its own
+  /* surucu:d1-actions - the ⋮ menu at the end of the filter row. Only its own
      NAME is new: every row inside it reuses the string that verb already has
      (`toolbar.new_folder`, `toolbar.upload`, `ctx.paste`, `shortcuts.select_all`,
      `selection.clear`), because a menu that renames a command is a menu the
@@ -1809,14 +1872,14 @@ export const en: Record<string, string> = {
   'inspector.activity.comment': 'Comment by {who}',
   'inspector.activity.select': 'Select a file or folder to see its activity.',
   /* === /surucu:d1 === */
-  /* === gorunum:v1-chrome — the filter row's name box === */
+  /* === gorunum:v1-chrome - the filter row's name box === */
   'filter.find': 'Filter in this folder…',
-  /* surucu:d1-scope — the same box where the rows are not a folder's contents.
+  /* surucu:d1-scope - the same box where the rows are not a folder's contents.
      It has to say what it narrows: at the drive list "this folder" names
      nothing, and on Home it would name three blocks at once. */
   'filter.find.storages': 'Filter storages…',
   'filter.find.home': 'Filter Home…',
-  /* === gorunum:v1-viewer — the full-bleed overlay's own chrome === */
+  /* === gorunum:v1-viewer - the full-bleed overlay's own chrome === */
   'viewer.share': 'Share',
   'viewer.nav_prev': 'Previous file',
   'viewer.nav_next': 'Next file',
@@ -1826,15 +1889,15 @@ export const en: Record<string, string> = {
   'viewer.fullscreen': 'Full screen',
   'viewer.exit_fullscreen': 'Exit full screen',
   'viewer.md_placeholder': '# Markdown here…',
-  /* === gorunum:v1-selbar — the selection bar that replaces the filter row === */
+  /* === gorunum:v1-selbar - the selection bar that replaces the filter row === */
   'selection.count': '{n} selected',
   'selection.clear': 'Clear selection',
-  /* === gorunum:v1-preview — the kind, said in words ======================
+  /* === gorunum:v1-preview - the kind, said in words ======================
      The Type column used to print the extension in caps. These are what it
      prints instead; the table that picks one is in `lib/fileIcons.ts`
      (`typeLabelKey`), so this list and that one are the only two places a
      kind is named. Anything unmapped still falls back to the uppercased
-     extension — these names improve on that fallback, they do not replace
+     extension - these names improve on that fallback, they do not replace
      it. `Folder` is NOT here: it is `node.folder`, which the grid card's
      caption already prints. */
   'ftype.typescript': 'TypeScript',
@@ -1876,7 +1939,7 @@ export const en: Record<string, string> = {
   'ftype.slides': 'Presentation',
   'ftype.archive': 'Archive',
   'ftype.code': 'Code',
-  /* === gorunum:v1-advsearch — the Advanced search dialog ==================
+  /* === gorunum:v1-advsearch - the Advanced search dialog ==================
    * Two `filter.*` keys are added here rather than beside their siblings
    * because they are new members of shared unions the dialog introduced
    * (`modified: 'around'`, `size: 'range'`); the filter row never selects
@@ -1939,7 +2002,7 @@ export const en: Record<string, string> = {
   'advsearch.cancel': 'Cancel',
   'advsearch.submit': 'Search',
 
-  /* === gorunum:v2-topbar — the page bar is gone; the explorer's own header
+  /* === gorunum:v2-topbar - the page bar is gone; the explorer's own header
      and breadcrumb row carry what it used to. === */
   'breadcrumb.subfolders': 'Subfolders',
   'breadcrumb.subfolders.empty': 'No subfolders here',
@@ -1948,9 +2011,9 @@ export const en: Record<string, string> = {
   'header.signout': 'Sign out',
   'ai.assistant': 'AI assistant',
   'ai.soon': 'Coming soon',
-  'ai.assistant.soon': 'AI assistant — coming soon',
+  'ai.assistant.soon': 'AI assistant - coming soon',
 
-  /* gorunum:v2-share — the Share / Permissions dialog's own chrome. The
+  /* gorunum:v2-share - the Share / Permissions dialog's own chrome. The
      controls inside it keep the strings they already had; these are the new
      shell: the title, the one switch, the sentence that says who can open the
      item right now, and the three named sections it all folds into. */
@@ -1963,8 +2026,8 @@ export const en: Record<string, string> = {
   'access.who.private': 'Only people with access can open it.',
   'access.who.link': 'Anyone with the link can open it.',
   'access.who.pin': 'Anyone with the link and the PIN can open it.',
-  'access.who.existing': 'Link sharing is on — {n} links already exist.',
-  'access.who.existing_one': 'Link sharing is on — {n} link already exists.',
+  'access.who.existing': 'Link sharing is on - {n} links already exist.',
+  'access.who.existing_one': 'Link sharing is on - {n} link already exists.',
   'access.section.link': 'Link options',
   'access.section.people': 'People with access',
   'access.section.drop': 'Request files',
@@ -1973,10 +2036,12 @@ export const en: Record<string, string> = {
   'access.sum.people': '{n} people',
   'access.sum.people_one': '{n} person',
   'access.sum.people_none': 'No one yet',
+  'access.sum.groups': '{n} groups',
+  'access.sum.groups_one': '{n} group',
   'access.sum.drop': '{n} upload links',
   'access.sum.drop_one': '{n} upload link',
   'access.sum.drop_none': 'No upload link',
-  /* Ownership — the Owner column and the People chip. "System" is the honest
+  /* Ownership - the Owner column and the People chip. "System" is the honest
      word for a row nobody put here through filex (the scanner found it, or it
      was written straight into the bucket); it is a real answer, not a blank. */
   'col.owner': 'Owner',
@@ -1990,14 +2055,14 @@ export const en: Record<string, string> = {
   'filter.people.me': 'You',
   'filter.people.system': 'System',
   'filter.people.someone': 'Someone else',
-  /* surucu:d1-sort — the listing sort control at the trailing edge of the
+  /* surucu:d1-sort - the listing sort control at the trailing edge of the
      filter row. The four key names are `col.*`: the menu offers exactly the
      words the list view's own column headers carry, so the two controls that
      drive one sort cannot name it differently. */
   'sort.by': 'Sort by',
   'sort.asc': 'Ascending',
   'sort.desc': 'Descending',
-  /* The order a SEARCH RESULT is in. It is not a fifth sort key — it is what
+  /* The order a SEARCH RESULT is in. It is not a fifth sort key - it is what
      the control prints instead of a key while the rows on screen were ranked
      by the server, so the button stops claiming a sort it is not performing.
      `_why` is the reason the control is closed, and the owner asked for the
@@ -2005,8 +2070,8 @@ export const en: Record<string, string> = {
   'sort.relevance': 'Relevance',
   'sort.relevance_why':
     'Search results are listed by how well they match. Your sort comes back when you leave the search.',
-  /* === tablo:t1 — the table's own configuration ==========================
-     Since v0.43 everything about how a folder looks — view, sort AND columns —
+  /* === tablo:t1 - the table's own configuration ==========================
+     Since v0.43 everything about how a folder looks - view, sort AND columns -
      belongs to the folder it was changed in; a folder nobody changed opens
      with the person's default (their settings), else the instance's.
      `folder_hint` is that rule in one sentence, written where the person who
@@ -2027,15 +2092,15 @@ export const en: Record<string, string> = {
     'A change you make here stays in this folder. Folders you have never changed open with your default view (Settings → Default folder view).',
   'cols.forget_folder': "Forget this folder's view",
   'cols.apply_all': 'Make this my default for all folders ({count} remembered)',
-  /* === tablo:t3 — THE ONE TABLE (components/DataTable.vue) ================
+  /* === tablo:t3 - THE ONE TABLE (components/DataTable.vue) ================
      Every table in the product speaks these, so a column menu or a pager is
      never the one English thing on a Turkish page. */
   'table.empty': 'Nothing here yet',
   'table.prev': 'Previous page',
   'table.next': 'Next page',
   'table.sort_paged':
-    'This list is split into pages. Sorting would only re-order the page on screen, so it is off here — narrow the list with the search or filters instead.',
-  /* === tablo:t1 — the trash banner ======================================
+    'This list is split into pages. Sorting would only re-order the page on screen, so it is off here - narrow the list with the search or filters instead.',
+  /* === tablo:t1 - the trash banner ======================================
      ⚠ `retention` is only used when the deployment has TOLD us the number
      (GET /api/admin/protection). Everywhere else `retention_unknown` says the
      same thing without naming a period we cannot verify: a banner that states
@@ -2055,18 +2120,18 @@ export const en: Record<string, string> = {
   'trash.days_remaining': '{n} days',
   'trash.days_remaining_one': '{n} day',
   'trash.days_remaining_due': 'Due for deletion',
-  'trash.deleted_by_nobody': 'Not recorded: removed outside filex, or deleted before filex kept this',
+  'trash.deleted_by_nobody': 'Not recorded: quarantined by the virus scan, or deleted before filex kept this',
   'trash.emptying': 'Emptying the trash… {done} of {total}',
   'trash.empty_busy': 'The trash is already being emptied.',
-  'trash.emptied_partly': 'Trash emptied, but {count} items could not be purged — see the server log.',
-  'trash.emptied_partly_one': 'Trash emptied, but {count} item could not be purged — see the server log.',
+  'trash.emptied_partly': 'Trash emptied, but {count} items could not be purged - see the server log.',
+  'trash.emptied_partly_one': 'Trash emptied, but {count} item could not be purged - see the server log.',
   'trash.empty_stopped': 'Emptying the trash stopped: {error}',
   'trash.emptying_queued': 'Emptying the trash… waiting for another purge to finish',
   'trash.empty_cancelled': 'Emptying the trash was stopped after {count} items; the rest is still in the trash.',
   'trash.empty_cancelled_one': 'Emptying the trash was stopped after {count} item; the rest is still in the trash.',
   'empty.trash.hint': 'Files you delete land here first, so you can put them back.',
 
-  /* tasi:m1 — the destination picker (modals/DestinationPickerModal.vue) and
+  /* tasi:m1 - the destination picker (modals/DestinationPickerModal.vue) and
      the two selection verbs built on it. */
   'destpicker.title.move': 'Move to',
   'destpicker.title.copy': 'Copy to',
@@ -2100,12 +2165,12 @@ export const en: Record<string, string> = {
   'toast.archive.preparing': 'Preparing the archive…',
   'toast.archive.started': 'Downloading {name} ({count} files)',
   'toast.archive.started_one': 'Downloading {name} ({count} file)',
-  'toast.archive.empty': 'Nothing to download — the selection contains no readable file.',
+  'toast.archive.empty': 'Nothing to download - the selection contains no readable file.',
   'toast.moved_to': 'Move to {name} queued',
   'toast.copied_to': 'Copy to {name} queued',
-  'toast.already_there': 'The selected items are already in {name} — nothing was sent',
+  'toast.already_there': 'The selected items are already in {name} - nothing was sent',
 
-  /* ── dil:paket — strings that used to be inline `en ? … : …` pairs in
+  /* ── dil:paket - strings that used to be inline `en ? … : …` pairs in
      FileExplorer / RecentlyOpened, where no language pack could reach them
      (and where a pack's language fell through to TURKISH). */
   'ctx.tags_menu': 'Tags…',
@@ -2122,7 +2187,7 @@ export const en: Record<string, string> = {
   'share.ttl.until': 'This link is valid until {when}.',
   'share.ttl.ceiling': 'Links can be valid for at most {days} days (server setting).',
   'share.ttl.ceiling_one': 'Links can be valid for at most {days} day (server setting).',
-  /* ── dil:paket — the share / access dialog (modals/PermissionsModal.vue). These were ~90 inline (tr, en) pairs: no language pack could reach them, and under any third language the dialog spoke TURKISH. access.ui.emails_comma_separated / access.ui.send / access.ui.mail_not_set_up are the mail-row lines another branch rewrote in the same release, converted at the v0.43.0 merge. */
+  /* ── dil:paket - the share / access dialog (modals/PermissionsModal.vue). These were ~90 inline (tr, en) pairs: no language pack could reach them, and under any third language the dialog spoke TURKISH. access.ui.emails_comma_separated / access.ui.send / access.ui.mail_not_set_up are the mail-row lines another branch rewrote in the same release, converted at the v0.43.0 merge. */
   'access.ui.level_viewer': 'Viewer',
   'access.ui.level_viewer_desc': 'view + download',
   'access.ui.level_editor': 'Editor',
@@ -2160,8 +2225,8 @@ export const en: Record<string, string> = {
   'access.ui.enter_a_valid_email': 'Enter a valid email.',
   'access.ui.user_created_invite_emailed': 'User created, invite emailed.',
   'access.ui.user_created_share_the_temp_password': 'User created. Share the temp password.',
-  'access.ui.smtp_not_set_up_verified_share_the_link': 'SMTP not set up/verified — share the link manually.',
-  'access.ui.send_failed_temporary_please_retry': 'Send failed (temporary) — please retry.',
+  'access.ui.smtp_not_set_up_verified_share_the_link': 'SMTP not set up/verified - share the link manually.',
+  'access.ui.send_failed_temporary_please_retry': 'Send failed (temporary) - please retry.',
   'access.ui.server_limit_applied': '(server limit applied)',
   'access.ui.protect_with_a_pin': 'Protect with a PIN',
   'access.ui.expiry': 'Expiry',
@@ -2173,19 +2238,23 @@ export const en: Record<string, string> = {
   'access.ui.command_line': 'Command line',
   'access.ui.share': 'Share',
   'access.ui.existing_links': 'Existing links',
-  'access.ui.rbac_off_here': 'Per-item access control is off on this storage — everyone opens it according to their role, so people added here would change nothing. Turn it on in the admin panel under Storages (this storage → Per-item access control).',
+  'access.ui.rbac_off_here': 'Per-item access control is off on this storage - everyone opens it according to their role, so people added here would change nothing. Turn it on in the admin panel under Storages (this storage → Per-item access control).',
   'access.ui.other_links': 'Other links',
   'access.ui.revoke': 'Revoke',
   'access.ui.loading': 'Loading…',
   'access.ui.name_or_email': 'Name or email',
   'access.ui.add': 'Add',
-  'access.ui.no_account_for_this_email_what_next': 'No account for this email — what next?',
+  'access.ui.no_account_for_this_email_what_next': 'No account for this email - what next?',
   'access.ui.user': 'User',
   'access.ui.viewer': 'Viewer',
   'access.ui.create_user_grant': 'Create user + grant',
   'access.ui.just_send_a_share_link': 'Just send a share link →',
   'access.ui.temp_password': 'Temp password:',
-  'access.ui.people_with_access': 'People with access',
+  'access.ui.people_with_access': 'Who has access',
+  'access.ui.group': 'Group',
+  'access.ui.group_title': 'The group “{name}” - everyone in it',
+  'access.ui.group_owner_confirm': 'Owner lets everyone in “{name}” manage who has access here - including sharing it with other people and groups. Give the group Owner?',
+  'access.ui.group_owner_give': 'Give owner access',
   'access.ui.not_shared_with_anyone_yet': 'Not shared with anyone yet.',
   'access.ui.remove': 'Remove',
   'access.ui.a_public_link_that_lets_anyone_upload_fi': 'A public link that lets anyone UPLOAD files into this folder. Uploaders never see the folder\'s existing files.',
@@ -2196,10 +2265,10 @@ export const en: Record<string, string> = {
   'access.ui.allowed_types': 'Allowed types',
   'access.ui.all_e_g_pdf_jpg': 'all (e.g. pdf, jpg)',
   'access.ui.ask_uploader_name': 'Ask uploader name',
-  'access.ui.emails_comma_separated': 'email(s) — comma separated',
+  'access.ui.emails_comma_separated': 'email(s) - comma separated',
   'access.ui.send': 'Send',
-  'access.ui.mail_not_set_up': 'Email is not set up — set it up in the admin panel under Settings (Email / SMTP).',
-  /* ── wiring:e2 fxe — single encrypted files (.fxe), streamed downloads ── */
+  'access.ui.mail_not_set_up': 'Email is not set up - set it up in the admin panel under Settings (Email / SMTP).',
+  /* ── wiring:e2 fxe - single encrypted files (.fxe), streamed downloads ── */
   'e2e.fxe.type': 'Encrypted file',
   'e2e.fxe.ctx_encrypt': 'Encrypt with E2EE…',
   'e2e.fxe.ctx_download_raw': 'Download encrypted file',
@@ -2207,7 +2276,7 @@ export const en: Record<string, string> = {
   'e2e.fxe.ctx_remove': 'Remove encryption…',
   'e2e.fxe.encrypt_title': 'Encrypt this file',
   'e2e.fxe.encrypt_lead':
-    '“{name}” is encrypted in this browser with a password of its own. The server keeps only ciphertext. The password or the recovery key opens it — here, or offline with filex decrypt.',
+    '“{name}” is encrypted in this browser with a password of its own. The server keeps only ciphertext. The password or the recovery key opens it - here, or offline with filex decrypt.',
   'e2e.fxe.pw_label': 'File password',
   'e2e.fxe.hide_label': 'Hide the file name too',
   'e2e.fxe.hide_on_hint':
@@ -2242,7 +2311,7 @@ export const en: Record<string, string> = {
   'e2e.fxe.unlock_title_remove': 'Remove encryption',
   'e2e.fxe.unlock_lead':
     '“{name}” is encrypted. Its password is checked here, in this browser, and is never sent to the server.',
-  'e2e.fxe.known_note': 'Already opened in this tab — no password needed.',
+  'e2e.fxe.known_note': 'Already opened in this tab - no password needed.',
   'e2e.fxe.use_password': 'Use the password instead',
   'e2e.fxe.remove_warn_title': 'The plaintext goes back to the server',
   'e2e.fxe.remove_warn_body':
@@ -2266,25 +2335,25 @@ export const en: Record<string, string> = {
   'e2e.fxe.password_cost':
     'Only the file’s header changes: the content is sent back byte for byte, and the recovery key keeps working.',
   'e2e.fxe.password_old_copies':
-    'An earlier version of this file — its version history, a backup, a copy someone downloaded — still opens with the OLD password.',
+    'An earlier version of this file - its version history, a backup, a copy someone downloaded - still opens with the OLD password.',
   'e2e.fxe.password_done': 'Password changed. The old password no longer opens this file.',
   'e2e.recovery.warn_body_file':
-    'Anyone holding this key can read the file. Keep it somewhere separate from the password — a key stored next to the password protects you from forgetting, not from anyone else.',
+    'Anyone holding this key can read the file. Keep it somewhere separate from the password - a key stored next to the password protects you from forgetting, not from anyone else.',
   'e2e.recovery.lead_file':
-    'This key opens the file without its password. It is shown once — filex does not store it and cannot show it again.',
+    'This key opens the file without its password. It is shown once - filex does not store it and cannot show it again.',
   'e2e.dl.ctx_encrypted_copy': 'Download encrypted copy',
   'e2e.dl.too_big':
     'This browser can save at most {limit} of decrypted data at once, and this is {size}. Use Chrome or Edge (they save straight to disk), the filex desktop app, or download the encrypted file and run filex decrypt.',
   'e2e.dl.click_again': 'Click Download again to choose where to save it.',
   'e2e.dl.zip_started': 'Decrypting into “{name}”…',
-  'e2e.dl.zip_done': '“{name}” saved — decrypted, with the real names.',
+  'e2e.dl.zip_done': '“{name}” saved - decrypted, with the real names.',
   'e2e.dl.zip_done_plain': '“{name}” saved. {n} files in it were never encrypted and are in it as they were.',
   'e2e.dl.zip_done_plain_one': '“{name}” saved. {n} file in it was never encrypted and is in it as it was.',
   'e2e.dl.zip_damaged':
     'A file in the folder is damaged or was tampered with. The download stopped and nothing was saved.',
   'e2e.upload.streaming_unsupported':
     'This file is over 200 MB, and this server has no chunked upload to send it encrypted piece by piece.',
-  /* wiring:e2 fxe escrow — the escrow key opens a single file, and its owner is told */
+  /* wiring:e2 fxe escrow - the escrow key opens a single file, and its owner is told */
   'e2e.fxe.use_escrow': 'Use the escrow key',
   'e2e.fxe.escrow_warn_title': 'The file’s owner will be told',
   'e2e.fxe.escrow_warn_body':
@@ -2296,22 +2365,22 @@ export const en: Record<string, string> = {
   'e2e.fxe.wrong_escrow': 'That escrow key does not open this file.',
   'e2e.fxe.escrow_notify_failed':
     'Could not notify the file’s owner, so the file was not opened. Escrow use is always announced.',
-  'e2e.fxe.escrow_done': 'Opened with the escrow key — the owner has been notified',
-  /* wiring:e2 fxe purge — an administrator deletes the original for good */
+  'e2e.fxe.escrow_done': 'Opened with the escrow key - the owner has been notified',
+  /* wiring:e2 fxe purge - an administrator deletes the original for good */
   'e2e.fxe.seen_trash_admin':
-    'The original goes to the trash and stays there until the trash retention period ends — unless you delete it for good below.',
-  'e2e.fxe.seen_versions_admin': 'Its earlier versions stay in its version history — unless you delete them for good below.',
+    'The original goes to the trash and stays there until the trash retention period ends - unless you delete it for good below.',
+  'e2e.fxe.seen_versions_admin': 'Its earlier versions stay in its version history - unless you delete them for good below.',
   'e2e.fxe.purge_label': 'Delete the original for good (administrator)',
   'e2e.fxe.purge_hint':
     'Its earlier versions and its trash entry are deleted as soon as the encrypted copy is saved, so no plaintext of it stays on this server. There is no undo. Backups and copies made before now are not reached.',
   'e2e.fxe.purge_others': 'This file belongs to {owner}, not to you. Delete their original and its versions for good.',
-  'e2e.fxe.purge_others_unknown': 'This file has no recorded owner — it is not yours. Delete the original and its versions for good.',
+  'e2e.fxe.purge_others_unknown': 'This file has no recorded owner - it is not yours. Delete the original and its versions for good.',
   'e2e.fxe.purge_others_required': 'Confirm that you are deleting someone else’s file for good.',
   'e2e.fxe.purge_no_id': 'This file is not in the catalog yet, so it cannot be deleted for good. Refresh the folder and try again.',
   'e2e.fxe.purged': '“{name}” is encrypted. The original, its versions and its trash entry are deleted for good.',
   'e2e.fxe.purge_failed':
     'The encrypted copy of “{name}” is saved, but the original could not be deleted for good ({reason}). Delete it from the trash and its version history.',
-  /* wiring:e2 fxe big — a decrypted download too large for this browser's memory */
+  /* wiring:e2 fxe big - a decrypted download too large for this browser's memory */
   'e2e.big.title': 'Too large to decrypt in this browser',
   'e2e.big.lead':
     '“{name}” is {size} once decrypted. This browser decrypts a download in its memory and can hold at most {limit} of it, so nothing was downloaded.',
@@ -2319,7 +2388,7 @@ export const en: Record<string, string> = {
     '“{name}” grew past {limit} while it was being decrypted. This browser decrypts a download in its memory and cannot hold more, so nothing was saved.',
   'e2e.big.instead': 'Decrypt it on your own computer instead:',
   'e2e.big.step_file': 'Download the encrypted file, as it is (the button below).',
-  'e2e.big.step_folder': 'Download the encrypted folder as a zip (the button below) — it carries the folder’s key file.',
+  'e2e.big.step_folder': 'Download the encrypted folder as a zip (the button below) - it carries the folder’s key file.',
   'e2e.big.step_run': 'In the folder you saved it to, run filex decrypt and give it the password:',
   'e2e.big.copy': 'Copy',
   'e2e.big.copied': 'Copied',
@@ -2328,7 +2397,7 @@ export const en: Record<string, string> = {
   'e2e.big.download_file': 'Download encrypted file',
   'e2e.big.download_folder': 'Download encrypted folder (zip)',
   /* /wiring:e2 fxe */
-  /* ── dil:paket — accessible names that were English literals */
+  /* ── dil:paket - accessible names that were English literals */
   'breadcrumb.aria': 'Breadcrumb',
   'e2e.recovery_key_aria': 'Recovery key',
   'modal.close': 'Close',
@@ -2365,13 +2434,13 @@ export const en: Record<string, string> = {
      in vue-i18n-only syntax (an escaped @, a | plural), which a shared key
      may not use. */
   'account.errors.emailRequired': "Enter an email address.",
-  'account.errors.usernameChar': "“{char}” cannot be used in a username. Use a–z, 0–9, dot, dash or underscore.",
+  'account.errors.usernameChar': "“{char}” cannot be used in a username. Use a-z, 0-9, dot, dash or underscore.",
   'account.errors.usernameDigit': "A username cannot start with a digit.",
   'account.errors.usernameEmpty': "Enter a username.",
   'account.errors.usernameLong': "A username can be at most {max} characters.",
   'account.errors.usernameReserved': "“{name}” is reserved; choose another username.",
   'account.errors.usernameShort': "A username needs at least {min} characters.",
-  'account.errors.usernameSpace': "A username cannot contain spaces. Use a–z, 0–9, dot, dash or underscore.",
+  'account.errors.usernameSpace': "A username cannot contain spaces. Use a-z, 0-9, dot, dash or underscore.",
   'common.cancel': "Cancel",
   'common.close': "Close",
   'common.confirm': "Confirm",
@@ -2394,8 +2463,8 @@ export const en: Record<string, string> = {
   'notifications.prefs.desktopHandled': "The desktop app shows these itself",
   'notifications.prefs.enableBrowser': "Allow notifications",
   'notifications.prefs.inApp': "In-app bell",
-  'notifications.prefs.inAppHint': "Turning this off empties your bell. Nothing stops being recorded — an admin still sees every event.",
-  'notifications.prefs.movedToSettings': "Your own notification settings — the bell, browser pop-ups, which events — are in your user settings.",
+  'notifications.prefs.inAppHint': "Turning this off empties your bell. Nothing stops being recorded - an admin still sees every event.",
+  'notifications.prefs.movedToSettings': "Your own notification settings - the bell, browser pop-ups, which events - are in your user settings.",
   'notifications.prefs.openSettings': "Open my notification settings",
   'notifications.prefs.permDefault': "Permission not asked yet",
   'notifications.prefs.permDenied': "Blocked by this browser",
@@ -2405,8 +2474,8 @@ export const en: Record<string, string> = {
   'notifications.prefs.saved': "Preference saved",
   'notifications.prefs.title': "Your notifications",
   'profile.avatar.change': "Change photo",
-  'profile.avatar.failed': "That image could not be processed — try another one.",
-  'profile.avatar.help': "Shown next to your name, and in the file explorer's collaboration bar — on every client signed in as you. Resized to 160px automatically.",
+  'profile.avatar.failed': "That image could not be processed - try another one.",
+  'profile.avatar.help': "Shown next to your name, and in the file explorer's collaboration bar - on every client signed in as you. Resized to 160px automatically.",
   'profile.avatar.label': "Profile picture",
   'profile.avatar.notImage': "Please choose an image file.",
   'profile.locale': "Language",
@@ -2417,7 +2486,7 @@ export const en: Record<string, string> = {
   'profile.totp.disabled': "Disabled",
   'profile.totp.enable': "Enable 2FA",
   'profile.totp.enabled': "Enabled",
-  'profile.totp.recoveryHint': "Save these now — each one signs you in once if you lose your authenticator. They are shown only this time.",
+  'profile.totp.recoveryHint': "Save these now - each one signs you in once if you lose your authenticator. They are shown only this time.",
   'profile.totp.recoveryTitle': "Recovery codes",
   'profile.totp.scanHint': "Scan this QR code with your authenticator app, then enter the 6-digit code.",
   'profile.totp.title': "Two-factor authentication",
@@ -2450,16 +2519,16 @@ export const en: Record<string, string> = {
   'userSettings.notifications.events.file_uploaded': "A new file arrives",
   'userSettings.notifications.events.plugin_notice': "An installed app sends you a message",
   'userSettings.notifications.events.share_created': "Someone creates a share link",
-  'userSettings.notifications.eventsHint': "Turning one off keeps it out of your bell. Nothing stops being recorded — an administrator still sees every event.",
+  'userSettings.notifications.eventsHint': "Turning one off keeps it out of your bell. Nothing stops being recorded - an administrator still sees every event.",
   'userSettings.notifications.eventsTitle': "What to tell me about",
   'userSettings.open': "User settings",
   'userSettings.prefs.appearance': "Appearance",
   'userSettings.prefs.compact': "Use compact file list",
   'userSettings.prefs.compactHint': "Tighter rows in the file explorer.",
   'userSettings.prefs.desktopApp': "Desktop app",
-  'userSettings.prefs.desktopAppHint': "The reminder in the corner of the app can be closed for good — these downloads stay here.",
+  'userSettings.prefs.desktopAppHint': "The reminder in the corner of the app can be closed for good - these downloads stay here.",
   'userSettings.prefs.folderView': "Default folder view",
-  'userSettings.prefs.folderViewHint': "How a folder you have never changed opens. A folder you have changed keeps its own view — changing this does not touch it.",
+  'userSettings.prefs.folderViewHint': "How a folder you have never changed opens. A folder you have changed keeps its own view - changing this does not touch it.",
   'userSettings.prefs.fvColumns': "Your default columns are customized (set with “Make this my default for all folders”).",
   'userSettings.prefs.fvColumnsReset': "Reset them",
   'userSettings.prefs.fvDir': "Direction",
@@ -2500,21 +2569,28 @@ export const en: Record<string, string> = {
   'userSettings.subtitle.ai': "Nothing for you to set here yet.",
   'userSettings.subtitle.notifications': "What reaches your bell, and what reaches your desktop.",
   'userSettings.subtitle.preferences': "How this app looks and reads on your devices.",
-  'userSettings.subtitle.profile': "Your name, email and picture — what other people see.",
+  'userSettings.subtitle.profile': "Your name, email and picture - what other people see.",
   'userSettings.subtitle.security': "Your password and second factor.",
   'userSettings.tabs.ai': "AI assistant",
   'userSettings.tabs.notifications': "Notifications",
   'userSettings.tabs.preferences': "Preferences",
   'userSettings.tabs.profile': "Profile",
   'userSettings.tabs.security': "Security",
+  'userSettings.apps.title': "Default apps",
+  'userSettings.apps.lead': "Choose one in a file's menu: Open with, Choose an app…, then tick \"Always use this app\". Only the apps your administrator left on for a kind are offered.",
+  'userSettings.apps.empty': "You have not chosen an app for any kind of file yet: every file opens with what your administrator put first.",
+  'userSettings.apps.reset': "Reset",
+  'userSettings.apps.resetAll': "Reset all",
+  'userSettings.apps.unavailable': "No longer available: it opens with {app} until you choose again.",
+  'userSettings.apps.change': "The app that opens {ext} files",
   'userSettings.title': "Settings",
   'users.fields.displayName': "Display name",
   'webhooks.offReason.antivirus': "Virus scanning is off (Protection).",
   'webhooks.offReason.appPlugins': "Apps are switched off on this server.",
   'webhooks.offReason.escrow': "No escrow key is set up for encrypted folders.",
   'account.problem.emailInvalid': "This is not an email address. Write it as name@example.com.",
-  'account.problem.usernameAt': "A username cannot contain @ — that belongs to an email address.",
-  'profile.username.helpText': "Your username. You can sign in with it or with your email — and connection clients (SFTP, FTP) need it, because an @ in the name they sign in with has to be escaped in their config files.",
+  'account.problem.usernameAt': "A username cannot contain @ - that belongs to an email address.",
+  'profile.username.helpText': "Your username. You can sign in with it or with your email - and connection clients (SFTP, FTP) need it, because an @ in the name they sign in with has to be escaped in their config files.",
   'userSettings.prefs.fvKeptCount': "{count} folders keep a view of their own.",
   'userSettings.prefs.fvKeptCount_one': "{count} folder keeps a view of its own.",
 };

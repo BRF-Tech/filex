@@ -2,7 +2,7 @@
 /**
  * e2e/run.mjs — the one entry point for filex's end-to-end suite.
  *
- * Three profiles, deliberately kept apart:
+ * Three profiles, deliberately kept apart (and one diagnostic, boot-stress):
  *
  *   local        Hermetic Playwright run. Starts a filex binary on a free port
  *                against a throwaway data dir with a deterministic admin, waits
@@ -19,6 +19,10 @@
  *   deployment   Read-only smoke against a URL that is already live. Never
  *                run as part of a build check.
  *
+ *   boot-stress  The same hermetic instance, and the sign-in page opened in
+ *                fresh browser contexts back to back (lib/boot-stress.mjs,
+ *                task #81). A diagnostic, not a gate.
+ *
  * Mixing the live one into the others is what made the old setup unable to
  * answer the only question that matters before a release — "is this build
  * good?" — because a local run could go red merely because production was
@@ -26,12 +30,13 @@
  *
  * Usage:
  *   node e2e/run.mjs local
- *   node e2e/run.mjs local --s3                 # + a MinIO container and an s3 storage
+ *   node e2e/run.mjs local --s3                 # + an S3 server container and an s3 storage
  *   node e2e/run.mjs local --binary ../bin/filex.exe --keep
  *   node e2e/run.mjs local --base-path /filex   # served under a sub-path, behind a proxy
  *   node e2e/run.mjs cypress
  *   node e2e/run.mjs cypress --spec "cypress/e2e/13-navigation-ui.cy.ts"
  *   node e2e/run.mjs deployment --url https://fm.example.com
+ *   node e2e/run.mjs boot-stress --binary bin/filex --loads 1000
  *
  * Exit code is the suite's. A profile that cannot set up what it promised
  * fails loudly; it never quietly runs a smaller suite than you asked for.
@@ -44,6 +49,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unknownOptions, unknownOptionMessage } from './lib/args.mjs';
+import { S3_HEALTH_PATH, S3_REGION, s3BucketArgs, s3Image, s3RemoveArgs, s3RunArgs } from './lib/s3server.mjs';
 import { REPORT_PATH } from './lib/subpath-proxy.mjs';
 
 const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -62,13 +68,13 @@ const value = (name, fallback = undefined) => {
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : fallback;
 };
 
-const PROFILES = ['local', 'cypress', 'deployment'];
+const PROFILES = ['local', 'cypress', 'deployment', 'boot-stress'];
 if (!PROFILES.includes(profile)) {
   console.error(`usage: node e2e/run.mjs <${PROFILES.join('|')}> [options]\n`);
   console.error('  local       hermetic Playwright run against a binary this script starts');
   console.error('    --binary <path>   filex binary (default: bin/filex[.exe], or --build)');
   console.error('    --build           build the frontend + binary first');
-  console.error('    --s3              also start MinIO and register an s3 storage');
+  console.error('    --s3              also start an S3 server (versitygw) and register an s3 storage');
   console.error('    --port <n>        server port (default: a free one)');
   console.error('    --keep            leave the server (and data dir) running afterwards');
   console.error('    --grep <pattern>  pass through to playwright');
@@ -84,6 +90,11 @@ if (!PROFILES.includes(profile)) {
   console.error('');
   console.error('  deployment  read-only smoke against a live URL');
   console.error('    --url <url>       required, e.g. https://fm.example.com');
+  console.error('');
+  console.error('  boot-stress the sign-in page in fresh contexts, back to back (task #81, lib/boot-stress.mjs)');
+  console.error('    --binary / --build / --port / --keep as above');
+  console.error('    --loads <n>       how many loads (default 1000)');
+  console.error('    --close-after <ms|rand>  when each context closes after its form (default rand)');
   process.exit(2);
 }
 
@@ -376,6 +387,20 @@ async function startServer(binary) {
       // being measured, and it binds to loopback only.
       FILEX_NFS: '1',
       FILEX_NFS_ADDR: '127.0.0.1:0',
+      // ⚠ The app sources 171-app-plugin-updates and 177-plugin-requests
+      // install from are small HTTP servers on 127.0.0.1. Plugin and app
+      // downloads reach public addresses only (0.50.0, netguard); this opens
+      // THIS machine to them and nothing else. Development and tests only -
+      // never set on a server.
+      FILEX_PLUGIN_LOOPBACK_SOURCES: '1',
+      // Debug unless the caller chose: the access line is written when an
+      // answer FINISHES, and only the debug level also writes each request's
+      // arrival with its socket (`http start ... peer=`). Without it a page
+      // whose script "never reached the server" (task #81, a blank sign-in
+      // page once in a few hundred loads) cannot be told from one whose
+      // request arrived and hung. The log roughly doubles; it is kept in
+      // e2e/.artifacts/server.log either way.
+      FILEX_LOG_LEVEL: process.env.FILEX_LOG_LEVEL ?? 'debug',
     },
     stdio: ['ignore', logFd, logFd],
   });
@@ -658,45 +683,39 @@ async function seedCypressStorage(baseURL, dataDir) {
 }
 
 /**
- * MinIO in Docker, plus an s3 storage registered through the admin API.
- * The bucket is made by creating a directory inside the container — MinIO
- * treats a top-level directory of its data dir as a bucket, so this needs no
- * extra client and no SigV4 signing here.
+ * An S3 server in Docker (lib/s3server.mjs: Versity S3 Gateway, posix
+ * backend), plus an s3 storage registered through the admin API.
  */
 async function startS3(baseURL) {
   if (!tryRun('docker', ['version'])) {
     throw new Error('--s3 needs Docker, and `docker version` failed. Not skipping silently.');
   }
-  const image = 'minio/minio:latest';
+  const image = s3Image();
   if (!tryRun('docker', ['image', 'inspect', image])) {
     log(`pulling ${image}…`);
-    run('docker', ['pull', image]);
+    if (!tryRun('docker', ['pull', image])) {
+      throw new Error(`--s3 could not pull ${image}. Set E2E_S3_IMAGE to a versitygw image this Docker has or can pull.`);
+    }
   }
 
   const port = await freePort();
-  const name = `filex-e2e-minio-${port}`;
+  const name = `filex-e2e-s3-${port}`;
   const access = 'filexe2e';
   const secret = 'filexe2esecret';
   const bucket = 'filex-e2e';
 
-  run('docker', [
-    'run', '-d', '--rm', '--name', name,
-    '-p', `${port}:9000`,
-    '-e', `MINIO_ROOT_USER=${access}`,
-    '-e', `MINIO_ROOT_PASSWORD=${secret}`,
-    image, 'server', '/data',
-  ]);
+  run('docker', s3RunArgs({ image, name, hostPort: port, accessKey: access, secretKey: secret }));
   cleanups.push(() => {
     if (flag('keep')) {
-      log(`--keep: MinIO still on http://127.0.0.1:${port} (container ${name})`);
+      log(`--keep: the S3 server is still on http://127.0.0.1:${port} (container ${name})`);
       return;
     }
-    tryRun('docker', ['rm', '-f', name]);
+    tryRun('docker', s3RemoveArgs(name));
   });
 
-  await waitFor(`http://127.0.0.1:${port}/minio/health/live`, 'MinIO');
-  run('docker', ['exec', name, 'mkdir', '-p', `/data/${bucket}`]);
-  log(`MinIO up on http://127.0.0.1:${port}, bucket ${bucket}`);
+  await waitFor(`http://127.0.0.1:${port}${S3_HEALTH_PATH}`, 'the S3 server');
+  run('docker', s3BucketArgs(name, bucket));
+  log(`S3 server (${image}) up on http://127.0.0.1:${port}, bucket ${bucket}`);
 
   // Register the storage the same way a human would: through the admin API.
   const login = await fetch(`${baseURL}/api/auth/login`, {
@@ -723,7 +742,7 @@ async function startS3(baseURL) {
         enabled: true,
         config: {
           endpoint: `http://127.0.0.1:${port}`,
-          region: 'us-east-1',
+          region: S3_REGION,
           bucket,
           prefix,
           access_key: access,
@@ -754,6 +773,16 @@ async function main() {
   const { baseURL, apiRoot, dataDir, proxy } = await startServer(binary);
   const storageRootDir = path.join(dataDir, 'storages');
   fs.mkdirSync(storageRootDir, { recursive: true });
+
+  if (profile === 'boot-stress') {
+    const { bootStress } = await import('./lib/boot-stress.mjs');
+    const loads = Number(value('loads', '1000'));
+    const closeAfter = value('close-after', 'rand');
+    if (!Number.isInteger(loads) || loads < 1) throw new Error(`--loads ${value('loads')}: a whole number of loads`);
+    if (closeAfter !== 'rand' && !/^\d+$/.test(closeAfter)) throw new Error(`--close-after ${closeAfter}: milliseconds or rand`);
+    log(`boot stress: ${loads} loads, closing each context ${closeAfter === 'rand' ? '0.1-1.1 s' : `${closeAfter} ms`} after its form`);
+    return bootStress({ baseURL, loads, closeAfter, outDir: path.join(E2E_DIR, '.artifacts', 'boot-stress'), log });
+  }
 
   if (profile === 'cypress') {
     const storageName = await seedCypressStorage(apiRoot, dataDir);

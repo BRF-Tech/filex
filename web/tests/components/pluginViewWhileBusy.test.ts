@@ -6,8 +6,8 @@
 // outside or × closed the dialog while a submit was on its way; the server
 // still queued the job, but the dialog that hands the row up was gone, so the
 // job ran with no row in the operations centre and no word on screen.
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -24,21 +24,13 @@ const screen: PluginSurface = {
   ],
 };
 
-const mounted: VueWrapper[] = [];
-
 function open(props: Record<string, unknown>) {
   const w = mount(PluginViewModal, {
     props: { open: true, locale: 'en', plugin: 'sign', view: 'wizard', path: 'docs://nda.pdf', ...props },
     attachTo: document.body,
   });
-  mounted.push(w);
   return w;
 }
-
-afterEach(() => {
-  mounted.splice(0).forEach((w) => w.unmount());
-  document.body.innerHTML = '';
-});
 
 describe('an app screen', () => {
   it('opened before its first screen says it is loading, under the action’s name', async () => {

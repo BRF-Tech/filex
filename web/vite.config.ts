@@ -96,7 +96,7 @@ export default defineConfig({
       includeAssets: ['favicon.svg', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png'],
       manifest: {
         id: '/admin/',
-        name: 'filex — File Manager',
+        name: 'filex - File Manager',
         short_name: 'filex',
         description: 'Self-hosted file manager: browse, upload, share and edit your files.',
         start_url: '/admin/',

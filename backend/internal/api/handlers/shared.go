@@ -35,6 +35,9 @@ type Shared struct {
 	// ThumbSigner stamps the `thumb_url` this listing hands out. Nil emits an
 	// unsigned URL, which authenticated clients still fetch fine.
 	ThumbSigner *thumb.Signer
+	// ThumbRefresh draws in the background what a projected row found missing
+	// or stale (hydrateThumbs).
+	ThumbRefresh ThumbRefresher
 }
 
 // NewShared constructs the handler.
@@ -107,7 +110,9 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 		if !st.RBACEnabled {
 			continue
 		}
-		grants, gerr := h.Store.ListFileGrantsByStorageUser(r.Context(), st.ID, u.ID)
+		// Their own grants and their groups' (acl.UserGrants): shared with a
+		// group they are in is shared with them.
+		grants, gerr := acl.UserGrants(r.Context(), h.Store, st.ID, u)
 		if gerr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
 			return
@@ -117,10 +122,30 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 		}
 		sharedStorages = append(sharedStorages, st.Name)
 
+		// One row per item: the same folder shared with the person and with
+		// one of their groups is still one folder shared with them — at the
+		// HIGHEST of those levels (acl.Set.Effective takes the highest too),
+		// capped by the account's ceiling, as the folder itself will answer.
+		best := map[string]*model.FileGrant{}
+		for _, g := range grants {
+			rel := acl.CleanRel(g.PathPrefix)
+			if b := best[rel]; b == nil || acl.ParseLevel(g.Level) > acl.ParseLevel(b.Level) {
+				best[rel] = g
+			}
+		}
+		ceiling := acl.RoleCeiling(u.Role)
 		for _, g := range grants {
 			rel := acl.CleanRel(g.PathPrefix)
 			if rel == "" {
 				continue // (3) whole-storage grant — reported via `storages`
+			}
+			if best[rel] != g {
+				continue
+			}
+			if lv := acl.ParseLevel(g.Level); lv > ceiling {
+				capped := *g
+				capped.Level = ceiling.String()
+				g = &capped
 			}
 			if confined && !root.Within(st.Name, rel) {
 				continue
@@ -199,9 +224,7 @@ func (h *Shared) project(ctx context.Context, st *model.Storage, g *model.FileGr
 	var entry map[string]any
 	hash := pathkey.Hash(st.ID, normalizeDBPath(rel))
 	if node, err := h.Store.GetNodeByPath(ctx, st.ID, hash); err == nil && node != nil {
-		if th, terr := h.Store.GetThumbnail(ctx, node.ID); terr == nil {
-			node.Thumb = th
-		}
+		hydrateThumbs(ctx, h.Store, h.ThumbRefresh, []*model.Node{node})
 		// set=nil: the caller's visibility is already decided — they hold the
 		// grant. Passing an acl.Set here would re-derive the same answer and
 		// stamp `perm` from it; the grant's own level is the more precise

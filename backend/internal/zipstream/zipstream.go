@@ -82,9 +82,9 @@ type Skip struct {
 
 func (s Skip) String() string {
 	if s.Partial {
-		return fmt.Sprintf("%s — incomplete after %d bytes: %v", s.Name, s.Written, s.Err)
+		return fmt.Sprintf("%s - incomplete after %d bytes: %v", s.Name, s.Written, s.Err)
 	}
-	return fmt.Sprintf("%s — not included: %v", s.Name, s.Err)
+	return fmt.Sprintf("%s - not included: %v", s.Name, s.Err)
 }
 
 // Options tune one Write. The zero value is valid and means "write every

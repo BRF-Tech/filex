@@ -47,6 +47,7 @@ import (
 	"context"
 	"log/slog"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,6 +58,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/trash"
+	"github.com/brf-tech/filex/backend/internal/versioning"
 	"github.com/brf-tech/filex/backend/internal/writehook"
 )
 
@@ -402,23 +405,67 @@ func (s *Syncer) Delete(ctx context.Context, st *model.Storage, rel string) {
 
 // DeleteRows is Delete without the write hook or the change frame — see
 // TrashRows for why the halves are separable.
+//
+// It is filex's one answer to "these bytes are gone for good, drop the rows":
+// the protocol servers' deletes, the explorer's delete of an item already gone
+// or on a storage that keeps no trash (vfDelete) and the operations queue's
+// (Manager.SyncHardDelete) all end here, so none of them can release less than
+// the others. Every row goes on its own, deepest first, through the accounting
+// store (each file's bytes leave its owner's quota) - never a folder row alone,
+// whose parent_id cascade would take its contents and release nothing.
+//
+// Also dropped, with the folder (issue #104):
+//
+//   - rows an earlier version soft-deleted where they stood below it
+//     (vanished): they still name it as their parent and still count against
+//     their owner's quota, and the cascade would take them silently;
+//   - each file's snapshots under `.versions/<id>/`, when the Syncer has a
+//     Resolver: their rows cascade with the file's, and nothing would ever
+//     reach the bytes again.
 func (s *Syncer) DeleteRows(ctx context.Context, st *model.Storage, rel string) (string, bool) {
 	clean := NormalizePath(rel)
 	node, _ := s.Store.GetNodeByPath(ctx, st.ID, pathkey.Hash(st.ID, clean))
 	if node == nil {
 		return "", false
 	}
-	subtree := s.CollectSubtree(ctx, st.ID, node)
-	for i := len(subtree) - 1; i >= 0; i-- {
-		n := subtree[i]
+	rows := s.CollectSubtree(ctx, st.ID, node)
+	if node.Type == model.NodeTypeDirectory {
+		if under, err := s.Store.ListNodesUnder(ctx, st.ID, node.Path, true); err == nil {
+			for _, c := range under {
+				if trash.Vanished(c) {
+					rows = append(rows, c)
+				}
+			}
+		}
+	}
+	// Deepest first, so no row is ever taken by its parent's cascade.
+	sort.SliceStable(rows, func(i, j int) bool { return depth(rows[i].Path) > depth(rows[j].Path) })
+	var drv storage.Driver
+	if s.Resolver != nil {
+		drv, _ = s.Resolver(st.ID)
+	}
+	seen := map[int64]bool{}
+	for _, n := range rows {
+		if seen[n.ID] {
+			continue
+		}
+		seen[n.ID] = true
+		var history []string
+		if n.Type == model.NodeTypeFile && drv != nil {
+			history = versioning.Keys(ctx, s.Store, n.ID)
+		}
 		if err := s.Store.HardDeleteNode(ctx, n.ID); err != nil {
 			s.warn("node delete", slog.Int64("id", n.ID), slog.String("err", err.Error()))
 			continue
 		}
 		s.RemoveFromIndex(ctx, n.ID)
+		versioning.Forget(ctx, drv, n.ID, history)
 	}
 	return node.Name, true
 }
+
+// depth is how many segments deep p is, in either spelling a row carries.
+func depth(p string) int { return strings.Count(strings.Trim(p, "/"), "/") }
 
 // Move re-homes the node row (and cached descendants) to the new path and
 // re-indexes each. A stale FILE row holding the destination is dropped (its

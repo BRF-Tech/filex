@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "name": "pkglist",
+  "version": "0.1.0",
+  "label": { "en": "Package contents", "tr": "Paket içeriği" },
+  "description": {
+    "en": "Draws the thumbnail of a .jar, .apk, .whl, .vsix, .nupkg or .xpi as the list of what is inside it.",
+    "tr": ".jar, .apk, .whl, .vsix, .nupkg ve .xpi dosyalarının küçük resmini içindekilerin listesi olarak çizer."
+  },
+  "filex": ">=0.50.0",
+  "languages": ["en", "tr"],
+  "permissions": [],
+  "thumbnails": {
+    "applies": { "kind": "file", "ext": ["apk", "jar", "nupkg", "vsix", "whl", "xpi"] }
+  }
+}

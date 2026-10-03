@@ -75,6 +75,11 @@ describe('the sign-in page is not covered by the install banner', () => {
         const body = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
         const drivers: string[] = body.auth_drivers ?? [];
         if (!drivers.includes('oidc')) body.auth_drivers = [...drivers, 'oidc'];
+        // ⚠ Since the per-realm SSO buttons (#130) the page draws one button
+        // per entry of `auth_sso`, and reads `auth_drivers` only from a
+        // server that sends no list; this server sends an empty one, so the
+        // stub fills it (the e2e 103 stub does the same).
+        if (!Array.isArray(body.auth_sso) || body.auth_sso.length === 0) body.auth_sso = [{ id: '', label: '' }];
         res.send(body);
       });
     });

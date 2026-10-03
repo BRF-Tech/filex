@@ -69,7 +69,7 @@ export async function completeDesktopHandoff(): Promise<string | null> {
   const { data } = await api.post('/auth/desktop/complete', {
     state,
     challenge,
-    label: `filex desktop — ${navigator.platform || 'unknown'}`,
+    label: `filex desktop - ${navigator.platform || 'unknown'}`,
   });
   // Only the code travels in the URL; the token stays on the wire. The desktop
   // exchanges it using a verifier that never left that process.

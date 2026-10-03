@@ -17,20 +17,18 @@
 //   4. It speaks the explorer catalogue: Turkish with Turkish characters.
 //
 // (The admin app's binding keeps its own, older suite: userSettings.test.ts.)
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 import UserSettingsDialog from '@brftech/filex-core/src/components/UserSettingsDialog.vue';
 import type { UserSettingsHost, SettingsUser } from '@brftech/filex-core/src/lib/userSettingsHost';
 import { tr } from '@brftech/filex-core/src/locales/tr';
+import { answerAccountPrefs } from '../helpers/accountPrefs';
 
-const live: VueWrapper[] = [];
-afterEach(() => {
-  while (live.length) live.pop()!.unmount();
-  document.body.innerHTML = '';
-});
+// Picking a theme writes it to the account 400 ms later.
+answerAccountPrefs();
 
 function plainHost(extra: Partial<UserSettingsHost> = {}, locale = 'en') {
   let user: SettingsUser = { id: 7, email: 'ayse@example.com', username: 'ayse', display_name: 'Ayşe', role: 'user' };
@@ -72,9 +70,7 @@ function plainHost(extra: Partial<UserSettingsHost> = {}, locale = 'en') {
 }
 
 function open(host: UserSettingsHost) {
-  const w = mount(UserSettingsDialog, { props: { modelValue: true, host }, attachTo: document.body });
-  live.push(w);
-  return w;
+  return mount(UserSettingsDialog, { props: { modelValue: true, host }, attachTo: document.body });
 }
 
 describe('the core settings dialog, with only what an explorer can give it', () => {

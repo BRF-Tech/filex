@@ -20,11 +20,13 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // MarkerName is the folder marker filename dropped by the client at the
-// root of every encrypted folder.
-const MarkerName = ".filex-e2e.json"
+// root of every encrypted folder. Spelled once, in syspath (E2EKeyFile),
+// whose listing and keyless-write rules judge it by this very name.
+const MarkerName = syspath.E2EKeyFile
 
 // MagicPrefix is the 8-byte prefix of every client-encrypted file.
 var MagicPrefix = []byte("filexe2e")
@@ -136,6 +138,14 @@ func markerAt(ctx context.Context, lk NodeByPathLookup, storageID int64, dir str
 	}
 	n, err := lk.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, markerPath))
 	return err == nil && n != nil && n.DeletedAt == nil
+}
+
+// IsRoot reports whether dir is itself an encrypted folder: it holds a live
+// marker. The one test behind the listing badge (`e2e: true` on a folder
+// row), the AI surface's `encrypted` folder and the transfer guard's "an
+// encrypted folder may move, its marker travels with it".
+func IsRoot(ctx context.Context, lk NodeByPathLookup, storageID int64, dir string) bool {
+	return markerAt(ctx, lk, storageID, dir)
 }
 
 // FindRoot walks dir and its ancestors (deepest first, storage root last)

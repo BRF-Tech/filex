@@ -43,7 +43,7 @@ function node(over: Partial<FileNode> = {}): FileNode {
   } as FileNode;
 }
 
-function mountViewer(props: Record<string, unknown> = {}) {
+function mountViewer(props: Record<string, unknown> = {}, stubs: Record<string, boolean> = {}) {
   return mount(PreviewModal, {
     props: {
       open: true,
@@ -53,6 +53,7 @@ function mountViewer(props: Record<string, unknown> = {}) {
       downloadUrl: (p: string) => `/download?path=${p}`,
       ...props,
     },
+    global: { stubs },
   });
 }
 
@@ -133,6 +134,105 @@ describe('viewer overlay chrome', () => {
     expect(share).toBeTruthy();
     share!.trigger('click');
     expect(w.emitted('share')).toBeTruthy();
+  });
+
+  // #110: the chevrons were drawn over a surface that fills the stage, and
+  // covered its edge: filextext's page list and its scroll bar (measured in
+  // Firefox and WebKit, two files in the folder). Such a stage keeps a gutter
+  // for them, the same on both sides; a photo, with ground around it, does not.
+  it.each([
+    ['pdf', 'report.pdf'],
+    ['markdown', 'README.md'],
+    ['code', 'main.go'],
+    ['office', 'contract.docx'],
+    ['viewer', 'topology.drawio'],
+  ])('keeps a gutter for the chevrons beside a %s surface', (_kind, basename) => {
+    const extension = basename.split('.').pop()!;
+    const file = node({ extension, basename, path: `qldemo://docs/${basename}` });
+    const nav = mountViewer({ file, index: 2, total: 3 });
+    expect(nav.find('[data-testid="viewer-stage"]').classes()).toContain('fe-viewer__stage--gutter');
+    // The first file draws only "next" in some hosts' minds; the gutter does
+    // not depend on which chevron, so the surface does not move.
+    const first = mountViewer({ file, index: 1, total: 3 });
+    expect(first.find('[data-testid="viewer-stage"]').classes()).toContain('fe-viewer__stage--gutter');
+    // Nowhere to go: no chevrons, no gutter.
+    const alone = mountViewer({ file, index: 1, total: 1 });
+    expect(alone.find('[data-testid="viewer-stage"]').classes()).not.toContain('fe-viewer__stage--gutter');
+  });
+
+  it("keeps a gutter beside an app's own interface", () => {
+    const w = mountViewer({
+      file: node({ extension: 'fxtxt', basename: 'notes.fxtxt', path: 'qldemo://docs/notes.fxtxt' }),
+      index: 2,
+      total: 3,
+      appViewer: { plugin: 'filextext', id: 'editor', label: { en: 'filextext' }, ui: { version: '0.1.1' } },
+      api: {},
+    }, { AppFrame: true });
+    expect(w.find('[data-testid="viewer-stage"]').classes()).toContain('fe-viewer__stage--gutter');
+  });
+
+  it('leaves a photo where it was: no gutter', () => {
+    const w = mountViewer({ index: 2, total: 3 });
+    expect(w.find('[data-testid="viewer-stage"]').classes()).not.toContain('fe-viewer__stage--gutter');
+  });
+
+  it('sizes the gutter from the chevrons themselves, so the two cannot disagree', () => {
+    const rule = (sel: string) => {
+      const i = coreStyles.indexOf(`${sel} {`);
+      expect(i, sel).toBeGreaterThanOrEqual(0);
+      return coreStyles.slice(i, coreStyles.indexOf('}', i));
+    };
+    expect(rule('.fe-viewer__stage--gutter')).toMatch(
+      /padding-inline:\s*calc\(var\(--fe-viewer-chev-size\)\s*\+\s*var\(--fe-viewer-chev-inset\)\s*\*\s*2\)/,
+    );
+    expect(rule('.fe-viewer__chev')).toMatch(/width:\s*var\(--fe-viewer-chev-size\)/);
+    expect(coreStyles).toMatch(/\.fe-viewer__chev--prev\s*\{\s*inset-inline-start:\s*var\(--fe-viewer-chev-inset\)/);
+    expect(coreStyles).toMatch(/\.fe-viewer__chev--next\s*\{\s*inset-inline-end:\s*var\(--fe-viewer-chev-inset\)/);
+  });
+
+  // #110: after a save made in the viewer the header still said the size and
+  // date the file had when it was opened (filextext re-keyed its workspace
+  // after a password reset: a new version on the storage, "1.92 KB" on top).
+  it("says the new size after an app's interface saved, and tells the host", async () => {
+    const file = node({ extension: 'fxtxt', basename: 'notes.fxtxt', path: 'qldemo://docs/notes.fxtxt', size: 252_211 });
+    const w = mountViewer({
+      file,
+      appViewer: { plugin: 'filextext', id: 'editor', label: { en: 'filextext' }, ui: { version: '0.1.1' } },
+      api: {},
+    }, { AppFrame: true });
+    expect(w.find('.fe-viewer__meta').text()).toContain('252.2');
+    const frame = w.findComponent({ name: 'AppFrame' });
+    // Another of its files saved: the header is about the first one.
+    frame.vm.$emit('saved', { path: 'qldemo://docs/other.fxtxt', size: 9, index: 1 });
+    await w.vm.$nextTick();
+    expect(w.find('.fe-viewer__meta').text()).toContain('252.2');
+    frame.vm.$emit('saved', { path: 'qldemo://docs/notes.fxtxt', size: 1_048_576, index: 0 });
+    await w.vm.$nextTick();
+    const meta = w.find('.fe-viewer__meta').text();
+    expect(meta).not.toContain('252.2');
+    expect(meta).toContain('MB');
+    expect(w.emitted('saved')).toEqual([[{ path: 'qldemo://docs/notes.fxtxt', size: 1_048_576 }]]);
+  });
+
+  it('says the new size after the Markdown editor saved', async () => {
+    // Fake timers: the editor saves 1.5 s after the last keystroke, and that
+    // timer must not outlive the test (it would reach for the network later).
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const file = node({ extension: 'md', basename: 'notes.md', path: 'qldemo://docs/notes.md', size: 252_211 });
+      const w = mountViewer({ file, openMode: 'edit', saveTextEndpoint: '/api/files/save-text' });
+      await vi.advanceTimersByTimeAsync(0);
+      const area = w.find('.fe-preview__md-split-input');
+      expect(area.exists()).toBe(true);
+      expect(w.find('.fe-viewer__meta').text()).toContain('252.2');
+      await area.setValue('hello');
+      await vi.advanceTimersByTimeAsync(1600);
+      await w.vm.$nextTick();
+      expect(w.find('.fe-viewer__meta').text()).not.toContain('252.2');
+      expect(w.emitted('saved')?.[0]).toEqual([{ path: 'qldemo://docs/notes.md', size: 5 }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps chromeless bare — the standalone route IS the container', () => {

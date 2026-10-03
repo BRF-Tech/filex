@@ -94,8 +94,8 @@ func TestLocalStateLines(t *testing.T) {
 	l.localState("pair-1", fmt.Errorf("%w: more than 4000 items (macOS watches every file separately)", errTooLargeToWatch))
 	l.localState("pair-1", errors.New("too many open files"))
 	l.localState("pair-1", nil)
-	want := "pair-1: local: poll-only — too-large — more than 4000 items (macOS watches every file separately)\n" +
-		"pair-1: local: poll-only — unavailable — too many open files\n" +
+	want := "pair-1: local: poll-only - too-large - more than 4000 items (macOS watches every file separately)\n" +
+		"pair-1: local: poll-only - unavailable - too many open files\n" +
 		"pair-1: local: watched\n"
 	if buf.String() != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", buf.String(), want)

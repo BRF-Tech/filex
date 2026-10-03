@@ -36,6 +36,12 @@ type Worker struct {
 	// reclaim, when set, releases a node's per-node caches when the sync drops
 	// its row for good. See AttachReclaim.
 	reclaim func(ctx context.Context, nodeID int64)
+	// entryState, when set, hears about entries the storage could not answer
+	// for (issue #104). See AttachEntryState.
+	entryState func(ctx context.Context, e EntryState)
+	// thumbs, when set, is told about the files a walk found drifted, so the
+	// ones whose thumbnail is now stale are drawn again. See AttachThumbs.
+	thumbs func(ctx context.Context, nodes []*model.Node)
 	// fallback is the global poll cadence for storages with no interval of
 	// their own (FILEX_SYNC_INTERVAL).
 	fallback time.Duration
@@ -112,6 +118,16 @@ func (w *Worker) AttachAntivirus(fn func(ctx context.Context, n *model.Node)) {
 // their own sweepers.
 func (w *Worker) AttachReclaim(fn func(ctx context.Context, nodeID int64)) {
 	w.reclaim = fn
+}
+
+// AttachThumbs wires what hears about the files a walk found drifted (their
+// content changed on the backend, outside filex) or settled: the thumbnail
+// refresher, which draws again the ones whose picture is now of other
+// content. Before 0.50 nothing did, and a file replaced on the backend kept
+// its old picture for good. Called after the batch committed; best-effort,
+// never fails a pass. nil leaves the walk as it was.
+func (w *Worker) AttachThumbs(fn func(ctx context.Context, nodes []*model.Node)) {
+	w.thumbs = fn
 }
 
 // Start launches one syncer per enabled storage. ctx is the parent
@@ -280,6 +296,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 		index:    w.index,
 		avScan:   w.avScan,
 		reclaim:  w.reclaim,
+		thumbs:   w.thumbs,
 		storage:  st,
 		driver:   driver,
 		rule:     ruleFor(st, cfg),
@@ -290,6 +307,7 @@ func (w *Worker) startOne(parent context.Context, st *model.Storage) {
 		// A full scan of a lazy storage leaves its per-folder state as
 		// complete as the catalogue it rebuilt (dirListed).
 		recordFolders: st.SyncMode == model.SyncModeLazy,
+		entryState:    w.entryState,
 	}
 	w.mu.Lock()
 	w.cancels[st.ID] = cancel
@@ -309,6 +327,10 @@ type storageSyncer struct {
 	index   *search.Index
 	avScan  func(ctx context.Context, n *model.Node)
 	reclaim func(ctx context.Context, nodeID int64)
+	// entryState: see Worker.AttachEntryState.
+	entryState func(ctx context.Context, e EntryState)
+	// thumbs: see Worker.AttachThumbs.
+	thumbs  func(ctx context.Context, nodes []*model.Node)
 	storage *model.Storage
 	driver  storage.Driver
 	// rule says which paths the walk does not enter: filex's own trees and

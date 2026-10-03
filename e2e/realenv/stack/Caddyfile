@@ -1,0 +1,23 @@
+# filex behind a real Caddy in FILEX_TLS_MODE=proxy (docs/TENANT-ADMIN.md,
+# "TLS"). Certificates come from the realenv Pebble; filex answers Caddy's two
+# questions. On purpose this site does NOT answer /api/tls/* itself (the
+# documentation recommends it): the suite measures that filex refuses a
+# stranger's request the proxy forwards.
+{
+	acme_ca {$REALENV_ACME_DIR}
+	acme_ca_root /realenv/pebble.minica.pem
+	email ops@proxy.test
+	http_port 5002
+	https_port 5001
+	on_demand_tls {
+		ask http://{$REALENV_FILEX}/api/tls/ask
+	}
+}
+
+https:// {
+	tls {
+		on_demand
+		get_certificate http http://{$REALENV_FILEX}/api/tls/certificate
+	}
+	reverse_proxy {$REALENV_FILEX}
+}

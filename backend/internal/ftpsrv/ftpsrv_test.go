@@ -38,6 +38,7 @@ const testPassword = "FtpPass!1"
 
 type harness struct {
 	srv     *ftpsrv.Server
+	res     *protocolauth.Resolver
 	store   db.Store
 	addr    string
 	roots   map[int64]string
@@ -54,7 +55,7 @@ func newHarness(t *testing.T) *harness {
 	// credential rather than refusing it — same as SFTP.
 	res.Confine = protocolauth.ConfineHonor
 
-	hz := &harness{store: store, roots: map[int64]string{}, certDir: t.TempDir()}
+	hz := &harness{store: store, res: res, roots: map[int64]string{}, certDir: t.TempDir()}
 	srv, err := ftpsrv.New(ftpsrv.Config{
 		Enabled:    true,
 		Addr:       "127.0.0.1:0",

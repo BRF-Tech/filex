@@ -24,7 +24,7 @@ import (
 // An app's own user permission ("Request signatures", manifest
 // `user_permissions` + `requires`) is asked of the caller on every door that
 // starts the app's work (appUserPermOK), decided by perm.Result.AppAllowed.
-// Burak 2026-09-28: "imza isteme bir yetki arkasında olmalı".
+// The maintainer 2026-09-28: "imza isteme bir yetki arkasında olmalı".
 
 func appPermFixture(t *testing.T) (db.Store, *AppPlugins, *wasmplugin.Installed) {
 	t.Helper()
@@ -209,4 +209,58 @@ func TestAppUserPerm_ExceptionsAnswerCarriesApps(t *testing.T) {
 
 	// Apps off: no apps key at all, the rest of the answer as before.
 	assert.Empty(t, answer(&PermissionsAdmin{Store: store, ACL: h.ACL}))
+}
+
+// The catalogue (GET /api/admin/roles/catalogue) says, for each installed app
+// permission, what its default comes to on each built-in role —
+// apps[].default_for — so the role editors label "Default (allowed / not
+// allowed)" from the server's answer and keep no copy of the rule. What it
+// says must be what a real account on that role, with nothing decided, is
+// answered on the doors (ACL.Perms → AppAllowed).
+func TestAppUserPerm_CatalogueSaysWhatDefaultComesTo(t *testing.T) {
+	store, h, _ := appPermFixture(t)
+	ctx := context.Background()
+	rows := []wasmplugin.UserPermRow{
+		{Key: "app.sign.verify", App: "sign", ID: "verify", Default: "viewer"},
+		{Key: "app.sign.request", App: "sign", ID: "request", Default: "user"},
+		{Key: "app.sign.audit", App: "sign", ID: "audit", Default: "admin"},
+	}
+	ph := &PermissionsAdmin{Store: store, ACL: h.ACL, AppPermissions: func() []wasmplugin.UserPermRow { return rows }}
+
+	rec := httptest.NewRecorder()
+	ph.Catalogue(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var body struct {
+		Apps []struct {
+			Key        string          `json:"key"`
+			Default    string          `json:"default"`
+			DefaultFor map[string]bool `json:"default_for"`
+		} `json:"apps"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Len(t, body.Apps, len(rows))
+
+	accounts := map[string]*model.User{}
+	for _, role := range []string{model.RoleViewer, model.RoleUser, model.RoleAdmin} {
+		u, err := store.CreateUser(ctx, role+"@test.local", "x", role, "en", "UTC")
+		require.NoError(t, err)
+		accounts[role] = u
+	}
+	for i, app := range body.Apps {
+		assert.Equal(t, rows[i].Key, app.Key)
+		assert.Equal(t, rows[i].Default, app.Default, "the manifest's default is still there")
+		require.Len(t, app.DefaultFor, 3, "%s: one answer per built-in role", app.Key)
+		for role, u := range accounts {
+			res, err := h.ACL.Perms(ctx, u)
+			require.NoError(t, err)
+			held, _ := res.AppAllowed(app.Key, perm.AppDefault(app.Default))
+			assert.Equal(t, held, app.DefaultFor[role], "%s on %s: the catalogue says what the doors answer", app.Key, role)
+		}
+	}
+	assert.Equal(t, map[string]bool{"viewer": false, "user": true, "admin": true}, body.Apps[1].DefaultFor)
+
+	// Apps off: an empty list, not null.
+	rec = httptest.NewRecorder()
+	(&PermissionsAdmin{Store: store, ACL: h.ACL}).Catalogue(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Contains(t, rec.Body.String(), `"apps":[]`)
 }

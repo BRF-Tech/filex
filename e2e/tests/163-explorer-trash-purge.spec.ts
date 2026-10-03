@@ -6,13 +6,14 @@
  * showed a retention notice instead. An operator's press now purges, through
  * the queue where the server runs purges as jobs (capabilities.queued).
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { loginAs } from '../helpers/auth';
-import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
+import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
 import { setAccountViewMode } from '../helpers/prefs';
 
 const STAMP = Date.now();
 const STORAGE = `e2e-purge-${STAMP}`;
+const PREFS = '/api/me/prefs?surface=web';
 
 async function trashed(request: Page['request'], name: string) {
   const up = await request.post('/api/files/manager?action=upload', {
@@ -26,12 +27,28 @@ async function trashed(request: Page['request'], name: string) {
 }
 
 test.describe('The explorer Trash deletes permanently', () => {
-  test.beforeAll(async ({ request }) => {
+  // ⚠ Turkish on the ACCOUNT, and put back (lesson #616). This spec used to
+  // set only localStorage's filex.locale; the page then wrote "tr" into the
+  // shared admin's preferences and nothing took it back, so every later spec
+  // that restored "the language it found" restored Turkish: in the 0.50
+  // integration run 171 read "Güncelleme var" and 173's password change found
+  // no "Change password…".
+  let api: APIRequestContext;
+  let prefsBefore: Record<string, unknown> = {};
+
+  test.beforeAll(async ({ request, playwright, baseURL }) => {
     await dropStorageByName(request, STORAGE);
     await seedLocalStorage(request, STORAGE, `/tmp/filex-${STORAGE}`);
+    api = await newAuthedRequest(playwright, baseURL ?? '');
+    const got = await api.get(PREFS);
+    const doc = got.ok() ? (await got.json()).prefs : {};
+    prefsBefore = doc && typeof doc === 'object' && !Array.isArray(doc) ? doc : {};
+    expect((await api.put(PREFS, { data: { prefs: { ...prefsBefore, locale: 'tr' } } })).ok()).toBe(true);
   });
 
   test.afterAll(async ({ request }) => {
+    await api?.put(PREFS, { data: { prefs: prefsBefore } }).catch(() => undefined);
+    await api?.dispose();
     await dropStorageByName(request, STORAGE);
   });
 

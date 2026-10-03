@@ -27,7 +27,7 @@ const uploaded: NotificationLike = {
   meta: {
     origin: 'manager',
     node: { storage_id: 3, path: 'Belgeler/rapor.pdf', name: 'rapor.pdf', size: 1234 },
-    actor: { id: 7, email: 'burak@example.com' },
+    actor: { id: 7, email: 'alice@example.com' },
     target: { kind: 'file', storage: 'team', path: 'Belgeler/rapor.pdf' },
   },
   target: { kind: 'file', storage: 'team', path: 'Belgeler/rapor.pdf' },
@@ -139,8 +139,8 @@ describe('renderNotification', () => {
   });
 
   it('drops the separator with the field it was holding', () => {
-    // file.infected reads "{signature} — {path}". A scan result with no
-    // signature must not render "— Belgeler/rapor.pdf".
+    // file.infected reads "{signature} - {path}". A scan result with no
+    // signature must not render "- Belgeler/rapor.pdf".
     const infected: NotificationLike = {
       event: 'file.infected',
       title: 'Infected file detected',
@@ -184,7 +184,7 @@ describe('renderNotification', () => {
     // A toast is readable over a shoulder; an address is not a display name.
     for (const lang of ['en', 'tr'] as const) {
       const out = renderNotification(uploaded, lang);
-      expect(`${out.title} ${out.body}`).not.toContain('burak@example.com');
+      expect(`${out.title} ${out.body}`).not.toContain('alice@example.com');
     }
   });
 });
@@ -230,6 +230,16 @@ describe('fillTemplate', () => {
     expect(fillTemplate('{a} → {b}', {})).toBe('');
     expect(fillTemplate('Moved: {name}', { name: '' })).toBe('Moved');
   });
+
+  it('drops the spaced hyphen the catalogues write now, and only a spaced one', () => {
+    // Since 2026-09-30 no catalogue says an em dash: the separator is " - ".
+    expect(fillTemplate('{a} - {b}', { a: 'one' })).toBe('one');
+    expect(fillTemplate('{a} - {b}', { b: 'two' })).toBe('two');
+    expect(fillTemplate('{a} - {b}', { a: 'one', b: 'two' })).toBe('one - two');
+    // A hyphen that belongs to the value stays: a name may start or end with one.
+    expect(fillTemplate('{a} - {b}', { b: '-draft/x-' })).toBe('-draft/x-');
+    expect(fillTemplate('{a} - {b}', { a: 'v1-', b: '' })).toBe('v1-');
+  });
 });
 
 // ⚠ An "open with filex" save, as the server now sends it (personview.go): the
@@ -270,7 +280,7 @@ describe('an open-with save', () => {
     };
     expect(renderNotification(infected, 'tr')).toEqual({
       title: 'Plan.docx dosyasında virüs bulundu',
-      body: 'Eicar-Test-Signature — filex masaüstü uygulamasıyla açıldı',
+      body: 'Eicar-Test-Signature - filex masaüstü uygulamasıyla açıldı',
     });
   });
 });

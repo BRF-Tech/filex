@@ -262,6 +262,12 @@ func (h *Share) HandleBrowseFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	// A file in (or below) an entry the storage could not answer for (#104):
+	// the page that says so, as HandleDownload answers for the shared row.
+	if linkTargetUnavailable(r.Context(), h.Store, node.StorageID, full) {
+		h.renderErrorPage(w, r, http.StatusConflict, "unavailable")
+		return
+	}
 	drv, err := h.StorageResolver(node.StorageID)
 	if err != nil {
 		http.Error(w, "storage error", http.StatusInternalServerError)

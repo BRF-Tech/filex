@@ -294,7 +294,7 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 <html lang="{{.Lang}}" dir="{{.Dir}}"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{.Name}} — {{.T.folder_title_suffix}}</title>
+<title>{{.Name}} - {{.T.folder_title_suffix}}</title>
 {{.Style}}
 <style>
 .card--folder { width: 880px; max-width: 100%; text-align: start; padding: 26px 24px; }
@@ -336,7 +336,7 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 <div class="icon-badge">` + folderPageIconFolder + `</div>
 <h1>{{.Name}}</h1>
 </div>
-<p class="fsub">{{.CountsLabel}}{{if .SubPath}} — {{.SubPath}}{{end}}</p>
+<p class="fsub">{{.CountsLabel}}{{if .SubPath}} - {{.SubPath}}{{end}}</p>
 <div class="factions">
 {{if .UpHref}}<a class="fbtn fbtn--ghost" href="{{.UpHref}}">{{.T.folder_up}}</a>{{end}}
 <a class="fbtn" href="{{.ZipHref}}">{{.T.folder_zip}}</a>
@@ -345,7 +345,7 @@ var folderPageTemplate = template.Must(template.New("sharefolder").Parse(`<!doct
 <div class="fempty">{{.T.folder_empty}}</div>
 {{else if .Gallery}}
 <div class="ggrid">
-{{range .Entries}}<a class="gtile" href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}} title="{{.Name}}{{if .SizeLabel}} — {{.SizeLabel}}{{end}}">
+{{range .Entries}}<a class="gtile" href="{{.Href}}"{{if ne .Kind "dir"}} target="_blank" rel="noopener"{{end}} title="{{.Name}}{{if .SizeLabel}} - {{.SizeLabel}}{{end}}">
 {{if .ThumbSrc}}<img src="{{.ThumbSrc}}" alt="{{.Name}}" loading="lazy">{{else if eq .Kind "dir"}}<span class="gicon">` + folderPageIconFolder + `</span>{{else if eq .Kind "video"}}<span class="gicon">` + folderPageIconFile + `</span>{{else if eq .Kind "image"}}<span class="gicon">` + folderPageIconImage + `</span>{{else}}<span class="gicon">` + folderPageIconFile + `</span>{{end}}
 {{if eq .Kind "video"}}<span class="gbadge">` + folderPageIconPlay + `</span>{{end}}
 <span class="gname">{{.Name}}</span>

@@ -13,7 +13,7 @@ import (
 )
 
 // TestDeleteUserTakesItsLinksOnEveryEngine — deleting an account deletes the
-// public links it opened (Burak, 2026-09-28: "Kapansın"), in the store, so no
+// public links it opened (the maintainer, 2026-09-28: "Kapansın"), in the store, so no
 // door that deletes an account can leave one working.
 //
 // ⚠ Measured before the change: the account row went, `shares.created_by`

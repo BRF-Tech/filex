@@ -99,6 +99,10 @@ func jsonFn(name string, perm Permission, h jsonHandler) HostFunc {
 				stack[0] = writeJSON(p, errEnvelope(hostErr(wire.ErrPermissionDenied, "no call scope")))
 				return
 			}
+			if s.thumb && !thumbHostFns[name] {
+				stack[0] = writeJSON(p, errEnvelope(hostErr(wire.ErrPermissionDenied, thumbDenied)))
+				return
+			}
 			if perm != "" && !s.plugin.Grants.Has(perm) {
 				stack[0] = writeJSON(p, errEnvelope(hostErr(wire.ErrPermissionDenied, "plugin was not granted "+string(perm))))
 				return
@@ -127,6 +131,10 @@ func rawFn(name string, perm Permission, h rawHandler) HostFunc {
 			s := scopeFrom(ctx)
 			if s == nil {
 				stack[0] = writeFrame(p, 2, errJSON(hostErr(wire.ErrPermissionDenied, "no call scope")))
+				return
+			}
+			if s.thumb && !thumbHostFns[name] {
+				stack[0] = writeFrame(p, 2, errJSON(hostErr(wire.ErrPermissionDenied, thumbDenied)))
 				return
 			}
 			if perm != "" && !s.plugin.Grants.Has(perm) {
@@ -192,7 +200,9 @@ func hfFileOpen(ctx context.Context, s *Scope, in json.RawMessage) (any, error) 
 	if err := json.Unmarshal(in, &req); err != nil {
 		return nil, hostErr(wire.ErrInvalid, "bad json")
 	}
-	if f, ok := s.file(req.Ref); !ok || !f.Asset {
+	// An asset is the app's own file; a thumbnail call's input is the one
+	// file it was handed to draw (thumbnails.go): neither needs files:read.
+	if f, ok := s.file(req.Ref); !ok || !(f.Asset || s.thumb) {
 		if err := needRead(s); err != nil {
 			return nil, err
 		}
@@ -230,7 +240,7 @@ func hfFileRead(_ context.Context, s *Scope, in []byte) ([]byte, error) {
 	if err := json.Unmarshal(in, &req); err != nil {
 		return nil, hostErr(wire.ErrInvalid, "bad json")
 	}
-	if !s.handleIsAsset(req.Handle) {
+	if !s.thumb && !s.handleIsAsset(req.Handle) {
 		if err := needRead(s); err != nil {
 			return nil, err
 		}
@@ -773,14 +783,14 @@ func hfFileUnlock(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 
 // ── engines ────────────────────────────────────────────────────────────
 
-func hfEngineAvailable(_ context.Context, s *Scope, in json.RawMessage) (any, error) {
+func hfEngineAvailable(ctx context.Context, s *Scope, in json.RawMessage) (any, error) {
 	var req struct {
 		Engine string `json:"engine"`
 	}
 	if err := json.Unmarshal(in, &req); err != nil {
 		return nil, hostErr(wire.ErrInvalid, "bad json")
 	}
-	ok := s.plugin.Grants.HasEngine(req.Engine) && s.reg.engines.available(req.Engine)
+	ok := s.plugin.Grants.HasEngine(req.Engine) && s.reg.engines.available(ctx, req.Engine)
 	return map[string]any{"available": ok}, nil
 }
 

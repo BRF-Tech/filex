@@ -15,7 +15,9 @@
 
 import { computed, ref, onBeforeUnmount } from 'vue';
 import type { ExplorerConfig } from '../types/ExplorerConfig';
+import type { SurfaceOpenRequest } from '../types/Plugins';
 import type { FileApi } from './useFileApi';
+import { isOpenRequest } from '../lib/surfaceOpen';
 
 /**
  * The queue kinds this package knows by name. A server may emit others (an
@@ -66,6 +68,17 @@ export interface PendingOp {
   message?: string;
   /** Files the job committed, once finished. */
   outputs?: PendingOpOutput[];
+  /**
+   * Where the FINISHED job sends the person who queued it: one of its outputs
+   * and the app's own screen to start there (the job result's `surface.open`,
+   * docs/APP-PLUGINS-API.md → Ops rows). Absent while it runs, after it
+   * failed, and on every row whose app asked for nothing.
+   *
+   * ⚠ Followed only by the screen that queued the job (PluginPageView, the
+   * explorer's own registered jobs): an administrator's list carries other
+   * people's rows too, and their jobs must not move this person's screen.
+   */
+  open?: SurfaceOpenRequest;
 }
 
 const POLL_MS = 2000;
@@ -117,6 +130,14 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
         .filter((p): p is string => p !== null)
         .map((path) => ({ path }))
     : undefined;
+  // Only a request the client can act on, and only the fields the contract
+  // has (path, action, view - lib/surfaceOpen), never whatever else rode along.
+  let open: SurfaceOpenRequest | undefined;
+  if (isOpenRequest(raw.open)) {
+    const action = str(raw.open.action);
+    const view = str(raw.open.view);
+    open = { path: raw.open.path, ...(action ? { action } : {}), ...(view ? { view } : {}) };
+  }
   return {
     id: num(raw.id),
     op_type: opType === 'plugin-action' ? 'plugin' : opType,
@@ -142,6 +163,7 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     label: str(raw.label) ?? undefined,
     message: str(raw.message) ?? undefined,
     outputs,
+    ...(open ? { open } : {}),
   };
 }
 

@@ -30,8 +30,16 @@ export const useUsersStore = defineStore('users', () => {
     return u;
   }
 
+  // ⚠ PATCH /api/admin/users/{id} answers {ok: true}, not the account
+  // (handlers/users.go Update). Putting that answer in the list replaced the
+  // row with an object that has no email, name or role: back on Admin ->
+  // Users the account showed as an empty row until the list was read again,
+  // and stayed so when that read failed. The row is read again instead - the
+  // server's own, with whatever the change moved besides the fields sent (the
+  // level a role sets, the reason an account was off).
   async function update(id: number, payload: UserUpdateRequest): Promise<User> {
-    const u = await UsersApi.update(id, payload);
+    await UsersApi.update(id, payload);
+    const u = await UsersApi.get(id);
     page.value = {
       ...page.value,
       items: page.value.items.map((x) => (x.id === id ? u : x)),

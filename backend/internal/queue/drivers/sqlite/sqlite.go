@@ -312,7 +312,7 @@ func (d *Driver) Dequeue(ctx context.Context, types []string) (queue.Op, error) 
 		     dedup_key=NULL
 		 -- ⚠ dedup_key is cleared here, not when the op finishes. Two reasons,
 		 -- and both are correctness rather than tidiness:
-		 --   1. A request arriving while this scan RUNS must queue a new one —
+		 --   1. A request arriving while this scan RUNS must queue a new one -
 		 --      this scan may already have read the old bytes.
 		 --   2. Fail(retry) puts the row back to pending. If it still held
 		 --      the key and a newer op had meanwhile taken it, that UPDATE

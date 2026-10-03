@@ -102,7 +102,7 @@
   "permissions": [
     {
       "id": "files:read",
-      "label": "Reads the contents of the files you pick",
+      "label": "Reads the contents of the files it is opened or run on, and of the files it keeps records about",
       "reason": {
         "en": "To read the document you sign or send.",
         "tr": "İmzaladığınız ya da gönderdiğiniz belgeyi okumak için."
@@ -110,7 +110,7 @@
     },
     {
       "id": "files:write",
-      "label": "Writes files next to the one you pick, or as its new version",
+      "label": "Writes files next to the one it is run on, into a folder you choose, or as that file's new version",
       "reason": {
         "en": "To write the signed document beside the original.",
         "tr": "İmzalı belgeyi özgün belgenin yanına yazmak için."

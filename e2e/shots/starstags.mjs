@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { seedFixtures, syncAndWait } from './fixtures.mjs';
+import { seedFixtures, syncAndWait, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -217,8 +217,8 @@ async function seed() {
 
   const root = mkdtempSync(join(tmpdir(), 'filex-starstags-'));
   seedFixtures(root); // Photos/ with real PNGs, Documents/, …
-  writeFileSync(join(root, 'Documents', 'Q3 budget.xlsx'), 'PK placeholder');
-  writeFileSync(join(root, 'Documents', 'Proposal.docx'), 'PK placeholder');
+  writeOfficeFile(join(root, 'Documents', 'Q3 budget.xlsx'));
+  writeOfficeFile(join(root, 'Documents', 'Proposal.docx'));
   const storage = await makeStorage(token, 'My files', root);
 
   for (const p of ['My files://', 'My files://Photos', 'My files://Documents']) {

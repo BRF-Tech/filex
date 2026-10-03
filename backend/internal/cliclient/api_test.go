@@ -158,6 +158,19 @@ func (fs *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 			fs.writeJSON(w, 501, map[string]string{"error": "action not implemented"})
 		}
 
+	case "/api/files/move", "/api/files/copy":
+		if !fs.authorized(r) {
+			fs.writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+			return
+		}
+		fs.lastAction = strings.TrimPrefix(r.URL.Path, "/api/files/")
+		fs.lastBody = map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&fs.lastBody)
+		fs.writeJSON(w, 202, map[string]any{"op": map[string]any{"id": 9, "kind": fs.lastAction, "status": "pending"}})
+
+	case "/api/files/ops/9":
+		fs.writeJSON(w, 200, map[string]any{"id": 9, "status": "ok", "total": 1, "done": 1})
+
 	case "/api/files/search":
 		if !fs.authorized(r) {
 			fs.writeJSON(w, 401, map[string]string{"error": "unauthorized"})
@@ -210,7 +223,7 @@ func TestLogin_SavesConfig0600(t *testing.T) {
 	_, srv := newFakeServer(t)
 	api := New(Conn{URL: srv.URL})
 
-	lr, err := api.Login(context.Background(), "ada@example.com", "s3cret", "")
+	lr, err := api.Login(context.Background(), LoginRequest{Email: "ada@example.com", Password: "s3cret"})
 	require.NoError(t, err)
 	assert.Equal(t, "sess-abc", lr.Token)
 
@@ -234,7 +247,7 @@ func TestLogin_InvalidCredentials(t *testing.T) {
 	_, srv := newFakeServer(t)
 	api := New(Conn{URL: srv.URL})
 
-	_, err := api.Login(context.Background(), "ada@example.com", "wrong", "")
+	_, err := api.Login(context.Background(), LoginRequest{Email: "ada@example.com", Password: "wrong"})
 	require.Error(t, err)
 	assert.True(t, IsUnauthorized(err))
 	assert.Contains(t, err.Error(), "invalid credentials")
@@ -245,7 +258,7 @@ func TestLogin_TotpRequiredHint(t *testing.T) {
 	_, srv := newFakeServer(t)
 	api := New(Conn{URL: srv.URL})
 
-	_, err := api.Login(context.Background(), "totp@example.com", "s3cret", "")
+	_, err := api.Login(context.Background(), LoginRequest{Email: "totp@example.com", Password: "s3cret"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--totp")
 }
@@ -383,16 +396,23 @@ func TestRemove_WireShape(t *testing.T) {
 	assert.Equal(t, "docs://inbox/eski.txt", items[0].(map[string]any)["path"])
 }
 
-// TestMove_IntoExistingDir uses the move verb and keeps the basename.
+// TestMove_IntoExistingDir queues one move into the folder; the item keeps
+// its basename (no `name`).
 func TestMove_IntoExistingDir(t *testing.T) {
 	fs, srv := newFakeServer(t)
 	api := testClient(srv, "good-token")
 
-	dest, _, err := api.Move(context.Background(), "docs://inbox/rapor.pdf", "docs://archive")
+	tr, err := api.Move(context.Background(), "docs://inbox/rapor.pdf", "docs://archive")
 	require.NoError(t, err)
-	assert.Equal(t, "docs://archive/rapor.pdf", dest.String())
+	assert.True(t, tr.Into)
+	assert.Equal(t, "docs://archive", tr.Folder.String())
+	assert.Equal(t, "docs://archive/rapor.pdf", tr.To.String())
 	assert.Equal(t, "move", fs.lastAction)
-	assert.Equal(t, "docs://archive", fs.lastBody["path"])
+	assert.Equal(t, []any{"docs://inbox/rapor.pdf"}, fs.lastBody["source"])
+	assert.Equal(t, "docs://archive", fs.lastBody["target"])
+	assert.NotContains(t, fs.lastBody, "name")
+	require.NotNil(t, tr.Op)
+	assert.Equal(t, "ok", tr.Op.Status, "the op is followed to its end")
 }
 
 // TestMove_SameDirRename maps a same-parent target onto the rename verb.
@@ -400,22 +420,29 @@ func TestMove_SameDirRename(t *testing.T) {
 	fs, srv := newFakeServer(t)
 	api := testClient(srv, "good-token")
 
-	dest, _, err := api.Move(context.Background(), "docs://inbox/a.txt", "docs://inbox/b.txt")
+	tr, err := api.Move(context.Background(), "docs://inbox/a.txt", "docs://inbox/b.txt")
 	require.NoError(t, err)
-	assert.Equal(t, "docs://inbox/b.txt", dest.String())
+	assert.False(t, tr.Into)
+	assert.Equal(t, "docs://inbox/b.txt", tr.To.String())
 	assert.Equal(t, "rename", fs.lastAction)
 	assert.Equal(t, "docs://inbox/a.txt", fs.lastBody["item"])
 	assert.Equal(t, "b.txt", fs.lastBody["name"])
+	assert.Nil(t, tr.Op)
 }
 
-// TestMove_CrossAdapterRejected fails fast before any wire call.
-func TestMove_CrossAdapterRejected(t *testing.T) {
-	_, srv := newFakeServer(t)
+// TestMove_CrossAdapter_SameRelativeFolder is a MOVE, not a rename: the same
+// folder name on another storage is another folder. (The CLI used to refuse
+// every cross-adapter move; a rename here would rename in the source storage.)
+func TestMove_CrossAdapter_SameRelativeFolder(t *testing.T) {
+	fs, srv := newFakeServer(t)
 	api := testClient(srv, "good-token")
 
-	_, _, err := api.Move(context.Background(), "docs://a.txt", "s3-test://a.txt")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cross-adapter")
+	tr, err := api.Move(context.Background(), "docs://a.txt", "s3-test://b.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "move", fs.lastAction)
+	assert.Equal(t, "s3-test://", fs.lastBody["target"])
+	assert.Equal(t, "b.txt", fs.lastBody["name"])
+	assert.Equal(t, "s3-test://b.txt", tr.To.String())
 }
 
 // ─────────────────── search ───────────────────

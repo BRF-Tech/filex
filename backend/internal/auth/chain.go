@@ -69,18 +69,30 @@ func (c *LoginChain) Name() string { return "login-chain(" + strings.Join(c.name
 // service-account bind — and that is NOT swallowed: it is logged with the
 // driver name and returned when no later driver succeeds, so an operator
 // reading the log can tell "wrong password" from "the directory is down".
+//
+// A refusal that carries a reason the person may be told (RefusedAfterPassword,
+// a provider whose show_refusal_reason is on) is still a "no", but it is a
+// judgement about THIS person: the first one is what the chain answers when no
+// later driver signs them in, ahead of a driver that could not judge.
 func (c *LoginChain) Login(ctx context.Context, identifier, password string) (*model.User, string, error) {
 	var lastErr error = ErrUnauthorized
+	var told error
 	for _, d := range c.drivers {
 		u, tok, err := d.Login(ctx, identifier, password)
 		if err == nil && u != nil {
 			return u, tok, nil
+		}
+		if err != nil && errors.Is(err, ErrUnauthorized) && told == nil && SSOReason(err) != "" {
+			told = err
 		}
 		if err != nil && !errors.Is(err, ErrUnauthorized) {
 			slog.Warn("auth: login driver could not judge the credentials",
 				slog.String("driver", driverName(d)), slog.Any("err", err))
 			lastErr = err
 		}
+	}
+	if told != nil {
+		return nil, "", told
 	}
 	return nil, "", lastErr
 }

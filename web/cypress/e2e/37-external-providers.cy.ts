@@ -80,6 +80,7 @@ describe('auth providers', () => {
       // new field on this admin surface should be a deliberate edit here.
       const REQUIRED = [
         'name',
+        'driver',
         'capabilities',
         'managed',
         'origin',
@@ -89,7 +90,21 @@ describe('auth providers', () => {
         'secrets_set',
         'testable',
       ];
-      const OPTIONAL = ['from', 'error', 'legacy', 'shadowed', 'fields'];
+      // 0.50: `driver` (what the provider is, now that one driver can have
+      // several instances), and the instance's own `instance_id`, `label`,
+      // `owner_provider_id`, `tenants` and `test_account_required`.
+      const OPTIONAL = [
+        'from',
+        'error',
+        'legacy',
+        'shadowed',
+        'fields',
+        'instance_id',
+        'label',
+        'owner_provider_id',
+        'tenants',
+        'test_account_required',
+      ];
       for (const p of d.providers ?? []) {
         expect(p, `${p.name} envelope`).to.include.all.keys(...REQUIRED);
         const stray = Object.keys(p).filter((k) => !REQUIRED.includes(k) && !OPTIONAL.includes(k));

@@ -91,7 +91,7 @@ func TestOIDCCallback_MultiTenant_RedirectsToTenantHost(t *testing.T) {
 func TestOIDCCallback_MultiTenant_ExplicitCookieDomain_EmitsSetCookie(t *testing.T) {
 	_, store := testutil.NewTestDB(t)
 	// Explicit cookie_domain, on a multi-label public suffix like the live
-	// tenant (.diyetlif.com.tr). Token mimics base64.RawURLEncoding output.
+	// tenant (.globex.com.tr). Token mimics base64.RawURLEncoding output.
 	seedProvider(t, store, &model.Provider{
 		Slug: "dtl", Host: "files.tenant.example", CookieDomain: ".tenant.example",
 		AuthType: model.AuthTypeOIDC,

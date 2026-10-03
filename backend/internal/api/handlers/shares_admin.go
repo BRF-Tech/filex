@@ -141,7 +141,8 @@ func (h *SharesAdmin) list(w http.ResponseWriter, r *http.Request, appsOnly bool
 			row.CreatorName = names[*row.Share.CreatedBy]
 		}
 		if row != nil && row.Share != nil && row.Share.Token != "" {
-			row.URL = base + "/s/" + row.Share.Token
+			// /d/ for a file request: /s/<token> answers not_found for one.
+			row.URL = base + shareLinkPath(row.Share) + row.Share.Token
 		}
 		if row != nil && h.Apps != nil {
 			row.App = h.Apps.LinkOf(row.Share)

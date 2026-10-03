@@ -98,7 +98,7 @@ func TestOtherEnginesAreTakenAsFound(t *testing.T) {
 		"pdftoppm": "/usr/bin/pdftoppm", "rsvg-convert": "/usr/bin/rsvg-convert",
 	}}
 	s := h.prober("").probe()
-	for _, e := range []string{FFmpeg, LibreOffice, Ghostscript, Poppler, RSVG} {
+	for _, e := range []string{FFmpeg, Ghostscript, Poppler, RSVG} {
 		if !s.Has(e) {
 			t.Errorf("%s not found", e)
 		}
@@ -131,5 +131,56 @@ func TestDisplayNames(t *testing.T) {
 		if got := DisplayName(id); got != want {
 			t.Errorf("%s → %q, want %q", id, got, want)
 		}
+	}
+}
+
+// 0.50: the office engine is the connected OnlyOffice Document Server, so a
+// LibreOffice on PATH is not an engine any more - not under its own name, and
+// not under the office engine's. Red before 0.50: soffice was probed and
+// Has(LibreOffice) answered true.
+func TestSofficeIsNeverAnEngine(t *testing.T) {
+	h := &fakeHost{path: map[string]string{"soffice": "/usr/bin/soffice", "libreoffice": "/usr/bin/libreoffice"}}
+	s := h.prober("").probe()
+	for _, e := range []string{LibreOffice, Office} {
+		if s.Has(e) {
+			t.Errorf("%s counted as installed because soffice is on PATH", e)
+		}
+	}
+	if _, ok := s.Available()[LibreOffice]; ok {
+		t.Error("the binary probe still answers for libreoffice")
+	}
+}
+
+// libreoffice is an alias of the office engine: known (an old manifest still
+// installs), read as ONLYOFFICE, and never listed as an engine of its own.
+func TestLibreOfficeIsAnAliasOfTheOfficeEngine(t *testing.T) {
+	if Canonical(LibreOffice) != Office || Canonical(Office) != Office || Canonical(FFmpeg) != FFmpeg {
+		t.Fatalf("Canonical: libreoffice=%q office=%q ffmpeg=%q", Canonical(LibreOffice), Canonical(Office), Canonical(FFmpeg))
+	}
+	for _, id := range []string{LibreOffice, Office, FFmpeg, ImageMagick, Ghostscript, Poppler, RSVG} {
+		if !Known(id) {
+			t.Errorf("%s is not known", id)
+		}
+	}
+	if Known("soffice") || Known("unknown") {
+		t.Error("an unknown engine is known")
+	}
+	if got := DisplayName(LibreOffice); got != "ONLYOFFICE" {
+		t.Errorf("libreoffice reads as %q, want ONLYOFFICE", got)
+	}
+	if got := DisplayName(Office); got != "ONLYOFFICE" {
+		t.Errorf("office reads as %q, want ONLYOFFICE", got)
+	}
+	names := Names()
+	var office, lo bool
+	for _, n := range names {
+		office = office || n == Office
+		lo = lo || n == LibreOffice
+	}
+	if !office || lo {
+		t.Errorf("Names() = %v: want office listed and libreoffice not", names)
+	}
+	if a := AliasesOf(Office); len(a) != 1 || a[0] != LibreOffice {
+		t.Errorf("AliasesOf(office) = %v", a)
 	}
 }

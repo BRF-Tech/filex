@@ -256,8 +256,8 @@ func TestOwnership_ForeignIdsAreRefused(t *testing.T) {
 			srv, client, store := ownershipServer(t, true)
 			// The attacker's own tenant, complete, so nothing fails merely
 			// for want of a storage of one's own.
-			mine := seedFullTenant(t, store, "diyetlif")
-			theirs := seedFullTenant(t, store, "arasboya")
+			mine := seedFullTenant(t, store, "globex")
+			theirs := seedFullTenant(t, store, "initech")
 			testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 			status, body := doJSON(t, client, c.method, srv.URL+c.path(theirs), c.body)
@@ -272,8 +272,8 @@ func TestOwnership_ForeignIdsAreRefused(t *testing.T) {
 func TestOwnership_TheDamageDidNotHappen(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
 	ctx := context.Background()
-	mine := seedFullTenant(t, store, "diyetlif")
-	theirs := seedFullTenant(t, store, "arasboya")
+	mine := seedFullTenant(t, store, "globex")
+	theirs := seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 	t.Run("the password was not reset and not disclosed", func(t *testing.T) {
@@ -340,8 +340,8 @@ func TestOwnership_TheDamageDidNotHappen(t *testing.T) {
 // also pass against a handler that answered 404 to everybody.
 func TestOwnership_OwnRowsStillWork(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
-	mine := seedFullTenant(t, store, "diyetlif")
-	seedFullTenant(t, store, "arasboya")
+	mine := seedFullTenant(t, store, "globex")
+	seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 	for _, c := range []struct {
@@ -402,7 +402,7 @@ func TestOwnership_OwnRowsStillWork(t *testing.T) {
 func TestOwnership_SupertenantReachesEverything(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
 	email, password := testutil.SeedAdmin(t, store) // provider 1 = supertenant
-	theirs := seedFullTenant(t, store, "arasboya")
+	theirs := seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, email, password)
 
 	for _, path := range []string{
@@ -512,8 +512,8 @@ func TestOwnership_SingleTenantAdminUnaffected(t *testing.T) {
 // own miss says "not found" fails this test with exactly that diff.
 func TestOwnership_RefusalIsIndistinguishableFromAMiss(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
-	mine := seedFullTenant(t, store, "diyetlif")
-	theirs := seedFullTenant(t, store, "arasboya")
+	mine := seedFullTenant(t, store, "globex")
+	theirs := seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 	// An id far beyond anything seeded: it names nothing, in any tenant.

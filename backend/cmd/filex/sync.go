@@ -137,7 +137,7 @@ func syncCmd() *cobra.Command {
 			"name and the server's copy lands beside it.",
 	}
 	c.PersistentFlags().StringVar(&opts.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
-	c.PersistentFlags().StringVar(&opts.token, "token", "", "API or session token (default: $FILEX_TOKEN or ~/.filex/cli.yaml)")
+	c.PersistentFlags().StringVar(&opts.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the session ~/.filex/cli.yaml saved for this server URL)")
 
 	c.AddCommand(
 		syncAddCmd(),
@@ -290,17 +290,17 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 		Use:   "run",
 		Short: "Sync every pair once, or keep syncing with --watch",
 		Long: "Sync every pair once. With --watch, keep running: changes on either\n" +
-			"side are synced as they happen — the server announces its changes over\n" +
+			"side are synced as they happen - the server announces its changes over\n" +
 			"the same live stream the web explorer uses, and the local folders are\n" +
 			"watched by the file system. The --watch interval is the safety net: it\n" +
 			"asks the server's change log what changed while the stream was down,\n" +
 			"walks a pair whose local tree changed unseen, retries what failed, and\n" +
 			"walks every pair at least every --full-every.\n\n" +
-			"The live state is printed as `live: connected|polling|offline — …`.\n" +
+			"The live state is printed as `live: connected|polling|offline - …`.\n" +
 			"A token the server refuses stops the command with exit status 3.\n\n" +
 			"One engine per pair on this computer: a pair another filex is already\n" +
 			"syncing (the desktop app, a second copy of it, another terminal) is\n" +
-			"left alone and reported as `<pair>: lock: busy — …`. A single run skips\n" +
+			"left alone and reported as `<pair>: lock: busy - …`. A single run skips\n" +
 			"it, syncs the rest and exits with status 4; --watch takes the pair over\n" +
 			"once the other process stops (`<pair>: lock: acquired`).",
 		Args: cobra.NoArgs,
@@ -556,7 +556,7 @@ func printPlan(ctx context.Context, cmd *cobra.Command, api *cliclient.Client, s
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "%s  %s <-> %s\n", p.ID, p.Local, p.Remote)
 	if !had {
-		fmt.Fprintln(out, "  (first run — both sides are merged and nothing is deleted)")
+		fmt.Fprintln(out, "  (first run - both sides are merged and nothing is deleted)")
 	}
 	if len(actions) == 0 {
 		fmt.Fprintln(out, "  already in step")
@@ -615,7 +615,7 @@ func errPairsBusy(ids []string) error {
 	if len(ids) > 1 {
 		what, it = fmt.Sprintf("%d pairs were", len(ids)), "them"
 	}
-	return fmt.Errorf("%s not synced (%s): another filex on this computer is syncing %s — "+
+	return fmt.Errorf("%s not synced (%s): another filex on this computer is syncing %s - "+
 		"run again once that one has stopped (in the desktop app: Pause sync, or quit it)",
 		what, strings.Join(ids, ", "), it)
 }
@@ -636,7 +636,7 @@ func writeResult(out, errOut io.Writer, p filesync.Pair, res filesync.Result) {
 	if res.Planned == 0 && len(res.Errors) == 0 && res.Held == 0 {
 		fmt.Fprintf(out, "%s: already in step\n", p.ID)
 	} else {
-		fmt.Fprintf(out, "%s: %d/%d done — %d up, %d down, %d removed here, %d removed on the server",
+		fmt.Fprintf(out, "%s: %d/%d done - %d up, %d down, %d removed here, %d removed on the server",
 			p.ID, res.Applied, res.Planned, res.Uploaded, res.Downloaded, res.DeletedLocal, res.DeletedRemot)
 		if res.Conflicts > 0 {
 			fmt.Fprintf(out, ", %d kept as both versions", res.Conflicts)
@@ -659,7 +659,7 @@ func writeResult(out, errOut io.Writer, p filesync.Pair, res filesync.Result) {
 	// Not errors: the other side moved while this pass ran, nothing was
 	// overwritten, and the next pass keeps both versions.
 	for _, rc := range res.Raced {
-		fmt.Fprintf(out, "%s: ~ %s — both versions are kept on the next pass\n", p.ID, rc)
+		fmt.Fprintf(out, "%s: ~ %s - both versions are kept on the next pass\n", p.ID, rc)
 	}
 	// Worth reading, not a failure: a symlink in a synced folder is reported
 	// on every full check for as long as it is there.
@@ -667,7 +667,7 @@ func writeResult(out, errOut io.Writer, p filesync.Pair, res filesync.Result) {
 		fmt.Fprintf(errOut, "%s: note: skipped %d unreadable or non-regular item(s), e.g. %s\n", p.ID, n, res.Skipped[0])
 	}
 	if res.DeletedLocal > 0 {
-		fmt.Fprintf(out, "%s: %d file(s) moved to the local trash — recover with `filex sync trash --pair %s`\n",
+		fmt.Fprintf(out, "%s: %d file(s) moved to the local trash - recover with `filex sync trash --pair %s`\n",
 			p.ID, res.DeletedLocal, p.ID)
 	}
 }
@@ -724,7 +724,7 @@ func syncDiscardCmd() *cobra.Command {
 		Short: "Move the items a pair is holding into the local sync trash",
 		Long: "The other answer to a hold: the files are not wanted on the server (typically\n" +
 			"they were cleaned up there, and this machine's copy is stale). They move into\n" +
-			"the pair's local sync trash — recoverable with `filex sync trash` for 30 days —\n" +
+			"the pair's local sync trash - recoverable with `filex sync trash` for 30 days -\n" +
 			"and the next run makes this folder match the server. A file edited after it\n" +
 			"was held is left where it is.",
 		Args: cobra.ExactArgs(1),

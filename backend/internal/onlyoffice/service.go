@@ -82,6 +82,23 @@ type Service struct {
 	probeOnce sync.Once
 	probeReg  *probeRegistry
 
+	// fetchLogV remembers, per document, when filex last opened it and what
+	// the fetch endpoint last answered the document server (fetchlog.go).
+	// Lazily built, like probeReg.
+	fetchLogOnce sync.Once
+	fetchLogV    *fetchLog
+
+	// purposeLogV is what the fetch endpoint answered the document server's
+	// downloads for a conversion (a thumbnail, an app's), kept apart from the
+	// editor's record (purpose.go). Lazily built, like probeReg.
+	purposeOnce sync.Once
+	purposeLogV *purposeLog
+
+	// offerReg holds the files on offer to the document server for one
+	// conversion each (offer.go). Lazily built, like probeReg.
+	offerOnce sync.Once
+	offerReg  *offerRegistry
+
 	// Sync is the shared post-write gate every other write surface in filex
 	// goes through: it upserts the node row, re-indexes the document,
 	// dispatches a thumbnail, tells open explorers, emits the canonical
@@ -129,14 +146,24 @@ func (s *Service) syncer() *protocolsync.Syncer {
 // through here. A path that reads the struct fields directly would keep working
 // on an env-configured install and silently 503 on a UI-configured one — which
 // is exactly the shape of the bug this replaced.
+//
+// ⚠⚠ Wired to the live configuration (Live), that is the ONLY answer, empty
+// included. It used to fall back to the boot-time values when Live said
+// nothing, so on an install configured by FILEX_ONLYOFFICE_URL an
+// administrator who switched OnlyOffice off under External services was told
+// "off" by capabilities, About and the card while the editor, the office
+// thumbnails and the apps' office engine went on using the document server
+// (0.50 test phase: e2e 116 switched it off, 195 then watched the thumbnails
+// still being drawn). Switched off is off everywhere now; the environment
+// writes its value back at the next boot (server.seedExternalDefaults). The
+// boot-time fields answer only for a Service with no live source (tests).
 func (s *Service) settings(ctx context.Context) (string, string) {
 	if s == nil {
 		return "", ""
 	}
 	if s.Live != nil {
-		if u, sec := s.Live(ctx); u != "" || sec != "" {
-			return strings.TrimRight(u, "/"), sec
-		}
+		u, sec := s.Live(ctx)
+		return strings.TrimRight(u, "/"), sec
 	}
 	return s.DocumentServerURL, s.JWTSecret
 }
@@ -273,6 +300,9 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 		return nil, fmt.Errorf("sign config: %w", err)
 	}
 	body["token"] = token
+	// From here on a fetch for this document belongs to this opening, which is
+	// what the editor's "Download failed" diagnosis compares against.
+	s.noteOpened(node.ID)
 
 	return &EditorConfig{
 		DocumentServerURL: docURL,
@@ -309,13 +339,26 @@ func (s *Service) VerifyFetchSignature(nodeID, exp int64, sig string) error {
 // VerifyFetchSignatureCtx is VerifyFetchSignature with the request context, so
 // the secret is the one in force now.
 func (s *Service) VerifyFetchSignatureCtx(ctx context.Context, nodeID, exp int64, sig string) error {
-	if exp < time.Now().Unix() {
-		return errors.New("onlyoffice: signature expired")
-	}
 	_, secret := s.settings(ctx)
+	return verifyFetch(nodeID, exp, sig, secret)
+}
+
+// The two ways a fetch signature is refused. Callers tell them apart with
+// errors.Is: an expired link and a wrong secret want different advice.
+var (
+	ErrSignatureExpired = errors.New("onlyoffice: signature expired")
+	ErrBadSignature     = errors.New("onlyoffice: bad signature")
+)
+
+// verifyFetch is the one check a fetch signature gets, for a document and for
+// the reverse-path probe alike.
+func verifyFetch(nodeID, exp int64, sig, secret string) error {
+	if exp < time.Now().Unix() {
+		return ErrSignatureExpired
+	}
 	want := fetchSignature(nodeID, exp, secret)
 	if !hmac.Equal([]byte(want), []byte(sig)) {
-		return errors.New("onlyoffice: bad signature")
+		return ErrBadSignature
 	}
 	return nil
 }

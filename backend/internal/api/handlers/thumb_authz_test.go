@@ -309,16 +309,16 @@ func TestThumb_ConfinedTokenCannotLeaveItsRoot(t *testing.T) {
 func TestThumb_CrossTenantIsRefused(t *testing.T) {
 	srv, client, store, cacheDir := newThumbServer(t, true)
 
-	minePID, _, _ := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
-	theirsPID, _, _ := seedTenant(t, store, "arasboya", "admin@arasboya.test", false)
+	minePID, _, _ := seedTenant(t, store, "globex", "admin@globex.test", false)
+	theirsPID, _, _ := seedTenant(t, store, "initech", "admin@initech.test", false)
 
-	myStorage, _, _, _ := seedThumbNode(t, store, cacheDir, "diyetlif")
+	myStorage, _, _, _ := seedThumbNode(t, store, cacheDir, "globex")
 	require.NoError(t, store.LinkProviderStorage(context.Background(), minePID, myStorage.ID))
-	theirStorage, _, theirNode, theirJPEG := seedThumbNode(t, store, cacheDir, "arasboya")
+	theirStorage, _, theirNode, theirJPEG := seedThumbNode(t, store, cacheDir, "initech")
 	require.NoError(t, store.LinkProviderStorage(context.Background(), theirsPID, theirStorage.ID))
 
-	seedUserIn(t, store, minePID, "user@diyetlif.test")
-	testutil.LoginAs(t, srv, client, "user@diyetlif.test", xtUserPass)
+	seedUserIn(t, store, minePID, "user@globex.test")
+	testutil.LoginAs(t, srv, client, "user@globex.test", xtUserPass)
 
 	resp, err := client.Get(srv.URL + thumbPath(theirNode.ID))
 	require.NoError(t, err)

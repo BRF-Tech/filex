@@ -16,9 +16,10 @@
  *     it, by name or by content, in the palette or from the API (NEGATIVE);
  *   · download and drag-out from the hit row, the bytes checked end to end.
  */
-import { test, expect, type Download, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName } from '../helpers/seed';
+import { nextHandedFile } from '../helpers/download';
 
 const STORAGE = `e2e-palette47-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -127,27 +128,16 @@ async function plainRowDownloadUrl(page: Page): Promise<string> {
   return downloadUrlOf(row);
 }
 
-/**
- * The next download, wherever it starts: a single file opens its body in a
- * new tab (`window.open`), a folder navigates a hidden frame on this page.
- */
-function nextDownload(page: Page): Promise<Download> {
-  return new Promise((resolve) => {
-    page.once('download', resolve);
-    page.context().once('page', (p) => p.once('download', resolve));
-  });
-}
-
-async function readDownload(dl: Download): Promise<Buffer> {
-  const file = await dl.path();
-  const fs = await import('node:fs');
-  return fs.readFileSync(file!);
-}
-
 test.describe('⌘K Everywhere — hit verbs and permissions (#47)', () => {
   test.describe.configure({ mode: 'serial' });
 
   test.beforeAll(async ({ request }) => {
+    /* ⚠ The hook's own budget, above the index wait's 30 s. Both were 30 s, so
+       the seeding before the wait came out of the wait's share: WebKit's
+       hook ran out at "2 of 4 indexed" in the 0.50 targeted run, on a disk
+       slow enough that the uploads took seconds, and the poll never got its
+       30 s. */
+    test.setTimeout(90_000);
     await dropStorageByName(request, STORAGE);
     await seedLocalStorage(request, STORAGE, MOUNT, { rbac_enabled: true });
     await apiLogin(request);
@@ -206,12 +196,14 @@ test.describe('⌘K Everywhere — hit verbs and permissions (#47)', () => {
     await openExplorer(page, true);
     const rows = await paletteRows(page, ADMIN_HITS);
     const row = rows.filter({ hasText: SECRET.name });
-    const got = nextDownload(page);
+    // A single file opens its body in a new tab, a folder navigates a hidden
+    // frame on this page: helpers/download takes either (and WebKit's tab).
+    const got = nextHandedFile(page);
     await row.hover();
     await row.getByTestId('palette-hit-download').click();
     const dl = await got;
-    expect(dl.suggestedFilename()).toBe(SECRET.name);
-    expect((await readDownload(dl)).toString('utf8')).toBe(SECRET.body);
+    expect(dl.filename).toBe(SECRET.name);
+    expect((await dl.body()).toString('utf8')).toBe(SECRET.body);
     // Not an open: the palette is still up, nothing navigated.
     await expect(page.locator('.fe-cmdp')).toBeVisible();
   });
@@ -220,12 +212,12 @@ test.describe('⌘K Everywhere — hit verbs and permissions (#47)', () => {
     await openExplorer(page, true);
     const rows = await paletteRows(page, ADMIN_HITS);
     const row = rows.filter({ has: page.locator('.fe-cmdp__label', { hasText: FOLDER.name }) });
-    const got = nextDownload(page);
+    const got = nextHandedFile(page);
     await row.hover();
     await row.getByTestId('palette-hit-download').click();
     const dl = await got;
-    expect(dl.suggestedFilename()).toMatch(new RegExp(`^${FOLDER.name}.*\\.zip$`));
-    const zip = await readDownload(dl);
+    expect(dl.filename).toMatch(new RegExp(`^${FOLDER.name}.*\\.zip$`));
+    const zip = await dl.body();
     expect(zip.subarray(0, 2).toString('latin1'), 'a zip').toBe('PK');
     expect(zip.includes(Buffer.from('ic.txt')), 'the folder’s file is inside').toBe(true);
   });

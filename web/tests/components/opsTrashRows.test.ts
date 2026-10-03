@@ -5,8 +5,8 @@
 // destination and no source folder, the row's name came out empty, and the
 // row read only its kind — "Restore" — with nothing to tell two of them, or
 // what either was bringing back, apart.
-import { afterEach, describe, expect, it } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { describe, expect, it } from 'vitest';
+import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 
 import { useOperations } from '@brftech/filex-core/src/composables/useOperations';
@@ -14,19 +14,12 @@ import OperationsCenter from '@brftech/filex-core/src/components/OperationsCente
 import PendingOpsTray from '@brftech/filex-core/src/components/PendingOpsTray.vue';
 import { normalizeOp } from '@brftech/filex-core/src/composables/usePendingOps';
 
-const mounted: VueWrapper[] = [];
-afterEach(() => {
-  mounted.splice(0).forEach((w) => w.unmount());
-  document.body.innerHTML = '';
-});
-
 async function rowName(kind: string, sources: string[], locale: 'en' | 'tr') {
   const op = normalizeOp({ id: 9, kind, status: 'running', total: sources.length, done: 0, sources, dest: '', storage_id: 1 });
   const center = useOperations();
-  mounted.push(mount(PendingOpsTray, { props: { ops: [op], locale, center } }));
+  mount(PendingOpsTray, { props: { ops: [op], locale, center } });
   await nextTick();
   const w = mount(OperationsCenter, { props: { center, locale }, attachTo: document.body });
-  mounted.push(w);
   await nextTick();
   await w.find('.fe-opc__badge').trigger('click');
   return w.find('.fe-opc__name').text();

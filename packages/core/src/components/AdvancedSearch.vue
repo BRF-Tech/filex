@@ -803,7 +803,7 @@ function submit() {
                   :aria-label="t('advsearch.size.from')"
                   data-testid="advsearch-size-from"
                 />
-                <span class="fe-advsearch__dash" aria-hidden="true">–</span>
+                <span class="fe-advsearch__dash" aria-hidden="true">-</span>
                 <input
                   v-model="sizeTo"
                   type="number"

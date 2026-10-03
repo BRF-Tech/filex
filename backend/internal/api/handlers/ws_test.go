@@ -406,6 +406,11 @@ func TestWSDesktopClientPresence(t *testing.T) {
 	nameless := &model.User{ID: 4, Username: "grace.h", Email: "grace@example.com"}
 	require.Equal(t, "grace.h (filex desktop)", mintVia(t, nameless, desktop, "", nil).Name)
 
+	// Since 0.50 the desktop app writes a plain hyphen; the label above is
+	// what the older ones wrote, and both read the same.
+	current := &model.APIToken{ID: 15, UserID: 3, Label: "filex desktop - Win32"}
+	require.Equal(t, "Ada (filex desktop)", mintVia(t, ada, current, "", nil).Name)
+
 	// A label with nothing to trim survives whole.
 	cli := &model.APIToken{ID: 13, UserID: 3, Label: "filex cli"}
 	require.Equal(t, "Ada (filex cli)", mintVia(t, ada, cli, "", nil).Name)

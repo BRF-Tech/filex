@@ -71,6 +71,10 @@ type aiOps struct {
 	// leaves search falling back to SQL LIKE, exactly as it does for a
 	// manager upload on an instance with no index wired.
 	index *search.Index
+	// doors are the explorer's own handlers the copy, app, operations, trash,
+	// versions, archive and link tools run through (ai_doors.go). nil = those
+	// tools answer 503.
+	doors *AIDoors
 }
 
 // attachBody wires the byte-source resolver so the AI/REST read and zip
@@ -107,8 +111,23 @@ func (a *aiOps) sync() *protocolsync.Syncer {
 // live app locks. Asked BEFORE allow, whose level check reads a lock's
 // viewer cap as a plain "access denied" — an agent is told who froze the
 // document instead (aiStatus maps it to 423).
+//
+// Every target is judged as a write from a surface with no key
+// (syspath.Keyless): on top of filex's own names, an encrypted folder's key
+// file is never written, renamed, moved or deleted from here.
 func (a *aiOps) gate(ctx context.Context, s *model.Storage, targets ...writegate.Target) error {
+	for i := range targets {
+		targets[i] = keyless(targets[i])
+	}
 	return writegate.Check(a.lockView(ctx, s), 0, targets...)
+}
+
+// keyless claims syspath.Keyless for a target that claims nothing else.
+func keyless(t writegate.Target) writegate.Target {
+	if t.Verb == syspath.Change {
+		return t.As(syspath.Keyless)
+	}
+	return t
 }
 
 func (a *aiOps) lockView(ctx context.Context, s *model.Storage) writegate.Locks {
@@ -189,6 +208,30 @@ type aiEntry struct {
 	// it was copied and what stayed.
 	LeftBehind []aiLeftBehind `json:"left_behind,omitempty"`
 	SourceKept bool           `json:"source_kept,omitempty"`
+	// Encrypted says the content is end-to-end encrypted and filex holds no
+	// key for it: a file inside an encrypted folder, a single encrypted file
+	// (`.fxe`), or an encrypted folder itself. file_read and
+	// /api/ai/download refuse such a file with E2E_ENCRYPTED rather than
+	// hand out ciphertext an agent would take for a broken document.
+	Encrypted bool `json:"encrypted,omitempty"`
+	// E2eRoot is the encrypted folder the entry sits in (or is), in the
+	// adapter://path form every other path here has. Empty for a `.fxe`
+	// outside any encrypted folder: such a file carries its own key slots.
+	E2eRoot string `json:"e2e_root,omitempty"`
+	// Unavailable marks an entry the storage could not answer for (issue
+	// #104), with what it answered: listed so an agent knows it is there, and
+	// refused (409 ENTRY_UNAVAILABLE) whatever it is asked to do with it.
+	Unavailable       bool   `json:"unavailable,omitempty"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
+}
+
+// aiParent is the folder that holds rel ("" for the storage root).
+func aiParent(rel string) string {
+	dir := path.Dir(strings.Trim(rel, "/"))
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return dir
 }
 
 // aiLeftBehind is one ops.Skipped, with the path spelled the way every other
@@ -287,7 +330,7 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 		np, err := root.EnforcePath(p)
 		if err != nil {
 			q := root.Adapter + "://" + root.Rel
-			return nil, "", denied(confine.ErrOutOfRoot, "%q is outside your confined root %s — use a bare relative path (e.g. \"sub/file.txt\") or a path under %s (call file_root to see your root)", p, q, q)
+			return nil, "", denied(confine.ErrOutOfRoot, "%q is outside your confined root %s - use a bare relative path (e.g. \"sub/file.txt\") or a path under %s (call file_root to see your root)", p, q, q)
 		}
 		p = np
 	}
@@ -323,6 +366,12 @@ func (a *aiOps) resolveStorage(ctx context.Context, p string) (*model.Storage, s
 			// ≥editor in their own methods.
 			if !a.allow(ctx, s, clean, acl.LevelViewer) {
 				return nil, "", denied(errAIForbidden, "access denied: no permission for %s", joinAdapterPath(s.Name, clean))
+			}
+			// An entry the storage could not answer for, or anything inside
+			// one (issue #104): no verb works on it, from here as from the
+			// explorer. 409 ENTRY_UNAVAILABLE (writeAIError).
+			if err := unavailableIn(ctx, a.store, s, clean); err != nil {
+				return nil, "", err
 			}
 			return s, clean, nil
 		}
@@ -362,7 +411,7 @@ func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
 		info.Adapter = root.Adapter
 		info.Root = root.Adapter + "://" + root.Rel
 		info.Storages = []string{root.Adapter}
-		info.Hint = "You are confined to " + info.Root + ". Use bare relative paths (e.g. \"sub/file.txt\") — they resolve UNDER this root — or full \"" + info.Root + "/...\" paths. Anything outside is rejected; an empty path = your root."
+		info.Hint = "You are confined to " + info.Root + ". Use bare relative paths (e.g. \"sub/file.txt\") - they resolve UNDER this root - or full \"" + info.Root + "/...\" paths. Anything outside is rejected; an empty path = your root."
 	} else {
 		first := ""
 		if len(info.Storages) > 0 {
@@ -370,9 +419,12 @@ func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
 		}
 		info.Hint = "Full access. Address files as \"<adapter>://<path>\" using a storage listed above; an empty path uses the first storage (" + first + ")."
 	}
-	// Conversion is NOT a server-side MCP operation: it is the Convert app's
-	// file-menu action (the iframe converter is gone since 0.48).
-	info.Hint += " File conversion is not a server-side MCP operation: it is the Convert app's action in the filex UI (right-click a file → Convert…), when an administrator has installed it."
+	// Conversion is a server-side job: the Convert app's action, queued like a
+	// copy (the iframe converter is gone since 0.48). Since 0.50 it has a tool
+	// of its own and a REST twin (ai_doors.go); saying "UI only" sent agents to
+	// a person for a job the token could start itself (task #116), and saying
+	// "no MCP tool" after 0.50 would be the same lie the other way round.
+	info.Hint += " File conversion is a server-side job of the Convert app, when an administrator has installed it: call file_convert {path, target} (REST: POST /api/ai/convert) - it answers 202 with the operation - and follow it with op_get {id} (GET /api/ai/ops/{id}). Other apps' actions: app_actions {path} lists what applies to a file, app_run starts one."
 	return info
 }
 
@@ -392,11 +444,18 @@ func (a *aiOps) List(ctx context.Context, p string) ([]aiEntry, error) {
 		return nil, err
 	}
 	out := make([]aiEntry, 0, len(objs))
+	roots := newE2eRoots(a.store)
+	if e2eMarkerAmong(objs) {
+		// A folder encrypted seconds ago: its marker is in this listing but
+		// not yet in the catalogue the rows below are judged against.
+		roots.rootIs(s.ID, s.Name, rel)
+	}
 	for _, o := range objs {
-		// ⚠ syspath.IsName, the one list. The hand-written check here did not
-		// know `.versions` or `.filex-open`, so `file_list` on a storage root
-		// handed an agent both.
-		if syspath.IsName(o.Name) {
+		// ⚠ syspath.Unlisted, the one list. The hand-written check here did
+		// not know `.versions` or `.filex-open`, so `file_list` on a storage
+		// root handed an agent both; and it did not know an encrypted folder's
+		// key file, which an agent could then delete (task #113).
+		if syspath.Unlisted(o.Name) {
 			continue
 		}
 		objRel := o.Path
@@ -413,9 +472,53 @@ func (a *aiOps) List(ctx context.Context, p string) ([]aiEntry, error) {
 		if !o.Mtime.IsZero() {
 			e.LastModified = o.Mtime.UnixMilli()
 		}
+		markE2e(ctx, roots, s, objRel, &e)
 		out = append(out, e)
 	}
-	return out, nil
+	return a.withUnavailable(ctx, s, rel, out), nil
+}
+
+// withUnavailable flags, in a driver listing of rel, the entries the catalogue
+// marks unavailable (issue #104), and adds the ones the listing does not hold -
+// the usual case: the storage did not list the entry, which is why the sync
+// asked about it and got no answer. Without this an agent would never hear of
+// an entry the explorer shows with a warning.
+func (a *aiOps) withUnavailable(ctx context.Context, s *model.Storage, rel string, out []aiEntry) []aiEntry {
+	var parent *int64
+	if rel != "" {
+		n, err := a.store.GetNodeByPath(ctx, s.ID, pathkey.Hash(s.ID, rel))
+		if err != nil || n == nil {
+			return out
+		}
+		parent = &n.ID
+	}
+	rows, err := a.store.ListNodesByParent(ctx, s.ID, parent)
+	if err != nil {
+		return out
+	}
+	at := map[string]int{}
+	for i, e := range out {
+		at[e.Name] = i
+	}
+	for _, n := range rows {
+		if !n.Unavailable || syspath.IsName(n.Name) || !a.allow(ctx, s, n.Path, acl.LevelViewer) {
+			continue
+		}
+		if i, ok := at[n.Name]; ok {
+			out[i].Unavailable, out[i].UnavailableReason = true, n.UnavailableReason
+			continue
+		}
+		out = append(out, aiEntry{
+			Path:              joinAdapterPath(s.Name, strings.Trim(n.Path, "/")),
+			Name:              n.Name,
+			Type:              aiTypeOfNode(n.Type),
+			Size:              n.Size,
+			Mime:              n.Mime,
+			Unavailable:       true,
+			UnavailableReason: n.UnavailableReason,
+		})
+	}
+	return out
 }
 
 // Info stats a single path and returns its metadata.
@@ -445,6 +548,7 @@ func (a *aiOps) Info(ctx context.Context, p string) (*aiEntry, error) {
 	if !o.Mtime.IsZero() {
 		e.LastModified = o.Mtime.UnixMilli()
 	}
+	markE2e(ctx, newE2eRoots(a.store), s, rel, e)
 	return e, nil
 }
 
@@ -459,6 +563,12 @@ func (a *aiOps) Read(ctx context.Context, p string) (io.ReadCloser, string, int6
 		return nil, "", 0, errors.New("path required")
 	}
 	if err := a.can(ctx, s, rel, perm.FilesDownload); err != nil {
+		return nil, "", 0, err
+	}
+	// Ciphertext is refused, not served: this surface holds no key, and the
+	// bytes under the file's own mime type read as a broken document (task
+	// #113: an encrypted PDF came back as `application/pdf`, base64).
+	if err := a.encryptedRefusal(ctx, s, rel); err != nil {
 		return nil, "", 0, err
 	}
 	drv, err := a.resolver(s.ID)
@@ -552,6 +662,12 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 	if err := a.can(ctx, s, rel, a.writeNeed(ctx, s, rel)); err != nil {
 		return nil, err
 	}
+	// Into an encrypted folder only with the caller's allow_plaintext: the
+	// bytes would land there unencrypted (plaintextRefusal). Asked before a
+	// byte of src is read, so the upload ticket keeps its body for a retry.
+	if err := a.plaintextRefusal(ctx, s, aiParent(rel)); err != nil {
+		return nil, err
+	}
 	if err := checkUploadSize(ctx, a.store, size); err != nil {
 		return nil, err
 	}
@@ -578,14 +694,16 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 		node, serr := a.staged.IngestStream(ctx, s.ID, rel, src, size, currentUserID(ctx), "")
 		switch {
 		case serr == nil:
-			return &aiEntry{
+			e := &aiEntry{
 				Path:         joinAdapterPath(s.Name, rel),
 				Name:         name,
 				Type:         "file",
 				Size:         size,
 				Mime:         node.Mime,
 				LastModified: time.Now().UnixMilli(),
-			}, nil
+			}
+			markE2e(ctx, newE2eRoots(a.store), s, rel, e)
+			return e, nil
 		case !errors.Is(serr, ErrStagingUnavailable):
 			return nil, serr
 		}
@@ -596,7 +714,7 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 	// Sniff the head, then hand the driver the ORIGINAL reader when it can
 	// rewind. Wrapping a seekable body in io.MultiReader destroys the Seeker,
 	// which is what once put every upload on the chunked path with no
-	// Content-Length (olivov H1, 2026-08-05).
+	// Content-Length (a production report, 2026-08-05).
 	var sniff [512]byte
 	n, _ := io.ReadFull(src, sniff[:])
 	mime := ""
@@ -630,14 +748,16 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 
 	a.cacheUpsertFile(ctx, s, rel, size, mime)
 
-	return &aiEntry{
+	e := &aiEntry{
 		Path:         joinAdapterPath(s.Name, rel),
 		Name:         name,
 		Type:         "file",
 		Size:         size,
 		Mime:         mime,
 		LastModified: time.Now().UnixMilli(),
-	}, nil
+	}
+	markE2e(ctx, newE2eRoots(a.store), s, rel, e)
+	return e, nil
 }
 
 // Delete soft-deletes a file or folder (rename into .filex-trash, flip the
@@ -796,7 +916,7 @@ func (a *aiOps) trashRetagCache(ctx context.Context, s *model.Storage, rel, tras
 // queued worker do; the destination may end up holding both files. The returned
 // entry names where the file REALLY is, which is the path a caller must use —
 // not the one it asked for.
-func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
+func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err error) {
 	sSrc, relSrc, err := a.resolveStorage(ctx, src)
 	if err != nil {
 		return nil, err
@@ -805,6 +925,17 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Whichever return below answers, the entry says what file_info would
+	// say about where the item now is. The request's ctx, not the detached
+	// one: that is cancelled by the time this runs.
+	reqCtx := ctx
+	defer func() {
+		if err == nil && out != nil {
+			_, rel := splitAdapterPath(out.Path)
+			a.statInto(reqCtx, sDst, rel, out)
+			markE2e(reqCtx, newE2eRoots(a.store), sDst, rel, out)
+		}
+	}()
 	if relSrc == "" || relDst == "" {
 		return nil, errors.New("src and dst required")
 	}
@@ -822,12 +953,22 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (*aiEntry, error) {
 	}
 	// A new name in the same folder is files.rename, another folder (or
 	// storage) files.move, both at once needs both — at both ends.
+	//
+	// ⚠ And in the folder the item lands in, as both of the explorer's doors
+	// ask it: `?action=rename` judges the folder it renames in and the queued
+	// move (/api/files/move, /api/files/ops) the destination folder. Asking
+	// only the destination PATH let a grant on exactly that path (grants are
+	// path prefixes, and one may name a single file) add an entry to a folder
+	// the caller may only view.
 	needs := perm.RelocateNeeds(sSrc.ID, relSrc, sDst.ID, relDst)
 	for _, p := range needs {
 		if err := a.can(ctx, sSrc, relSrc, p); err != nil {
 			return nil, err
 		}
 		if err := a.can(ctx, sDst, relDst, p); err != nil {
+			return nil, err
+		}
+		if err := a.can(ctx, sDst, aiParent(relDst), p); err != nil {
 			return nil, err
 		}
 	}
@@ -1043,6 +1184,30 @@ func (a *aiOps) moveAcross(ctx context.Context, sSrc *model.Storage, relSrc stri
 	}, nil
 }
 
+// statInto fills in what a Stat of rel says - size, media type, modification
+// time - so a move's answer describes the item where it now is, as file_info
+// would (task #119: `file_move` and POST /api/ai/move answered `size: 0` for
+// every file, measured with a 5-byte one). The type stays the one read off the
+// source before the move. Best effort: a driver that cannot Stat leaves the
+// entry as it was, and the move it describes has happened either way.
+func (a *aiOps) statInto(ctx context.Context, s *model.Storage, rel string, e *aiEntry) {
+	drv, err := a.resolver(s.ID)
+	if err != nil {
+		return
+	}
+	o, err := drv.Stat(ctx, rel)
+	if err != nil {
+		return
+	}
+	e.Size = o.Size
+	if o.Mime != "" {
+		e.Mime = o.Mime
+	}
+	if !o.Mtime.IsZero() {
+		e.LastModified = o.Mtime.UnixMilli()
+	}
+}
+
 // Mkdir creates a directory at `p` and mirrors it into the cache.
 func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	s, rel, err := a.resolveStorage(ctx, p)
@@ -1058,7 +1223,14 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
 		return nil, err
 	}
+	// files.create in the folder that gains the entry, as the explorer's
+	// `?action=newfolder` asks it (resolveAdapterDir), and on the new path.
+	// The new path alone let a grant on exactly that path create a folder
+	// inside one the caller may only view.
 	if err := a.can(ctx, s, rel, perm.FilesCreate); err != nil {
+		return nil, err
+	}
+	if err := a.can(ctx, s, aiParent(rel), perm.FilesCreate); err != nil {
 		return nil, err
 	}
 	drv, err := a.resolver(s.ID)
@@ -1078,11 +1250,13 @@ func (a *aiOps) Mkdir(ctx context.Context, p string) (*aiEntry, error) {
 		return nil, err
 	}
 	a.cacheUpsertDir(ctx, s, rel)
-	return &aiEntry{
+	e := &aiEntry{
 		Path: joinAdapterPath(s.Name, rel),
 		Name: path.Base(rel),
 		Type: "dir",
-	}, nil
+	}
+	markE2e(ctx, newE2eRoots(a.store), s, rel, e)
+	return e, nil
 }
 
 // Search runs the index-less name search of one storage (or all when the
@@ -1127,12 +1301,13 @@ func (a *aiOps) visibleEntries(ctx context.Context, s *model.Storage, rows []*mo
 		set, _ = a.acl.LoadSet(ctx, auth.UserFrom(ctx), s)
 	}
 	out := make([]aiEntry, 0, len(rows))
+	roots := newE2eRoots(a.store)
 	for _, n := range rows {
 		if n.DeletedAt != nil {
 			continue
 		}
-		if syspath.Hidden(n.Path) {
-			continue // filex's own directories hold no search results
+		if syspath.Hidden(n.Path) || syspath.Unlisted(n.Name) {
+			continue // filex's own directories and an encrypted folder's key file hold no search results
 		}
 		if !tagFilterAccepts(tags, n.ID) {
 			continue
@@ -1144,15 +1319,18 @@ func (a *aiOps) visibleEntries(ctx context.Context, s *model.Storage, rows []*mo
 			continue // outside the user's RBAC grants
 		}
 		e := aiEntry{
-			Path: joinAdapterPath(s.Name, n.Path),
-			Name: n.Name,
-			Type: aiTypeOfNode(n.Type),
-			Size: n.Size,
-			Mime: n.Mime,
+			Path:              joinAdapterPath(s.Name, n.Path),
+			Name:              n.Name,
+			Type:              aiTypeOfNode(n.Type),
+			Size:              n.Size,
+			Mime:              n.Mime,
+			Unavailable:       n.Unavailable,
+			UnavailableReason: n.UnavailableReason,
 		}
 		if n.BackendMtime != nil {
 			e.LastModified = n.BackendMtime.UnixMilli()
 		}
+		markE2e(ctx, roots, s, n.Path, &e)
 		out = append(out, e)
 	}
 	return out
@@ -1168,6 +1346,11 @@ type aiShareResult struct {
 	Pin          string     `json:"pin,omitempty"` // present ONLY when generated now
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	MaxDownloads *int       `json:"max_downloads,omitempty"`
+	// Encrypted: the link hands out a single encrypted file (`.fxe`) as it
+	// is. Its recipient needs the file's password to open it (the web UI or
+	// `filex decrypt`); say so when you pass the link on. An encrypted FOLDER
+	// and anything inside one is never linked (publicLinkRefusal).
+	Encrypted bool `json:"encrypted,omitempty"`
 }
 
 // CreateShare mints a public share link for a file/folder. Honors the token's
@@ -1187,7 +1370,7 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 	}
 	node, err := a.store.GetNodeByPath(ctx, s.ID, pathkey.Hash(s.ID, rel))
 	if err != nil || node == nil {
-		return nil, fmt.Errorf("not indexed yet: %s — write or list it first so filex caches the entry", joinAdapterPath(s.Name, rel))
+		return nil, fmt.Errorf("not indexed yet: %s - write or list it first so filex caches the entry", joinAdapterPath(s.Name, rel))
 	}
 	// The same rule the web explorer's share door asks (public_link_rule.go):
 	// never filex's own names, edit rights on the file and the share.links
@@ -1230,6 +1413,7 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 		return nil, err
 	}
 	url := a.tenants.ForStorage(ctx, s.ID) + "/s/" + sh.Token
+	encrypted, _ := newE2eRoots(a.store).mark(ctx, s.ID, s.Name, node.Path, node.Type == model.NodeTypeDirectory)
 	return &aiShareResult{
 		URL:          url,
 		Token:        sh.Token,
@@ -1238,21 +1422,27 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 		Pin:          pinGen,
 		ExpiresAt:    sh.ExpiresAt,
 		MaxDownloads: sh.MaxDownloads,
+		Encrypted:    encrypted,
 	}, nil
 }
 
-// RevokeShare revokes a share by its token. Only the share's creator (or an
-// admin) may revoke it.
+// RevokeShare revokes a share by its token, under the rule the explorer's
+// DELETE /api/files/share/{id} asks (shareRevokeRefusal): inside the caller's
+// tenant and token root, and the caller's own link unless it is an admin's.
 func (a *aiOps) RevokeShare(ctx context.Context, token string) error {
 	if a.share == nil {
 		return errors.New("sharing is not enabled on this server")
 	}
 	sh, err := a.store.GetShareByToken(ctx, token)
-	if err != nil {
-		return errors.New("share not found")
+	if err != nil || sh == nil {
+		return denied(storage.ErrNotFound, "share not found")
 	}
-	if u := auth.UserFrom(ctx); u != nil && !u.IsAdmin() && (sh.CreatedBy == nil || *sh.CreatedBy != u.ID) {
-		return errors.New("forbidden: not your share")
+	switch err := shareRevokeRefusal(ctx, a.store, sh); {
+	case errors.Is(err, errShareHidden):
+		// The answer a token that never existed gets, word for word.
+		return denied(storage.ErrNotFound, "share not found")
+	case err != nil:
+		return denied(errAIForbidden, "%s", err.Error())
 	}
 	return a.store.RevokeShare(ctx, sh.ID)
 }
@@ -1288,6 +1478,12 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	if err := a.can(ctx, sDest, relDest, a.writeNeed(ctx, sDest, relDest)); err != nil {
 		return nil, err
 	}
+	// The archive is a new plaintext file where it lands: into an encrypted
+	// folder only with allow_plaintext, as any other write from here.
+	destDir := aiParent(relDest)
+	if err := a.plaintextRefusal(ctx, sDest, destDir); err != nil {
+		return nil, err
+	}
 	drvDest, err := a.resolver(sDest.ID)
 	if err != nil {
 		return nil, err
@@ -1295,6 +1491,44 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	wr, ok := drvDest.(storage.Writer)
 	if !ok {
 		return nil, storage.ErrUnsupported
+	}
+
+	// Every source is judged before a byte is packed: what the explorer's
+	// archive/create asks (packSourceRefusal: files.download, never filex's
+	// own names), and the encryption boundary a copy to destDir would cross
+	// (e2e.GuardTransfer: an encrypted file does not leave its folder inside
+	// a zip either; the encrypted folder itself may, its key file goes with
+	// it). allow_plaintext waives only the "plaintext into an encrypted
+	// folder" half, which plaintextRefusal has already put to the caller.
+	srcRels := make([]string, 0, len(sources))
+	for _, src := range sources {
+		sSrc, relSrc, rerr := a.resolveStorage(ctx, src)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if relSrc == "" {
+			return nil, errors.New("source path required (cannot zip a storage root)")
+		}
+		if sSrc.ID != sDest.ID {
+			return nil, errors.New("zip sources must be on the same storage as dest")
+		}
+		if perr := packSourceRefusal(ctx, a.acl, a.store, sSrc.ID, relSrc); perr != nil {
+			var pr *packRefusal
+			if !errors.As(perr, &pr) {
+				return nil, perr
+			}
+			if pr.v.ByPerm() {
+				return nil, denied(errAIForbidden, "access denied: your account lacks the %s permission (packing %s takes its bytes)", perm.FilesDownload, src)
+			}
+			return nil, denied(errAIForbidden, "access denied: no permission to download %s", src)
+		}
+		srcRels = append(srcRels, relSrc)
+	}
+	if lk, ok := a.store.(e2e.NodeByPathLookup); ok {
+		if gerr := e2e.GuardTransfer(ctx, lk, sDest.ID, srcRels, sDest.ID, destDir); gerr != nil &&
+			!(plaintextConsented(ctx) && errors.Is(gerr, e2e.ErrPlaintextIntoEncrypted)) {
+			return nil, gerr
+		}
 	}
 
 	// archive/zip writes forward-only, so build into a tmp file then stream
@@ -1309,26 +1543,9 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 
 	zw := zip.NewWriter(tmp)
 	seen := map[string]bool{}
-	for _, src := range sources {
-		sSrc, relSrc, rerr := a.resolveStorage(ctx, src)
-		if rerr != nil {
-			_ = zw.Close()
-			return nil, rerr
-		}
-		if relSrc == "" {
-			_ = zw.Close()
-			return nil, errors.New("source path required (cannot zip a storage root)")
-		}
-		if sSrc.ID != sDest.ID {
-			_ = zw.Close()
-			return nil, errors.New("zip sources must be on the same storage as dest")
-		}
-		drvSrc, derr := a.resolver(sSrc.ID)
-		if derr != nil {
-			_ = zw.Close()
-			return nil, derr
-		}
-		if aerr := a.zipAdd(ctx, zw, drvSrc, sSrc.ID, relSrc, path.Base(relSrc), seen); aerr != nil {
+	for _, relSrc := range srcRels {
+		// Every source is on sDest's storage (checked above).
+		if aerr := a.zipAdd(ctx, zw, drvDest, sDest.ID, relSrc, path.Base(relSrc), seen); aerr != nil {
 			_ = zw.Close()
 			return nil, aerr
 		}
@@ -1362,14 +1579,16 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 		mime = "application/zip"
 	}
 	a.cacheUpsertFile(ctx, sDest, relDest, size, mime)
-	return &aiEntry{
+	e := &aiEntry{
 		Path:         joinAdapterPath(sDest.Name, relDest),
 		Name:         path.Base(relDest),
 		Type:         "file",
 		Size:         size,
 		Mime:         mime,
 		LastModified: time.Now().UnixMilli(),
-	}, nil
+	}
+	markE2e(ctx, newE2eRoots(a.store), sDest, relDest, e)
+	return e, nil
 }
 
 // zipAdd writes rel (a file or directory) into zw under the zip-internal path
@@ -1471,6 +1690,12 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 	if err := a.can(ctx, sDst, relDst, perm.FilesCreate); err != nil {
 		return 0, refused, err
 	}
+	// An archive that is ciphertext cannot be opened here (no key): the rule
+	// file_read asks. Where the members land is judged below, member by
+	// member, before any of them is written.
+	if err := a.encryptedRefusal(ctx, sSrc, relSrc); err != nil {
+		return 0, refused, err
+	}
 	drv, err := a.resolver(sSrc.ID)
 	if err != nil {
 		return 0, refused, err
@@ -1510,6 +1735,25 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 	defer zr.Close()
 
 	dest := strings.Trim(relDst, "/")
+	// The members land as plaintext: into an encrypted folder only with
+	// allow_plaintext (plaintextRefusal, the rule file_write asks). Judged
+	// per member, because one can land in an encrypted folder that sits
+	// UNDER an ordinary destination (`kasa/` in the archive, `<dest>/kasa`
+	// encrypted on the storage), and before anything is written, so a
+	// refusal leaves nothing half-extracted.
+	if !plaintextConsented(ctx) {
+		roots := newE2eRoots(a.store)
+		for _, f := range zr.File {
+			safeRel, serr := sanitizeZipPath(f.Name)
+			if serr != nil {
+				continue
+			}
+			target := strings.Trim(path.Join(dest, safeRel), "/")
+			if root := roots.of(ctx, sDst.ID, sDst.Name, target); root != "" {
+				return 0, refused, a.plaintextRefusal(ctx, sDst, aiParent(target))
+			}
+		}
+	}
 	mkdirer, _ := drv.(storage.Mkdirer)
 	locks := a.lockView(ctx, sDst)
 	count := 0
@@ -1524,8 +1768,10 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 		// filex's own names inside an ordinary destination is skipped here,
 		// and so is one that would land on a document an app has frozen
 		// (counted as refused: it is not the archive's fault, and nothing
-		// about retrying changes it while the freeze lasts).
-		if gerr := writegate.Check(locks, 0, writegate.Writes(target)); gerr != nil {
+		// about retrying changes it while the freeze lasts). Judged as every
+		// write from here is (keyless): a member named like an encrypted
+		// folder's key file is skipped, so an archive cannot plant one.
+		if gerr := writegate.Check(locks, 0, keyless(writegate.Writes(target))); gerr != nil {
 			slog.Warn("ai unzip: skipped member", slog.String("name", f.Name), slog.String("why", gerr.Error()))
 			if errors.Is(gerr, writegate.ErrLocked) {
 				refused++

@@ -66,7 +66,7 @@ var instanceWideNoTenantForm = []struct {
 
 func TestInstanceWideNoTenantForm_TenantAdminIsRefused(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
-	_, email, password := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
+	_, email, password := seedTenant(t, store, "globex", "admin@globex.test", false)
 	testutil.LoginAs(t, srv, client, email, password)
 
 	for _, rt := range instanceWideNoTenantForm {
@@ -118,16 +118,16 @@ func TestInstanceWideNoTenantForm_SingleTenantAdminUnaffected(t *testing.T) {
 // that only refused would have been trivially "safe" and useless.
 func TestSettings_TenantMayBrandButNotRewriteTheInstance(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
-	tenantID, email, password := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
+	tenantID, email, password := seedTenant(t, store, "globex", "admin@globex.test", false)
 	testutil.LoginAs(t, srv, client, email, password)
 
 	t.Run("may brand its own tenant", func(t *testing.T) {
 		status, body := doJSON(t, client, http.MethodPut, srv.URL+"/api/admin/settings/branding.name",
-			map[string]any{"value": "Diyetlif"})
+			map[string]any{"value": "Globex"})
 		require.Equal(t, http.StatusOK, status, "%v", body)
 
 		// The value must land under the tenant's OWN prefix, not the global key.
-		assert.Equal(t, "Diyetlif", settingValue(t, store, fmt.Sprintf("tenant.%d.branding.name", tenantID)))
+		assert.Equal(t, "Globex", settingValue(t, store, fmt.Sprintf("tenant.%d.branding.name", tenantID)))
 		assert.Empty(t, settingValue(t, store, "branding.name"),
 			"a tenant admin overwrote the instance-wide branding")
 	})
@@ -155,7 +155,7 @@ func TestSettings_TenantMayBrandButNotRewriteTheInstance(t *testing.T) {
 	// tenantBrandingKey passes it through UNCHANGED — so accepting it would
 	// let one tenant rebrand another's login page by typing their id.
 	t.Run("may not brand another tenant by naming its id", func(t *testing.T) {
-		other, _, _ := seedTenant(t, store, "arasboya", "admin@arasboya.test", false)
+		other, _, _ := seedTenant(t, store, "initech", "admin@initech.test", false)
 		key := fmt.Sprintf("tenant.%d.branding.name", other)
 		status, _ := doJSON(t, client, http.MethodPut, srv.URL+"/api/admin/settings/"+key,
 			map[string]any{"value": "hijacked"})
@@ -201,8 +201,8 @@ func TestSettings_SingleTenantAdminWritesAnything(t *testing.T) {
 // change is which rows come back.
 func TestScopedAdminReads_ShowOnlyOwnTenant(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
-	mine := seedFullTenant(t, store, "diyetlif")
-	theirs := seedFullTenant(t, store, "arasboya")
+	mine := seedFullTenant(t, store, "globex")
+	theirs := seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 	t.Run("sync-run history excludes the other tenant", func(t *testing.T) {
@@ -246,8 +246,8 @@ func TestScopedAdminReads_ShowOnlyOwnTenant(t *testing.T) {
 // the status code — the endpoint answered 200 before and answers 200 now.
 func TestTrashEmpty_StopsAtTheTenantBoundary(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
-	mine := seedFullTenant(t, store, "diyetlif")
-	theirs := seedFullTenant(t, store, "arasboya")
+	mine := seedFullTenant(t, store, "globex")
+	theirs := seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/trash/empty",

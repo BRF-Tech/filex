@@ -40,6 +40,21 @@ services:
       # Optional: preset the first admin instead of a random password.
       # FILEX_ADMIN_EMAIL: admin@example.com
       # FILEX_ADMIN_PASSWORD: change-me
+      # Which peers may tell filex a client's address (X-Forwarded-For /
+      # X-Real-IP): the address the sign-in attempt limit counts by and the
+      # audit log records. The default, "auto", trusts this machine and the
+      # containers on this Docker network (a proxy container next to filex) -
+      # never the network's gateway, never a client on the LAN - so the port
+      # published below needs nothing set.
+      # ⚠ A reverse proxy on the HOST reaches filex through the published port
+      # and arrives from the network's gateway (docker network inspect shows
+      # it): list it, keeping auto, and publish the port on 127.0.0.1 only -
+      # "127.0.0.1:5212:5212" - so nothing else arrives from that address.
+      # A proxy on another machine, or over 100.64.0.0/10 (Tailscale,
+      # Cloudflare WARP), is listed by its address. The Sign-in security page
+      # names a peer that sends forwarded addresses without being trusted.
+      # docs/CONFIGURATION.md -> "Trusted proxies".
+      # FILEX_TRUSTED_PROXIES: "auto, 172.18.0.1"
     volumes:
       # DB + search index + thumbnail cache + first-run secret.
       - filex-data:/data

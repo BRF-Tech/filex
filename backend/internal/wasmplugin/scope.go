@@ -121,6 +121,12 @@ type Scope struct {
 	// read-only (writable is false), so it can neither write files nor state,
 	// take locks, sign, nor open links.
 	system bool
+	// thumb marks a thumbnail call (thumbnails.go): it reads the one file it
+	// was handed, its settings and assets, and a granted http host - every
+	// other host function refuses it (thumbHostFns).
+	thumb bool
+	// sent are the hosts a thumbnail call reached, for its audit row.
+	sent []string
 }
 
 func newScope(plugin *Installed, reg *Registry, jobID string, storageID int64, drv storage.Driver, actor *model.User, locale string, writable bool) (*Scope, error) {

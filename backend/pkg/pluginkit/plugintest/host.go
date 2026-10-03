@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/pkg/pluginkit"
+	"github.com/brf-tech/filex/backend/pkg/pluginkit/officecmd"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
@@ -164,7 +166,16 @@ type Host struct {
 	// EngineFn answers engine_run. The default produces one artefact per
 	// name in req.Outputs (`engine:<name>` as bytes), or a single
 	// `out.bin`. Set it to script failures, timeouts and real payloads.
+	// It answers the office engine too when set; OfficeFn is the narrower
+	// way to script that one.
 	EngineFn func(n int, req pluginkit.EngineRequest) (*pluginkit.EngineResult, error)
+	// OfficeFn is the fake document server behind the office engine
+	// (`engines:office`, alias `engines:libreoffice`): one call per file of a
+	// `--convert-to` command line the host has already read and accepted
+	// (officecmd). Return the converted bytes, or an *OfficeRefusal for the
+	// document server's error code (-7: it does not make that format from
+	// that one). The default answers `office:<from>-><to>` and the input.
+	OfficeFn func(c OfficeConversion) ([]byte, error)
 	// HTTPFn answers http_request for a granted host. The default is a
 	// 200 with an empty body.
 	HTTPFn func(req pluginkit.HTTPRequest) (*pluginkit.HTTPResponse, error)
@@ -273,27 +284,60 @@ func (h *Host) SetSetting(key, value string) {
 
 // InstallEngine marks an engine as present on this server. Availability and
 // the grant are separate: an engine the manifest never asked for stays
-// refused even when installed.
+// refused even when installed. The office engine is "installed" when a
+// document server is connected: InstallEngine("office") (or "libreoffice",
+// the same engine).
 func (h *Host) InstallEngine(names ...string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, n := range names {
+		if officecmd.IsEngine(n) {
+			n = officecmd.Engine
+		}
 		h.engines[n] = true
 	}
 }
 
 // InstalledEngines is the engine map a call carries (ActionRunInput.Engines
-// / CallContext.Engines): installed AND granted, as the host reports it.
+// / CallContext.Engines): installed AND granted, as the host reports it -
+// the office engine under both of its names, as the real host does.
 func (h *Host) InstalledEngines() map[string]bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := map[string]bool{}
 	for name := range h.engines {
-		if h.grants["engines:"+name] {
-			out[name] = true
+		if !h.engineGrantedLocked(name) {
+			continue
 		}
+		if officecmd.IsEngine(name) {
+			out[officecmd.Engine] = true
+			out[officecmd.LegacyEngine] = true
+			continue
+		}
+		out[name] = true
 	}
 	return out
+}
+
+// engineGrantedLocked: engines:<name> is granted - the office engine under
+// either of its names, which are one grant.
+func (h *Host) engineGrantedLocked(name string) bool {
+	if h.grants["engines:"+name] {
+		return true
+	}
+	if officecmd.IsEngine(name) {
+		return h.grants["engines:"+officecmd.Engine] || h.grants["engines:"+officecmd.LegacyEngine]
+	}
+	return false
+}
+
+// engineInstalledLocked: the engine is present (the office engine under
+// either name).
+func (h *Host) engineInstalledLocked(name string) bool {
+	if officecmd.IsEngine(name) {
+		return h.engines[officecmd.Engine]
+	}
+	return h.engines[name]
 }
 
 // AddUser puts someone in the directory users_lookup searches.
@@ -671,7 +715,7 @@ func (h *Host) FileUnlock(ref string) error {
 func (h *Host) EngineAvailable(name string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.grants["engines:"+name] && h.engines[name]
+	return h.engineGrantedLocked(name) && h.engineInstalledLocked(name)
 }
 
 // EngineRun runs one of the host's engines (permission `engines:<name>`,
@@ -687,8 +731,8 @@ func (h *Host) EngineRun(req pluginkit.EngineRequest) (*pluginkit.EngineResult, 
 }
 
 func (h *Host) engineRunLocked(req pluginkit.EngineRequest) (*pluginkit.EngineResult, error) {
-	if err := h.need("engines:" + req.Engine); err != nil {
-		return nil, err
+	if !h.engineGrantedLocked(req.Engine) {
+		return nil, hostErr(wire.ErrPermissionDenied, "plugin was not granted engines:"+req.Engine)
 	}
 	if err := h.needJob("engines run"); err != nil {
 		return nil, err
@@ -701,7 +745,19 @@ func (h *Host) engineRunLocked(req pluginkit.EngineRequest) (*pluginkit.EngineRe
 			return nil, err
 		}
 	}
-	if !h.engines[req.Engine] {
+	var office *officecmd.Command
+	if officecmd.IsEngine(req.Engine) {
+		// The command line is read before availability, as the host does:
+		// what the office engine cannot do fails on every host.
+		cmd, err := officecmd.Parse(req.Args)
+		if err != nil {
+			return nil, hostErr(wire.ErrInvalid, err.Error())
+		}
+		if !h.engineInstalledLocked(req.Engine) {
+			return nil, hostErr(wire.ErrUnavailable, "engine "+req.Engine+" is not configured on this host: office documents are converted by ONLYOFFICE Document Server, and none is connected (an administrator connects one under External services)")
+		}
+		office = cmd
+	} else if !h.engines[req.Engine] {
 		return nil, hostErr(wire.ErrUnavailable, "engine "+req.Engine+" is not installed on this host")
 	}
 	for name, ref := range req.Inputs {
@@ -712,6 +768,9 @@ func (h *Host) engineRunLocked(req pluginkit.EngineRequest) (*pluginkit.EngineRe
 	if h.EngineFn != nil {
 		n := len(h.Engines)
 		return h.EngineFn(n, req)
+	}
+	if office != nil {
+		return h.officeRunLocked(req, office)
 	}
 	res := &pluginkit.EngineResult{DurationMS: 1}
 	names := req.Outputs
@@ -1031,7 +1090,7 @@ func (h *Host) ShareCreate(req pluginkit.PageCreate) (*pluginkit.PageCreated, er
 		}
 	default:
 		if len(pin) < 4 || len(pin) > 12 {
-			return nil, hostErr(wire.ErrInvalid, "pin must be 4–12 characters")
+			return nil, hostErr(wire.ErrInvalid, "pin must be 4-12 characters")
 		}
 		if page.PIN == "none" {
 			return nil, hostErr(wire.ErrInvalid, "this page takes no pin")
@@ -1230,8 +1289,9 @@ func (h *Host) CertIssue(commonName, email string, days int) (*pluginkit.IssuedC
 		Subject:      pkix.Name{CommonName: commonName},
 		NotBefore:    time.Now().Add(-time.Minute),
 		NotAfter:     time.Now().Add(time.Duration(days) * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
+		// The usages the real host puts on a signer's certificate.
+		UnknownExtKeyUsage: signerEKUs(),
 	}
 	if email != "" {
 		tpl.EmailAddresses = []string{email}
@@ -1281,12 +1341,12 @@ func (h *Host) PlatformSeal() (*pluginkit.IssuedCert, error) {
 		return nil, hostErr(wire.ErrInternal, "keygen")
 	}
 	tpl := &x509.Certificate{
-		SerialNumber: big.NewInt(9_000_000),
-		Subject:      pkix.Name{CommonName: "filex document seal", Organization: []string{"filex"}, OrganizationalUnit: []string{h.manifest.Name}},
-		NotBefore:    time.Now().Add(-time.Minute),
-		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageEmailProtection},
+		SerialNumber:       big.NewInt(9_000_000),
+		Subject:            pkix.Name{CommonName: "filex document seal", Organization: []string{"filex"}, OrganizationalUnit: []string{h.manifest.Name}},
+		NotBefore:          time.Now().Add(-time.Minute),
+		NotAfter:           time.Now().Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:           x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
+		UnknownExtKeyUsage: signerEKUs(),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, h.caCert, &priv.PublicKey, h.caKey)
 	if err != nil {
@@ -1304,6 +1364,17 @@ func (h *Host) PlatformSeal() (*pluginkit.IssuedCert, error) {
 
 // sealRef is the fake host's one platform seal.
 const sealRef = "key:platform-seal"
+
+// signerEKUs is wire.SignerEKUs as object identifiers - what the real host
+// puts on every certificate it issues for signing, so a verifier tested here
+// sees the certificates it will see there.
+func signerEKUs() []asn1.ObjectIdentifier {
+	out := make([]asn1.ObjectIdentifier, 0, len(wire.SignerEKUs))
+	for _, o := range wire.SignerEKUs {
+		out = append(out, append(asn1.ObjectIdentifier(nil), o...))
+	}
+	return out
+}
 
 // HostSign signs a sha256 digest with a host-held key. The answer is a
 // DER-encoded ECDSA signature — a real one, verifiable with the leaf.

@@ -23,6 +23,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { loginAs, dismissInstallBanner, logout } from '../helpers/auth';
 import { underBase } from '../helpers/base';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
+import { readWebPrefs, restoreWebPrefs } from '../helpers/prefs';
 
 const STORAGE = `e2e-theme98-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -44,13 +45,26 @@ function token(page: Page, name: string) {
 }
 
 test.describe('tema:v1 — a custom theme, composed and worn', () => {
-  test.beforeAll(async ({ request }) => {
+  /* ⚠ The account's web preferences as this spec found them. Choosing a
+     palette while signed in writes it into the shared admin's preference
+     document, which outranks the browser's own choice: the "signing out"
+     case leaves "night" there, and the next engine's run of this spec on
+     the same server painted night over the theme it had just applied
+     (0.50 test phase: Chromium green, then Firefox and WebKit red; either
+     engine alone on a fresh server green). Put back as found. */
+  let prefsBefore: Record<string, unknown> = {};
+
+  test.beforeAll(async ({ playwright, baseURL, request }) => {
+    const api = await newAuthedRequest(playwright, baseURL ?? '');
+    prefsBefore = await readWebPrefs(api);
+    await api.dispose();
     await dropStorageByName(request, STORAGE);
     await seedLocalStorage(request, STORAGE, MOUNT);
   });
 
   test.afterAll(async ({ playwright, baseURL, request }) => {
     const api = await newAuthedRequest(playwright, baseURL ?? '');
+    await restoreWebPrefs(api, prefsBefore).catch(() => undefined);
     await api.delete(`/api/admin/themes/${THEME_KEY}`);
     await api.patch('/api/admin/settings', {
       data: { 'ui.default_theme': 'default', 'ui.custom_css': '', 'ui.custom_css_enabled': 'false' },
@@ -177,6 +191,15 @@ test.describe('tema:v1 — a custom theme, composed and worn', () => {
     });
     expect(btnBg, 'the submit button wears the instance primary').toBe('rgb(122, 31, 92)');
 
+    // #74 - and the page itself: its card and ground. This theme defines no
+    // page of its own, so they come in its own tones - the card is its
+    // surface, `--fe-bg`. They were stock white and grey under the brand.
+    const cardBg = await anonPage.evaluate(() => {
+      const c = document.querySelector('.fe-ppage__card');
+      return c ? getComputedStyle(c).backgroundColor : '';
+    });
+    expect(cardBg, 'the share page card wears the theme, not the stock white').toBe('rgb(255, 250, 247)');
+
     // ── and the page a browser with no JavaScript gets ──────────────────
     //
     // ⚠ Still served, still themed, and it is the reader the `--px-*` set was
@@ -274,6 +297,79 @@ test.describe('tema:v1 — a custom theme, composed and worn', () => {
     await expect.poll(() => token(page, '--fe-primary')).toBe(BRAND);
     expect(await page.evaluate(() => localStorage.getItem('filex.palette'))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem('filex.session'))).toBeNull();
+  });
+
+  // #74 - the owner, 2026-10-01: an operator's theme may define the share
+  // page and the sign-in page itself; when it does, those pages wear exactly
+  // that. (The theme above defines neither and its pages come in its own
+  // tones - measured in the instance-default test.)
+  test('a theme that defines its own share and sign-in pages gets exactly those', async ({
+    playwright,
+    baseURL,
+    browser,
+  }) => {
+    const PAGES_KEY = 'e2e-acme-pages';
+    const SHARE_CARD = '#fbf3ee';
+    const SHARE_GROUND = '#efe2d9';
+    const SIGNIN_CARD = '#fffdf9';
+    const api = await newAuthedRequest(playwright, baseURL ?? '');
+    try {
+      const list = await (await api.get('/api/admin/themes')).json();
+      const base = (list.themes ?? []).find((t: { key: string }) => t.key === THEME_KEY);
+      expect(base, 'the composed theme is there to start from').toBeTruthy();
+      const put = await api.put(`/api/admin/themes/${PAGES_KEY}`, {
+        data: {
+          ...base,
+          key: PAGES_KEY,
+          name: 'Acme Sayfalar',
+          light: {
+            ...base.light,
+            '--fe-ppage-ground-1': SHARE_GROUND,
+            '--fe-ppage-card': SHARE_CARD,
+            '--fe-login-card': SIGNIN_CARD,
+          },
+        },
+      });
+      expect(put.ok(), `the server takes a theme's own pages: ${put.status()} ${await put.text()}`).toBe(true);
+      await api.patch('/api/admin/settings', { data: { 'ui.default_theme': `custom:${PAGES_KEY}` } });
+
+      const shareRes = await api.post('/api/files/share', {
+        data: { path: `${STORAGE}://${FILE_NAME}`, kind: 'file' },
+      });
+      expect(shareRes.ok()).toBeTruthy();
+      const shareURL: string = (await shareRes.json()).share.url;
+
+      const anon = await browser.newContext();
+      const page = await anon.newPage();
+      await page.goto(shareURL);
+      await expect(page.getByTestId('public-page')).toBeVisible();
+      const share = await page.evaluate(() => {
+        const card = document.querySelector('.fe-ppage__card');
+        const root = document.querySelector('.fe.fe-ppage');
+        return {
+          card: card ? getComputedStyle(card).backgroundColor : '',
+          ground: root ? getComputedStyle(root).getPropertyValue('--fe-ppage-ground-1').trim() : '',
+        };
+      });
+      expect(share.card, 'the share page card is the theme\'s own').toBe('rgb(251, 243, 238)');
+      expect(share.ground, 'and so is its ground').toBe(SHARE_GROUND);
+
+      await page.goto('/admin/login');
+      await expect(page.locator('input[type="password"]')).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const c = document.querySelector('.lg-card');
+            return c ? getComputedStyle(c).backgroundColor : '';
+          }),
+        )
+        .toBe('rgb(255, 253, 249)');
+      await anon.close();
+    } finally {
+      await api.patch('/api/admin/settings', { data: { 'ui.default_theme': THEME_ID } });
+      await api.delete(`/api/admin/themes/${PAGES_KEY}`);
+      await api.dispose();
+    }
   });
 });
 

@@ -26,6 +26,10 @@ func TestClassifyJobError(t *testing.T) {
 		{model.AppPluginJobFailed, engineMissingMessage("libreoffice"), "engine_missing", "libreoffice"},
 		// An app usually passes the host's words on inside its own.
 		{model.AppPluginJobFailed, "convert: " + engineMissingMessage("ffmpeg") + " (docx → pdf)", "engine_missing", "ffmpeg"},
+		// 0.50: the office engine is a document server to connect - its own
+		// code, named by the engine's own id whichever name the app used.
+		{model.AppPluginJobFailed, officeUnconfiguredMessage("libreoffice"), "office_unconfigured", "office"},
+		{model.AppPluginJobFailed, "convert: " + officeUnconfiguredMessage("office") + " (docx → pdf)", "office_unconfigured", "office"},
 		{model.AppPluginJobFailed, msgJobTimeout, "timeout", ""},
 		{model.AppPluginJobFailed, msgJobOOM, "out_of_memory", ""},
 		{model.AppPluginJobFailed, msgJobTrap, "crashed", ""},

@@ -30,6 +30,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/namefold"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 
 	postgres_migrations "github.com/brf-tech/filex/backend/db/migrations/postgres"
 )
@@ -82,8 +83,21 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Rows deleted where they stood (issue #74), written once in internal/db.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Plugin install requests (00070), written once in internal/db.
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// Sign-in attempt counters (00072), written once in internal/db.
+	s.LoginThrottleSQL = &db.LoginThrottleSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// Groups (00074), written once in internal/db.
+	s.GroupSQL = db.NewGroupSQL(sqlDB, true)
+	// Tenant self-service (00076), written once in internal/db.
+	s.TenantAuthSQL = db.NewTenantAuthSQL(sqlDB, true)
+	// File associations and app thumbnail limits (00077), written once in
+	// internal/db.
+	s.FileAssocSQL = &db.FileAssocSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// The SSO identity an account is bound to (00079), written once in
+	// internal/db.
+	s.OIDCIdentitySQL = &db.OIDCIdentitySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, GetUser: s.GetUser}
 	return s
 }
 
@@ -105,8 +119,24 @@ type Store struct {
 	*db.DraftSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
+	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
+	// node_unavailable_sql.go, migration 00078).
+	*db.NodeUnavailableSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
+	// The sign-in attempt counters (internal/db login_throttle_sql.go).
+	*db.LoginThrottleSQL
+	// The group methods (internal/db group_sql.go, migration 00074).
+	*db.GroupSQL
+	// Sign-in instances, their bindings, own domains (internal/db
+	// tenant_auth_sql.go, migration 00076).
+	*db.TenantAuthSQL
+	// File associations and app thumbnail limits (internal/db
+	// file_assoc_sql.go, migration 00077).
+	*db.FileAssocSQL
+	// The SSO identity an account is bound to (internal/db
+	// oidc_identity_sql.go, migration 00079).
+	*db.OIDCIdentitySQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -511,17 +541,17 @@ func (s *Store) SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) er
 
 // ─── Providers (tenants) — see docs/MULTI-TENANCY.md ─────────────────
 
-const providerCols = `id, slug, name, COALESCE(host,''), auth_type, ` +
+const providerCols = `id, slug, COALESCE(realm,''), name, COALESCE(host,''), auth_type, ` +
 	`COALESCE(oidc_issuer,''), COALESCE(oidc_client_id,''), COALESCE(oidc_client_secret,''), ` +
 	`COALESCE(oidc_redirect_url,''), COALESCE(role_claim,''), COALESCE(admin_group,''), ` +
-	`COALESCE(cookie_domain,''), is_supertenant, enabled, created_at, updated_at`
+	`COALESCE(cookie_domain,''), is_supertenant, enabled, allow_insecure_auth, oidc_trust_email, created_at, updated_at`
 
 func scanProvider(r rowScanner) (*model.Provider, error) {
 	p := &model.Provider{}
-	if err := r.Scan(&p.ID, &p.Slug, &p.Name, &p.Host, &p.AuthType,
+	if err := r.Scan(&p.ID, &p.Slug, &p.Realm, &p.Name, &p.Host, &p.AuthType,
 		&p.OIDCIssuer, &p.OIDCClientID, &p.OIDCClientSecret, &p.OIDCRedirectURL,
 		&p.RoleClaim, &p.AdminGroup, &p.CookieDomain, &p.IsSupertenant, &p.Enabled,
-		&p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.AllowInsecureAuth, &p.OIDCTrustEmail, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -533,11 +563,25 @@ func (s *Store) CreateProvider(ctx context.Context, p *model.Provider) (*model.P
 		at = model.AuthTypeOIDC
 	}
 	row := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO providers (slug, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, cookie_domain, is_supertenant, enabled)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING `+providerCols,
-		p.Slug, p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
+		`INSERT INTO providers (slug, realm, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, cookie_domain, is_supertenant, enabled)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING `+providerCols,
+		p.Slug, db.ProviderRealmOnCreate(p), p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
 		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.CookieDomain, p.IsSupertenant, p.Enabled)
 	return scanProvider(row)
+}
+
+// GetProviderByRealm resolves a realm to its tenant, or (nil, nil); see the
+// sqlite store for why it does not filter on enabled.
+func (s *Store) GetProviderByRealm(ctx context.Context, realm string) (*model.Provider, error) {
+	r := tenant.NormalizeRealm(realm)
+	if r == "" {
+		return nil, nil
+	}
+	p, err := scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE realm=$1`, r))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
 }
 
 func (s *Store) GetProvider(ctx context.Context, id int64) (*model.Provider, error) {
@@ -552,10 +596,13 @@ func (s *Store) GetProviderBySlug(ctx context.Context, slug string) (*model.Prov
 	return p, err
 }
 
+// GetProviderByHost resolves an address to its enabled tenant: a provider's
+// `host`, else an active own domain or a platform subdomain
+// (db.ResolveExtraHost, docs/TENANT-ADMIN.md).
 func (s *Store) GetProviderByHost(ctx context.Context, host string) (*model.Provider, error) {
 	p, err := scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE host=$1 AND enabled=TRUE`, host))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return db.ResolveExtraHost(ctx, s, host)
 	}
 	return p, err
 }
@@ -1041,7 +1088,7 @@ const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,'
 	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
 	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at, ` +
 	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,TRUE), ` +
-	`COALESCE(avatar_url,''), COALESCE(username,'')`
+	`COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,'')`
 
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
 	// New users default to the always-present "default" provider (the
@@ -1056,9 +1103,13 @@ func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz st
 
 func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE users SET provider_id=$1, oidc_subject=$2, updated_at=NOW() WHERE id=$3`,
+		`UPDATE users SET provider_id=$1, oidc_subject=$2, oidc_issuer=CASE WHEN $2='' THEN NULL ELSE oidc_issuer END, updated_at=NOW() WHERE id=$3`,
 		providerID, oidcSubject, userID)
-	return err
+	if err != nil {
+		return err
+	}
+	// A group of the tenant they left no longer holds them (migration 00074).
+	return s.DropForeignMemberships(ctx, userID, providerID)
 }
 
 func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
@@ -2137,21 +2188,149 @@ func (s *Store) UpdateExternalServiceState(ctx context.Context, name string, las
 	return err
 }
 
-func (s *Store) GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error) {
+// thumbCols is the one column list every thumbnail read scans (scanThumb).
+const thumbCols = `node_id, state, COALESCE(storage_key,''), COALESCE(width,0), COALESCE(height,0), COALESCE(error,''), generated_at, COALESCE(source_sig,''), attempted_at, COALESCE(generator,''), COALESCE(attempts,'')`
+
+func scanThumb(sc interface{ Scan(...any) error }) (*model.Thumbnail, error) {
 	t := &model.Thumbnail{}
-	err := s.conn(ctx).QueryRowContext(ctx, `SELECT node_id, state, COALESCE(storage_key,''), COALESCE(width,0), COALESCE(height,0), COALESCE(error,''), generated_at FROM thumbnails WHERE node_id=$1`, nodeID).
-		Scan(&t.NodeID, &t.State, &t.StorageKey, &t.Width, &t.Height, &t.Error, &t.GeneratedAt)
-	if err != nil {
+	if err := sc.Scan(&t.NodeID, &t.State, &t.StorageKey, &t.Width, &t.Height, &t.Error, &t.GeneratedAt, &t.SourceSig, &t.AttemptedAt, &t.Generator, &t.Attempts); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
+func (s *Store) GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error) {
+	return scanThumb(s.conn(ctx).QueryRowContext(ctx, `SELECT `+thumbCols+` FROM thumbnails WHERE node_id=$1`, nodeID))
+}
+
+// GetThumbnails answers many rows at once, 500 ids per query (the same
+// batching ExistingNodeIDs uses). A node with no row is absent from the map.
+func (s *Store) GetThumbnails(ctx context.Context, ids []int64) (map[int64]*model.Thumbnail, error) {
+	out := make(map[int64]*model.Thumbnail, len(ids))
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := make([]string, 0, len(chunk))
+		args := make([]any, 0, len(chunk))
+		for i, id := range chunk {
+			ph = append(ph, fmt.Sprintf("$%d", i+1))
+			args = append(args, id)
+		}
+		rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+thumbCols+` FROM thumbnails WHERE node_id IN (`+strings.Join(ph, ",")+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			t, err := scanThumb(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[t.NodeID] = t
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListPreviewCandidates(ctx context.Context, storageID int64, parentIDs []int64, perFolder int) (map[int64][]*model.Node, error) {
+	out := map[int64][]*model.Node{}
+	if len(parentIDs) == 0 || perFolder <= 0 {
+		return out, nil
+	}
+	const batch = 400
+	for start := 0; start < len(parentIDs); start += batch {
+		end := start + batch
+		if end > len(parentIDs) {
+			end = len(parentIDs)
+		}
+		chunk := parentIDs[start:end]
+		args := []any{storageID}
+		ph := make([]string, len(chunk))
+		for i, id := range chunk {
+			args = append(args, id)
+			ph[i] = fmt.Sprintf("$%d", len(args))
+		}
+		args = append(args, perFolder)
+		// Newest first by the later of the row's creation and the file's own
+		// modification time (GREATEST skips a NULL mtime), then by name.
+		q := `SELECT ` + nodeColumnsN + ` FROM (
+			SELECT nodes.*, ROW_NUMBER() OVER (PARTITION BY parent_id
+				ORDER BY GREATEST(created_at, backend_mtime) DESC, name) AS rn FROM nodes
+			WHERE storage_id = $1 AND type = 'file' AND deleted_at IS NULL
+			AND parent_id IN (` + strings.Join(ph, ",") + `)
+		) n WHERE n.rn <= ` + fmt.Sprintf("$%d", len(args)) + ` ORDER BY n.parent_id, n.rn`
+		rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			n, err := scanNode(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if n.ParentID != nil {
+				out[*n.ParentID] = append(out[*n.ParentID], n)
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListThumbnailProblems(ctx context.Context, storageIDs []int64, limit int) ([]*model.ThumbnailProblem, error) {
+	if storageIDs != nil && len(storageIDs) == 0 {
+		return []*model.ThumbnailProblem{}, nil
+	}
+	q := `SELECT n.id, n.storage_id, n.path, n.name, n.size, t.state, COALESCE(t.error,''), t.attempted_at, COALESCE(t.attempts,'')
+		FROM thumbnails t JOIN nodes n ON n.id = t.node_id
+		WHERE (t.state IN ('failed','skipped') OR (t.state = 'ready' AND COALESCE(t.attempts,'') LIKE '%},{%'))
+		  AND n.deleted_at IS NULL AND COALESCE(t.error,'') NOT LIKE 'e2e-encrypted%'`
+	args := []any{}
+	if storageIDs != nil {
+		ph := make([]string, len(storageIDs))
+		for i, id := range storageIDs {
+			args = append(args, id)
+			ph[i] = fmt.Sprintf("$%d", len(args))
+		}
+		q += ` AND n.storage_id IN (` + strings.Join(ph, ",") + `)`
+	}
+	args = append(args, limit)
+	q += fmt.Sprintf(` ORDER BY t.attempted_at DESC NULLS LAST, n.id DESC LIMIT $%d`, len(args))
+	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.ThumbnailProblem{}
+	for rows.Next() {
+		p := &model.ThumbnailProblem{}
+		if err := rows.Scan(&p.NodeID, &p.StorageID, &p.Path, &p.Name, &p.Size, &p.State, &p.Error, &p.AttemptedAt, &p.Attempts); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO thumbnails (node_id, state, storage_key, width, height, error, generated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
-		 ON CONFLICT(node_id) DO UPDATE SET state=excluded.state, storage_key=excluded.storage_key, width=excluded.width, height=excluded.height, error=excluded.error, generated_at=excluded.generated_at`,
-		t.NodeID, t.State, t.StorageKey, t.Width, t.Height, t.Error, t.GeneratedAt)
+		`INSERT INTO thumbnails (node_id, state, storage_key, width, height, error, generated_at, source_sig, attempted_at, generator, attempts) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		 ON CONFLICT(node_id) DO UPDATE SET state=excluded.state, storage_key=excluded.storage_key, width=excluded.width, height=excluded.height, error=excluded.error, generated_at=excluded.generated_at, source_sig=excluded.source_sig, attempted_at=excluded.attempted_at, generator=excluded.generator, attempts=excluded.attempts`,
+		t.NodeID, t.State, t.StorageKey, t.Width, t.Height, t.Error, t.GeneratedAt, t.SourceSig, t.AttemptedAt, t.Generator, t.Attempts)
 	return err
 }
 
@@ -2247,7 +2426,7 @@ type rowScanner interface {
 // what there were, and a column added to `nodes` reached the ordinary listing,
 // the search rebuild — and silently missed the tag and starred reads, whose
 // scan then failed at runtime on a path the suite only walks in one test.
-const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,FALSE), %[1]sdeleted_by`
+const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,FALSE), %[1]sdeleted_by, %[1]sunavailable_reason, %[1]sunavailable_at`
 
 var (
 	// nodeColumnList is the unqualified list; nodeColumnsN is the "n."-aliased
@@ -2260,10 +2439,12 @@ func nodeColumns() string { return nodeColumnList }
 
 func scanNode(r rowScanner) (*model.Node, error) {
 	n := &model.Node{}
-	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload, &n.DeletedBy)
+	var unavailable sql.NullString
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload, &n.DeletedBy, &unavailable, &n.UnavailableAt)
 	if err != nil {
 		return nil, err
 	}
+	n.UnavailableReason, n.Unavailable = unavailable.String, unavailable.Valid && unavailable.String != ""
 	return n, nil
 }
 
@@ -2308,9 +2489,10 @@ func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL, &u.Username); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason); err != nil {
 		return nil, err
 	}
+	u.SSOLinked = u.OIDCSubject != "" || u.OIDCIssuer != ""
 	if recoveryJSON != "" {
 		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
 	}
@@ -2699,7 +2881,7 @@ func (s *Store) ListAllShares(ctx context.Context, creatorID *int64, activeOnly 
 const shareMetaCols = `s.id, s.node_id, s.token, COALESCE(s.pin_hash,''), s.expires_at, s.max_downloads, s.download_count, s.visit_count, s.created_by, COALESCE(s.created_via,''), s.created_at,
 		       s.plugin_id, COALESCE(s.page_id,''), COALESCE(s.subject,''), COALESCE(s.purpose_json,''),
 		       CASE WHEN COALESCE(s.pin_enc,'') <> '' THEN 1 ELSE 0 END,
-		       s.revoked_at,
+		       s.revoked_at, COALESCE(s.kind,'download'), s.max_uploads, s.upload_count,
 		       COALESCE(u.email,''), COALESCE(n.path,''), COALESCE(st.name,''), COALESCE(ap.name,'')`
 
 const shareMetaJoins = `LEFT JOIN users u     ON u.id = s.created_by
@@ -2716,7 +2898,7 @@ func scanShareMeta(rows *sql.Rows) ([]*db.ShareWithMeta, error) {
 		var pinRecoverable int
 		if err := rows.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.VisitCount, &sh.CreatedBy, &sh.CreatedVia, &sh.CreatedAt,
 			&sh.PluginID, &sh.PageID, &sh.Subject, &sh.PurposeJSON, &pinRecoverable,
-			&sh.RevokedAt,
+			&sh.RevokedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount,
 			&row.CreatorEmail, &row.NodePath, &row.StorageName, &row.PluginName); err != nil {
 			return nil, err
 		}
@@ -2972,7 +3154,7 @@ func (s *Store) IncrementUserUsage(ctx context.Context, userID int64, delta int6
 // SetUserEnabled flips the account on/off. Files, quota and grants are
 // untouched -- this is an access switch, not a soft delete.
 func (s *Store) SetUserEnabled(ctx context.Context, userID int64, enabled bool) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=$1 WHERE id=$2`, enabled, userID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=$1, disabled_reason=NULL WHERE id=$2`, enabled, userID)
 	return err
 }
 
@@ -4852,9 +5034,18 @@ func (s *Store) SetAppPluginJobOp(ctx context.Context, jobID string, opID int64)
 	return err
 }
 
+// UpdateAppPluginJob writes what the worker learned about a job.
+//
+// ⚠⚠ op_id is KEPT when this copy has none. The handler records the ops row
+// on the job after queueing it (SetAppPluginJobOp), and the worker is awake
+// by then: it can read the job before that write and update it after, from a
+// copy whose OpID is nil. Writing op_id=NULL then unlinked the job from its
+// row for good, and the queue drew a nameless "plugin-action" with no
+// message, outputs or "open" link (measured in the 0.50 e2e: a bell click's
+// "sign" job ran and its ops row never said so).
 func (s *Store) UpdateAppPluginJob(ctx context.Context, j *model.AppPluginJob) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE app_plugin_jobs SET op_id=$1, status=$2, message=$3, outputs_json=$4, error=$5, finished_at=$6 WHERE id=$7`,
+		`UPDATE app_plugin_jobs SET op_id=COALESCE($1, op_id), status=$2, message=$3, outputs_json=$4, error=$5, finished_at=$6 WHERE id=$7`,
 		j.OpID, j.Status, j.Message, orJSON(j.OutputsJSON, "[]"), j.Error, j.FinishedAt, j.ID)
 	return err
 }

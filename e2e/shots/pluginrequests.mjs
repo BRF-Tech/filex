@@ -20,9 +20,10 @@
 // to install (checked below, before the shutter).
 //
 // ⚠ The source is a small HTTP server on 127.0.0.1 inside this script (plain
-// http is accepted for loopback only, wasmplugin/fetch.go), serving the builds
-// the apps scene uses (e2e/helpers/app-locations.mjs → findApp): nothing here
-// reaches GitHub.
+// http is accepted for loopback only, wasmplugin/fetch.go, and only with
+// FILEX_PLUGIN_LOOPBACK_SOURCES=1, which the instance below is booted with),
+// serving the builds the apps scene uses (e2e/helpers/app-locations.mjs →
+// findApp): nothing here reaches GitHub.
 //
 // Environment: FILEX_BIN, FILEX_SIGN_APP_DIR, FILEX_LANG_ES_APP_DIR, SHOTS_OUT,
 // SHOTS_KEEP (see apps.mjs).
@@ -103,7 +104,11 @@ async function main() {
     ['/lang-es/filex-app.json', readFileSync(pack.manifestPath)],
   ]);
   const source = await serve(files);
-  const inst = await bootInstance({ name: SET, admin: ADMIN, env: { FILEX_UPDATE_CHECK: '0' } });
+  const inst = await bootInstance({
+    name: SET,
+    admin: ADMIN,
+    env: { FILEX_UPDATE_CHECK: '0', FILEX_PLUGIN_LOOPBACK_SOURCES: '1' },
+  });
   const browser = await chromium.launch();
   try {
     const admin = client(inst.url);

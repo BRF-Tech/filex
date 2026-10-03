@@ -36,6 +36,7 @@ import { useNotificationsStore } from '@/stores/notifications';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import type { NotificationItem, User } from '@/api/types';
+import { unmountAll } from '../helpers/teardown';
 
 const markRead = vi.fn(async () => {});
 let rows: NotificationItem[] = [];
@@ -130,7 +131,6 @@ function shownTitles(): string[] {
 }
 
 beforeEach(() => {
-  document.body.innerHTML = '';
   markRead.mockClear();
   listCalls.mockClear();
   rows = [
@@ -166,7 +166,7 @@ describe('NotificationBell', () => {
   it('shows the unread count on the button and says it out loud', async () => {
     const { w } = await setup();
     expect(w.find('[data-testid="unread-badge"]').text()).toBe('3');
-    expect(w.find('[data-testid="notification-bell"]').attributes('aria-label')).toBe('Notifications — 3 unread');
+    expect(w.find('[data-testid="notification-bell"]').attributes('aria-label')).toBe('Notifications - 3 unread');
   });
 
   it('lists what happened in words, never a raw event key — in both languages', async () => {
@@ -181,8 +181,7 @@ describe('NotificationBell', () => {
       expect(titles).toHaveLength(3);
       for (const t of titles) expect(t).not.toMatch(/^[a-z_]+\.[a-z_.]+$/);
       expect(titles[0]).toBe(locale === 'tr' ? 'Yeni dosya: olcum.txt' : 'New file: olcum.txt');
-      w.unmount();
-      document.body.innerHTML = '';
+      unmountAll();
     }
   });
 
@@ -281,8 +280,7 @@ describe('NotificationBell', () => {
     await flushPromises();
     expect(user.notif.panelOpen, 'the full list did not open').toBe(true);
     expect(user.push, 'a non-admin was navigated somewhere').not.toHaveBeenCalled();
-    user.w.unmount();
-    document.body.innerHTML = '';
+    unmountAll();
 
     const admin = await setup({ role: 'admin' });
     await openPanel(admin.w);
@@ -299,8 +297,7 @@ describe('NotificationBell', () => {
     const user = await setup({ role: 'user' });
     await openPanel(user.w);
     expect(document.body.querySelector('[data-testid="notification-manage"]')).toBeNull();
-    user.w.unmount();
-    document.body.innerHTML = '';
+    unmountAll();
 
     const admin = await setup({ role: 'admin' });
     await openPanel(admin.w);

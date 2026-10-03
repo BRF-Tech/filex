@@ -115,7 +115,9 @@ func (p *IdP) SignIn(email, sub string) {
 }
 
 // SetExtraClaims adds claims (a groups claim, say) to every id_token from
-// now on; nil removes them.
+// now on; nil removes them. A claim set to nil is LEFT OUT of the id_token
+// (`"email_verified": nil` is a provider that does not send the claim at
+// all), where a non-nil value replaces the default one.
 func (p *IdP) SetExtraClaims(claims map[string]any) {
 	p.mu.Lock()
 	p.extra = claims
@@ -230,6 +232,10 @@ func (p *IdP) token(w http.ResponseWriter, r *http.Request) {
 		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "sid": "sid-" + p.sub,
 	}
 	for k, v := range p.extra {
+		if v == nil {
+			delete(claims, k)
+			continue
+		}
 		claims[k] = v
 	}
 	idt := p.IDToken(claims)

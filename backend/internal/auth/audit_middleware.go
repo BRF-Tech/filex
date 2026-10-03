@@ -9,7 +9,6 @@ package auth
 import (
 	"context"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -35,6 +35,16 @@ func AuditMiddleware(store db.Store) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			// ⚠⚠ ONE row per request. When an outer AuditMiddleware already
+			// records this request, this one steps aside: the handler's detail
+			// lands in the outer recorder and the outer one writes the row.
+			// /api/ai/admin/* sat under two of them (the /api/ai group's and the
+			// /admin route's own) and every admin write through an API key was
+			// written twice - the second row empty (measured 2026-10-01).
+			if d, _ := r.Context().Value(auditDetailKey{}).(*AuditDetail); d != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
 			rw := &auditRecorder{ResponseWriter: w, status: http.StatusOK}
 			ctx, detail := WithAuditDetail(r.Context())
 			r = r.WithContext(ctx)
@@ -44,6 +54,12 @@ func AuditMiddleware(store db.Store) func(http.Handler) http.Handler {
 			}
 			user := UserFrom(r.Context())
 			action, targetType, targetID := actionFor(r)
+			// A handler that knows its write belongs to another family than its
+			// route says (a sign-in setting written through the generic settings
+			// API) renames the row - through the same door rule as the route.
+			if a, tt := detail.Action(); a != "" {
+				action, targetType = DoorAction(a, strings.HasPrefix(r.URL.Path, "/api/ai/admin")), tt
+			}
 			if action == "" {
 				return
 			}
@@ -63,15 +79,7 @@ func AuditMiddleware(store db.Store) func(http.Handler) http.Handler {
 			// Token-authenticated calls stamp WHICH credential + identity acted:
 			// one account often backs several tokens (work, fishapp, MCP…), and
 			// user_id alone can't tell them apart.
-			if tok := TokenFrom(r.Context()); tok != nil {
-				if entry.Metadata == nil {
-					entry.Metadata = map[string]interface{}{}
-				}
-				entry.Metadata["token_id"] = tok.ID
-				if tu := TokenUserFrom(r.Context()); tu != "" {
-					entry.Metadata["token_username"] = tu
-				}
-			}
+			entry.Metadata = StampTokenDoor(r.Context(), entry.Metadata, ViaAPI)
 			// Best-effort — don't block the response on a logging error.
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -128,6 +136,13 @@ func shouldAudit(r *http.Request) bool {
 		// AI-surface admin REST mirror (/api/ai/admin/*). Same admin write
 		// ops as the native panel, just behind a token instead of a session.
 		return true
+	case p == "/api/ai/mcp" || strings.HasPrefix(p, "/api/ai/mcp/"):
+		// ⚠ The MCP transport is one POST per JSON-RPC message - a read, a
+		// tools/list, a write alike. Every tool that CHANGES something writes
+		// its own row, the one its REST twin writes (handlers/ai_mcp.go
+		// mcpAuditWrite, AIAdmin.auditInvoke); a row per transport message
+		// logged every read as "ai.file.mcp" and no write by what it did.
+		return false
 	case strings.HasPrefix(p, "/api/ai/"):
 		// AI file surface: reads are GET (already filtered out by method), so
 		// every mutating call here is a real write (upload/mkdir/move/delete/
@@ -193,10 +208,63 @@ func AIAdminAction(method, path, id, name string) (string, string, string) {
 		norm = "/api/admin" + strings.TrimPrefix(norm, "/api/ai/admin")
 	}
 	action, targetType, targetID := ActionForPath(method, norm, id, name)
-	if action != "" {
-		action = "ai." + action
+	return DoorAction(action, true), targetType, targetID
+}
+
+// doorAgnosticFamilies are the action families whose rows keep ONE name
+// whatever door the administrator came in by - the panel, an admin API key,
+// an MCP tool. The door is in the row's metadata instead (`token_id`, `via`).
+//
+// ⚠⚠ The sign-in limit's story is one filter (`login.`, plus
+// `login_security.` for its settings): the limiter writes login.failed /
+// locked / unlocked / allowlist_pass itself with no door prefix, and the
+// Sign-in security page's trail reads that family. An unlock through an API
+// key filed as `ai.login.unlocked` fell outside it, so the trail never showed
+// it (measured 2026-10-01). plugin_request.* follows the same rule
+// (internal/pluginreq writes its own rows, one name for every door).
+var doorAgnosticFamilies = []string{"login.", "login_security."}
+
+// DoorAction is the action an admin write is filed under: through the AI
+// surface (aiDoor - /api/ai/admin or an admin_* MCP tool) it is prefixed
+// "ai.", except for the door-agnostic families above. "" stays "".
+func DoorAction(action string, aiDoor bool) string {
+	if action == "" || !aiDoor {
+		return action
 	}
-	return action, targetType, targetID
+	for _, f := range doorAgnosticFamilies {
+		if strings.HasPrefix(action, f) {
+			return action
+		}
+	}
+	return "ai." + action
+}
+
+// The doors an audited write through a token came in by, as metadata `via`.
+// A session's write (the panel) carries none.
+const (
+	ViaAPI = "api"
+	ViaMCP = "mcp"
+)
+
+// StampTokenDoor adds to meta (allocating it when needed) which token acted -
+// `token_id`, `token_username` - and the door (`via`), when the request was
+// authenticated by a token. A session's row is returned unchanged.
+func StampTokenDoor(ctx context.Context, meta map[string]interface{}, via string) map[string]interface{} {
+	tok := TokenFrom(ctx)
+	if tok == nil {
+		return meta
+	}
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	meta["token_id"] = tok.ID
+	if tu := TokenUserFrom(ctx); tu != "" {
+		meta["token_username"] = tu
+	}
+	if via != "" {
+		meta["via"] = via
+	}
+	return meta
 }
 
 // ActionForPath maps a (method, path) pair to (action, target_type, target_id).
@@ -236,6 +304,24 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	case strings.HasPrefix(p, "/api/admin/plugin-requests"):
 		return "", "", ""
 
+	// ── groups (internal/group) ──
+	// Members first: /groups/{id}/members/… is under the /groups/{id} prefix.
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/groups/") && strings.HasSuffix(p, "/members"):
+		return "group.members_add", "group", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/groups/") && strings.Contains(p, "/members/"):
+		return "group.member_remove", "group", id
+	case method == http.MethodPost && (p == "/api/admin/groups" || p == "/api/admin/groups/"):
+		return "group.create", "group", ""
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/groups/") && id != "":
+		return "group.update", "group", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/groups/") && id != "":
+		return "group.delete", "group", id
+	// A group's folder grant is numbered apart from a person's: the generic
+	// "grants.delete" would file both under the same resource and id, and the
+	// log could not say which one was revoked.
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/grants/groups/") && id != "":
+		return "group_grant.delete", "group_grant", id
+
 	// ── storages ──
 	case method == http.MethodPost && p == "/api/admin/storages/":
 		return "storage.create", "storage", ""
@@ -249,6 +335,23 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "storage.sync_trigger", "storage", id
 	case method == http.MethodPost && p == "/api/admin/storages/test":
 		return "storage.test", "storage", ""
+
+	// ── tools ──
+	// The target (storage id and the qualified path, or "*" for every
+	// storage) and the mode are set by the handler (handlers.ThumbRepair).
+	case method == http.MethodPost && p == "/api/admin/tools/thumbnails/repair":
+		return "thumbnail.repair", "storage", ""
+	case method == http.MethodPatch && p == "/api/admin/tools/thumbnails/settings":
+		return "thumbnail.settings_update", "settings", ""
+
+	// ── default apps (handlers.FileTypesAdmin; the kind and the before and
+	// after are set by the handler) ──
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/file-types/"):
+		return "file_association.update", "file_type", ""
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/file-types/"):
+		return "file_association.reset", "file_type", ""
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/app-plugins/") && strings.HasSuffix(p, "/thumbnails"):
+		return "app_plugin.thumbnail_limits", "app_plugin", id
 
 	// ── users ──
 	case method == http.MethodPost && (p == "/api/admin/users/" || p == "/api/admin/users"):
@@ -312,6 +415,17 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	case method == http.MethodDelete && strings.HasPrefix(p, "/api/files/versions/") && id != "":
 		return "version.delete", "version", id
 
+	// ── sign-in security ──
+	// The unlock is filed under the same `login.` family the limiter writes its
+	// own rows in (failed / locked / unlocked / allowlist_pass), so one filter
+	// reads the whole story; the handler adds scope, subject and reason. Both
+	// families keep their name through every door (DoorAction): the page's
+	// trail reads `login.` and `login_security.`.
+	case method == http.MethodPost && p == "/api/admin/login-security/unlock":
+		return "login.unlocked", "login", ""
+	case (method == http.MethodPatch || method == http.MethodPut) && strings.TrimSuffix(p, "/") == "/api/admin/login-security":
+		return "login_security.update", "login_security", ""
+
 	// ── settings / external / auth providers ──
 	case method == http.MethodPatch && p == "/api/admin/settings":
 		return "settings.update", "setting", ""
@@ -323,8 +437,89 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "external.test", "external", name
 	case method == http.MethodPatch && strings.HasPrefix(p, "/api/admin/auth-providers/") && name != "":
 		return "auth_provider.update", "auth_provider", name
+	case method == http.MethodPost && strings.TrimSuffix(p, "/") == "/api/admin/auth-providers":
+		return "auth_provider.create", "auth_provider", ""
+	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/auth-providers/") && strings.HasSuffix(p, "/tenants"):
+		return "auth_provider.tenants_set", "auth_provider", name
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/auth-providers/") && name != "":
+		return "auth_provider.delete", "auth_provider", name
 	case method == http.MethodPost && strings.HasSuffix(p, "/test") && strings.HasPrefix(p, "/api/admin/auth-providers/"):
 		return "auth_provider.test", "auth_provider", name
+
+	// ── a tenant running itself (handlers/tenant_self.go) ──
+	// Its own providers are filed with the platform's (auth_provider.*), the
+	// tenant in the row's metadata; its domains under tenant_domain.*.
+	case strings.HasPrefix(p, "/api/admin/tenant/auth-providers"):
+		switch {
+		case method == http.MethodPost && strings.HasSuffix(p, "/test"):
+			return "auth_provider.test", "auth_provider", name
+		case method == http.MethodPost:
+			return "auth_provider.create", "auth_provider", ""
+		case method == http.MethodPatch:
+			return "auth_provider.update", "auth_provider", name
+		case method == http.MethodDelete:
+			return "auth_provider.delete", "auth_provider", name
+		}
+	case strings.HasPrefix(p, "/api/admin/tenant/domains"):
+		switch {
+		case method == http.MethodPost && strings.HasSuffix(p, "/check"):
+			return "tenant_domain.check", "tenant_domain", id
+		case method == http.MethodPut && strings.HasSuffix(p, "/certificate"):
+			return "tenant_domain.certificate_set", "tenant_domain", id
+		case method == http.MethodDelete && strings.HasSuffix(p, "/certificate"):
+			return "tenant_domain.certificate_delete", "tenant_domain", id
+		case method == http.MethodPost:
+			return "tenant_domain.create", "tenant_domain", ""
+		case method == http.MethodDelete:
+			return "tenant_domain.delete", "tenant_domain", id
+		}
+	case method == http.MethodPut && p == "/api/admin/tenant/insecure":
+		return "tenant.insecure_auth_set", "providers", ""
+
+	// ── tenants (providers) ──
+	// A storage link names the tenant in its path, not the storage: the
+	// generic fallback below filed a link as "providers.create" and an unlink
+	// as "providers.delete", which reads as a tenant made or removed. The
+	// storage id is in the row's metadata (handlers.Providers).
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/providers/") && strings.HasSuffix(p, "/storages"):
+		return "providers.storage_link", "providers", id
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/providers/") && strings.Contains(p, "/storages/"):
+		return "providers.storage_unlink", "providers", id
+
+	// ── the explorer's operations behind the AI surface ──
+	// (handlers/ai_doors.go: /api/ai/<route> and the MCP tool that shares it,
+	// whose row is this route's - mcpWriteTwin). Named here because the first
+	// path segment alone - the generic ai.file.<segment> below - cannot tell a
+	// version restore from a snapshot, or an archive made from one opened.
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/ai/ops/") && strings.HasSuffix(p, "/cancel"):
+		return "ai.file.op_cancel", "op", id
+	case method == http.MethodPost && p == "/api/ai/trash/restore":
+		return "ai.file.restore", "node", ""
+	case method == http.MethodPost && p == "/api/ai/versions/restore":
+		return "ai.file.version_restore", "node", ""
+	case method == http.MethodPost && p == "/api/ai/versions/snapshot":
+		return "ai.file.version_snapshot", "node", ""
+	case method == http.MethodPost && p == "/api/ai/archive/create":
+		return "ai.file.archive_create", "node", ""
+	case method == http.MethodPost && p == "/api/ai/archive/extract":
+		return "ai.file.archive_extract", "node", ""
+	// An app's action: the run names its row app_plugin.action_run once it is
+	// queued (AppPlugins.enqueue); an action that only opened its form keeps
+	// this one.
+	case method == http.MethodPost && (p == "/api/ai/apps/run" || p == "/api/ai/convert"):
+		return "ai.file.action_run", "node", ""
+	// Marking one's own notices read is bookkeeping, unaudited as on
+	// /api/notifications.
+	case strings.HasPrefix(p, "/api/ai/notifications"):
+		return "", "", ""
+	case method == http.MethodPost && p == "/api/ai/comments":
+		return "ai.file.comment_add", "node", ""
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/ai/comments/") && strings.HasSuffix(p, "/delete"):
+		return "ai.file.comment_delete", "comment", id
+	case method == http.MethodPost && p == "/api/ai/permissions":
+		return "ai.file.grant_set", "node", ""
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/ai/permissions/") && strings.HasSuffix(p, "/revoke"):
+		return "ai.file.grant_revoke", "grant", id
 
 	// ── trash ──
 	case method == http.MethodPost && p == "/api/admin/trash/empty":
@@ -386,28 +581,14 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	return "", "", ""
 }
 
-// clientIP is the address the request came from, without the port.
+// clientIP is the address the request came from, without the port — the one
+// resolver every surface shares (internal/clientip).
 //
 // ⚠ The port is the client's ephemeral source port — a different number on
 // every connection, meaningless to anybody reading the log, and it made the
 // Audit page's IP column read "127.0.0.1:54452" (release-candidate sweep,
-// 2026-09-21). handlers.clientIP already dropped it; this copy did not.
-func clientIP(r *http.Request) string {
-	if v := r.Header.Get("X-Forwarded-For"); v != "" {
-		// take just the first hop
-		if idx := strings.IndexByte(v, ','); idx >= 0 {
-			return strings.TrimSpace(v[:idx])
-		}
-		return strings.TrimSpace(v)
-	}
-	if v := r.Header.Get("X-Real-IP"); v != "" {
-		return strings.TrimSpace(v)
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
+// 2026-09-21). The shared resolver never returns one.
+func clientIP(r *http.Request) string { return clientip.FromRequest(r) }
 
 // AuditDetail is what a handler adds to the audit row the middleware writes
 // for its request: the facts only the handler knows (which fields changed,
@@ -423,9 +604,49 @@ type AuditDetail struct {
 	// does not say (a create has no id in its path; a delete's row is gone by
 	// the time anybody reads the log). See SetAuditTarget.
 	targetID, targetName string
+	// act / actType rename the row (SetAuditAction); "" = the route's name.
+	act, actType string
+}
+
+// SetAuditAction files the request's audit row under another action (and
+// target type) than its route maps to - for a generic route whose write, this
+// time, belongs to a family of its own: a sign-in security setting written
+// through the settings API is a `login_security.update` like the Sign-in
+// security page's. The door rule still applies (DoorAction). A no-op when the
+// request is not being audited.
+func SetAuditAction(ctx context.Context, action, targetType string) {
+	d, _ := ctx.Value(auditDetailKey{}).(*AuditDetail)
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.act, d.actType = action, targetType
+	d.mu.Unlock()
+}
+
+// Action answers SetAuditAction's rename - action and target type; "" when
+// there is none. Nil-safe.
+func (d *AuditDetail) Action() (string, string) {
+	if d == nil {
+		return "", ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.act, d.actType
 }
 
 type auditDetailKey struct{}
+
+// Audited reports whether a door is recording this request's audit row - the
+// middleware above, or an in-process AI door (an MCP tool) that writes the row
+// its REST twin writes. A handler that also writes a row of its own asks it
+// first: when a door records the request, the handler names THAT row
+// (SetAuditAction, SetAuditTarget, AddAuditDetail) instead of writing a
+// second one beside it.
+func Audited(ctx context.Context) bool {
+	d, _ := ctx.Value(auditDetailKey{}).(*AuditDetail)
+	return d != nil
+}
 
 // WithAuditDetail returns a context carrying an empty detail holder.
 func WithAuditDetail(ctx context.Context) (context.Context, *AuditDetail) {

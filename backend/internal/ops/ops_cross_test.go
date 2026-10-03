@@ -251,7 +251,7 @@ func TestCross_Move_RemovesTheSourceOnlyAfterItArrived(t *testing.T) {
 
 	require.Equal(t, "yuk", readB(t, f, "tasi/beni.txt"))
 	_, err := os.Stat(filepath.Join(f.rootA, "tasi"))
-	require.True(t, os.IsNotExist(err), "a cross-storage move deletes the source (Burak, 2026-08-29)")
+	require.True(t, os.IsNotExist(err), "a cross-storage move deletes the source (the maintainer, 2026-08-29)")
 
 	// The listing must stop showing it on the source side too.
 	ctx := context.Background()

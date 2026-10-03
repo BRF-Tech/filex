@@ -114,7 +114,7 @@ func (s *Skipped) Report(driver, root, path string, mode fs.FileMode) {
 	if _, dup := s.seen.LoadOrStore(path, true); dup {
 		return
 	}
-	slog.Warn("storage scan: skipped an entry that is not a regular file or folder — filex never opens named pipes, sockets or device nodes",
+	slog.Warn("storage scan: skipped an entry that is not a regular file or folder - filex never opens named pipes, sockets or device nodes",
 		slog.String("driver", driver),
 		slog.String("root", root),
 		slog.String("path", path),

@@ -562,7 +562,10 @@ async function checkReleasePages() {
   // ONLY those measures 295 characters — long enough to satisfy a naive length
   // test, which is precisely what the first version of this check did.
   const BOILERPLATE = [
-    'Self-hosted file manager — Go single binary + multi-framework frontend.',
+    // The goreleaser header, as bodies before 0.50 carry it (an em dash, built from
+    // its code point) and as .goreleaser.yml writes it now.
+    'Self-hosted file manager ' + String.fromCharCode(0x2014) + ' Go single binary + multi-framework frontend.',
+    'Self-hosted file manager - Go single binary + multi-framework frontend.',
     'Download a binary below, or pull a Docker image:',
     '**Verify:** `sha256sum -c checksums.txt`',
     'Issues:',

@@ -196,7 +196,7 @@ function syncPos() {
           </MenuItem>
           <!-- Which filex this is, at the foot: a line, not a row — the same
                piece the admin panel's account menu and user settings draw
-               (Burak, 2026-09-24: somewhere a person can find it). -->
+               (the maintainer, 2026-09-24: somewhere a person can find it). -->
           <ProductVersion
             v-if="productVersionLine(version)"
             :version="version"

@@ -1211,7 +1211,7 @@ func (h *StagedUpload) settleUnstored(ctx context.Context, n *model.Node) bool {
 		if err != nil {
 			reason = err.Error()
 		}
-		slog.Warn("staged upload recovery: left unstored — its bytes are not provably on the storage",
+		slog.Warn("staged upload recovery: left unstored - its bytes are not provably on the storage",
 			slog.Int64("node", n.ID),
 			slog.String("path", n.Path),
 			slog.String("transfer_state", n.TransferState),

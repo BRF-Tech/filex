@@ -49,7 +49,7 @@
 
 import { ref } from 'vue';
 import type { FileNode } from '../types/FileNode';
-import { iconFamilyFor } from './fileIcons';
+import { extensionLabel, iconFamilyFor, type IconFamily } from './fileIcons';
 import { resolveEndpoints } from '../composables/useFileApi';
 
 /** What shape the preview takes. `null` = this node has no text preview. */
@@ -226,6 +226,90 @@ export function drawsAsPage(node: FileNode): boolean {
  */
 export function drawsAsVideo(node: FileNode): boolean {
   return node.type === 'file' && iconFamilyFor(node) === 'video';
+}
+
+/**
+ * The families whose thumbnail is drawn on PAPER: a white or near-white sheet
+ * with dark marks on it. The first page of an office document or a PDF, the
+ * first lines of a text or Markdown file, the list of what an archive holds
+ * (backend/internal/thumb: office.go, pdf.go, text.go, archive.go).
+ *
+ * ⚠ The ONE place this is decided. The folder peek pictures these (with
+ * photographs and video frames) where it would otherwise show a type tile.
+ * The list's type badge is wider than this set: every thumbnail that is not
+ * a picture of its own carries one (`thumbTypeBadge`), because at 24 pixels
+ * a page is a white square on a white row and the row looks as if it had
+ * lost its icon (0.50, the first release that drew real pages there: 0.49
+ * drew a coloured card with the extension on it).
+ */
+const PAPER_FAMILIES: ReadonlySet<IconFamily> = new Set<IconFamily>([
+  'pdf',
+  'doc',
+  'sheet',
+  'slides',
+  'text',
+  'archive',
+]);
+
+/** Is this node's thumbnail a light sheet of paper (see PAPER_FAMILIES)? */
+export function drawsOnPaper(node: FileNode): boolean {
+  return node.type === 'file' && PAPER_FAMILIES.has(iconFamilyFor(node));
+}
+
+/**
+ * The families whose thumbnail is a picture of its own - a photograph, a
+ * frame of a video - and needs no caption. Every other thumbnail in the list
+ * names its kind (`thumbTypeBadge`).
+ */
+const PICTURE_FAMILIES: ReadonlySet<IconFamily> = new Set<IconFamily>(['image', 'video']);
+
+/** What the list view's type badge says and which family's colour it wears. */
+export interface ThumbTypeBadge {
+  /** Picks the colour: the same `fe-ftile--<family>` the type tile is filled with. */
+  family: IconFamily;
+  /** The extension in capitals, the words the type tile's caption would use. */
+  label: string;
+}
+
+/** One object per family and label, so a re-render hands the tile the same
+ *  value and the tile has nothing to compare. */
+const BADGES = new Map<string, ThumbTypeBadge>();
+
+/**
+ * The type badge for this node's thumbnail, or null when it gets none: a
+ * photograph or a video frame (PICTURE_FAMILIES), not a file, or no
+ * extension to name (`LICENSE`, a `Makefile`).
+ *
+ * ⚠ Every OTHER thumbnail carries one, not only the families filex draws on
+ * paper: an app can draw a thumbnail for any kind (Admin → Plugins → Default
+ * apps), and the 0.50 release shots showed what an app draws for a kind with
+ * no family of its own - a package's list of contents, `.jar` / `.apk` /
+ * `.whl` - as the white square on a white row this badge is there to prevent.
+ * A kind with no family wears the neutral grey of the unknown type icon.
+ *
+ * Built from the two sources the type tile itself uses, never a table of its
+ * own: the family from `iconFamilyFor` (its colour is that family's
+ * `--fe-icon-<family>` token, through the tile's `fe-ftile--<family>` class)
+ * and the words from `extensionLabel`.
+ *
+ * ⚠ It says nothing about whether a thumbnail is actually drawn. The badge
+ * belongs to the PICTURE, so ThumbTile shows it only while it has one; without
+ * a picture the row already shows the coloured type tile, and a badge on top
+ * of that would say the same thing twice.
+ */
+export function thumbTypeBadge(node: FileNode): ThumbTypeBadge | null {
+  if (node.type !== 'file') return null;
+  const family = iconFamilyFor(node);
+  if (PICTURE_FAMILIES.has(family)) return null;
+  const label = extensionLabel(node);
+  if (!label) return null;
+  const key = `${family}:${label}`;
+  let badge = BADGES.get(key);
+  if (!badge) {
+    badge = { family, label };
+    BADGES.set(key, badge);
+  }
+  return badge;
 }
 
 /* --------------------------------------------------------------- parsing */

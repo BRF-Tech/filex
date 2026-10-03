@@ -19,9 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/netguard"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/share"
@@ -55,9 +57,19 @@ type Options struct {
 	TrustedKeys []string
 	// Demo refuses every install/upgrade (the admin account is public).
 	Demo bool
-	// HTTP fetches manifests and modules for URL/GitHub installs.
+	// HTTP fetches manifests, modules and interface bundles - an
+	// administrator's install, an install request, the update check. Nil (what
+	// a server passes) is the shared guarded download client
+	// (netguard.DownloadClient): public addresses only, after DNS and on every
+	// redirect hop, no redirect from https to plain http, 5 hops at most.
+	// Supplying a client lifts that guard; it exists for tests and for an
+	// embedder with an egress policy of its own.
 	HTTP *http.Client
-	Log  *slog.Logger
+	// LoopbackSources lets the guarded client reach this machine
+	// (FILEX_PLUGIN_LOOPBACK_SOURCES): development and the end-to-end tests
+	// serve app sources from a loopback server. Never the private network.
+	LoopbackSources bool
+	Log             *slog.Logger
 	// StorageResolver opens the driver a job reads from and writes to.
 	StorageResolver func(int64) (storage.Driver, error)
 	// Limits (bytes). Zero → defaults below.
@@ -74,6 +86,10 @@ type Options struct {
 	// event is answered for an anonymous visitor: without a ceiling, a burst
 	// of events on one link held that much memory per request.
 	PerPluginCalls int
+	// Office is the office engine (`engines:office`, alias
+	// `engines:libreoffice`): the connected OnlyOffice Document Server's
+	// conversion API (office.go). Nil = no office engine on this server.
+	Office OfficeConverter
 }
 
 const (
@@ -113,6 +129,9 @@ type Installed struct {
 	calls    chan struct{}
 	mailRate rateWindow
 	signRate minuteWindow
+	// thumb is the app's thumbnail machinery (thumbnails.go): its limits, its
+	// slots, its thumbnail copy of the module.
+	thumb thumbState
 }
 
 func (p *Installed) log(level, msg string) { p.logs.add(level, msg) }
@@ -186,6 +205,9 @@ type Registry struct {
 	// with no ACL wiring wants.
 	visible  func(ctx context.Context, u *model.User, storageID int64, rel string) bool
 	outbound http.RoundTripper
+	// fetchGuard is the address policy of the registry's own download client
+	// (Options.HTTP nil); nil when the embedder supplied the client.
+	fetchGuard *netguard.Policy
 
 	// instanceID names this process on every schedule row it claims, so an
 	// operator can tell which node ran a piece of unattended work.
@@ -247,8 +269,15 @@ func New(o Options) (*Registry, error) {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
+	// ⚠ The guard follows the client: a registry that builds its own client
+	// checks addresses before the dial too (fetch), one handed a client by
+	// its embedder leaves that to the embedder - the same switch the storage
+	// plugin downloader has (plugin.Options.HTTP).
+	var fetchGuard *netguard.Policy
 	if o.HTTP == nil {
-		o.HTTP = &http.Client{Timeout: 2 * time.Minute}
+		p := netguard.Policy{Loopback: o.LoopbackSources}
+		fetchGuard = &p
+		o.HTTP = p.DownloadClient(2 * time.Minute)
 	}
 	if o.MaxWasmBytes <= 0 {
 		o.MaxWasmBytes = defaultMaxWasm
@@ -295,9 +324,10 @@ func New(o Options) (*Registry, error) {
 		return nil, fmt.Errorf("wasmplugin: %w", err)
 	}
 	return &Registry{
-		opts: o, rt: rt, box: box, trusted: trusted, engines: probeEngines(), log: o.Log,
+		opts: o, rt: rt, box: box, trusted: trusted, engines: probeEngines(o.Office), log: o.Log,
 		byID: map[int64]*Installed{}, byName: map[string]*Installed{},
 		outbound: newOutboundTransport(), instanceID: newInstanceID(),
+		fetchGuard: fetchGuard,
 	}, nil
 }
 
@@ -318,8 +348,19 @@ func (r *Registry) Dir() string { return r.opts.Dir }
 // RequiresSignature reports whether installs must carry a signature.
 func (r *Registry) RequiresSignature() bool { return len(r.trusted) > 0 }
 
-// Engines is the engine → installed map for this host.
-func (r *Registry) Engines() map[string]bool { return r.engines.Available() }
+// SetOffice wires the office engine (Options.Office) after the registry is
+// built - the document server's service exists later in the server's boot.
+// Call it before the server starts serving.
+func (r *Registry) SetOffice(o OfficeConverter) {
+	if r == nil || r.engines == nil {
+		return
+	}
+	r.engines.office = o
+}
+
+// Engines is the engine → can-run-now map for this host, every engine by its
+// own id (the office engine as `office`, never its alias).
+func (r *Registry) Engines(ctx context.Context) map[string]bool { return r.engines.Available(ctx) }
 
 // SetStorageResolver wires (or replaces) the driver resolver jobs read
 // through; the server builds it after the registry.
@@ -370,6 +411,7 @@ func (r *Registry) Close(ctx context.Context) {
 			p.compiled = nil
 		}
 		p.mu.Unlock()
+		p.dropThumbModule(ctx)
 	}
 	r.byID = map[int64]*Installed{}
 	r.byName = map[string]*Installed{}
@@ -559,7 +601,7 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		if p.Row.LastError != "" {
 			r.persistError(ctx, p, "")
 		}
-		p.log("info", "language pack "+p.Row.Name+" "+p.Row.Version+" serves "+strings.Join(sortedTags(p.Manifest.UILocales), ", ")+" — no module, nothing runs")
+		p.log("info", "language pack "+p.Row.Name+" "+p.Row.Version+" serves "+strings.Join(sortedTags(p.Manifest.UILocales), ", ")+" - no module, nothing runs")
 		return
 	}
 	// The interface first (uibundle.go): an app whose interface does not load
@@ -590,7 +632,7 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		if p.Row.LastError != "" {
 			r.persistError(ctx, p, "")
 		}
-		p.log("info", "loaded "+p.Row.Name+" "+p.Row.Version+" — an interface, no module")
+		p.log("info", "loaded "+p.Row.Name+" "+p.Row.Version+" - an interface, no module")
 		return
 	}
 	wasmPath := filepath.Join(r.opts.Dir, p.Row.Name, p.Row.WasmPath)
@@ -627,6 +669,14 @@ func (r *Registry) compile(ctx context.Context, p *Installed) {
 		r.persistError(ctx, p, err.Error())
 		return
 	}
+	// The same for an app that says it draws thumbnails (thumbnails.go).
+	if err := checkThumbnailExport(ctx, p.Manifest, c); err != nil {
+		_ = c.Close(ctx)
+		p.setState(StateRefused, err.Error())
+		r.persistError(ctx, p, err.Error())
+		return
+	}
+	p.dropThumbModule(ctx)
 	p.mu.Lock()
 	if p.compiled != nil {
 		_ = p.compiled.Close(ctx)
@@ -677,7 +727,7 @@ func checkTickExport(ctx context.Context, g Grants, c exportProbe) error {
 	}
 	if !has {
 		return &CallError{Code: CodeRefused, Export: "tick",
-			Message: "the manifest asks for the schedule permission, but the module has no tick export — an app that cannot be woken must not ask to be"}
+			Message: "the manifest asks for the schedule permission, but the module has no tick export - an app that cannot be woken must not ask to be"}
 	}
 	return nil
 }
@@ -909,7 +959,11 @@ const (
 	FetchReasonUnreachable = "unreachable"
 	// FetchReasonHTTPStatus: an answer, but not a success or a 404.
 	FetchReasonHTTPStatus = "http_status"
-	// FetchReasonBadURL: not an https address (plain http only for loopback).
+	// FetchReasonBadURL: not an address filex downloads from - not https
+	// (plain http only for loopback, with FILEX_PLUGIN_LOOPBACK_SOURCES), or a
+	// private or local one (this machine, the private network, the cloud
+	// metadata service), by its literal or by what its name resolves to, on
+	// any redirect hop.
 	FetchReasonBadURL = "bad_url"
 	// FetchReasonMissingURL: a URL install without its addresses — the
 	// manifest always, the module unless the manifest is a language pack.
@@ -962,6 +1016,11 @@ type InstallInput struct {
 	// Notes are the source's release notes for this version, as plain text,
 	// for the review (a GitHub release's body).
 	Notes string
+	// Placements are the administrator's choices at the review's File types
+	// group: where the new app goes for each kind it opens or draws
+	// (internal/assoc). The registry does not read them; the HTTP layer
+	// writes them once the app is installed and running.
+	Placements []assoc.Placement
 }
 
 // DryRunAnswer is what a dry run returns for the review step.
@@ -1008,6 +1067,10 @@ type DryRunAnswer struct {
 	// exceptions, and every external address — mirrored or live. The review
 	// draws it as its own group, with what a live address means.
 	UI *UIInfo `json:"ui,omitempty"`
+	// FileTypes are the kinds the app would open or draw thumbnails of, each
+	// with who handles it now and where the app lands by default - the
+	// review's File types group (internal/assoc, filled by the HTTP layer).
+	FileTypes []assoc.InstallKind `json:"file_types,omitempty"`
 }
 
 // DryRunUpgrade is the jump an upgrade makes. Added are the permissions the
@@ -1148,7 +1211,14 @@ type DryRunInstalled struct {
 type DryRunEngine struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Kind is DryRunEngineOffice for the office engine, which is a document
+	// server to connect rather than a program to install (and needs no
+	// restart once connected); empty for a binary engine.
+	Kind string `json:"kind,omitempty"`
 }
+
+// DryRunEngineOffice is DryRunEngine.Kind for the office engine.
+const DryRunEngineOffice = "office"
 
 // dryRun is the review of a staged install, for Install and Upgrade alike:
 // what the app is (a module, or a language pack and its coverage), what it
@@ -1183,8 +1253,14 @@ func (r *Registry) dryRun(ctx context.Context, st *staged, lang string, upgradin
 	}
 	for _, p := range st.m.Perms {
 		name, ok := strings.CutPrefix(string(p), permPrefixEngines)
-		if ok && (r.engines == nil || !r.engines.available(name)) {
-			ans.EnginesMissing = append(ans.EnginesMissing, DryRunEngine{ID: name, Name: enginebin.DisplayName(name)})
+		if ok && (r.engines == nil || !r.engines.available(ctx, name)) {
+			de := DryRunEngine{ID: name, Name: enginebin.DisplayName(name)}
+			if isOffice(name) {
+				// Not a program to install: a document server to connect,
+				// and no restart after it (the review says so).
+				de.Kind = DryRunEngineOffice
+			}
+			ans.EnginesMissing = append(ans.EnginesMissing, de)
 		}
 	}
 	return ans
@@ -1246,7 +1322,7 @@ func (r *Registry) stage(ctx context.Context, in *InstallInput) (*staged, error)
 		if m.UI != nil {
 			why = "this app has an interface, but it also needs a module: " + m.moduleOnlyReason()
 		}
-		return nil, installErr(ErrCodeManifestInvalid, "no module supplied — "+why)
+		return nil, installErr(ErrCodeManifestInvalid, "no module supplied - "+why)
 	}
 	lr := io.LimitReader(in.Wasm, r.opts.MaxWasmBytes+1)
 	wasm, err := io.ReadAll(lr)
@@ -1279,7 +1355,7 @@ func (r *Registry) checkIntegrity(what string, payload []byte, pin, signature st
 	}
 	if err := plugin.VerifyDetached(r.trusted, sum, signature); err != nil {
 		if errors.Is(err, plugin.ErrSignatureRequired) {
-			return "", false, installErr(ErrCodeSignatureRequired, "this instance only accepts signed apps (FILEX_PLUGIN_TRUSTED_KEYS is set) — supply the detached signature over the "+what+"'s sha256")
+			return "", false, installErr(ErrCodeSignatureRequired, "this instance only accepts signed apps (FILEX_PLUGIN_TRUSTED_KEYS is set) - supply the detached signature over the "+what+"'s sha256")
 		}
 		return "", false, installErr(ErrCodeSignatureInvalid, err.Error())
 	}
@@ -1491,6 +1567,7 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 		p.compiled = nil
 	}
 	p.mu.Unlock()
+	p.dropThumbModule(ctx)
 	// The version this one replaced is KEPT (versions.go): "Back to …" puts
 	// it back without a new approval.
 	r.keepPrevious(ctx, &oldRow, backup, in.ActorID)
@@ -1554,6 +1631,7 @@ func (r *Registry) unload(ctx context.Context, p *Installed) {
 		p.compiled = nil
 	}
 	p.mu.Unlock()
+	p.dropThumbModule(ctx)
 	p.setState(StateDisabled, "")
 }
 
@@ -1572,10 +1650,13 @@ func (r *Registry) Remove(ctx context.Context, id int64) error {
 		p.compiled = nil
 	}
 	p.mu.Unlock()
+	p.dropThumbModule(ctx)
 	r.drop(p)
 	if err := r.opts.Store.DeleteAppPlugin(ctx, id); err != nil {
 		return err
 	}
+	// Its thumbnail limits go with it (00077).
+	_ = r.opts.Store.DeleteAppThumbLimits(ctx, id)
 	_ = os.RemoveAll(filepath.Join(r.opts.Dir, p.Row.Name))
 	// Its downloads go with it (asset_fetch).
 	_ = os.RemoveAll(r.assetDir(p.Row.Name))
@@ -1813,7 +1894,7 @@ func (r *Registry) effectiveActions(ctx context.Context, p *Installed) ([]effect
 	// Resolved NOW, against the engines present now: an override saved
 	// before LibreOffice was installed offers .docx once it is, and stops
 	// when it is removed.
-	engines := r.enginesFor(p)
+	engines := r.enginesFor(ctx, p)
 	for i := range p.Manifest.Actions {
 		a := &p.Manifest.Actions[i]
 		e := effective{Action: a, Applies: a.Applies, Enabled: true}
@@ -1874,7 +1955,12 @@ func gatedRules(m wire.Applies, d *appliesDelta, now wire.Applies, engines map[s
 		if len(extra) == 0 {
 			continue
 		}
-		out = append(out, GatedRule{Ext: extra, Needs: Need{Kind: "engine", ID: n, Name: enginebin.DisplayName(n)}})
+		need := Need{Kind: "engine", ID: n, Name: enginebin.DisplayName(n)}
+		if isOffice(n) {
+			// Connected, not installed: the explorer says what to connect.
+			need.Kind = "office"
+		}
+		out = append(out, GatedRule{Ext: extra, Needs: need})
 	}
 	return out
 }

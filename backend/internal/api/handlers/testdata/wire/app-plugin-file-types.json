@@ -1,0 +1,61 @@
+{
+  "file_types": [
+    {
+      "capability": "open",
+      "current": [
+        {
+          "app": "drawio",
+          "id": "app:drawio/editor",
+          "label": {
+            "en": "draw.io",
+            "tr": "draw.io"
+          },
+          "version": "1.2.0",
+          "view": "editor"
+        },
+        {
+          "app": "zeta",
+          "id": "app:zeta/viewer",
+          "label": {
+            "en": "Zeta viewer",
+            "tr": "Zeta görüntüleyici"
+          },
+          "version": "2.0.0",
+          "view": "viewer"
+        },
+        {
+          "id": "builtin"
+        }
+      ],
+      "default": "last",
+      "ext": "drawio",
+      "handler": {
+        "app": "sign",
+        "id": "app:sign/editor",
+        "label": {
+          "en": "Editor",
+          "tr": "Düzenleyici"
+        },
+        "version": "1.2.0",
+        "view": "editor"
+      },
+      "mime": "application/vnd.jgraph.mxfile"
+    },
+    {
+      "capability": "thumbnail",
+      "current": [],
+      "default": "first",
+      "ext": "whl",
+      "handler": {
+        "app": "sign",
+        "id": "app:sign",
+        "label": {
+          "en": "e-Signature",
+          "tr": "e-İmza"
+        },
+        "version": "1.2.0"
+      },
+      "mime": "application/zip"
+    }
+  ]
+}

@@ -3,22 +3,16 @@
 // (403 RESERVED_NAME, backend/internal/api/handlers/reserved_guard.go); this is
 // the courtesy of saying why, in Turkish for a Turkish reader, instead of an
 // English error toast after the fact.
-import { afterEach, describe, expect, it } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { describe, expect, it } from 'vitest';
+import { mount } from '@vue/test-utils';
 
 import NewFolderModal from '@brftech/filex-core/src/modals/NewFolderModal.vue';
 import RenameModal from '@brftech/filex-core/src/modals/RenameModal.vue';
 import { INTERNAL_DIR_NAMES, KEEP_MARKER_NAME } from '@brftech/filex-core/src/lib/internalPaths';
-
-const mounted: VueWrapper[] = [];
-afterEach(() => {
-  while (mounted.length) mounted.pop()!.unmount();
-  document.body.innerHTML = '';
-});
+import { unmountAll } from '../helpers/teardown';
 
 async function submitFolder(locale: 'en' | 'tr', value: string) {
   const w = mount(NewFolderModal, { props: { open: true, locale }, attachTo: document.body });
-  mounted.push(w);
   await w.vm.$nextTick();
   const input = document.body.querySelector('input.fe-input') as HTMLInputElement;
   input.value = value;
@@ -30,7 +24,6 @@ async function submitFolder(locale: 'en' | 'tr', value: string) {
 
 async function submitRename(locale: 'en' | 'tr', value: string) {
   const w = mount(RenameModal, { props: { open: true, locale, currentName: 'Rapor.docx' }, attachTo: document.body });
-  mounted.push(w);
   await w.vm.$nextTick();
   const input = document.body.querySelector('input.fe-input') as HTMLInputElement;
   input.value = value;
@@ -63,9 +56,7 @@ describe('reserved names in the rename dialog', () => {
     expect(document.body.querySelector('[data-testid="rename-error"]')?.textContent).toContain(
       'reserved for filex’s own use',
     );
-    w.unmount();
-    mounted.pop();
-    document.body.innerHTML = '';
+    unmountAll();
     w = await submitRename('tr', '.filex-trash');
     expect(w.emitted('submit')).toBeUndefined();
     expect(document.body.querySelector('[data-testid="rename-error"]')?.textContent).toContain('Başka bir ad seç');

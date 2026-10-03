@@ -73,7 +73,7 @@ func init() {
 				Label:       "FTPS (explicit AUTH TLS)",
 				I18nKey:     "storages.fields.tls",
 				Default:     false,
-				Help:        "Plain FTP sends credentials in the clear — turn this on whenever the server supports it.",
+				Help:        "Plain FTP sends credentials in the clear - turn this on whenever the server supports it.",
 				HelpI18nKey: "storages.fieldHelp.tls",
 			},
 			{

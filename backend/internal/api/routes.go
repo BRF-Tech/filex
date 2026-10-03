@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
 	"github.com/brf-tech/filex/backend/internal/archivecli"
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/authsetup"
 	"github.com/brf-tech/filex/backend/internal/basepath"
@@ -38,6 +40,8 @@ import (
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
+	"github.com/brf-tech/filex/backend/internal/identity"
+	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -57,12 +61,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/s3api"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/secheaders"
+	"github.com/brf-tech/filex/backend/internal/secretbox"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/tenant"
+	"github.com/brf-tech/filex/backend/internal/tenantdomain"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 	"github.com/brf-tech/filex/backend/internal/trash"
@@ -84,8 +90,11 @@ type Deps struct {
 	// External resolves the live `external_services` rows. It is what makes an
 	// admin-UI change to OnlyOffice / drawio / the converter take effect
 	// without a restart (issue #17). Constructed in BuildRouter when nil.
-	External        *external.Resolver
-	Thumbs          *thumb.Pipeline
+	External *external.Resolver
+	Thumbs   *thumb.Pipeline
+	// ThumbRefresh draws what a listing finds missing or stale. Nil: listings
+	// draw nothing (thumbnails off, or a test router).
+	ThumbRefresh    *thumb.Refresher
 	Share           *share.Service
 	OnlyOffice      *onlyoffice.Service
 	Ops             *ops.Service
@@ -113,6 +122,10 @@ type Deps struct {
 	// with AppPluginsDisabledReason.
 	AppPlugins               *wasmplugin.Registry
 	AppPluginsDisabledReason string
+	// Assoc keeps which app opens and draws which kind of file
+	// (internal/assoc, Admin → Plugins → Default apps). Nil when app plugins
+	// are off: filex alone opens and draws every kind.
+	Assoc *assoc.Service
 	// PluginRequests keeps the plugin install requests an API key leaves
 	// instead of installing (internal/pluginreq). internal/server builds it
 	// and runs its hourly expiry; nil here builds one from the fields above
@@ -128,6 +141,9 @@ type Deps struct {
 	// the Identity providers page changes it, and LocalAuth / OIDCAuth /
 	// Directory are its proxies, so a change applies without a restart.
 	AuthLive *authsetup.Live
+	// Domains proves tenants' own domains (docs/TENANT-ADMIN.md); nil on a
+	// harness that has none, where the domain routes answer 503.
+	Domains *tenantdomain.Service
 	// Directory is the external password authority the FILE PROTOCOLS consult
 	// (the LDAP driver, when configured and not switched off with
 	// auth.ldap.protocol_login). Nil = local passwords only.
@@ -147,6 +163,10 @@ type Deps struct {
 	// password keep working" on each of them. Constructed in BuildRouter when
 	// nil.
 	ProtocolAuth *protocolauth.Resolver
+	// LoginGuard limits wrong sign-in attempts per account identifier and per
+	// address, for the web form and every password protocol alike
+	// (internal/loginguard). Constructed in BuildRouter from Store when nil.
+	LoginGuard *loginguard.Guard
 	// FTPSAddr reports the address the FTPS listener actually bound.
 	//
 	// ⚠⚠ A function, not a string, and read at REQUEST time. Config may say
@@ -229,9 +249,24 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.External == nil {
 		d.External = external.New(d.Store)
 	}
+	if d.LoginGuard == nil && d.Store != nil {
+		d.LoginGuard = loginguard.New(d.Store)
+	}
+	// ⚠⚠ A public demo publishes its account's password, so the per-ACCOUNT
+	// lock on it is a switch any stranger flips for every visitor: that one
+	// account is counted per address only (loginguard/exempt.go). Which
+	// account: the one FILEX_DEMO_USER names, looked up as a sign-in does -
+	// never a name written here. One guard serves every door (the protocols
+	// take it below), so the web form, WebDAV, FTPS and SFTP agree.
+	if d.Cfg.Demo.Mode && d.LoginGuard != nil {
+		token, _ := identity.EmailToken(d.Cfg.Auth.LoginEmailToken)
+		d.LoginGuard.ExemptAccounts(loginguard.DemoAccount(d.Store, d.Cfg.Demo.User, token))
+	}
 	if d.ProtocolAuth == nil {
 		d.ProtocolAuth = protocolauth.New(d.Store, d.ACL, d.Cfg.MultiTenant)
 		d.ProtocolAuth.Directory = d.Directory
+		// `acme/alex` is looked up as `alex@acme.<token>` (multi-tenant realms).
+		d.ProtocolAuth.EmailToken, _ = identity.EmailToken(d.Cfg.Auth.LoginEmailToken)
 		// The box is what lets an S3 access key be issued at all: SigV4 needs a
 		// recoverable secret, so with no FILEX_SECRET_KEY configured, issuing
 		// fails loudly instead of storing one in the clear.
@@ -240,6 +275,11 @@ func BuildRouter(d *Deps) http.Handler {
 		} else {
 			slog.Error("protocolauth: secret box unavailable; S3 access keys cannot be issued", slog.Any("err", err))
 		}
+	}
+
+	// One guard, for every door a password can be typed at.
+	if d.ProtocolAuth.Guard == nil {
+		d.ProtocolAuth.Guard = d.LoginGuard
 	}
 
 	// The S3 endpoint, built here because it has to be reachable at the ROOT
@@ -329,6 +369,9 @@ func BuildRouter(d *Deps) http.Handler {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	// Cross-site request forgery: a state-changing request a browser sent from
+	// another origin with the visitor's session is refused (origin_guard.go).
+	r.Use(originGuard(d))
 
 	// ⚠ Before any route is registered, and above every auth chain: a public
 	// demo publishes an admin login, so "admin-only" means "public" there and
@@ -340,6 +383,9 @@ func BuildRouter(d *Deps) http.Handler {
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
 	mh.AttachACL(d.ACL)
 	mh.ThumbSigner = thumbSigner
+	if d.ThumbRefresh != nil {
+		mh.ThumbRefresh = d.ThumbRefresh
+	}
 	// The per-user ceiling on the synchronous write paths (vfUpload, and the
 	// IngestFile fallback that drop/ShareX/AI take for small files). The staged
 	// path checks at `begin`; before this, everything below the staging
@@ -362,6 +408,9 @@ func BuildRouter(d *Deps) http.Handler {
 		// this every new upload starts with no preview and a
 		// `filex thumb backfill` is required to fill the grid.
 		mh.AttachThumbPipeline(d.Thumbs)
+		// Folder pictures in listings, while the administrator's switch
+		// (thumbs.folder_previews) is on.
+		mh.FolderPreviews = d.Thumbs
 	}
 	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
 	uh.AttachACL(d.ACL)
@@ -488,6 +537,7 @@ func BuildRouter(d *Deps) http.Handler {
 	oh := handlers.NewOps(d.Ops, d.Store)
 	oh.AttachACL(d.ACL)
 	apH := handlers.NewAppPlugins(d.AppPlugins, d.Store, d.ACL, d.Ops, d.StorageResolver, d.Index, d.Thumbs)
+	apH.Assoc = d.Assoc
 	apH.Quota = d.Quota
 	// Plugin install requests (internal/pluginreq): ONE service behind the
 	// panel's /api/admin/plugin-requests and the admin MCP tools.
@@ -591,11 +641,30 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.AppPlugins != nil {
 		permH.AppPermissions = d.AppPlugins.UserPermissions
 	}
+	groupsH := handlers.NewGroupsAdmin(d.Store, d.ACL)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
+	seth.LoginGuard = d.LoginGuard
+	// A demo's settings page is a public page: the sign-in settings'
+	// addresses are masked (handlers/demo_redact.go).
+	seth.DemoMode = d.Cfg.Demo.Mode
 	authh := handlers.NewAuth(d.Store, d.LocalAuth, d.OIDCAuth, d.Cfg.PublicURL, d.Cfg.MultiTenant, d.Cfg.CookieDomain)
 	authh.OIDCLocalLogout = d.Cfg.Auth.OIDC.LocalLogout()
+	authh.Guard = d.LoginGuard
+	// What a realm's sign-in may use (GET /api/auth/methods), and the
+	// buttons the sign-in page first draws (/api/capabilities `auth_sso`).
+	authh.Live = d.AuthLive
+	ch.SSO = authh.SSOFor
+	// The realm's derived addresses end in the installation's e-mail token;
+	// server.New has already refused a bad one, so an error here is "unset".
+	authh.EmailToken, _ = identity.EmailToken(d.Cfg.Auth.LoginEmailToken)
+	if d.Cfg.MultiTenant {
+		// A sign-in typed on the platform's address for a tenant with an
+		// address of its own ends there (handlers.Auth.handOff).
+		authh.Handoffs = auth.NewHandoffStore()
+	}
 	provH := handlers.NewProviders(d.Store, d.Cfg.MultiTenant)
+	provH.DemoMode = d.Cfg.Demo.Mode
 	sxh := handlers.NewSearch(d.Index, d.Store)
 	sxh.AttachACL(d.ACL)
 
@@ -636,7 +705,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// check the document server's route back to filex — which is where the
 	// reporter of issue #17 spent two rounds.
 	if d.OnlyOffice != nil {
-		externalH.ReversePath = d.OnlyOffice.VerifyReversePath
+		externalH.ReversePath = d.OnlyOffice.CheckReversePath
 	}
 	authProvH := handlers.NewAuthProviders(d.Store, d.AuthLive)
 	authProvH.DemoMode = d.Cfg.Demo.Mode
@@ -668,8 +737,14 @@ func BuildRouter(d *Deps) http.Handler {
 	// listing does — the explorer's context menu is the same in every view.
 	metaH.AttachACL(d.ACL)
 	metaH.AttachThumbSigner(thumbSigner)
+	if d.ThumbRefresh != nil {
+		metaH.ThumbRefresh = d.ThumbRefresh
+	}
 	sharedH := handlers.NewShared(d.Store)
 	sharedH.AttachThumbSigner(thumbSigner)
+	if d.ThumbRefresh != nil {
+		sharedH.ThumbRefresh = d.ThumbRefresh
+	}
 	quotaH := handlers.NewQuota(d.Quota, d.Store)
 	quotaH.AttachACL(d.ACL)
 	if d.Worker != nil {
@@ -679,6 +754,9 @@ func BuildRouter(d *Deps) http.Handler {
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
 	saveTextH.AttachACL(d.ACL)
 	saveTextH.AttachSearchIndex(d.Index)
+	if d.Thumbs != nil {
+		saveTextH.AttachThumbs(d.Thumbs)
+	}
 	if d.Versions != nil {
 		// Snapshot the pre-edit bytes into version history before
 		// every save-text write (Ada, translated from Turkish: "not a
@@ -730,6 +808,9 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 	versionsH := handlers.NewVersions(d.Store, d.Versions)
 	versionsH.AttachSearchIndex(d.Index)
+	if d.Thumbs != nil {
+		versionsH.Thumbs = d.Thumbs
+	}
 	versionsH.AttachACL(d.ACL)
 	// wiring:e2 fxe watch — every rewrite of a single encrypted file (`.fxe`)
 	// is audited by the server itself (e2e.fxe_header_rewritten), whatever
@@ -829,14 +910,36 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
+	// The admin Test's reverse-path probe arrives at /fetch too, signed like a
+	// document's (OnlyOffice.fetchProbe); it no longer has a door of its own.
 	r.Get("/api/files/onlyoffice/fetch", ooh.Fetch)
-	r.Get("/api/files/onlyoffice/probe", ooh.Probe)
 	r.Post("/api/files/onlyoffice/callback", ooh.Callback)
+
+	// ────── the reverse proxy's certificate questions ──────
+	// Answered to the proxy ITSELF only (handlers.TLSHooks): which names it
+	// may certify (Caddy on-demand TLS `ask`) and a tenant's own certificate
+	// (`get_certificate http`). docs/TENANT-ADMIN.md.
+	{
+		var tlsBox *secretbox.Box
+		if d.AuthLive != nil {
+			tlsBox = d.AuthLive.Options().Box
+		}
+		tlsH := &handlers.TLSHooks{Store: d.Store, Box: tlsBox, PublicURL: d.Cfg.PublicURL}
+		r.Get("/api/tls/ask", tlsH.Ask)
+		r.Get("/api/tls/certificate", tlsH.Certificate)
+	}
 
 	// ────── auth (always public) ──────
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Post("/login", authh.Login)
+		// The tenant's-address half of a sign-in typed on the platform's
+		// address (multi-tenant): a one-use ticket becomes the session here.
+		r.Post("/handoff", authh.Handoff)
 		r.Post("/logout", authh.Logout)
+		// How a sign-in for the tenant the address and ?realm= name may go:
+		// the password form, the recovery form, its SSO buttons
+		// (docs/TENANT-ADMIN.md).
+		r.Get("/methods", authh.Methods)
 		r.Get("/oidc/start", authh.OIDCStart)
 		r.Get("/oidc/callback", authh.OIDCCallback)
 		r.Get("/whoami", authh.WhoAmI)
@@ -980,6 +1083,21 @@ func BuildRouter(d *Deps) http.Handler {
 	// at the top of this function and the SFTP/FTPS/NFS servers live in
 	// internal/server, so a field would make this depend on wiring order.
 	protocolsync.SetChangeEmitter(emitter)
+	// A thumbnail drawn in the background (listing or sync asked for it) is
+	// announced as a DERIVED change: open explorers reload the folder and get
+	// the new picture, and the folder above it reloads for its mosaic. Straight
+	// to the hub, like the size refresher's own announcements: a new picture
+	// is not a change of anybody's files, so it is neither logged for sync
+	// clients nor a reason to recompute folder sizes.
+	if d.ThumbRefresh != nil {
+		d.ThumbRefresh.OnRendered(func(n *model.Node) {
+			dir := path.Dir("/" + strings.TrimPrefix(n.Path, "/"))
+			hub.EmitChange(n.StorageID, dir, realtime.ChangeEvent{Action: "modify", Name: n.Name, Derived: true})
+			if dir != "/" {
+				hub.EmitChange(n.StorageID, path.Dir(dir), realtime.ChangeEvent{Action: "modify", Name: path.Base(dir), Derived: true})
+			}
+		})
+	}
 
 	/* bag:b3 event */
 	// Wire the notify sink so the mutation handlers can emit canonical
@@ -1091,7 +1209,7 @@ func BuildRouter(d *Deps) http.Handler {
 		// Changing the account itself — profile, password, two-factor — is a
 		// write: a token that may only read (`read`) must not be able to take
 		// the account over by setting a new password or switching two-factor
-		// off (Burak, 2026-09-28: "write iste"). Every desktop pairing carries
+		// off (the maintainer, 2026-09-28: "write iste"). Every desktop pairing carries
 		// `write` — a viewer's too (handlers.desktopScopes), whose role still
 		// keeps it from changing files — so the desktop's account dialog does
 		// what the web one does, for every role.
@@ -1177,6 +1295,18 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Route("/api/me/prefs", func(r chi.Router) {
 			r.Get("/", upH.Get)
 			r.Put("/", upH.Put)
+		})
+
+		// 0.50 - "always open this kind with this app": ONE record per
+		// account, the same for the browser, the desktop app and every embed,
+		// changed one kind at a time (handlers/openwith.go).
+		owH := handlers.NewOpenWith(d.Store)
+		r.Route("/api/me/open-with", func(r chi.Router) {
+			r.Use(confine.Middleware)
+			r.Get("/", owH.Get)
+			r.Delete("/", owH.Clear)
+			r.Put("/{ext}", owH.Put)
+			r.Delete("/{ext}", owH.Forget)
 		})
 
 		// ────── the caller's OWN public links ──────
@@ -1319,6 +1449,10 @@ func BuildRouter(d *Deps) http.Handler {
 			// `write` gets the viewer, never the editor (OnlyOffice.Config).
 			r.Get("/onlyoffice/config", ooh.Config)
 			r.Post("/onlyoffice/config", ooh.Config)
+			// After the editor's "Download failed": did the document server
+			// ask for this document, and what did filex answer? Read-only,
+			// for whoever may open the document (OnlyOffice.Diagnose, #80).
+			r.Get("/onlyoffice/diagnose", ooh.Diagnose)
 
 			// Plain-text save target for the SFC's code/markdown editor.
 			r.With(write).Post("/save-text", saveTextH.Save)
@@ -1343,6 +1477,11 @@ func BuildRouter(d *Deps) http.Handler {
 			r.With(write).Delete("/permissions/{id}", grantsH.Delete)
 			r.Get("/permissions/resolve", grantsH.Resolve)
 			r.Get("/permissions/users", grantsH.SearchUsers)
+			// A group's grants have their own ids (group_file_grants); the
+			// fixed "groups" segment keeps them apart from a person's {id}.
+			r.Get("/permissions/groups", grantsH.SearchGroups)
+			r.With(write).Patch("/permissions/groups/{id}", grantsH.UpdateGroup)
+			r.With(write).Delete("/permissions/groups/{id}", grantsH.DeleteGroup)
 			r.With(write).Post("/permissions/invite", grantsH.Invite)
 			r.With(write).Post("/permissions/share-mail", grantsH.ShareMail)
 
@@ -1536,10 +1675,24 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(users).Get("/roles", permH.ListRules)
 				r.With(users).Get("/roles/", permH.ListRules)
 				r.With(users).Get("/roles/builtin", permH.GetDefaults)
+				// Groups (internal/group) — managing people, so admin.users. The
+				// handler holds the delegated lines: roles given through a group,
+				// never one's own membership, and links to an outside directory
+				// are an administrator's (handlers/groups_admin.go).
+				r.With(users).Get("/groups", groupsH.List)
+				r.With(users).Get("/groups/", groupsH.List)
+				r.With(users).Post("/groups", groupsH.Create)
+				r.With(users).Post("/groups/", groupsH.Create)
+				r.With(users).Get("/groups/{id}", groupsH.Get)
+				r.With(users).Put("/groups/{id}", groupsH.Update)
+				r.With(users).Delete("/groups/{id}", groupsH.Delete)
+				r.With(users).Post("/groups/{id}/members", groupsH.AddMembers)
+				r.With(users).Delete("/groups/{id}/members/{user_id}", groupsH.RemoveMember)
+				r.With(users).Get("/users/{id}/groups", groupsH.UserGroups)
 				// Per-user quota, nested where callers look for it first. The
 				// flat /quota/{user_id} predates it and still works;
 				// handlers/quota.go has documented the nested shape since before
-				// it existed, which sent olivov hunting for a provider-quota
+				// it existed, which sent a multi-tenant deployment hunting for a provider-quota
 				// endpoint that was never there (G2).
 				r.With(users).Get("/users/{id}/quota", quotaH.AdminGet)
 				r.With(users).Post("/users/{id}/quota", quotaH.AdminSet)
@@ -1553,6 +1706,7 @@ func BuildRouter(d *Deps) http.Handler {
 				grants := handlers.RequireAdminPermission(d.ACL, perm.AdminGrants)
 				r.With(grants).Get("/grants", grantsH.AdminList)
 				r.With(grants).Delete("/grants/{id}", grantsH.AdminDelete)
+				r.With(grants).Delete("/grants/groups/{id}", grantsH.AdminDeleteGroup)
 
 				shares := handlers.RequireAdminPermission(d.ACL, perm.AdminShares)
 				r.With(shares).Get("/shares", sharesAdmH.List)
@@ -1590,6 +1744,9 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Put("/roles/builtin", permH.PutDefaults)
 				r.Post("/roles", permH.CreateRule)
 				r.Post("/roles/", permH.CreateRule)
+				// What a role being edited comes to (its people's built-in role),
+				// for the editor's app-permission Defaults: nothing is stored.
+				r.Post("/roles/preview", permH.PreviewRole)
 				r.Put("/roles/{id}", permH.UpdateRule)
 				r.Delete("/roles/{id}", permH.DeleteRule)
 				// Duplicate-file report — same (size, etag) grouping (v0.2 "Bul").
@@ -1611,6 +1768,7 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Post("/", pluginsH.Install)
 					r.Post("/updates/check", pluginsH.CheckUpdates)
 					r.Get("/{id}", pluginsH.Get)
+					r.Get("/{id}/logs", pluginsH.Logs)
 					r.Patch("/{id}", pluginsH.Patch)
 					r.Post("/{id}/restart", pluginsH.Restart)
 					r.Post("/{id}/upgrade", pluginsH.Upgrade)
@@ -1622,6 +1780,10 @@ func BuildRouter(d *Deps) http.Handler {
 				// (handlers/plugin_requests.go, internal/pluginreq). Approve and
 				// reject refuse an API key in the handler (requireSession).
 				pluginReqH := handlers.NewPluginRequests(pluginRequests)
+				// An app request's File types group, and the approving
+				// administrator's choices (0.50, Default apps).
+				pluginReqH.Assoc = d.Assoc
+				pluginReqH.Apps = d.AppPlugins
 				r.Route("/plugin-requests", func(r chi.Router) {
 					r.Get("/", pluginReqH.List)
 					r.Post("/", pluginReqH.Create)
@@ -1633,6 +1795,7 @@ func BuildRouter(d *Deps) http.Handler {
 				// App plugins — in-process wasm modules the admin installs
 				// (handlers/app_plugins_admin.go, docs/APP-PLUGINS.md).
 				apAdm := handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason)
+				apAdm.Assoc = d.Assoc
 				apAdm.Audit = func(ctx context.Context, userID *int64, action string, storageID int64, rel, ip string) error {
 					return d.Store.InsertAuditEntry(ctx, &model.AuditEntry{
 						UserID: userID, Action: action, TargetType: "file", TargetID: rel,
@@ -1654,6 +1817,9 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Get("/{id}/overrides", apAdm.GetOverrides)
 					r.Put("/{id}/overrides", apAdm.PutOverrides)
 					r.Get("/{id}/logs", apAdm.Logs)
+					// An app's thumbnail limits (wasmplugin/thumbnails.go).
+					r.Get("/{id}/thumbnails", apAdm.ThumbLimits)
+					r.Put("/{id}/thumbnails", apAdm.PutThumbLimits)
 					r.Get("/signing/ca.pem", apAdm.SigningCA)
 					r.Get("/signing/cas", apAdm.SigningCAs)
 					r.Post("/signing/ca/import", apAdm.ImportSigningCA)
@@ -1665,6 +1831,18 @@ func BuildRouter(d *Deps) http.Handler {
 					// /api/admin/shares with a `plugin_name` on them; this is the
 					// same rows filtered, for a panel that wants one app's table.
 					r.Get("/shares", sharesAdmH.ListAppPluginShares)
+				})
+
+				// Default apps: which app opens a kind of file, and which draws
+				// its thumbnails (handlers/file_types_admin.go, internal/assoc).
+				fileTypesH := handlers.NewFileTypesAdmin(d.Assoc, d.Cfg.Demo.Mode)
+				r.Route("/file-types", func(r chi.Router) {
+					// Like every route group: a `root:` token is held to its
+					// root (it names no path here, so nothing is rewritten).
+					r.Use(confine.Middleware)
+					r.Get("/", fileTypesH.List)
+					r.Put("/{ext}", fileTypesH.Put)
+					r.Delete("/{ext}", fileTypesH.Reset)
 				})
 
 				r.Route("/storages", func(r chi.Router) {
@@ -1701,12 +1879,13 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Put("/{key}", seth.Set)
 				})
 
-				/* tema:v1 — operator-defined themes (handlers/themes.go).
+				/* tema:v1 - operator-defined themes (handlers/themes.go).
 				   ⚠ Every method calls requireSupertenant ITSELF rather than
-				   sitting behind a middleware here, because this is not the only
-				   door: /api/ai/admin mounts the same handler instances for the
-				   MCP admin tools, and a route-level gate would guard one of two
-				   (the reasoning in handlers/supertenant.go). */
+				   sitting behind a middleware here. Today this is the only door
+				   (themes have no admin_* MCP tool and no /api/ai/admin route),
+				   but a second door that mounted the same handler instances
+				   would otherwise inherit no gate at all (the reasoning in
+				   handlers/supertenant.go). */
 				themesH := handlers.NewThemes(d.Store, appearanceSrc)
 				r.Route("/themes", func(r chi.Router) {
 					r.Get("/", themesH.List)
@@ -1721,16 +1900,59 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Get("/protection", protH.Get)
 				r.Patch("/protection", protH.Patch)
 
+				// Sign-in security: the attempt limits, the IP allow-list, the
+				// trusted proxies, the locks in force and the sign-in trail
+				// (handlers/login_security.go; internal/loginguard). Supertenant
+				// only, asked inside each method.
+				loginSecH := handlers.NewLoginSecurity(d.Store, d.LoginGuard, d.Cfg.TrustedProxies)
+				// A demo's Sign-in security page is a public page: the visitors'
+				// addresses and the operator's are masked (handlers/demo_redact.go).
+				loginSecH.DemoMode = d.Cfg.Demo.Mode
+				r.Route("/login-security", func(r chi.Router) {
+					r.Get("/", loginSecH.Get)
+					r.Patch("/", loginSecH.Patch)
+					r.Get("/locks", loginSecH.Locks)
+					r.Post("/unlock", loginSecH.Unlock)
+					r.Get("/attempts", loginSecH.Attempts)
+				})
+
 				archiveAdminH := handlers.NewArchiveAdmin(d.Store, archiveEngine)
 				r.Get("/archives", archiveAdminH.Get)
 				r.Patch("/archives", archiveAdminH.Patch)
 				r.Post("/archives/test", archiveAdminH.Test)
+
+				// A tenant runs itself (docs/TENANT-ADMIN.md): its own OIDC and
+				// LDAP, its own domains. A tenant's administrator acts on their
+				// own tenant; the platform operator names one (?tenant=<id>).
+				tenantSelfH := handlers.NewTenantSelf(d.Store, d.AuthLive, d.Domains, d.Cfg.MultiTenant)
+				tenantSelfH.DemoMode = d.Cfg.Demo.Mode
+				tenantSelfH.TLSMode = d.Cfg.TLS.Mode
+				if tenantSelfH.TLSMode == "" {
+					tenantSelfH.TLSMode = config.TLSModeProxy
+				}
+				r.Route("/tenant", func(r chi.Router) {
+					r.Get("/", tenantSelfH.Get)
+					r.Post("/auth-providers", tenantSelfH.CreateProvider)
+					r.Patch("/auth-providers/{name}", tenantSelfH.UpdateProvider)
+					r.Delete("/auth-providers/{name}", tenantSelfH.DeleteProvider)
+					r.Post("/auth-providers/{name}/test", tenantSelfH.TestProvider)
+					r.Post("/domains", tenantSelfH.AddDomain)
+					r.Post("/domains/{id}/check", tenantSelfH.CheckDomain)
+					r.Put("/domains/{id}/certificate", tenantSelfH.SetCertificate)
+					r.Delete("/domains/{id}/certificate", tenantSelfH.DeleteCertificate)
+					r.Delete("/domains/{id}", tenantSelfH.DeleteDomain)
+					r.Put("/insecure", tenantSelfH.SetInsecure)
+				})
 
 				// Tenant lifecycle (multi-tenancy). In multi-tenant mode only the
 				// supertenant's admins pass the handler's internal gate.
 				r.Route("/providers", func(r chi.Router) {
 					r.Get("/", provH.List)
 					r.Post("/", provH.Create)
+					// The realm the tenant screen offers for a slug (static, so
+					// chi matches it before /{id}).
+					r.Get("/realm-suggestion", provH.RealmSuggestion)
+					r.Get("/{id}", provH.Get)
 					r.Patch("/{id}", provH.Update)
 					r.Delete("/{id}", provH.Delete)
 					r.Post("/{id}/storages", provH.LinkStorage)
@@ -1754,6 +1976,23 @@ func BuildRouter(d *Deps) http.Handler {
 				r.Post("/update/check", updateH.Check)
 				r.Post("/update/apply", updateH.Apply)
 
+				// Tools (Admin → Tools): maintenance that is not an action on
+				// a file. The paths they take are qualified storage paths, so
+				// a `root:` token is held to its root (confine.Middleware).
+				r.Route("/tools", func(r chi.Router) {
+					r.Use(confine.Middleware)
+					thumbRepairH := handlers.NewThumbRepair(d.Store, d.Ops)
+					if d.Thumbs != nil {
+						thumbRepairH.Limits = d.Thumbs
+					}
+					r.Get("/thumbnails/repair", thumbRepairH.Status)
+					r.Post("/thumbnails/repair", thumbRepairH.Start)
+					r.Get("/thumbnails/problems", thumbRepairH.Problems)
+					r.Get("/thumbnails/generators", thumbRepairH.Generators)
+					r.Get("/thumbnails/settings", thumbRepairH.Settings)
+					r.Patch("/thumbnails/settings", thumbRepairH.UpdateSettings)
+				})
+
 				r.Route("/trash", func(r chi.Router) {
 					r.Post("/empty", trashH.AdminEmpty)
 					// The progress of the empty POST started: a large trash is
@@ -1774,7 +2013,12 @@ func BuildRouter(d *Deps) http.Handler {
 
 				r.Route("/auth-providers", func(r chi.Router) {
 					r.Get("/", authProvH.List)
+					// Another instance of a driver; which tenants sign in
+					// through one (docs/TENANT-ADMIN.md).
+					r.Post("/", authProvH.Create)
 					r.Patch("/{name}", authProvH.Update)
+					r.Delete("/{name}", authProvH.Delete)
+					r.Put("/{name}/tenants", authProvH.SetTenants)
 					r.Post("/{name}/test", authProvH.Test)
 				})
 
@@ -1846,6 +2090,26 @@ func BuildRouter(d *Deps) http.Handler {
 	aiH.AttachStaged(suh)
 	aiH.AttachBody(d.Body)
 	aiH.AttachTickets(uploadTickets)
+	// The explorer's own handlers, as built above for /api/files and
+	// /api/shares: the AI surface's copy, app, operations, trash, versions,
+	// archive and link tools run THEM in process (handlers/ai_doors.go), so a
+	// rule the explorer's route keeps is kept on /api/ai and over MCP too.
+	// The comments handler holds nothing but the store and the resolver: one
+	// built here is the explorer's route's twin.
+	aiComments := handlers.NewComments(d.Store)
+	aiComments.AttachACL(d.ACL)
+	aiDoors := &handlers.AIDoors{
+		Ops: oh, Apps: apH, Trash: trashH, Versions: versionsH, Archive: ah,
+		SharesMine: sharesMineH, Share: sh,
+		Notifications: notifH, Meta: metaH, Comments: aiComments, Grants: grantsH,
+		ACL: d.ACL,
+	}
+	aiH.AttachDoors(aiDoors)
+	// The MCP admin's Test measures the third leg the way the page's does.
+	var reversePath func(context.Context, *onlyoffice.Target) onlyoffice.ReverseResult
+	if d.OnlyOffice != nil {
+		reversePath = d.OnlyOffice.CheckReversePath
+	}
 	aiAdmin := handlers.NewAIAdmin(handlers.AIAdminDeps{
 		Store:           d.Store,
 		Caps:            d.Caps,
@@ -1864,13 +2128,20 @@ func BuildRouter(d *Deps) http.Handler {
 		DemoMode:           d.Cfg.Demo.Mode,
 		PublicURL:          d.Cfg.PublicURL,
 		PublicURLSet:       d.Cfg.PublicURLSet,
+		ReversePath:        reversePath,
 		AuthLive:           d.AuthLive,
 
 		// Plugin tools read and REQUEST; they never install or approve.
 		Plugins:                  d.Plugins,
 		AppPlugins:               d.AppPlugins,
 		AppPluginsDisabledReason: d.AppPluginsDisabledReason,
+		Assoc:                    d.Assoc,
 		PluginRequests:           pluginRequests,
+		LoginGuard:               d.LoginGuard,
+		EnvTrustedProxies:        d.Cfg.TrustedProxies,
+		MultiTenant:              d.Cfg.MultiTenant,
+		// The archive settings tools read and probe the panel's engine.
+		ArchiveEngine: archiveEngine,
 	})
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL)
 	aiMCP.AttachTenants(tenants)
@@ -1880,6 +2151,7 @@ func BuildRouter(d *Deps) http.Handler {
 	aiMCP.AttachStaged(suh)
 	aiMCP.AttachBody(d.Body)
 	aiMCP.AttachTickets(uploadTickets)
+	aiMCP.AttachDoors(aiDoors)
 	r.Route("/api/ai", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		// Agents are tenant-scoped too — resolve the token user's provider
@@ -1925,6 +2197,38 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireScope("write")).Post("/zip", aiH.Zip)
 		r.With(auth.RequireScope("write")).Post("/unzip", aiH.Unzip)
 
+		// The explorer's operations, run through its own handlers
+		// (handlers/ai_doors.go) - each the REST twin of an MCP tool, asking
+		// that tool's verb (ai_mcp.go fileToolVerb).
+		r.With(auth.RequireScope("write")).Post("/copy", aiH.Copy)
+		r.With(auth.RequireScope("read")).Get("/apps/actions", aiH.AppActions)
+		r.With(auth.RequireScope("write")).Post("/apps/run", aiH.AppRun)
+		r.With(auth.RequireScope("write")).Post("/convert", aiH.Convert)
+		r.With(auth.RequireScope("read")).Get("/ops", aiH.OpsList)
+		r.With(auth.RequireScope("read")).Get("/ops/{id}", aiH.OpGet)
+		r.With(auth.RequireScope("write")).Post("/ops/{id}/cancel", aiH.OpCancel)
+		r.With(auth.RequireScope("read")).Get("/trash", aiH.TrashList)
+		r.With(auth.RequireScope("write")).Post("/trash/restore", aiH.TrashRestore)
+		r.With(auth.RequireScope("read")).Get("/versions", aiH.VersionsList)
+		r.With(auth.RequireScope("write")).Post("/versions/restore", aiH.VersionRestore)
+		r.With(auth.RequireScope("write")).Post("/versions/snapshot", aiH.VersionSnapshot)
+		r.With(auth.RequireScope("write")).Post("/archive/create", aiH.ArchiveCreate)
+		r.With(auth.RequireScope("write")).Post("/archive/extract", aiH.ArchiveExtract)
+		r.With(auth.RequireScope("read")).Get("/shares", aiH.SharesList)
+		r.With(auth.RequireScope("write")).Post("/share/request", aiH.FileRequest)
+		// The bell (marking read is the caller's bookkeeping, `read` as on
+		// /api/notifications), a star, comments, item permissions.
+		r.With(auth.RequireScope("read")).Get("/notifications", aiH.NotificationsList)
+		r.With(auth.RequireScope("read")).Post("/notifications/read", aiH.NotificationRead)
+		r.With(auth.RequireScope("write")).Post("/star", aiH.Star)
+		r.With(auth.RequireScope("read")).Get("/comments", aiH.CommentsList)
+		r.With(auth.RequireScope("write")).Post("/comments", aiH.CommentAdd)
+		r.With(auth.RequireScope("write")).Post("/comments/{id}/delete", aiH.CommentDelete)
+		r.With(auth.RequireScope("read")).Get("/permissions", aiH.PermissionsList)
+		r.With(auth.RequireScope("read")).Get("/permissions/users", aiH.PermissionUsers)
+		r.With(auth.RequireScope("write")).Post("/permissions", aiH.PermissionSet)
+		r.With(auth.RequireScope("write")).Post("/permissions/{id}/revoke", aiH.PermissionRevoke)
+
 		// MCP streamable HTTP (JSON-RPC). Both POST (requests) and GET
 		// (SSE stream open) are part of the transport contract.
 		r.With(auth.RequireScope("mcp")).Handle("/mcp", aiMCP)
@@ -1934,10 +2238,11 @@ func BuildRouter(d *Deps) http.Handler {
 		// folder (auth.RequireAdminToken — a `root:` token is a folder
 		// credential, never an operator one); the bound user is then elevated
 		// to an admin principal so the reused admin handler logic runs
-		// authorized. AuditMiddleware runs AFTER the gate so the bound
-		// principal is on the context — every successful mutating
-		// /api/ai/admin/* write lands in the audit log (action prefixed "ai.").
-		r.With(auth.RequireAdminToken, auth.AuditMiddleware(d.Store)).Route("/admin", aiAdmin.Register)
+		// authorized. Every successful mutating /api/ai/admin/* write lands in
+		// the audit log ONCE, through the /api/ai group's AuditMiddleware above
+		// (action prefixed "ai." - auth.DoorAction): a second one here wrote
+		// every such write twice, the second row empty (2026-10-01).
+		r.With(auth.RequireAdminToken).Route("/admin", aiAdmin.Register)
 	})
 
 	// ────── ShareX uploader (token-authenticated) ──────
@@ -2018,7 +2323,7 @@ func wireStatic(r chi.Router, fsys fs.FS, base string) {
 		// frontend hasn't been built). Surface the error so the
 		// operator knows to run pnpm build:web.
 		r.Get("/admin/*", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "admin SPA not bundled — frontend build missing", http.StatusNotFound)
+			http.Error(w, "admin SPA not bundled - frontend build missing", http.StatusNotFound)
 		})
 	} else {
 		shell := newShellDocs(adminFS, base)
@@ -2060,7 +2365,7 @@ func wireStatic(r chi.Router, fsys fs.FS, base string) {
 	webFS, err := stripPrefix(fsys, "web")
 	if err != nil {
 		r.Get("/embed.js", func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "embed.js not bundled — packages/webcomponent build missing", http.StatusNotFound)
+			http.Error(w, "embed.js not bundled - packages/webcomponent build missing", http.StatusNotFound)
 		})
 		return
 	}

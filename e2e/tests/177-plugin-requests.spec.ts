@@ -15,7 +15,8 @@
  *      as superseded) rather than reporting a failure.
  *
  * ⚠ The "source" is a tiny HTTP server on 127.0.0.1 inside this spec (plain
- * http is accepted for loopback only, wasmplugin/fetch.go), serving language
+ * http is accepted for loopback only, wasmplugin/fetch.go, and only with
+ * FILEX_PLUGIN_LOOPBACK_SOURCES=1, which e2e/run.mjs sets), serving language
  * packs — an app with no module, so nothing here needs a wasm build.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';

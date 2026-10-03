@@ -87,12 +87,12 @@ func GoldenWith(t TB, name string, v any, scrub func([]byte) []byte) {
 			t.Fatalf("golden %s: %v", name, err)
 			return
 		}
-		t.Logf("golden %s: written (%d bytes) — review it with `git diff %s`", name, len(got), path)
+		t.Logf("golden %s: written (%d bytes) - review it with `git diff %s`", name, len(got), path)
 		return
 	}
 	want, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		t.Errorf("golden %s: %s does not exist yet — run the tests once with -update and review what it wrote", name, path)
+		t.Errorf("golden %s: %s does not exist yet - run the tests once with -update and review what it wrote", name, path)
 		return
 	}
 	if err != nil {

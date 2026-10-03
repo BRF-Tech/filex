@@ -27,7 +27,8 @@ import {
   type PluginRequest,
   type PluginRequestStatus,
 } from '@/api/pluginRequests';
-import type { AppPluginDryRun } from '@/api/appPlugins';
+import type { AppPluginDryRun, AppPluginPlace } from '@/api/appPlugins';
+import { changedPlacements, defaultPlaces } from '@/lib/fileTypes';
 import { formatDate } from '@/lib/format';
 import { useToastStore } from '@/stores/toast';
 import { DataTable, pluginLabelOf, type ContextAction, type DataColumn } from '@brftech/filex-core';
@@ -37,6 +38,7 @@ import Button from '@/components/ui/Button.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Textarea from '@/components/ui/Textarea.vue';
+import AppPluginFileTypes from './AppPluginFileTypes.vue';
 import AppPluginPermissionList from './AppPluginPermissionList.vue';
 
 const emit = defineEmits<{
@@ -101,12 +103,12 @@ function sourceText(r: PluginRequest): string {
   if (s.source) return s.source;
   if (s.url) return s.url;
   if (s.from_source) return t('pluginRequests.source.own');
-  return '—';
+  return '-';
 }
 
 function versionText(r: PluginRequest): string {
-  if (r.op === 'upgrade' && r.from_version) return t('pluginRequests.jump', { from: r.from_version, to: r.version || '—' });
-  return r.version || '—';
+  if (r.op === 'upgrade' && r.from_version) return t('pluginRequests.jump', { from: r.from_version, to: r.version || '-' });
+  return r.version || '-';
 }
 
 const STATUS_RANK: Record<string, number> = { pending: 0, superseded: 1, rejected: 2, expired: 3, approved: 4 };
@@ -172,6 +174,12 @@ const rejecting = ref(false);
 const rejectReason = ref('');
 const busy = ref(false);
 const failure = ref('');
+/**
+ * The File types choices (0.50): the same group, rows and defaults the
+ * install wizard shows - an upgrade request's, the kinds it adds - sent with
+ * the approval, only the rows changed from the default.
+ */
+const places = ref<Record<string, AppPluginPlace>>({});
 
 async function review(r: PluginRequest, reject = false) {
   opening.value = true;
@@ -181,6 +189,7 @@ async function review(r: PluginRequest, reject = false) {
   rejectReason.value = '';
   try {
     open.value = await PluginRequestsApi.get(r.id);
+    places.value = defaultPlaces(open.value.file_types);
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.loadFailed')));
   } finally {
@@ -226,8 +235,13 @@ async function approve() {
   busy.value = true;
   failure.value = '';
   try {
-    const done = await PluginRequestsApi.approve(r.id);
+    const done = await PluginRequestsApi.approve(r.id, changedPlacements(r.file_types, places.value));
     toast.success(t('pluginRequests.approved', { name: labelOf(done), version: done.version }));
+    // Installed either way; a choice the server could not write leaves that
+    // kind in its order, and the administrator is told which.
+    if (done.association_errors?.length) {
+      toast.warn(t('appPlugins.wizard.fileTypes.notSaved', { list: done.association_errors.join('; ') }));
+    }
     open.value = null;
     emit('installed');
     await load();
@@ -322,7 +336,7 @@ async function reject() {
       </template>
       <template #cell-requester="{ row }">
         <div class="min-w-0 py-1">
-          <div class="truncate">{{ row.requester || '—' }}</div>
+          <div class="truncate">{{ row.requester || '-' }}</div>
           <div v-if="row.token_label" class="truncate text-[11px] text-zinc-500" :title="row.token_label">
             {{ t('pluginRequests.via', { key: row.token_label }) }}
           </div>
@@ -365,14 +379,14 @@ async function reject() {
           <dt class="text-zinc-500">{{ t('pluginRequests.fields.source') }}</dt>
           <dd class="break-all" data-testid="plugin-request-source">{{ sourceText(open) }}</dd>
           <dt class="text-zinc-500">{{ t('pluginRequests.review.sha256') }}</dt>
-          <dd class="break-all font-mono text-xs" data-testid="plugin-request-sha256">{{ open.sha256 || '—' }}</dd>
+          <dd class="break-all font-mono text-xs" data-testid="plugin-request-sha256">{{ open.sha256 || '-' }}</dd>
           <template v-if="open.manifest_sha256 && open.manifest_sha256 !== open.sha256">
             <dt class="text-zinc-500">{{ t('pluginRequests.review.manifestSha256') }}</dt>
             <dd class="break-all font-mono text-xs">{{ open.manifest_sha256 }}</dd>
           </template>
           <dt class="text-zinc-500">{{ t('pluginRequests.fields.requester') }}</dt>
           <dd>
-            {{ open.requester || '—' }}
+            {{ open.requester || '-' }}
             <span v-if="open.token_label" class="text-xs text-zinc-500"> · {{ t('pluginRequests.via', { key: open.token_label }) }}</span>
           </dd>
           <dt class="text-zinc-500">{{ t('pluginRequests.fields.requested') }}</dt>
@@ -412,6 +426,14 @@ async function reject() {
             :permissions="open.permission_rows"
             :reasons="appReview?.manifest?.permission_reasons"
             :added="appReview?.upgrade?.added"
+          />
+          <!-- Where the app goes for each kind it opens or draws (an
+               upgrade: each kind it adds) - the install wizard's group. -->
+          <AppPluginFileTypes
+            v-if="open.status === 'pending' && open.file_types?.length"
+            v-model="places"
+            :rows="open.file_types"
+            :mode="open.op === 'upgrade' ? 'upgrade' : 'install'"
           />
         </template>
 

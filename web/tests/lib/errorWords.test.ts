@@ -127,6 +127,25 @@ describe('jobFailure (the operations centre)', () => {
     expect(admin.detail).toBe(op.error);
   });
 
+  it('no document server for the office engine: connect ONLYOFFICE, never "install" (0.50)', () => {
+    /* Red before 0.50: there was no `office_unconfigured`; the office engine
+       was a binary and its failure read "This needs libreoffice, which is
+       not installed ... Install it there". */
+    const raw =
+      'engine libreoffice is not configured on this host: office documents are converted by ONLYOFFICE Document Server, and none is connected (an administrator connects one under External services)';
+    const op = { error: raw, error_code: 'office_unconfigured', error_engine: 'office' };
+    const user = jobFailure(op, 'Dönüştür başarısız', tr);
+    expect(user.text).toBe(tr('opc.err.office_unconfigured'));
+    expect(user.text).toContain('ONLYOFFICE');
+    expect(user.text).not.toContain('configured on this host');
+    expect(user.detail).toBeUndefined();
+    const admin = jobFailure(op, 'Dönüştür başarısız', tr, { callerAdmin: true });
+    expect(admin.text).toBe(tr('opc.err.office_unconfigured_admin'));
+    expect(admin.text).toContain('Dış servisler');
+    expect(admin.detail).toBe(raw);
+    expect(jobFailure(op, 'Convert failed', en, { callerAdmin: true }).text).not.toMatch(/install|libreoffice/i);
+  });
+
   it('the app’s own words are shown; the app’s plumbing is not', () => {
     expect(jobFailure({ error: 'Bu belge zaten imzalanmış.', error_code: 'app' }, 'fallback', tr)).toEqual({
       text: 'Bu belge zaten imzalanmış.',

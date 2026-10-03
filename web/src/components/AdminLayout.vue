@@ -46,7 +46,10 @@ function toggleSidebar() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex">
+  <!-- The ground and the ink are the THEME's (`--fe-bg-elev` under the
+       `--fe-bg` cards, as in the explorer), not Tailwind's zinc pair: an
+       operator theme paints the admin pages' ground too (#74). -->
+  <div class="min-h-screen bg-[var(--fe-bg-elev)] text-[var(--fe-text)] flex">
     <!-- Mobile backdrop when sidebar open -->
     <div
       v-if="sidebarOpen"

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ArrowLeft, Save, KeyRound, Trash2, Database, RefreshCcw } from 'lucide-vue-next';
+import { ArrowLeft, Save, KeyRound, Trash2, Database, RefreshCcw, ShieldCheck, Unlink } from 'lucide-vue-next';
 
 import { UsersApi } from '@/api/users';
 import { quotaApi, type QuotaSnapshot } from '@/api/quota';
@@ -20,7 +20,8 @@ import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
 import ResetPasswordModal from '@/components/ResetPasswordModal.vue';
 import UserRolesCard from '@/components/UserRolesCard.vue';
-import { RolesApi, type PermissionRule } from '@/api/roles';
+import UserGroupsCard from '@/components/UserGroupsCard.vue';
+import { RolesApi, type GroupRole, type PermissionRule } from '@/api/roles';
 import { roleName } from '@/lib/roleName';
 import Spinner from '@/components/ui/Spinner.vue';
 
@@ -43,6 +44,19 @@ const role = ref<string>('viewer');
 const customRoles = ref<PermissionRule[]>([]);
 const heldRoleId = ref<number | null>(null);
 const heldRole = computed(() => customRoles.value.find((r) => r.id === heldRoleId.value) ?? null);
+/** With no custom role of their own: the one a group gives them. */
+const groupRole = ref<GroupRole | null>(null);
+const groupRoleRule = computed(() =>
+  groupRole.value ? (customRoles.value.find((r) => r.id === groupRole.value?.role_id) ?? null) : null,
+);
+/** The custom role in force — their own, else their group's — for the card. */
+const roleInForce = computed(() => {
+  // The role itself (its names in other languages come with it), and the
+  // group it comes from when it is not their own.
+  if (heldRole.value) return { ...heldRole.value, group: null as string | null };
+  if (groupRoleRule.value && groupRole.value) return { ...groupRoleRule.value, group: groupRole.value.group_name };
+  return null;
+});
 const CUSTOM = 'custom:';
 /** The choice as saved, to tell whether the Role field changed. */
 const savedRole = ref('');
@@ -57,6 +71,39 @@ const showReset = ref(false);
 const showDelete = ref(false);
 const deleting = ref(false);
 
+// The account's switch and its SSO bind (docs/SSO.md). An account an SSO
+// sign-in opened switched off waits for approval: switching it on IS the
+// approval. Both answer {ok}, so the account is read again.
+const pending = computed(() => user.value?.enabled === false && user.value?.disabled_reason === 'pending_approval');
+const enabling = ref(false);
+async function enableAccount() {
+  enabling.value = true;
+  try {
+    await UsersApi.update(id.value, { enabled: true });
+    user.value = await UsersApi.get(id.value);
+    toast.success(t('users.account.enabledOk'));
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    enabling.value = false;
+  }
+}
+const showUnlink = ref(false);
+const unlinking = ref(false);
+async function unlinkSSO() {
+  unlinking.value = true;
+  try {
+    await UsersApi.update(id.value, { sso_unlink: true });
+    user.value = await UsersApi.get(id.value);
+    toast.success(t('users.sso.unlinkedOk'));
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    unlinking.value = false;
+    showUnlink.value = false;
+  }
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -65,13 +112,14 @@ async function load() {
       // Best effort: without the roles list the field offers the built-in
       // roles only.
       RolesApi.listRules().catch(() => ({ rules: [] as PermissionRule[], assignments: {} })),
-      RolesApi.userRole(id.value).catch(() => null),
+      RolesApi.userRoleDetail(id.value).catch(() => ({ role_id: null, group_role: null })),
     ]);
     user.value = u;
     email.value = u.email;
     displayName.value = u.display_name;
     customRoles.value = list.rules;
-    heldRoleId.value = held;
+    heldRoleId.value = held.role_id;
+    groupRole.value = held.group_role;
     role.value = currentChoice();
     savedRole.value = role.value;
   } catch (e: unknown) {
@@ -91,21 +139,52 @@ async function save() {
     }
     // The role is one server call (it also guards the last administrator),
     // and only made when the choice changed — no audit entry for a no-op.
+    let stillFromGroup: GroupRole | null = null;
     if (picked !== savedRole.value) {
+      // ⚠ A built-in role does not replace the role a group gives them (only
+      // a custom role of their own does) — say so before, not after.
+      const g = groupRole.value;
+      if (g && !picked.startsWith(CUSTOM) && picked !== 'admin') {
+        const ok = confirm(
+          t('users.groupRoleConfirm', { name: personName(user.value!), role: groupRoleRule.value ? roleName(groupRoleRule.value, locale.value) : `#${g.role_id}`, group: g.group_name }),
+        );
+        if (!ok) return;
+      }
       const res = await RolesApi.setUserRole(
         id.value,
         picked.startsWith(CUSTOM) ? Number(picked.slice(CUSTOM.length)) : (picked as UserRole),
       );
       heldRoleId.value = res.role_id;
+      stillFromGroup = res.group_role ?? null;
     }
-    user.value = await UsersApi.get(id.value);
+    await refreshRole();
     savedRole.value = currentChoice();
-    toast.success(t('users.updatedOk'));
+    if (stillFromGroup) {
+      const rule = customRoles.value.find((r) => r.id === stillFromGroup?.role_id);
+      const name = rule ? roleName(rule, locale.value) : `#${stillFromGroup.role_id}`;
+      toast.warn(t('users.groupRoleStill', { role: name, group: stillFromGroup.group_name }));
+    } else {
+      toast.success(t('users.updatedOk'));
+    }
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
     saving.value = false;
   }
+}
+
+/** Re-reads the account and the role in force — after its role or its
+ *  groups changed, either of which can move the other. */
+async function refreshRole() {
+  const [u, held] = await Promise.all([
+    UsersApi.get(id.value),
+    RolesApi.userRoleDetail(id.value).catch(() => ({ role_id: heldRoleId.value, group_role: null })),
+  ]);
+  user.value = u;
+  heldRoleId.value = held.role_id;
+  groupRole.value = held.group_role;
+  role.value = currentChoice();
+  savedRole.value = role.value;
 }
 
 async function confirmDelete() {
@@ -197,7 +276,7 @@ async function recomputeQuota() {
         percent_used: limit > 0 ? (used / limit) * 100 : 0,
       };
     }
-    toast.success(`${t('users.quota.recomputeOk')} — ${formatBytes(used, locale.value)}`);
+    toast.success(`${t('users.quota.recomputeOk')} - ${formatBytes(used, locale.value)}`);
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
@@ -219,7 +298,7 @@ onMounted(() => {
         <h1 class="text-xl font-semibold flex items-center gap-2">
           {{ personName(user) }}
           <!-- ⚠ The role in words (it printed "user" under the name). -->
-          <Badge size="xs" data-testid="user-edit-role">{{ heldRole && user.role !== 'admin' ? roleName(heldRole, locale) : t(`users.roles.${user.role}`) }}</Badge>
+          <Badge size="xs" data-testid="user-edit-role">{{ roleInForce && user.role !== 'admin' ? roleName(roleInForce, locale) : t(`users.roles.${user.role}`) }}</Badge>
         </h1>
         <p class="text-sm text-zinc-500">{{ user.email }}</p>
       </div>
@@ -235,6 +314,9 @@ onMounted(() => {
       <Input v-model="email" type="email" :label="t('common.email')" readonly disabled />
       <Input v-model="displayName" :label="t('users.fields.displayName')" required />
       <Select v-model="role" :options="roleOptions" :label="t('common.role')" />
+      <p v-if="user.role !== 'admin' && !heldRole && roleInForce?.group" class="text-xs text-zinc-600 dark:text-zinc-300" data-testid="user-group-role">
+        {{ t('groups.userCard.roleFromGroup', { role: roleName(roleInForce, locale), group: roleInForce.group }) }}
+      </p>
 
       <div class="flex justify-between items-center pt-2 gap-2">
         <Button type="button" variant="outline" @click="showReset = true">
@@ -254,9 +336,39 @@ onMounted(() => {
       </div>
     </form>
 
+    <div
+      v-if="user.enabled === false"
+      class="card card-body space-y-3"
+      :class="pending ? 'border-amber-300 dark:border-amber-700' : ''"
+      data-testid="user-account-off"
+    >
+      <p class="text-sm">{{ pending ? t('users.account.pendingAbout') : t('users.account.disabledAbout') }}</p>
+      <div class="flex justify-end">
+        <Button type="button" :loading="enabling" data-testid="user-account-enable" @click="enableAccount">
+          <ShieldCheck class="h-4 w-4" />
+          {{ pending ? t('users.account.approve') : t('users.account.enable') }}
+        </Button>
+      </div>
+    </div>
+
+    <div v-if="user.sso_linked" class="card card-body space-y-3" data-testid="user-sso">
+      <h2 class="text-base font-semibold">{{ t('users.sso.title') }}</h2>
+      <p class="text-sm text-zinc-600 dark:text-zinc-300">{{ t('users.sso.linked') }}</p>
+      <div class="flex justify-end">
+        <Button type="button" variant="outline" data-testid="user-sso-unlink" @click="showUnlink = true">
+          <Unlink class="h-4 w-4" />
+          {{ t('users.sso.unlink') }}
+        </Button>
+      </div>
+    </div>
+
     <!-- Per-user permissions (backend internal/perm). Keyed on the SAVED
          role, not the form's: the card describes what the server holds. -->
-    <UserRolesCard :user-id="user.id" :role="user.role" :custom-role="user.role !== 'admin' ? heldRole : null" />
+    <UserRolesCard :user-id="user.id" :role="user.role" :custom-role="user.role !== 'admin' ? roleInForce : null" />
+
+    <!-- Groups (backend internal/group): folder access and a role for
+         everyone in them. Changing them can move the role in force. -->
+    <UserGroupsCard :user-id="user.id" :user-name="personName(user)" @changed="refreshRole" />
 
     <!-- koru:k3 — storage quota -->
     <div class="card card-body space-y-3">
@@ -322,6 +434,16 @@ onMounted(() => {
     </div>
 
     <ResetPasswordModal :user="showReset ? user : null" @close="showReset = false" />
+
+    <Modal v-model="showUnlink" :title="t('users.sso.unlink')" size="sm">
+      <p class="text-sm">{{ t('users.sso.unlinkConfirm', { email: user.email }) }}</p>
+      <template #footer>
+        <Button variant="ghost" @click="showUnlink = false">{{ t('common.cancel') }}</Button>
+        <Button :loading="unlinking" data-testid="user-sso-unlink-confirm" @click="unlinkSSO">
+          {{ t('users.sso.unlink') }}
+        </Button>
+      </template>
+    </Modal>
 
     <Modal v-model="showDelete" :title="t('common.delete')" size="sm">
       <p class="text-sm">{{ t('users.deleteConfirm', { email: user.email }) }}</p>

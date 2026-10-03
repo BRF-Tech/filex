@@ -161,6 +161,7 @@ func hfAssetFetch(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 	if err := s.reg.recentAssetFailure(s.plugin.Row.Name + "/" + sum); err != nil {
 		return nil, err
 	}
+	s.noteSent(strings.ToLower(u.Hostname()))
 	fl := s.reg.assetFlight(s.plugin, u, sum, req.MaxBytes, final)
 	wait := assetTimeout
 	if dl, ok := ctx.Deadline(); ok {

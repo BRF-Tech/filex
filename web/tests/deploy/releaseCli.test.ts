@@ -277,7 +277,7 @@ function publish(fx: Fixture, { docsFresh }: { docsFresh: boolean }) {
   const sha512 = createHash('sha512').update(app).digest('base64');
   write(path.join(fx.site, 'desktop/app.bin'), app.toString());
   write(path.join(fx.site, 'desktop/latest.yml'), `version: ${VERSION}\nfiles:\n  - url: app.bin\n    sha512: ${sha512}\n    size: ${app.length}\npath: app.bin\nsha512: ${sha512}\n`);
-  write(path.join(fx.site, 'docs/RELEASES.html'), `<main><p>Latest — ${TAG}</p></main>`);
+  write(path.join(fx.site, 'docs/RELEASES.html'), `<main><p>Latest - ${TAG}</p></main>`);
   write(
     path.join(fx.site, 'docs/GUIDE.html'),
     `<main><h1>Guide</h1><h2 id="getting-started">Getting started</h2>${docsFresh ? '<h2 id="sharing">Sharing a folder with a team</h2>' : ''}</main>`,

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"time"
 
@@ -28,47 +27,25 @@ import (
 //     accepted only for loopback, link-local, RFC 1918 and ULA targets.
 //
 // The address rules themselves live in internal/netguard, shared with the
-// app-plugin outbound transport: one list of refused ranges, one guarded
-// dialer, one error.
-
-const downloadMaxRedirects = 5
+// app-plugin downloads and the app-plugin outbound transport: one list of
+// refused ranges, one guarded dialer, one download client
+// (netguard.Policy.DownloadClient: every hop guarded, at most five, never
+// from https to plain http), one error.
 
 // errPrivateTarget is what the download dialer answers for a refused address.
 var errPrivateTarget = fmt.Errorf("%w; a plugin download must come from a public host", netguard.ErrPrivateTarget)
 
-// newDownloadClient is the client InstallFromURL uses when the embedder did
-// not supply one: every dial resolves the name and refuses a private or local
-// result, every redirect hop dials through the same guard, and the chain is
-// capped.
-func newDownloadClient(timeout time.Duration) *http.Client {
-	return &http.Client{
-		Transport: netguard.Transport(60 * time.Second),
-		Timeout:   timeout,
-		CheckRedirect: func(next *http.Request, via []*http.Request) error {
-			if len(via) >= downloadMaxRedirects {
-				return errors.New("too many redirects")
-			}
-			if next.URL.Scheme != "https" && next.URL.Scheme != "http" {
-				return fmt.Errorf("redirect to %s:// is not followed", next.URL.Scheme)
-			}
-			if ip := net.ParseIP(next.URL.Hostname()); ip != nil && netguard.Refused(ip) {
-				return fmt.Errorf("redirect to %s refused: %w", next.URL.Hostname(), errPrivateTarget)
-			}
-			return nil
-		},
-	}
-}
-
 // checkDownloadURL is the cheap, pre-dial half of the download guard: the
-// scheme always, and — when guard is on — a literal IP that is private. The
-// dialer does the rest (names, redirects).
-func checkDownloadURL(rawURL string, guard bool) (*url.URL, error) {
+// scheme always, and - when guard is set - a literal IP the policy refuses.
+// The dialer does the rest (names, redirects). A nil guard is an embedder
+// that supplied its own client.
+func checkDownloadURL(rawURL string, guard *netguard.Policy) (*url.URL, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" {
 		return nil, reject("url must be http(s)://host/…")
 	}
-	if guard {
-		if ip := net.ParseIP(u.Hostname()); ip != nil && netguard.Refused(ip) {
+	if guard != nil {
+		if ip := net.ParseIP(u.Hostname()); ip != nil && guard.Refused(ip) {
 			return nil, reject("%s %v", u.Hostname(), errPrivateTarget)
 		}
 	}
@@ -78,6 +55,35 @@ func checkDownloadURL(rawURL string, guard bool) (*url.URL, error) {
 // errRemoteNeedsTLS is the refusal for a plain-http remote plugin outside the
 // private network.
 var errRemoteNeedsTLS = errors.New("remote plugins outside the private network must use https://")
+
+// privateOnlyDial is how a plugin spoken to over plain http:// is dialled -
+// a remote registered with http://, a launched plugin on its loopback port.
+// The name is resolved at EVERY dial, every answer must be private
+// (netguard.Private), and the connection is made to the address that
+// passed. checkRemoteAddress asks once, at registration and at start; without
+// this a name that resolves elsewhere later (DNS rebinding) carried the bearer
+// token and every storage credential there in the clear.
+func privateOnlyDial(dialer *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("%s does not resolve: %w", host, errRemoteNeedsTLS)
+		}
+		for _, ip := range ips {
+			if !netguard.Private(ip.IP) {
+				return nil, fmt.Errorf("%s resolves to %s: %w", host, ip.IP, errRemoteNeedsTLS)
+			}
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+	}
+}
 
 // checkRemoteAddress applies the remote-plugin rule to a registered address:
 // https:// goes anywhere; http:// only where every address the host resolves

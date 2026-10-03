@@ -1,6 +1,6 @@
 // `filex 0.43.0` — which filex this is, where a person can find it.
 //
-// Burak, 2026-09-24: in the account menu or in user settings. The version was
+// The maintainer, 2026-09-24: in the account menu or in user settings. The version was
 // only on the sign-in page and the administrators' About page, so anybody
 // already signed in who is not an administrator had no way to say which
 // version they were on.
@@ -37,7 +37,7 @@ describe('productVersionLine — one spelling of the line', () => {
   /* ⚠ The server's REAL string (version.String): the release, then the
      commit and the build time in brackets. The line printed it whole — 40
      hex digits and a timestamp — and the avatar menu grew a sideways scroll
-     bar for it (Burak, 2026-09-26). The tests above only ever fed it a bare
+     bar for it (the maintainer, 2026-09-26). The tests above only ever fed it a bare
      number, which is why nobody saw it. */
   const REAL = 'v0.46.0 (a2d7e34d1971707c638a5a44756685f1cd010bd6, 2026-09-26T03:41:30Z)';
 
@@ -99,7 +99,7 @@ describe('ProductVersion — the quiet line the menus draw', () => {
 });
 
 describe('where a person finds it', () => {
-  /* The three places Burak asked for, held to the ONE piece: a menu that grew
+  /* The three places the maintainer asked for, held to the ONE piece: a menu that grew
      its own `filex {{ version }}` would be a second spelling of one line, and
      a refactor that dropped the line would lose it without a sound. */
   const SRC = path.resolve(__dirname, '../../src/components');

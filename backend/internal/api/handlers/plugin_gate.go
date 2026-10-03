@@ -52,7 +52,7 @@ func verifyPluginStorage(ctx context.Context, mgr *plugin.Manager, resolver func
 		// The driver is not registered: its plugin is stopped, failed, or was
 		// removed. Saying that is far more useful than the generic "unknown
 		// driver" the registry would produce a moment later.
-		return fmt.Sprintf("the plugin providing %q is not running — start it on the Plugins page and try again", st.Driver), false
+		return fmt.Sprintf("the plugin providing %q is not running - start it on the Plugins page and try again", st.Driver), false
 	}
 
 	drv, err := storage.Get(st.Driver)

@@ -346,10 +346,10 @@ const hasItems = computed(() => entries.value.length > 0);
 
 /* Who put it in the trash: the account's name, its id when the server had no
  * name for it, or a dash when nobody is named. ⚠ Not "System": a row nobody
- * is named on may have been removed outside filex OR trashed before filex
- * kept this, and "System" is false for the second. */
+ * is named on may have been quarantined by the virus scan OR trashed before
+ * filex kept this, and "System" is false for the second. */
 function deleterLabel(e: TrashEntry): string {
-  if (typeof e.deleted_by_id !== 'number') return '—';
+  if (typeof e.deleted_by_id !== 'number') return '-';
   return e.deleted_by_name || `#${e.deleted_by_id}`;
 }
 

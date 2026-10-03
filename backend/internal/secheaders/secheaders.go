@@ -81,7 +81,7 @@ func Normalize(in []string) ([]string, error) {
 		}
 		src, err := source(v)
 		if err != nil {
-			return nil, fmt.Errorf("frame_ancestors: %q %v — write an origin such as https://home.example.com, https://*.example.com, or * for any page", v, err)
+			return nil, fmt.Errorf("frame_ancestors: %q %v - write an origin such as https://home.example.com, https://*.example.com, or * for any page", v, err)
 		}
 		if !seen[src] {
 			seen[src] = true

@@ -28,15 +28,15 @@ export const tr: Record<string, string> = {
   'ctx.keep_online': 'Yalnızca çevrimiçi tut',
   'ctx.keep_reveal': 'Yerel klasörü aç',
   'ctx.keep_inherited': 'Üst klasörle bilgisayarda tutuluyor',
-  'keep.started': 'Bilgisayarda tutulacak — eşitleme başladı',
+  'keep.started': 'Bilgisayarda tutulacak - eşitleme başladı',
   'keep.failed': 'Bilgisayarda tutulamadı',
   'keep.badge_kept': 'Bilgisayarda',
   'keep.badge_syncing': 'Eşitleniyor…',
   'keep.badge_cloud': 'Yalnızca çevrimiçi',
   'keep.badge_partial': 'İçinde bilgisayarda tutulanlar var',
-  'keep.strip_transfer': '{name} eşitleniyor — {done}/{total} (%{pct})',
-  'keep.strip_inventory': '{name} eşitleniyor — sunucu taranıyor…',
-  'keep.strip_settling': '{name} eşitleniyor — son durum kaydediliyor…',
+  'keep.strip_transfer': '{name} eşitleniyor - {done}/{total} (%{pct})',
+  'keep.strip_inventory': '{name} eşitleniyor - sunucu taranıyor…',
+  'keep.strip_settling': '{name} eşitleniyor - son durum kaydediliyor…',
   'ctx.paste': 'Yapıştır',
   'ctx.info': 'Bilgi',
   'ctx.duplicate': 'Kopyasını oluştur',
@@ -108,7 +108,7 @@ export const tr: Record<string, string> = {
   'archive.extracted_one': '{count} dosya çıkarıldı',
   'archive.extraction_queued': 'Arşiv çıkarma arka planda çalışıyor',
   'archive.preparing_extract': '{name} okunuyor… çıkarılmadan önce arşivin tamamı okunur.',
-  'archive.already_preparing': '{name} hâlâ okunuyor — okuma bitince bir kez çıkarılacak',
+  'archive.already_preparing': '{name} hâlâ okunuyor - okuma bitince bir kez çıkarılacak',
   'archive.extraction_completed': 'Çıkarma tamamlandı',
   'archive.extraction_cancelled': 'Çıkarma {count} dosyadan sonra iptal edildi',
   'archive.extraction_cancelled_one': 'Çıkarma {count} dosyadan sonra iptal edildi',
@@ -169,7 +169,7 @@ export const tr: Record<string, string> = {
   'node.trash': 'Çöp kutusu',
   'node.folder': 'Klasör',
 
-  // ——— Zengin önizleyici chrome ———
+  // --- Zengin önizleyici chrome ---
   'viewer.open_in_new_tab': 'Yeni sekmede aç',
   'viewer.loading': 'Yükleniyor…',
   'viewer.failed_to_load': 'Dosya yüklenemedi',
@@ -208,12 +208,12 @@ export const tr: Record<string, string> = {
   'viewer.epub_next': 'Sonraki',
   /* ⚠ Eski cümle her okuyucuya bir ORTAM DEĞİŞKENİ söylüyordu ("yönetici
      FILEX_DRAWIO_URL'yi ayarlamalı"). Yalnızca bir diyagrama bakmak isteyen
-     kişiye ne yapabileceği; `_admin` — düzeltebilecek kişiye — nereden
+     kişiye ne yapabileceği; `_admin` - düzeltebilecek kişiye - nereden
      düzelteceği söylenir. */
   'viewer.drawio.disabled': 'Diyagramlar burada açılamıyor: bu sunucuda draw.io yok. Başka bir yerde açmak için dosyayı indirin.',
   'viewer.drawio.disabled_admin': 'Bu sunucuda draw.io kurulu değil. Yönetim panelinde Dış servisler altından kurabilirsiniz.',
   'viewer.drawio.load_failed': 'Bu diyagram okunamadı. Başka bir yerde açmak için indirin.',
-  'viewer.drawio.save_failed': 'Diyagram kaydedilemedi. Değişiklikleriniz hâlâ düzenleyicide — yeniden deneyin.',
+  'viewer.drawio.save_failed': 'Diyagram kaydedilemedi. Değişiklikleriniz hâlâ düzenleyicide - yeniden deneyin.',
   'viewer.archive.entries': '{n} dosya',
   'viewer.archive.entries_one': '{n} dosya',
   'viewer.archive.empty': 'Arşiv boş.',
@@ -228,7 +228,7 @@ export const tr: Record<string, string> = {
   'viewer.name': 'Ad',
   'viewer.size': 'Boyut',
 
-  // ——— cila:a — sıralama / tarih grupları / yoğunluk ———
+  // --- cila:a - sıralama / tarih grupları / yoğunluk ---
   'col.sort': 'Sırala',
   'group.today': 'Bugün',
   'group.yesterday': 'Dün',
@@ -238,7 +238,7 @@ export const tr: Record<string, string> = {
   'toolbar.density.compact': 'Sıkışık görünüm',
   'toolbar.density.comfortable': 'Rahat görünüm',
 
-  // ——— cila:c — komut paleti + kısayol yardımı + breadcrumb ———
+  // --- cila:c - komut paleti + kısayol yardımı + breadcrumb ---
   'palette.placeholder': 'Dosya, klasör veya komut ara…',
   'palette.files': 'Dosyalar',
   'palette.commands': 'Komutlar',
@@ -267,7 +267,7 @@ export const tr: Record<string, string> = {
   'shortcuts.paste': 'Yapıştır',
   'breadcrumb.more': 'Aradaki klasörler',
 
-  // ——— State screens + undo snackbar + connection badge (cila:b) ———
+  // --- State screens + undo snackbar + connection badge (cila:b) ---
   'empty.hint': 'Dosyaları buraya sürükleyip bırakın',
   'empty.upload': 'Dosya yükle',
   'empty.search.title': 'Aramanızla eşleşen dosya yok',
@@ -278,14 +278,14 @@ export const tr: Record<string, string> = {
   'toast.undo': 'Geri al',
   'toast.undone': 'Geri alındı',
   'toast.undoing': 'Geri alınıyor…',
-  'toast.undo_queued': 'Geri alma kuyruğa alındı — bittiğini işlemler paneli gösterecek',
+  'toast.undo_queued': 'Geri alma kuyruğa alındı - bittiğini işlemler paneli gösterecek',
   'toast.undo_partial': 'Kısmen geri alındı: {total} öğeden {done}',
   'toast.undo_failed': 'Geri alınamadı',
   'toast.renamed': 'Yeniden adlandırıldı',
   'toast.rename_queued': '“{name}” olarak yeniden adlandırılıyor…',
   'toast.moved': 'Taşındı',
   'toast.trashed': 'Çöpe taşındı',
-  /* i18n:hardcoded — FileExplorer.vue'da düz string olarak duran, hiçbir dilin
+  /* i18n:hardcoded - FileExplorer.vue'da düz string olarak duran, hiçbir dilin
      değiştiremediği bildirim metinleri. */
   'toast.failed': 'İşlem başarısız',
   'err.status.400': 'Geçersiz istek',
@@ -303,17 +303,17 @@ export const tr: Record<string, string> = {
   'err.status.503': 'Servis şu an kullanılamıyor',
   'err.status.504': 'Bağlı bir servis zamanında yanıt vermedi',
   'err.status.other': 'Sunucu bu isteği kabul etmedi.',
-  'err.upload_stalled': 'Yükleme ilerlemeyi bıraktı. Yeniden deneyin — kaldığı yerden devam eder.',
+  'err.upload_stalled': 'Yükleme ilerlemeyi bıraktı. Yeniden deneyin - kaldığı yerden devam eder.',
   'err.network': 'Sunucuya ulaşılamadı. Bağlantınızı kontrol edip yeniden deneyin.',
   'err.read_only': 'Bu depo salt okunur',
   'err.no_secret_key': 'Bu sunucuda şifreleme anahtarı tanımlı değil, bu yüzden erişim anahtarı verilemiyor. Yöneticinizden tanımlamasını isteyin.',
   'err.quota': 'Depolama kotanız dolu.',
   'err.bad_kind': 'Sunucu bu türde bir işi bu yoldan kuyruğa almıyor.',
-  'err.not_cancellable': 'Bu iş başladıktan sonra durdurulamaz — kendiliğinden tamamlanır.',
+  'err.not_cancellable': 'Bu iş başladıktan sonra durdurulamaz - kendiliğinden tamamlanır.',
   'err.finished': 'Bu iş zaten bitti.',
   'err.too_many': 'Tek seferde en fazla {max} öğe geri getirilebilir. Daha küçük gruplar hâlinde geri getirin.',
   'err.name_taken': 'Aynı adla bir şey zaten var. Oradakinin adını değiştirip yeniden deneyin.',
-  'err.not_in_trash': 'Artık çöpte değil — bu arada geri getirilmiş ya da kaldırılmış; hiçbir şey silinmedi.',
+  'err.not_in_trash': 'Artık çöpte değil - bu arada geri getirilmiş ya da kaldırılmış; hiçbir şey silinmedi.',
   'err.save_failed': 'Değişiklikleriniz kaydedilemedi.',
   'err.load_failed': 'Bu dosya yüklenemedi.',
   'err.viewer_failed': 'Bu dosyanın görüntüleyicisi başlatılamadı. Açmak için dosyayı indirin.',
@@ -322,9 +322,11 @@ export const tr: Record<string, string> = {
   'opc.err.out_of_memory': 'Uygulamanın bu dosyada belleği yetmedi.',
   'opc.err.crashed': 'Uygulama beklenmedik biçimde durdu.',
   'opc.err.app_removed': 'Bu iş çalışamadan uygulama kaldırıldı.',
-  'opc.err.action_removed': 'Bu eylem artık yok — uygulama güncellendi.',
+  'opc.err.action_removed': 'Bu eylem artık yok - uygulama güncellendi.',
   'opc.err.engine_missing': 'Bunun için sunucuda olmayan bir program gerekiyor ({engine}). Yöneticinize başvurun.',
   'opc.err.engine_missing_admin': 'Bunun için {engine} gerekiyor ve filex\'i çalıştıran sunucuda kurulu değil. Oraya kurup yeniden deneyin.',
+  'opc.err.office_unconfigured': 'Ofis belgeleri ONLYOFFICE ile dönüştürülür ve bu sunucuya bağlı bir ONLYOFFICE yok. Yöneticinize başvurun.',
+  'opc.err.office_unconfigured_admin': 'Ofis belgeleri ONLYOFFICE Document Server ile dönüştürülür ve bağlı bir sunucu yok. Dış servisler sayfasından bir sunucu bağlayıp yeniden deneyin; yeniden başlatma gerekmez.',
   'toast.copied': 'Kopyalandı',
   'toast.deleted': 'Silindi',
   'toast.cut': 'Kesildi',
@@ -350,7 +352,7 @@ export const tr: Record<string, string> = {
   'toast.purged_partly': '{n} öğe kalıcı olarak silindi; {failed} öğe silinemedi: {reason}',
   'toast.purged_partly_one': '{n} öğe kalıcı olarak silindi; {failed} öğe silinemedi: {reason}',
   /* Kalıcı silinmesi yolda olan çöp satırı (yönetici Çöp sayfasının sözleri:
-     iki katalogda tek cümle — ders #447). */
+     iki katalogda tek cümle - ders #447). */
   'trash.purging': 'Kalıcı olarak siliniyor…',
   'trash.row_busy': 'Bu öğe üzerinde zaten bir iş sürüyor',
   'dropzone.hint': 'Dosyaları buraya bırak',
@@ -358,7 +360,7 @@ export const tr: Record<string, string> = {
   'names.reserved': '“{name}” adı filex’in kendi kullanımına ayrılmış. Başka bir ad seçin.',
   /* ⚠ Eksik ya da bozuk belge sunucusu kelimelerle söylenir, asla HTTP
      katmanıyla değil (eskiden `Config fetch 503: {"error":"onlyoffice not
-     configured"}` yazıyordu). `_admin`, düzeltebilecek kişinin okuduğu —
+     configured"}` yazıyordu). `_admin`, düzeltebilecek kişinin okuduğu -
      nereden düzelteceği; diğer herkes dosyayı yine de nasıl alacağını okur. */
   'viewer.office_unconfigured':
     'Ofis belgeleri burada açılamıyor: bu sunucuda ONLYOFFICE belge sunucusu yok. Dosyayı bilgisayarınızda açmak için indirin.',
@@ -369,17 +371,33 @@ export const tr: Record<string, string> = {
     'ONLYOFFICE belge sunucusu yanıt vermiyor. Yönetim panelinde Dış servisler altından kontrol edin.',
   'viewer.office_failed': 'Bu belge ONLYOFFICE ile açılamadı. Bilgisayarınızda açmak için indirin.',
   'viewer.office_forbidden': 'Bu belgeyi ONLYOFFICE ile açma izniniz yok.',
-  /* Gezginin "Aç" girdisi, belge sunucusu yokken — yalnızca yöneticiye
+  /* ONLYOFFICE'in "Download failed" (İndirme başarısız) hatasından sonra:
+     iki durumdan hangisi olduğu, filex'in gördüğüyle (lib/officeDiagnosis,
+     #80). */
+  'viewer.office_download_served':
+    'Belge sunucusu bu dosyayı filex’ten indirdi, ancak tarayıcınız dönüştürülmüş kopyayı belge sunucusundan yükleyemedi. Belge sunucusunun önündeki vekil sunucunun X-Forwarded-Proto ve X-Forwarded-Host başlıklarına bakın.',
+  'viewer.office_download_not_requested':
+    'Belge sunucusu bu dosyayı filex’ten hiç istemedi. Dosya daha önce açıldıysa belge sunucusu kendi kopyasını kullanıyor olabilir.',
+  'viewer.office_download_refused': 'filex, belge sunucusunun bu dosya için yaptığı isteği şu nedenle reddetti: {reason}.',
+  'viewer.office_fetch_reason.bad_link': 'adres bozuktu',
+  'viewer.office_fetch_reason.signature_expired': 'adresin süresi dolmuştu',
+  'viewer.office_fetch_reason.signature_bad': 'imzası eşleşmedi (JWT sırrı değişti ya da adres değiştirildi)',
+  'viewer.office_fetch_reason.not_found': 'dosya artık yok',
+  'viewer.office_fetch_reason.storage_unavailable': 'depo açılamadı',
+  'viewer.office_fetch_reason.body_unavailable': 'dosyanın içeriği bulunamadı',
+  'viewer.office_fetch_reason.object_missing': 'dosya depoda yok',
+  'viewer.office_fetch_reason.read_failed': 'dosya depodan okunamadı',
+  /* Gezginin "Aç" girdisi, belge sunucusu yokken - yalnızca yöneticiye
      gösterilir (diğer herkese girdi hiç sunulmaz; lib/serviceGate). */
-  'ctx.needs_onlyoffice': 'ONLYOFFICE kurulu değil — yönetim panelinde Dış servisler altından kurun.',
-  'ctx.needs_drawio': 'draw.io kurulu değil — yönetim panelinde Dış servisler altından kurun.',
+  'ctx.needs_onlyoffice': 'ONLYOFFICE kurulu değil - yönetim panelinde Dış servisler altından kurun.',
+  'ctx.needs_drawio': 'draw.io kurulu değil - yönetim panelinde Dış servisler altından kurun.',
   'viewer.pdf_inline_failed': 'Tarayıcı PDF\'i inline açamadı.',
   'viewer.too_large': 'Dosya çok büyük (>1 MB).',
   'viewer.csv_rows': '{n} satır',
   'viewer.csv_rows_one': '{n} satır',
   'presence.others': '{n} kişi',
   'presence.others_one': '{n} kişi',
-  'conn.offline': 'Canlı bağlantı yok — değişiklikler gecikebilir',
+  'conn.offline': 'Canlı bağlantı yok - değişiklikler gecikebilir',
   'conn.tooltip': 'Sunucuyla canlı bağlantı kurulamadı; liste belirli aralıklarla otomatik yenilenir. Bağlantı geri gelince bu uyarı kaybolur.',
 
   /* === bul:s3 === */
@@ -390,7 +408,7 @@ export const tr: Record<string, string> = {
   'palette.save': 'Aramayı kaydet',
   'palette.saved.delete': 'Kayıtlı aramayı sil',
   'search.in_content': 'İçerikte',
-  'search.truncated': 'Gösterilenden daha fazla sonuç var — aramanızı daraltın',
+  'search.truncated': 'Gösterilenden daha fazla sonuç var - aramanızı daraltın',
 
   /* Katalog kapsamı (docs/LAZY-CATALOGUE.md, lib/catalogCoverage). */
   'coverage.first_scan': 'Bu deponun ilk senkronu henüz bitmedi. Bitene kadar arama, klasör boyutları ve kullanım deponun bir kısmını kapsamaz.',
@@ -398,13 +416,13 @@ export const tr: Record<string, string> = {
   'coverage.lazy_on_open': 'Bu depoda yalnız açılan klasörler kataloglanır. Arama, klasör boyutları ve kullanım yalnız bu klasörleri kapsar.',
   'coverage.search_some': 'Şu depoların tamamı henüz kataloglanmadı: {names}. Bu arama oradaki bazı dosyaları bulamayabilir.',
   'coverage.catalog_all': 'Tümünü katalogla',
-  'coverage.catalog_started': 'Senkron başladı — deponun tamamı kataloglanıyor.',
+  'coverage.catalog_started': 'Senkron başladı - deponun tamamı kataloglanıyor.',
   'coverage.catalog_running': 'Kataloglanıyor…',
   'coverage.cataloging': '{storage} kataloglanıyor… arka planda sürüyor, bittiğinde bu sayfa söyleyecek.',
   'coverage.catalog_done': '{storage} baştan sona kataloglandı',
   'coverage.catalog_failed': '{storage} kataloglanamadı. Nedenini yönetim panelinde, deponun senkron geçmişinde görebilirsiniz.',
   'coverage.catalog_stopped': '{storage} kataloglaması bitmeden durduruldu',
-  'coverage.catalog_joined': '{storage} zaten taranıyordu — bittiğinde bu sayfa haber verecek.',
+  'coverage.catalog_joined': '{storage} zaten taranıyordu - bittiğinde bu sayfa haber verecek.',
   'coverage.catalog_gone': '{storage} kataloglanırken kaldırıldı',
   'coverage.catalog_unfollowed': '{storage} arka planda kataloglanmaya devam ediyor; nasıl bittiğini yönetim panelinde deponun senkron geçmişi gösterir',
   'size.at_least': '≥ {size}',
@@ -420,7 +438,7 @@ export const tr: Record<string, string> = {
   /* === koru:k1 === */
   'toolbar.inspector': 'Ayrıntılar',
   'ctx.details': 'Ayrıntılar',
-  /* yildiz:s1 — yıldızlamak bir eylem, menüde de öyle görünür. */
+  /* yildiz:s1 - yıldızlamak bir eylem, menüde de öyle görünür. */
   'ctx.star': 'Yıldızla',
   'ctx.unstar': 'Yıldızı kaldır',
   'star.failed': 'Yıldız değiştirilemedi',
@@ -431,14 +449,14 @@ export const tr: Record<string, string> = {
   'inspector.items_one': '{n} öğe',
   'inspector.type': 'Tür',
   'inspector.select_hint': 'Ayrıntılarını görmek için bir öğe seçin.',
-  /* pane:p1 — panel SON seçilen şeyi tutar (Burak'ın kararı, 2026-09-13);
+  /* pane:p1 - panel SON seçilen şeyi tutar (bakımcının kararı, 2026-09-13);
      dolayısıyla bölünmüş pencerenin bakılmayan yarısındaki bir öğeyi
      anlatıyor olabilir. Bu satır hangisi olduğunu ve nerede durduğunu söyler. */
-  'inspector.held': 'Son seçilen — {where} içinde',
+  'inspector.held': 'Son seçilen - {where} içinde',
   'inspector.close': 'Kapat',
   'inspector.section.general': 'Genel',
   'inspector.section.tags': 'Etiketler',
-  /* etiket:t1 — TagPicker'ın kendi çerçevesi. 2026-09-13'e kadar bu üçü
+  /* etiket:t1 - TagPicker'ın kendi çerçevesi. 2026-09-13'e kadar bu üçü
      katalogdan bağımsız olarak İngilizce basılıyordu; `tags.open` ise çipin
      yeni "bu etiketi taşıyan her şeyi göster" kapısı. */
   'tags.open': 'Etiketi aç: {tag}',
@@ -446,7 +464,7 @@ export const tr: Record<string, string> = {
   'tags.name': 'Etiket adı',
   'tags.remove': 'Etiketi kaldır',
 
-  /* etiket:k2 (v0.43.0) — etiketin iki TÜRÜ. Etiket nerede çiziliyorsa türünü
+  /* etiket:k2 (v0.43.0) - etiketin iki TÜRÜ. Etiket nerede çiziliyorsa türünü
      simgeyle birlikte sözcükle de söyler: bu sürüme kadar her etiket sessizce
      sunucudaki herkesle paylaşılıyordu. */
   'tags.kind.label': 'Bu etiketi kim görür',
@@ -455,8 +473,8 @@ export const tr: Record<string, string> = {
   'tags.kind.personal_help': 'Yalnızca siz görürsünüz',
   'tags.kind.team_help': 'Bu dosyayı görebilen ekibindeki herkes görür',
   'tags.kind.team_locked': 'Ekip etiketi eklemek ya da kaldırmak için bu dosyada düzenleme yetkiniz olmalı.',
-  'tags.chip.personal': 'Kişisel etiket “{tag}” — yalnızca siz görürsünüz',
-  'tags.chip.team': 'Ekip etiketi “{tag}” — bu dosyayı görebilen ekibindeki herkes görür',
+  'tags.chip.personal': 'Kişisel etiket “{tag}” - yalnızca siz görürsünüz',
+  'tags.chip.team': 'Ekip etiketi “{tag}” - bu dosyayı görebilen ekibindeki herkes görür',
   'tags.add_submit': 'Ekle',
   'inspector.section.versions': 'Sürümler',
   'inspector.section.permissions': 'İzinler',
@@ -495,7 +513,7 @@ export const tr: Record<string, string> = {
   'inspector.shares.empty': 'Paylaşım bağlantısı yok',
   'inspector.shares.copy': 'Bağlantıyı kopyala',
 
-  /* wiring:c1 — tema galerisi */
+  /* wiring:c1 - tema galerisi */
   'theme.menu': 'Tema',
   'theme.title': 'Tema galerisi',
   'theme.hint': 'Tema yalnız renk paletini değiştirir; gündüz mü gece mi olduğu yukarıdaki seçim.',
@@ -514,19 +532,19 @@ export const tr: Record<string, string> = {
   'theme.name.contrast': 'Yüksek kontrast',
   'theme.name.gray': 'Yumuşak gri',
   'theme.name.terminal': 'Terminal yeşili',
-  /* === zaman:z3 — saat dilimi seçici (gömme penceresi + web ayarları) === */
+  /* === zaman:z3 - saat dilimi seçici (gömme penceresi + web ayarları) === */
   'tz.menu': 'Saat dilimi',
   'tz.title': 'Saat dilimi',
   'tz.label': 'Tarihleri şu saatle göster',
-  'tz.search': 'Şehir, ülke ya da saat farkı arayın — “İstanbul” veya “GMT+3” deneyin',
+  'tz.search': 'Şehir, ülke ya da saat farkı arayın - “İstanbul” veya “GMT+3” deneyin',
   'tz.default.device': 'Bu cihazın saat dilimini kullan ({zone})',
   'tz.default.account': 'Hesabınızın saat dilimini kullan ({zone})',
   'tz.default.host': 'Bu sitenin varsayılanını kullan ({zone})',
   'tz.no_match': '“{query}” ile eşleşen saat dilimi yok. Bir şehir, bir ülke ya da GMT+3 gibi bir fark deneyin.',
-  'tz.more': '{n} kayıt daha var — listeyi daraltmak için yazmayı sürdürün.',
+  'tz.more': '{n} kayıt daha var - listeyi daraltmak için yazmayı sürdürün.',
   'tz.hint': 'Yalnızca bu tarayıcıda saklanır. Her tarih tek bir an olarak saklanır ve burada seçtiğiniz saatle gösterilir.',
   'tz.now': '{zone} bölgesinde şu an: {time}',
-  /* === wiring:c2 — özelleştirilebilir kısayollar + hızlı bakış === */
+  /* === wiring:c2 - özelleştirilebilir kısayollar + hızlı bakış === */
   'shortcuts.quicklook': 'Hızlı bakış',
   'shortcuts.customize': 'Özelleştir',
   'shortcuts.settings.menu': 'Kısayollar',
@@ -540,17 +558,17 @@ export const tr: Record<string, string> = {
   'shortcuts.settings.fixed': 'Sabit',
   'shortcuts.settings.customized': 'Özelleştirildi',
   'shortcuts.settings.conflict': 'kombinasyonu "{name}" kısayolunda kullanılıyor.',
-  'shortcuts.settings.conflict_fixed': 'kombinasyonu "{name}" sabit kısayoluna ayrılmış — kullanılamaz.',
+  'shortcuts.settings.conflict_fixed': 'kombinasyonu "{name}" sabit kısayoluna ayrılmış - kullanılamaz.',
   'shortcuts.settings.conflict_take': 'Eskisini boşa çıkar ve ata',
   'shortcuts.settings.conflict_cancel': 'Vazgeç',
   'quicklook.hint_close': 'kapat',
   'quicklook.hint_nav': 'önceki/sonraki',
   'quicklook.hint_open': 'aç',
   /* === /wiring:c2 === */
-  /* === wiring:c3 — işlem merkezi === */
+  /* === wiring:c3 - işlem merkezi === */
   'opc.title': 'İşlemler',
-  'opc.aria_badge': '{n} işlem — işlem merkezini aç/kapat',
-  'opc.aria_badge_one': '{n} işlem — işlem merkezini aç/kapat',
+  'opc.aria_badge': '{n} işlem - işlem merkezini aç/kapat',
+  'opc.aria_badge_one': '{n} işlem - işlem merkezini aç/kapat',
   'opc.close': 'Kapat',
   'opc.active': 'Sürüyor',
   'opc.history': 'Geçmiş',
@@ -580,9 +598,17 @@ export const tr: Record<string, string> = {
   'opc.kind.archive': 'Arşiv',
   'opc.kind.plugin': 'Uygulama',
   'opc.kind.trash': 'Çöp kutusunu boşaltma',
+  'opc.kind.thumbs': 'Küçük resim onarımı',
+
+  /* A folder's contents on hover (FolderPeek, useFolderPeek). */
+  'peek.items': '{n} öğe',
+  'peek.items_one': '{n} öğe',
+  'peek.more': '+{n} tane daha',
+  'peek.empty': 'Boş',
+  'peek.loading': 'İçine bakılıyor…',
   'opc.open': 'Aç',
 
-  /* Uygulama eklentileri — dosya menüsüne eklenen satırlar ve kuyruğa
+  /* Uygulama eklentileri - dosya menüsüne eklenen satırlar ve kuyruğa
      aldıkları işler (docs/APP-PLUGINS-API.md). */
   'plugin.queued': '{label} kuyruğa alındı',
   'plugin.done': '{label} tamamlandı',
@@ -590,8 +616,9 @@ export const tr: Record<string, string> = {
   'plugin.cancel_failed': 'İş iptal edilemedi',
   'plugin.not_applicable': 'Bu işlem seçime uygulanamaz',
   'plugin.read_only': 'Bu depo salt okunur',
-  'plugin.needs_engine': '{name} bu sunucuda kurulu değil — sunucuya kurup filex\'i yeniden başlatın.',
+  'plugin.needs_engine': '{name} bu sunucuda kurulu değil - sunucuya kurup filex\'i yeniden başlatın.',
   'plugin.needs_other': '{name} bu sunucuda kullanılamıyor.',
+  'plugin.needs_office': 'Ofis belgeleri için {name} gerekiyor ve bu sunucuya bağlı değil - Dış servisler sayfasından bağlayın.',
   'plugin.confirm.title': 'Onayla',
   'plugin.confirm.cancel': 'Vazgeç',
   'plugin.confirm.run': 'Çalıştır',
@@ -608,7 +635,7 @@ export const tr: Record<string, string> = {
   'appframe.keep_open': 'Düzenlemeye devam et',
   'appframe.save_close': 'Kaydet ve kapat',
   'appframe.updated': '{app}, {version} sürümüne güncellendi.',
-  'appframe.updated_reload': 'Bir yönetici {app} uygulamasının yeni sürümünü onayladı. Yeni sürümü kullanmak için yeniden yükleyin — önce çalışmanızı kaydedin.',
+  'appframe.updated_reload': 'Bir yönetici {app} uygulamasının yeni sürümünü onayladı. Yeni sürümü kullanmak için yeniden yükleyin - önce çalışmanızı kaydedin.',
   'appframe.reload': 'Yeniden yükle',
   'appframe.dismiss': 'Kapat',
   'appframe.not_connected': '{app} başlamadı. Kapatıp yeniden açın; tekrar ederse yöneticinize haber verin.',
@@ -616,7 +643,7 @@ export const tr: Record<string, string> = {
   'plugin.view.unsupported': 'Bu ekran, bu sürümün çizemediği bir bileşen kullanıyor ({type})',
   'plugin.view.error': 'Uygulama hata döndürdü',
   'plugin.output_missing': 'Çıktı artık eski yerinde değil',
-  /* M2 — surface components (components/plugin/nodes/*) */
+  /* M2 - surface components (components/plugin/nodes/*) */
   'plugin.view.loading': 'Yükleniyor…',
   'plugin.view.preview_failed': 'Önizleme yüklenemedi',
   'plugin.steps.label': 'Adımlar',
@@ -636,7 +663,7 @@ export const tr: Record<string, string> = {
   'plugin.file.choose': 'Seç…',
   'plugin.file.clear': 'Temizle',
   'plugin.file.none': 'Seçim yok',
-  /* M3 — imza yolu: signature-pad + pdf-fields düğümleri ve dış katılımcının
+  /* M3 - imza yolu: signature-pad + pdf-fields düğümleri ve dış katılımcının
      herkese açık sayfası (views/PublicSurface.vue, usePublicPage). */
   'plugin.sig.mode_draw': 'Çiz',
   'plugin.sig.mode_type': 'Yaz',
@@ -696,7 +723,7 @@ export const tr: Record<string, string> = {
   'plugin.page.pin_hint': 'Devam etmek için size verilen PIN\'i girin',
   'plugin.page.pin_submit': 'Devam et',
   'plugin.page.pin_wrong': 'Bu PIN doğru değil',
-  'plugin.page.pin_locked': 'Çok fazla yanlış PIN girildi — birkaç dakika bekleyip yeniden deneyin',
+  'plugin.page.pin_locked': 'Çok fazla yanlış PIN girildi - birkaç dakika bekleyip yeniden deneyin',
   'plugin.page.unavailable_title': 'Bu bağlantı kullanılamıyor',
   'plugin.page.unavailable_text': 'Süresi dolmuş, hakkı tükenmiş ya da geri çekilmiş olabilir. Gönderen kişiden yeni bir bağlantı isteyin.',
   'plugin.page.accepted_title': 'Alındı, teşekkürler',
@@ -708,7 +735,7 @@ export const tr: Record<string, string> = {
   'plugin.page.files': 'Belgeler',
   'plugin.page.open_file': '{name} dosyasını yeni sekmede aç',
   'plugin.page.footer': 'filex ile sunuldu',
-  /* === v3 — tek public kabuk: paylaşım, dosya isteği ve bir uygulamanın
+  /* === v3 - tek public kabuk: paylaşım, dosya isteği ve bir uygulamanın
      sayfası tek sayfanın üç gövdesi. Aşağıdakiler kabuğun kendi sözleri;
      hangi bağlantı açılmış olursa olsun aynı cümleler görünür. === */
   'public.served_by': '{name} ile paylaşıldı',
@@ -719,6 +746,7 @@ export const tr: Record<string, string> = {
   'public.up': 'Bir üst klasör',
   'public.download_all': 'Hepsini indir',
   'public.browse': 'İçine bak',
+  'public.unavailable': 'Bu öğe şu anda açılamıyor: bulunduğu depo, öğenin durumu hakkında yanıt vermedi. Bağlantıyı size gönderen kişiye haber verin.',
   'public.folder_empty': 'Bu klasörde bir şey yok',
   'public.drop_sub': 'Dosyalarınızı aşağıya bırakın ya da seçin. Bu klasöre yalnızca ekleyebilirsiniz; içinde hâlihazırda ne olduğu size görünmez.',
   'public.drop_here': 'Dosyaları buraya bırakın',
@@ -735,21 +763,25 @@ export const tr: Record<string, string> = {
     'Gönderildi ama sunucu zamanında onaylamadı. Hâlâ kaydediyor olabilir: yeniden göndermeden önce bu bağlantıyı size gönderen kişiye sorun.',
   'public.your_name': 'Adınız (isteğe bağlı)',
   'public.your_name_ph': 'Örn. Ahmet Yılmaz',
-  'public.refused_ext': 'Gönderilmedi — bu bağlantı bu türde dosya kabul etmiyor.',
-  'public.refused_too_large': 'Gönderilmedi — {size} sınırından büyük.',
-  'public.refused_too_many': 'Gönderilmedi — şu an en fazla {count} dosya gönderilebilir.',
-  'public.refused_too_many_one': 'Gönderilmedi — şu an en fazla {count} dosya gönderilebilir.',
-  /* === Uygulama eklentileri v2 — `page` görünümü, uygulamanın dosya kilidi,
+  'public.refused_ext': 'Gönderilmedi - bu bağlantı bu türde dosya kabul etmiyor.',
+  'public.refused_too_large': 'Gönderilmedi - {size} sınırından büyük.',
+  'public.refused_too_many': 'Gönderilmedi - şu an en fazla {count} dosya gönderilebilir.',
+  'public.refused_too_many_one': 'Gönderilmedi - şu an en fazla {count} dosya gönderilebilir.',
+  /* === Uygulama eklentileri v2 - `page` görünümü, uygulamanın dosya kilidi,
      işin yazdığı çıktı kipi, imza alanının yazı tipleri ve kuralları. === */
   'plugin.page_view.back': 'Dosyalara dön',
   'plugin.page_view.queued_title': 'İş kuyruğa alındı',
-  'plugin.page_view.queued_text': 'filex işi yürütüyor. İlerleyişi işlemler tepsisinde; bittiğinde haber verilecek.',
+  'plugin.page_view.queued_text': 'filex işi yürütüyor. Bittiğinde bu sayfa söyler; ilerleyişi işlemler tepsisinde de görünür.',
+  'plugin.page_view.finished_title': 'İş bitti',
+  'plugin.page_view.finished_text': 'Burada yapılacak başka bir şey kalmadı. Dosyalara dönebilir ya da bu sekmeyi kapatabilirsiniz.',
+  'plugin.page_view.failed_title': 'İş tamamlanamadı',
+  'plugin.page_view.opening_title': 'Sonuç açılıyor',
   'plugin.page_view.open_ops': 'İşlemler tepsisini aç',
   'plugin.page_view.done_title': 'Tamamlandı',
   'plugin.page_view.done_text': 'Burada yapılacak başka bir şey kalmadı. Bu sekmeyi kapatabilirsiniz.',
   'plugin.page_view.error_title': 'Bu ekran açılamadı',
   'plugin.page_view.retry': 'Yeniden dene',
-  'plugin.page_view.blocked': 'Yeni sekme engellendi — bu site için açılır pencerelere izin verin, yoksa ekran pencere içinde açılır',
+  'plugin.page_view.blocked': 'Yeni sekme engellendi - bu site için açılır pencerelere izin verin, yoksa ekran pencere içinde açılır',
   'plugin.output.sibling': 'yeni dosya',
   'plugin.output.version': 'yeni sürüm',
   'plugin.output.sibling_title': 'Sonuç, aslının yanına yeni bir dosya olarak iner',
@@ -763,16 +795,16 @@ export const tr: Record<string, string> = {
   'plugin.pdf.rule_max': 'En çok {max} karakter',
   'plugin.pdf.err_number': 'Bir sayı girin',
   'plugin.pdf.err_email': 'Geçerli bir e-posta adresi girin',
-  'plugin.pdf.err_min': 'Çok kısa — en az {min} karakter',
-  'plugin.pdf.err_max': 'Çok uzun — en çok {max} karakter',
+  'plugin.pdf.err_min': 'Çok kısa - en az {min} karakter',
+  'plugin.pdf.err_max': 'Çok uzun - en çok {max} karakter',
   'applock.badge': 'Kilitli',
   'applock.some_app': 'bir uygulama',
   'applock.held': '{app} bu dosyayı kilitledi',
   'applock.held_reason': '{app} bu dosyayı kilitledi: {reason}',
-  'applock.until': '— {date} tarihine kadar',
+  'applock.until': '- {date} tarihine kadar',
   'applock.inspector': 'Uygulama kilidi',
-  /* issue #34 — sunucunun İZLEMEDİĞİ sembolik bağ (lib/symlink). Rozet satırdaki
-     kısa söz; `why` ise arkasındaki cümle — üzerine gelince, ayrıntılar panelinde
+  /* issue #34 - sunucunun İZLEMEDİĞİ sembolik bağ (lib/symlink). Rozet satırdaki
+     kısa söz; `why` ise arkasındaki cümle - üzerine gelince, ayrıntılar panelinde
      ve biri açmaya kalkıştığında çıkan bildirimde. ⚠ Kırık bağ ile depo dışına
      çıkan bağ AYRI durumlardır ve ayrı okunmalıdır: yalnızca birinin yönetici
      çaresi vardır; silinmiş bir hedef için o çareyi önermek insanı işe yaramayacak
@@ -784,12 +816,26 @@ export const tr: Record<string, string> = {
   'symlink.why.outside_root':
     'Hedefi bu deponun dışında kalan bir bağ; bu yüzden açılamıyor. Bir yönetici, deponun ayarlarındaki "Bu klasörün dışına çıkan sembolik bağları izle" seçeneğiyle buna izin verebilir.',
   'symlink.why.broken':
-    'Hedefi artık var olmayan bir bağ; açılacak bir şey yok. Sunucuda onarılması ya da kaldırılması gerekir — hiçbir ayar silinmiş hedefi geri getirmez.',
+    'Hedefi artık var olmayan bir bağ; açılacak bir şey yok. Sunucuda onarılması ya da kaldırılması gerekir - hiçbir ayar silinmiş hedefi geri getirmez.',
   'symlink.why.unresolved':
     'Uzak sunucudaki bir bağ. filex hedefinin bu deponun içinde olup olmadığını bilemediği için bağı izlemez ve açamaz.',
   'symlink.why.unknown':
     'filex\'in izlemediği bir bağ, bu yüzden açılamıyor. Hedefi ya bu deponun dışında, ya kayıp, ya da filex\'in çözümleyemediği uzak bir sunucuda.',
   'symlink.inspector': 'Açılamayan bir bağ',
+  'unavailable.why.file':
+    'Depo bu dosyanın hâlâ var olup olmadığını söyleyemedi. Depo yeniden yanıt verene kadar dosya açılamaz ve değiştirilemez; bir sonraki tarama yeniden denetler.',
+  'unavailable.why.dir':
+    'Depo bu klasörün hâlâ var olup olmadığını söyleyemedi. Depo yeniden yanıt verene kadar ne klasör ne de içindekiler açılabilir ya da değiştirilebilir; bir sonraki tarama yeniden denetler.',
+  'unavailable.withReason': '{why} Deponun yanıtı: {reason}',
+  'unavailable.inspector': 'Kullanılamıyor',
+  /* 0.50 - why a file has no thumbnail, on the file itself (lib/thumbNote). */
+  'thumbNote.corrupt': 'Bozuk',
+  'thumbNote.corrupt_why': 'Küçük resim yok: dosya okunamadı. Bozuk ya da eksik olabilir.',
+  'thumbNote.encrypted': 'Şifreli',
+  'thumbNote.encrypted_why': 'Küçük resim yok: dosya şifreli ya da parolayla korunuyor.',
+  'thumbNote.too_large': 'Çok büyük',
+  'thumbNote.too_large_why': 'Küçük resim yok: dosya, küçük resim boyut sınırından büyük.',
+  'thumbNote.full': '{label}. {why}',
   'plugin.pdf.rule': 'Kabul ettiği',
   'plugin.pdf.rule_kind_any': 'Serbest metin',
   'plugin.pdf.rule_kind_number': 'Yalnızca sayı',
@@ -802,7 +848,7 @@ export const tr: Record<string, string> = {
   'plugin.pdf.date_example': 'Örnek',
   'opc.kind.archive-create': 'Arşiv oluşturuluyor',
   'opc.kind.archive-extract': 'Arşiv çıkarılıyor',
-  /* === wiring:c4 — onboarding turu + erişilebilirlik + hata kartı === */
+  /* === wiring:c4 - onboarding turu + erişilebilirlik + hata kartı === */
   'tour.aria': 'Tanıtım turu',
   'tour.restart': 'Turu tekrar başlat',
   'tour.skip': 'Turu atla',
@@ -845,7 +891,7 @@ export const tr: Record<string, string> = {
   'list.aria': 'Dosya listesi',
   'grid.aria': 'Dosya ızgarası',
 
-  /* === wiring:d1 — sekmeler + split panel === */
+  /* === wiring:d1 - sekmeler + split panel === */
   'tabs.strip': 'Sekmeler',
   'tabs.new': 'Yeni sekme',
   'tabs.close': 'Sekmeyi kapat',
@@ -853,12 +899,21 @@ export const tr: Record<string, string> = {
   'tabs.split_off': 'Bölmeyi kapat',
   'ctx.open_new_tab': 'Yeni sekmede aç',
   'ctx.open_with': '{app} ile aç',
+  'ctx.open_with_builtin': "Yerleşik görüntüleyiciyle aç",
+  'ctx.open_with_choose': "Uygulama seç…",
+  'openWith.title': "Birlikte aç",
+  'openWith.lead': "{name} hangi uygulamayla açılsın?",
+  'openWith.builtin': "filex görüntüleyicisi (yerleşik)",
+  'openWith.now': "Şu an bununla açılıyor",
+  'openWith.always': "{ext} dosyalarını her zaman bu uygulamayla aç",
+  'openWith.hint': "Hesabınızda saklanır. Ayarlar, Varsayılan uygulamalar bölümünden değiştirebilirsiniz.",
+  'openWith.open': "Aç",
   'shortcuts.group.tabs': 'Sekmeler',
   'shortcuts.tab_new': 'Yeni sekme',
   'shortcuts.tab_close': 'Sekmeyi kapat',
   'shortcuts.tab_next': 'Sonraki sekme',
   'shortcuts.tab_prev': 'Önceki sekme',
-  /* tus:t1 — menü fiilleri */
+  /* tus:t1 - menü fiilleri */
   'shortcuts.new_folder': 'Yeni klasör',
   'shortcuts.upload': 'Dosya yükle',
   'shortcuts.refresh': 'Listeyi yenile',
@@ -884,30 +939,30 @@ export const tr: Record<string, string> = {
   'split.copy_queued': 'Kopyalama kuyruğa alındı',
   'split.move_queued': 'Taşıma kuyruğa alındı',
   'toast.move_kept_both': 'Taşıma kuyruğa alındı. Hedefte aynı adla bir öğe vardı, taşınan öğe onun yanına “-copy” ekiyle konacak. Bu taşıma geri alınamaz.',
-  'split.cross_copy': 'Depolar farklı — kopyalama kuyruğa alındı',
+  'split.cross_copy': 'Depolar farklı - kopyalama kuyruğa alındı',
   'dragout.downloading': 'Bırakılan klasöre indiriliyor…',
-  'dragout.downloading_n': 'Bırakılan klasöre indiriliyor — şimdiye dek {n} dosya…',
-  'dragout.downloading_n_one': 'Bırakılan klasöre indiriliyor — şimdiye dek {n} dosya…',
+  'dragout.downloading_n': 'Bırakılan klasöre indiriliyor - şimdiye dek {n} dosya…',
+  'dragout.downloading_n_one': 'Bırakılan klasöre indiriliyor - şimdiye dek {n} dosya…',
   'dragout.stop': 'Durdur',
   'dragout.stopping': 'Durduruluyor…',
-  'dragout.stopped': 'Durduruldu — gelenler klasörde kalıyor',
-  'dragout.not_found': 'Bırakılan yer bulunamadı — dosya bir klasöre değil bir uygulamaya bırakıldıysa indirme yapılamaz',
+  'dragout.stopped': 'Durduruldu - gelenler klasörde kalıyor',
+  'dragout.not_found': 'Bırakılan yer bulunamadı - dosya bir klasöre değil bir uygulamaya bırakıldıysa indirme yapılamaz',
   'dragout.done': 'İndirme tamamlandı',
-  'dragout.ready': 'Dosyalar hazır — masaüstüne sürükleyebilirsiniz',
+  'dragout.ready': 'Dosyalar hazır - masaüstüne sürükleyebilirsiniz',
   'dragout.preparing': 'Sürükleme için hazırlanıyor…',
-  'split.cross_move': 'Depolar farklı — taşıma kuyruğa alındı (baytlar aktarılıp kaynak silinir)',
+  'split.cross_move': 'Depolar farklı - taşıma kuyruğa alındı (baytlar aktarılıp kaynak silinir)',
   /* === /wiring:d1 === */
-  /* wiring:d2 — galeri görünümü */
+  /* wiring:d2 - galeri görünümü */
   'toolbar.view.gallery': 'Galeri',
   'gallery.aria': 'Dosya galerisi',
   /* /wiring:d2 */
-  /* wiring:d3 — Yorumlar (inspector node comments) */
+  /* wiring:d3 - Yorumlar (inspector node comments) */
   'inspector.section.comments': 'Yorumlar',
   'inspector.comments.empty': 'Henüz yorum yok.',
   'inspector.comments.placeholder': 'Yorum yaz…',
   'inspector.comments.send': 'Gönder',
   'inspector.comments.delete': 'Yorumu sil',
-  /* wiring:e2 — uçtan uca şifreli klasörler */
+  /* wiring:e2 - uçtan uca şifreli klasörler */
   'e2e.create.title': 'Şifreli klasör oluştur',
   'e2e.create.option': 'Şifreli klasör oluştur…',
   'e2e.create.pw_label': 'Klasör parolası',
@@ -935,13 +990,13 @@ export const tr: Record<string, string> = {
   'e2e.unlock.damaged':
     'Parola doğru ama anahtar dosyasındaki (.filex-e2e.json) klasör anahtarı açılmıyor: dosya bozulmuş. Kurtarma anahtarını deneyin.',
   'e2e.unlock.marker_missing': 'Anahtar dosyası (.filex-e2e.json) okunamadı.',
-  /* ikon:emoji — listedeki işaretin erişilebilir adı. Satır eskiden yalnız
+  /* ikon:emoji - listedeki işaretin erişilebilir adı. Satır eskiden yalnız
      bir 🔒 basıyordu; onun yerini alan asma kilit kutunun içinde
      aria-hidden, dolayısıyla adı taşıyan yer bu. */
   'e2e.badge': 'Şifreli klasör',
-  'e2e.strip.label': 'Şifreli klasör — kilit açık',
+  'e2e.strip.label': 'Şifreli klasör - kilit açık',
   'e2e.strip.lock': 'Kilitle',
-  /* wiring:e2 password — klasör parolasını değiştirme */
+  /* wiring:e2 password - klasör parolasını değiştirme */
   'e2e.password.strip_action': 'Parolayı değiştir…',
   'e2e.password.title': 'Klasör parolasını değiştir',
   'e2e.password.reset_title': 'Bu klasör için yeni bir parola belirleyin',
@@ -949,7 +1004,7 @@ export const tr: Record<string, string> = {
     'Bu klasörü kurtarma anahtarıyla açtınız; parolası kaybolmuş ya da başkası tarafından biliniyor olabilir. Şimdi yeni bir parola belirleyin. Bu pencereyi kapatmak klasörü yeniden kilitler.',
   'e2e.password.current': 'Mevcut parola',
   'e2e.password.recovery': 'Kurtarma anahtarı',
-  'e2e.password.use_recovery': 'Hatırlamıyorum — kurtarma anahtarını kullan',
+  'e2e.password.use_recovery': 'Hatırlamıyorum - kurtarma anahtarını kullan',
   'e2e.password.use_current': 'Bunun yerine mevcut parolayı kullan',
   'e2e.password.new': 'Yeni parola',
   'e2e.password.current_required': 'Mevcut parolayı girin ya da kurtarma anahtarını kullanın.',
@@ -993,8 +1048,8 @@ export const tr: Record<string, string> = {
   'e2e.password.rekey_done': 'Yeni klasör anahtarı yerinde ({n} dosya yeniden sarıldı). Eski parola burada artık hiçbir şey açmıyor.',
   'e2e.password.rekey_done_one': 'Yeni klasör anahtarı yerinde ({n} dosya yeniden sarıldı). Eski parola burada artık hiçbir şey açmıyor.',
   'e2e.recovery.lead_replaced':
-    'Klasörün yeni bir anahtarı var, bu yüzden yeni bir kurtarma anahtarı da var — eskisi artık açmıyor. Bir kez gösterilir; filex kopyasını tutmaz.',
-  /* wiring:e2 names — şifreli dosya ve klasör adları */
+    'Klasörün yeni bir anahtarı var, bu yüzden yeni bir kurtarma anahtarı da var - eskisi artık açmıyor. Bir kez gösterilir; filex kopyasını tutmaz.',
+  /* wiring:e2 names - şifreli dosya ve klasör adları */
   'e2e.unlock.unsupported':
     'Bu klasör daha yeni bir filex istiyor: bu sürümün tanımadığı bir özellik kullanıyor ({features}). Hiçbir şey değiştirilmedi.',
   'e2e.settings.open': 'Şifreleme ayarları…',
@@ -1042,6 +1097,11 @@ export const tr: Record<string, string> = {
     '{n} dosya şifrelenemedi (bu arada değişti, çok büyük ya da yazılamıyor). Hâlâ şifresizler; devam etmek için yeniden deneyin.',
   'e2e.convert.partial_one':
     '{n} dosya şifrelenemedi (bu arada değişti, çok büyük ya da yazılamıyor). Hâlâ şifresiz; devam etmek için yeniden deneyin.',
+  'e2e.convert.too_large_here':
+    '{n} dosya bu tarayıcının tek parçada gönderebileceğinden büyük ve bu sunucu parça parça yükleme almıyor; bu yüzden yerlerinde şifrelenemediler. Hâlâ şifresizler ve onlar şifrelenene kadar klasörün şifrelenmesi tamamlanmış sayılmaz.',
+  'e2e.convert.too_large_here_one':
+    '{n} dosya bu tarayıcının tek parçada gönderebileceğinden büyük ve bu sunucu parça parça yükleme almıyor; bu yüzden yerinde şifrelenemedi. Hâlâ şifresiz ve o şifrelenene kadar klasörün şifrelenmesi tamamlanmış sayılmaz.',
+  'e2e.convert.large_progress': '“{name}” şifreleniyor: %{percent}',
   'e2e.convert.busy': 'Klasör şifreleniyor…',
   'e2e.convert.resume_title': 'Bu klasörü şifrelemeyi bitirin',
   'e2e.convert.resume_body':
@@ -1053,14 +1113,14 @@ export const tr: Record<string, string> = {
   'e2e.convert.done_one':
     'Klasör şifrelendi ({n} dosya). Silinen eski sürüm: {versions}; silinen çöp kaydı: {trash}.',
   'e2e.convert.cleanup_failed':
-    'Klasör şifrelendi ama eski sürümleri ve çöp kayıtları silinemedi — bunu yalnız klasörün sahibi ya da bir yönetici yapabilir.',
+    'Klasör şifrelendi ama eski sürümleri ve çöp kayıtları silinemedi - bunu yalnız klasörün sahibi ya da bir yönetici yapabilir.',
   'e2e.names.locked_item': '🔒 Şifreli öğe',
   'e2e.names.unreadable_item': '🔒 Adı okunamıyor',
   'e2e.names.key_failed':
     'Anahtar dosyası bu klasördeki adların şifreli olduğunu söylüyor ama ad anahtarı bu anahtarla açılmıyor. Hiçbir şey değiştirilmedi.',
   'e2e.names.write_failed': 'Uzun bir adın ad dosyası yazılamadı, bu yüzden hiçbir şey yüklenmedi.',
   'e2e.names.bad_name':
-    '“{name}” şifreli klasörde kullanılamaz: ad 1–255 bayt olmalı; bölü, ters bölü ya da kontrol karakteri içeremez.',
+    '“{name}” şifreli klasörde kullanılamaz: ad 1-255 bayt olmalı; bölü, ters bölü ya da kontrol karakteri içeremez.',
   'e2e.names.offer_cost':
     'Ne değişir: WebDAV, komut satırı ve masaüstü senkronu adları karıştırılmış görür; filex 0.47 ve öncesi bu klasörü açmayı reddeder. Sunucu kaç öğe olduğunu ve boyutlarını hâlâ görür.',
   'e2e.names.resume_title': 'Adları şifrelemeyi bitirin',
@@ -1083,13 +1143,12 @@ export const tr: Record<string, string> = {
   'e2e.names.strip_fix': '{n} adı düzelt (açık kalmış ya da filex dışından taşınmış)',
   'e2e.names.strip_fix_one': '{n} adı düzelt (açık kalmış ya da filex dışından taşınmış)',
   'e2e.create.names_root_hint':
-    'Klasörün kendi adı her durumda açık kalır — şifresiz bir klasörün içinde durur. Hiçbir şey ele vermeyen bir ad seçin.',
+    'Klasörün kendi adı her durumda açık kalır - şifresiz bir klasörün içinde durur. Hiçbir şey ele vermeyen bir ad seçin.',
   'e2e.locked_toast': 'Klasör kilitlendi',
-  'e2e.upload.too_big': '200 MB üstü dosyalar şifreli klasöre yüklenemez (MVP sınırı)',
   'e2e.upload.locked': 'Önce klasörün kilidini açın',
   'e2e.decrypting': 'Çözülüyor…',
   'e2e.decrypt_failed': 'Dosya çözülemedi (parola değişmiş ya da dosya bozulmuş olabilir).',
-  /* wiring:e2 recovery — kurtarma anahtarı + yönetici escrow'u */
+  /* wiring:e2 recovery - kurtarma anahtarı + yönetici escrow'u */
   'e2e.create.escrow_title': 'Bu sunucunun da bir anahtarı var',
   'e2e.create.escrow_body':
     'Bu kurulumda anahtar emaneti (escrow) açık: sunucunun işletmecisi bu klasörü parolanız olmadan açabilir. O anahtar kullanıldığında size bildirim gelir. Escrow sunucu kurulurken sabitlenir; bir klasör için kapatılamaz.',
@@ -1097,7 +1156,7 @@ export const tr: Record<string, string> = {
   'e2e.recovery.title': 'Kurtarma anahtarınızı saklayın',
   'e2e.recovery.title_upgraded': 'Kurtarma anahtarınız',
   'e2e.recovery.lead':
-    'Bu anahtar klasörü parolasız açar. Yalnız bir kez gösterilir — filex bu anahtarı saklamaz ve bir daha gösteremez.',
+    'Bu anahtar klasörü parolasız açar. Yalnız bir kez gösterilir - filex bu anahtarı saklamaz ve bir daha gösteremez.',
   'e2e.recovery.lead_upgraded':
     'Bu klasörün artık bir kurtarma anahtarı var. Klasörü parolasız açar, yalnız bir kez gösterilir ve filex\'te kopyası kalmaz.',
   'e2e.recovery.copy': 'Kopyala',
@@ -1105,7 +1164,7 @@ export const tr: Record<string, string> = {
   'e2e.recovery.download': 'Dosya olarak indir',
   'e2e.recovery.warn_title': 'BUNU PAROLA GİBİ SAKLAYIN',
   'e2e.recovery.warn_body':
-    'Bu anahtarı eline geçiren herkes klasörü okuyabilir. Parolanızdan ayrı bir yerde tutun — parolanın yanında duran bir anahtar sizi unutmaya karşı korur, başkasına karşı değil.',
+    'Bu anahtarı eline geçiren herkes klasörü okuyabilir. Parolanızdan ayrı bir yerde tutun - parolanın yanında duran bir anahtar sizi unutmaya karşı korur, başkasına karşı değil.',
   'e2e.recovery.escrow_title': 'Bu sunucunun da bir anahtarı var',
   'e2e.recovery.escrow_body':
     'Bu kurulumda anahtar emaneti açık: sunucunun işletmecisi bu klasörü parolanız olmadan açabilir. O anahtar kullanıldığında size bildirim gelir.',
@@ -1124,7 +1183,7 @@ export const tr: Record<string, string> = {
     'Emanet anahtarıyla açılan klasörün sahibine bildirim gönderilir. Yalnız yetkiniz olduğunda kullanın.',
   'e2e.recover.escrow_kid': 'Emanet anahtarı',
   'e2e.recover.escrow_predates':
-    'Bu kurulumun emanet anahtarı var ama bu klasörün yok. Klasör, emanet burada açılmadan önce oluşturulmuş; ana anahtarı emanet kimliğine hiç sarmalanmadı. Emanet anahtarı bu klasörü açmaz. İşletmecinin yapabileceği hiçbir şey bunu değiştirmez — sarmalama için klasörün parolası gerekir ve sunucu onu hiçbir zaman görmedi. Klasörün sahibi verebilir: parolayla kilidi açıp işletmeciye anahtar vermeyi seçebilir. O yapılana kadar parolayı ya da kurtarma anahtarını kullanın.',
+    'Bu kurulumun emanet anahtarı var ama bu klasörün yok. Klasör, emanet burada açılmadan önce oluşturulmuş; ana anahtarı emanet kimliğine hiç sarmalanmadı. Emanet anahtarı bu klasörü açmaz. İşletmecinin yapabileceği hiçbir şey bunu değiştirmez - sarmalama için klasörün parolası gerekir ve sunucu onu hiçbir zaman görmedi. Klasörün sahibi verebilir: parolayla kilidi açıp işletmeciye anahtar vermeyi seçebilir. O yapılana kadar parolayı ya da kurtarma anahtarını kullanın.',
   'e2e.recover.escrow_other_key':
     'Bu klasör BAŞKA bir kurulumun emanet anahtarını taşıyor. Başka yerde oluşturulup buraya geri yüklenmiş, bu yüzden bu kurulumun emanet anahtarı onu açmaz. Yalnızca sarmalandığı emanet anahtarının özel yarısı açabilir.',
   'e2e.recover.escrow_placeholder': 'Emanet özel anahtarını yapıştırın (PKCS#8, base64 ya da PEM)',
@@ -1133,17 +1192,17 @@ export const tr: Record<string, string> = {
   'e2e.recover.escrow_required': 'Emanet özel anahtarını yapıştırın.',
   'e2e.recover.wrong_recovery': 'Bu kurtarma anahtarı bu klasörü açmıyor.',
   'e2e.recover.wrong_escrow':
-    'Bu emanet anahtarı bu klasörü açmıyor. Emanet açılmadan önce oluşturulmuş bir klasörün, sahibi izin verene kadar emanet anahtarı yoktur — o zamana kadar parolayı ya da kurtarma anahtarını kullanın.',
+    'Bu emanet anahtarı bu klasörü açmıyor. Emanet açılmadan önce oluşturulmuş bir klasörün, sahibi izin verene kadar emanet anahtarı yoktur - o zamana kadar parolayı ya da kurtarma anahtarını kullanın.',
   'e2e.recover.bad_escrow_key': 'Bu okunabilir bir özel anahtar değil (PKCS#8, base64 ya da PEM bekleniyor).',
   'e2e.recover.notify_failed':
     'Klasör sahibine bildirim gönderilemedi, bu yüzden kilit açılmadı. Emanet anahtarının kullanımı her zaman duyurulur.',
   'e2e.recover.recovery_done': 'Kurtarma anahtarıyla açıldı',
-  'e2e.recover.escrow_done': 'Emanet anahtarıyla açıldı — klasör sahibine bildirildi',
+  'e2e.recover.escrow_done': 'Emanet anahtarıyla açıldı - klasör sahibine bildirildi',
   'e2e.recover.unlock': 'Kilidi aç',
   'e2e.recover.busy': 'Açılıyor…',
   'e2e.escrowoffer.title': 'İşletmeciye bu klasörün anahtarı verilsin mi?',
   'e2e.escrowoffer.body':
-    'Bu klasör, burada anahtar emaneti açılmadan önce oluşturulmuş; bu yüzden kurulumun işletmecisi onu açamıyor. Şu anda — parolanız bellekteyken — filex bu klasörü emanet anahtarına sarmalayabilir. Dosyalarınız yeniden şifrelenmez, hiçbir yere taşınmaz; yalnızca anahtar dosyası değişir.',
+    'Bu klasör, burada anahtar emaneti açılmadan önce oluşturulmuş; bu yüzden kurulumun işletmecisi onu açamıyor. Şu anda - parolanız bellekteyken - filex bu klasörü emanet anahtarına sarmalayabilir. Dosyalarınız yeniden şifrelenmez, hiçbir yere taşınmaz; yalnızca anahtar dosyası değişir.',
   'e2e.escrowoffer.consequence':
     'Bunun anlamı: işletmeci, parolanız olmadan bu klasöre giren ikinci ve kalıcı bir yol kazanır. O anahtar kullanıldığında size bildirim gelir, ama bu bildirim bir denetim değil yalnızca bir duyurudur.',
   'e2e.escrowoffer.learn_more': 'Emanet anahtarı neyi yapar, neyi yapamaz',
@@ -1162,7 +1221,7 @@ export const tr: Record<string, string> = {
   'e2e.escrowoffer.strip_action': 'Emanet anahtarı…',
   'e2e.upgrade.title': 'Bu klasörün kurtarma anahtarı yok',
   'e2e.upgrade.body':
-    'Kurtarma anahtarları eklenmeden önce oluşturulmuş, bu yüzden tek giriş yolu parolası. Şu anda — ve yalnız şu anda, parola bellekteyken — filex bir tane ekleyebilir. Dosyalarınız yeniden şifrelenmez, hiçbir yere taşınmaz.',
+    'Kurtarma anahtarları eklenmeden önce oluşturulmuş, bu yüzden tek giriş yolu parolası. Şu anda - ve yalnız şu anda, parola bellekteyken - filex bir tane ekleyebilir. Dosyalarınız yeniden şifrelenmez, hiçbir yere taşınmaz.',
   'e2e.upgrade.escrow_note':
     'Not: bu kurulumda anahtar emaneti açık; kurtarma anahtarı eklemek aynı zamanda işletmecinin bu klasörü parolanız olmadan açabilmesi demektir.',
   'e2e.upgrade.accept': 'Kurtarma anahtarı oluştur',
@@ -1204,7 +1263,7 @@ export const tr: Record<string, string> = {
   'conn.guide.fact.user': 'Kullanıcı adı',
   'conn.guide.fact.password': 'Parola',
   'conn.guide.webdav.summary': 'WebDAV, filex’i bir sürücü gibi bağlar: Windows Gezgini, macOS Finder, Linux, rclone ve Cyberduck bu protokolü konuşur ve yapılan her değişiklik filex’e yansır.',
-  'conn.guide.webdav.userHint': 'Kullanıcı adınız ya da e-postanız — görünen adınız değil.',
+  'conn.guide.webdav.userHint': 'Kullanıcı adınız ya da e-postanız - görünen adınız değil.',
   'conn.guide.webdav.passwordHint': 'Hesap parolanız ya da bir API anahtarı (gezinti panelindeki API anahtarları bölümü). İki adımlı doğrulaması açık bir hesap ZORUNLU olarak API anahtarı kullanır: Basic kimlik doğrulamasında ikinci adım için yer yoktur.',
   'conn.guide.webdav.win.s1': 'Dosya Gezgini’ni açın, Bu bilgisayar’a sağ tıklayın ve “Ağ sürücüsü bağla…” deyin.',
   'conn.guide.webdav.win.s2': 'Bir sürücü harfi seçin ve klasör olarak {url} adresini girin.',
@@ -1212,7 +1271,7 @@ export const tr: Record<string, string> = {
   'conn.guide.webdav.win.cmdCaption': 'Komut İstemi (sihirbaz olmadan aynı iş)',
   'conn.guide.webdav.win.limits': 'Windows’un tam olarak filex hatası gibi görünen üç yerleşik sınırı vardır: aktarımlar ~47,7 MB’ta durur, yaklaşık bin dosyalı klasörler açılmaz (“Disk biçimlendirilmemiş”) ve her iki ayarı değiştirdikten sonra WebClient hizmeti yeniden başlatılmalıdır.',
   'conn.guide.webdav.win.regCaption': 'Yönetici olarak çalıştırın, sonra sürücüyü yeniden bağlayın',
-  'conn.guide.webdav.win.https': 'HTTPS zorunludur. Windows Basic kimlik bilgilerini yalnızca TLS üzerinden gönderir; düz http:// üzerinde hiçbir açıklama vermeden reddeder. BasicAuthLevel değerini 2 yapmayın — TLS kullanın.',
+  'conn.guide.webdav.win.https': 'HTTPS zorunludur. Windows Basic kimlik bilgilerini yalnızca TLS üzerinden gönderir; düz http:// üzerinde hiçbir açıklama vermeden reddeder. BasicAuthLevel değerini 2 yapmayın - TLS kullanın.',
   'conn.guide.webdav.win.persist': 'Bağlanan sürücü oturum kapatmayı atlatamaz: Windows 7’den beri Basic kimlik bilgileri Kimlik Bilgisi Yöneticisi’nde saklanamaz ve /persistent:yes bunu değiştirmez. Kendiliğinden geri gelsin istiyorsanız komutu bir oturum açma betiğinden yeniden çalıştırın.',
   'conn.guide.webdav.win.service': 'Hiç bağlanamıyorsa WebClient hizmetinin çalıştığından emin olun: sc config WebClient start= auto && net start WebClient.',
   'conn.guide.webdav.mac.s1': 'Finder’da Git → Sunucuya Bağlan… (⌘K) yolunu izleyin.',
@@ -1221,8 +1280,8 @@ export const tr: Record<string, string> = {
   'conn.guide.webdav.mac.note': 'Sürücü Konumlar altında görünür; her depo en üst düzeyde bir klasördür.',
   'conn.guide.webdav.linux.mountCaption': 'davfs2 ya da masaüstü dosya yöneticisi (GNOME Dosyalar, Dolphin)',
   'conn.guide.webdav.linux.gvfsComment': 'ya da bu adresi GNOME Dosyalar / Dolphin icine yapistirin',
-  'conn.guide.webdav.linux.locks': 'davfs2 için kilitler kapatılmalıdır. filex WebDAV kilitlerini süreç belleğinde tutar; yeniden başlatmayı atlatamazlar ve kopyalar arasında paylaşılmazlar — davfs2 tersini varsayar ve takılır.',
-  'conn.guide.webdav.rclone.obscureCaption': 'rclone parolayı gizlenmiş biçimde saklar — önce bunu çalıştırıp çıktısını aşağıya yapıştırın',
+  'conn.guide.webdav.linux.locks': 'davfs2 için kilitler kapatılmalıdır. filex WebDAV kilitlerini süreç belleğinde tutar; yeniden başlatmayı atlatamazlar ve kopyalar arasında paylaşılmazlar - davfs2 tersini varsayar ve takılır.',
+  'conn.guide.webdav.rclone.obscureCaption': 'rclone parolayı gizlenmiş biçimde saklar - önce bunu çalıştırıp çıktısını aşağıya yapıştırın',
   'conn.guide.webdav.rclone.passPlaceholder': '<rclone obscure çıktısı>',
   'conn.guide.webdav.rclone.useCaption': 'Kullanımı',
   'conn.guide.webdav.duck.s1': 'Yeni Yer İmi → WebDAV (HTTPS).',
@@ -1235,16 +1294,16 @@ export const tr: Record<string, string> = {
   'conn.guide.webdav.note.http': 'Bu sunucuya düz http:// ile erişiliyor. Windows kimlik bilgilerinizi hiç göndermez, diğer tüm istemciler ise parolanızı açık metin olarak yollar. Bağlamadan önce filex’i TLS arkasına alın.',
   // ── S3 ucu: anahtarlar ve rehber ─────────────────────────────────
   'conn.s3keys.title': 'S3 erişim anahtarları',
-  'conn.s3keys.lead': 'Bir erişim anahtarı, S3 konuşan her istemcinin — rclone, restic, AWS CLI, mc, s3fs, Cyberduck — filex’e bağlanmasını sağlar. Anahtar sizin yetkinizi taşır, bir fazlasını değil.',
+  'conn.s3keys.lead': 'Bir erişim anahtarı, S3 konuşan her istemcinin - rclone, restic, AWS CLI, mc, s3fs, Cyberduck - filex’e bağlanmasını sağlar. Anahtar sizin yetkinizi taşır, bir fazlasını değil.',
   'conn.s3keys.disabled': 'Bu sunucuda S3 ucu kapalı (FILEX_S3). Burada üretilen anahtar, yönetici ucu tekrar açana kadar bağlanmaz.',
-  'conn.s3keys.cannotMint': 'Erişim anahtarı üretebilecek bir hesapla oturum açmış değilsiniz. Aşağıdaki talimatlar yine geçerli — bir anahtar isteyip yapıştırmanız yeter.',
+  'conn.s3keys.cannotMint': 'Erişim anahtarı üretebilecek bir hesapla oturum açmış değilsiniz. Aşağıdaki talimatlar yine geçerli - bir anahtar isteyip yapıştırmanız yeter.',
   'conn.s3keys.label': 'Ne için? (dizüstü yedeği, CI, …)',
   'conn.s3keys.defaultLabel': 'erişim anahtarı',
   'conn.s3keys.everyBucket': 'Görebildiğim tüm kovalar',
   'conn.s3keys.prefix': 'Kova içindeki klasör (isteğe bağlı)',
   'conn.s3keys.mint': 'Anahtar oluştur',
   'conn.s3keys.inheritNote': 'Bir anahtar sahip olduğunuz yetkiyi yalnızca DARALTABİLİR: yetkileriniz, kiracınız, rolünüz. Anahtarı tek bir kovaya ya da klasöre kısıtlamak, bir dizüstü yedeği ile her şeyi okuyabilen bir kimlik arasındaki farktır.',
-  'conn.s3keys.once': 'Gizli anahtarı şimdi kopyalayın — bir daha gösterilmeyecek.',
+  'conn.s3keys.once': 'Gizli anahtarı şimdi kopyalayın - bir daha gösterilmeyecek.',
   'conn.s3keys.accessKeyID': 'Erişim anahtarı kimliği',
   'conn.s3keys.secret': 'Gizli anahtar',
   'conn.s3keys.dismiss': 'Kopyaladım',
@@ -1260,7 +1319,7 @@ export const tr: Record<string, string> = {
   'conn.s3keys.revoke': 'İptal et',
   'conn.s3keys.confirm': 'Emin misiniz?',
   'conn.s3keys.empty': 'Henüz erişim anahtarı yok.',
-  'conn.guide.s3.summary': 'S3 ucu, S3 konuşan her şeyin — yedekleme, eşitleme araçları, SDK’lar — hedefi olarak filex’i kullanmanızı sağlar; hem de zaten sahip olduğunuz depolarla.',
+  'conn.guide.s3.summary': 'S3 ucu, S3 konuşan her şeyin - yedekleme, eşitleme araçları, SDK’lar - hedefi olarak filex’i kullanmanızı sağlar; hem de zaten sahip olduğunuz depolarla.',
   'conn.guide.s3.keyPlaceholder': 'yukarıdan bir anahtar oluşturun',
   'conn.guide.s3.secretPlaceholder': 'anahtarı oluştururken bir kez gösterilir',
   'conn.guide.s3.fact.endpoint': 'Uç adresi',
@@ -1270,7 +1329,7 @@ export const tr: Record<string, string> = {
   'conn.guide.s3.fact.key': 'Erişim anahtarı kimliği',
   'conn.guide.s3.fact.keyHint': 'Genel yarısı; her istekte gider.',
   'conn.guide.s3.fact.secret': 'Gizli anahtar',
-  'conn.guide.s3.fact.secretHint': 'Yalnızca anahtar oluşturulurken bir kez gösterilir. filex bir daha gösteremez — kaybolduysa yeni anahtar üretin.',
+  'conn.guide.s3.fact.secretHint': 'Yalnızca anahtar oluşturulurken bir kez gösterilir. filex bir daha gösteremez - kaybolduysa yeni anahtar üretin.',
   'conn.guide.s3.fact.region': 'Bölge',
   'conn.guide.s3.fact.regionHint': 'filex’te bölge yok; hangi değeri verirseniz aynen geri döner. Yine de istemciler bir değer ister.',
   'conn.guide.s3.fact.addressing': 'Adresleme',
@@ -1295,21 +1354,21 @@ export const tr: Record<string, string> = {
   'conn.guide.s3.duck.s2': 'Sunucu: {host}.',
   'conn.guide.s3.duck.s3': 'Erişim anahtarı kimliği: {key}, gizli anahtar yukarıdaki.',
   'conn.guide.s3.duck.s4': 'Yer imini açın; kovalar sizin filex depolarınızdır.',
-  'conn.guide.s3.duck.pathStyle': 'Tercihler → S3 altında "Use virtual host style" seçeneğini KAPATIN — bu kurulumda joker S3 alan adı yok.',
+  'conn.guide.s3.duck.pathStyle': 'Tercihler → S3 altında "Use virtual host style" seçeneğini KAPATIN - bu kurulumda joker S3 alan adı yok.',
   'conn.guide.s3.sdk.note': 'SigV4 konuşan her istemci aynı şekilde çalışır: uç adresi, anahtar, gizli anahtar ve bu kurulumun kendi S3 alan adı yoksa yol tabanlı adresleme.',
   'conn.guide.s3.note.buckets': 'Kova = filex deposu. İstemci kovanın İÇİNDE klasör ve nesne oluşturabilir, ama kovanın kendisini oluşturamaz: kova bir sürücü ve bir yol ister, bunu bir S3 isteği ifade edemez.',
   'conn.guide.s3.note.permissions': 'Anahtar tam olarak sizin gördüğünüzü görür. Açamayacağınız bir kova "yasak" değil "böyle bir kova yok" der; böylece uç, neyin var olduğunu sızdırmaz.',
   'conn.guide.s3.note.trash': 'Silme her yerdeki gibi filex çöp kutusuna gider ve saklama politikası süpürene kadar geri alınabilir.',
-  'conn.guide.s3.note.mtime': 'Yüklemeler değişiklik zamanını taşır; istemcinin gönderdiği sağlama toplamları (Content-MD5, x-amz-checksum-*) doğrulanır — bozulmuş bir yükleme saklanmaz, reddedilir.',
+  'conn.guide.s3.note.mtime': 'Yüklemeler değişiklik zamanını taşır; istemcinin gönderdiği sağlama toplamları (Content-MD5, x-amz-checksum-*) doğrulanır - bozulmuş bir yükleme saklanmaz, reddedilir.',
   'conn.guide.s3.note.pathStyle': 'Bu kurulumda S3’e ayrılmış alan adı yok; istemcilere yol tabanlı adresleme söylenmeli. Söylenmezse güncel bir SDK, ne filex’i ne de sebebi anan bir DNS hatasıyla düşer.',
   'conn.guide.s3.note.http': 'Bu uç düz http://. İmzalar isteği yine korur ama nesneler açık metin gider. Bir yedeği buraya yöneltmeden önce filex’i TLS arkasına alın.',
   // ── SFTP ucu: anahtarlar ve rehber ───────────────────────────────
   'conn.sshkeys.title': 'SSH anahtarları',
-  'conn.sshkeys.lead': 'Bir açık anahtar kaydedin; SSH konuşan her istemci — sftp, scp, WinSCP, FileZilla, rclone, sshfs — parolanızı göndermeden bağlansın.',
+  'conn.sshkeys.lead': 'Bir açık anahtar kaydedin; SSH konuşan her istemci - sftp, scp, WinSCP, FileZilla, rclone, sshfs - parolanızı göndermeden bağlansın.',
   'conn.sshkeys.disabled': 'Bu sunucuda SFTP ucu kapalı (FILEX_SFTP). Burada kaydedilen anahtar, yönetici ucu açana kadar bağlanmaz.',
   'conn.sshkeys.cannotAdd': 'Anahtar kaydedebilecek bir hesapla oturum açmış değilsiniz.',
   'conn.sshkeys.paste': '~/.ssh/id_ed25519.pub dosyasının içeriğini yapıştırın',
-  'conn.sshkeys.name': 'Ad (isteğe bağlı — boşsa anahtarın kendi yorumu kullanılır)',
+  'conn.sshkeys.name': 'Ad (isteğe bağlı - boşsa anahtarın kendi yorumu kullanılır)',
   'conn.sshkeys.add': 'Anahtar ekle',
   'conn.sshkeys.noCopyId': 'ssh-copy-id burada çalışamaz: kabuk üzerinden ~/.ssh/authorized_keys dosyasına ekler, filex’in kabuğu yoktur. Anahtar eklemenin yolu bu kutudur.',
   'conn.sshkeys.col.name': 'Ad',
@@ -1331,7 +1390,7 @@ export const tr: Record<string, string> = {
   'conn.guide.sftp.fact.userHint': 'Kullanıcı adınız. İçinde @ işareti olsaydı çoğu istemcinin ayar dosyasında tırnaklanması gerekirdi; kullanıcı adı tam da bunu ortadan kaldırır.',
   'conn.guide.sftp.fact.auth': 'Oturum açma yöntemi',
   'conn.guide.sftp.fact.authKey': 'kayıtlı SSH anahtarınız (ya da parolanız)',
-  'conn.guide.sftp.fact.authPassword': 'hesap parolanız — ya da yukarıdan bir anahtar kaydedin',
+  'conn.guide.sftp.fact.authPassword': 'hesap parolanız - ya da yukarıdan bir anahtar kaydedin',
   'conn.guide.sftp.fact.authHint': 'API anahtarı da parola yerine geçer ve tek başına iptal edilebilir. İki adımlı doğrulaması açık bir hesap SSH anahtarı ya da API anahtarı kullanmalıdır.',
   'conn.guide.sftp.fact.path': 'Yol',
   'conn.guide.sftp.fact.pathHint': 'İlk klasör bir depodur; kök, açabildiğiniz depoları listeler.',
@@ -1339,14 +1398,14 @@ export const tr: Record<string, string> = {
   'conn.guide.sftp.openssh.noShell': 'Burada kabuk yok, yalnız SFTP alt sistemi var. `ssh sunucu komut` bilerek reddedilir; scp çalışır çünkü OpenSSH 9 onun için de SFTP konuşur.',
   'conn.guide.sftp.key.tab': 'Anahtar kurulumu',
   'conn.guide.sftp.key.s1': 'Bağlanacak makinede bir anahtar çifti üretin (zaten varsa atlayın).',
-  'conn.guide.sftp.key.s2': 'AÇIK yarısını kopyalayın — .pub dosyası, asla diğeri değil.',
+  'conn.guide.sftp.key.s2': 'AÇIK yarısını kopyalayın - .pub dosyası, asla diğeri değil.',
   'conn.guide.sftp.key.s3': 'Yukarıdaki kutuya yapıştırıp bağlanın; o andan sonra parola gönderilmez.',
   'conn.guide.sftp.key.genCaption': 'Kendi makinenizde',
   'conn.guide.sftp.key.noCopyId': 'ssh-copy-id filex’e karşı ÇALIŞMAZ: ~/.ssh/authorized_keys dosyasına eklemek için kabuğa ihtiyacı var, filex’te kabuk yok. Anahtarı yukarıdan yapıştırın.',
   'conn.guide.sftp.winscp.s1': 'Yeni site → Dosya protokolü: SFTP.',
   'conn.guide.sftp.winscp.s2': 'Sunucu adı: {host}, port: {port}.',
   'conn.guide.sftp.winscp.s3': 'Kullanıcı adı: {user}. Anahtar için: Gelişmiş → SSH → Kimlik Doğrulama → özel anahtar dosyası.',
-  'conn.guide.sftp.winscp.s4': 'WinSCP .ppk biçiminde özel anahtar ister — OpenSSH anahtarını kendi aracıyla (Araçlar → PuTTYgen) bir kez dönüştürün.',
+  'conn.guide.sftp.winscp.s4': 'WinSCP .ppk biçiminde özel anahtar ister - OpenSSH anahtarını kendi aracıyla (Araçlar → PuTTYgen) bir kez dönüştürün.',
   'conn.guide.sftp.filezilla.s1': 'Dosya → Site Yöneticisi → Yeni site, Protokol: SFTP.',
   'conn.guide.sftp.filezilla.s2': 'Sunucu: {host}, port: {port}.',
   'conn.guide.sftp.filezilla.s3': 'Kullanıcı: {user}. Giriş türü: parola için Normal, anahtar için Anahtar dosyası.',
@@ -1356,7 +1415,7 @@ export const tr: Record<string, string> = {
   'conn.guide.sftp.note.storages': 'Kök bir ev dizini değildir: açabildiğiniz depoları listeler ve yolun ilk parçası bir depoyu adlandırır.',
   'conn.guide.sftp.note.permissions': 'İstemcinizin çizdiği izin bitleri buradaki erişim seviyenizden gelir; yani salt-okunur görünen bir dosya sizin için gerçekten öyledir.',
   'conn.guide.sftp.note.trash': 'Silme her yerdeki gibi filex çöp kutusuna gider ve saklama politikası süpürene kadar geri alınabilir.',
-  'conn.guide.sftp.note.totp': 'Hesabınızda iki adımlı doğrulama açıksa parola burada çalışmaz — SSH’ın kodu soracak bir kanalı yok. Bir SSH anahtarı kaydedin ya da parola yerine API anahtarı kullanın.',
+  'conn.guide.sftp.note.totp': 'Hesabınızda iki adımlı doğrulama açıksa parola burada çalışmaz - SSH’ın kodu soracak bir kanalı yok. Bir SSH anahtarı kaydedin ya da parola yerine API anahtarı kullanın.',
   'conn.guide.sftp.note.disabled': 'Bu sunucuda SFTP ucu kapalı. Yönetici açtığında bu talimatlar çalışacaktır.',
   // ── FTPS ─────────────────────────────────────────────────────────
   'conn.guide.ftps.summary': 'FTPS, yalnızca FTP öğrenmiş ekipman için var: tarayıp-klasöre-atan yazıcılar, EDI muhatapları, eski laboratuvar ve endüstri yazılımları. Her zaman TLS üzerinden.',
@@ -1365,12 +1424,12 @@ export const tr: Record<string, string> = {
   'conn.guide.ftps.fact.port': 'Port',
   'conn.guide.ftps.fact.portHint': 'Kontrol kanalı. Veri, aşağıdaki pasif aralıktan ayrı bir porttan akar.',
   'conn.guide.ftps.fact.mode': 'Şifreleme',
-  'conn.guide.ftps.fact.modeValue': 'FTPS — açık (explicit) TLS, zorunlu',
+  'conn.guide.ftps.fact.modeValue': 'FTPS - açık (explicit) TLS, zorunlu',
   'conn.guide.ftps.fact.modeHint': 'Düz FTP, parola okunmadan reddedilir. "Require explicit FTP over TLS" seçin; "plain FTP" ya da "implicit" asla.',
   'conn.guide.ftps.fact.userHint': 'Kullanıcı adınız ya da e-postanız. Parola yerine bir API anahtarı da kullanılabilir ve tek başına iptal edilebilir.',
-  'conn.guide.ftps.fact.passwordHint': 'Hesap parolanız ya da bir API anahtarı. İki adımlı doğrulaması açık bir hesap API anahtarı kullanmalıdır — FTP\'nin kodu soracak bir yolu yok.',
+  'conn.guide.ftps.fact.passwordHint': 'Hesap parolanız ya da bir API anahtarı. İki adımlı doğrulaması açık bir hesap API anahtarı kullanmalıdır - FTP\'nin kodu soracak bir yolu yok.',
   'conn.guide.ftps.fact.pasv': 'Pasif portlar',
-  'conn.guide.ftps.fact.pasvHint': 'Veri bağlantıları buraya düşer. Güvenlik duvarınız bu aralığı kapatıyorsa aktarım iki tarafta da hata vermeden ASILI KALIR — FTP\'nin klasik arızası budur.',
+  'conn.guide.ftps.fact.pasvHint': 'Veri bağlantıları buraya düşer. Güvenlik duvarınız bu aralığı kapatıyorsa aktarım iki tarafta da hata vermeden ASILI KALIR - FTP\'nin klasik arızası budur.',
   'conn.guide.ftps.filezilla.s1': 'Dosya → Site Yöneticisi → Yeni site, Protokol: FTP.',
   'conn.guide.ftps.filezilla.s2': 'Sunucu: {host}, port: {port}.',
   'conn.guide.ftps.filezilla.s3': 'Şifreleme: "Require explicit FTP over TLS". Giriş türü: Normal, kullanıcı: {user}.',
@@ -1381,12 +1440,12 @@ export const tr: Record<string, string> = {
   'conn.guide.ftps.curl.caption': 'Gönder ve al',
   'conn.guide.ftps.curl.sslReqd': '--ssl-reqd isteğe bağlı değil: curl\'ün düz metne geri düşmek yerine TLS\'i ZORUNLU kılmasını sağlar. Bu sunucu zaten düz metni reddediyor, ama alışkanlık sizi reddetmeyen sunuculara karşı korur.',
   'conn.guide.ftps.lftp.caption': 'Bağlan',
-  'conn.guide.ftps.lftp.protectData': 'ssl-protect-data yalnız oturum açmayı değil DOSYAYI da şifreler. Olmazsa lftp TLS ile oturum açar ve dosyayı açık metin gönderir — sahada en sık yapılan FTPS yanlışı budur.',
+  'conn.guide.ftps.lftp.protectData': 'ssl-protect-data yalnız oturum açmayı değil DOSYAYI da şifreler. Olmazsa lftp TLS ile oturum açar ve dosyayı açık metin gönderir - sahada en sık yapılan FTPS yanlışı budur.',
   'conn.guide.ftps.rclone.useCaption': 'Kullanımı',
   'conn.guide.ftps.printer.tab': 'Tarayıcı / yazıcı',
   'conn.guide.ftps.printer.s1': 'Cihazın tara-ve-FTP\'ye-gönder ayarlarında: sunucu {host}, port {port}.',
-  'conn.guide.ftps.printer.s2': 'Kullanıcı: {user}, parola yukarıdaki. Cihaz için kendi parolanız yerine bir API anahtarı oluşturun — başka hiçbir şeyi değiştirmeden iptal edilebilir.',
-  'conn.guide.ftps.printer.s3': 'Yol: {path} — ya da önceden oluşturduğunuz bir alt klasör. Cihaz depo oluşturamaz.',
+  'conn.guide.ftps.printer.s2': 'Kullanıcı: {user}, parola yukarıdaki. Cihaz için kendi parolanız yerine bir API anahtarı oluşturun - başka hiçbir şeyi değiştirmeden iptal edilebilir.',
+  'conn.guide.ftps.printer.s3': 'Yol: {path} - ya da önceden oluşturduğunuz bir alt klasör. Cihaz depo oluşturamaz.',
   'conn.guide.ftps.printer.s4': '"SSL/TLS" ya da "FTPS explicit" seçeneğini AÇIN ve PASİF modu seçin.',
   'conn.guide.ftps.printer.noTLS': 'Tara-ve-gönder yazılımlarının önemli bir kısmı TLS konuşamıyor. Bu sunucu öyle bir cihazla konuşmayacak ve bu bilinçli: alternatifi, belgelerinizin ve parolanızın ofis ağında açık metin dolaşması.',
   'conn.guide.ftps.note.tls': 'TLS zorunludur ve kapatan bir düğme yoktur. Düz FTP parolanızı açık metin gönderir, ardından dosyanızı da.',
@@ -1398,8 +1457,8 @@ export const tr: Record<string, string> = {
   'conn.guide.ftps.note.disabled': 'Bu sunucuda FTPS ucu kapalı. Yönetici açtığında bu talimatlar çalışacaktır.',
   // ── NFS ──────────────────────────────────────────────────────────
   'conn.nfs.title': 'NFS export\'ları',
-  'conn.nfs.lead': 'Bir export, ağınızdaki bir makinenin filex\'i sürücü olarak bağlamasını sağlar — medya oynatıcı, derleme sunucusu, yedek kutusu.',
-  'conn.nfs.pathIsSecret': '⚠ Export yolu PAROLANIN TA KENDİSİDİR. NFS, Kerberos olmadan istemciye kim olduğunu soramaz; bu yüzden filex yola 32 rastgele bayt koyar: yolu bilen sizin adınıza bağlanır. Bağlama satırını bir kimlik bilgisi gibi saklayın — /etc/fstab çoğu sistemde herkes tarafından okunabilir.',
+  'conn.nfs.lead': 'Bir export, ağınızdaki bir makinenin filex\'i sürücü olarak bağlamasını sağlar - medya oynatıcı, derleme sunucusu, yedek kutusu.',
+  'conn.nfs.pathIsSecret': '⚠ Export yolu PAROLANIN TA KENDİSİDİR. NFS, Kerberos olmadan istemciye kim olduğunu soramaz; bu yüzden filex yola 32 rastgele bayt koyar: yolu bilen sizin adınıza bağlanır. Bağlama satırını bir kimlik bilgisi gibi saklayın - /etc/fstab çoğu sistemde herkes tarafından okunabilir.',
   'conn.nfs.disabled': 'Bu sunucuda NFS ucu kapalı (FILEX_NFS). Burada oluşturulan export, yönetici ucu açana kadar bağlanmaz.',
   'conn.nfs.cannotMint': 'Export oluşturabilecek bir hesapla oturum açmış değilsiniz.',
   'conn.nfs.label': 'Ne için? (medya oynatıcı, yedek kutusu, …)',
@@ -1408,9 +1467,9 @@ export const tr: Record<string, string> = {
   'conn.nfs.prefix': 'Depo içindeki klasör (isteğe bağlı)',
   'conn.nfs.allowCidrs': 'İzinli adresler, örn. 192.168.1.0/24 (isteğe bağlı)',
   'conn.nfs.readOnly': 'Salt okunur',
-  'conn.nfs.readOnlyHint': 'Bir makine için güvenli varsayılan salt okunurdur: sizin yetkiniz ne olursa olsun bu bağlantı üzerinden her yazmayı reddeder. Adres listesi daha da daraltır — listenin dışından gelen bağlanamaz.',
+  'conn.nfs.readOnlyHint': 'Bir makine için güvenli varsayılan salt okunurdur: sizin yetkiniz ne olursa olsun bu bağlantı üzerinden her yazmayı reddeder. Adres listesi daha da daraltır - listenin dışından gelen bağlanamaz.',
   'conn.nfs.mint': 'Export oluştur',
-  'conn.nfs.once': 'Şimdi kopyalayın — yol yalnızca bir kez gösterilir ve geri alınamaz.',
+  'conn.nfs.once': 'Şimdi kopyalayın - yol yalnızca bir kez gösterilir ve geri alınamaz.',
   'conn.nfs.dismiss': 'Kopyaladım',
   'conn.nfs.col.label': 'Etiket',
   'conn.nfs.col.scope': 'Kapsam',
@@ -1426,14 +1485,14 @@ export const tr: Record<string, string> = {
   'conn.nfs.revoke': 'İptal et',
   'conn.nfs.confirm': 'Emin misiniz?',
   'conn.nfs.empty': 'Henüz export yok.',
-  'conn.guide.nfs.summary': 'NFS, filex\'i kendi ağınızdaki bir makinede sürücü olarak bağlar — NAS protokolü, onu bekleyen cihazlar için.',
+  'conn.guide.nfs.summary': 'NFS, filex\'i kendi ağınızdaki bir makinede sürücü olarak bağlar - NAS protokolü, onu bekleyen cihazlar için.',
   'conn.guide.nfs.pathPlaceholder': 'yukarıdan bir export oluşturun',
   'conn.guide.nfs.fact.host': 'Sunucu',
   'conn.guide.nfs.fact.hostHint': 'Web uygulamasıyla aynı makine, kendine ait bir portta.',
   'conn.guide.nfs.fact.port': 'Port',
   'conn.guide.nfs.fact.portHint': 'Hem port= hem mountport= buna ayarlanmalı; filex mount ve NFS servislerini tek portta veriyor.',
   'conn.guide.nfs.fact.export': 'Export yolu',
-  'conn.guide.nfs.fact.exportHint': 'Kimlik bilgisi budur. Export oluşturulurken bir kez gösterilir ve hash\'li saklanır — filex bir daha gösteremez.',
+  'conn.guide.nfs.fact.exportHint': 'Kimlik bilgisi budur. Export oluşturulurken bir kez gösterilir ve hash\'li saklanır - filex bir daha gösteremez.',
   'conn.guide.nfs.fact.options': 'Bağlama seçenekleri',
   'conn.guide.nfs.fact.optionsHint': 'nolock, çünkü filex NFS kilit yöneticisini çalıştırmıyor; nfsvers=3, çünkü bu sunucunun konuştuğu sürüm bu.',
   'conn.guide.nfs.linux.mountCaption': 'Bağla',
@@ -1449,7 +1508,7 @@ export const tr: Record<string, string> = {
   'conn.guide.nfs.nas.s1': 'Cihazın NFS ayarlarında: sunucu {host}, port {port} (ayrı ayrı soruyorsa hem NFS hem mount portunu ayarlayın).',
   'conn.guide.nfs.nas.s2': 'Uzak yol: yukarıdaki export yolu, birebir.',
   'conn.guide.nfs.nas.s3': 'NFS sürüm 3, kilitleme kapalı. Cihazın gerçekten yazması gerekmiyorsa export\'u salt okunur oluşturun.',
-  'conn.guide.nfs.note.unencrypted': 'NFSv3 şifreli değildir. Trafiği okuyabilen dosyalarınızı görür, yolu öğrenen bağlanabilir. Ev/ofis ağında ya da VPN üzerinden kullanın — internet üzerinden asla.',
+  'conn.guide.nfs.note.unencrypted': 'NFSv3 şifreli değildir. Trafiği okuyabilen dosyalarınızı görür, yolu öğrenen bağlanabilir. Ev/ofis ağında ya da VPN üzerinden kullanın - internet üzerinden asla.',
   'conn.guide.nfs.note.pathIsSecret': 'Export yolu kimlik bilgisinin tamamıdır. Sızarsa yukarıdaki listeden iptal edin; değiştirilecek başka bir şey yok.',
   'conn.guide.nfs.note.noPortmapper': '111 portunda portmapper yok; portu söylenmeyen istemci sunucuyu bulamaz. Buradaki her komutun port= ve mountport= taşımasının sebebi bu.',
   'conn.guide.nfs.note.uid': 'İstemcinizin gönderdiği kullanıcı ve grup kimlikleri yok sayılır: bağlantı zaten kime ait olduğunu biliyor. Gördüğünüz izinler filex\'teki erişiminizden gelir.',
@@ -1457,9 +1516,9 @@ export const tr: Record<string, string> = {
   'conn.guide.nfs.note.revoke': 'İptal anında değil, bir sonraki istekte etkili olur: NFS\'te sonlandırılacak bir oturum yok, bağlantısı açık olan istemci sıradaki işleminde hata alır.',
   'conn.guide.nfs.note.disabled': 'Bu sunucuda NFS ucu kapalı. Yönetici açtığında bu talimatlar çalışacaktır.',
   'conn.tokens.title': 'API anahtarları',
-  'conn.tokens.lead': 'FTPS, WebDAV ve filex mount hesap parolanız yerine bir API anahtarıyla oturum açar. Buradan oluşturun — tek başına iptal edilebilir, ayrıca iki adımlı doğrulaması açık bir hesap bunlarda parolasını zaten kullanamaz.',
+  'conn.tokens.lead': 'FTPS, WebDAV ve filex mount hesap parolanız yerine bir API anahtarıyla oturum açar. Buradan oluşturun - tek başına iptal edilebilir, ayrıca iki adımlı doğrulaması açık bir hesap bunlarda parolasını zaten kullanamaz.',
   'conn.tokens.mint': 'API anahtarı oluştur',
-  'conn.tokens.once': 'Şimdi kopyalayın — yalnızca bir kez gösterilir. Sunucuda yalnız özeti saklandığı için bir daha gösterilemez.',
+  'conn.tokens.once': 'Şimdi kopyalayın - yalnızca bir kez gösterilir. Sunucuda yalnız özeti saklandığı için bir daha gösterilemez.',
   'conn.tokens.dismiss': 'Kopyaladım',
   'conn.tokens.cannotMint': 'Bu oturum API anahtarı oluşturamıyor. Kendi hesabınızla oturum açıp oluşturun.',
   'conn.tokens.empty': 'Henüz API anahtarı yok.',
@@ -1470,26 +1529,26 @@ export const tr: Record<string, string> = {
   'conn.tokens.col.scopes': 'İzinler',
   'conn.tokens.col.used': 'Son kullanım',
   'conn.tokens.revokeHint': 'İptal, yalnız bir sonraki oturum açmayı değil AÇIK bağlantıyı da durdurur: SFTP ya da FTPS oturumu kesilir, bağlı bir sürücü yarım dakika içinde çalışmayı bırakır.',
-  'conn.guide.mount.summary': 'filex mount, uzaktaki bir filex sunucusunu bu makinede bir klasöre bağlar — tarayıcının kullandığı aynı HTTPS üzerinden. Buradakilerin her yerden çalışan tek yöntemi: yerel ağ da gerekmez, ek sunucu da, üçüncü parti bir istemci de.',
+  'conn.guide.mount.summary': 'filex mount, uzaktaki bir filex sunucusunu bu makinede bir klasöre bağlar - tarayıcının kullandığı aynı HTTPS üzerinden. Buradakilerin her yerden çalışan tek yöntemi: yerel ağ da gerekmez, ek sunucu da, üçüncü parti bir istemci de.',
   'conn.guide.mount.fact.url': 'Sunucu adresi',
   'conn.guide.mount.fact.urlHint': 'Tarayıcıda kullandığınız adresin aynısı. Başka hiçbir şeye erişilebilir olması gerekmez.',
   'conn.guide.mount.fact.token': 'API anahtarı',
   'conn.guide.mount.fact.tokenPlaceholder': 'API anahtarları bölümünden oluşturun',
-  'conn.guide.mount.fact.tokenHint': 'Parolanız değil, bir API anahtarı — tek başına iptal edilebilir, ayrıca 2FA açık bir hesap burada parolasını zaten kullanamaz.',
+  'conn.guide.mount.fact.tokenHint': 'Parolanız değil, bir API anahtarı - tek başına iptal edilebilir, ayrıca 2FA açık bir hesap burada parolasını zaten kullanamaz.',
   'conn.guide.mount.fact.remote': 'Neyi bağlayacağınız',
-  'conn.guide.mount.fact.remoteHint': '--remote vermezseniz her depo bir klasör olarak görünür; tek bir depoyu — ya da onun içindeki bir klasörü — adlandırırsanız yalnızca o bağlanır.',
+  'conn.guide.mount.fact.remoteHint': '--remote vermezseniz her depo bir klasör olarak görünür; tek bir depoyu - ya da onun içindeki bir klasörü - adlandırırsanız yalnızca o bağlanır.',
   'conn.guide.mount.linux.mountCaption': 'Bağlayın',
   'conn.guide.mount.linux.umountCaption': 'Ayırın',
   'conn.guide.mount.linux.umountWarn': 'Süreci öldürerek değil, fusermount ile ayırın. Ayrılmadan ölen bir bağlantı, birileri elle fusermount çalıştırana kadar her ls komutunun asılı kaldığı bir klasör bırakır.',
   'conn.guide.mount.linux.systemdCaption': 'Oturum açılınca otomatik bağlansın (systemd kullanıcı birimi)',
-  'conn.guide.mount.win.winfsp': "Windows'ta bir kez WinFsp kurulması gerekiyor — ücretsiz ve açık kaynak: https://winfsp.dev. Başka bir şey gerekmiyor, sonrasında yönetici hakkı da istemiyor.",
+  'conn.guide.mount.win.winfsp': "Windows'ta bir kez WinFsp kurulması gerekiyor - ücretsiz ve açık kaynak: https://winfsp.dev. Başka bir şey gerekmiyor, sonrasında yönetici hakkı da istemiyor.",
   'conn.guide.mount.win.mountCaption': 'Sürücü olarak bağlayın',
   'conn.guide.mount.win.freeLetter': 'BOŞ bir sürücü harfi seçin. Harf bağlama sırasında oluşturulur, var olan bir şeye eklenmez; kullanımdaki bir harfi verirseniz bunu söylemeyen bir hatayla başarısız olur.',
   'conn.guide.mount.win.stop': 'O pencerede Ctrl-C ile durdurun. Sürücü kaybolur ve bu makinede hiçbir şey kalmaz.',
   'conn.guide.mount.mac.unsupported': "filex mount macOS'ta çalışmıyor. macFUSE gerekiyor; lisansı filex gibi bir programın onu sizin yerinize kurmasına izin vermiyor ve Go bağlaması filex'in bilinçli olarak kullanmadığı bir C derleyicisi istiyor. Komut burada çalışıyormuş gibi görünüp hiçbir şey yapmak yerine açıkça reddediyor.",
   'conn.guide.mount.mac.alternatives': "macOS'ta filex masaüstü uygulamasını klasör eşitlemesiyle kullanın (dosyalar diskte durur) ya da sürücü bağlayabilen bir istemciyle SFTP.",
   'conn.guide.mount.note.notASync': 'Bu bir eşitleme değildir. Küçük bir okuma önbelleği dışında bu makineye hiçbir şey kopyalanmaz; yüz bin dosyanın içinden birini gerisini indirmeden açar. Dosyaları çevrimdışıyken istiyorsanız klasör eşitlemesini kullanın.',
-  'conn.guide.mount.note.reachable': 'Sunucuya, tarayıcının geçtiği hangi vekil ya da tünel varsa oradan ulaşır — çünkü altında aynı API vardır. İzinleriniz, depolarınız ve çok kiracılı bir sunucuda kiracınız da birlikte gelir.',
+  'conn.guide.mount.note.reachable': 'Sunucuya, tarayıcının geçtiği hangi vekil ya da tünel varsa oradan ulaşır - çünkü altında aynı API vardır. İzinleriniz, depolarınız ve çok kiracılı bir sunucuda kiracınız da birlikte gelir.',
   'conn.guide.mount.note.wholeFileWrites': 'Bağlantı üzerinden yazdığınız dosya, yazılırken değil, program onu kapattığında yüklenir. Çok büyük bir dosyayı yerinde düzenlemek burada yerel diskten yavaştır; içeri ve dışarı kopyalamak değildir.',
   'conn.guide.mount.note.trash': 'Silme her yerdeki gibi filex çöp kutusuna gider ve saklama politikası süpürene kadar geri alınabilir.',
   'conn.guide.mount.note.revoke': 'Bir bağlantıyı durdurmak için API anahtarını iptal edin. Bağlantı hâlâ takılı olsa bile yarım dakika içinde hizmet vermeyi bırakır.',
@@ -1507,8 +1566,7 @@ export const tr: Record<string, string> = {
     'Paylaşımın içindeki alt klasör. Paylaşımın tamamı için boş bırakın.',
   'storages.fields.share': 'Paylaşım',
   'storages.fields.domain': 'Etki alanı / çalışma grubu',
-  'storages.fields.dialTimeout': 'Bağlanma zaman aşımı (saniye)',
-  'storages.fieldHelp.disablePresign': 'Varsayılan olarak açık: yüklemeler ve herkese açık paylaşım bağlantılarındaki indirmeler filex üzerinden akar; kova endpoint\'inin tarayıcıdan erişilebilir olması gerekmez (yalnız yerel ağdaki MinIO doğrudan çalışır). Yalnızca endpoint kullanıcıların tarayıcısından erişilebiliyorsa (AWS, herkese açık MinIO) ve tarayıcının kovayla doğrudan konuşmasını istiyorsanız kapatın — çok büyük dosyalarda daha hızlıdır, ama depo SDK\'nın imzaladığı URL\'leri kabul etmelidir (Ceph RGW / bazı Hetzner kurulumları SignatureDoesNotMatch döner).',
+  'storages.fieldHelp.disablePresign': 'Varsayılan olarak açık: yüklemeler ve herkese açık paylaşım bağlantılarındaki indirmeler filex üzerinden akar; kova endpoint\'inin tarayıcıdan erişilebilir olması gerekmez (yalnız yerel ağdaki MinIO doğrudan çalışır). Yalnızca endpoint kullanıcıların tarayıcısından erişilebiliyorsa (AWS, herkese açık MinIO) ve tarayıcının kovayla doğrudan konuşmasını istiyorsanız kapatın - çok büyük dosyalarda daha hızlıdır, ama depo SDK\'nın imzaladığı URL\'leri kabul etmelidir (Ceph RGW / bazı Hetzner kurulumları SignatureDoesNotMatch döner).',
   'storages.fieldHelp.endpoint': 'AWS S3 için boş bırakın. S3 uyumlu diğer tüm depolar kendi endpoint\'ini ister.',
   'storages.fieldHelp.hostKey': 'authorized_keys / known_hosts satır biçiminde tek bir açık anahtar.',
   'storages.fieldHelp.insecureSkipHostKey': 'Her sunucu anahtarını kabul eder. Yalnızca geçici sunucular için.',
@@ -1521,7 +1579,7 @@ export const tr: Record<string, string> = {
   'storages.fieldHelp.region': 'Boş bırakılırsa "auto" kullanılır.',
   'storages.fieldHelp.root': 'Arka uçtaki alt klasör. Zorunlu: filex hesabın kökünü asla mount etmez.',
   'storages.fieldHelp.sftpAuth': 'Parola ya da özel anahtardan biri zorunludur.',
-  'storages.fieldHelp.tls': 'Düz FTP kimlik bilgilerini açık metin gönderir — sunucu destekliyorsa açın.',
+  'storages.fieldHelp.tls': 'Düz FTP kimlik bilgilerini açık metin gönderir - sunucu destekliyorsa açın.',
   'storages.fields.accessKey': 'Access key',
   'storages.fields.basePath': 'Temel yol',
   'storages.fields.bucket': 'Kova',
@@ -1565,7 +1623,7 @@ export const tr: Record<string, string> = {
   'storages.fieldHelp.totalTimeout': 'İlk denemeden itibaren bu kadar saniye içinde bitemeyecek yeni bir deneme başlatılmaz; böylece çalışmayan bir sunucu bu süre içinde bildirilir. Sürmekte olan bir aktarım kesilmez. Zaman aşımına uğrayan bir istek ancak bu değer deneme zaman aşımının en az iki katıysa yeniden denenir.',
 
 
-  /* === gezinti:g1 — gezinti paneli (SideNav) === */
+  /* === gezinti:g1 - gezinti paneli (SideNav) === */
   'sidenav.title': 'Gezinti',
   'sidenav.views': 'Görünümler',
   'sidenav.storages': 'Depolar',
@@ -1580,7 +1638,7 @@ export const tr: Record<string, string> = {
   'sidenav.collapse': 'Gezintiyi daralt',
   'sidenav.expand': 'Gezintiyi genişlet',
   'sidenav.close': 'Gezintiyi kapat',
-  // ⚠ aç/kapat çifti ÇEKMECENİN, daralt/genişlet çifti yerleşik PANELİN —
+  // ⚠ aç/kapat çifti ÇEKMECENİN, daralt/genişlet çifti yerleşik PANELİN -
   // ikisi birbirinin yerine kullanılamaz; bkz. en.ts'teki not ve Toolbar.vue
   // içindeki `navToggleLabel`. 560px altında panel listenin üzerine gelen bir
   // çekmecedir: raya inmez, hiç ekranda değildir; "genişlet" olmayan bir
@@ -1588,7 +1646,7 @@ export const tr: Record<string, string> = {
   'sidenav.open': 'Gezintiyi aç',
   'sidenav.storage.shared': 'Paylaşılan',
   'sidenav.storage.readOnly': 'Salt okunur',
-  // #57 — depo satırının sıralama menüsü (sağ tık, uzun basış, Shift+F10).
+  // #57 - depo satırının sıralama menüsü (sağ tık, uzun basış, Shift+F10).
   // "Ada göre sırala" bir mod değildir; kişinin elle düzeltmeye devam
   // edebileceği bir sıra yazar. "Varsayılan sırayı kullan" kişinin kendi
   // sırasını bırakır: panel yöneticinin sırasına (yoksa sunucununkine) döner.
@@ -1598,7 +1656,7 @@ export const tr: Record<string, string> = {
   'sidenav.storage.sortName.done': 'Zaten ada göre sıralı',
   'sidenav.storage.defaultOrder': 'Varsayılan sırayı kullan',
   'sidenav.storage.defaultOrder.none': 'Zaten varsayılan sırada',
-  // ⚠ `toolbar.nav` KALDIRILDI, yerine bir şey konmadı — bkz. en.ts'teki not.
+  // ⚠ `toolbar.nav` KALDIRILDI, yerine bir şey konmadı - bkz. en.ts'teki not.
   // Paneli daraltan tek denetimin etiketiydi; önce "Gezinti" (panelin adı,
   // düğmenin ne yaptığını söylemiyor), sonra "Gezintiyi göster/gizle" (sabit
   // geçici çözüm). Gerçek düzeltme yukarıdaki dört `sidenav.*` fiili:
@@ -1616,7 +1674,7 @@ export const tr: Record<string, string> = {
   'empty.shared.hint': 'Başkalarının paylaştığı klasör ve dosyalar burada görünür',
   /* etiket:t1 */
   'sidenav.tags': 'Etiketler',
-  'sidenav.tags.empty': 'Henüz etiket yok — bir dosyaya sağ tıklayıp Etiketler’den ekleyebilirsiniz.',
+  'sidenav.tags.empty': 'Henüz etiket yok - bir dosyaya sağ tıklayıp Etiketler’den ekleyebilirsiniz.',
   'sidenav.tags.more': '{count} tane daha göster',
   'sidenav.tags.less': 'Daha az göster',
   'sidenav.tags.personal': 'Kişisel',
@@ -1634,12 +1692,12 @@ export const tr: Record<string, string> = {
   'conn.tokens.expiry': 'Geçerlilik (gün)',
   'conn.tokens.expiryNever': 'süresiz',
   'conn.tokens.defaultName': 'API anahtarı {date}',
-  'conn.tokens.namePlaceholder': 'Ad — ör. yedekleme betiği',
-  'conn.tokens.capNote': 'Tavan kendi erişiminizdir — sahip olmadığınız bir izin reddedilir, verilmez.',
-  'conn.tokens.scopesRequired': 'En az bir izin seçin — hiçbir izni olmayan bir API anahtarı verilmez.',
+  'conn.tokens.namePlaceholder': 'Ad - ör. yedekleme betiği',
+  'conn.tokens.capNote': 'Tavan kendi erişiminizdir - sahip olmadığınız bir izin reddedilir, verilmez.',
+  'conn.tokens.scopesRequired': 'En az bir izin seçin - hiçbir izni olmayan bir API anahtarı verilmez.',
   /* === /gezinti:g1 === */
 
-  /* === surucu:d1 — kabuk (GitHub #14); artık `uiProfile: 'drive'` ile
+  /* === surucu:d1 - kabuk (GitHub #14); artık `uiProfile: 'drive'` ile
      gelen bir seçenek değil, her profilde çizilir === */
   'drive.new': 'Yeni',
   'drive.new.upload': 'Dosya yükle',
@@ -1647,10 +1705,10 @@ export const tr: Record<string, string> = {
   'drive.new.request': 'Dosya iste',
   'drive.new.document': 'Yeni belge',
 
-  /* === belge:n1 — "Yeni belge": + Yeni altındaki seçici ==================
+  /* === belge:n1 - "Yeni belge": + Yeni altındaki seçici ==================
      Tür adları BURADA durmuyor. Her kutucuk sözcüklerini lib/fileIcons
-     `typeLabelFor`den okur — listedeki Tür sütununun okuduğu tablonun
-     aynısı — böylece ".docx" iki yerde de aynı adla anılır ve yeni bir tür
+     `typeLabelFor`den okur - listedeki Tür sütununun okuduğu tablonun
+     aynısı - böylece ".docx" iki yerde de aynı adla anılır ve yeni bir tür
      için hiç dizge gerekmez. Aşağıda yalnız bu pencerenin kendi metni var. */
   'newdoc.title': 'Yeni belge',
   'newdoc.type.label': 'Belge türü',
@@ -1672,7 +1730,7 @@ export const tr: Record<string, string> = {
   'newdoc.err.slash': 'Ad eğik çizgi içeremez.',
   'newdoc.err.exists': '{name} burada zaten var. Başka bir ad seçin.',
   'newdoc.err.bare_ext': 'Dosyaya yalnız bir uzantı değil, bir ad verin.',
-  'newdoc.err.ext_needs_type': '.{ext} dosyası kendi türüyle oluşturulmalı — boş bir dosya açılmaz. O türü ya da başka bir uzantıyı seçin.',
+  'newdoc.err.ext_needs_type': '.{ext} dosyası kendi türüyle oluşturulmalı - boş bir dosya açılmaz. O türü ya da başka bir uzantıyı seçin.',
   'newdoc.hint.ext_added': 'Bu tür uzantısını korur; dosya {name} adıyla oluşturulacak.',
   // Drafts (issue #71): a new document is a draft until its first save.
   'sidenav.drafts': 'Taslaklar',
@@ -1711,6 +1769,8 @@ export const tr: Record<string, string> = {
   'err.draft_limit': 'Bu sunucunun izin verdiği kadar taslağınız var ({limit}). Taslaklar’da bazılarını kaydedin ya da silin.',
   'err.draft_folder_gone': 'Bu taslağın kaydedileceği klasör artık yok.',
   'err.drafts_unavailable': 'Taslaklar burada kullanılamıyor.',
+  'err.entry_unavailable':
+    'Bu öğe kullanılamıyor: depo, öğenin hâlâ var olup olmadığını söyleyemedi. Bir sonraki taramadan sonra yeniden deneyin.',
   'newdoc.location': 'Konum',
   'newdoc.location.none': 'Bir klasör seçin',
   'newdoc.location.change': 'Değiştir',
@@ -1725,15 +1785,15 @@ export const tr: Record<string, string> = {
   'drive.storage.used_unlimited': '{used} kullanılıyor',
   'drive.storage.used_partial': 'en az {used} kullanılıyor',
   'drive.storage.label': 'Depolama',
-  /* === gorunum:v3-shell — Ana sayfa görünümü (kabuğun içindeki genel bakış)
+  /* === gorunum:v3-shell - Ana sayfa görünümü (kabuğun içindeki genel bakış)
    * Bölüm başlıkları `sidenav.storages` / `sidenav.recent` / `sidenav.starred`,
-   * boş durumlar da `empty.recent.*` / `empty.starred.*` — bilerek: Ana
+   * boş durumlar da `empty.recent.*` / `empty.starred.*` - bilerek: Ana
    * sayfadaki "Son kullanılanlar" başlığı ile yanındaki panel satırı aynı
    * şeydir, ikisine ayrı metin yazmak onları çeviri çeviri birbirinden
    * ayırmanın yoludur. Aşağıda yalnızca başka hiçbir yerde olmayanlar var. */
   'home.title': 'Ana sayfa',
   'home.storages.empty': 'Henüz depo yok',
-  'home.storages.hint': 'Depo, filex’in okuyup yazdığı yerdir — depoları yönetici ekler.',
+  'home.storages.hint': 'Depo, filex’in okuyup yazdığı yerdir - depoları yönetici ekler.',
   'drive.section.folders': 'Klasörler',
   'drive.section.files': 'Dosyalar',
   'filter.aria': 'Filtreler',
@@ -1761,10 +1821,10 @@ export const tr: Record<string, string> = {
   'filter.size.1to10': '1 - 10 MB',
   'filter.size.10to100': '10 - 100 MB',
   'filter.size.gt100': '100 MB üstü',
-  /* surucu:d1-actions — filtre satırının sonundaki ⋮ menüsü. Yalnızca menünün
+  /* surucu:d1-actions - filtre satırının sonundaki ⋮ menüsü. Yalnızca menünün
      KENDİ adı yeni: içindeki her satır o eylemin zaten sahip olduğu metni
      kullanır (`toolbar.new_folder`, `toolbar.upload`, `ctx.paste`,
-     `shortcuts.select_all`, `selection.clear`) — bir komutu yeniden adlandıran
+     `shortcuts.select_all`, `selection.clear`) - bir komutu yeniden adlandıran
      menü, okuyucuya aynı şeyi iki kez öğretir. */
   'filter.actions': 'Liste işlemleri',
   'filter.clear': 'Filtreleri temizle',
@@ -1788,14 +1848,14 @@ export const tr: Record<string, string> = {
   'inspector.activity.comment': '{who} yorum yaptı',
   'inspector.activity.select': 'Etkinliğini görmek için bir dosya ya da klasör seçin.',
   /* === /surucu:d1 === */
-  /* === gorunum:v1-chrome — filtre satırındaki ad kutusu === */
+  /* === gorunum:v1-chrome - filtre satırındaki ad kutusu === */
   'filter.find': 'Bu klasörde filtrele…',
-  /* surucu:d1-scope — satırların bir klasörün içeriği olmadığı yerlerde aynı
+  /* surucu:d1-scope - satırların bir klasörün içeriği olmadığı yerlerde aynı
      kutu. Neyi daralttığını söylemek zorunda: depo listesinde "bu klasör" hiçbir
      şeyi adlandırmaz, Ana sayfada ise üç bloğu birden adlandırırdı. */
   'filter.find.storages': 'Depolarda filtrele…',
   'filter.find.home': 'Ana sayfada filtrele…',
-  /* === gorunum:v1-viewer — tam ekran görüntüleyicinin kendi çerçevesi === */
+  /* === gorunum:v1-viewer - tam ekran görüntüleyicinin kendi çerçevesi === */
   'viewer.share': 'Paylaş',
   'viewer.nav_prev': 'Önceki dosya',
   'viewer.nav_next': 'Sonraki dosya',
@@ -1805,13 +1865,13 @@ export const tr: Record<string, string> = {
   'viewer.fullscreen': 'Tam ekran',
   'viewer.exit_fullscreen': 'Tam ekrandan çık',
   'viewer.md_placeholder': '# Markdown buraya…',
-  /* === gorunum:v1-selbar — filtre satırının yerini alan seçim çubuğu === */
+  /* === gorunum:v1-selbar - filtre satırının yerini alan seçim çubuğu === */
   'selection.count': '{n} seçildi',
   'selection.clear': 'Seçimi temizle',
-  /* === gorunum:v1-preview — türün adı, kelimeyle =======================
+  /* === gorunum:v1-preview - türün adı, kelimeyle =======================
      Tür sütunu eskiden uzantıyı büyük harfle yazıyordu; artık bunları
      yazıyor. Hangisinin seçileceğine `lib/fileIcons.ts` karar verir
-     (`typeLabelKey`) — bir türü adlandıran yalnız iki yer var: o tablo ve bu
+     (`typeLabelKey`) - bir türü adlandıran yalnız iki yer var: o tablo ve bu
      liste. Eşleşmeyen her şey yine büyük harfli uzantıya düşer. `Klasör`
      burada DEĞİL: o `node.folder`, grid kartının alt yazısı zaten onu basar. */
   'ftype.typescript': 'TypeScript',
@@ -1853,7 +1913,7 @@ export const tr: Record<string, string> = {
   'ftype.slides': 'Sunum',
   'ftype.archive': 'Arşiv',
   'ftype.code': 'Kod',
-  /* === gorunum:v1-advsearch — Gelişmiş arama penceresi ===================
+  /* === gorunum:v1-advsearch - Gelişmiş arama penceresi ===================
    * İki `filter.*` anahtarı kardeşlerinin yanında değil burada: paylaşılan
    * birleşimlere pencerenin eklediği yeni üyeler (`modified: 'around'`,
    * `size: 'range'`). Filtre satırı bunları hiç seçmez ama biri oraya
@@ -1916,7 +1976,7 @@ export const tr: Record<string, string> = {
   'advsearch.cancel': 'Vazgeç',
   'advsearch.submit': 'Ara',
 
-  /* === gorunum:v2-topbar — sayfanın üst barı kalktı; onun taşıdıklarını
+  /* === gorunum:v2-topbar - sayfanın üst barı kalktı; onun taşıdıklarını
      artık gezginin kendi başlığı ve kırıntı satırı taşıyor. === */
   'breadcrumb.subfolders': 'Alt klasörler',
   'breadcrumb.subfolders.empty': 'Burada alt klasör yok',
@@ -1925,9 +1985,9 @@ export const tr: Record<string, string> = {
   'header.signout': 'Oturumu kapat',
   'ai.assistant': 'AI asistanı',
   'ai.soon': 'Yakında',
-  'ai.assistant.soon': 'AI asistanı — yakında',
+  'ai.assistant.soon': 'AI asistanı - yakında',
 
-  /* gorunum:v2-share — Paylaş / İzinler penceresinin kendi çerçevesi. İçindeki
+  /* gorunum:v2-share - Paylaş / İzinler penceresinin kendi çerçevesi. İçindeki
      denetimler eski metinlerini koruyor; buradakiler yeni kabuk: başlık, tek
      anahtar, "şu anda kim açabilir" cümlesi ve her şeyin katlandığı üç adlı
      bölüm. */
@@ -1940,8 +2000,8 @@ export const tr: Record<string, string> = {
   'access.who.private': 'Yalnızca erişimi olan kişiler açabilir.',
   'access.who.link': 'Bağlantıyı bilen herkes açabilir.',
   'access.who.pin': "Bağlantıyı ve PIN'i bilen herkes açabilir.",
-  'access.who.existing': 'Bağlantı paylaşımı açık — {n} bağlantı var.',
-  'access.who.existing_one': 'Bağlantı paylaşımı açık — {n} bağlantı var.',
+  'access.who.existing': 'Bağlantı paylaşımı açık - {n} bağlantı var.',
+  'access.who.existing_one': 'Bağlantı paylaşımı açık - {n} bağlantı var.',
   'access.section.link': 'Bağlantı seçenekleri',
   'access.section.people': 'Erişimi olanlar',
   'access.section.drop': 'Dosya iste',
@@ -1950,10 +2010,12 @@ export const tr: Record<string, string> = {
   'access.sum.people': '{n} kişi',
   'access.sum.people_one': '{n} kişi',
   'access.sum.people_none': 'Henüz kimse yok',
+  'access.sum.groups': '{n} grup',
+  'access.sum.groups_one': '{n} grup',
   'access.sum.drop': '{n} yükleme bağlantısı',
   'access.sum.drop_one': '{n} yükleme bağlantısı',
   'access.sum.drop_none': 'Yükleme bağlantısı yok',
-  /* Sahiplik — Sahibi sütunu ve Kişiler çipi. "Sistem", filex üzerinden kimsenin
+  /* Sahiplik - Sahibi sütunu ve Kişiler çipi. "Sistem", filex üzerinden kimsenin
      koymadığı satırın dürüst karşılığıdır (tarayıcı buldu ya da doğrudan kovaya
      yazıldı); boşluk değil, gerçek bir cevaptır. */
   'col.owner': 'Sahibi',
@@ -1967,24 +2029,24 @@ export const tr: Record<string, string> = {
   'filter.people.me': 'Siz',
   'filter.people.system': 'Sistem',
   'filter.people.someone': 'Başka biri',
-  /* surucu:d1-sort — filtre satırının sağ ucundaki sıralama denetimi. Dört
+  /* surucu:d1-sort - filtre satırının sağ ucundaki sıralama denetimi. Dört
      ölçütün adı `col.*`: menü, liste görünümünün sütun başlıklarındaki
-     sözcüklerin aynısını sunar — tek bir sıralamayı süren iki denetim onu
+     sözcüklerin aynısını sunar - tek bir sıralamayı süren iki denetim onu
      farklı adlarla anamaz. */
   'sort.by': 'Sıralama ölçütü',
   'sort.asc': 'Artan',
   'sort.desc': 'Azalan',
-  /* Bir ARAMA SONUCUNUN sırası. Beşinci bir sıralama ölçütü değildir —
+  /* Bir ARAMA SONUCUNUN sırası. Beşinci bir sıralama ölçütü değildir -
      ekrandaki satırları sunucu sıraladığında denetim, ölçüt adı yerine bunu
      yazar; böylece yapmadığı bir sıralamayı üstlenmez. `_why` denetimin neden
-     kapalı olduğudur: Burak, denetimin sessizce işlevsizleşmesini değil
+     kapalı olduğudur: bakımcı, denetimin sessizce işlevsizleşmesini değil
      nedeninin yazılmasını istedi. */
   'sort.relevance': 'Alaka',
   'sort.relevance_why':
     'Arama sonuçları eşleşme yakınlığına göre listelenir. Seçtiğiniz sıralama, aramadan çıkınca geri gelir.',
-  /* === tablo:t1 — tablonun kendi yapılandırması ==========================
-     v0.43'ten beri bir klasörün görünüşüne dair her şey — görünüm, sıralama VE
-     sütunlar — değiştirildiği klasöre aittir; kimsenin değiştirmediği klasör
+  /* === tablo:t1 - tablonun kendi yapılandırması ==========================
+     v0.43'ten beri bir klasörün görünüşüne dair her şey - görünüm, sıralama VE
+     sütunlar - değiştirildiği klasöre aittir; kimsenin değiştirmediği klasör
      kişinin varsayılanıyla (ayarlarından), o yoksa kurulumunkiyle açılır.
      `folder_hint` bu kuralı tek cümlede, tam da ona şaşıracak kişinin
      okuyabileceği yerde söyler. */
@@ -2004,19 +2066,19 @@ export const tr: Record<string, string> = {
     'Burada yaptığınız değişiklik bu klasörde kalır. Hiç değiştirmediğiniz klasörler varsayılan görünümünüzle açılır (Ayarlar → Varsayılan klasör görünümü).',
   'cols.forget_folder': 'Bu klasörün görünümünü unut',
   'cols.apply_all': 'Bunu tüm klasörler için varsayılanım yap ({count} klasör hatırlanıyor)',
-  /* === tablo:t3 — TEK TABLO (components/DataTable.vue) ====================
+  /* === tablo:t3 - TEK TABLO (components/DataTable.vue) ====================
      Üründeki her tablo bunları konuşur; Türkçe bir sayfada sütun menüsü ya da
      sayfalayıcı İngilizce kalmasın. */
   'table.empty': 'Henüz burada bir şey yok',
   'table.prev': 'Önceki sayfa',
   'table.next': 'Sonraki sayfa',
   'table.sort_paged':
-    'Bu liste sayfalara bölünmüş. Sıralama yalnızca ekrandaki sayfayı yeniden dizerdi, bu yüzden burada kapalı — listeyi arama ya da filtrelerle daraltın.',
-  /* === tablo:t1 — çöp kutusu bilgi şeridi ================================
+    'Bu liste sayfalara bölünmüş. Sıralama yalnızca ekrandaki sayfayı yeniden dizerdi, bu yüzden burada kapalı - listeyi arama ya da filtrelerle daraltın.',
+  /* === tablo:t1 - çöp kutusu bilgi şeridi ================================
      ⚠ `retention` yalnızca kurulum bize sayıyı SÖYLEDİĞİNDE kullanılır
      (GET /api/admin/protection). Diğer her durumda `retention_unknown` aynı
      şeyi, doğrulayamadığımız bir süreyi taahhüt etmeden söyler: yanlış saklama
-     süresi yazan bir şerit, hiç şerit olmamasından kötüdür — insanlar ona
+     süresi yazan bir şerit, hiç şerit olmamasından kötüdür - insanlar ona
      bakıp karar verir. */
   'trash.retention': 'Çöp kutusundaki öğeler {days} gün sonra kalıcı olarak silinir.',
   'trash.retention_one': 'Çöp kutusundaki öğeler {days} gün sonra kalıcı olarak silinir.',
@@ -2033,18 +2095,18 @@ export const tr: Record<string, string> = {
   'trash.days_remaining': '{n} gün',
   'trash.days_remaining_one': '{n} gün',
   'trash.days_remaining_due': 'Silinmek üzere',
-  'trash.deleted_by_nobody': 'Kayıt yok: filex dışında kaldırılmış ya da filex bunu tutmaya başlamadan önce silinmiş',
+  'trash.deleted_by_nobody': 'Kayıt yok: virüs taraması karantinaya almış ya da filex bunu tutmaya başlamadan önce silinmiş',
   'trash.emptying': 'Çöp kutusu boşaltılıyor… {done} / {total}',
   'trash.empty_busy': 'Çöp kutusu zaten boşaltılıyor.',
-  'trash.emptied_partly': 'Çöp kutusu boşaltıldı, ama {count} öğe silinemedi — sunucu günlüğüne bakın.',
-  'trash.emptied_partly_one': 'Çöp kutusu boşaltıldı, ama {count} öğe silinemedi — sunucu günlüğüne bakın.',
+  'trash.emptied_partly': 'Çöp kutusu boşaltıldı, ama {count} öğe silinemedi - sunucu günlüğüne bakın.',
+  'trash.emptied_partly_one': 'Çöp kutusu boşaltıldı, ama {count} öğe silinemedi - sunucu günlüğüne bakın.',
   'trash.empty_stopped': 'Çöp kutusunu boşaltma durdu: {error}',
   'trash.emptying_queued': 'Çöp kutusu boşaltılıyor… başka bir temizliğin bitmesi bekleniyor',
   'trash.empty_cancelled': 'Çöp kutusunu boşaltma {count} öğeden sonra durduruldu; kalanlar hâlâ çöp kutusunda.',
   'trash.empty_cancelled_one': 'Çöp kutusunu boşaltma {count} öğeden sonra durduruldu; kalanlar hâlâ çöp kutusunda.',
   'empty.trash.hint': 'Sildiğiniz dosyalar önce buraya düşer, böylece geri alabilirsiniz.',
 
-  /* tasi:m1 — hedef klasör seçici (modals/DestinationPickerModal.vue) ve
+  /* tasi:m1 - hedef klasör seçici (modals/DestinationPickerModal.vue) ve
      üzerine kurulan iki seçim eylemi. */
   'destpicker.title.move': 'Şuraya taşı',
   'destpicker.title.copy': 'Şuraya kopyala',
@@ -2078,12 +2140,12 @@ export const tr: Record<string, string> = {
   'toast.archive.preparing': 'Arşiv hazırlanıyor…',
   'toast.archive.started': '{name} indiriliyor ({count} dosya)',
   'toast.archive.started_one': '{name} indiriliyor ({count} dosya)',
-  'toast.archive.empty': 'İndirilecek bir şey yok — seçimde okunabilir dosya bulunmuyor.',
+  'toast.archive.empty': 'İndirilecek bir şey yok - seçimde okunabilir dosya bulunmuyor.',
   'toast.moved_to': '{name} klasörüne taşıma kuyruğa alındı',
   'toast.copied_to': '{name} klasörüne kopyalama kuyruğa alındı',
-  'toast.already_there': 'Seçilen öğeler zaten {name} içinde — hiçbir şey gönderilmedi',
+  'toast.already_there': 'Seçilen öğeler zaten {name} içinde - hiçbir şey gönderilmedi',
 
-  /* ── dil:paket — bkz. en.ts */
+  /* ── dil:paket - bkz. en.ts */
   'ctx.tags_menu': 'Etiketler…',
   'toast.node_id_copied': 'Node id {id} kopyalandı',
   'toast.read_only_here': 'Burada yazma yetkiniz yok',
@@ -2098,7 +2160,7 @@ export const tr: Record<string, string> = {
   'share.ttl.until': 'Bu bağlantı {when} tarihine kadar geçerli.',
   'share.ttl.ceiling': 'Bağlantılar en fazla {days} gün geçerli olabilir (sunucu ayarı).',
   'share.ttl.ceiling_one': 'Bağlantılar en fazla {days} gün geçerli olabilir (sunucu ayarı).',
-  /* ── dil:paket — paylaşım / erişim penceresi (bkz. en.ts) */
+  /* ── dil:paket - paylaşım / erişim penceresi (bkz. en.ts) */
   'access.ui.level_viewer': 'Görüntüleyen',
   'access.ui.level_viewer_desc': 'görüntüle + indir',
   'access.ui.level_editor': 'Düzenleyen',
@@ -2136,8 +2198,8 @@ export const tr: Record<string, string> = {
   'access.ui.enter_a_valid_email': 'Geçerli bir e-posta girin.',
   'access.ui.user_created_invite_emailed': 'Kullanıcı açıldı, davet e-postası gönderildi.',
   'access.ui.user_created_share_the_temp_password': 'Kullanıcı açıldı. Geçici parolayı iletin.',
-  'access.ui.smtp_not_set_up_verified_share_the_link': 'SMTP ayarlı/doğrulanmış değil — bağlantıyı elle iletin.',
-  'access.ui.send_failed_temporary_please_retry': 'Gönderilemedi (geçici hata) — tekrar deneyin.',
+  'access.ui.smtp_not_set_up_verified_share_the_link': 'SMTP ayarlı/doğrulanmış değil - bağlantıyı elle iletin.',
+  'access.ui.send_failed_temporary_please_retry': 'Gönderilemedi (geçici hata) - tekrar deneyin.',
   'access.ui.server_limit_applied': '(sunucu sınırı uygulandı)',
   'access.ui.protect_with_a_pin': 'PIN ile koru',
   'access.ui.expiry': 'Süre',
@@ -2149,7 +2211,7 @@ export const tr: Record<string, string> = {
   'access.ui.command_line': 'Komut satırı',
   'access.ui.share': 'Paylaş',
   'access.ui.existing_links': 'Mevcut bağlantılar',
-  'access.ui.rbac_off_here': 'Bu depoda öğe bazlı erişim denetimi kapalı — herkes depoyu rolüne göre açar, burada eklenen kişiler bir şey değiştirmez. Yönetim panelinde Depolar altından (bu depo → Öğe bazlı erişim denetimi) açın.',
+  'access.ui.rbac_off_here': 'Bu depoda öğe bazlı erişim denetimi kapalı - herkes depoyu rolüne göre açar, burada eklenen kişiler bir şey değiştirmez. Yönetim panelinde Depolar altından (bu depo → Öğe bazlı erişim denetimi) açın.',
   'access.ui.other_links': 'Diğer bağlantılar',
   'access.ui.revoke': 'İptal',
   'access.ui.loading': 'Yükleniyor…',
@@ -2162,6 +2224,10 @@ export const tr: Record<string, string> = {
   'access.ui.just_send_a_share_link': 'Yalnızca paylaşım bağlantısı gönder →',
   'access.ui.temp_password': 'Geçici parola:',
   'access.ui.people_with_access': 'Erişimi olanlar',
+  'access.ui.group': 'Grup',
+  'access.ui.group_title': '“{name}” grubu - içindeki herkes',
+  'access.ui.group_owner_confirm': 'Sahip düzeyi, “{name}” grubundaki herkesin buraya kimin erişebileceğini yönetmesine izin verir - başka kişi ve gruplarla paylaşmak dâhil. Gruba Sahip verilsin mi?',
+  'access.ui.group_owner_give': 'Sahip yap',
   'access.ui.not_shared_with_anyone_yet': 'Henüz kimseyle paylaşılmadı.',
   'access.ui.remove': 'Kaldır',
   'access.ui.a_public_link_that_lets_anyone_upload_fi': 'Bu klasöre herkesin dosya YÜKLEYEBİLECEĞİ herkese açık bir bağlantı. Yükleyenler klasördeki mevcut dosyaları göremez.',
@@ -2172,10 +2238,10 @@ export const tr: Record<string, string> = {
   'access.ui.allowed_types': 'İzinli türler',
   'access.ui.all_e_g_pdf_jpg': 'hepsi (örn. pdf, jpg)',
   'access.ui.ask_uploader_name': 'Yükleyenin adını sor',
-  'access.ui.emails_comma_separated': 'e-posta(lar) — virgülle ayırın',
+  'access.ui.emails_comma_separated': 'e-posta(lar) - virgülle ayırın',
   'access.ui.send': 'Gönder',
-  'access.ui.mail_not_set_up': 'E-posta kurulu değil — yönetim panelinde Ayarlar altından (E-posta / SMTP) kurun.',
-  /* ── wiring:e2 fxe — tek şifreli dosyalar (.fxe), akışlı indirmeler ── */
+  'access.ui.mail_not_set_up': 'E-posta kurulu değil - yönetim panelinde Ayarlar altından (E-posta / SMTP) kurun.',
+  /* ── wiring:e2 fxe - tek şifreli dosyalar (.fxe), akışlı indirmeler ── */
   'e2e.fxe.type': 'Şifreli dosya',
   'e2e.fxe.ctx_encrypt': 'E2EE ile şifrele…',
   'e2e.fxe.ctx_download_raw': 'Şifreli dosyayı indir',
@@ -2183,7 +2249,7 @@ export const tr: Record<string, string> = {
   'e2e.fxe.ctx_remove': 'Şifrelemeyi kaldır…',
   'e2e.fxe.encrypt_title': 'Bu dosyayı şifrele',
   'e2e.fxe.encrypt_lead':
-    '“{name}” bu tarayıcıda, kendine ait bir parolayla şifrelenir. Sunucu yalnızca şifreli veriyi saklar. Dosyayı parola ya da kurtarma anahtarı açar — burada ya da çevrimdışı olarak filex decrypt ile.',
+    '“{name}” bu tarayıcıda, kendine ait bir parolayla şifrelenir. Sunucu yalnızca şifreli veriyi saklar. Dosyayı parola ya da kurtarma anahtarı açar - burada ya da çevrimdışı olarak filex decrypt ile.',
   'e2e.fxe.pw_label': 'Dosya parolası',
   'e2e.fxe.hide_label': 'Dosya adını da gizle',
   'e2e.fxe.hide_on_hint':
@@ -2218,7 +2284,7 @@ export const tr: Record<string, string> = {
   'e2e.fxe.unlock_title_remove': 'Şifrelemeyi kaldır',
   'e2e.fxe.unlock_lead':
     '“{name}” şifreli. Parolası burada, bu tarayıcıda denetlenir ve asla sunucuya gönderilmez.',
-  'e2e.fxe.known_note': 'Bu sekmede zaten açıldı — parola gerekmiyor.',
+  'e2e.fxe.known_note': 'Bu sekmede zaten açıldı - parola gerekmiyor.',
   'e2e.fxe.use_password': 'Onun yerine parolayı kullan',
   'e2e.fxe.remove_warn_title': 'Şifresiz içerik sunucuya geri döner',
   'e2e.fxe.remove_warn_body':
@@ -2243,25 +2309,25 @@ export const tr: Record<string, string> = {
   'e2e.fxe.password_cost':
     'Yalnızca dosyanın başlığı değişir: içerik bayt bayt aynen geri gönderilir ve kurtarma anahtarı çalışmaya devam eder.',
   'e2e.fxe.password_old_copies':
-    'Bu dosyanın önceki bir sürümü — sürüm geçmişi, bir yedek, birinin indirdiği bir kopya — ESKİ parolayla açılmaya devam eder.',
+    'Bu dosyanın önceki bir sürümü - sürüm geçmişi, bir yedek, birinin indirdiği bir kopya - ESKİ parolayla açılmaya devam eder.',
   'e2e.fxe.password_done': 'Parola değişti. Eski parola bu dosyayı artık açmıyor.',
   'e2e.recovery.warn_body_file':
-    'Bu anahtara sahip olan herkes dosyayı okuyabilir. Onu paroladan ayrı bir yerde saklayın — parolanın yanında duran bir anahtar sizi unutmaktan korur, başkalarından değil.',
+    'Bu anahtara sahip olan herkes dosyayı okuyabilir. Onu paroladan ayrı bir yerde saklayın - parolanın yanında duran bir anahtar sizi unutmaktan korur, başkalarından değil.',
   'e2e.recovery.lead_file':
-    'Bu anahtar dosyayı parolası olmadan açar. Yalnızca bir kez gösterilir — filex onu saklamaz ve bir daha gösteremez.',
+    'Bu anahtar dosyayı parolası olmadan açar. Yalnızca bir kez gösterilir - filex onu saklamaz ve bir daha gösteremez.',
   'e2e.dl.ctx_encrypted_copy': 'Şifreli kopyayı indir',
   'e2e.dl.too_big':
     'Bu tarayıcı tek seferde en çok {limit} çözülmüş veri kaydedebilir, bu ise {size}. Chrome ya da Edge (doğrudan diske kaydeder), filex masaüstü uygulamasını kullanın ya da şifreli dosyayı indirip filex decrypt çalıştırın.',
   'e2e.dl.click_again': 'Nereye kaydedileceğini seçmek için İndir’e bir kez daha tıklayın.',
   'e2e.dl.zip_started': '“{name}” içine çözülerek yazılıyor…',
-  'e2e.dl.zip_done': '“{name}” kaydedildi — çözülmüş, gerçek adlarla.',
+  'e2e.dl.zip_done': '“{name}” kaydedildi - çözülmüş, gerçek adlarla.',
   'e2e.dl.zip_done_plain': '“{name}” kaydedildi. İçindeki {n} dosya hiç şifrelenmemişti ve olduğu gibi eklendi.',
   'e2e.dl.zip_done_plain_one': '“{name}” kaydedildi. İçindeki {n} dosya hiç şifrelenmemişti ve olduğu gibi eklendi.',
   'e2e.dl.zip_damaged':
     'Klasördeki bir dosya bozuk ya da kurcalanmış. İndirme durduruldu ve hiçbir şey kaydedilmedi.',
   'e2e.upload.streaming_unsupported':
     'Bu dosya 200 MB’tan büyük ve bu sunucuda onu parça parça şifreli göndermek için parçalı yükleme yok.',
-  /* wiring:e2 fxe escrow — emanet anahtarı tek bir dosyayı açar, sahibine haber gider */
+  /* wiring:e2 fxe escrow - emanet anahtarı tek bir dosyayı açar, sahibine haber gider */
   'e2e.fxe.use_escrow': 'Emanet anahtarını kullan',
   'e2e.fxe.escrow_warn_title': 'Dosyanın sahibine haber gidecek',
   'e2e.fxe.escrow_warn_body':
@@ -2273,22 +2339,22 @@ export const tr: Record<string, string> = {
   'e2e.fxe.wrong_escrow': 'Bu emanet anahtarı bu dosyayı açmıyor.',
   'e2e.fxe.escrow_notify_failed':
     'Dosyanın sahibine bildirim gönderilemedi, bu yüzden dosya açılmadı. Emanet anahtarının kullanımı her zaman duyurulur.',
-  'e2e.fxe.escrow_done': 'Emanet anahtarıyla açıldı — dosya sahibine bildirildi',
-  /* wiring:e2 fxe purge — yönetici aslını kalıcı olarak siler */
+  'e2e.fxe.escrow_done': 'Emanet anahtarıyla açıldı - dosya sahibine bildirildi',
+  /* wiring:e2 fxe purge - yönetici aslını kalıcı olarak siler */
   'e2e.fxe.seen_trash_admin':
-    'Asıl dosya çöp kutusuna gider ve çöp kutusunun saklama süresi dolana kadar orada kalır — aşağıda kalıcı olarak silmediğiniz sürece.',
-  'e2e.fxe.seen_versions_admin': 'Önceki sürümleri sürüm geçmişinde kalır — aşağıda kalıcı olarak silmediğiniz sürece.',
+    'Asıl dosya çöp kutusuna gider ve çöp kutusunun saklama süresi dolana kadar orada kalır - aşağıda kalıcı olarak silmediğiniz sürece.',
+  'e2e.fxe.seen_versions_admin': 'Önceki sürümleri sürüm geçmişinde kalır - aşağıda kalıcı olarak silmediğiniz sürece.',
   'e2e.fxe.purge_label': 'Aslını kalıcı olarak sil (yönetici)',
   'e2e.fxe.purge_hint':
     'Şifreli kopya kaydedilir kaydedilmez önceki sürümleri ve çöp kutusundaki kaydı silinir; açık hâlinden bu sunucuda hiçbir şey kalmaz. Geri alınamaz. Daha önce alınmış yedeklere ve kopyalara ulaşılmaz.',
   'e2e.fxe.purge_others': 'Bu dosya sizin değil, {owner} adlı kullanıcının. Onun aslını ve sürümlerini kalıcı olarak sil.',
-  'e2e.fxe.purge_others_unknown': 'Bu dosyanın kayıtlı bir sahibi yok — sizin değil. Aslını ve sürümlerini kalıcı olarak sil.',
+  'e2e.fxe.purge_others_unknown': 'Bu dosyanın kayıtlı bir sahibi yok - sizin değil. Aslını ve sürümlerini kalıcı olarak sil.',
   'e2e.fxe.purge_others_required': 'Başkasının dosyasını kalıcı olarak sildiğinizi onaylayın.',
   'e2e.fxe.purge_no_id': 'Bu dosya henüz katalogda değil, bu yüzden kalıcı olarak silinemez. Klasörü yenileyip tekrar deneyin.',
   'e2e.fxe.purged': '“{name}” şifrelendi. Aslı, sürümleri ve çöp kutusundaki kaydı kalıcı olarak silindi.',
   'e2e.fxe.purge_failed':
     '“{name}” dosyasının şifreli kopyası kaydedildi, ama aslı kalıcı olarak silinemedi ({reason}). Çöp kutusundan ve sürüm geçmişinden silin.',
-  /* wiring:e2 fxe big — bu tarayıcının belleğine sığmayan çözülmüş indirme */
+  /* wiring:e2 fxe big - bu tarayıcının belleğine sığmayan çözülmüş indirme */
   'e2e.big.title': 'Bu tarayıcıda çözülemeyecek kadar büyük',
   'e2e.big.lead':
     '“{name}” çözüldüğünde {size}. Bu tarayıcı indirmeyi belleğinde çözer ve en çok {limit} tutabilir, bu yüzden hiçbir şey indirilmedi.',
@@ -2296,7 +2362,7 @@ export const tr: Record<string, string> = {
     '“{name}” çözülürken {limit} sınırını aştı. Bu tarayıcı indirmeyi belleğinde çözer ve daha fazlasını tutamaz, bu yüzden hiçbir şey kaydedilmedi.',
   'e2e.big.instead': 'Bunun yerine kendi bilgisayarınızda çözün:',
   'e2e.big.step_file': 'Şifreli dosyayı olduğu gibi indirin (aşağıdaki düğme).',
-  'e2e.big.step_folder': 'Şifreli klasörü zip olarak indirin (aşağıdaki düğme) — klasörün anahtar dosyası da içindedir.',
+  'e2e.big.step_folder': 'Şifreli klasörü zip olarak indirin (aşağıdaki düğme) - klasörün anahtar dosyası da içindedir.',
   'e2e.big.step_run': 'Kaydettiğiniz klasörde filex decrypt komutunu çalıştırıp parolayı girin:',
   'e2e.big.copy': 'Kopyala',
   'e2e.big.copied': 'Kopyalandı',
@@ -2305,7 +2371,7 @@ export const tr: Record<string, string> = {
   'e2e.big.download_file': 'Şifreli dosyayı indir',
   'e2e.big.download_folder': 'Şifreli klasörü indir (zip)',
   /* /wiring:e2 fxe */
-  /* ── dil:paket — İngilizce sabit yazılmış erişilebilir adlar */
+  /* ── dil:paket - İngilizce sabit yazılmış erişilebilir adlar */
   'breadcrumb.aria': 'Konum yolu',
   'e2e.recovery_key_aria': 'Kurtarma anahtarı',
   'modal.close': 'Kapat',
@@ -2339,13 +2405,13 @@ export const tr: Record<string, string> = {
      ⚠ ORTAK anahtarlar; ardından gelenler bu tablonun kendisinin (yönetim
      kataloğu onları yalnız vue-i18n'in anladığı sözdizimiyle yazar). */
   'account.errors.emailRequired': "Bir e-posta adresi yazın.",
-  'account.errors.usernameChar': "Kullanıcı adında “{char}” kullanılamaz. a–z, 0–9, nokta, tire ya da alt çizgi kullanın.",
+  'account.errors.usernameChar': "Kullanıcı adında “{char}” kullanılamaz. a-z, 0-9, nokta, tire ya da alt çizgi kullanın.",
   'account.errors.usernameDigit': "Kullanıcı adı rakamla başlayamaz.",
   'account.errors.usernameEmpty': "Bir kullanıcı adı yazın.",
   'account.errors.usernameLong': "Kullanıcı adı en çok {max} karakter olabilir.",
   'account.errors.usernameReserved': "“{name}” ayrılmış bir ad; başka bir kullanıcı adı seçin.",
   'account.errors.usernameShort': "Kullanıcı adı en az {min} karakter olmalı.",
-  'account.errors.usernameSpace': "Kullanıcı adında boşluk olamaz. a–z, 0–9, nokta, tire ya da alt çizgi kullanın.",
+  'account.errors.usernameSpace': "Kullanıcı adında boşluk olamaz. a-z, 0-9, nokta, tire ya da alt çizgi kullanın.",
   'common.cancel': "İptal",
   'common.close': "Kapat",
   'common.confirm': "Onayla",
@@ -2368,8 +2434,8 @@ export const tr: Record<string, string> = {
   'notifications.prefs.desktopHandled': "Masaüstü uygulaması bunları kendisi gösteriyor",
   'notifications.prefs.enableBrowser': "Bildirimlere izin ver",
   'notifications.prefs.inApp': "Uygulama içi çan",
-  'notifications.prefs.inAppHint': "Kapatırsanız çanınız boşalır. Hiçbir kayıt silinmez — yönetici tüm olayları görmeye devam eder.",
-  'notifications.prefs.movedToSettings': "Kendi bildirim ayarlarınız — zil, tarayıcı bildirimleri, hangi olaylar — kullanıcı ayarlarınızda.",
+  'notifications.prefs.inAppHint': "Kapatırsanız çanınız boşalır. Hiçbir kayıt silinmez - yönetici tüm olayları görmeye devam eder.",
+  'notifications.prefs.movedToSettings': "Kendi bildirim ayarlarınız - zil, tarayıcı bildirimleri, hangi olaylar - kullanıcı ayarlarınızda.",
   'notifications.prefs.openSettings': "Bildirim ayarlarımı aç",
   'notifications.prefs.permDefault': "İzin henüz istenmedi",
   'notifications.prefs.permDenied': "Bu tarayıcıda engellendi",
@@ -2379,8 +2445,8 @@ export const tr: Record<string, string> = {
   'notifications.prefs.saved': "Tercih kaydedildi",
   'notifications.prefs.title': "Bildirimleriniz",
   'profile.avatar.change': "Fotoğrafı değiştir",
-  'profile.avatar.failed': "Bu görsel işlenemedi — başka bir tane deneyin.",
-  'profile.avatar.help': "Adınızın yanında ve dosya yöneticisinin işbirliği çubuğunda görünür — hesabınızla açılan her istemcide. Otomatik olarak 160 piksele küçültülür.",
+  'profile.avatar.failed': "Bu görsel işlenemedi - başka bir tane deneyin.",
+  'profile.avatar.help': "Adınızın yanında ve dosya yöneticisinin işbirliği çubuğunda görünür - hesabınızla açılan her istemcide. Otomatik olarak 160 piksele küçültülür.",
   'profile.avatar.label': "Profil fotoğrafı",
   'profile.avatar.notImage': "Lütfen bir görsel dosyası seçin.",
   'profile.locale': "Dil",
@@ -2391,7 +2457,7 @@ export const tr: Record<string, string> = {
   'profile.totp.disabled': "Pasif",
   'profile.totp.enable': "2FA'yı aç",
   'profile.totp.enabled': "Aktif",
-  'profile.totp.recoveryHint': "Bunları şimdi kaydedin — doğrulayıcınızı kaybederseniz her biri bir kez oturum açmanızı sağlar. Yalnızca bu sefer gösterilir.",
+  'profile.totp.recoveryHint': "Bunları şimdi kaydedin - doğrulayıcınızı kaybederseniz her biri bir kez oturum açmanızı sağlar. Yalnızca bu sefer gösterilir.",
   'profile.totp.recoveryTitle': "Kurtarma kodları",
   'profile.totp.scanHint': "Bu QR kodu doğrulayıcı uygulamanızla tarayın, sonra 6 haneli kodu girin.",
   'profile.totp.title': "İki adımlı doğrulama",
@@ -2424,16 +2490,16 @@ export const tr: Record<string, string> = {
   'userSettings.notifications.events.file_uploaded': "Yeni bir dosya geldiğinde",
   'userSettings.notifications.events.plugin_notice': "Kurulu bir uygulama size mesaj gönderdiğinde",
   'userSettings.notifications.events.share_created': "Biri paylaşım bağlantısı oluşturduğunda",
-  'userSettings.notifications.eventsHint': "Birini kapatmak onu zilinizin dışında tutar. Hiçbir şey kaydedilmekten çıkmaz — yönetici her olayı görmeye devam eder.",
+  'userSettings.notifications.eventsHint': "Birini kapatmak onu zilinizin dışında tutar. Hiçbir şey kaydedilmekten çıkmaz - yönetici her olayı görmeye devam eder.",
   'userSettings.notifications.eventsTitle': "Nelerden haberdar olayım",
   'userSettings.open': "Kullanıcı ayarları",
   'userSettings.prefs.appearance': "Görünüm",
   'userSettings.prefs.compact': "Sıkışık dosya listesi kullan",
   'userSettings.prefs.compactHint': "Dosya gezgininde daha dar satırlar.",
   'userSettings.prefs.desktopApp': "Masaüstü uygulaması",
-  'userSettings.prefs.desktopAppHint': "Uygulamanın köşesindeki hatırlatmayı kapattığınızda bir daha çıkmaz — indirmeler burada kalır.",
+  'userSettings.prefs.desktopAppHint': "Uygulamanın köşesindeki hatırlatmayı kapattığınızda bir daha çıkmaz - indirmeler burada kalır.",
   'userSettings.prefs.folderView': "Varsayılan klasör görünümü",
-  'userSettings.prefs.folderViewHint': "Hiç değiştirmediğiniz bir klasörün nasıl açılacağı. Değiştirdiğiniz klasörler kendi görünümünü korur — bu ayar onlara dokunmaz.",
+  'userSettings.prefs.folderViewHint': "Hiç değiştirmediğiniz bir klasörün nasıl açılacağı. Değiştirdiğiniz klasörler kendi görünümünü korur - bu ayar onlara dokunmaz.",
   'userSettings.prefs.fvColumns': "Varsayılan sütunlarınız özelleştirilmiş (“Bunu tüm klasörler için varsayılanım yap” ile ayarlandı).",
   'userSettings.prefs.fvColumnsReset': "Sıfırla",
   'userSettings.prefs.fvDir': "Yön",
@@ -2474,13 +2540,20 @@ export const tr: Record<string, string> = {
   'userSettings.subtitle.ai': "Burada henüz ayarlayabileceğiniz bir şey yok.",
   'userSettings.subtitle.notifications': "Zilinize ve masaüstünüze neyin ulaşacağı.",
   'userSettings.subtitle.preferences': "Uygulamanın cihazlarınızda nasıl göründüğü ve okunduğu.",
-  'userSettings.subtitle.profile': "Adınız, e-postanız ve fotoğrafınız — başkalarının gördüğü bilgiler.",
+  'userSettings.subtitle.profile': "Adınız, e-postanız ve fotoğrafınız - başkalarının gördüğü bilgiler.",
   'userSettings.subtitle.security': "Parolanız ve ikinci faktörünüz.",
   'userSettings.tabs.ai': "AI asistanı",
   'userSettings.tabs.notifications': "Bildirimler",
   'userSettings.tabs.preferences': "Tercihler",
   'userSettings.tabs.profile': "Profil",
   'userSettings.tabs.security': "Güvenlik",
+  'userSettings.apps.title': "Varsayılan uygulamalar",
+  'userSettings.apps.lead': "Bir dosyanın menüsünden seçin: Birlikte aç, Uygulama seç…, sonra \"Her zaman bu uygulamayla aç\" kutusunu işaretleyin. Yalnız yöneticinizin o tür için açık bıraktığı uygulamalar sunulur.",
+  'userSettings.apps.empty': "Henüz hiçbir dosya türü için uygulama seçmediniz: her dosya, yöneticinizin ilk sıraya koyduğu uygulamayla açılır.",
+  'userSettings.apps.reset': "Sıfırla",
+  'userSettings.apps.resetAll': "Tümünü sıfırla",
+  'userSettings.apps.unavailable': "Artık kullanılamıyor: siz yeniden seçene kadar {app} ile açılıyor.",
+  'userSettings.apps.change': "{ext} dosyalarını açan uygulama",
   'userSettings.title': "Ayarlar",
   'users.fields.displayName': "Görünen ad",
   'webhooks.offReason.antivirus': "Virüs taraması kapalı (Koruma).",
@@ -2488,7 +2561,7 @@ export const tr: Record<string, string> = {
   'webhooks.offReason.escrow': "Şifreli klasörler için emanet anahtarı kurulmamış.",
   'account.problem.emailInvalid': "Bu bir e-posta adresi değil. ad@ornek.com biçiminde yazın.",
   'account.problem.usernameAt': "Kullanıcı adında @ olamaz; @ e-posta adresine aittir.",
-  'profile.username.helpText': "Kullanıcı adınız. Oturum açarken bunu da e-postanızı da kullanabilirsiniz — bağlantı istemcileri (SFTP, FTP) için ise bu ad gerekir, çünkü oturum açtıkları addaki @ işareti onların ayar dosyalarında kaçış gerektirir.",
+  'profile.username.helpText': "Kullanıcı adınız. Oturum açarken bunu da e-postanızı da kullanabilirsiniz - bağlantı istemcileri (SFTP, FTP) için ise bu ad gerekir, çünkü oturum açtıkları addaki @ işareti onların ayar dosyalarında kaçış gerektirir.",
   'userSettings.prefs.fvKeptCount': "{count} klasör kendi görünümünü koruyor.",
   'userSettings.prefs.fvKeptCount_one': "{count} klasör kendi görünümünü koruyor.",
 };

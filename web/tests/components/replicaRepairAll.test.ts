@@ -6,7 +6,7 @@
 // press: each one queued the whole set again. The server now absorbs a retry
 // that is already waiting (`already_queued`), and the page says so instead of
 // "0 retries queued".
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
@@ -19,7 +19,7 @@ import { useToastStore } from '@/stores/toast';
 type Body = Record<string, unknown>;
 
 let fixAllReply: () => Promise<{ data: Body }> = async () => ({ data: { queued: 1, already_queued: 0 } });
-let fixOneReply: () => Promise<{ data: Body }> = async () => ({ data: { ok: true, queued: true } });
+const fixOneReply: () => Promise<{ data: Body }> = async () => ({ data: { ok: true, queued: true } });
 
 const FAILURE = {
   id: 1,
@@ -56,15 +56,12 @@ vi.mock('@/api/client', () => ({
   },
 }));
 
-const mounted: VueWrapper[] = [];
-
 async function mountPage() {
   setActivePinia(createPinia());
   const blank = { template: '<div/>' };
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:p(.*)*', component: blank }] });
   const i18n = createI18n({ legacy: false, locale: 'en', fallbackLocale: 'en', messages: { en } });
   const w = mount(Replica, { global: { plugins: [i18n, router] }, attachTo: document.body });
-  mounted.push(w);
   await flushPromises();
   return w;
 }
@@ -76,11 +73,6 @@ function fixAllButton(w: VueWrapper) {
 function toasts() {
   return useToastStore().toasts.map((t) => t.message);
 }
-
-afterEach(() => {
-  mounted.splice(0).forEach((w) => w.unmount());
-  document.body.innerHTML = '';
-});
 
 describe('Replica — Fix all', () => {
   it('holds its button while the request is out, then says what it queued', async () => {

@@ -9,6 +9,7 @@
 package storage
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -124,6 +125,33 @@ type limitedReadCloser struct {
 
 func (l limitedReadCloser) Close() error { return l.c.Close() }
 
+// SeekOpened moves a file just opened for a ranged read to off (nothing to
+// do at 0) and closes it when that fails, so a failed open leaves no handle
+// behind. The shape the SFTP and SMB drivers share.
+func SeekOpened(f interface {
+	io.Seeker
+	io.Closer
+}, off int64) error {
+	if off <= 0 {
+		return nil
+	}
+	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return nil
+}
+
+// ReadAhead gives a file reader its read-ahead: buffer bytes, or less for a
+// short ranged read (length > 0), never under 32 KiB. Close closes fr.
+func ReadAhead(fr io.ReadCloser, buffer int, length int64) io.ReadCloser {
+	size := buffer
+	if length > 0 && length < int64(size) {
+		size = max(int(length), 32<<10)
+	}
+	return limitedReadCloser{Reader: bufio.NewReaderSize(fr, size), c: fr}
+}
+
 // emptyReadCloser is at EOF immediately — the answer for a zero-length
 // window and for an offset at or past EOF.
 type emptyReadCloser struct{}
@@ -133,6 +161,17 @@ func (emptyReadCloser) Close() error             { return nil }
 
 // EmptyReadCloser returns a ReadCloser that is immediately at EOF.
 func EmptyReadCloser() io.ReadCloser { return emptyReadCloser{} }
+
+// CloseDriver releases what a driver holds once nothing will use it again -
+// a connection (sftp, ftp, smb), or the instance a storage plugin keeps with
+// the storage's configuration and credentials in it. Driver does not require
+// Close, so this is best effort by contract: a driver without one holds
+// nothing worth releasing.
+func CloseDriver(d Driver) {
+	if c, ok := d.(interface{ Close() error }); ok {
+		_ = c.Close()
+	}
+}
 
 // Mover renames/moves objects.
 type Mover interface {

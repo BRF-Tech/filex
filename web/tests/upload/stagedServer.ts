@@ -35,6 +35,8 @@ export class FakeStagedServer {
   sessions = new Map<string, Session>();
   beginCalls = 0;
   commitCalls = 0;
+  /** The query of every commit, in order (`expect`, `e2e_convert`). */
+  commitQueries: Array<Record<string, string>> = [];
   statusCalls = 0;
   abortCalls = 0;
   /** Every chunk body actually accepted, in arrival order. */
@@ -138,9 +140,11 @@ export class FakeStagedServer {
       return { id, chunk_size: chunkSize, offset: 0, total_size: body.size, state: 'staging' };
     }
 
-    const commit = path.match(/\/upload\/([^/]+)\/commit$/);
+    const [pathOnly, query = ''] = path.split('?');
+    const commit = pathOnly.match(/\/upload\/([^/]+)\/commit$/);
     if (commit && method === 'POST') {
       this.commitCalls++;
+      this.commitQueries.push(Object.fromEntries(new URLSearchParams(query)));
       const s = this.sessions.get(decodeURIComponent(commit[1]));
       if (!s) throw this.err(404, 'upload not found');
       if (!this.complete(s)) throw this.err(409, 'upload incomplete');

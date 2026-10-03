@@ -74,7 +74,7 @@ const columns = computed<DataColumn<SearchHit>[]>(() => [
     label: t('explore.cols.mime'),
     sortable: true,
     width: 150,
-    format: (h) => h.mime || '\u2014',
+    format: (h) => h.mime || '-',
     sortValue: (h) => h.mime || null,
   },
   {
@@ -121,7 +121,7 @@ const columns = computed<DataColumn<SearchHit>[]>(() => [
         <p class="flex items-center gap-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
           <TagKindIcon :kind="g.kind" :size="14" />
           {{ t(`tagged.${g.kind}`) }}
-          <span class="font-normal">— {{ t(`tagged.${g.kind}Help`) }}</span>
+          <span class="font-normal">- {{ t(`tagged.${g.kind}Help`) }}</span>
         </p>
         <div class="flex flex-wrap gap-2">
           <button
@@ -169,7 +169,7 @@ const columns = computed<DataColumn<SearchHit>[]>(() => [
         </template>
         <template #cell-storage_name="{ row }">
           <Badge v-if="row.storage_name" tone="zinc" size="xs">{{ row.storage_name }}</Badge>
-          <template v-else>—</template>
+          <template v-else>-</template>
         </template>
       </DataTable>
     </template>

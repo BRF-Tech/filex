@@ -103,6 +103,13 @@ export function useConnections(config: ExplorerConfig) {
   /** Storage names a non-admin may see (manager root). */
   const visible = shallowRef<string[]>([]);
   const me = ref<ConnectionsUser | null>(null);
+  /**
+   * The caller's tenant realm on a multi-tenant server (`/api/auth/me` →
+   * `realm`), else null. A protocol that carries no address a tenant could be
+   * told by is signed in to as `realm/name` (docs/PROTOCOLS.md), so the guides
+   * print it.
+   */
+  const realm = ref<string | null>(null);
   /** The server's own public address, when it has one to give (see connectionsOrigin). */
   const publicUrl = ref<string | null>(null);
 
@@ -148,8 +155,9 @@ export function useConnections(config: ExplorerConfig) {
       // Identity first: the guides need the caller's own e-mail (it IS the
       // WebDAV username), and it is the one call every role may make.
       try {
-        const body = await api.jsonFetch<{ user: ConnectionsUser }>(url('/api/auth/me'));
+        const body = await api.jsonFetch<{ user: ConnectionsUser; realm?: string }>(url('/api/auth/me'));
         me.value = body?.user ?? null;
+        realm.value = typeof body?.realm === 'string' && body.realm ? body.realm : null;
       } catch (e) {
         if (statusOf(e) === 401) {
           canManage.value = false;
@@ -293,6 +301,7 @@ export function useConnections(config: ExplorerConfig) {
     storages,
     visible,
     me,
+    realm,
     publicUrl,
     loading,
     loaded,

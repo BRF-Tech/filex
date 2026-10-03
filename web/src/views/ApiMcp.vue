@@ -374,7 +374,7 @@ function onRowAction(key: string, row: AIToken) {
       @row-action="(key: string, row: AIToken) => onRowAction(key, row)"
     >
       <template #cell-label="{ row }">
-        <span class="font-medium">{{ row.label || '—' }}</span>
+        <span class="font-medium">{{ row.label || '-' }}</span>
       </template>
 
       <template #cell-usernames="{ row }">
@@ -387,7 +387,7 @@ function onRowAction(key: string, row: AIToken) {
             size="xs"
             >{{ u }}</Badge
           >
-          <span v-if="!usernameList(row).length" class="tbl-sub">{{ row.label || '—' }}</span>
+          <span v-if="!usernameList(row).length" class="tbl-sub">{{ row.label || '-' }}</span>
         </div>
       </template>
 
@@ -418,7 +418,7 @@ function onRowAction(key: string, row: AIToken) {
       </template>
 
       <template #cell-last_used_at="{ row }">
-        <span class="whitespace-nowrap">{{ row.last_used_at ? formatRelative(row.last_used_at, locale) : '—' }}</span>
+        <span class="whitespace-nowrap">{{ row.last_used_at ? formatRelative(row.last_used_at, locale) : '-' }}</span>
       </template>
       <template #cell-expires_at="{ row }">
         <span class="whitespace-nowrap">{{

@@ -213,7 +213,7 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 			}
 		}
 		if promoted == "" {
-			return nil, hostErr(wire.ErrInvalid, "a link without a page hands over no copies — it serves the one file it points at. Name that file with ref or path: one of this job's inputs, or one of the outputs it is writing")
+			return nil, hostErr(wire.ErrInvalid, "a link without a page hands over no copies - it serves the one file it points at. Name that file with ref or path: one of this job's inputs, or one of the outputs it is writing")
 		}
 		req.Ref, req.Files = promoted, nil
 	}
@@ -242,7 +242,7 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 				// Two different documents in one ask. `path` used to win
 				// silently; against an output that would mean promising a
 				// link of one file and delivering another.
-				return nil, hostErr(wire.ErrInvalid, "ref names an output of this job and path names "+rel+": a link is of ONE file — pass one or the other")
+				return nil, hostErr(wire.ErrInvalid, "ref names an output of this job and path names "+rel+": a link is of ONE file - pass one or the other")
 			}
 			outRef = f.Ref
 		case rel == "":
@@ -360,7 +360,7 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 		pin = randomDigits(pagePinLength)
 	}
 	if pin != "" && (len(pin) < 4 || len(pin) > 12) {
-		return nil, hostErr(wire.ErrInvalid, "pin must be 4–12 characters")
+		return nil, hostErr(wire.ErrInvalid, "pin must be 4-12 characters")
 	}
 
 	// TTL: the plugin's ask, clamped by the manifest's ceiling and the host's.
@@ -759,7 +759,7 @@ func (r *Registry) PageEvent(ctx context.Context, sh *model.Share, p *Installed,
 	in.ViewID = sh.PageID
 	var state map[string]any
 	_ = json.Unmarshal([]byte(orJSON(sh.StateJSON, "{}")), &state)
-	in.Context = wire.CallContext{Inputs: scope.Inputs(), Locale: in.Context.Locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(p),
+	in.Context = wire.CallContext{Inputs: scope.Inputs(), Locale: in.Context.Locale, Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(ctx, p),
 		ShareMaxTTLDays: r.linkCeiling(ctx, p)}
 	if in.Data == nil {
 		in.Data = map[string]any{}

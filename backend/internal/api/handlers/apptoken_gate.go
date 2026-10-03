@@ -68,7 +68,7 @@ func deniedToApp(w http.ResponseWriter, r *http.Request) bool {
 		"error": "this request is authenticated by an app token (" + label +
 			", id " + id + "), which cannot manage its owner's credentials " +
 			"(API tokens, S3 access keys, SSH keys, NFS exports). " +
-			"Sign in as a person to mint your own, or — if this token really belongs to one person — " +
+			"Sign in as a person to mint your own, or - if this token really belongs to one person - " +
 			"change its kind with PATCH /api/admin/ai-tokens/" + id + ` {"kind":"user"}.`,
 		// Machine-readable so a client can tell "wrong kind of credential"
 		// apart from "your role is too low", which is also a 403 here.

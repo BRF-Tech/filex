@@ -21,6 +21,14 @@ vi.mock('@/api/branding', () => ({
   BrandingApi: { get: vi.fn().mockResolvedValue({}) },
 }));
 
+// The sign-in page asks the server what it offers as it mounts
+// (GET /api/capabilities). The server here publishes what each test put in
+// the store, so the answer cannot overwrite it.
+let published: Record<string, unknown> = {};
+vi.mock('@/api/capabilities', () => ({
+  CapabilitiesApi: { fetch: vi.fn(async () => published) },
+}));
+
 const push = vi.fn();
 
 function mountLogin() {
@@ -65,6 +73,7 @@ describe('demo landing CTA', () => {
       demo_user: 'demo@demo.com',
       demo_pass: 's3cret',
     };
+    published = caps.data;
     const auth = useAuthStore();
     const login = vi.spyOn(auth, 'login').mockResolvedValue(true);
 
@@ -84,6 +93,7 @@ describe('demo landing CTA', () => {
   it('falls back to "demo" when the server does not publish one', async () => {
     const caps = useCapabilitiesStore();
     caps.data = { ...caps.data, demo_mode: true, demo_user: 'demo@demo.com', demo_pass: '' };
+    published = caps.data;
     const auth = useAuthStore();
     const login = vi.spyOn(auth, 'login').mockResolvedValue(true);
 

@@ -22,7 +22,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
-	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
@@ -43,6 +42,9 @@ type Meta struct {
 	// ThumbSigner stamps the `thumb_url` these rows hand out, as the folder
 	// listing's does (thumb_url.go). Nil emits it unsigned.
 	ThumbSigner *thumb.Signer
+	// ThumbRefresh draws in the background what these rows found missing or
+	// stale (hydrateThumbs).
+	ThumbRefresh ThumbRefresher
 }
 
 // NewMeta constructs the handler.
@@ -91,6 +93,10 @@ type metaRow struct {
 	// client used to build `/api/files/thumb/<id>` for EVERY file on these
 	// rows and got `404 "not ready"` for each one it could not have.
 	ThumbURL string `json:"thumb_url,omitempty"`
+	// ThumbNote says why a file has no thumbnail when the reason is the
+	// file's: corrupt, encrypted or too_large (thumb.NoteOf, the folder
+	// listing's rule). Absent otherwise.
+	ThumbNote string `json:"thumb_note,omitempty"`
 	// E2eRoot is the end-to-end encrypted folder the node sits in, as a wire
 	// path — absent for every other node. The client needs it to name a row
 	// whose name is encrypted (see e2eRoots).
@@ -119,13 +125,15 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 	user := auth.UserFrom(ctx)
 	sets := map[int64]*acl.Set{}
 	roots := newE2eRoots(h.Store)
+	hydrateThumbs(ctx, h.Store, h.ThumbRefresh, nodes)
 	for _, n := range nodes {
 		if n == nil {
 			continue
 		}
 		// An encrypted folder's key file is bookkeeping, hidden from every
-		// listing; it is not "recent", "starred" or tagged either.
-		if n.Name == e2e.MarkerName {
+		// listing (syspath.Unlisted); it is not "recent", "starred" or tagged
+		// either.
+		if syspath.Unlisted(n.Name) {
 			continue
 		}
 		// ⚠ Recent, Starred and every tag view come through here, and each
@@ -140,11 +148,16 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 			continue
 		}
 		row := metaRow{Node: n}
-		if n.Type == model.NodeTypeFile {
-			if t, err := h.Store.GetThumbnail(ctx, n.ID); err == nil && thumbServable(t) {
-				row.ThumbURL = thumbURL(h.ThumbSigner, n.ID)
-			}
+		if n.Type == model.NodeTypeFile && thumbServable(n.Thumb) {
+			row.ThumbURL = thumbURL(h.ThumbSigner, n.ID, n.Thumb)
+		} else if n.Type == model.NodeTypeFile {
+			row.ThumbNote = thumb.NoteOf(n.Thumb)
 		}
+		// ⚠ These rows are the node serialized as it is: the thumbnail row
+		// (its cache path, a generator's error text) is the server's
+		// business, and `thumb_url` and `thumb_note` above are all a client
+		// is owed.
+		n.Thumb = nil
 		st := byID[n.StorageID]
 		if st != nil {
 			n.Storage = st.Name

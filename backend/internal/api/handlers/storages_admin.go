@@ -76,6 +76,12 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown driver"})
 		return
 	}
+	// A configuration that was never saved - credentials included - is
+	// looked at once and let go: the connection it opened, or the instance a
+	// storage plugin made from it, does not outlive the answer. Off the
+	// request's path: a driver whose connection hangs must not hold the
+	// answer back.
+	defer func() { go storage.CloseDriver(drv) }()
 	ctx, cancel := context.WithTimeout(r.Context(), ProbeTimeout)
 	defer cancel()
 	if err := drv.Init(ctx, req.Config); err != nil {
@@ -168,6 +174,7 @@ func (h *StoragesAdmin) Discover(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown driver"})
 		return
 	}
+	defer func() { go storage.CloseDriver(drv) }() // as in Test: nothing it opened outlives the answer
 	if req.Config == nil {
 		req.Config = map[string]any{}
 	}
@@ -223,7 +230,7 @@ func childRoot(current, name string) string {
 // loud in front of it.
 func probeError(ctx context.Context, err error) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("timed out after %s — the endpoint did not answer: %v", ProbeTimeout, err)
+		return fmt.Sprintf("timed out after %s - the endpoint did not answer: %v", ProbeTimeout, err)
 	}
 	return err.Error()
 }

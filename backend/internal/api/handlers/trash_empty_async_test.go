@@ -218,8 +218,8 @@ func TestTrashEmpty_ANarrowingItCannotReadPurgesNothing(t *testing.T) {
 // told there is none.
 func TestTrashEmptyStatus_IsTheTenantsOwn(t *testing.T) {
 	srv, client, store := ownershipServer(t, true)
-	mine := seedFullTenant(t, store, "diyetlif")
-	theirs := seedFullTenant(t, store, "arasboya")
+	mine := seedFullTenant(t, store, "globex")
+	theirs := seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/trash/empty", map[string]any{})
@@ -257,8 +257,8 @@ func TestTrashEmpty_IsAnOpsRowOfItsTenant(t *testing.T) {
 			t.Cleanup(d.Ops.Stop)
 			t.Cleanup(held.free)
 		})
-	mine := seedFullTenant(t, store, "diyetlif")
-	theirs := seedFullTenant(t, store, "arasboya")
+	mine := seedFullTenant(t, store, "globex")
+	theirs := seedFullTenant(t, store, "initech")
 	testutil.LoginAs(t, srv, client, mine.adminEmail, mine.adminPass)
 
 	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/trash/empty", map[string]any{})

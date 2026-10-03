@@ -147,6 +147,7 @@ async function openExplorer(page: Page, view: 'list' | 'grid' = 'list') {
 
 test.describe('Phone — a tap anywhere on an item opens it (issue #26)', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test.skip(({ browserName }) => browserName === 'firefox', 'Playwright cannot emulate a phone in Firefox (isMobile is not supported there)');
 
   test.beforeEach(async ({ page }) => openExplorer(page));
 
@@ -168,6 +169,7 @@ test.describe('Phone — a tap anywhere on an item opens it (issue #26)', () => 
   });
 
   test('a long press selects; the checkbox adds; a tap on a row still opens while things are selected', async ({ page }) => {
+    test.skip(test.info().project.name !== 'chromium', 'a real long press goes through CDP Input.dispatchTouchEvent, which only Chromium has (longPress)');
     const png = row(page, 'dot.png');
     const other = row(page, 'other.txt');
 
@@ -193,6 +195,7 @@ test.describe('Phone — a tap anywhere on an item opens it (issue #26)', () => 
  */
 test.describe('Phone — a tap does not depend on the click (issue #26, third round)', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test.skip(({ browserName }) => browserName === 'firefox', 'Playwright cannot emulate a phone in Firefox (isMobile is not supported there)');
 
   test.beforeEach(async ({ page }) => openExplorer(page));
 
@@ -245,10 +248,12 @@ test.describe('Phone — a tap does not depend on the click (issue #26, third ro
 
 test.describe('Phone — grid cards (issue #26, fourth round)', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+  test.skip(({ browserName }) => browserName === 'firefox', 'Playwright cannot emulate a phone in Firefox (isMobile is not supported there)');
 
   test.beforeEach(async ({ page }) => openExplorer(page, 'grid'));
 
   test('a card checkbox stays out of the way until something is selected, then ticks; a tap on a card opens', async ({ page }) => {
+    test.skip(test.info().project.name !== 'chromium', 'a real long press goes through CDP Input.dispatchTouchEvent, which only Chromium has (longPress)');
     const png = row(page, 'dot.png');
     const other = row(page, 'other.txt');
     const otherCheck = other.locator('.fe-item-check');

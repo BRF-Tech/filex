@@ -7,7 +7,7 @@
 // second download, a second inspection, a second job. "Extract here" has no
 // dialog, so it showed nothing at all in that time and a second choice of it
 // started another.
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import { readFileSync } from 'node:fs';
@@ -16,10 +16,6 @@ import { resolve } from 'node:path';
 import ArchiveExtractModal from '@brftech/filex-core/src/modals/ArchiveExtractModal.vue';
 import ArchiveCreateModal from '@brftech/filex-core/src/modals/ArchiveCreateModal.vue';
 import ArchivePasswordModal from '@brftech/filex-core/src/modals/ArchivePasswordModal.vue';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 describe('"Extract to folder"', () => {
   it('Enter while it is busy sends nothing more, and the box is shut', async () => {

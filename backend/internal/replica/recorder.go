@@ -60,7 +60,7 @@ func (n *Notifier) NotifyReplicaFail(ctx context.Context, path, op string, err e
 		Event:    notify.EventReplicaFail,
 		Severity: notify.SeverityWarning,
 		Title:    "Replica " + op + " failed",
-		Body:     "Path " + path + " — " + err.Error(),
+		Body:     "Path " + path + " - " + err.Error(),
 		Meta: map[string]any{
 			"path":    path,
 			"op":      op,

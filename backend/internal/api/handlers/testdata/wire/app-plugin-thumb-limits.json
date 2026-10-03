@@ -1,0 +1,39 @@
+{
+  "defaults": {
+    "concurrency": 2,
+    "max_input_mb": 32,
+    "memory_mb": 64,
+    "timeout_s": 10
+  },
+  "ext": [
+    "jar",
+    "apk"
+  ],
+  "max": {
+    "concurrency": 8,
+    "max_input_mb": 256,
+    "memory_mb": 256,
+    "timeout_s": 60
+  },
+  "mime": [
+    "application/java-archive"
+  ],
+  "min": {
+    "concurrency": 1,
+    "max_input_mb": 1,
+    "memory_mb": 16,
+    "timeout_s": 1
+  },
+  "stored": {
+    "concurrency": 0,
+    "max_input_mb": 0,
+    "memory_mb": 0,
+    "timeout_s": 20
+  },
+  "values": {
+    "concurrency": 2,
+    "max_input_mb": 32,
+    "memory_mb": 64,
+    "timeout_s": 20
+  }
+}

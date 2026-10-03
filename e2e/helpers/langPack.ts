@@ -14,7 +14,7 @@
  * around.
  *
  * ⚠ Arabic is filex's right-to-left TEST fixture and nothing else: it is not
- * published and not advertised (Burak, 2026-09-19), and no screenshot shows
+ * published and not advertised (the maintainer, 2026-09-19), and no screenshot shows
  * it.
  */
 import { expect, type APIRequestContext } from '@playwright/test';
@@ -58,7 +58,11 @@ export function arabicPack(extra: Record<string, string> = {}): LangPack {
   }
   const fixture = JSON.parse(readFileSync(resolve(HERE, '../fixtures/lang-pack/filex-app.json'), 'utf8'));
   fixture.name = 'lang-ar-e2e';
-  fixture.label = { en: 'Arabic (e2e)', ar: '\u0627\u0644\u0639\u0631\u0628\u064a\u0629 (e2e)' };
+  // The label keeps every language the fixture declares (`languages`: en,
+  // tr): the server refuses a manifest whose label lacks one (manifest_invalid,
+  // wasmplugin checkLanguages). Only a machine without the local pack takes
+  // this path - CI, a fresh checkout - and every spec installing Arabic was red there.
+  fixture.label = { en: 'Arabic (e2e)', tr: 'Arapça (e2e)', ar: '\u0627\u0644\u0639\u0631\u0628\u064a\u0629 (e2e)' };
   fixture.ui_locales = { ar: { ...(fixture.ui_locales?.ar ?? {}), ...extra } };
   const dir = mkdtempSync(join(tmpdir(), 'filex-lang-ar-'));
   const path = join(dir, 'filex-app.json');

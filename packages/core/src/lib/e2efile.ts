@@ -173,7 +173,7 @@ export class FxeFormatError extends Error {
 /** Header length from the first 13 bytes. Throws FxeFormatError. */
 export function fxeHeaderLength(first: Uint8Array): number {
   if (first.length < FXE_FIXED_LEN || !hasFxeMagic(first)) throw new FxeFormatError('e2e: not a filex encrypted file (.fxe)');
-  if (first[8] !== FXE_VERSION) throw new FxeFormatError(`e2e: unsupported .fxe version ${first[8]} — a newer filex wrote it`);
+  if (first[8] !== FXE_VERSION) throw new FxeFormatError(`e2e: unsupported .fxe version ${first[8]} - a newer filex wrote it`);
   const n = new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(9, false);
   if (n === 0 || n > FXE_MAX_HEADER_BYTES) throw new FxeFormatError('e2e: the .fxe header length is out of range');
   return n;

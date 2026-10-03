@@ -194,7 +194,7 @@ func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 // browser. read, write and delete for an account that may change files;
 // read and write for a viewer.
 //
-// ⚠ Why a viewer's desktop carries `write` (Burak, 2026-09-28): the verbs of a
+// ⚠ Why a viewer's desktop carries `write` (the maintainer, 2026-09-28): the verbs of a
 // token gate the ROUTE, the account's role gates the FILES. Changing the
 // account itself — profile, password, two-factor — asks `write` (routes.go,
 // accountWrite), so a `read` desktop answered 403 there while the same viewer

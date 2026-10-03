@@ -26,6 +26,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -63,7 +64,9 @@ type stagedFake struct {
 
 	beginCalls  int
 	commitCalls int
-	statusCalls int
+	// commitQueries is every commit's query (expect, e2e_convert), in order.
+	commitQueries []url.Values
+	statusCalls   int
 	// wireBytes counts every byte the client pushed, accepted or not — the
 	// number that answers "did it resume or start over?".
 	wireBytes int64
@@ -321,6 +324,7 @@ func (f *stagedFake) handleCommit(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.commitCalls++
+	f.commitQueries = append(f.commitQueries, r.URL.Query())
 	f.mu.Unlock()
 	if !s.complete() {
 		f.writeJSON(w, 409, map[string]any{"error": "upload incomplete", "offset": s.offset()})

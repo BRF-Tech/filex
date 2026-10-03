@@ -452,19 +452,37 @@ onBeforeUnmount(() => {
         <!-- PC: the useful install is the desktop app — it is the only build
              that syncs folders to disk and stays running in the tray. -->
         <template v-if="showDesktopDownload">
-          <a
+          <!-- A row is the file for this machine's processor (x64 when the
+               browser cannot tell) and, under it, the same file for the other
+               one: two links, so the row is a box holding them rather than one
+               link (a link inside a link is not HTML). -->
+          <div
             v-for="d in desktopDownloads"
             :key="d.href"
-            :href="d.href"
-            class="flex items-center justify-between gap-3 ip-dl"
-            data-testid="desktop-download-button"
+            class="ip-dl"
+            :data-arch="d.arch"
           >
-            <span class="min-w-0">
-              <span class="block ip-dl__label">{{ d.label }}</span>
-              <span class="block ip-muted">{{ d.hint }}</span>
-            </span>
-            <span aria-hidden="true" class="ip-dl__arrow">↓</span>
-          </a>
+            <a
+              :href="d.href"
+              class="flex items-center justify-between gap-3 ip-dl__main"
+              data-testid="desktop-download-button"
+            >
+              <span class="min-w-0">
+                <span class="block ip-dl__label">{{ d.label }}</span>
+                <span class="block ip-muted">{{ d.hint }}</span>
+              </span>
+              <span aria-hidden="true" class="ip-dl__arrow">↓</span>
+            </a>
+            <a
+              v-if="d.other"
+              :href="d.other.href"
+              class="ip-dl__other"
+              :data-arch="d.other.arch"
+              data-testid="desktop-download-other"
+            >
+              {{ d.other.label }}
+            </a>
+          </div>
           <a :href="RELEASES" target="_blank" rel="noopener noreferrer" class="block ip-all">
             {{ $t('install.desktopAllDownloads') }}
           </a>
@@ -726,13 +744,28 @@ onBeforeUnmount(() => {
 }
 
 .ip-dl {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 8px 12px;
   border: 1px solid var(--fe-border);
   border-radius: var(--fe-radius);
-  text-decoration: none;
 }
 .ip-dl:hover {
   border-color: var(--fe-primary);
+}
+.ip-dl__main {
+  text-decoration: none;
+}
+/* The other processor's file: small, under the row's hint, plainly a link. */
+.ip-dl__other {
+  align-self: flex-start;
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+  text-decoration: underline;
+}
+.ip-dl__other:hover {
+  color: var(--fe-text);
 }
 .ip-dl__label {
   font-size: var(--fe-text-md);

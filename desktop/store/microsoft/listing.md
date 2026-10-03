@@ -1,4 +1,4 @@
-# Microsoft Store listing — filex
+# Microsoft Store listing - filex
 
 What goes into Partner Center → the product → **Store listings** (one per
 language) and **Submission options**. Kept here so a change to the product and a
@@ -22,7 +22,7 @@ screenshots PNG, 1366×768 or larger, at least one (four or more recommended).
 
 **Description**
 
-filex connects to a filex server that you or your organisation run — it is the
+filex connects to a filex server that you or your organisation run - it is the
 desktop app for a self-hosted file manager, not a cloud service of its own.
 
 Sign in through your browser, including single sign-on, and your server's
@@ -37,7 +37,7 @@ server's document editor.
 filex keeps your sign-in in Windows' secure storage and sends nothing about
 you anywhere except the server you chose. It is open source (MIT); the server
 is a single program you can run on your own machine, in Docker or on
-Kubernetes — see filex.sh.
+Kubernetes - see filex.sh.
 
 **Product features**
 
@@ -49,12 +49,12 @@ Kubernetes — see filex.sh.
 - "Open with filex" for Office documents, edited in your server's document editor
 - Share links with a PIN, an expiry and a download limit
 - Download and upload limits, and a time window for syncing
-- Notifications for what happens on your server, from the tray — and the bell and your account menu in the window
+- Notifications for what happens on your server, from the tray - and the bell and your account menu in the window
 - Starts at sign-in if you want it to, quietly in the tray
 - English and Turkish interface
 - Open source (MIT); no telemetry, no ads
 
-**What's new** — written by the release itself since 0.47.0: "What's new in
+**What's new** - written by the release itself since 0.47.0: "What's new in
 filex X.Y.Z: <the GitHub Release>" in every listed language (the public
 workflow's `scripts/msstore-submit.ps1`). The first submission's text was
 written by hand. Store version ≠ app version: see
@@ -70,7 +70,7 @@ written by hand. Store version ≠ app version: see
 
 **Açıklama**
 
-filex, sizin ya da kurumunuzun işlettiği bir filex sunucusuna bağlanır — kendi
+filex, sizin ya da kurumunuzun işlettiği bir filex sunucusuna bağlanır - kendi
 başına bir bulut hizmeti değil, kendi sunucunuzda çalışan bir dosya
 yöneticisinin masaüstü uygulamasıdır.
 
@@ -78,7 +78,7 @@ Tarayıcınızla (kurumunuzun tek oturum açma sistemi dahil) giriş yapın, sun
 dosyalar yerel bir pencerede karşınızda olsun: sunucunuzun bağlandığı her
 depoda gezin, önizleyin, yeniden adlandırın, taşıyın, paylaşın ve arayın. Bu
 bilgisayardan bir klasör seçin; filex onu sunucudaki bir klasörle iki yönlü
-senkronda tutar — arka planda, hiçbir pencere açık değilken bile. Hangi sunucu
+senkronda tutar - arka planda, hiçbir pencere açık değilken bile. Hangi sunucu
 klasörlerinin bu bilgisayarda tutulacağını siz seçersiniz. Dosyaları
 pencereden doğrudan masaüstüne ya da Dosya Gezgini'ne sürükleyin; Office
 belgelerini filex ile açıp sunucunuzun belge düzenleyicisinde düzenleyin.
@@ -86,7 +86,7 @@ belgelerini filex ile açıp sunucunuzun belge düzenleyicisinde düzenleyin.
 filex oturumunuzu Windows'un güvenli deposunda saklar ve seçtiğiniz sunucu
 dışında hiçbir yere sizinle ilgili bilgi göndermez. Açık kaynaktır (MIT);
 sunucu, kendi makinenizde, Docker'da ya da Kubernetes'te çalıştırabileceğiniz
-tek bir programdır — ayrıntılar filex.sh'ta.
+tek bir programdır - ayrıntılar filex.sh'ta.
 
 **Ürün özellikleri**
 
@@ -118,11 +118,11 @@ tek bir programdır — ayrıntılar filex.sh'ta.
 | Copyright | © BRF Tech |
 | Developed by | BRF Tech |
 | Store logo (1:1, 300×300) | `desktop/build/appx/LargeTile.png` is 310×310; export 300×300 from `build/icon.png` |
-| Screenshots | EN listing: the English interface; TR listing: the Turkish interface. Taken from a signed-in desktop app against a demo server — file list, Settings → Sync folders, a share dialog, "Open with" in the editor window. The release screenshot rules apply (`docs/CONTRIBUTING.md` → Release process, step 2): current, and in the listing's language |
+| Screenshots | EN listing: the English interface; TR listing: the Turkish interface. Taken from a signed-in desktop app against a demo server - file list, Settings → Sync folders, a share dialog, "Open with" in the editor window. The release screenshot rules apply (`docs/CONTRIBUTING.md` → Release process, step 2): current, and in the listing's language |
 
 ## Submission options
 
-**Restricted capability — `runFullTrust`** (asked on upload; the box is short):
+**Restricted capability - `runFullTrust`** (asked on upload; the box is short):
 
 > Electron desktop app. It syncs folders the user picks by running the sync
 > engine shipped in the package as a child process, and opens files the user
@@ -130,14 +130,14 @@ tek bir programdır — ayrıntılar filex.sh'ta.
 
 **Notes for certification** (Policy 10.3: the tester needs a working server and
 an account). Give the demo server address and a test account in this field in
-Partner Center itself — never in this file or anywhere in the repository; the
+Partner Center itself - never in this file or anywhere in the repository; the
 account comes from the vault.
 
 > filex is the client for a self-hosted server. Sign in: Connect → server
 > address https://demo.filex.sh → the browser opens → sign in with the account
 > below → the browser hands you back to the app. If the browser cannot hand
 > back in your environment, the sign-in window asks "Browser couldn't return to
-> the app? Paste the code it showed you" — paste the code the browser page
+> the app? Paste the code it showed you" - paste the code the browser page
 > shows.
 
 **Age rating:** the IARC questionnaire in Partner Center. The honest answers:

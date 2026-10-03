@@ -29,7 +29,7 @@ vi.mock('@/api/client', () => ({
   extractError: (_e: unknown, f: string) => f,
   api: {
     get: vi.fn(async (url: string) => {
-      if (url === '/admin/storages') return { data: [{ id: 2, name: 'Diyetlif-Bulut-Depolama' }] };
+      if (url === '/admin/storages') return { data: [{ id: 2, name: 'Globex-Cloud-Storage' }] };
       if (url === '/files/manager/trash') {
         return { data: { entries: listed, total: listed.length, limit: 50, offset: 0 } };
       }
@@ -50,7 +50,7 @@ function entry(id: number): Body {
   return {
     id,
     storage_id: 2,
-    storage_name: 'Diyetlif-Bulut-Depolama',
+    storage_name: 'Globex-Cloud-Storage',
     path: `/Kopya ${id}.pdf`,
     name: `Kopya ${id}.pdf`,
     size: 1024,

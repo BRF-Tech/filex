@@ -18,7 +18,8 @@ import (
 var everyEvent = []notify.EventType{
 	notify.EventReplicaFail, notify.EventReplicaFailSpike, notify.EventReplicaReconcileDone,
 	notify.EventReplicaStatusReport, notify.EventPrimaryReadFail, notify.EventQuotaNearFull,
-	notify.EventQuotaFull, notify.EventQueueStuck, notify.EventAuthFailSpike, notify.EventDiskFull,
+	notify.EventQuotaFull, notify.EventQueueStuck, notify.EventAuthFailSpike, notify.EventAuthProviderDown,
+	notify.EventLDAPLegacyAccountElsewhere, notify.EventDiskFull,
 	notify.EventUpdateAvailable, notify.EventUpdateApplied,
 	notify.EventFileUploaded, notify.EventFileUpdated, notify.EventFileUploadFailed,
 	notify.EventFileDeleted, notify.EventFileMoved, notify.EventFileTrashed,

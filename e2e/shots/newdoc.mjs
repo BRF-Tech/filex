@@ -58,7 +58,7 @@ async function openDialog(page, url, { list = true, name = 'LICENSE' } = {}) {
   const input = page.getByTestId('newdoc-name');
   // Typed the way a person does. ⚠ Not `fill()`: it focuses the field as it
   // fills, focusing selects the stem, and fill then replaced only `Untitled`
-  // (`LICENSE.txt`) — see e2e/tests/158-new-document-any-name.spec.ts.
+  // (`LICENSE.txt`) - see e2e/tests/155-new-document-any-name.spec.ts.
   await input.click();
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type(name);

@@ -63,7 +63,29 @@ const (
 	EventQuotaFull            EventType = "quota_full"
 	EventQueueStuck           EventType = "queue_stuck"
 	EventAuthFailSpike        EventType = "auth_fail_spike"
-	EventDiskFull             EventType = "disk_full"
+	// EventAuthProviderDown fires when an operating-system sign-in provider the
+	// administrator switched on cannot start (the machine changed, the API is
+	// gone). The provider is left out of the running set; every other way in
+	// keeps working. Once per distinct reason.
+	EventAuthProviderDown EventType = "auth_provider_down"
+	// EventLDAPLegacyAccountElsewhere fires ONCE per older directory account
+	// (keyed by a bare login name before the e-mail rule) that a sign-in by the
+	// same name found in ANOTHER tenant. The account is left alone — the tenant
+	// boundary is not crossed — and the person gets the first sign-in rule in
+	// their own tenant; the platform operator decides what, if anything, to do
+	// (auth.AdoptAccount, LegacyAccountElsewhere). Meta `provider`, `account`,
+	// `account_tenant`, `login_tenant`, and the sentence per language
+	// (`title_<lang>`, `body_<lang>`, from srvtext).
+	EventLDAPLegacyAccountElsewhere EventType = "ldap_legacy_account_elsewhere"
+	// EventTenantDomainSuspended / EventTenantDomainRestored tell a tenant's
+	// administrators (one notification each, UserID set) that the CNAME of
+	// the tenant's own domain stopped pointing at its platform subdomain, so
+	// the domain stopped routing, or that it points there again
+	// (tenantdomain.Service.Check, docs/TENANT-ADMIN.md). Meta `domain`,
+	// `reason`, and the sentence per language (`title_<lang>`, `body_<lang>`).
+	EventTenantDomainSuspended EventType = "tenant_domain_suspended"
+	EventTenantDomainRestored  EventType = "tenant_domain_restored"
+	EventDiskFull              EventType = "disk_full"
 	// EventUpdateAvailable fires ONCE per newly published release — the
 	// "already announced" mark is persisted, so a restart loop cannot turn it
 	// into a stream.
@@ -132,7 +154,8 @@ const (
 // which broadcast is decided in ONE place — bell.go.
 var operatorEvents = []EventType{
 	EventReplicaFail, EventReplicaFailSpike, EventReplicaReconcileDone, EventReplicaStatusReport,
-	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike,
+	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike, EventAuthProviderDown,
+	EventLDAPLegacyAccountElsewhere,
 	EventDiskFull, EventUpdateAvailable, EventUpdateApplied,
 	EventAppUpdated, EventAppUpdateAvailable, EventAppUpdateNeedsApproval, EventAppUpdateFailed,
 	EventPluginUpdateAvailable, EventPluginRequested,

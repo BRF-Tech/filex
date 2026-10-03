@@ -55,6 +55,14 @@ export interface AppPermDef {
   label: PluginText;
   description?: PluginText;
   default: AppPermDefault;
+  /**
+   * What `default` comes to on each built-in role when nobody has decided
+   * it — the server's answer (perm.AppDefaultFor, the last layer of
+   * AppAllowed): `{viewer: false, user: true, admin: true}` for a `user`
+   * default. The role editors label "Default" from this and keep no copy of
+   * the rule. Absent: "Default" says only "Default".
+   */
+  default_for?: Partial<Record<BuiltinRole | 'admin', boolean>>;
 }
 
 export interface PermCatalogue {
@@ -78,6 +86,17 @@ export interface PermSource {
   kind: PermSourceKind;
   rule_id?: number;
   rule_name?: string;
+  /** The custom role is the account's through this group (it has none of
+   *  its own). */
+  group_id?: number;
+  group_name?: string;
+}
+
+/** The role an account has through a group, when it has none of its own. */
+export interface GroupRole {
+  role_id: number;
+  group_id: number;
+  group_name: string;
 }
 
 export interface PermRuleSettings {
@@ -189,15 +208,26 @@ export const RolesApi = {
 
   /** The one custom role an account holds, or null. */
   async userRole(id: number): Promise<number | null> {
-    const { data } = await api.get<{ role_id: number | null }>(`/admin/users/${id}/roles`);
-    return data.role_id ?? null;
+    return (await this.userRoleDetail(id)).role_id;
+  },
+
+  /** The account's own custom role, and — when it has none — the role a
+   *  group gives it. */
+  async userRoleDetail(id: number): Promise<{ role_id: number | null; group_role: GroupRole | null }> {
+    const { data } = await api.get<{ role_id: number | null; group_role?: GroupRole | null }>(`/admin/users/${id}/roles`);
+    return { role_id: data.role_id ?? null, group_role: data.group_role ?? null };
   },
 
   /** Sets the account's ONE role in one call: a custom role (its id), or a
    *  built-in one ("admin" | "user" | "viewer"), which ends the custom one. */
-  async setUserRole(id: number, role: number | BuiltinRole | 'admin'): Promise<{ role_id: number | null; role: string }> {
+  /** `group_role` is set when, with no custom role of their own, a group's
+   *  role still decides — a built-in role picked here does not replace it. */
+  async setUserRole(
+    id: number,
+    role: number | BuiltinRole | 'admin',
+  ): Promise<{ role_id: number | null; role: string; group_role?: GroupRole | null }> {
     const body = typeof role === 'number' ? { role_id: role } : { role };
-    const { data } = await api.put<{ role_id: number | null; role: string }>(`/admin/users/${id}/roles`, body);
+    const { data } = await api.put<{ role_id: number | null; role: string; group_role?: GroupRole | null }>(`/admin/users/${id}/roles`, body);
     return data;
   },
 
@@ -206,14 +236,22 @@ export const RolesApi = {
   async listRules(): Promise<{
     rules: PermissionRule[];
     assignments: Record<string, number>;
+    /** user id → the role a group gives them (people with none of their own). */
+    groupAssignments?: Record<string, GroupRole>;
     builtinMembers?: Partial<Record<'admin' | BuiltinRole, number>>;
   }> {
     const { data } = await api.get<{
       rules: PermissionRule[];
       assignments?: Record<string, number>;
+      group_assignments?: Record<string, GroupRole>;
       builtin_members?: Partial<Record<'admin' | BuiltinRole, number>>;
     }>('/admin/roles');
-    return { rules: data.rules ?? [], assignments: data.assignments ?? {}, builtinMembers: data.builtin_members ?? {} };
+    return {
+      rules: data.rules ?? [],
+      assignments: data.assignments ?? {},
+      groupAssignments: data.group_assignments ?? {},
+      builtinMembers: data.builtin_members ?? {},
+    };
   },
 
   async createRule(rule: PermissionRuleInput): Promise<PermissionRule> {
@@ -224,6 +262,15 @@ export const RolesApi = {
   async updateRule(id: number, rule: PermissionRuleInput): Promise<PermissionRule> {
     const { data } = await api.put<PermissionRule>(`/admin/roles/${id}`, rule);
     return data;
+  },
+
+  /** What a custom role being edited comes to before it is saved: the
+   *  built-in role its people would be on (backend perm.HolderRole). The
+   *  rule is the server's alone; nothing is stored. */
+  async previewHolder(rule: Pick<PermissionRuleInput, 'permissions' | 'effects' | 'conditions'>): Promise<BuiltinRole> {
+    const { permissions, effects, conditions } = rule;
+    const { data } = await api.post<{ holder_role: BuiltinRole }>('/admin/roles/preview', { permissions, effects, conditions });
+    return data.holder_role;
   },
 
   /** Deletes a role. People holding it move to `to`: "user", "viewer" or

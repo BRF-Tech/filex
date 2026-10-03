@@ -7,7 +7,7 @@
 #   docker compose up                                            # filex slim only
 #   docker compose --profile full up                             # filex + thumbnail tools
 #   docker compose --profile onlyoffice up                       # filex + ONLYOFFICE editor
-#   docker compose --profile postgres --profile minio up         # full self-hosted stack
+#   docker compose --profile postgres --profile versitygw up     # full self-hosted stack
 #   docker compose --profile full --profile onlyoffice --profile postgres up
 #
 # Copy `.env.example` -> `.env` and edit before going to prod.
@@ -74,7 +74,8 @@ services:
 
   # ---------------------------------------------------------------------
   # filex (full) — the registry's default tag; thumbnail toolchain included
-  # (~510 MB). The lean alternative is ghcr.io/brf-tech/filex:slim (~43 MB),
+  # (~225 MB; no LibreOffice since 0.50 - office documents are the connected
+  # ONLYOFFICE's). The lean alternative is ghcr.io/brf-tech/filex:slim (~43 MB),
   # which has the same binary and none of the programs the thumbnailer shells
   # out to.
   # Activate with `--profile full` and stop the `filex` service first
@@ -177,25 +178,36 @@ services:
       - filex-net
 
   # ---------------------------------------------------------------------
-  # MinIO (profile: minio) — local S3-compatible blob store
-  # Use as a storage backend for the `s3` driver, or for testing.
+  # S3 server (profile: versitygw) - Versity S3 Gateway, posix backend: a
+  # local S3 store for the `s3` driver, or for testing. Objects are plain
+  # files under s3-data/<bucket>/<key>; the entrypoint makes the bucket
+  # S3_BUCKET names. Add it as a storage with endpoint http://versitygw:7070,
+  # path_style true and region us-east-1 (part of the signature: `auto` is
+  # refused). Versioning is available per bucket (s3-versions holds the
+  # older versions). It replaced MinIO, whose image is no longer published:
+  # see docs/STORAGE.md, "Moving off the bundled MinIO".
   # ---------------------------------------------------------------------
-  minio:
-    profiles: ["minio"]
-    image: minio/minio:latest
-    container_name: filex-minio
+  versitygw:
+    profiles: ["versitygw"]
+    image: versity/versitygw:v1.8.0
+    container_name: filex-s3
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    entrypoint: ["/bin/sh", "-c", "mkdir -p \"/data/$$S3_BUCKET\" && exec /usr/local/bin/docker-entrypoint.sh"]
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${S3_PORT:-7070}:7070"
     environment:
-      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin}
+      ROOT_ACCESS_KEY: ${S3_ACCESS_KEY:-filex}
+      ROOT_SECRET_KEY: ${S3_SECRET_KEY:-change-me}
+      S3_BUCKET: ${S3_BUCKET:-filex}
+      VGW_BACKEND: posix
+      VGW_BACKEND_ARG: /data
+      VGW_VERSIONING_DIR: /versions
+      VGW_HEALTH: /health
     volumes:
-      - minio-data:/data
+      - s3-data:/data
+      - s3-versions:/versions
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7070/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -209,7 +221,8 @@ volumes:
   onlyoffice-cache:
   onlyoffice-fonts:
   postgres-data:
-  minio-data:
+  s3-data:
+  s3-versions:
 
 networks:
   filex-net:

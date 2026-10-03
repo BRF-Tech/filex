@@ -92,4 +92,33 @@ describe('every window-sized layer in core starts at --fe-overlay-top', () => {
     expect(html).toMatch(/--fe-overlay-top: var\(--titlebar-h\);/);
     expect(html).toMatch(/#titlebar \{\s*flex: 0 0 var\(--titlebar-h\);/);
   });
+
+  // #93 - the document windows (a file's own window: the viewer, the
+  // open-with editor) reserved their bar with an `!important` patch on the
+  // chromeless viewer's padding. It moved the viewer and nothing else: its
+  // backdrop and any dialog in that window still began under the bar. They
+  // state the strip through the same contract now, and nothing in the desktop
+  // shell overrides core's layout rules with `!important`. The geometry is
+  // measured in Electron (titlebar-e2e.mjs, section 4).
+  it('the desktop document windows reserve their bar and their note through the variables, no !important patch', () => {
+    // Raw text, not stripComments(): main.ts has globs like '**/*' in strings,
+    // which a comment stripper would read as the start of a block comment.
+    const code = readFileSync(path.resolve(__dirname, '../../../desktop/src/main.ts'), 'utf8');
+    expect(code).toMatch(/:root\{--fe-overlay-top:\$\{H\}px\}/);
+    expect(code).toMatch(/:root\{--fe-overlay-bottom:' \+ h \+ 'px\}/);
+    const patches = [...code.matchAll(/\.fe-[\w-]+\{[^}]*!important/g)].map((m) => m[0]);
+    expect(patches).toEqual([]);
+  });
+
+  it('the full-window viewer fits between the two strips; both default to 0 for every other host', () => {
+    const vars = readFileSync(path.join(CORE, 'styles/variables.css'), 'utf8');
+    expect(vars).toMatch(/:where\(:root\) \{[^}]*--fe-overlay-top: 0px;[^}]*--fe-overlay-bottom: 0px;/);
+    const chromeless = rules(path.join(CORE, 'styles/base.css'));
+    const card = chromeless.find((r) => r.sel === '.fe-modal__card--chromeless');
+    expect(card?.body).toMatch(
+      /height: calc\(100vh - var\(--fe-overlay-top, 0px\) - var\(--fe-overlay-bottom, 0px\)\);/,
+    );
+    const backdrop = chromeless.find((r) => r.sel === '.fe-modal__backdrop--chromeless');
+    expect(backdrop?.body).toMatch(/bottom: var\(--fe-overlay-bottom, 0px\);/);
+  });
 });

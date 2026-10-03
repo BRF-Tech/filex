@@ -36,7 +36,7 @@ func selfUpdateCmd() *cobra.Command {
 		Short: "Check for a newer filex and install it",
 		Long: "Check the release manifest and install a newer filex.\n\n" +
 			"By default only the newest release is considered. Use --to to pin a\n" +
-			"specific version (minor/major jumps included — you are the confirmation),\n" +
+			"specific version (minor/major jumps included - you are the confirmation),\n" +
 			"or --check to look without changing anything.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -69,7 +69,7 @@ func selfUpdateCmd() *cobra.Command {
 			}
 			fmt.Println(installLine(svc.Install()))
 			if d.Reason != "" {
-				fmt.Printf("verdict: %s — %s\n", d.Action, d.Reason)
+				fmt.Printf("verdict: %s - %s\n", d.Action, d.Reason)
 			}
 			for _, r := range d.Skipped {
 				line := "  · " + r.Version
@@ -80,7 +80,7 @@ func selfUpdateCmd() *cobra.Command {
 					line += "  [security]"
 				}
 				if r.Notes != "" {
-					line += " — " + r.Notes
+					line += " - " + r.Notes
 				}
 				fmt.Println(line)
 			}
@@ -92,7 +92,7 @@ func selfUpdateCmd() *cobra.Command {
 				return nil
 			}
 			if d.Action == update.ActionNone && to == "" {
-				fmt.Println("nothing to do — already up to date")
+				fmt.Println("nothing to do - already up to date")
 				return nil
 			}
 			if err := refuseSelfUpdate(os.Stderr, svc.Install(), d, to); err != nil {
@@ -109,7 +109,7 @@ func selfUpdateCmd() *cobra.Command {
 			} else if d.Action == update.ActionInstruct && !force {
 				// A major move, or an install below a release's MinVersion.
 				// Refuse the implicit path and make the operator name it.
-				return fmt.Errorf("%s — rerun with --to %s once you have read the notes%s",
+				return fmt.Errorf("%s - rerun with --to %s once you have read the notes%s",
 					d.Reason, d.Target.Version, notesSuffix(d.Target.NotesURL))
 			}
 

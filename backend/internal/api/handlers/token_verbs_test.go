@@ -347,7 +347,7 @@ func TestFilesSurface_ReadTokenKeepsWhatAViewerKeeps(t *testing.T) {
 // TestAccountChanges_NeedWrite — changing the account itself (profile,
 // password, two-factor) is a write: a `read` token must not set a new password
 // or switch two-factor off, and a `read,write` token (the desktop app's shape)
-// still reaches the handlers. Burak 2026-09-28: "write iste".
+// still reaches the handlers. The maintainer 2026-09-28: "write iste".
 func TestAccountChanges_NeedWrite(t *testing.T) {
 	f := newVerbFixture(t)
 	reader := testutil.NewAPIToken(t, f.store, f.memberID, "read")
@@ -487,8 +487,10 @@ var publicUnderTokenPrefixes = map[string]bool{
 	"GET /api/files/share/{token}":        true,
 	"GET /api/files/capabilities":         true,
 	"GET /api/files/onlyoffice/fetch":     true,
-	"GET /api/files/onlyoffice/probe":     true,
 	"POST /api/files/onlyoffice/callback": true,
+	// The sign-in page's question (docs/TENANT-ADMIN.md): public, and only
+	// spelled like the /api/auth/me prefix.
+	"GET /api/auth/methods": true,
 }
 
 // readLevelMutations are the non-GET routes a `read` token may call: reads that
@@ -534,9 +536,14 @@ var readLevelMutations = map[string]bool{
 	"DELETE /api/tokens/{id}":               true,
 	"POST /api/auth/desktop/complete":       true,
 	"PUT /api/me/prefs/":                    true,
-	"POST /api/notifications/{id}/read":     true,
-	"POST /api/notifications/read-all":      true,
-	"PATCH /api/notifications/settings":     true,
+	// "Always open with": the account's own choices, which moved out of the
+	// prefs document above (0.50, file associations) - personal state too.
+	"PUT /api/me/open-with/{ext}":       true,
+	"DELETE /api/me/open-with/{ext}":    true,
+	"DELETE /api/me/open-with/":         true,
+	"POST /api/notifications/{id}/read": true,
+	"POST /api/notifications/read-all":  true,
+	"PATCH /api/notifications/settings": true,
 }
 
 var deleteRoutes = map[string]bool{

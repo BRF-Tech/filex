@@ -14,8 +14,10 @@
  *   • QUEUED — a `page` action never goes through `…/run`, so the job is
  *     born from this screen's submit. A tab that just closed itself would
  *     leave the person with no idea whether anything happened; instead the
- *     page says the job is queued and offers the way back to the operations
- *     tray that is now tracking it.
+ *     page says the job is queued, FOLLOWS it, and says how it ended - or,
+ *     when the job's result names a screen on what it made (`surface.open`),
+ *     goes there in this tab (filex #78: a job carries its person on to
+ *     what it made).
  *   • DONE — the plugin ended the conversation (`done`), with nothing queued.
  *
  * ⚠ It is in the package, not in the admin SPA: fm.example.com, the desktop shell
@@ -38,8 +40,13 @@ import SurfaceFooterButtons from './SurfaceFooterButtons.vue';
 import SurfaceSections from './SurfaceSections.vue';
 import { walkNodes } from '../../lib/surfaceValues';
 import { openTargetFor } from '../../lib/surfaceOpen';
+import { isPagePlacement } from '../../lib/pluginPage';
+import { opFailure } from '../../lib/errorWords';
+import { jobOpenOf } from '../../lib/jobOpen';
+import { usePendingOps, type PendingOp } from '../../composables/usePendingOps';
 import AppFrame from './AppFrame.vue';
-import type { PluginUIRef } from '../../types/Plugins';
+import type { PluginUIRef, SurfaceOpenRequest } from '../../types/Plugins';
+import type { ExplorerConfig } from '../../types/ExplorerConfig';
 
 const props = defineProps<{
   locale: LocaleCode;
@@ -110,6 +117,97 @@ const state = ref<PageState>('loading');
 const loadError = ref('');
 const toast = ref('');
 
+/**
+ * Where the job this page queued has got to. `running` until it ends; then
+ * `done`, `failed`, or `opening` (the job asked for a screen on what it
+ * made, and the page is on its way there).
+ *
+ * ⚠⚠ The page FOLLOWS its own job (filex #78). It used to stop at "the job
+ * is queued … you will be told when it lands", and nothing told anybody: the
+ * explorer in the other tab announces only the jobs IT queued, so a job born
+ * here ended in silence. The signing app's "Convert to PDF" (filex-sign 0.2;
+ * the app signs PDFs only since 0.3) was the case that read as a broken
+ * wizard: the PDF landed, the page still said "queued", and the person had to
+ * find the PDF and ask for signatures again. Now the page
+ * says how the job ended in the person's words, and when the job's result
+ * names a screen on one of its outputs (`surface.open`), it goes there.
+ *
+ * ⚠ The card keeps its `plugin-page-queued` place for the job's whole life:
+ * it is the card about THE job, whose title and words change as the job does.
+ */
+type JobPhase = 'running' | 'done' | 'failed' | 'opening';
+const jobPhase = ref<JobPhase>('running');
+const jobWords = ref('');
+
+/** The views of this app that are whole pages, learned from the actions list
+ *  (a `page` view is listed only through an action that opens it). */
+const pageViews = ref<Set<string>>(new Set());
+
+/**
+ * Go where a finished job sent the person - in THIS tab. The page's work is
+ * done, and a tab opened by a job's end rather than by a click is a pop-up
+ * the browser blocks.
+ */
+function followJobOpen(req: SurfaceOpenRequest): boolean {
+  const target = openTargetFor(req, {
+    plugin: props.plugin,
+    base: props.mountBase,
+    placementOf: (id) => (pageViews.value.has(id) ? 'page' : undefined),
+  });
+  if (!target.href) return false;
+  try {
+    window.location.assign(target.href);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function onJobSettled(op: PendingOp): void {
+  if (op.status === 'done') {
+    jobWords.value = op.message ?? '';
+    const go = jobOpenOf(op);
+    if (go && followJobOpen(go.open)) {
+      jobPhase.value = 'opening';
+      return;
+    }
+    jobPhase.value = 'done';
+    return;
+  }
+  jobWords.value = opFailure(op, t).text;
+  jobPhase.value = 'failed';
+}
+
+// The same follower the explorer's tray uses: one poll of `/api/files/ops`,
+// announcing only what was registered here.
+const jobs = usePendingOps({} as ExplorerConfig, props.api, { onSettled: onJobSettled });
+
+/** Follow the job this page queued, where the client can ask the queue. */
+function followJob(op: Record<string, unknown>): void {
+  jobPhase.value = 'running';
+  jobWords.value = '';
+  if (!props.api.endpoints?.opsList) return;
+  jobs.register(op);
+}
+
+const jobTitle = computed(() => {
+  switch (jobPhase.value) {
+    case 'done':
+      return t('plugin.page_view.finished_title');
+    case 'failed':
+      return t('plugin.page_view.failed_title');
+    case 'opening':
+      return t('plugin.page_view.opening_title');
+    default:
+      return t('plugin.page_view.queued_title');
+  }
+});
+const jobText = computed(() => {
+  if (jobPhase.value === 'running') return t('plugin.page_view.queued_text');
+  if (jobPhase.value === 'done') return jobWords.value || t('plugin.page_view.finished_text');
+  return jobWords.value;
+});
+
 const conv = usePluginSurface(
   {
     api: props.api,
@@ -151,6 +249,7 @@ const conv = usePluginSurface(
     onOp: (op) => {
       emit('op', op);
       state.value = 'queued';
+      followJob(op);
     },
     onDone: () => {
       if (state.value !== 'queued') state.value = 'done';
@@ -240,6 +339,13 @@ const uiFiles = computed(() =>
 async function findUI(): Promise<void> {
   try {
     const list = await props.api.pluginActions();
+    // Which of this app's screens are whole pages: where a finished job's
+    // `open` lands on its own address rather than through the explorer.
+    pageViews.value = new Set(
+      (list.actions ?? [])
+        .filter((a) => a.plugin === props.plugin && a.view && isPagePlacement(a.view_placement))
+        .map((a) => a.view as string),
+    );
     const row = list.views.find((v) => v.plugin === props.plugin && v.id === props.view && v.ui);
     if (row?.ui) {
       uiRef.value = row.ui;
@@ -364,9 +470,20 @@ const showsDocument = computed(() => {
         :layout="embedded ? 'inline' : 'page'"
       />
 
-      <div v-else-if="state === 'queued'" class="fe-apppage__state" data-testid="plugin-page-queued">
-        <h2 class="fe-apppage__state-title">{{ t('plugin.page_view.queued_title') }}</h2>
-        <p class="fe-surface__text">{{ t('plugin.page_view.queued_text') }}</p>
+      <div
+        v-else-if="state === 'queued'"
+        class="fe-apppage__state"
+        data-testid="plugin-page-queued"
+        :data-job="jobPhase"
+      >
+        <h2 class="fe-apppage__state-title" data-testid="plugin-page-job-title">{{ jobTitle }}</h2>
+        <p
+          :class="jobPhase === 'failed' ? 'fe-surface__error' : 'fe-surface__text'"
+          :role="jobPhase === 'failed' ? 'alert' : 'status'"
+          data-testid="plugin-page-job-text"
+        >
+          {{ jobText }}
+        </p>
         <div class="fe-apppage__state-actions">
           <a v-if="opsHref" class="fe-btn fe-btn--primary" :href="opsHref" data-testid="plugin-page-ops">
             {{ t('plugin.page_view.open_ops') }}

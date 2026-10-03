@@ -62,6 +62,7 @@ vi.mock('@/api/client', () => ({
 
 import AppPluginInstallWizard from '@/components/plugins/AppPluginInstallWizard.vue';
 import { INSTALL_TIMEOUT_MS } from '@/api/appPlugins';
+import { unmountAll } from '../helpers/teardown';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
@@ -89,7 +90,6 @@ describe('AppPluginInstallWizard', () => {
     posts.length = 0;
     refuse = null;
     dryRunAnswer = wireDryRun();
-    document.body.innerHTML = '';
   });
 
   it('the fixture is the real wire shape: a reason is an object of languages', () => {
@@ -213,8 +213,7 @@ describe('AppPluginInstallWizard', () => {
       await flushPromises();
       const expected = (en.appPlugins.wizard.errors as Record<string, string>)[code].replace('{message}', 'detail');
       expect(w.find('[data-testid="app-plugin-wizard-error"]').text()).toBe(expected);
-      w.unmount();
-      document.body.innerHTML = '';
+      unmountAll();
     }
   });
 
@@ -293,9 +292,39 @@ describe('AppPluginInstallWizard', () => {
     await reachReview(w);
     const box = w.find('[data-testid="app-plugin-engines-missing"]');
     expect(box.exists()).toBe(true);
-    expect(box.text()).toContain('LibreOffice'); // by its name, not `engines:libreoffice`
+    expect(box.text()).toContain('FFmpeg'); // by its name, not `engines:ffmpeg`
     expect(box.text()).not.toContain('engines:');
     w.unmount();
+  });
+
+  it('says the office engine apart: a document server to connect, no restart (0.50)', async () => {
+    /* The server's own bytes: app-plugin-dry-run.json lists FFmpeg and the
+       office engine under its old name, `kind: "office"`. Red before 0.50:
+       ONLYOFFICE (then LibreOffice) stood in the "install them and restart
+       filex" sentence beside FFmpeg, and there was no second box. */
+    dryRunAnswer = wireDryRunFull();
+    delete dryRunAnswer.installed;
+    const w = mountWizard('tr');
+    await reachReview(w);
+    const programs = w.find('[data-testid="app-plugin-engines-missing"]');
+    expect(programs.text()).not.toContain('ONLYOFFICE');
+    const office = w.find('[data-testid="app-plugin-office-missing"]');
+    expect(office.exists()).toBe(true);
+    expect(office.text()).toContain('ONLYOFFICE');
+    expect(office.text()).toContain('Dış servisler');
+    expect(office.text()).toContain('Yeniden başlatma gerekmez');
+    expect(office.text()).not.toContain('engines:');
+    w.unmount();
+
+    // Only the office engine missing: no "programs" box at all.
+    dryRunAnswer = wireDryRunFull();
+    delete dryRunAnswer.installed;
+    dryRunAnswer.engines_missing = (dryRunAnswer.engines_missing as { kind?: string }[]).filter((e) => e.kind === 'office');
+    const w2 = mountWizard('en');
+    await reachReview(w2);
+    expect(w2.find('[data-testid="app-plugin-engines-missing"]').exists()).toBe(false);
+    expect(w2.find('[data-testid="app-plugin-office-missing"]').text()).toContain('no restart needed');
+    w2.unmount();
   });
 });
 
@@ -314,7 +343,6 @@ describe('AppPluginInstallWizard — upgrade review and range', () => {
     posts.length = 0;
     refuse = null;
     dryRunAnswer = wireDryRun();
-    document.body.innerHTML = '';
   });
 
   function mountUpdate(locale = 'en') {
@@ -375,19 +403,20 @@ describe('AppPluginInstallWizard — upgrade review and range', () => {
     w.unmount();
   });
 
-  it('shows the source’s notes as text, never as markup', async () => {
+  // The notes are Markdown since #122, drawn through the explorer preview's
+  // pipeline (markdown-it + the document sanitizer): what they render to, and
+  // that nothing in them runs, is appPluginUpdateNotes.test.ts (jsdom, which
+  // DOMPurify needs). Here: the group says itself in the reader's language.
+  it('says the notes and the signature in Turkish on a Turkish screen', async () => {
     const review = upgradeReview();
     review.compat.ok = true;
-    review.upgrade.notes = 'Fixed <img src=x onerror="window.pwned=1"> and <b>more</b>';
     dryRunAnswer = review;
     const w = mountUpdate('tr');
     await w.setProps({ modelValue: true });
     await flushPromises();
     const notes = w.find('[data-testid="app-plugin-upgrade-notes"]');
     expect(notes.find('h4').text()).toBe('Sürüm notları');
-    expect(notes.find('img').exists()).toBe(false);
-    expect(notes.find('b').exists()).toBe(false);
-    expect(notes.text()).toContain('<img src=x onerror="window.pwned=1">');
+    expect(notes.text()).toContain('Signers can now be reminded.');
     expect(w.find('[data-testid="app-plugin-upgrade-signed"]').text()).toBe('İmza: imzalı → imzasız');
     w.unmount();
   });
@@ -442,7 +471,6 @@ describe('AppPluginInstallWizard — an app with its own interface', () => {
     setActivePinia(createPinia());
     posts.length = 0;
     refuse = null;
-    document.body.innerHTML = '';
   });
 
   it('shows the package, the addresses by risk — mirrored green, live amber — and always the honest note', async () => {

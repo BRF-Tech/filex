@@ -1,0 +1,70 @@
+{
+  "realm": "corp",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "groups": [
+    { "name": "engineering" },
+    { "name": "filex-admins" }
+  ],
+  "clients": [
+    {
+      "clientId": "filex",
+      "name": "filex (operator's SSO)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "corp-client-secret",
+      "redirectUris": ["*"],
+      "webOrigins": ["*"],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@corp.test",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Engineer",
+      "credentials": [{ "type": "password", "value": "alice-pass", "temporary": false }],
+      "groups": ["/engineering"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@corp.test",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Admin",
+      "credentials": [{ "type": "password", "value": "bob-pass", "temporary": false }],
+      "groups": ["/filex-admins"]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@corp.test",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Nogroup",
+      "credentials": [{ "type": "password", "value": "carol-pass", "temporary": false }]
+    }
+  ]
+}

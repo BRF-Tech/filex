@@ -126,7 +126,9 @@ export interface PluginUIRef {
 /** One "offered once X is there" part of an action's rule. */
 export interface PluginGatedRule {
   ext?: string[];
-  needs: { kind: 'engine' | string; id: string; name: string };
+  /** `engine`: a program to install; `office` (0.50): the office engine, a
+   *  document server to connect; anything else: said as "not available". */
+  needs: { kind: 'engine' | 'office' | string; id: string; name: string };
 }
 
 /** One entry of `GET /api/files/plugins/actions` → `views[]`. */
@@ -142,9 +144,24 @@ export interface PluginViewRow {
   ui?: PluginUIRef;
 }
 
+/**
+ * 0.50 - the administrator's rule for which handler opens a kind of file
+ * (Admin → Plugins → Default apps; backend internal/assoc): the handlers
+ * offered first, in this order, and the ones switched off. Handler ids are
+ * `builtin` (filex's own viewer) and `app:<plugin>/<view>`.
+ */
+export interface OpenRule {
+  order: string[];
+  off: string[];
+}
+
 export interface PluginActionsResponse {
   actions: PluginActionRow[];
   views: PluginViewRow[];
+  /** 0.50 - the open rules, by kind (a file name's extension, lower-case,
+   *  no dot). A kind without one keeps the default order: the apps' viewers
+   *  in the list's order, then filex's own. lib/appViewer applies them. */
+  open_rules?: Record<string, OpenRule>;
 }
 
 /** One component of a surface (wire.Node). */

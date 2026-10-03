@@ -256,7 +256,7 @@ func openFxe(abs, out string) (*fxeInput, error) {
 }
 
 // ErrFileExists: the file a .fxe would decrypt to is already there.
-var ErrFileExists = errors.New("the output file already exists — pass another with -o")
+var ErrFileExists = errors.New("the output file already exists - pass another with -o")
 
 // target is where the plaintext goes: -o, or the original name next to the
 // input (made safe for this OS).

@@ -167,8 +167,8 @@ func TestSchedule_AnAppThatAsksIsWoken(t *testing.T) {
 	// ...in the reader's language: the app said it in Turkish too, and the
 	// host's tally follows it (2026-09-21: the Turkish admin panel read
 	// "nothing due … — 0 scheduled").
-	assert.Equal(t, "nothing to do — 0 scheduled", LocalizeNote(wake.Error, "en"))
-	assert.Equal(t, "yapacak iş yok — 0 planlandı", LocalizeNote(wake.Error, "tr"))
+	assert.Equal(t, "nothing to do - 0 scheduled", LocalizeNote(wake.Error, "en"))
+	assert.Equal(t, "yapacak iş yok - 0 planlandı", LocalizeNote(wake.Error, "tr"))
 	assert.Equal(t, "the plugin trapped", LocalizeNote("the plugin trapped", "tr"), "a plain note (an error) is read as it is")
 	assert.Empty(t, wake.ClaimedBy, "re-arming releases the lease, or no other process could ever take it")
 
@@ -937,10 +937,10 @@ func TestSchedule_WakeNoteIsComposedInTheReadersLanguage(t *testing.T) {
 
 	note := wakeNote(wire.Text{"en": "nothing to do", "tr": "yapacak iş yok", "es": "nada que hacer"},
 		tallied{Scheduled: 2, Refused: 1, Reason: "bad item"})
-	assert.Equal(t, "nada que hacer — 2 programadas, 1 refused (bad item)", LocalizeNote(note, "es"),
+	assert.Equal(t, "nada que hacer - 2 programadas, 1 refused (bad item)", LocalizeNote(note, "es"),
 		"the pack's words where it has them, English where it does not")
-	assert.Equal(t, "yapacak iş yok — 2 planlandı, 1 reddedildi (bad item)", LocalizeNote(note, "tr"))
-	assert.Equal(t, "nothing to do — 2 scheduled, 1 refused (bad item)", LocalizeNote(note, "en"))
+	assert.Equal(t, "yapacak iş yok - 2 planlandı, 1 reddedildi (bad item)", LocalizeNote(note, "tr"))
+	assert.Equal(t, "nothing to do - 2 scheduled, 1 refused (bad item)", LocalizeNote(note, "en"))
 
 	assert.Equal(t, "eski", LocalizeNote(`{"en":"old","tr":"eski"}`, "tr"), "a row from the previous release still reads")
 

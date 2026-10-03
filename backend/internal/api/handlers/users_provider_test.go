@@ -32,9 +32,21 @@ func seedTenant(t *testing.T, store db.Store, slug, email string, supertenant bo
 	t.Helper()
 	ctx := context.Background()
 
-	p, err := store.CreateProvider(ctx, &model.Provider{
-		Slug: slug, Name: slug, AuthType: "local", IsSupertenant: supertenant, Enabled: true,
-	})
+	var p *model.Provider
+	var err error
+	if supertenant {
+		// The platform's own tenant already exists (migration 00014 seeded
+		// it) and there is at most one: its accounts are the ones an empty
+		// realm signs in to. A second flagged row is a state production never
+		// has, and the realm rules (auth.LoginRealm) would rightly not treat
+		// it as the platform's.
+		p, err = store.GetSupertenant(ctx)
+		require.NotNil(t, p)
+	} else {
+		p, err = store.CreateProvider(ctx, &model.Provider{
+			Slug: slug, Name: slug, AuthType: "local", Enabled: true,
+		})
+	}
 	require.NoError(t, err)
 
 	password := "TenantAdmin!1"
@@ -60,7 +72,7 @@ func providerOf(t *testing.T, store db.Store, userID int64) int64 {
 // user created through the admin API landed in provider 1.
 //
 // Provider 1 is `default`, and `default` is the SUPERTENANT: the account
-// olivov meant to pre-provision for one tenant came out confine-exempt,
+// a multi-tenant deployment meant to pre-provision for one tenant came out confine-exempt,
 // able to see every tenant's storages. Reported as a pre-provisioning gap
 // (G1, 2026-08-05); it is also a privilege one.
 func TestCreateUser_HonoursProviderID(t *testing.T) {
@@ -68,10 +80,10 @@ func TestCreateUser_HonoursProviderID(t *testing.T) {
 	email, password := testutil.SeedAdmin(t, store) // provider 1 = supertenant
 	testutil.LoginAs(t, srv, client, email, password)
 
-	tenantID, _, _ := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
+	tenantID, _, _ := seedTenant(t, store, "globex", "admin@globex.test", false)
 
 	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/users", map[string]any{
-		"email": "rbac-probe@diyetlif.test", "password": "ProbePass!1",
+		"email": "rbac-probe@globex.test", "password": "ProbePass!1",
 		"role": "user", "provider_id": tenantID,
 	})
 	require.Equal(t, http.StatusOK, status, "%v", body)
@@ -86,11 +98,11 @@ func TestCreateUser_HonoursProviderID(t *testing.T) {
 // provider 1 (the supertenant) regardless of who was asking.
 func TestCreateUser_DefaultsToCallersProvider(t *testing.T) {
 	srv, client, store := multiTenantServer(t)
-	tenantID, email, password := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
+	tenantID, email, password := seedTenant(t, store, "globex", "admin@globex.test", false)
 	testutil.LoginAs(t, srv, client, email, password)
 
 	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/users", map[string]any{
-		"email": "yeni@diyetlif.test", "password": "ProbePass!1", "role": "user",
+		"email": "yeni@globex.test", "password": "ProbePass!1", "role": "user",
 	})
 	require.Equal(t, http.StatusOK, status, "%v", body)
 
@@ -103,12 +115,12 @@ func TestCreateUser_DefaultsToCallersProvider(t *testing.T) {
 // create a user inside another tenant, nor inside the supertenant.
 func TestCreateUser_TenantAdminCannotPlantElsewhere(t *testing.T) {
 	srv, client, store := multiTenantServer(t)
-	_, email, password := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
-	otherID, _, _ := seedTenant(t, store, "arasboya", "admin@arasboya.test", false)
+	_, email, password := seedTenant(t, store, "globex", "admin@globex.test", false)
+	otherID, _, _ := seedTenant(t, store, "initech", "admin@initech.test", false)
 	testutil.LoginAs(t, srv, client, email, password)
 
 	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/users", map[string]any{
-		"email": "planted@arasboya.test", "password": "ProbePass!1",
+		"email": "planted@initech.test", "password": "ProbePass!1",
 		"role": "user", "provider_id": otherID,
 	})
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
@@ -137,10 +149,10 @@ func TestUpdateUser_ReHomesProvider(t *testing.T) {
 	email, password := testutil.SeedAdmin(t, store)
 	testutil.LoginAs(t, srv, client, email, password)
 
-	tenantID, _, _ := seedTenant(t, store, "diyetlif", "admin@diyetlif.test", false)
+	tenantID, _, _ := seedTenant(t, store, "globex", "admin@globex.test", false)
 
 	status, body := doJSON(t, client, http.MethodPost, srv.URL+"/api/admin/users", map[string]any{
-		"email": "stranded@diyetlif.test", "password": "ProbePass!1", "role": "user",
+		"email": "stranded@globex.test", "password": "ProbePass!1", "role": "user",
 	})
 	require.Equal(t, http.StatusOK, status, "%v", body)
 	newID := int64(body["id"].(float64))

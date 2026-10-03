@@ -16,8 +16,11 @@ describe('login', () => {
     cy.get('input[name="password"]').first().clear().type('definitely-wrong-password');
     cy.submitLogin();
     cy.url().should('include', '/admin/login');
-    // The backend's own words ("invalid credentials"), surfaced by the store.
-    cy.contains(/geçersiz|invalid|incorrect|hatalı/i, { timeout: 8000 }).should('be.visible');
+    // ⚠ The sign-in page's own words, which since 0.50 also count the tries
+    // left ("Email, username or password is wrong. Attempts left before a
+    // lock: 4." / Turkish "yanlış"). The old list (invalid, incorrect,
+    // geçersiz, hatalı) matched neither and timed out on a page that said it.
+    cy.contains(/wrong|yanlış|geçersiz|invalid|incorrect|hatalı/i, { timeout: 8000 }).should('be.visible');
   });
 
   // ⚠ Home, not the dashboard. Since 0.41.0 every account — administrators

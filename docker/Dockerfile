@@ -1,17 +1,27 @@
-# filex default image (~510 MB) — published as :latest and :full
+# filex default image (~225 MB compressed, ~550 MB on disk) - published as :latest and :full
 # - Pure Go binary (CGO=0, modernc.org/sqlite)
 # - + ffmpeg (video thumbs)
 # - + ghostscript + poppler-utils (PDF → JPEG, page 1)
-# - + libreoffice (headless soffice for .doc/.xls/.ppt/.odt/.ods/.odp → PDF → JPEG)
-# - + imagemagick + rsvg-convert (raster and SVG work, and two of the six engines
-#   an app plugin may require — About → Tools lists them)
-# - + ttf-liberation + ttf-dejavu + font-noto so libreoffice/Ghostscript don't tofu non-ASCII glyphs
+# - + imagemagick + rsvg-convert (raster and SVG work, and engines an app plugin
+#   may require - About → Tools lists them); imagemagick-heic so HEIC/HEIF/AVIF
+#   photos get thumbnails
+# - + ttf-liberation + ttf-dejavu + font-noto(-cjk) so Ghostscript, poppler,
+#   rsvg and ffmpeg don't tofu non-ASCII glyphs in what they draw
 #
-# ⚠ Since v0.43.0 the same six engines (ffmpeg, ImageMagick, LibreOffice,
-#   Ghostscript, poppler, rsvg) also gate APP actions and the converter, and
-#   they are probed ONCE at start — install one, then restart filex.
+# ⚠⚠ No LibreOffice (0.50). Office documents - their thumbnails and the apps'
+#   office engine (`engines:office`, formerly `engines:libreoffice`) - go to
+#   the ONLYOFFICE Document Server filex is connected to (External services),
+#   and filex runs no soffice, not even one installed here. LibreOffice and the
+#   headless JRE it needed were ~420 MB of the compressed image and ~1.1 GB on
+#   disk: this recipe with them put back measured 642 MB / 1633 MiB, without
+#   them 225 MB / 550 MiB (the gzip and the size of the image's filesystem,
+#   alpine:3.24, brkgpu, 2026-10-02).
 #
-# Image size grew from ~43 MB (no thumb deps) to ~510 MB; the bulk is libreoffice.
+# ⚠ Since v0.43.0 the binary engines (ffmpeg, ImageMagick, Ghostscript,
+#   poppler, rsvg) also gate APP actions and the converter, and they are probed
+#   ONCE at start - install one, then restart filex. The office engine is read
+#   live: connect ONLYOFFICE and it is there.
+#
 # Trade-off accepted: every advertised thumbnail format actually works at runtime.
 # The lean variant IS kept, and is built from docker/Dockerfile.slim (~43 MB,
 # frontend + Go binary only) — from v0.31.0, when the :slim TAG stopped being
@@ -162,20 +172,33 @@ FROM alpine:3.24
 #                                         Alpine 3.22's 24.09 has the ZIP/RAR5
 #                                         and symlink CVEs fixed in 25.00/25.01.
 #   ffmpeg                              — video thumbnails (1st keyframe).
+#   imagemagick-heic                    — HEIC, HEIF and AVIF thumbnails
+#                                         (libheif, decoders only; +3 MB,
+#                                         measured on alpine:3.24). Without
+#                                         it those photos are skipped as
+#                                         "no_tool:heif" (thumb/heif.go).
+#   libheif-libde265                    - the HEVC decoder a HEIC photo needs.
+#                                         libheif 1.23.4-r0 already depends on
+#                                         it (and on libheif-dav1d for AVIF);
+#                                         named here so a packaging split
+#                                         cannot drop it silently, the way
+#                                         Ubuntu 24.04's libheif1 only
+#                                         suggests its libde265 plugin. The
+#                                         server decodes a sample HEIC at boot
+#                                         (enginebin.HEIC); without the
+#                                         decoder HEIC photos are skipped as
+#                                         "no_tool:heic_codec".
 #   ghostscript + poppler-utils         — PDF → JPEG (page 1). gs preferred,
 #                                         pdftoppm as fallback (matches
 #                                         backend/internal/thumb/pdf.go).
-#   libreoffice                         — headless `soffice --headless --convert-to pdf`
-#                                         for office docs (matches thumb/office.go).
-#                                         Pulls in writer/calc/impress/draw.
-#   openjdk17-jre-headless              — LibreOffice's xlsx/docx pipeline calls
-#                                         out to javaldx for chart/formula
-#                                         rendering. Without a JRE present
-#                                         soffice exits 1 and the pipeline rows
-#                                         the file as state=failed. Ship the
-#                                         smallest headless JRE.
-#   font-{noto,noto-cjk} + ttf-*        — without these libreoffice and
-#                                         Ghostscript render Unicode as boxes.
+#   font-{noto,noto-cjk} + ttf-*        - without these Ghostscript and poppler
+#                                         (a PDF's unembedded fonts), rsvg (an
+#                                         SVG's text) and ffmpeg (burned-in
+#                                         subtitles) render Unicode as boxes.
+#
+# ⚠ No libreoffice and no JRE (0.50): office documents are the connected
+#   ONLYOFFICE's (see the header). Do not add them back for "office
+#   thumbnails" - filex would not run them.
 RUN apk --no-cache add \
         ca-certificates \
         tzdata \
@@ -184,10 +207,10 @@ RUN apk --no-cache add \
         '7zip>=25.01-r0' \
         ffmpeg \
         imagemagick \
+        imagemagick-heic \
+        libheif-libde265 \
         ghostscript \
         poppler-utils \
-        libreoffice \
-        openjdk17-jre-headless \
         rsvg-convert \
         ttf-liberation \
         ttf-dejavu \

@@ -10,7 +10,7 @@
 // ⚠ An upload whose bytes are all in filex is not done either: the server then
 // writes it to the storage, again minutes on a slow uplink. The row and the
 // badge read 100% for all of it.
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 
@@ -20,10 +20,6 @@ import type { UploadJob } from '@brftech/filex-core/src/composables/useUploadChu
 import PendingOpsTray from '@brftech/filex-core/src/components/PendingOpsTray.vue';
 import UploadProgress from '@brftech/filex-core/src/components/UploadProgress.vue';
 import OperationsCenter from '@brftech/filex-core/src/components/OperationsCenter.vue';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 function queued(total: number, done: number) {
   return normalizeOp({

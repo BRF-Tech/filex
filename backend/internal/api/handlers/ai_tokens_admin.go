@@ -64,7 +64,18 @@ func (h *AITokens) List(w http.ResponseWriter, r *http.Request) {
 		}
 		tokens = kept
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokenList(tokens)})
+}
+
+// tokenList is the `tokens` field of a list answer: [] when there are none,
+// never null. The store hands back a nil slice for no rows, which encodes as
+// `"tokens": null`, and a client reading the list (`tokens.map(...)`, the
+// Cypress token-kinds spec) failed on an instance that simply had no tokens.
+func tokenList(tokens []*model.APIToken) []*model.APIToken {
+	if tokens == nil {
+		return []*model.APIToken{}
+	}
+	return tokens
 }
 
 // createTokenBody is the POST body. user_id defaults to the calling admin;
@@ -110,7 +121,7 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 	// not "an admin managing somebody else's token", it is identity takeover:
 	// a tenant admin mints a credential that reads and writes every storage of
 	// the tenant they named. This is the same class that was found and fixed
-	// on POST /api/admin/users (handlers/users.go, olivov G1) — the user
+	// on POST /api/admin/users (handlers/users.go, a production report, 2026-08-05) — the user
 	// surface got the check and the token surface beside it did not, which is
 	// the worse half, because the token needs no password and no login.
 	//

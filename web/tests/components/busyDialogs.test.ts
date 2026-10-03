@@ -7,16 +7,12 @@
 // half-copied folder and was refused as "already here". When the server said
 // no to a new folder or a delete, the dialog stayed open with nothing in it:
 // the failure went to the host's console only (audit, 2026-09-26).
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import RenameModal from '@brftech/filex-core/src/modals/RenameModal.vue';
 import NewFolderModal from '@brftech/filex-core/src/modals/NewFolderModal.vue';
 import DeleteConfirmModal from '@brftech/filex-core/src/modals/DeleteConfirmModal.vue';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 function button(label: RegExp): HTMLButtonElement | undefined {
   return Array.from(document.body.querySelectorAll('button')).find((b) =>

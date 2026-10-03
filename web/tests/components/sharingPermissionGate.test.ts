@@ -8,7 +8,7 @@
 // app, the desktop app and the embeds hide the same things.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 
 import SideNav from '@brftech/filex-core/src/components/SideNav.vue';
@@ -18,10 +18,6 @@ import InspectorPanel from '@brftech/filex-core/src/components/InspectorPanel.vu
 import { en } from '@brftech/filex-core/src/locales/en';
 import { ALL_SHARING, canShareAny, sharingHeld } from '@brftech/filex-core/src/lib/sharingHeld';
 import type { FileApi } from '@brftech/filex-core/src/composables/useFileApi';
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 describe('lib/sharingHeld — one answer for the three kinds', () => {
   it('asks each kind by its permission key', () => {

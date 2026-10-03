@@ -358,11 +358,11 @@ test('a pair list that could not be read keeps the watchers the accounts had', (
 test('the tray tooltip keeps a pause, and says what sync is doing', () => {
   const words = { paused: 'Sync is paused', syncing: 'Syncing…', failing: 'A folder could not be synced' };
   assert.equal(trayTooltip({ paused: true, unreadLabel: '3 unread', syncing: true, failing: true }, words),
-    'filex — Sync is paused — 3 unread');
-  assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: true, failing: false }, words), 'filex — Syncing…');
+    'filex - Sync is paused - 3 unread');
+  assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: true, failing: false }, words), 'filex - Syncing…');
   assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: true, failing: true }, words),
-    'filex — A folder could not be synced');
-  assert.equal(trayTooltip({ paused: false, unreadLabel: '1 unread', syncing: false, failing: false }, words), 'filex — 1 unread');
+    'filex - A folder could not be synced');
+  assert.equal(trayTooltip({ paused: false, unreadLabel: '1 unread', syncing: false, failing: false }, words), 'filex - 1 unread');
   assert.equal(trayTooltip({ paused: false, unreadLabel: null, syncing: false, failing: false }, words), 'filex');
 });
 

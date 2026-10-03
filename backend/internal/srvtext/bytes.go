@@ -21,7 +21,7 @@ var byteUnits = []string{"server.unit.bytes", "server.unit.kb", "server.unit.mb"
 // definition of a size now, on both sides of the wire.
 func Bytes(lang string, n int64) string {
 	if n < 0 {
-		return "—"
+		return "-"
 	}
 	idx := 0
 	v := float64(n)

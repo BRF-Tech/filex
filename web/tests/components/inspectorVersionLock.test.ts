@@ -2,7 +2,7 @@
 // signatures are collected) is refused with 423 and the app's name and reason
 // (handlers.lockedAnswer). The inspector says that in the reader's language —
 // not the server's English "locked by app sign: <path>".
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import InspectorPanel from '@brftech/filex-core/src/components/InspectorPanel.vue';
@@ -51,10 +51,6 @@ const NODE = {
 };
 
 describe('InspectorPanel — restoring a frozen document', () => {
-  afterEach(() => {
-    document.body.innerHTML = '';
-  });
-
   for (const [locale, words] of [
     ['en', 'sign'],
     ['tr', 'sign'],

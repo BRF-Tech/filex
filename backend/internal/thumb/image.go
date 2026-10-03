@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"image"
 	_ "image/gif" // register GIF decoder
-	"image/jpeg"
 	_ "image/png" // register PNG decoder
 	"io"
-	"os"
-	"path/filepath"
 
 	// Register additional image formats used by the SFC's example
 	// fixtures + real-world S3 storage. Without these the pipeline
@@ -44,20 +41,7 @@ func (p *Pipeline) generateImage(ctx context.Context, node *model.Node, drv stor
 	if err != nil {
 		return fmt.Errorf("thumb: decode: %w", err)
 	}
-	dst := scaleDown(src, thumbMaxWidth, thumbMaxHeight)
-
-	if err := os.MkdirAll(p.cacheDir, 0o755); err != nil {
-		return err
-	}
-	out, err := os.Create(filepath.Join(p.cacheDir, fmt.Sprintf("%d.jpg", node.ID)))
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if err := jpeg.Encode(out, dst, &jpeg.Options{Quality: thumbQuality}); err != nil {
-		return err
-	}
-	return nil
+	return p.writeJPEG(node.ID, scaleDown(src, thumbMaxWidth, thumbMaxHeight), thumbQuality)
 }
 
 // scaleDown is a stdlib-only nearest-neighbour resize keeping aspect ratio.

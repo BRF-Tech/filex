@@ -1,4 +1,4 @@
-# End-to-end encryption — roadmap
+# End-to-end encryption - roadmap
 
 > What filex does today is [End-to-end encryption](E2E-ENCRYPTION.md); where
 > the two pages disagree, that one is right. This page is the plan: what is
@@ -7,19 +7,19 @@
 
 ## Where it stands
 
-Encryption is a **level of a folder** — chosen when the folder is encrypted,
+Encryption is a **level of a folder** - chosen when the folder is encrypted,
 shown in the strip above it, changed in its **Encryption settings…**. There is
 no separate "vault" area or tab: an encrypted folder is a folder, at whichever
 level ([levels](E2E-ENCRYPTION.md#encryption-levels)).
 
 | Piece | Status |
 |---|---|
-| Level 1 — contents only (the default) | Built |
-| Level 2 — contents and names, names sealed per folder ([folder ids](E2E-ENCRYPTION.md#folder-ids)) | Built (v0.48) |
-| Raising a folder from level 1 to level 2 | Built — [changing the level](E2E-ENCRYPTION.md#changing-the-level) |
-| Encrypting a folder you already have, in place | Built in the browser — [encrypting a folder you already have](E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have); the command-line twin is [below](#2-encrypting-a-folder-that-already-exists) |
-| [A single encrypted file, and the streamed format](#1-encrypting-a-single-file) (no 200 MB limit) | Built (v0.48) — [single encrypted files](E2E-ENCRYPTION.md#single-encrypted-files-fxe), [streaming content](E2E-ENCRYPTION.md#streaming-content-stream) |
-| [Level 3 — the vault](#3-the-vault-level) | Designed, not built — not offered anywhere until it works |
+| Level 1 - contents only (the default) | Built |
+| Level 2 - contents and names, names sealed per folder ([folder ids](E2E-ENCRYPTION.md#folder-ids)) | Built (v0.48) |
+| Raising a folder from level 1 to level 2 | Built - [changing the level](E2E-ENCRYPTION.md#changing-the-level) |
+| Encrypting a folder you already have, in place | Built - in the browser ([encrypting a folder you already have](E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have)), and from the command line since v0.50 ([`filex encrypt`](CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)) |
+| [A single encrypted file, and the streamed format](#1-encrypting-a-single-file) (no 200 MB limit) | Built (v0.48) - [single encrypted files](E2E-ENCRYPTION.md#single-encrypted-files-fxe), [streaming content](E2E-ENCRYPTION.md#streaming-content-stream) |
+| [Level 3 - the vault](#3-the-vault-level) | Designed, not built - not offered anywhere until it works |
 
 ---
 
@@ -32,8 +32,8 @@ and [the format reference](E2E-ENCRYPTION.md#format-reference) is the
 normative text; the design that stood here is replaced by them.
 
 **What it gave.** One file encrypted without a folder for it, as a
-self-contained `.fxe` with its own password, recovery key and — where the
-installation has one — escrow slot; a file anyone with the password and
+self-contained `.fxe` with its own password, recovery key and - where the
+installation has one - escrow slot; a file anyone with the password and
 `filex decrypt` can open without an account; and, through the streamed format,
 files of any size in encrypted folders.
 
@@ -42,10 +42,10 @@ files of any size in encrypted folders.
 - **A password per file, or a key per person?** A password per file is simple
   and works for someone with no account. A personal key pair (unlocked once per
   session, like a folder) would let people encrypt files without typing a
-  password each time and is the base for sharing — but it is a new identity
+  password each time and is the base for sharing - but it is a new identity
   system, and a lost personal key loses everything under it.
 - **Sharing an encrypted file by link.** The key could ride in the URL
-  fragment (`#k=…`), which browsers never send to the server — the Firefox Send
+  fragment (`#k=…`), which browsers never send to the server - the Firefox Send
   model. It would make "sharing is off in encrypted files" untrue for single
   files. Worth it?
 
@@ -53,22 +53,26 @@ files of any size in encrypted folders.
 
 ## 2. Encrypting a folder that already exists
 
-**Status:** built in the browser — right-click a folder → **Encrypt with
-E2EE…** ([how it works](E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have)).
+**Status:** built - right-click a folder → **Encrypt with E2EE…**
+([how it works](E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have)), or
+`filex encrypt` from the command line (v0.50).
 The key file carries the required feature `conv` while the files are
 converted; the server keeps no plaintext version of those writes and, when the
 conversion ends, drops the thumbnails and extracted text it held for the
-folder and — the owner's choice — its versions and trash entries.
+folder and - the owner's choice - its versions and trash entries.
 
-What is left:
+Since v0.50 the conversion writes files over 200 MB in the streamed format
+([above](#1-encrypting-a-single-file)), read and sent as streams
+([how](E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have)), and the
+same job runs from the command line: `filex encrypt docs://folder`, through
+the same API with the Go twin of the browser code, for folders too large to
+convert in a tab; `filex encrypt ./folder` makes an encrypted folder from one
+on disk, to upload
+([CLI.md](CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)). What is
+left:
 
-- **`filex encrypt <remote folder>`** — the same job from the command line,
-  streaming through the same API with the Go twin of the browser code, for
-  folders too large to convert in a tab. A threshold (say 2 GB or 5,000
-  files) would decide which is offered first. 2–3 days.
-- **Files over the one-shot limit.** The browser leaves them as they are and
-  says so. The streamed format ([above](#1-encrypting-a-single-file)) is in
-  since v0.48, but the conversion does not use it yet. 1 day.
+- **Offering the command line first** for a large folder: a threshold (say
+  2 GB or 5,000 files) in the dialog that says the command and why.
 
 ### Open questions
 
@@ -86,11 +90,11 @@ What is left:
 **What for.** In an encrypted folder today the server sees how many files there
 are, how big each one is and how the tree is shaped. At the **vault** level it
 sees a number of equal-sized blocks and nothing else. It is the third level of
-the same picker — offered when a folder is encrypted and in its settings,
-never forced, and **never a separate area or tab** — because its cost is real.
+the same picker - offered when a folder is encrypted and in its settings,
+never forced, and **never a separate area or tab** - because its cost is real.
 Until it works it is not in the picker at all.
 
-### What it costs — the text people see before choosing
+### What it costs - the text people see before choosing
 
 > **Vault: the server sees only encrypted blocks of equal size.** It cannot
 > tell how many files you keep here, how big they are, how they are arranged or
@@ -129,7 +133,7 @@ Kasa/
 Two browsers editing one vault must not lose each other's changes:
 
 - new packs never collide (random names, write-once);
-- a new index snapshot is written **only if its generation is still free** — a
+- a new index snapshot is written **only if its generation is still free** - a
   conditional create (`If-None-Match: *` on S3, an exclusive create on a local
   disk). filex's upload API needs this as a flag; it has none today;
 - a writer that loses the race reads the winner's index, merges the two
@@ -139,21 +143,21 @@ Two browsers editing one vault must not lose each other's changes:
 ### Garbage collection
 
 Deleting a file only drops it from the index; its chunks stay in their packs.
-A maintenance job — in the browser, or `filex vault prune` — finds packs no
+A maintenance job - in the browser, or `filex vault prune` - finds packs no
 retained index snapshot refers to and deletes them, and repacks packs that are
 mostly dead, under a short-lived lease file so two prunes never run at once.
 This is restic's `prune` and Kopia's maintenance, on a smaller scale.
 
 ### Prior art
 
-- **restic** — packs of encrypted blobs, separate index files, lock files and
+- **restic** - packs of encrypted blobs, separate index files, lock files and
   `prune`; content-defined chunking. <https://restic.readthedocs.io/en/stable/100_references.html#design>
-- **Kopia** — content-addressed blobs in pack files, index blobs, epoch-based
+- **Kopia** - content-addressed blobs in pack files, index blobs, epoch-based
   index management and scheduled maintenance. <https://kopia.io/docs/advanced/architecture/>
-- **Tahoe-LAFS** — capabilities, encrypted immutable and mutable files and
+- **Tahoe-LAFS** - capabilities, encrypted immutable and mutable files and
   directory nodes, erasure-coded shares no storage server can read.
   <https://tahoe-lafs.readthedocs.io/en/latest/architecture.html>
-- **Cryptomator** — for contrast: it encrypts names and flattens directories
+- **Cryptomator** - for contrast: it encrypts names and flattens directories
   into `d/` by directory ID, but file count and sizes remain visible to the
   storage. <https://docs.cryptomator.org/en/latest/security/architecture/>
 
@@ -161,13 +165,13 @@ This is restic's `prune` and Kopia's maintenance, on a smaller scale.
 
 | Part | Days |
 |---|---|
-| Format spec, JS index + packs + padding | 6–8 |
+| Format spec, JS index + packs + padding | 6-8 |
 | Conditional create in the upload API and every driver | 2 |
-| Concurrent-writer merge, garbage collection, lease | 4–5 |
-| Explorer: list, open, upload, rename and move from the index | 5–7 |
-| `filex decrypt` for vaults (and later `filex vault mount`) | 2–3 |
+| Concurrent-writer merge, garbage collection, lease | 4-5 |
+| Explorer: list, open, upload, rename and move from the index | 5-7 |
+| `filex decrypt` for vaults (and later `filex vault mount`) | 2-3 |
 | Tests (races, interrupted writes, GC), docs | 3 |
-| **Total** | **22–28** |
+| **Total** | **22-28** |
 
 ### Open questions
 
@@ -182,7 +186,7 @@ This is restic's `prune` and Kopia's maintenance, on a smaller scale.
   folder is possible and makes merges harder.
 - **Which storages?** A vault needs range reads and a conditional create. Local
   and S3 have both; SFTP and WebDAV backends would need a lock-file fallback.
-- **Changing the level** of a folder to the vault and back — the
+- **Changing the level** of a folder to the vault and back - the
   [conversion job](#2-encrypting-a-folder-that-already-exists), with packs.
 
 ---
@@ -191,9 +195,9 @@ This is restic's `prune` and Kopia's maintenance, on a smaller scale.
 
 | | Days | Depends on |
 |---|---|---|
-| 1. Single file (+ streaming, lifts 200 MB) | built (v0.48) | — |
-| 2. `filex encrypt`, large files in a conversion | 3–4 | the streaming format from 1 |
-| 3. Vault level | 22–28 | the streaming format from 1; conditional create |
+| 1. Single file (+ streaming, lifts 200 MB) | built (v0.48) | - |
+| 2. `filex encrypt`, large files in a conversion | built (v0.50) | the streaming format from 1 |
+| 3. Vault level | 22-28 | the streaming format from 1; conditional create |
 
 The vault is most of what is left, and the one piece that changes what the
 server can know.

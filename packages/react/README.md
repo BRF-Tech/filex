@@ -4,12 +4,12 @@
 
 React adapter for the [filex](https://github.com/BRF-Tech/filex)
 file manager. Thin wrapper around `<filex-explorer>` (the
-`@brftech/filex` Web Component) — gives you proper React props and
+`@brftech/filex` Web Component) - gives you proper React props and
 camelCased event handlers via `@lit/react`'s `createComponent`.
 
-> ⚠ This package wraps the **explorer** only. filex's other surface — the
+> ⚠ This package wraps the **explorer** only. filex's other surface - the
 > connections panel, where storages are added and the credentials for reaching
-> the server over S3/SFTP/FTPS/NFS/WebDAV are minted — ships as
+> the server over S3/SFTP/FTPS/NFS/WebDAV are minted - ships as
 > `<filex-connections>` in [`@brftech/filex`](https://www.npmjs.com/package/@brftech/filex)
 > and is a plain custom element: render it directly in JSX and set `config` on
 > the ref, exactly as you would any non-React element.
@@ -36,14 +36,14 @@ export function App() {
         // The navigation panel (the "+ New" menu · Home / Shared with me /
         // My shares / Recent / Starred / Trash · your tags, personal and team ·
         // an Apps section · storages) and how much of the
-        // explorer to draw. Both are ordinary config keys — there is no
+        // explorer to draw. Both are ordinary config keys - there is no
         // React-specific switch for either.
         sideNav: true,
         connections: true,
-        // How much of the explorer to put on screen — a reduction, and only
+        // How much of the explorer to put on screen - a reduction, and only
         // that. Two values: 'standard' (default) and 'simple' (one pane,
         // list/grid only, no tab strip, no split pane). Anything else resolves
-        // to 'standard' with one console line naming it — the 'drive' profile
+        // to 'standard' with one console line naming it - the 'drive' profile
         // was removed after v0.40.0; pass 'simple' instead. It does NOT decide
         // the look: the "+ New" menu, the header search field with its ⌘K hint,
         // the filter row, the Folders/Files sections and Details/Activity are
@@ -77,12 +77,12 @@ has no stylesheet of its own and you do not need one from anywhere else.
 carries the explorer's stylesheet *inside the JavaScript* and appends it to
 `<head>` once, the first time an element mounts. The sheet is
 `@brftech/filex-core`'s, byte for byte, so a React page and a Vue page render
-the same explorer — the Vue wrapper is the only one that imports a
+the same explorer - the Vue wrapper is the only one that imports a
 `style.css`, because mounting an SFC runs no registration step that could
 inject it.
 
 The look is the `--fe-*` custom properties. Set them on any scope above the
-component — `:root`, a wrapper `div` — and the explorer follows:
+component - `:root`, a wrapper `div` - and the explorer follows:
 
 ```css
 :root {
@@ -93,15 +93,15 @@ component — `:root`, a wrapper `div` — and the explorer follows:
 
 Light/dark follows `config.theme` (`'light'` / `'dark'` / `'auto'`, and `auto`
 reads the host's `prefers-color-scheme`). The shipped palettes are in
-[`docs/INTEGRATION.md`](https://github.com/BRF-Tech/filex/blob/main/docs/INTEGRATION.md#themes)
-— and an operator's own themes, composed on the admin **Appearance** screen,
+[`docs/INTEGRATION.md`](https://github.com/BRF-Tech/filex/blob/main/docs/INTEGRATION.md#themes) -
+and an operator's own themes, composed on the admin **Appearance** screen,
 arrive through the same `--fe-*` tokens, so an embed wears the instance's
 colours without being told about them.
 
 > ⚠ The product mark in the top bar comes from `config.brand`
 > (`{ name, markUrl }`), not from a slot. A host that mounts a custom element
-> cannot fill a slot inside it — that is a Vue custom-element limitation, not
-> an oversight — so the config entry is the door.
+> cannot fill a slot inside it - that is a Vue custom-element limitation, not
+> an oversight - so the config entry is the door.
 
 ## Bundler note
 

@@ -15,6 +15,7 @@ import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
+import ThumbLimitsCard from '@/components/tools/ThumbLimitsCard.vue';
 
 const { t } = useI18n();
 const settings = useSettingsStore();
@@ -253,6 +254,10 @@ onMounted(() => settings.fetch());
       </div>
     </form>
 
+
+    <!-- The SVG thumbnail limits: the same card Admin → Tools → Thumbnail
+         repair shows, so the two cannot disagree. -->
+    <ThumbLimitsCard v-if="!settings.loading" />
 
     <!-- tablo:t3 — the instance default folder view -->
     <form

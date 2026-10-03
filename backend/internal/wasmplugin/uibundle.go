@@ -190,7 +190,7 @@ func indexUIZip(ra io.ReaderAt, size int64, verify bool) (*uiIndex, error) {
 		}
 		low := strings.ToLower(name)
 		if prev, dup := folded[low]; dup {
-			return nil, fmt.Errorf("the interface bundle holds %s and %s — names that differ only in case are one file on some systems", clip(prev, 80), clip(name, 80))
+			return nil, fmt.Errorf("the interface bundle holds %s and %s - names that differ only in case are one file on some systems", clip(prev, 80), clip(name, 80))
 		}
 		folded[low] = name
 		if f.Method != zip.Store && f.Method != zip.Deflate {
@@ -200,7 +200,7 @@ func indexUIZip(ra io.ReaderAt, size int64, verify bool) (*uiIndex, error) {
 			return nil, fmt.Errorf("the interface bundle's %s is over %d MiB", clip(name, 120), maxUIFileBytes>>20)
 		}
 		if isUIHTML(name) && f.UncompressedSize64 > maxUIHTMLBytes {
-			return nil, fmt.Errorf("the interface bundle's %s is over %d MiB — an HTML page that large is not an interface", clip(name, 120), maxUIHTMLBytes>>20)
+			return nil, fmt.Errorf("the interface bundle's %s is over %d MiB - an HTML page that large is not an interface", clip(name, 120), maxUIHTMLBytes>>20)
 		}
 		x.unpacked += int64(f.UncompressedSize64)
 		if x.unpacked > maxUIUnpacked {
@@ -245,7 +245,7 @@ type stagedMirror struct {
 // the mirrored external files. m has a `ui` block.
 func (r *Registry) stageUI(ctx context.Context, m *Manifest, in *InstallInput) (*stagedUI, error) {
 	if in.UI == nil {
-		return nil, installErr(ErrCodeManifestInvalid, "the manifest declares an interface (ui) — supply its bundle: the multipart part `ui`, or ui.bundle.url for an install from GitHub or an address")
+		return nil, installErr(ErrCodeManifestInvalid, "the manifest declares an interface (ui) - supply its bundle: the multipart part `ui`, or ui.bundle.url for an install from GitHub or an address")
 	}
 	b, err := io.ReadAll(io.LimitReader(in.UI, r.maxUIBytes()+1))
 	if err != nil {
@@ -300,7 +300,7 @@ func (r *Registry) stageUI(ctx context.Context, m *Manifest, in *InstallInput) (
 			continue
 		}
 		if _, clash := idx.files[mirrorPath(e.URL)]; clash {
-			return nil, installErr(ErrCodeManifestInvalid, "the bundle holds "+mirrorPath(e.URL)+", which is where the mirrored "+e.URL+" is served — rename one")
+			return nil, installErr(ErrCodeManifestInvalid, "the bundle holds "+mirrorPath(e.URL)+", which is where the mirrored "+e.URL+" is served - rename one")
 		}
 		body, have := in.Mirrors[e.SHA256]
 		if have {

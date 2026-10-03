@@ -259,9 +259,10 @@ type Applies struct {
 	State   []string `json:"state,omitempty"`
 	NoState []string `json:"no_state,omitempty"`
 	// EngineExt adds extensions that are offered only while the named
-	// engine is installed and granted: `{"libreoffice": ["docx", "odt"]}`
-	// on top of `ext: ["pdf"]` offers the action on a .docx exactly when
-	// the host can turn one into a PDF. The host folds the list into Ext
+	// engine is there and granted: `{"office": ["docx", "odt"]}` on top of
+	// `ext: ["pdf"]` offers the action on a .docx exactly when the host can
+	// turn one into a PDF (the office engine is the connected ONLYOFFICE;
+	// `libreoffice`, its name before 0.50, reads the same). The host folds the list into Ext
 	// before anybody sees the action (the explorer's menu, the run check),
 	// so a client never evaluates it. It only ADDS to a non-empty ext/mime
 	// list — an empty one already means "any file".
@@ -548,7 +549,63 @@ type Manifest struct {
 	// are filled from the arguments it passes. Every declared language is
 	// required, like every other Text.
 	Messages map[string]Text `json:"messages,omitempty"`
+	// Thumbnails says the app draws thumbnails of the kinds its Applies names
+	// (filex 0.50.0 and later): its module answers the `thumbnail` export. Each
+	// kind is a permission (`thumbnail:.<ext>` / `thumbnail:<type>`), derived
+	// like the interface's, so an upgrade that draws one more kind is a new
+	// grant. filex before 0.50.0 does not know this field and refuses the
+	// manifest - declare it with `filex: ">=0.50.0"`.
+	Thumbnails *ThumbnailSpec `json:"thumbnails,omitempty"`
 }
+
+// ThumbnailSpec is the `thumbnails` block: the kinds of file the app draws.
+// Applies names them the way a viewer's rule does - a non-empty ext or mime
+// list (a family like `image/*` is fine, `*/*` is not), kind `file`.
+type ThumbnailSpec struct {
+	Applies Applies `json:"applies"`
+}
+
+// ThumbnailInput is what the host hands `thumbnail`: ONE file to draw.
+//
+// The file is the call's only input (`File.Ref`, read with file_open): its
+// name, size and type, never its path, its storage or who owns it. Nobody is
+// signed in to a thumbnail call; it runs whenever filex draws the file (an
+// upload, a listing that found it stale, a repair), for every person alike.
+type ThumbnailInput struct {
+	File FileRef `json:"file"`
+	// Ext is the file name's extension, lower-case, no dot ("" for none).
+	Ext string `json:"ext,omitempty"`
+	// MaxWidth / MaxHeight are the box filex shows a thumbnail in. Drawing
+	// larger is wasted: filex scales the answer down to fit.
+	MaxWidth  int `json:"max_width"`
+	MaxHeight int `json:"max_height"`
+	// MaxOutputBytes is the most the answer's image may weigh.
+	MaxOutputBytes int `json:"max_output_bytes"`
+	// Locale is the instance's default language (a thumbnail is the same
+	// picture for everybody).
+	Locale   string            `json:"locale,omitempty"`
+	Settings map[string]string `json:"settings,omitempty"` // non-secret only
+}
+
+// ThumbnailOutput is what `thumbnail` answers: a PNG or a JPEG. filex scales
+// it, lays it on the transparency checkerboard and writes its own JPEG. An
+// app that cannot draw this file answers an error; filex then asks the next
+// handler in the administrator's list.
+type ThumbnailOutput struct {
+	Image []byte `json:"image"`
+}
+
+// The limits the host holds every thumbnail answer to - part of the contract,
+// so the test kit checks an answer against the same numbers.
+const (
+	// ThumbnailMaxOutputBytes is the most an answer's image may weigh.
+	ThumbnailMaxOutputBytes = 4 << 20
+	// ThumbnailMaxPixels is the widest and the tallest an answer's image may
+	// be, read from its header before a pixel is decoded.
+	ThumbnailMaxPixels = 4096
+	// ThumbnailSize is the box filex shows a thumbnail in, in pixels.
+	ThumbnailSize = 320
+)
 
 // FillMessage fills `{name}` placeholders in every language of t.
 func FillMessage(t Text, args map[string]string) Text {
@@ -909,6 +966,30 @@ type TickOutput struct {
 	// wake-up decided, in the app's own words. It is not shown to anyone
 	// else; there is nobody there.
 	Note Text `json:"note,omitempty"`
+}
+
+// SignerEKUs are the extended key usages of every certificate the host
+// issues for signing - a signer's (cert_issue) and the platform seal - as
+// object identifiers. Both say "documents" and nothing else:
+//
+//   - 1.3.6.1.5.5.7.3.36, id-kp-documentSigning (RFC 9336), the standard one;
+//     a verifier that asks for a document-signing certificate asks for it.
+//   - 1.2.840.113583.1.1.5, Adobe's Authentic Documents Trust: Acrobat
+//     refuses a signing certificate whose extendedKeyUsage carries none of
+//     emailProtection, codeSigning, anyExtendedKeyUsage or this one, and this
+//     is the only one of the four that is not a license for something else.
+//
+// ⚠ Never emailProtection (filex before 0.50.0 put it on every leaf): an app
+// with `sign` chooses the name and the email address on the certificate, so
+// emailProtection made it an S/MIME certificate in anybody's name under the
+// tenant's authority - an organization-wide one once an operator imports
+// their own. RFC 9336 exists to separate document signing from S/MIME and
+// TLS for exactly this reason. Signatures made with the older certificates
+// still verify: their chain is the same, and a verifier that requires
+// document signing finds it on them too.
+var SignerEKUs = [][]int{
+	{1, 3, 6, 1, 5, 5, 7, 3, 36},
+	{1, 2, 840, 113583, 1, 1, 5},
 }
 
 // HostError is the error envelope every host function may return.

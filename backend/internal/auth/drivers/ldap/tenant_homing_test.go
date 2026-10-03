@@ -67,9 +67,9 @@ func ldapFixture(t *testing.T, cfg map[string]any) (*Driver, db.Store) {
 // ProviderID == the supertenant, on the very request whose Host named a tenant.
 func TestLDAP_HostHomesTheAccountInItsTenant(t *testing.T) {
 	d, store := ldapFixture(t, map[string]any{"multi_tenant": true})
-	tenantID := seedProvider(t, store, "diyetlif", "diyetlif.example.com")
+	tenantID := seedProvider(t, store, "globex", "globex.example.com")
 
-	ctx := auth.WithLoginHost(context.Background(), "diyetlif.example.com")
+	ctx := auth.WithLoginHost(context.Background(), "globex.example.com")
 	u, tok, err := d.Login(ctx, "ayse@example.com", "directory-pw")
 	require.NoError(t, err)
 	require.NotEmpty(t, tok)
@@ -88,7 +88,7 @@ func TestLDAP_HostHomesTheAccountInItsTenant(t *testing.T) {
 // exists; what it cannot do is come into existence with no tenant.
 func TestLDAP_NoHostRefusesToProvision(t *testing.T) {
 	d, store := ldapFixture(t, map[string]any{"multi_tenant": true})
-	seedProvider(t, store, "diyetlif", "diyetlif.example.com")
+	seedProvider(t, store, "globex", "globex.example.com")
 
 	// VerifyPassword is exactly what internal/protocolauth calls: no request,
 	// no Host.
@@ -108,7 +108,7 @@ func TestLDAP_NoHostRefusesToProvision(t *testing.T) {
 // the same situation as no Host at all, and must not silently fall back.
 func TestLDAP_UnknownHostRefusesToProvision(t *testing.T) {
 	d, store := ldapFixture(t, map[string]any{"multi_tenant": true})
-	seedProvider(t, store, "diyetlif", "diyetlif.example.com")
+	seedProvider(t, store, "globex", "globex.example.com")
 
 	ctx := auth.WithLoginHost(context.Background(), "not-a-tenant.example.com")
 	_, _, err := d.Login(ctx, "ayse@example.com", "directory-pw")
@@ -126,9 +126,9 @@ func TestLDAP_UnknownHostRefusesToProvision(t *testing.T) {
 func TestLDAP_PinnedProviderHomesAHostlessLogin(t *testing.T) {
 	d, store := ldapFixture(t, map[string]any{
 		"multi_tenant": true,
-		"provider":     "diyetlif",
+		"provider":     "globex",
 	})
-	tenantID := seedProvider(t, store, "diyetlif", "diyetlif.example.com")
+	tenantID := seedProvider(t, store, "globex", "globex.example.com")
 
 	u, err := d.VerifyPassword(context.Background(), "ayse@example.com", "directory-pw")
 	require.NoError(t, err)
@@ -141,12 +141,12 @@ func TestLDAP_PinnedProviderHomesAHostlessLogin(t *testing.T) {
 func TestLDAP_HostWinsOverThePin(t *testing.T) {
 	d, store := ldapFixture(t, map[string]any{
 		"multi_tenant": true,
-		"provider":     "arasboya",
+		"provider":     "initech",
 	})
-	mine := seedProvider(t, store, "diyetlif", "diyetlif.example.com")
-	seedProvider(t, store, "arasboya", "arasboya.example.com")
+	mine := seedProvider(t, store, "globex", "globex.example.com")
+	seedProvider(t, store, "initech", "initech.example.com")
 
-	ctx := auth.WithLoginHost(context.Background(), "diyetlif.example.com")
+	ctx := auth.WithLoginHost(context.Background(), "globex.example.com")
 	u, _, err := d.Login(ctx, "ayse@example.com", "directory-pw")
 	require.NoError(t, err)
 	require.NotNil(t, u.ProviderID)
@@ -182,15 +182,15 @@ func TestLDAP_SingleTenantUnaffected(t *testing.T) {
 // or a login on the wrong host would migrate somebody between customers.
 func TestLDAP_ExistingAccountIsNeverRehomed(t *testing.T) {
 	d, store := ldapFixture(t, map[string]any{"multi_tenant": true})
-	mine := seedProvider(t, store, "diyetlif", "diyetlif.example.com")
-	theirs := seedProvider(t, store, "arasboya", "arasboya.example.com")
+	mine := seedProvider(t, store, "globex", "globex.example.com")
+	theirs := seedProvider(t, store, "initech", "initech.example.com")
 
-	ctx := auth.WithLoginHost(context.Background(), "diyetlif.example.com")
+	ctx := auth.WithLoginHost(context.Background(), "globex.example.com")
 	u1, _, err := d.Login(ctx, "ayse@example.com", "directory-pw")
 	require.NoError(t, err)
 	require.Equal(t, mine, *u1.ProviderID)
 
-	other := auth.WithLoginHost(context.Background(), "arasboya.example.com")
+	other := auth.WithLoginHost(context.Background(), "initech.example.com")
 	u2, _, err := d.Login(other, "ayse@example.com", "directory-pw")
 	require.NoError(t, err)
 	assert.Equal(t, u1.ID, u2.ID, "the same directory identity is one account")

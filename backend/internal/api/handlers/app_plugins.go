@@ -27,6 +27,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
@@ -60,6 +61,10 @@ type AppPlugins struct {
 	// Quota is the per-person ceiling an interface's save is held to, like
 	// every other write (security review UI-7). Nil = no ceiling.
 	Quota *quota.Service
+	// Assoc keeps which handler opens which kind of file (internal/assoc):
+	// the listing carries its rules, and an interface switched off for a
+	// kind is refused on it (openAllowed). Nil: every viewer opens its kinds.
+	Assoc *assoc.Service
 }
 
 // NewAppPlugins constructs the handler and wires it as the registry's sink.
@@ -134,7 +139,34 @@ func (h *AppPlugins) Actions(w http.ResponseWriter, r *http.Request) {
 			ans.Views = views
 		}
 	}
+	if h.Assoc != nil {
+		if rules := h.Assoc.Rules(r.Context(), assoc.CapOpen); len(rules) > 0 {
+			ans.OpenRules = rules
+		}
+	}
 	writeJSON(w, http.StatusOK, ans)
+}
+
+// openAllowed refuses an app's interface on a file of a kind the
+// administrator switched that interface off for (Admin → Plugins → Default
+// apps), answering 403 handler_off itself. Only a `viewer` view is an opener;
+// any other view is not this rule's business.
+//
+// ⚠ The listing already leaves such a view out of every list the explorer
+// draws. This is the server's own line: an old tab, or a crafted request,
+// that saves through the interface or calls its module on that file anyway.
+func (h *AppPlugins) openAllowed(w http.ResponseWriter, r *http.Request, p *wasmplugin.Installed, v *wire.View, name string) bool {
+	if h.Assoc == nil || v == nil || v.Placement != "viewer" || name == "" {
+		return true
+	}
+	if h.Assoc.OpenAllowed(r.Context(), name, assoc.OpenID(p.Row.Name, v.ID)) {
+		return true
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{
+		"error":   "handler_off",
+		"message": "the administrator turned this app off for ." + assoc.ExtOf(name) + " files",
+	})
+	return false
 }
 
 type runRequest struct {
@@ -451,18 +483,7 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found", "message": rel})
 			return nil, false
 		}
-		it := wasmplugin.Item{Kind: "file", Mime: obj.Mime, Ext: strings.TrimPrefix(strings.ToLower(path.Ext(rel)), ".")}
-		if obj.Kind == storage.KindDirectory {
-			it.Kind = "dir"
-			it.Ext, it.Mime = "", ""
-		}
-		// ⚠ Personal keys (`todo@7`) answer for the person asking only, as
-		// `todo@me` — the same view of them the listing gives (app badges).
-		for _, k := range wasmplugin.PersonalStateKeys(states[pathkey.Hash(storageID, "/"+rel)], callerID(r)) {
-			if strings.HasPrefix(k, p.Row.Name+":") {
-				it.State = append(it.State, strings.TrimPrefix(k, p.Row.Name+":"))
-			}
-		}
+		it := appItemOf(rel, obj, states[pathkey.Hash(storageID, "/"+rel)], callerID(r), p.Row.Name)
 		c.rels = append(c.rels, rel)
 		c.items = append(c.items, it)
 	}
@@ -471,6 +492,28 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 		return nil, false
 	}
 	return c, true
+}
+
+// appItemOf is one input as an app's `applies` rule sees it: its kind, mime
+// type and extension, and the app's own state keys on it. The run's check
+// (authorise) and the AI surface's "what applies to this file" (app_actions)
+// both build it here, so the two cannot disagree about what an action
+// matches.
+//
+// ⚠ Personal keys (`todo@7`) answer for the person asking only, as `todo@me`:
+// the same view of them the listing gives (app badges).
+func appItemOf(rel string, obj storage.Object, stateKeys []string, caller int64, plugin string) wasmplugin.Item {
+	it := wasmplugin.Item{Kind: "file", Mime: obj.Mime, Ext: strings.TrimPrefix(strings.ToLower(path.Ext(rel)), ".")}
+	if obj.Kind == storage.KindDirectory {
+		it.Kind = "dir"
+		it.Ext, it.Mime = "", ""
+	}
+	for _, k := range wasmplugin.PersonalStateKeys(stateKeys, caller) {
+		if strings.HasPrefix(k, plugin+":") {
+			it.State = append(it.State, strings.TrimPrefix(k, plugin+":"))
+		}
+	}
+	return it
 }
 
 // resolvePaths accepts the two spellings a caller may use: a storage_id with
@@ -621,11 +664,24 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 	opID := op.ID
 	job.OpID = &opID
 	_ = h.Store.SetAppPluginJobOp(r.Context(), job.ID, opID)
-	_ = h.Store.InsertAuditEntry(r.Context(), &model.AuditEntry{
-		UserID: actorID, Action: "app_plugin.action_run", TargetType: "app_plugin", TargetID: c.plugin.Row.Name,
-		Metadata: map[string]any{"action": c.action.ID, "storage_id": c.storage.ID, "paths": c.rels, "job": job.ID, "op": opID},
-		IP:       clientIP(r),
-	})
+	runMeta := map[string]any{"action": c.action.ID, "storage_id": c.storage.ID, "paths": c.rels, "job": job.ID, "op": opID}
+	if auth.Audited(r.Context()) {
+		// A door that records this request's row (POST /api/ai/apps/run,
+		// /api/ai/convert, the app_run / file_convert MCP tools) gets THIS
+		// name and these facts: one row per run, with the token and the door
+		// stamped on it, not the door's generic row plus a second one here.
+		auth.SetAuditAction(r.Context(), "app_plugin.action_run", "app_plugin")
+		auth.SetAuditTarget(r.Context(), c.plugin.Row.Name, "")
+		for k, v := range runMeta {
+			auth.AddAuditDetail(r.Context(), k, v)
+		}
+	} else {
+		_ = h.Store.InsertAuditEntry(r.Context(), &model.AuditEntry{
+			UserID: actorID, Action: "app_plugin.action_run", TargetType: "app_plugin", TargetID: c.plugin.Row.Name,
+			Metadata: runMeta,
+			IP:       clientIP(r),
+		})
+	}
 	op.Plugin, op.Action, op.Label = c.plugin.Row.Name, c.action.ID, wasmplugin.JobText(job.Label, locale)
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op, "job_id": job.ID})
 }

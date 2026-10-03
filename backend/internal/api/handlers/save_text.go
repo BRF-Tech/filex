@@ -85,7 +85,13 @@ type SaveText struct {
 	ACL             *acl.Resolver
 	// Index keeps the saved text searchable. Optional; nil skips indexing.
 	Index *search.Index
+	// Thumbs draws the saved file again. ⚠ Before 0.50 nothing did: an SVG
+	// edited in the built-in editor kept the picture of its first version.
+	Thumbs ThumbPipeline
 }
+
+// AttachThumbs wires the thumbnail pipeline (see Thumbs).
+func (h *SaveText) AttachThumbs(p ThumbPipeline) { h.Thumbs = p }
 
 // AttachSearchIndex wires the search index. ⚠ Without it an edit saved from
 // the built-in editor never reaches Bleve: the file keeps whatever text it had
@@ -166,6 +172,11 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	if readOnly {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		return
+	}
+	// No save onto an entry the storage could not answer for, or into one
+	// (issue #104).
+	if refuseUnavailable(w, r, h.Store, stRow, rel) {
 		return
 	}
 	// The text editor never opens anything among filex's own (the desktop's
@@ -283,6 +294,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		// ⚠ Re-index, or the document keeps the pre-edit text for good:
 		// nothing else ever revisits a file whose path did not change.
 		sy.IndexNode(r.Context(), existing)
+		dispatchThumb(h.Thumbs, existing)
 		// SAVE to a file that already existed → file.updated, and a debounced
 		// scan. Scanning on every Ctrl+S is why this surface had no scan at
 		// all; one scan per file per editing window is the answer to that, not
@@ -327,6 +339,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 				slog.String("path", clean), slog.String("err", cerr.Error()))
 		} else {
 			sy.IndexNode(r.Context(), created)
+			dispatchThumb(h.Thumbs, created)
 			writehook.EmitWritten(r.Context(), storageID, created, writehook.OriginManager, writehook.Created,
 				map[string]any{"editor": true})
 			// CREATE → scan now, exactly like an upload. This branch is the

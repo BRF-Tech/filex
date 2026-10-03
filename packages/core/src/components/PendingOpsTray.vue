@@ -69,6 +69,7 @@ const DRAWN_KINDS: ReadonlySet<string> = new Set([
  *  a generic job (`plugin`), never folded into delete. */
 function mapKind(op: PendingOp): OperationKind {
   if (op.op_type === 'trash-empty') return 'trash';
+  if (op.op_type === 'thumb-repair') return 'thumbs';
   return (DRAWN_KINDS.has(op.op_type) ? op.op_type : 'plugin') as OperationKind;
 }
 
@@ -83,7 +84,7 @@ function mayCancel(op: PendingOp): boolean {
   if (op.status !== 'pending' && op.status !== 'running') return false;
   if (op.op_type === 'archive-create' || op.op_type === 'archive-extract') return op.cancellable;
   if (isPluginJob(op)) return true;
-  return op.op_type === 'trash-empty' && props.callerAdmin === true;
+  return (op.op_type === 'trash-empty' || op.op_type === 'thumb-repair') && props.callerAdmin === true;
 }
 
 /* issue #27 — bytes when a cross-storage transfer reports them, no fake 0%
@@ -96,7 +97,7 @@ const percentOf = (op: PendingOp): number | null => opPercent(op);
  * ("Restore") before.
  */
 function nameOf(op: PendingOp): string {
-  if (op.op_type === 'trash-empty') return '';
+  if (op.op_type === 'trash-empty' || op.op_type === 'thumb-repair') return '';
   const named = op.label || op.target_path || op.source_dir || '';
   if (named) return named;
   if (op.op_type === 'restore' || op.op_type === 'purge') {

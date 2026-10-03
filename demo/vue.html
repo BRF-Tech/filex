@@ -90,7 +90,7 @@
         function rebuild() { stamp.value++; status.value = 'connecting...'; }
 
         function onReady(e)    { status.value = `ready · v${e.capabilities.version}`; }
-        function onError(e)    { status.value = `error: ${e.code} — ${e.message}`; }
+        function onError(e)    { status.value = `error: ${e.code} - ${e.message}`; }
         function onNavigate(e) { status.value = `path: ${e.path}`; }
         function onShare(e)    {
           navigator.clipboard.writeText(e.share.url);

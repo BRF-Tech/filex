@@ -34,7 +34,9 @@ import { actionIconSvg } from '../lib/actionIcons';
 import { appliesToNodes } from '../lib/pluginApplies';
 import { lockedRefusal, lockOf, lockWords } from '../lib/appLock';
 import { linkWordsFor } from '../lib/symlink'; /* issue #34 */
+import { unavailableWordsFor } from '../lib/unavailable'; /* issue #104 */
 import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
+import { publicLinksOff } from '../lib/e2eLinks';
 import { personInitial as initialOfPerson, personName as nameOfPerson } from '../lib/personName';
 import TagPicker from './TagPicker.vue';
 import type { TagKind } from '../lib/tags';
@@ -70,7 +72,7 @@ const props = withDefaults(
   /**
    * Is the reader an administrator (`capabilities.caller_admin`)?
    *
-   * ⚠ Only the NODE ID row depends on it (Burak, 2026-09-23). The id is a
+   * ⚠ Only the NODE ID row depends on it (the maintainer, 2026-09-23). The id is a
    * support handle — what an administrator quotes in Admin → File history or
    * an audit row — and it means nothing to anybody else; on a shared surface
    * it was a number in front of every reader. Absent = not an administrator,
@@ -85,6 +87,16 @@ const props = withDefaults(
    * three: the server decides.
    */
   sharing?: SharingHeld;
+  /**
+   * wiring:e2 - the selected item sits in an end-to-end encrypted folder (the
+   * host's listing is one, or the item was selected in one). "Create link"
+   * then follows the explorer's Share row (lib/e2eLinks publicLinksOff): never
+   * a public link for an encrypted folder or anything in it, which the server
+   * refuses with 409 E2E_ENCRYPTED. The folder's own row (`e2e`) and a row
+   * that names its folder (`e2e_root`) are told by the rows themselves.
+   * Absent = the rows decide alone.
+   */
+  inEncrypted?: boolean;
   /** Authenticated thumbnail resolver (useThumbs.src). Optional. */
   thumbSrc?: (n: FileNode) => string | null;
   /* === surucu:d1 — the Drive shell's details panel ===================== */
@@ -220,6 +232,9 @@ const lockLine = computed(() => lockWords(lockOf(single.value), { t, formatDate:
  * "Type: file" are both true and both misleading on their own, and the reason
  * is not something the person can read off any of the facts below. */
 const linkNote = computed(() => linkWordsFor(single.value, { t }));
+/* issue #104 - an entry the storage could not answer for: the same place as
+ * the two notes above, and the storage's own answer on its own line. */
+const unavailableNote = computed(() => unavailableWordsFor(single.value, { t }));
 const isFile = computed(() => single.value?.type === 'file');
 const nodeId = computed<number | null>(() =>
   typeof single.value?.id === 'number' ? (single.value.id as number) : null,
@@ -343,11 +358,11 @@ function shortHash(h: string): string {
  * `useLocale.formatDate` now; `{ time: true }` is the listing's own variant.
  */
 function formatDate(ms: number | undefined): string {
-  return formatDateOf(ms, { time: true }) || '—';
+  return formatDateOf(ms, { time: true }) || '-';
 }
 
 function formatDateStr(s: string | undefined | null): string {
-  if (!s) return '—';
+  if (!s) return '-';
   const ms = Date.parse(s);
   return Number.isNaN(ms) ? s : formatDate(ms);
 }
@@ -381,6 +396,9 @@ const effectivePerm = computed<string>(() => {
  */
 /** The sharing kinds this account may use on the item (lib/sharingHeld). */
 const mayShare = computed<SharingHeld>(() => props.sharing ?? ALL_SHARING);
+/** wiring:e2 - no public link here: the explorer's Share row asks the same
+ *  rule (lib/e2eLinks), and the server refuses it with 409 E2E_ENCRYPTED. */
+const linksOff = computed(() => publicLinksOff(props.nodes, props.inEncrypted === true));
 // …and without `share.users` the people in that dialog are not theirs to
 // change either, so the button that opens it for them is not drawn.
 const canManagePerms = computed(() => effectivePerm.value === 'owner' && mayShare.value.users);
@@ -579,7 +597,7 @@ const shareBusy = ref(false);
 
 async function createLink(): Promise<void> {
   const node = single.value;
-  if (!node || shareBusy.value || !mayShare.value.links) return;
+  if (!node || shareBusy.value || !mayShare.value.links || linksOff.value) return;
   shareBusy.value = true;
   try {
     const r = await props.api.createShare({ path: node.path });
@@ -825,6 +843,20 @@ watch(
           <span><strong>{{ t('symlink.inspector') }}</strong><br />{{ linkNote.why }}</span>
         </p>
 
+        <!-- issue #104 - an entry the storage could not answer for. -->
+        <p
+          v-if="unavailableNote"
+          class="fe-inspector__unavailable"
+          role="note"
+          data-testid="inspector-unavailable"
+        >
+          <span aria-hidden="true">!</span>
+          <span>
+            <strong>{{ t('unavailable.inspector') }}</strong><br />{{ unavailableNote.why }}
+            <template v-if="unavailableNote.reason"><br /><bdi>{{ unavailableNote.reason }}</bdi></template>
+          </span>
+        </p>
+
         <!-- Multi selection → summary. The head already counts them, so this
              is the one fact the head does not carry. -->
         <dl v-if="isMulti" class="fe-inspector__meta">
@@ -896,7 +928,7 @@ watch(
                  has one: a client-synthesized row (a multi-storage folder) has
                  no backend id, and an empty "ID —" teaches nothing.
 
-                 ⚠⚠ And only for an ADMINISTRATOR (Burak, 2026-09-23): the id
+                 ⚠⚠ And only for an ADMINISTRATOR (the maintainer, 2026-09-23): the id
                  is the handle admin screens take (Admin → File history, an
                  audit row), and it says nothing to anyone else. Here, in the
                  shared panel, so every surface that draws it — the explorer,
@@ -1131,7 +1163,7 @@ watch(
           <span class="fe-inspector__linkicon" aria-hidden="true" v-html="actionIconSvg('link')"></span>
           <span class="fe-inspector__linknone">{{ t('inspector.link.none') }}</span>
           <button
-            v-if="mayShare.links"
+            v-if="mayShare.links && !linksOff"
             type="button"
             class="fe-btn fe-btn--sm"
             :disabled="shareBusy || !single"
@@ -1187,7 +1219,7 @@ watch(
             <li v-for="c in comments" :key="c.id" class="fe-inspector__comment">
               <div class="fe-inspector__comment-top">
                 <span class="fe-inspector__comment-author" :title="c.author_name">
-                  {{ c.author_name || '—' }}
+                  {{ c.author_name || '-' }}
                 </span>
                 <span class="fe-inspector__comment-time" :title="formatDateStr(c.created_at)">
                   {{ relativeTime(c.created_at) }}

@@ -19,9 +19,10 @@
 //
 // ⚠ Keyed by picture, not by URL. `thumb_url` carries a signature whose expiry
 // moves every hour; keyed by URL, the first listing after the hour turned
-// fetched every thumbnail of the folder again. The key is the URL's path plus
-// the file's `last_modified`: a rotated signature is the same picture, an edited
-// file is not.
+// fetched every thumbnail of the folder again. The key is the URL's path, its
+// `v` (the render's time, 0.50) and the file's `last_modified`: a rotated
+// signature is the same picture; an edited file, or the same file drawn again
+// because its old picture was stale, is not.
 
 import { shallowReactive, toRaw } from 'vue';
 import type { FileNode } from '../types/FileNode';
@@ -41,7 +42,9 @@ function thumbKey(n: FileNode): string | null {
   const raw = n.thumb_url;
   if (!raw) return null;
   const q = raw.indexOf('?');
-  return `${q === -1 ? raw : raw.slice(0, q)}|${n.last_modified ?? ''}`;
+  if (q === -1) return `${raw}||${n.last_modified ?? ''}`;
+  const v = new URLSearchParams(raw.slice(q + 1)).get('v') ?? '';
+  return `${raw.slice(0, q)}|${v}|${n.last_modified ?? ''}`;
 }
 
 export function useThumbs(apiBase: string | undefined, api: ThumbApiSlice) {

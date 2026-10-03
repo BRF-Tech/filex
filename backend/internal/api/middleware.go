@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/basepath"
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/httpx"
 )
 
@@ -51,10 +52,29 @@ func loggerFor(base string, next http.Handler) http.Handler {
 		if p, ok := basepath.Strip(base, r.URL.Path); ok {
 			action = managerAction(p, r)
 		}
+		// A peer that sends X-Forwarded-For without being a trusted proxy is
+		// remembered here, once per request, so the Sign-in security page can
+		// name it (internal/clientip, forwarders.go).
+		clientip.Observe(r)
 		// Authentication happens further in, on contexts this function never
 		// sees; auth.WithUser / auth.WithToken and the tenant resolver write
 		// into this holder on their way past (httpx.RequestLog).
 		ctx, who := httpx.WithRequestLog(r.Context())
+		// ⚠ The "http" line below is written when the answer is FINISHED. A
+		// request that reached the server and never finished left no line at
+		// all, so "the browser never sent it" could not be told from "it
+		// arrived and hung" (e2e task #81: a login page whose i18n chunk the
+		// log never showed). At debug level the arrival is logged as well,
+		// with the socket's own address (`peer`, port included): `ip` is the
+		// client as resolved through trusted proxies and carries no port, and
+		// the port is what tells which connection a request came on.
+		if slog.Default().Enabled(r.Context(), slog.LevelDebug) {
+			slog.LogAttrs(context.Background(), slog.LevelDebug, "http start",
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.String("ip", clientIP(r)),
+				slog.String("peer", r.RemoteAddr))
+		}
 		defer func() {
 			attrs := []slog.Attr{
 				slog.String("method", r.Method),
@@ -166,12 +186,6 @@ func (sw *statusWriter) WriteHeader(code int) {
 // hides the Hijacker and the upgrade fails with 501.
 func (sw *statusWriter) Unwrap() http.ResponseWriter { return sw.ResponseWriter }
 
-func clientIP(r *http.Request) string {
-	if v := r.Header.Get("X-Forwarded-For"); v != "" {
-		return v
-	}
-	if v := r.Header.Get("X-Real-IP"); v != "" {
-		return v
-	}
-	return r.RemoteAddr
-}
+// clientIP is the address the request came from (internal/clientip: the
+// socket's peer, or the forwarded address when the peer is a trusted proxy).
+func clientIP(r *http.Request) string { return clientip.FromRequest(r) }

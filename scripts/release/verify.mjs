@@ -208,8 +208,14 @@ export function docsSite(name, baseUrl, { dir = 'docs', ...opts } = {}) {
           problems.push(page.error);
           continue;
         }
-        const text = htmlText(page.text);
-        const missing = headings.filter((h) => !text.includes(h));
+        // Whitespace is squeezed out of both sides: htmlText turns every tag
+        // into a space, so a heading with inline code (MCP.md's "403 Forbidden
+        // (session_required)" in backticks) reads "( session_required )" on the page and
+        // was reported missing while it was there (v0.49.0, the first release
+        // to add such headings).
+        const squash = (s) => s.replace(/\s+/g, '');
+        const text = squash(htmlText(page.text));
+        const missing = headings.filter((h) => !text.includes(squash(h)));
         checked += headings.length - missing.length;
         if (missing.length) {
           problems.push(

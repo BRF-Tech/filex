@@ -49,8 +49,11 @@ type Driver struct {
 	headerName     string
 	headerRoles    string
 	trustedProxies []*net.IPNet
-	autoProvision  bool
-	adminRole      string // role string in headerRoles that elevates to admin (default "admin")
+	// firstLogin is what happens to a person the proxy names who has no account
+	// yet: auto_create (older name: auto_provision) and allowed_groups, judged
+	// against the roles header's values (auth.ProvisionFirstLogin).
+	firstLogin auth.FirstLoginPolicy
+	adminRole  string // role string in headerRoles that elevates to admin (default "admin")
 	// homing decides which tenant a just-in-time account lands in. Zero value
 	// (MultiTenant=false) is the single-tenant install and does nothing.
 	homing auth.TenantHoming
@@ -84,7 +87,7 @@ func (d *Driver) load(cfg map[string]any) error {
 	d.headerName = stringOr(cfg, "header_name", defaultNameHeader)
 	d.headerRoles = stringOr(cfg, "header_roles", defaultRolesHeader)
 	d.adminRole = stringOr(cfg, "admin_role", model.RoleAdmin)
-	d.autoProvision = boolOr(cfg, "auto_provision", true)
+	d.firstLogin = auth.FirstLoginPolicyFrom(cfg)
 	d.homing.MultiTenant = boolOr(cfg, "multi_tenant", false)
 	d.homing.Pin = stringOr(cfg, "provider", "")
 
@@ -147,7 +150,7 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 	headerEmail := d.headerEmail
 	headerName := d.headerName
 	headerRoles := d.headerRoles
-	autoProvision := d.autoProvision
+	firstLogin := d.firstLogin
 	adminRole := d.adminRole
 	nets := d.trustedProxies
 	homing := d.homing
@@ -174,12 +177,25 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 	_ = strings.TrimSpace(r.Header.Get(headerName)) // accepted but Users table has no name field today
 
 	role := model.RoleUser
-	if rawRoles := r.Header.Get(headerRoles); rawRoles != "" {
-		for _, p := range strings.Split(rawRoles, ",") {
-			if strings.EqualFold(strings.TrimSpace(p), adminRole) {
-				role = model.RoleAdmin
-				break
-			}
+	// The roles header doubles as the person's groups: allowed_groups is judged
+	// against them, admin_role is looked for in them, and they are recorded
+	// (below). Every line of it counts: fields of one name are one
+	// comma-separated list (RFC 9110, section 5.3), however the proxy splits
+	// them.
+	//
+	// ⚠ Absent and empty are two answers. No roles header at all is a proxy
+	// that says nothing about groups - often one that sends none, or a request
+	// its group lookup did not run for - so what the last request recorded
+	// stays. A header that is there and empty is the proxy saying "no groups",
+	// and the linked groups are left. (For allowed_groups both are "in no
+	// group": a person with no account yet has nothing recorded to fall back
+	// on.)
+	lines, saysGroups := r.Header[http.CanonicalHeaderKey(headerRoles)]
+	groups := auth.SplitList(strings.Join(lines, ","))
+	for _, g := range groups {
+		if strings.EqualFold(g, adminRole) {
+			role = model.RoleAdmin
+			break
 		}
 	}
 
@@ -187,19 +203,45 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 	// account in that tenant. Unlike the LDAP driver this one runs INSIDE an
 	// *http.Request, so the signal is always there.
 	ctx := auth.WithRequestLoginHost(r.Context(), r)
+	created := false
 	user, err := d.store.GetUserByEmail(ctx, email)
 	if err != nil {
-		if !autoProvision {
-			return nil, auth.ErrUnauthorized
-		}
 		// ⚠⚠ NOT store.CreateUser directly — that homes the account in
 		// `default`, which is seeded is_supertenant = 1 and therefore
 		// confine-EXEMPT. On a multi-tenant install, header-trust
 		// auto-provisioning was minting an account that could reach every
 		// storage on the box for anybody the upstream proxy named.
-		user, err = auth.ProvisionUser(ctx, d.store, homing, "proxyheader", email, role)
+		//
+		// ⚠ The first-login rule sits in front: auto_create off, or
+		// allowed_groups with no match, answers 401 - and the 401 carries the
+		// reason code (auth.RefusalToTell, written by auth.Middleware), so the
+		// sign-in page can say why. The proxy has already said who the person
+		// is: there is no password here to confirm. The reason is also in the
+		// log and the audit row.
+		user, err = auth.ProvisionFirstLogin(ctx, d.store, auth.FirstLogin{
+			Driver: "proxyheader", Identifier: uid, Email: email, Role: role,
+			Groups: groups, Policy: firstLogin, Homing: homing,
+		})
 		if err != nil {
+			if errors.Is(err, auth.ErrFirstLoginRefused) {
+				return nil, auth.RefusalToTell(err)
+			}
 			return nil, fmt.Errorf("proxyheader: provision user: %w", err)
+		}
+		created = true
+	}
+	if saysGroups {
+		// The header's groups, recorded and REPLACED - the proxy is the
+		// authority on membership - through the one rule every provider shares
+		// (auth.RecordSignInGroups): a new account starts with the role they
+		// name, the filex groups of the account's own tenant linked to them are
+		// joined and left, and the level a group's role sets is checked. With or
+		// without allowed_groups, which only decides who gets an account.
+		//
+		// Only when the set changed: every request is a sign-in here, and the
+		// same groups again would rewrite the same rows each time.
+		if cur, lerr := d.store.ListUserSSOGroups(ctx, user.ID); created || lerr != nil || !sameGroups(cur, groups) {
+			user = auth.RecordSignInGroups(ctx, d.store, "proxyheader", user, groups, created)
 		}
 	}
 	_ = d.store.TouchLastLogin(ctx, user.ID)
@@ -272,4 +314,26 @@ func stringSlice(cfg map[string]any, key string) []string {
 		return out
 	}
 	return nil
+}
+
+// sameGroups reports whether two group lists hold the same names (order and
+// repeats aside).
+func sameGroups(a, b []string) bool {
+	set := func(l []string) map[string]struct{} {
+		m := make(map[string]struct{}, len(l))
+		for _, g := range l {
+			m[g] = struct{}{}
+		}
+		return m
+	}
+	x, y := set(a), set(b)
+	if len(x) != len(y) {
+		return false
+	}
+	for g := range x {
+		if _, ok := y[g]; !ok {
+			return false
+		}
+	}
+	return true
 }

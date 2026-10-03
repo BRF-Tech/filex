@@ -47,7 +47,9 @@
  */
 export type LiveState = 'connected' | 'polling' | 'offline';
 
-const liveRe = /^live: (connected|polling|offline)(?: — (.*))?$/;
+// The engine writes " - " between a state and its detail (since 0.50; an em
+// dash before it). Both are read: a line from an older engine still parses.
+const liveRe = /^live: (connected|polling|offline)(?: [-—–] (.*))?$/;
 
 /** Parses one engine stdout line into a live-state update, or null. */
 export function parseLiveLine(line: string): { live: LiveState; detail: string | null } | null {
@@ -372,8 +374,9 @@ const progressRe = /^(inventory|plan|transfer|settling): (.*)$/;
 // A pass's summary. ⚠ "failed" is the engine saying the pass had errors; the
 // error TEXT comes on stderr, which may be read before or after this line.
 const summaryRe = /^(?:already in step$|\d+\/\d+ done\b(.*)$)/;
-const localRe = /^local: (?:(watched)|poll-only — (too-large|unavailable)(?: — (.*))?)$/;
-const lockRe = /^lock: (?:(acquired)|busy(?: — (.*))?)$/;
+// " - " since 0.50, an em dash before it: both read (see liveRe).
+const localRe = /^local: (?:(watched)|poll-only [-—–] (too-large|unavailable)(?: [-—–] (.*))?)$/;
+const lockRe = /^lock: (?:(acquired)|busy(?: [-—–] (.*))?)$/;
 const holdRe = /^hold: (\d+)\b/;
 const windowWaitRe = /^sync: waiting for the sync window (\S+)$/;
 const windowClosedRe = /^sync: the sync window (\S+) closed\b/;

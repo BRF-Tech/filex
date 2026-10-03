@@ -40,7 +40,7 @@ const text = computed(() => notificationText(props.item));
 const clickable = computed(() => isNotificationClickable(props.item.target));
 const unread = computed(() => !props.item.read_at);
 /** THE date format of the product (core formatWhen), with the clock. */
-const when = computed(() => formatWhen(props.item.created_at, props.locale, { time: true }) || '—');
+const when = computed(() => formatWhen(props.item.created_at, props.locale, { time: true }) || '-');
 
 /**
  * gorunum:v2 — the severity in the reader's language, not the enum.

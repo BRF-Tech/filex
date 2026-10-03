@@ -8,15 +8,22 @@
 # Bring-up:
 #   1. docker compose -f docker-compose.multi-tenant.yml up -d
 #   2. Sign in as the bootstrap admin on filex.example, then provision tenants
-#      over the lifecycle API (or your own tooling):
+#      on Admin -> Tenants, or over the lifecycle API (or your own tooling):
 #        POST /api/admin/storages         {"name":"acme-files","driver":"local",
 #                                          "config":{"path":"/storages/acme/files"}}
-#        POST /api/admin/providers        {"slug":"acme","host":"files.acme.example",
+#        POST /api/admin/providers        {"slug":"acme","realm":"acme","host":"files.acme.example",
 #                                          "oidc_issuer":"https://kc.example/realms/acme",
 #                                          "oidc_client_id":"filex","oidc_client_secret":"…",
 #                                          "role_claim":"realm_access.roles","admin_group":"filex-admins"}
 #        POST /api/admin/providers/{id}/storages  {"storage_id": <acme storage id>}
 #   3. Point each tenant's DNS at the proxy; per-host TLS terminates there.
+#
+# A tenant's REALM is its sign-in name ("realm" above, the slug when left
+# out) and it can never be changed. acme's people sign in on
+# files.acme.example, where the Realm field is filled in for them, or on
+# filex.example by typing "acme" in it; over SFTP they write acme/alex. An
+# empty Realm on filex.example is the operator's own accounts
+# (docs/MULTI-TENANCY.md -> Realms).
 #
 # The proxy MUST pass the original Host header through (Caddy's reverse_proxy
 # does by default) — filex resolves the tenant from it. Only route trusted
@@ -40,6 +47,19 @@ services:
       FILEX_OIDC_CLIENT_SECRET: change-me
       FILEX_OIDC_ROLE_CLAIM: realm_access.roles
       FILEX_OIDC_ADMIN_GROUP: filex-admins
+      # The proxy service below reaches filex over this compose network, which
+      # the default "auto" already trusts to say who the client is (never the
+      # network's gateway, never the LAN). A CDN in front of it is a public
+      # hop: list its ranges (a list REPLACES the default, so keep auto), or
+      # every tenant's visitors share the edge's sign-in counter.
+      # docs/CONFIGURATION.md -> "Trusted proxies".
+      # FILEX_TRUSTED_PROXIES: "auto, 173.245.48.0/20"
+      # Every tenant also at <realm>.tenants.filex.example, and a tenant's own
+      # domain proven by a CNAME to that name; needs a wildcard A/AAAA record
+      # *.tenants.filex.example. Certificates come from the proxy
+      # (FILEX_TLS_MODE=proxy, the default; Caddy's on-demand TLS asks
+      # /api/tls/ask) - docs/TENANT-ADMIN.md -> Addresses and own domains.
+      # FILEX_TENANT_DOMAIN: tenants.filex.example
       # Tenant storages are created in step 2 over the admin API/UI (one
       # `local` storage per mounted path below — or point each tenant at its
       # own S3 bucket instead) and then linked to their providers.

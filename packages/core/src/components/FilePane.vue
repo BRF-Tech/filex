@@ -63,7 +63,7 @@
  * Unscoped styles (`fe-pane*`, and the `fe__primary` / `fe-subhead` / `fe__body`
  * classes the layout already owns) — webcomponent data-v rule.
  */
-import { computed, inject, provide, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue';
 import { E2E_NAME_VIEW } from '../composables/useE2eNames';
 import { E2E_LOCK } from '../composables/useE2eLock';
 import E2eLockScreen from './E2eLockScreen.vue';
@@ -95,6 +95,8 @@ import ViewSwitcher from './ViewSwitcher.vue';
 import ListView from './ListView.vue';
 import GridView from './GridView.vue';
 import GalleryView from './GalleryView.vue';
+import FolderPeek from './FolderPeek.vue';
+import { useFolderPeek } from '../composables/useFolderPeek';
 
 /** The same literals the view components hardcode for the internal DnD
  *  channel; `-src` carries the ORIGIN DIRECTORY so the host can move across
@@ -209,6 +211,10 @@ const props = withDefaults(
 
     // ── forwarded to the view components ──────────────────────────────
     thumbSrc?: (n: FileNode) => string | null;
+    /** Folder previews are on (capabilities `folder_previews`): the peek on
+     *  a resting pointer. Absent: on. The cards follow the listing, which
+     *  sends no `preview` while they are off. */
+    folderPreviews?: boolean;
     keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
     starredIds?: Set<number>;
     starEnabled?: boolean;
@@ -449,6 +455,34 @@ function onCrumbNavigate(adapterPath: string) {
  * ⚠ Sorted HERE, at the pane, and not inside each view: "sorted by size" is a
  * fact about the LISTING, and three components each sorting for themselves is
  * how the grid and the list drifted apart in the first place (filex #67). */
+/* Folder previews (0.50): what a folder holds, shown when the pointer rests
+   on it in the list or the grid (useFolderPeek, FolderPeek). Listed through
+   this pane's own `api.index`, so a peek shows what opening shows. */
+const peek = useFolderPeek(
+  (path) => props.api.index(path),
+  () => props.folderPreviews !== false,
+);
+function peekSrc(n: FileNode): string | null {
+  return props.thumbSrc ? props.thumbSrc(n) : (n.thumb_url ?? null);
+}
+function peekEnd() {
+  peek.leave();
+}
+/* A new listing (a reload, a realtime change) can mean changed folders: the
+   next peek lists them again rather than answering from before. */
+watch(paneRows, () => peek.forget());
+onMounted(() => {
+  window.addEventListener('scroll', peekEnd, true);
+  window.addEventListener('dragstart', peekEnd, true);
+  window.addEventListener('keydown', peekEnd, true);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', peekEnd, true);
+  window.removeEventListener('dragstart', peekEnd, true);
+  window.removeEventListener('keydown', peekEnd, true);
+  peek.leave();
+});
+
 const displayFiles = computed<FileNode[]>(() => {
   const base = applyFilters(paneRows.value, props.filters);
   return sort.sortListing(
@@ -692,7 +726,16 @@ function dirPerm(): string {
   return props.selfDriven ? ownPerm.value : '';
 }
 
-defineExpose({ reload, goUp, getPath, visibleNodes, loadFolder, rowCount, rowPaths, dirPerm });
+/**
+ * wiring:e2 - the encrypted folder this pane's listing is inside, '' for none
+ * (or when the host drives the rows: the host knows its own). The details
+ * panel asks it so its "Create link" follows the Share row (lib/e2eLinks).
+ */
+function e2eRoot(): string {
+  return props.selfDriven ? ownE2eRoot.value : '';
+}
+
+defineExpose({ reload, goUp, getPath, visibleNodes, loadFolder, rowCount, rowPaths, dirPerm, e2eRoot });
 
 /* A host-driven pane whose address moved (a tab switch, a search) has to drop
  * any drop-highlight it was showing; nothing else here is stateful across a
@@ -979,6 +1022,8 @@ watch(panePath, () => {
         @item-drag-start="onRowDragStart"
         @item-drop-into="onViewDropInto"
         @star-change="(n: FileNode, v: boolean) => emit('star-change', n, v)"
+        @peek="peek.enter"
+        @peek-end="peekEnd"
       />
       <GridView
         v-else-if="viewMode === 'grid'"
@@ -1005,6 +1050,8 @@ watch(panePath, () => {
         @item-drag-start="onRowDragStart"
         @item-drop-into="onViewDropInto"
         @star-change="(n: FileNode, v: boolean) => emit('star-change', n, v)"
+        @peek="peek.enter"
+        @peek-end="peekEnd"
       />
       <GalleryView
         v-else
@@ -1030,5 +1077,6 @@ watch(panePath, () => {
         @star-change="(n: FileNode, v: boolean) => emit('star-change', n, v)"
       />
     </div>
+    <FolderPeek :state="peek.state.value" :src-of="peekSrc" :locale="locale" />
   </section>
 </template>

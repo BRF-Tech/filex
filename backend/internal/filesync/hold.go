@@ -106,7 +106,7 @@ func (e *Engine) holdPass(actions []Action, base Baseline, local, remote Snapsho
 		}
 	}
 	if triggered {
-		e.progressf("hold: %d item(s) here are not on the server — waiting for a decision "+
+		e.progressf("hold: %d item(s) here are not on the server - waiting for a decision "+
 			"(`filex sync confirm %s` sends them, `filex sync discard %s` moves them to the local sync trash)",
 			len(held), e.Pair.ID, e.Pair.ID)
 	}

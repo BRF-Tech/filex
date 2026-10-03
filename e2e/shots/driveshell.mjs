@@ -53,7 +53,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { seedFixtures } from './fixtures.mjs';
+import { seedFixtures, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -275,8 +275,8 @@ async function seed() {
   mkdirSync(join(demoRoot, 'Documents', 'Contracts'), { recursive: true });
   mkdirSync(join(demoRoot, 'Design'), { recursive: true });
   mkdirSync(join(demoRoot, 'Code'), { recursive: true });
-  writeFileSync(join(demoRoot, 'Documents', 'Q3 budget.xlsx'), 'PK placeholder');
-  writeFileSync(join(demoRoot, 'Documents', 'Proposal.docx'), 'PK placeholder');
+  writeOfficeFile(join(demoRoot, 'Documents', 'Q3 budget.xlsx'));
+  writeOfficeFile(join(demoRoot, 'Documents', 'Proposal.docx'));
   writeFileSync(join(demoRoot, 'Documents', 'Contracts', 'msa-2026.md'), '# MSA 2026\n\nDraft.\n');
   writeFileSync(join(demoRoot, 'Design', 'brand.md'), '# Brand\n');
   writeFileSync(join(demoRoot, 'Code', 'app.ts'), 'export const greet = () => "hello";\n');
@@ -295,7 +295,7 @@ async function seed() {
   writeFileSync(join(demoRoot, 'Invoices', '2026-08.md'), ['# August', ''].join('\n'));
   writeFileSync(join(demoRoot, 'Projects', 'roadmap.md'), ['# Roadmap', ''].join('\n'));
   writeFileSync(join(demoRoot, 'handbook.pdf'), ['%PDF-1.4 placeholder', ''].join('\n'));
-  writeFileSync(join(demoRoot, 'Roadmap.docx'), 'PK placeholder');
+  writeOfficeFile(join(demoRoot, 'Roadmap.docx'));
 
   // ⚠ One image among the documents, on purpose. Filtering Photos by "Images"
   // keeps every row, so the check would pass on a filter that does nothing at
@@ -564,7 +564,7 @@ async function clickMenuItem(page, label) {
  * unauthenticated against the default adapter.
  */
 const EMBED_HOST = (token, storages) => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Acme Portal — Files</title>
+<html lang="en"><head><meta charset="utf-8"><title>Acme Portal - Files</title>
 <style>
   body { margin: 0; font: 15px system-ui, sans-serif; background: #f4f5f7; color: #1a1e27; }
   header { padding: 18px 28px; background: #fff; border-bottom: 1px solid #e2e6ed; }

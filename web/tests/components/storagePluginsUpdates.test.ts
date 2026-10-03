@@ -1,7 +1,7 @@
 import { closeRowMenus, menuEntries, openRowMenu, pickMenuItem } from '../helpers/rowMenu';
 // A storage plugin that names an update source (M5, plugin/updates.go).
 // ⚠⚠ Nothing updates itself: the row SAYS a newer version is there, "Review
-// update" shows the jump, the build's SHA-256 and the notes (as text), and
+// update" shows the jump, the build's SHA-256 and the notes (Markdown), and
 // only the administrator's Upgrade sends {from_source: true}.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -43,7 +43,6 @@ function mountTab(locale = 'en') {
 describe('StoragePluginsTab — update source', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
-    document.body.innerHTML = '';
     closeRowMenus();
     plugins = [
       {
@@ -80,7 +79,10 @@ describe('StoragePluginsTab — update source', () => {
     w.unmount();
   });
 
-  it('"Review update" shows the jump, the hash and the notes as text; only Upgrade installs', async () => {
+  // The notes are Markdown since #122, drawn through the explorer preview's
+  // pipeline and sanitizer (ReleaseNotes, the component the Apps review uses
+  // too); that nothing in them runs is releaseNotes.test.ts (jsdom).
+  it('"Review update" shows the jump, the hash and the notes as Markdown; only Upgrade installs', async () => {
     const { api } = await import('@/api/client');
     (api.post as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ data: { ...plugins[0], version: '1.1.0' } }));
     const w = mountTab('tr');
@@ -90,9 +92,17 @@ describe('StoragePluginsTab — update source', () => {
     await flushPromises();
     expect(document.querySelector('[data-testid="plugin-review-jump"]')?.textContent).toContain('Sürüm 1.0.0 → 1.1.0');
     expect(document.querySelector('[data-testid="plugin-review-sha"]')?.textContent).toBe(SHA);
-    const notes = document.querySelector('[data-testid="plugin-review-notes"]')!;
-    expect(notes.querySelector('b'), 'never rendered as markup').toBeNull();
-    expect(notes.textContent).toContain('Faster <b>listings</b>.');
+    await vi.waitFor(
+      async () => {
+        await flushPromises();
+        expect(document.querySelector('[data-testid="plugin-review-notes-md"]')).not.toBeNull();
+      },
+      { timeout: 5000 },
+    );
+    const notes = document.querySelector('[data-testid="plugin-review-notes-md"]')!;
+    expect(notes.querySelector('b')?.textContent, 'the release body is rendered, not printed').toBe('listings');
+    expect(notes.textContent).toContain('Faster listings.');
+    expect(notes.textContent).not.toContain('<b>');
     expect((api.post as unknown as ReturnType<typeof vi.fn>).mock.calls, 'opening the review installs nothing').toHaveLength(0);
 
     (document.querySelector('[data-testid="plugin-review-install"]') as HTMLButtonElement).click();

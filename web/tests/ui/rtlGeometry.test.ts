@@ -35,6 +35,7 @@ import ContextMenu from '@brftech/filex-core/src/components/ContextMenu.vue';
 import QuickLook from '@brftech/filex-core/src/components/QuickLook.vue';
 import ChoiceButtons from '@brftech/filex-core/src/components/ChoiceButtons.vue';
 import { __resetViewPrefs } from '@brftech/filex-core/src/lib/viewPrefs';
+import { teardownDom } from '../helpers/teardown';
 
 type Row = { id: number; name: string; type: string; size: number };
 const ROWS: Row[] = [
@@ -47,7 +48,6 @@ const COLUMNS = [
   { id: 'size', label: 'Size', width: 200, hideable: true, align: 'right' as const },
 ];
 
-const mounted: VueWrapper[] = [];
 let tableSeq = 0;
 function drawTable(dir: 'ltr' | 'rtl', extra: Record<string, unknown> = {}) {
   const host = document.createElement('div');
@@ -64,13 +64,13 @@ function drawTable(dir: 'ltr' | 'rtl', extra: Record<string, unknown> = {}) {
       ...extra,
     },
   });
-  mounted.push(w);
   return w;
 }
 
-afterEach(() => {
-  while (mounted.length) mounted.pop()!.unmount();
-  document.body.innerHTML = '';
+// Pages down first (in-flight work lands, pages unmount, <body> empties),
+// while this file's mocks still answer; only then are the mocks taken away.
+afterEach(async () => {
+  await teardownDom();
   __resetViewPrefs();
   vi.restoreAllMocks();
 });
@@ -228,7 +228,6 @@ describe('the column menu', () => {
 describe('the context menu', () => {
   function openAt(locale: string, x: number) {
     const w = mount(ContextMenu, { props: { locale, actions: [{ key: 'open', label: 'Open' }] } });
-    mounted.push(w);
     vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
       const isMenu = (this as HTMLElement).classList?.contains('fe-ctx');
       return { left: 0, right: 0, top: 0, bottom: 0, width: isMenu ? 200 : 0, height: isMenu ? 100 : 0, x: 0, y: 0 } as DOMRect;
@@ -270,7 +269,6 @@ describe('quick look — the arrow that points the way the line reads is "next"'
       },
       global: { stubs: { PreviewModal: true } },
     });
-    mounted.push(w);
     return w;
   }
   const press = (key: string) => window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
@@ -302,7 +300,6 @@ describe('a radio row — the arrow that points to an option chooses it', () => 
       attachTo: host,
       props: { modelValue: 'b', options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }, { value: 'c', label: 'C' }] },
     });
-    mounted.push(w);
     return w;
   }
 

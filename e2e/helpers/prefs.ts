@@ -82,3 +82,31 @@ export async function setAccountViewMode(request: APIRequestContext, view: ViewM
   void _retired;
   await writeDoc(request, { ...rest, on: true, f: {}, p: { ...p, v: view }, u: Date.now() });
 }
+
+/** The web surface's preference document: theme, palette, density, language. */
+export const WEB_PREFS_URL = '/api/me/prefs?surface=web';
+
+/**
+ * The account's web preference document as it stands, or `{}` when it has
+ * none. Read it BEFORE a spec changes the language (or a look) through the
+ * interface, and put it back with `restoreWebPrefs`.
+ *
+ * ⚠⚠ Picking "English" again in the settings dialog is NOT putting it back.
+ * The pick WRITES `locale: 'en'` into a document that may never have had a
+ * language, and that key outranks `users.locale` for every later spec on the
+ * shared admin. Measured 2026-10-01 in the three-engine run: 25 and 60 "reset
+ * to English" this way, and the next engine's 134 opened its Arabic case in
+ * English, the document saying `en` while the account said `ar`.
+ */
+export async function readWebPrefs(request: APIRequestContext): Promise<Record<string, unknown>> {
+  const res = await request.get(WEB_PREFS_URL);
+  expect(res.ok(), `prefs GET failed: ${res.status()}`).toBe(true);
+  const doc = ((await res.json()) as { prefs?: unknown })?.prefs;
+  return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Record<string, unknown>) : {};
+}
+
+/** Put the document back EXACTLY as `readWebPrefs` found it. */
+export async function restoreWebPrefs(request: APIRequestContext, doc: Record<string, unknown>): Promise<void> {
+  const res = await request.put(WEB_PREFS_URL, { data: { prefs: doc } });
+  expect(res.ok(), `prefs PUT failed: ${res.status()}`).toBe(true);
+}

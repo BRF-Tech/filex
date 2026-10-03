@@ -32,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/group"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
@@ -145,11 +146,22 @@ func (h *PermissionsAdmin) Catalogue(w http.ResponseWriter, _ *http.Request) {
 	for _, p := range perm.Presets() {
 		presets = append(presets, permPresetWire{Name: p.Name, Permissions: p.Set.Strings()})
 	}
-	apps := []wasmplugin.UserPermRow{}
+	apps := []appPermDefWire{}
 	if h.AppPermissions != nil {
-		apps = h.AppPermissions()
+		for _, row := range h.AppPermissions() {
+			apps = append(apps, appPermDefWire{UserPermRow: row, DefaultFor: perm.AppDefaultFor(perm.AppDefault(row.Default))})
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"permissions": defs, "presets": presets, "apps": apps})
+}
+
+// appPermDefWire is one installed app permission on the catalogue, with
+// what its default comes to on each built-in role when nobody has decided it
+// (perm.AppDefaultFor): {"viewer": false, "user": true, "admin": true}. The
+// role editors label "Default" from it; the rule stays the server's.
+type appPermDefWire struct {
+	wasmplugin.UserPermRow
+	DefaultFor map[string]bool `json:"default_for"`
 }
 
 // ── defaults ───────────────────────────────────────────────────────────────
@@ -188,10 +200,23 @@ func (h *PermissionsAdmin) GetDefaults(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"permissions": s.Strings(), "preset": perm.MatchPreset(s), "apps": apps})
 }
 
+// builtinRolesAreInstanceWide is what a tenant admin reads when refused.
+const builtinRolesAreInstanceWide = "the built-in User and Viewer roles apply to every tenant and are managed by the platform operator; a tenant's own roles are custom roles"
+
 // PutDefaults replaces the defaults.
 //
 //	PUT /api/admin/roles/builtin {"permissions":["files.download",…]}
+//
+// ⚠ Supertenant-only in multi-tenant mode. Each built-in role is ONE
+// instance-wide row (perm.SaveRoleBase), held by every account of every
+// tenant that has no custom role — so a tenant admin writing it would narrow
+// or widen every other tenant's people, up to making them all delegated
+// administrators (admin.* with a session). A tenant's own roles are custom
+// roles, which carry its provider_id (CreateRule). Reading stays open.
 func (h *PermissionsAdmin) PutDefaults(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, builtinRolesAreInstanceWide) {
+		return
+	}
 	var req permDefaultsWire
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Permissions == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json: want {\"permissions\":[…]}"})
@@ -298,16 +323,33 @@ func (h *PermissionsAdmin) ListRules(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// group_assignments: user id → the role a group gives them, for people
+	// with none of their own (group.EffectiveRoles). They hold that role, not
+	// the built-in one, so they are not counted on it below.
+	vias, err := group.EffectiveRoles(r.Context(), h.Store, users)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	groupAssignments := map[string]group.Via{}
+	for uid, v := range vias {
+		if visible[v.RoleID] {
+			groupAssignments[strconv.FormatInt(uid, 10)] = v
+		}
+	}
 	builtin := map[string]int{model.RoleAdmin: 0, model.RoleUser: 0, model.RoleViewer: 0}
 	for _, u := range users {
 		if _, custom := assignments[strconv.FormatInt(u.ID, 10)]; custom && u.Role != model.RoleAdmin {
+			continue
+		}
+		if _, viaGroup := vias[u.ID]; viaGroup {
 			continue
 		}
 		if _, ok := builtin[u.Role]; ok {
 			builtin[u.Role]++
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rules": out, "assignments": assignments, "builtin_members": builtin})
+	writeJSON(w, http.StatusOK, map[string]any{"rules": out, "assignments": assignments, "group_assignments": groupAssignments, "builtin_members": builtin})
 }
 
 // ruleFromRequest decodes, normalises and checks a rule body against the
@@ -406,6 +448,19 @@ func (h *PermissionsAdmin) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule.ID = existing.ID
+	// A role moved to a tenant reaches only that tenant's people and groups
+	// (perm ignores it elsewhere): holders of another tenant would drop to
+	// their built-in role unseen — the quiet widening DeleteRule's "to"
+	// refuses. Refuse the move while any hold it.
+	if rule.ProviderID != nil && !sameProvider(rule.ProviderID, existing.ProviderID) {
+		if msg, err := h.holdersOutside(r.Context(), existing.ID, *rule.ProviderID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		} else if msg != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+			return
+		}
+	}
 	auditRule(r.Context(), "before", existing)
 	auditRule(r.Context(), "after", rule)
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(rule.ID, 10), rule.Name)
@@ -432,6 +487,23 @@ func (h *PermissionsAdmin) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+// PreviewRole answers what a custom role being edited comes to before it is
+// saved: the built-in role its people would be on, "user" or "viewer"
+// (perm.HolderRole). The role editor asks it for each app permission's
+// "Default", so the rule lives here alone. The body is a role body as the
+// editor has it — permissions, effects, conditions; the rest is ignored —
+// possibly unfinished: nothing is checked or stored.
+//
+//	POST /api/admin/roles/preview {permissions, effects, conditions} → {holder_role}
+func (h *PermissionsAdmin) PreviewRole(w http.ResponseWriter, r *http.Request) {
+	var rule model.PermissionRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"holder_role": perm.PreviewHolderRole(rule)})
+}
+
 // DeleteRule removes a role. A role people hold is deleted only when the
 // caller says what those people become — ?to=user, ?to=viewer or ?to=<role
 // id> — so deleting a role that takes things away never quietly hands its
@@ -455,13 +527,28 @@ func (h *PermissionsAdmin) DeleteRule(w http.ResponseWriter, r *http.Request) {
 			holders = append(holders, uid)
 		}
 	}
-	if len(holders) > 0 {
+	// Groups holding it count too: deleting it would leave their members
+	// on whatever built-in role is underneath, the same quiet widening.
+	groups, err := group.HoldingRole(ctx, h.Store, rule.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(holders) > 0 || len(groups) > 0 {
 		to := r.URL.Query().Get("to")
 		if to == "" {
 			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":   "people hold this role: say what they become (?to=user, ?to=viewer or ?to=<role id>)",
+				"error":   "people or groups hold this role: say what they become (?to=user, ?to=viewer or ?to=<role id>)",
 				"holders": len(holders),
+				"groups":  len(groups),
 			})
+			return
+		}
+		// Before anything moves: a role of another tenant would reach none of
+		// them (perm ignores a role out of its holder's tenant), leaving them
+		// on the built-in User role — the quiet widening "to" exists to stop.
+		if err := h.checkMoveTarget(ctx, to, holders, groups); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		// Moving the holders into a custom role that allows an admin-area
@@ -479,8 +566,13 @@ func (h *PermissionsAdmin) DeleteRule(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		if err := h.moveGroups(ctx, rule, groups, to); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		auth.AddAuditDetail(ctx, "moved_to", to)
 		auth.AddAuditDetail(ctx, "holders", len(holders))
+		auth.AddAuditDetail(ctx, "groups", len(groups))
 	}
 	auditRule(r.Context(), "rule", rule)
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(rule.ID, 10), rule.Name)
@@ -729,7 +821,16 @@ func (h *PermissionsAdmin) syncHolders(ctx context.Context, rule *model.Permissi
 			return err
 		}
 	}
-	return nil
+	// And the people who hold it through a group (and none of their own).
+	groups, err := group.HoldingRole(ctx, h.Store, rule.ID)
+	if err != nil {
+		return err
+	}
+	ids, err := group.MemberIDs(ctx, h.Store, groups...)
+	if err != nil {
+		return err
+	}
+	return group.SyncLevels(ctx, h.Store, ids)
 }
 
 // GetUserRoles returns the one custom role the account holds, or null.
@@ -750,7 +851,29 @@ func (h *PermissionsAdmin) GetUserRoles(w http.ResponseWriter, r *http.Request) 
 			id = 0
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"role_id": nullableID(id)})
+	out := map[string]any{"role_id": nullableID(id), "group_role": nil}
+	if id == 0 {
+		out["group_role"] = h.groupRoleOf(r.Context(), u)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// groupRoleOf is the role a person's groups give them (perm.EffectiveRole)
+// — nil when none does, or it is not one the caller's tenant can see. The
+// person's page shows it and says where it comes from.
+func (h *PermissionsAdmin) groupRoleOf(ctx context.Context, u *model.User) *group.Via {
+	vias, err := group.EffectiveRoles(ctx, h.Store, []*model.User{u})
+	if err != nil {
+		return nil
+	}
+	v, ok := vias[u.ID]
+	if !ok {
+		return nil
+	}
+	if rule, err := h.Store.GetPermissionRule(ctx, v.RoleID); err != nil || rule == nil || !visibleRule(ctx, rule) {
+		return nil
+	}
+	return &v
 }
 
 func nullableID(id int64) any {
@@ -842,30 +965,8 @@ func (h *PermissionsAdmin) PutUserRoles(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	if rule != nil && !callerIsFullAdmin(ctx) {
-		mine, err := h.ACL.Perms(ctx, auth.UserFrom(ctx))
-		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-			return
-		}
-		// Everything the role allows — its list, and its folder part's
-		// allows — must be something the caller holds.
-		allowed := roleSet.Keys()
-		for k, eff := range rule.Effects {
-			if eff == model.PermAllow {
-				allowed = append(allowed, perm.Perm(k))
-			}
-		}
-		for _, p := range allowed {
-			if !mine.Can(p) {
-				writeJSON(w, http.StatusForbidden, map[string]string{
-					"error":      "you cannot give a role that allows a permission you do not hold",
-					"role":       rule.Name,
-					"permission": string(p),
-				})
-				return
-			}
-		}
+	if rule != nil && refuseRoleBeyondCaller(w, r, h.ACL, rule) {
+		return
 	}
 
 	// Judged by the result as well: a built-in role, or no custom role, can
@@ -902,15 +1003,215 @@ func (h *PermissionsAdmin) PutUserRoles(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Whatever was picked here — a role of their own, administrator, or a
+	// built-in level — is the level the account has now, not one a group's
+	// role moved: forget the one kept from before a group's role, or leaving
+	// the group later would restore it over this choice. (If a group's role
+	// still applies, SyncLevels below moves the level again and keeps THIS
+	// one as the level to give back.) Only when the call changes something:
+	// the same role sent again is no choice, and forgetting the kept level
+	// then would leave the account on the group role's level for good.
+	if before != after || (newRole != "" && newRole != target.Role) {
+		if err := h.Store.DeleteUserGroupLevel(ctx, target.ID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	// With no custom role of their own now, a group may give them one — and
+	// with it the level underneath.
+	if after == 0 {
+		if err := group.SyncLevels(ctx, h.Store, []int64{target.ID}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	finalRole := target.Role
 	if newRole != "" {
 		finalRole = newRole
+	}
+	if after == 0 {
+		if u, err := h.Store.GetUser(ctx, target.ID); err == nil && u != nil {
+			finalRole = u.Role
+		}
 	}
 	auth.AddAuditDetail(ctx, "before", map[string]any{"role": target.Role, "role_id": nullableID(before)})
 	auth.AddAuditDetail(ctx, "after", map[string]any{"role": finalRole, "role_id": nullableID(after)})
 	auth.SetAuditTarget(ctx, strconv.FormatInt(target.ID, 10), target.Email)
 	perm.Invalidate()
-	writeJSON(w, http.StatusOK, map[string]any{"role_id": nullableID(after), "role": finalRole})
+	// ⚠ With no role of their own, a group's role still decides — a built-in
+	// role picked here does not override it, and its level wins. Say so, so
+	// the page can tell the person instead of reporting what was asked.
+	resp := map[string]any{"role_id": nullableID(after), "role": finalRole, "group_role": nil}
+	if after == 0 {
+		if u, err := h.Store.GetUser(ctx, target.ID); err == nil && u != nil {
+			resp["group_role"] = h.groupRoleOf(ctx, u)
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// refuseRoleBeyondCaller is the delegated administrator's line for giving a
+// role — to a person, or to a group and so to its members: everything the
+// role allows (its list, and its folder part's allows) must be something the
+// caller holds. It writes the 403 and reports true when refused. A full
+// administrator is never refused.
+func refuseRoleBeyondCaller(w http.ResponseWriter, r *http.Request, resolver *acl.Resolver, rule *model.PermissionRule) bool {
+	ctx := r.Context()
+	if callerIsFullAdmin(ctx) {
+		return false
+	}
+	mine, err := resolver.Perms(ctx, auth.UserFrom(ctx))
+	if err != nil || mine == nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return true
+	}
+	allowed := perm.RoleSet(rule).Keys()
+	for k, eff := range rule.Effects {
+		if eff == model.PermAllow {
+			allowed = append(allowed, perm.Perm(k))
+		}
+	}
+	for _, p := range allowed {
+		if !mine.Can(p) {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":      "you cannot give a role that allows a permission you do not hold",
+				"role":       rule.Name,
+				"permission": string(p),
+			})
+			return true
+		}
+	}
+	return false
+}
+
+// holdersOutside names why role roleID cannot become tenant providerID's: a
+// group or a person of another tenant holds it. "" when none does.
+func (h *PermissionsAdmin) holdersOutside(ctx context.Context, roleID, providerID int64) (string, error) {
+	groups, err := group.HoldingRole(ctx, h.Store, roleID)
+	if err != nil {
+		return "", err
+	}
+	for _, gid := range groups {
+		g, err := h.Store.GetGroup(ctx, gid)
+		if err != nil {
+			return "", err
+		}
+		if g.ProviderID == nil || *g.ProviderID != providerID {
+			return "the group " + strconv.Quote(g.Name) + " of another tenant holds this role: give it another role first", nil
+		}
+	}
+	members, err := h.Store.ListUserCustomRoles(ctx)
+	if err != nil {
+		return "", err
+	}
+	for uid, rid := range members {
+		if rid != roleID {
+			continue
+		}
+		u, err := h.Store.GetUser(ctx, uid)
+		if err != nil || u == nil || u.IsAdmin() {
+			continue
+		}
+		if u.ProviderID == nil || *u.ProviderID != providerID {
+			return "people of another tenant hold this role: give them another role first", nil
+		}
+	}
+	return "", nil
+}
+
+// checkMoveTarget refuses a "to" role that some holder of the deleted role —
+// a person or a group — could not hold: a tenant's role reaches only that
+// tenant's people and groups. A built-in "to" fits everyone.
+func (h *PermissionsAdmin) checkMoveTarget(ctx context.Context, to string, holders, groups []int64) error {
+	if to == model.RoleUser || to == model.RoleViewer {
+		return nil
+	}
+	id, err := strconv.ParseInt(to, 10, 64)
+	if err != nil {
+		return errors.New(`"to" must be user, viewer or another role's id`)
+	}
+	next, err := h.Store.GetPermissionRule(ctx, id)
+	if err != nil || next == nil || !visibleRule(ctx, next) {
+		return errors.New("unknown role: " + to)
+	}
+	if next.ProviderID == nil {
+		return nil
+	}
+	for _, gid := range groups {
+		g, err := h.Store.GetGroup(ctx, gid)
+		if err != nil {
+			return err
+		}
+		if !sameProvider(g.ProviderID, next.ProviderID) {
+			return errors.New("the role " + strconv.Quote(next.Name) + " belongs to another tenant than the group " + strconv.Quote(g.Name))
+		}
+	}
+	for _, uid := range holders {
+		u, err := h.Store.GetUser(ctx, uid)
+		if err != nil || u == nil {
+			continue
+		}
+		if !u.IsAdmin() && !sameProvider(u.ProviderID, next.ProviderID) {
+			return errors.New("the role " + strconv.Quote(next.Name) + " belongs to another tenant than some of the people who hold this one")
+		}
+	}
+	return nil
+}
+
+// moveGroups gives every group holding a role about to be deleted the role
+// "to" names — another custom role (its id) — or none for a built-in one, and
+// brings their members' levels along.
+func (h *PermissionsAdmin) moveGroups(ctx context.Context, from *model.PermissionRule, groups []int64, to string) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	var next int64
+	if to != model.RoleUser && to != model.RoleViewer {
+		// moveHolders has checked it names another visible role.
+		next, _ = strconv.ParseInt(to, 10, 64)
+	}
+	ids, err := group.MemberIDs(ctx, h.Store, groups...)
+	if err != nil {
+		return err
+	}
+	// Whose role the deleted one really is — before it goes. A member a
+	// higher-priority group gives another role to, or with a role of their
+	// own, is not moved by this: their level and the one kept for them stay.
+	members := make([]*model.User, 0, len(ids))
+	for _, uid := range ids {
+		if u, err := h.Store.GetUser(ctx, uid); err == nil && u != nil {
+			members = append(members, u)
+		}
+	}
+	vias, err := group.EffectiveRoles(ctx, h.Store, members)
+	if err != nil {
+		return err
+	}
+	if err := h.Store.ReassignGroupRole(ctx, from.ID, next); err != nil {
+		return err
+	}
+	// A built-in "to" is the level those members are left on: the role was
+	// what set it, and without one nothing else will. It is theirs now, so
+	// the level kept from before a group's role is forgotten (SyncLevels
+	// below would restore it over the administrator's choice; a member
+	// another group still gives a role to is moved again, keeping this one
+	// as the level to give back).
+	if next == 0 {
+		for _, u := range members {
+			if v, ok := vias[u.ID]; !ok || v.RoleID != from.ID {
+				continue
+			}
+			if u.Role != to {
+				if err := h.Store.UpdateUserRole(ctx, u.ID, to); err != nil {
+					return err
+				}
+			}
+			if err := h.Store.DeleteUserGroupLevel(ctx, u.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return group.SyncLevels(ctx, h.Store, ids)
 }
 
 // moveHolders gives every holder of a role about to be deleted the role
@@ -948,6 +1249,15 @@ func (h *PermissionsAdmin) moveHolders(ctx context.Context, from *model.Permissi
 		if err := h.Store.SetUserCustomRole(ctx, uid, id); err != nil {
 			return err
 		}
+		// The level set here is theirs, not one a group's role moved.
+		if err := h.Store.DeleteUserGroupLevel(ctx, uid); err != nil {
+			return err
+		}
+	}
+	// Moved to a built-in role, a holder with none of their own now gets a
+	// group's role if one of their groups has one — and its level.
+	if next == nil {
+		return group.SyncLevels(ctx, h.Store, holders)
 	}
 	return nil
 }

@@ -65,7 +65,7 @@ func (f *mtFix) rbacAlpha(t *testing.T) (writer *http.Client, writerID int64) {
 		_, err := f.Store.CreateFileGrant(ctx, g)
 		require.NoError(t, err)
 	}
-	return mtLogin(t, &httptest.Server{URL: f.URL}, "writer@alpha.test", mtUserPass), writerID
+	return mtLogin(t, &httptest.Server{URL: f.URL}, "alpha", "writer@alpha.test", mtUserPass), writerID
 }
 
 // waitNotification polls the admin-global view until a row whose body names

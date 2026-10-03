@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  gatedNeedWords,
   pluginMenuRows,
   pluginActionKey,
   pluginActionNeed,
@@ -11,6 +12,7 @@ import {
   isPluginActionKey,
 } from '@brftech/filex-core/src/lib/pluginMenu';
 import { actionIconSvg } from '@brftech/filex-core/src/lib/actionIcons';
+import { wordsIn } from '@brftech/filex-core/src/lib/errorWords';
 import type { PluginActionRow } from '@brftech/filex-core/src/types/Plugins';
 
 const sign: PluginActionRow = {
@@ -198,7 +200,7 @@ describe('pluginMenuRows', () => {
   });
 
   it('an action whose result may go elsewhere IS offered on a read-only storage', () => {
-    /* Burak, 2026-09-22: "Dönüştür…" on a read-only storage — the wizard asks
+    /* The maintainer, 2026-09-22: "Dönüştür…" on a read-only storage — the wizard asks
        where the result should go. */
     const convert: PluginActionRow = { plugin: 'convert', id: 'convert', label: { en: 'Convert…' }, applies: { kind: 'file' }, output_mode: 'sibling', output_elsewhere: true };
     expect(actionsOnly(pluginMenuRows([convert], [pdf], { locale: 'en', readOnly: true })).map((r) => r.key)).toEqual([
@@ -234,6 +236,22 @@ describe('pluginMenuRows', () => {
     expect(pluginMenuRows([sign], [docx], { locale: 'en' })).toEqual([]);
     // The level and read-only rules still apply to a greyed row.
     expect(pluginMenuRows([sign], [docx], { locale: 'en', needWords, readOnly: true })).toEqual([]);
+  });
+
+  it('says a missing office engine as a server to connect, not a program to install (0.50)', () => {
+    /* `kind: "office"` is the office engine - the connected ONLYOFFICE.
+       Red before 0.50: every need that was not `engine` read "{name} is not
+       available on this server", and the office engine was an `engine` that
+       read "install it and restart filex". */
+    const t = wordsIn('en');
+    const office = gatedNeedWords({ kind: 'office', id: 'libreoffice', name: 'ONLYOFFICE' }, t);
+    expect(office).toBe(t('plugin.needs_office', { name: 'ONLYOFFICE' }));
+    expect(office).toContain('External services');
+    expect(office).not.toMatch(/install|restart/i);
+    expect(gatedNeedWords({ kind: 'engine', id: 'ffmpeg', name: 'FFmpeg' }, t)).toBe(t('plugin.needs_engine', { name: 'FFmpeg' }));
+    expect(gatedNeedWords({ kind: 'other', id: 'x', name: 'X' }, t)).toBe(t('plugin.needs_other', { name: 'X' }));
+    const tr = wordsIn('tr');
+    expect(gatedNeedWords({ kind: 'office', id: 'office', name: 'ONLYOFFICE' }, tr)).toContain('Dış servisler');
   });
 
   it('writes = the output the server refuses on a read-only storage, nothing else', () => {

@@ -20,6 +20,7 @@ import {
   type E2eMarker,
 } from '../../../packages/core/src/lib/e2ecrypto';
 import { expectOf, runConversion, type ConvertIo, type ConvertRow } from '../../../packages/core/src/lib/e2econvert';
+import { bytesStream, collectBytes, encryptFolderFileStream } from '../../../packages/core/src/lib/e2estream';
 import * as legacy047 from '../fixtures/e2ecrypto-legacy-v0.47.0';
 
 const PW = 'correct horse battery';
@@ -215,4 +216,126 @@ describe('the conversion job', () => {
     expect(expectOf({ path: 'x', basename: 'x', type: 'file', size: 12, last_modified: 1700 })).toBe('12:1700');
     expect(expectOf({ path: 'x', basename: 'x', type: 'file' })).toBeNull();
   });
+});
+
+// #86: a file over the one-shot limit used to be counted and left as
+// plaintext, so a folder holding one could never finish converting. It is now
+// written as a STREAM (header 0x02) file, read and sent as streams - the
+// format an upload of the same file gets.
+describe('the conversion job, files over the one-shot limit', () => {
+  const LIMIT = 32;
+  let fmk: CryptoKey;
+  beforeAll(async () => {
+    fmk = (await createEncryptedFolder(PW)).fmk;
+  }, SLOW);
+
+  function folder(): FakeFolder {
+    const f = new FakeFolder();
+    f.put(`${ROOT}/${E2E_MARKER_NAME}`, enc.encode('{"v":3}'));
+    f.put(`${ROOT}/küçük.txt`, enc.encode('küçük'));
+    f.mkdir(`${ROOT}/Videolar`);
+    // Several 1 KiB chunks at the test chunk size, plus a short last one.
+    const big = new Uint8Array(5 * 1024 + 77);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 31 + 7) & 0xff;
+    f.put(`${ROOT}/Videolar/büyük.mp4`, big);
+    return f;
+  }
+
+  /** The streamed write a browser does, against the fake folder: the same
+   *  precondition as `write`, the bytes made by encryptFolderFileStream. */
+  function withLarge(
+    f: FakeFolder,
+    key: CryptoKey,
+    opts: { refuse?: boolean; failFirst?: boolean; seen?: Array<string | null> } = {},
+  ): ConvertIo {
+    const io = f.io(key);
+    let failed = false;
+    io.writeLarge = async (_dir, row, want) => {
+      opts.seen?.push(want);
+      if (opts.refuse) return false;
+      const cur = f.nodes.get(row.path);
+      if (!cur || cur === 'dir' || want !== `${cur.bytes.byteLength}:${cur.mtime}`) throw new Error('412');
+      const out = await encryptFolderFileStream(key, row.size!, bytesStream(cur.bytes, 700), { chunkLog2: 10 });
+      const bytes = await collectBytes(out.stream);
+      if (opts.failFirst && !failed) {
+        failed = true;
+        throw new Error('the connection dropped before the commit');
+      }
+      expect(bytes.length).toBe(out.size);
+      f.put(row.path, bytes);
+      f.writes.push(row.path);
+      return true;
+    };
+    return io;
+  }
+
+  it('encrypts it as a STREAM (0x02) file that decrypts to the original', async () => {
+    const f = folder();
+    const original = f.text(`${ROOT}/Videolar/büyük.mp4`).slice();
+    const prog = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+    await runConversion(ROOT, withLarge(f, fmk), prog, { maxBytes: LIMIT });
+    expect(prog).toEqual({ total: 2, done: 2, skipped: 0, tooBig: 0, failed: 0, large: 1 });
+    const stored = f.text(`${ROOT}/Videolar/büyük.mp4`);
+    expect(hasMagic(stored)).toBe(true);
+    expect(stored[8], 'header version 0x02, not the one-shot 0x01').toBe(2);
+    const plain = new Uint8Array(await decryptFile(fmk, stored.slice().buffer as ArrayBuffer));
+    expect(plain).toEqual(original);
+    // The small file next to it keeps the one-shot format every filex reads.
+    expect(f.text(`${ROOT}/küçük.txt`)[8]).toBe(1);
+  }, SLOW);
+
+  it('writes it on the condition the listing saw, like every other file', async () => {
+    const f = folder();
+    const seen: Array<string | null> = [];
+    const prog = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+    await runConversion(ROOT, withLarge(f, fmk, { seen }), prog, { maxBytes: LIMIT });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/^5197:\d+$/);
+    expect(prog).toMatchObject({ done: 2, failed: 0 });
+  }, SLOW);
+
+  it('a large file edited after it was listed is not overwritten with its older self', async () => {
+    const f = folder();
+    const io = withLarge(f, fmk);
+    const list = io.list;
+    io.list = async (dir) => {
+      const rows = await list(dir);
+      // Edited between the listing and its turn.
+      if (dir.endsWith('Videolar')) f.put(`${ROOT}/Videolar/büyük.mp4`, enc.encode('edited meanwhile, much shorter'));
+      return rows;
+    };
+    const prog = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+    await runConversion(ROOT, io, prog, { maxBytes: LIMIT });
+    expect(prog).toMatchObject({ done: 1, failed: 1, tooBig: 0 });
+    expect(dec.decode(f.text(`${ROOT}/Videolar/büyük.mp4`))).toBe('edited meanwhile, much shorter');
+  }, SLOW);
+
+  it('a large write that broke off leaves the plaintext whole, and the next run converts it', async () => {
+    const f = folder();
+    const original = f.text(`${ROOT}/Videolar/büyük.mp4`).slice();
+    const first = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+    await runConversion(ROOT, withLarge(f, fmk, { failFirst: true }), first, { maxBytes: LIMIT });
+    expect(first).toMatchObject({ done: 1, failed: 1, tooBig: 0 });
+    expect(f.text(`${ROOT}/Videolar/büyük.mp4`)).toEqual(original);
+
+    const second = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+    await runConversion(ROOT, withLarge(f, fmk), second, { maxBytes: LIMIT });
+    expect(second).toMatchObject({ done: 1, skipped: 1, failed: 0, tooBig: 0, large: 1 });
+    const stored = f.text(`${ROOT}/Videolar/büyük.mp4`);
+    expect(new Uint8Array(await decryptFile(fmk, stored.slice().buffer as ArrayBuffer))).toEqual(original);
+
+    // And once done, a third run touches nothing.
+    const third = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+    await runConversion(ROOT, withLarge(f, fmk), third, { maxBytes: LIMIT });
+    expect(third).toMatchObject({ done: 0, skipped: 2 });
+  }, SLOW);
+
+  it('counts, and leaves, one the server cannot take from this browser', async () => {
+    const f = folder();
+    const original = f.text(`${ROOT}/Videolar/büyük.mp4`).slice();
+    const prog = { total: 0, done: 0, skipped: 0, tooBig: 0, failed: 0 };
+    await runConversion(ROOT, withLarge(f, fmk, { refuse: true }), prog, { maxBytes: LIMIT });
+    expect(prog).toMatchObject({ done: 1, tooBig: 1, failed: 0 });
+    expect(f.text(`${ROOT}/Videolar/büyük.mp4`)).toEqual(original);
+  }, SLOW);
 });

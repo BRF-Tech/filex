@@ -19,6 +19,8 @@
  * fixed action name has no translation in either language.
  */
 
+import { DEMO_MASKED_ADDRESS } from '@/lib/format';
+
 type T = (key: string, values?: Record<string, unknown>) => string;
 type TE = (key: string) => boolean;
 
@@ -46,7 +48,7 @@ function resourceLabel(resource: string, t: T, te: TE): string {
 }
 
 export function auditActionLabel(action: string, t: T, te: TE): string {
-  if (!action) return '—';
+  if (!action) return '-';
   const { resource, verb } = splitAction(action);
   const vk = `audit.verb.${keyOf(verb)}`;
   const r = resourceLabel(resource, t, te);
@@ -72,8 +74,19 @@ export function auditTargetLabel(
   te: TE,
   name?: string | null,
 ): string {
+  // A public demo masks an address a row is about (an address lock): the
+  // server's "hidden on the demo" is said in the reader's language.
+  if (id === DEMO_MASKED_ADDRESS) id = t('demo.hiddenAddress');
+  if (name === DEMO_MASKED_ADDRESS) name = t('demo.hiddenAddress');
   const tk = type ? `audit.target.${keyOf(type)}` : '';
-  const kind = type ? (te(tk) ? t(tk) : readable(type)) : '';
+  /* ⚠ The middleware's generic fallback (any other /api/admin/* write) names
+     its target by the route segment: `app-plugins`, `replication-targets`.
+     Those have no `audit.target.*` entry, and the Panel read "Uygulama:
+     oluşturuldu — app plugins" on a Turkish screen (0.50 measurement). The
+     resource's own word, the one the action label already uses, comes
+     before the raw text. */
+  const rk = type ? `audit.resource.${keyOf(type)}` : '';
+  const kind = type ? (te(tk) ? t(tk) : te(rk) ? t(rk) : readable(type)) : '';
   if (name) return kind ? `${kind} “${name}”` : name;
   if (!type) return id ? String(id) : '';
   if (id === null || id === undefined || id === '') return kind;
@@ -96,10 +109,9 @@ export function auditResourceOptions(
 ): Array<{ value: string; label: string }> {
   const byLabel = new Map<string, string[]>();
   for (const key of Object.keys(resources ?? {})) {
-    const wire = WIRE_RESOURCE[key] ?? key;
     const label = t(`audit.resource.${key}`);
     const list = byLabel.get(label) ?? [];
-    if (!list.includes(`${wire}.`)) list.push(`${wire}.`);
+    for (const wire of [WIRE_RESOURCE[key] ?? key].flat()) if (!list.includes(`${wire}.`)) list.push(`${wire}.`);
     byLabel.set(label, list);
   }
   return [...byLabel.entries()]
@@ -109,7 +121,9 @@ export function auditResourceOptions(
 
 /** Catalogue keys whose wire resource is not the key itself (`keyOf` folds
  *  both `.` and `-` to `_`, so the way back has to be spelled out). */
-const WIRE_RESOURCE: Record<string, string> = {
+const WIRE_RESOURCE: Record<string, string | string[]> = {
+  // The fixed action is `login_security.update`, the admin route's own segment `login-security`.
+  login_security: ['login_security', 'login-security'],
   ai_file: 'ai.file',
   ai_share: 'ai.share',
   ai_tokens: 'ai-tokens',
@@ -119,4 +133,5 @@ const WIRE_RESOURCE: Record<string, string> = {
   plugin_requests: 'plugin-requests',
   webhook_config: 'webhook-config',
   smtp_test: 'smtp-test',
+  file_types: 'file-types',
 };

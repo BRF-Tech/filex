@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -55,8 +59,14 @@ type AIMCP struct {
 	index   *search.Index
 	body    *filebody.Resolver
 	tickets *uploadTicketStore
+	// doors: the explorer's handlers the copy, app, operations, trash,
+	// versions, archive and link tools run (ai_doors.go).
+	doors   *AIDoors
 	handler http.Handler
 }
+
+// AttachDoors wires the explorer's handlers the door tools run in process.
+func (h *AIMCP) AttachDoors(d *AIDoors) { h.doors = d }
 
 // AttachACL wires the RBAC resolver so every per-request MCP tool op is gated
 // by the bound user's grants + role ceiling (same enforcement as the REST AI).
@@ -105,8 +115,15 @@ func NewAIMCP(store db.Store, resolver func(int64) (storage.Driver, error), admi
 	return h
 }
 
-// ServeHTTP delegates to the SDK's streamable handler.
+// ServeHTTP delegates to the SDK's streamable handler. The client's address
+// is resolved here, once, and carried on the context: a tool call has no
+// *http.Request of its own, and the audit rows its writes leave name the
+// address like every other door's (mcpAuditWrite, AIAdmin.auditInvoke).
 func (h *AIMCP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := clientip.WithIP(r.Context(), clientip.FromRequest(r))
+	// …and the origin a door tool's handler reads (the host a link is minted
+	// on, the language a job's label is in): ai_doors.go withDoorOrigin.
+	r = r.WithContext(withDoorOrigin(ctx, r))
 	h.handler.ServeHTTP(w, r)
 }
 
@@ -124,6 +141,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	ops.staged = h.staged
 	ops.body = h.body
 	ops.tickets = h.tickets
+	ops.doors = h.doors
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "filex",
 		Title:   "filex file manager",
@@ -170,6 +188,38 @@ var fileToolVerb = map[string]string{
 	"file_zip":           auth.VerbWrite,
 	"file_unzip":         auth.VerbWrite,
 	"file_delete":        auth.VerbDelete,
+
+	// The explorer's operations (ai_doors.go, registerDoorTools).
+	"file_copy":            auth.VerbWrite,
+	"app_actions":          auth.VerbRead,
+	"app_run":              auth.VerbWrite,
+	"file_convert":         auth.VerbWrite,
+	"ops_list":             auth.VerbRead,
+	"op_get":               auth.VerbRead,
+	"op_cancel":            auth.VerbWrite,
+	"trash_list":           auth.VerbRead,
+	"trash_restore":        auth.VerbWrite,
+	"file_versions":        auth.VerbRead,
+	"file_version_restore": auth.VerbWrite,
+	"file_snapshot":        auth.VerbWrite,
+	"archive_create":       auth.VerbWrite,
+	"archive_extract":      auth.VerbWrite,
+	"share_list":           auth.VerbRead,
+	"file_request_create":  auth.VerbWrite,
+
+	// The bell, stars, comments and item permissions (ai_doors_people.go).
+	// Marking one's own notices read is bookkeeping (`read`, as the bell's
+	// route); a star, a comment and a grant change something (`write`).
+	"notifications_list":     auth.VerbRead,
+	"notification_read":      auth.VerbRead,
+	"file_star":              auth.VerbWrite,
+	"file_comments":          auth.VerbRead,
+	"file_comment_add":       auth.VerbWrite,
+	"file_comment_delete":    auth.VerbWrite,
+	"file_permissions":       auth.VerbRead,
+	"file_permission_users":  auth.VerbRead,
+	"file_permission_set":    auth.VerbWrite,
+	"file_permission_revoke": auth.VerbWrite,
 }
 
 // withdrawUngrantedFileTools removes every file tool whose verb tok does not
@@ -213,6 +263,9 @@ type mcpWriteIn struct {
 	Path          string `json:"path" jsonschema:"adapter://file path to create or overwrite"`
 	Content       string `json:"content,omitempty" jsonschema:"UTF-8 text content (use content_base64 for binary)"`
 	ContentBase64 string `json:"content_base64,omitempty" jsonschema:"base64-encoded binary content"`
+	// AllowPlaintext lets a write land in an end-to-end encrypted folder
+	// unencrypted (ai_e2e.go plaintextRefusal).
+	AllowPlaintext bool `json:"allow_plaintext,omitempty" jsonschema:"only for a path inside an end-to-end encrypted folder: store the bytes there UNENCRYPTED on purpose (filex holds no key). Without it such a write fails with E2E_PLAINTEXT_REFUSED"`
 }
 type mcpEntryOut struct {
 	Entry *aiEntry `json:"entry"`
@@ -222,6 +275,7 @@ type mcpUploadTicketIn struct {
 	Path             string `json:"path" jsonschema:"adapter://file path the upload will land at (a FILE path, not a folder)"`
 	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty" jsonschema:"how long the URL stays valid (default 1800, max 86400)"`
 	MaxBytes         int64  `json:"max_bytes,omitempty" jsonschema:"optional lower ceiling than the server maximum"`
+	AllowPlaintext   bool   `json:"allow_plaintext,omitempty" jsonschema:"only for a path inside an end-to-end encrypted folder: store the upload there UNENCRYPTED on purpose. Without it the ticket is refused with E2E_PLAINTEXT_REFUSED"`
 }
 type mcpUploadTicketOut struct {
 	URL        string `json:"url"`
@@ -287,13 +341,15 @@ type mcpUnshareIn struct {
 }
 
 type mcpZipIn struct {
-	Sources []string `json:"sources" jsonschema:"adapter:// paths to pack (files and/or folders; folders are zipped recursively)"`
-	Dest    string   `json:"dest" jsonschema:"adapter:// path of the .zip to create (same storage as the sources)"`
+	Sources        []string `json:"sources" jsonschema:"adapter:// paths to pack (files and/or folders; folders are zipped recursively)"`
+	Dest           string   `json:"dest" jsonschema:"adapter:// path of the .zip to create (same storage as the sources)"`
+	AllowPlaintext bool     `json:"allow_plaintext,omitempty" jsonschema:"only for a dest inside an end-to-end encrypted folder: store the zip there UNENCRYPTED on purpose"`
 }
 
 type mcpUnzipIn struct {
-	Src     string `json:"src" jsonschema:"adapter:// path of the .zip to extract"`
-	DestDir string `json:"dest_dir" jsonschema:"adapter:// directory to extract into (same storage as src)"`
+	Src            string `json:"src" jsonschema:"adapter:// path of the .zip to extract"`
+	DestDir        string `json:"dest_dir" jsonschema:"adapter:// directory to extract into (same storage as src)"`
+	AllowPlaintext bool   `json:"allow_plaintext,omitempty" jsonschema:"only when files would land inside an end-to-end encrypted folder: extract them there UNENCRYPTED on purpose"`
 }
 type mcpUnzipOut struct {
 	Extracted int `json:"extracted"` // number of files written
@@ -319,14 +375,15 @@ func (h *AIMCP) searchIndex() *search.Index {
 func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_root",
-		Description: "Report your access scope FIRST: the confinement root you're locked to (if any) and the storage adapter names you can address. If confined, address files with bare relative paths (they resolve UNDER your root) or full adapter://root/... paths — never guess adapter names.",
+		Description: "Report your access scope FIRST: the confinement root you're locked to (if any) and the storage adapter names you can address. If confined, address files with bare relative paths (they resolve UNDER your root) or full adapter://root/... paths - never guess adapter names.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ mcpRootIn) (*mcp.CallToolResult, aiRootInfo, error) {
 		return nil, ops.RootInfo(ctx), nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "file_list",
-		Description: "List files and folders in a directory. Path is adapter://dir (adapter = storage name); empty path lists the first storage's root.",
+		Name: "file_list",
+		Description: "List files and folders in a directory. Path is adapter://dir (adapter = storage name); empty path lists the first storage's root. " +
+			"An entry with encrypted: true is end-to-end encrypted (inside the encrypted folder named by e2e_root, or a single encrypted .fxe file): filex holds no key, so its content cannot be read here.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpListIn) (*mcp.CallToolResult, mcpEntriesOut, error) {
 		entries, err := ops.List(ctx, in.Path)
 		if err != nil {
@@ -337,7 +394,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_info",
-		Description: "Get metadata (size, mime, type, modified time) for a single file or folder.",
+		Description: "Get metadata (size, mime, type, modified time) for a single file or folder, including encrypted / e2e_root as file_list reports them.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpPathIn) (*mcp.CallToolResult, mcpEntryOut, error) {
 		e, err := ops.Info(ctx, in.Path)
 		if err != nil {
@@ -347,8 +404,9 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "file_read",
-		Description: "Read a file's contents. Returns UTF-8 text when the bytes are valid UTF-8, otherwise base64. Files above 8 MiB are rejected — use the REST download endpoint for those.",
+		Name: "file_read",
+		Description: "Read a file's contents. Returns UTF-8 text when the bytes are valid UTF-8, otherwise base64. Files above 8 MiB are rejected - use the REST download endpoint for those. " +
+			"An end-to-end encrypted file (encrypted: true) is refused with E2E_ENCRYPTED: filex holds no key; the person decrypts it in the filex web UI or with `filex decrypt`.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpReadIn) (*mcp.CallToolResult, mcpReadOut, error) {
 		data, mime, err := ops.ReadBytes(ctx, in.Path)
 		if err != nil {
@@ -366,8 +424,9 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "file_write",
-		Description: "Create or overwrite a file from content you produce here: UTF-8 text in `content`, or small binary as base64 in `content_base64`. These bytes travel inside the tool call, so a file that already exists on YOUR disk — anything more than ~1 MB — must NOT be sent this way: call `file_upload_ticket` instead and stream it with curl.",
+		Name: "file_write",
+		Description: "Create or overwrite a file from content you produce here: UTF-8 text in `content`, or small binary as base64 in `content_base64`. These bytes travel inside the tool call, so a file that already exists on YOUR disk - anything more than ~1 MB - must NOT be sent this way: call `file_upload_ticket` instead and stream it with curl. " +
+			"A path inside an end-to-end encrypted folder is refused with E2E_PLAINTEXT_REFUSED, because filex would store the bytes there unencrypted; set allow_plaintext only when that is what the person wants.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpWriteIn) (*mcp.CallToolResult, mcpEntryOut, error) {
 		var data []byte
 		if in.ContentBase64 != "" {
@@ -379,10 +438,11 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		} else {
 			data = []byte(in.Content)
 		}
-		e, err := ops.Write(ctx, in.Path, data)
+		e, err := ops.Write(withPlaintextConsent(ctx, in.AllowPlaintext), in.Path, data)
 		if err != nil {
 			return toolErr[mcpEntryOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_write")
 		return nil, mcpEntryOut{Entry: e}, nil
 	})
 
@@ -392,7 +452,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 			"passing through this conversation. Returns a short-lived, credential-free URL plus the exact `curl` " +
 			"line to run: `curl -T <local-file> <url>`. The destination is fixed by this call, the URL accepts " +
 			"exactly one upload and needs NO token, so an agent without filex credentials can still finish the " +
-			"transfer. Use this whenever the file is already on disk — never base64 it into file_write. Run the " +
+			"transfer. Use this whenever the file is already on disk - never base64 it into file_write. Run the " +
 			"returned line on the machine that HOLDS the file (a `powershell` variant is returned too); if you " +
 			"cannot run commands at all, hand the line to the user. Confirm the result with file_info afterwards.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUploadTicketIn) (*mcp.CallToolResult, mcpUploadTicketOut, error) {
@@ -400,10 +460,12 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 			Path:             in.Path,
 			ExpiresInSeconds: in.ExpiresInSeconds,
 			MaxBytes:         in.MaxBytes,
+			AllowPlaintext:   in.AllowPlaintext,
 		})
 		if err != nil {
 			return toolErr[mcpUploadTicketOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_upload_ticket")
 		return nil, mcpUploadTicketOut{
 			URL:        info.URL,
 			Path:       info.Path,
@@ -422,6 +484,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		if err := ops.Delete(ctx, in.Path); err != nil {
 			return toolErr[mcpOKOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_delete")
 		return nil, mcpOKOut{OK: true}, nil
 	})
 
@@ -434,12 +497,13 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		// user the file is somewhere it is not. The stale "within the same
 		// storage" this line used to say was the same kind of lie in the other
 		// direction: cross-storage moves have worked since v0.27.0.
-		Description: "Move or rename a file/folder, within a storage or across two (the bytes are copied and verified, then the source is removed). Never overwrites: if dst is taken the item lands on a free name beside it (rapor-copy.txt), so use the returned entry.path — it may differ from what you asked for. entry.type says what moved: \"dir\" for a folder, \"file\" for a file. Moving an item onto its own path does nothing. A folder moved across storages that holds links filex cannot follow is copied WITHOUT them and its source is KEPT: then entry.source_kept is true and entry.left_behind names each one — a success, do not retry.",
+		Description: "Move or rename a file/folder, within a storage or across two (the bytes are copied and verified, then the source is removed). Never overwrites: if dst is taken the item lands on a free name beside it (rapor-copy.txt), so use the returned entry.path - it may differ from what you asked for. entry.type says what moved: \"dir\" for a folder, \"file\" for a file. Moving an item onto its own path does nothing. A folder moved across storages that holds links filex cannot follow is copied WITHOUT them and its source is KEPT: then entry.source_kept is true and entry.left_behind names each one - a success, do not retry.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpMoveIn) (*mcp.CallToolResult, mcpEntryOut, error) {
 		e, err := ops.Move(ctx, in.Src, in.Dst)
 		if err != nil {
 			return toolErr[mcpEntryOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_move")
 		return nil, mcpEntryOut{Entry: e}, nil
 	})
 
@@ -451,12 +515,13 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		if err != nil {
 			return toolErr[mcpEntryOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_mkdir")
 		return nil, mcpEntryOut{Entry: e}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_search",
-		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Name matching is forgiving: `.`, `-`, `_` and a space are interchangeable (`invoice 2026` finds `invoice_2026.pdf`), every word must match, and one typo is tolerated. A query may carry `tag:<name>` / `-tag:<name>` filters, which narrow to (or exclude) files carrying that tag — your personal tag of that name or your team's, both count; a tag that does not exist returns nothing. Results are ranked: exact filename, prefix, name, path, fuzzy, then content-only. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
+		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Name matching is forgiving: `.`, `-`, `_` and a space are interchangeable (`invoice 2026` finds `invoice_2026.pdf`), every word must match, and one typo is tolerated. A query may carry `tag:<name>` / `-tag:<name>` filters, which narrow to (or exclude) files carrying that tag - your personal tag of that name or your team's, both count; a tag that does not exist returns nothing. Results are ranked: exact filename, prefix, name, path, fuzzy, then content-only. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSearchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 		withContent := in.Content == nil || *in.Content
 		entries, err := mcpSearch(ctx, ops, idx, in.Path, in.Query, withContent)
@@ -468,57 +533,161 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_tags",
-		Description: "Read or set a file's tags. Tags come in two kinds and every tag says which: `personal` (only you — the token's user — see it, like a star) and `team` (shared with everyone in your tenant who can see the file; adding or removing one needs edit permission, see can_edit_team). Without `set` it only reads. With `set` the tags you can see become exactly that list — always name the kind of each; there is no default. Other people's personal tags and other tenants' tags are never shown or touched.",
+		Description: "Read or set a file's tags. Tags come in two kinds and every tag says which: `personal` (only you - the token's user - see it, like a star) and `team` (shared with everyone in your tenant who can see the file; adding or removing one needs edit permission, see can_edit_team). Without `set` it only reads. With `set` the tags you can see become exactly that list - always name the kind of each; there is no default. Other people's personal tags and other tenants' tags are never shown or touched.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpTagsIn) (*mcp.CallToolResult, aiTagsResult, error) {
 		res, err := ops.Tags(ctx, in.Path, in.Set)
 		if err != nil {
 			return toolErr[aiTagsResult](err)
 		}
+		if in.Set != nil {
+			mcpAuditWrite(ctx, ops.store, "file_tags")
+		}
 		return nil, *res, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "file_share",
-		Description: "Create a public share link for a file or folder (folders download as a ZIP). Returns the URL + a one-time PIN if pin=true. Use this to hand a file to someone without filex access — do NOT stream large files back through file_read.",
+		Name: "file_share",
+		Description: "Create a public share link for a file or folder (folders download as a ZIP). Returns the URL + a one-time PIN if pin=true. Use this to hand a file to someone without filex access - do NOT stream large files back through file_read. " +
+			"An end-to-end encrypted folder and anything inside it is never shared (E2E_ENCRYPTED). A single encrypted file (.fxe) is: the result says encrypted: true, and its recipient needs the file's password to open it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpShareIn) (*mcp.CallToolResult, aiShareResult, error) {
 		res, err := ops.CreateShare(ctx, in.Path, in.Pin, in.ExpiresInDays, in.MaxDownloads)
 		if err != nil {
 			return toolErr[aiShareResult](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_share")
 		return nil, *res, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "file_unshare",
-		Description: "Revoke a share link by its token (returned from file_share).",
+		Description: "Revoke a public link or a file request by its token (file_share and file_request_create answer it; share_list lists yours).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUnshareIn) (*mcp.CallToolResult, mcpOKOut, error) {
 		if err := ops.RevokeShare(ctx, in.Token); err != nil {
 			return toolErr[mcpOKOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_unshare")
 		return nil, mcpOKOut{OK: true}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "file_zip",
-		Description: "Pack one or more files/folders into a .zip ON THE SERVER (folders recurse). The archive is written to storage at `dest` — the bytes never travel over MCP. To let someone download a big zip, call file_share on `dest`; do NOT file_read it.",
+		Name: "file_zip",
+		Description: "Pack one or more files/folders into a .zip ON THE SERVER (folders recurse). The archive is written to storage at `dest` - the bytes never travel over MCP. To let someone download a big zip, call file_share on `dest`; do NOT file_read it. " +
+			"Packing needs download permission on every source. Files inside an end-to-end encrypted folder cannot be packed into a zip outside it (E2E_BOUNDARY); the encrypted folder itself can, with its key file.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpZipIn) (*mcp.CallToolResult, mcpEntryOut, error) {
-		e, err := ops.Zip(ctx, in.Sources, in.Dest)
+		e, err := ops.Zip(withPlaintextConsent(ctx, in.AllowPlaintext), in.Sources, in.Dest)
 		if err != nil {
 			return toolErr[mcpEntryOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_zip")
 		return nil, mcpEntryOut{Entry: e}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "file_unzip",
-		Description: "Extract a .zip already in storage into dest_dir ON THE SERVER (zip-slip protected; every entry stays within your confinement root). Returns the number of files written.",
+		Name: "file_unzip",
+		Description: "Extract a .zip already in storage into dest_dir ON THE SERVER (zip-slip protected; every entry stays within your confinement root). Returns the number of files written. " +
+			"Extracting into an end-to-end encrypted folder is refused with E2E_PLAINTEXT_REFUSED unless allow_plaintext is set.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpUnzipIn) (*mcp.CallToolResult, mcpUnzipOut, error) {
-		n, refused, err := ops.Unzip(ctx, in.Src, in.DestDir)
+		n, refused, err := ops.Unzip(withPlaintextConsent(ctx, in.AllowPlaintext), in.Src, in.DestDir)
 		if err != nil {
 			return toolErr[mcpUnzipOut](err)
 		}
+		mcpAuditWrite(ctx, ops.store, "file_unzip")
 		return nil, mcpUnzipOut{Extracted: n, Refused: refused}, nil
 	})
+
+	registerDoorTools(srv, ops)
+}
+
+// mcpWriteTwin maps every file tool that CHANGES something to the /api/ai
+// route that does the same thing over REST. The tool's audit row is the one
+// that route writes - the same action name, the same target type - so a write
+// reads the same in the audit log whichever door the agent used; only `via`
+// says which (auth.ViaMCP here, auth.ViaAPI there).
+//
+// ⚠⚠ A write tool missing here leaves no audit row at all: the MCP
+// transport itself is not audited (auth.shouldAudit), since one POST carries a
+// read or a write alike. ai_mcp_audit_internal_test goes red for a tool of
+// fileToolVerb that needs a write verb and has no twin.
+var mcpWriteTwin = map[string]string{
+	"file_write":         "/api/ai/upload",
+	"file_upload_ticket": "/api/ai/upload/ticket",
+	"file_mkdir":         "/api/ai/mkdir",
+	"file_move":          "/api/ai/move",
+	"file_delete":        "/api/ai/delete",
+	"file_tags":          "/api/ai/tags", // only with `set`; reading tags is a read
+	"file_share":         "/api/ai/share",
+	"file_unshare":       "/api/ai/unshare",
+	"file_zip":           "/api/ai/zip",
+	"file_unzip":         "/api/ai/unzip",
+
+	"file_copy":            "/api/ai/copy",
+	"app_run":              "/api/ai/apps/run", // app_plugin.action_run once queued
+	"file_convert":         "/api/ai/convert",  // app_plugin.action_run once queued
+	"op_cancel":            "/api/ai/ops/{id}/cancel",
+	"trash_restore":        "/api/ai/trash/restore",
+	"file_version_restore": "/api/ai/versions/restore",
+	"file_snapshot":        "/api/ai/versions/snapshot",
+	"archive_create":       "/api/ai/archive/create",
+	"archive_extract":      "/api/ai/archive/extract",
+	"file_request_create":  "/api/ai/share/request",
+
+	"file_star":              "/api/ai/star",
+	"file_comment_add":       "/api/ai/comments",
+	"file_comment_delete":    "/api/ai/comments/{id}/delete",
+	"file_permission_set":    "/api/ai/permissions",
+	"file_permission_revoke": "/api/ai/permissions/{id}/revoke",
+}
+
+// mcpAuditWrite writes the audit row of one successful write tool call.
+//
+// Exactly what the REST twin's row holds: the action and target type
+// auth.ActionForPath names for it, the token's user, the client's address,
+// `token_id` / `token_username` - and `via: mcp`. No path is added: the REST
+// row carries none either, so neither door can put a name outside a confined
+// token's root into a log the administrator reads as that token's work.
+// Best-effort, like the middleware: a failed insert never fails the tool.
+func mcpAuditWrite(ctx context.Context, store db.Store, tool string) {
+	mcpAuditRow(ctx, store, tool, "", nil)
+}
+
+// mcpAuditRow is the row the /api/ai group's AuditMiddleware writes for the
+// tool's REST twin, written for the tool: the action its route maps to (id
+// fills a `{id}` in the twin, as chi would), renamed and detailed by the
+// handler when it said more (SetAuditAction, SetAuditTarget, AddAuditDetail -
+// the explorer's handlers the door tools run do, ai_doors.go), and stamped
+// `via: mcp`. detail may be nil.
+func mcpAuditRow(ctx context.Context, store db.Store, tool, id string, detail *auth.AuditDetail) {
+	twin, ok := mcpWriteTwin[tool]
+	if !ok || store == nil {
+		return
+	}
+	twin = strings.Replace(twin, "{id}", id, 1)
+	action, targetType, targetID := auth.ActionForPath(http.MethodPost, twin, id, "")
+	if a, tt := detail.Action(); a != "" {
+		action, targetType = auth.DoorAction(a, false), tt
+	}
+	if action == "" {
+		return
+	}
+	entry := &model.AuditEntry{
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		IP:         clientip.FromContext(ctx),
+		CreatedAt:  time.Now(),
+	}
+	if u := auth.UserFrom(ctx); u != nil && u.ID > 0 {
+		uid := u.ID
+		entry.UserID = &uid
+	}
+	entry.Metadata = detail.Into(map[string]interface{}{"via": auth.ViaMCP})
+	entry.TargetID, entry.Metadata = detail.ApplyTarget(entry.TargetID, entry.Metadata)
+	entry.Metadata = auth.StampTokenDoor(ctx, entry.Metadata, auth.ViaMCP)
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := store.InsertAuditEntry(wctx, entry); err != nil {
+		slog.Warn("mcp: audit insert failed", slog.String("tool", tool), slog.String("err", err.Error()))
+	}
 }
 
 // mcpSearch backs the file_search tool. Name-only mode (content=false, or
@@ -557,14 +726,16 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 	}
 
 	seen := map[string]bool{}
+	roots := newE2eRoots(ops.store)
 	for _, hit := range idx.SafeSearchFiltered(ctx, parsed.Text, 200, search.ScopeAll, tagFilter.index) {
 		n, gerr := ops.store.GetNode(ctx, hit.NodeID)
 		if gerr != nil || n == nil || n.DeletedAt != nil || n.StorageID != s.ID {
 			continue
 		}
 		// The index holds filex's own rows too (version snapshots, the
-		// desktop's open-with working copies); they are never a result.
-		if syspath.Hidden(n.Path) {
+		// desktop's open-with working copies) and encrypted folders' key
+		// files; they are never a result.
+		if syspath.Hidden(n.Path) || syspath.Unlisted(n.Name) {
 			continue
 		}
 		if confined && !root.Within(s.Name, n.Path) {
@@ -583,6 +754,7 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 		if n.BackendMtime != nil {
 			e.LastModified = n.BackendMtime.UnixMilli()
 		}
+		markE2e(ctx, roots, s, n.Path, &e)
 		out = append(out, mcpSearchEntry{aiEntry: e, Snippet: hit.Snippet, Matched: hit.Matched})
 		seen[e.Path] = true
 	}
@@ -599,11 +771,18 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 
 // toolErr packs an error into an MCP tool error result (IsError=true) rather
 // than a protocol error, so the model sees a readable message and can retry.
+// A refusal with a wire code (aiErrCode) leads with it, `E2E_ENCRYPTED: …` or
+// `NO_FREE_NAME: …`: the same word its /api/ai twin answers in `code`, for an
+// agent to match on.
 func toolErr[T any](err error) (*mcp.CallToolResult, T, error) {
 	var zero T
+	text := err.Error()
+	if code := aiErrCode(err); code != "" {
+		text = code + ": " + text
+	}
 	return &mcp.CallToolResult{
 		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}},
+		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 	}, zero, nil
 }
 

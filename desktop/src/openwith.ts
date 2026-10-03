@@ -422,7 +422,7 @@ export async function writeBackAtomic(
   } catch {
     const kept = await stash(bytes, recoveryPathFor(target, stamp), opts.fallbackDir, stamp);
     throw new WriteBackError(
-      'the original file is no longer at ' + target + ' — the edit was not applied',
+      'the original file is no longer at ' + target + ' - the edit was not applied',
       kept,
     );
   }

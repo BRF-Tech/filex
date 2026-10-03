@@ -84,7 +84,7 @@ describe('Trash — who deleted it', () => {
     const w = await mountTrash();
     expect(cellOf(w, 1).text()).toBe('Ada Lovelace');
     expect(cellOf(w, 2).text()).toBe('Bob Marley');
-    expect(cellOf(w, 3).text()).toBe('—');
+    expect(cellOf(w, 3).text()).toBe('-');
     expect(cellOf(w, 3).attributes('title'), 'the dash does not say why').toBe(en.trash.deleted_by_nobody);
     expect(cellOf(w, 4).text(), 'an account with no name is not nobody').toBe('#9');
   });

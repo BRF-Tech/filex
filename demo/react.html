@@ -60,7 +60,7 @@
       }), [apiBase, token, stamp]);
 
       const onReady    = useCallback((e) => setStatus(`ready · v${e.capabilities.version}`), []);
-      const onError    = useCallback((e) => setStatus(`error: ${e.code} — ${e.message}`), []);
+      const onError    = useCallback((e) => setStatus(`error: ${e.code} - ${e.message}`), []);
       const onNavigate = useCallback(({ path }) => setStatus(`path: ${path}`), []);
       const onShare    = useCallback(({ share }) => {
         navigator.clipboard.writeText(share.url);

@@ -66,12 +66,26 @@ export interface UiPrefs {
    * the next time the person opens that app, the "updated" note shows once.
    */
   appsSeen?: string;
+  /**
+   * 0.50 - "always open this kind with this app" (lib/openWith): a JSON object
+   * `{ext: handlerId}`, the handler `builtin` or `app:<plugin>/<view>`. A
+   * choice the administrator has since switched off is kept, and not used,
+   * until the person picks another (Settings → Preferences → Default apps
+   * says so).
+   *
+   * ⚠⚠ ONE record per ACCOUNT, not per surface (ACCOUNT_KEYS): the server
+   * hands it in with every surface's document and drops it from every PUT;
+   * it changes one kind at a time through `/api/me/open-with`
+   * (`accountFetch`), so a copy this page read at boot cannot undo a choice
+   * made since on another surface.
+   */
+  openWith?: string;
 }
 
 export type PrefKey = keyof UiPrefs;
 
 /** The keys that paint the window — each has a first-paint mirror (below). */
-export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appsSeen'>;
+export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appsSeen' | 'openWith'>;
 
 /**
  * Every key the account document carries.
@@ -81,7 +95,14 @@ export type LookKey = Exclude<PrefKey, 'tour' | 'appState' | 'appsSeen'>;
  * preference that is not a look (the tour) still has to be named here, or the
  * first palette change after it was stored would erase it.
  */
-export const PREF_KEYS: readonly PrefKey[] = ['theme', 'palette', 'density', 'locale', 'storageOrder', 'tour', 'appState', 'appsSeen'];
+export const PREF_KEYS: readonly PrefKey[] = ['theme', 'palette', 'density', 'locale', 'storageOrder', 'tour', 'appState', 'appsSeen', 'openWith'];
+
+/**
+ * The keys that belong to the ACCOUNT, not to this surface: read with the
+ * surface's document (the server puts them in), never written with it - each
+ * has its own route (`accountFetch`) and is set here with `setAccountPref`.
+ */
+export const ACCOUNT_KEYS: readonly PrefKey[] = ['openWith'];
 
 /**
  * The keys with a first-paint mirror in `localStorage` — what the window is
@@ -540,7 +561,9 @@ async function flush(): Promise<void> {
   // caller's document for one surface") — sending only what changed would
   // drop every other preference the account holds, which is a data loss that
   // looks like "my palette reset itself".
-  const body = { prefs: currentPrefs() };
+  const doc = currentPrefs();
+  for (const k of ACCOUNT_KEYS) delete doc[k];
+  const body = { prefs: doc };
   const doFetch = cfg.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) return;
   try {
@@ -572,6 +595,38 @@ export function savePref(key: PrefKey, value: string): void {
   timer = setTimeout(() => {
     inFlight = flush();
   }, PREFS_PUT_DEBOUNCE_MS);
+}
+
+/**
+ * An account key changed (ACCOUNT_KEYS): this page's copy, and whoever
+ * listens, now. Nothing is sent - the caller already asked the key's own
+ * route (`accountFetch`), and the surface document does not carry it.
+ */
+export function setAccountPref(key: PrefKey, value: string): void {
+  remote = { ...remote, [key]: value };
+  announce();
+}
+
+/**
+ * Ask the account's API with this host's address, credentials and fetch -
+ * the transport the preferences use, so every surface (the browser, the
+ * desktop app, an embed) reaches the same record. `null` when the host has
+ * no fetch or the network is not there: an account preference is never
+ * worth an exception.
+ */
+export async function accountFetch(path: string, init: { method: string; body?: string }): Promise<Response | null> {
+  const doFetch = cfg.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
+  if (!doFetch) return null;
+  try {
+    return await doFetch(`${apiRootOr(cfg.base)}${path}`, {
+      method: init.method,
+      headers: await headers(init.body !== undefined),
+      credentials: 'same-origin',
+      body: init.body,
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** Send anything still waiting, now (a window closing, a test). */

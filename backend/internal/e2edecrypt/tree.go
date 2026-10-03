@@ -35,7 +35,7 @@ import (
 var ErrOutputExists = errors.New("the output directory already exists")
 
 // ErrNoMarker: the input carries no .filex-e2e.json and none was given.
-var ErrNoMarker = errors.New("no " + MarkerName + " found in the input — pass the encrypted folder's root, or its marker with --marker")
+var ErrNoMarker = errors.New("no " + MarkerName + " found in the input - pass the encrypted folder's root, or its marker with --marker")
 
 // CorruptError names the entry that stopped a run.
 type CorruptError struct {
@@ -177,7 +177,7 @@ func Open(in string, opts OpenOptions) (*Job, error) {
 		} else if opts.MarkerPath == "" && dirHasFxe(abs) {
 			// wiring:e2 fxe — not an encrypted folder: a folder of single
 			// encrypted files, each with its own password.
-			return nil, errors.New("this folder has no " + MarkerName + ", but it holds single encrypted files (.fxe) — each has its own password: decrypt them one by one (filex decrypt <file>.fxe)")
+			return nil, errors.New("this folder has no " + MarkerName + ", but it holds single encrypted files (.fxe) - each has its own password: decrypt them one by one (filex decrypt <file>.fxe)")
 		}
 	case fi.Mode().IsRegular():
 		head, err := readHead(abs, 8)
@@ -364,7 +364,7 @@ func (j *Job) idOf(dir string) ([]byte, error) {
 		}
 		return nk.DeriveDirID(parent, base), nil
 	}
-	return nil, fmt.Errorf("%s: its name carries no folder id and it is not inside the folder of the marker, so the names in it cannot be read — pass the encrypted folder's root (or a folder inside it with --marker pointing at the root's %s)", base, MarkerName)
+	return nil, fmt.Errorf("%s: its name carries no folder id and it is not inside the folder of the marker, so the names in it cannot be read - pass the encrypted folder's root (or a folder inside it with --marker pointing at the root's %s)", base, MarkerName)
 }
 
 // collectIDs records every folder id below dir (id is dir's own).
@@ -401,7 +401,7 @@ func (j *Job) resolveName(dir, stored, plainRel string, parentID []byte) (string
 		// filex (over WebDAV, sync) without being re-sealed. Every folder id
 		// is known, so the name is recovered rather than lost.
 		if p, ok := nk.RecoverMoved(stored, parentID, j.ids, read); ok {
-			j.warn("%s: this name was sealed for another folder — the item was moved outside filex; its name was recovered (open the folder in the filex web UI and fix its names)", where)
+			j.warn("%s: this name was sealed for another folder - the item was moved outside filex; its name was recovered (open the folder in the filex web UI and fix its names)", where)
 			plain, state = p, NameDecrypted
 		}
 	}
@@ -458,7 +458,7 @@ func (j *Job) decryptDir(src, dst, plainRel, storedRel string, isRoot bool, dirI
 		}
 		storedPath := joinRel(storedRel, stored)
 		if e.Type()&os.ModeSymlink != 0 {
-			j.warn("%s: a symbolic link — skipped", storedPath)
+			j.warn("%s: a symbolic link - skipped", storedPath)
 			continue
 		}
 		plain, keep, err := j.resolveName(src, stored, plainRel, dirID)
@@ -467,7 +467,7 @@ func (j *Job) decryptDir(src, dst, plainRel, storedRel string, isRoot bool, dirI
 		}
 		if !keep {
 			if c := ClassifyStoredName(stored); j.keys.Names != nil && c.Kind == KindSidecar && !longHere[c.Hash] {
-				j.warn("%s: a long-name sidecar with no item next to it — ignored", storedPath)
+				j.warn("%s: a long-name sidecar with no item next to it - ignored", storedPath)
 			}
 			continue
 		}
@@ -492,7 +492,7 @@ func (j *Job) decryptDir(src, dst, plainRel, storedRel string, isRoot bool, dirI
 				return err
 			}
 		default:
-			j.warn("%s: not a regular file or folder — skipped", storedPath)
+			j.warn("%s: not a regular file or folder - skipped", storedPath)
 		}
 	}
 	return nil
@@ -521,7 +521,7 @@ func (j *Job) decryptSingle(dst string) error {
 		return err
 	}
 	if !keep {
-		return errors.New("the input is a long-name sidecar, not a file — pass the item next to it")
+		return errors.New("the input is a long-name sidecar, not a file - pass the item next to it")
 	}
 	name := j.outputName(plain, map[string]bool{}, plain)
 	return j.decryptFileTo(j.single, filepath.Join(dst, name), name, stored)
@@ -555,11 +555,11 @@ func (j *Job) decryptFileTo(src, target, rel, storedPath string) error {
 			derr = &CorruptError{Path: where, Err: derr}
 		}
 	case HasFxeMagic(head):
-		j.warn("%s: a single encrypted file (.fxe) with its own password; copied as it is — decrypt it on its own with filex decrypt", rel)
+		j.warn("%s: a single encrypted file (.fxe) with its own password; copied as it is - decrypt it on its own with filex decrypt", rel)
 		_, derr = io.Copy(bw, br)
 	default:
 		if j.Marker != nil && j.Marker.ConvPending {
-			j.warn("%s: not encrypted yet — the folder is being encrypted in place and this file was not reached; copied as it is", rel)
+			j.warn("%s: not encrypted yet - the folder is being encrypted in place and this file was not reached; copied as it is", rel)
 		} else {
 			j.warn("%s: this file was never encrypted (no filexe2e header); copied as it is", rel)
 		}
@@ -710,14 +710,14 @@ func extractZip(zipPath, dst, goos string) error {
 		}
 		clean := path.Clean("/" + name)[1:]
 		if unsafe || filepath.VolumeName(filepath.FromSlash(clean)) != "" {
-			return fmt.Errorf("the zip holds an unsafe entry %q — refusing to extract it", f.Name)
+			return fmt.Errorf("the zip holds an unsafe entry %q - refusing to extract it", f.Name)
 		}
 		if clean == "" {
 			continue
 		}
 		target := filepath.Join(dst, filepath.FromSlash(clean))
 		if rel, err := filepath.Rel(dst, target); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("the zip holds an unsafe entry %q — refusing to extract it", f.Name)
+			return fmt.Errorf("the zip holds an unsafe entry %q - refusing to extract it", f.Name)
 		}
 		mode := f.Mode()
 		if mode&os.ModeSymlink != 0 {

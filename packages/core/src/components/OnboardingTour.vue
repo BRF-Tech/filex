@@ -19,6 +19,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
+import { useSystemDark } from '../composables/useSystemDark';
 import { inlineKeyStep } from '../lib/direction';
 import { shortcutHint } from '../composables/useKeyboardShortcuts';
 
@@ -386,21 +387,9 @@ onBeforeUnmount(() => {
   if (placeRaf) cancelAnimationFrame(placeRaf);
 });
 
-// Theme cascade outside `.fe` — same pattern as ContextMenu.
-const prefersDark = ref(false);
-let mq: MediaQueryList | undefined;
-function syncPrefersDark(e?: MediaQueryListEvent | MediaQueryList) {
-  prefersDark.value = !!(e && 'matches' in e && e.matches);
-}
-onMounted(() => {
-  if (typeof window === 'undefined') return;
-  mq = window.matchMedia('(prefers-color-scheme: dark)');
-  syncPrefersDark(mq);
-  mq.addEventListener?.('change', syncPrefersDark);
-});
-onBeforeUnmount(() => {
-  mq?.removeEventListener?.('change', syncPrefersDark);
-});
+// Theme cascade outside `.fe` - same pattern as ContextMenu: the OS mode for
+// `auto` from composables/useSystemDark, the one shared listener (#74).
+const prefersDark = useSystemDark();
 const themeClass = computed(() => `fe-ctx-backdrop--theme-${props.theme || 'auto'}`);
 </script>
 

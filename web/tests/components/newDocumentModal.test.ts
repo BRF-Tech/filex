@@ -167,7 +167,7 @@ describe('where the extension is not optional', () => {
   });
 });
 
-// Burak, 2026-09-27: an app's rows in the New menu (`new_documents`). The
+// The maintainer, 2026-09-27: an app's rows in the New menu (`new_documents`). The
 // server lists them with the other types (a key, the app, its label); the
 // dialog offers them under "Apps" in the app's own words, even where the
 // built-in kind of the same extension is withheld, and asks the server for

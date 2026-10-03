@@ -102,9 +102,9 @@ func (e *PackageManagedError) Error() string {
 	name := e.Install.Manager.Label()
 	cmd := e.Install.UpgradeCommand()
 	if name == "" || cmd == "" {
-		return "this filex was installed by a package manager, which owns its binary — upgrade it with that package manager"
+		return "this filex was installed by a package manager, which owns its binary - upgrade it with that package manager"
 	}
-	return "this filex was installed with " + name + ", which owns its binary — upgrade it with: " + cmd
+	return "this filex was installed with " + name + ", which owns its binary - upgrade it with: " + cmd
 }
 
 // Is makes errors.Is(err, ErrNotSelfApplicable) hold.

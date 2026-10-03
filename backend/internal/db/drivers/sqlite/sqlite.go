@@ -21,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/namefold"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/tenant"
 
 	sqlite_migrations "github.com/brf-tech/filex/backend/db/migrations/sqlite"
 )
@@ -93,10 +94,21 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB}
 	// Rows deleted where they stood (issue #74), the same way.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
+	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB}
 	// Plugin install requests (00070), the same way; timestamps in
 	// CURRENT_TIMESTAMP's spelling, as both engines this file serves compare
 	// them as text.
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// Sign-in attempt counters (00072), the same way and for the same reason.
+	s.LoginThrottleSQL = &db.LoginThrottleSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// Groups (00074), the same way.
+	s.GroupSQL = db.NewGroupSQL(sqlDB, false)
+	// Tenant self-service (00076), the same way.
+	s.TenantAuthSQL = db.NewTenantAuthSQL(sqlDB, false)
+	// File associations and app thumbnail limits (00077), the same way.
+	s.FileAssocSQL = &db.FileAssocSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// The SSO identity an account is bound to (00079), the same way.
+	s.OIDCIdentitySQL = &db.OIDCIdentitySQL{Pool: sqlDB, GetUser: s.GetUser}
 	return s
 }
 
@@ -117,8 +129,24 @@ type Store struct {
 	*db.DraftSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
+	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
+	// node_unavailable_sql.go, migration 00078).
+	*db.NodeUnavailableSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
+	// The sign-in attempt counters (internal/db login_throttle_sql.go).
+	*db.LoginThrottleSQL
+	// The group methods (internal/db group_sql.go, migration 00074).
+	*db.GroupSQL
+	// Sign-in instances, their bindings, own domains (internal/db
+	// tenant_auth_sql.go, migration 00076).
+	*db.TenantAuthSQL
+	// File associations and app thumbnail limits (internal/db
+	// file_assoc_sql.go, migration 00077).
+	*db.FileAssocSQL
+	// The SSO identity an account is bound to (internal/db
+	// oidc_identity_sql.go, migration 00079).
+	*db.OIDCIdentitySQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -599,17 +627,17 @@ func (s *Store) SetNodeMtime(ctx context.Context, id int64, mtime *time.Time) er
 // SQL here is kept portable (no ON CONFLICT / INSERT OR IGNORE) because the
 // MySQL driver reuses this Store verbatim.
 
-const providerCols = `id, slug, name, COALESCE(host,''), auth_type, ` +
+const providerCols = `id, slug, COALESCE(realm,''), name, COALESCE(host,''), auth_type, ` +
 	`COALESCE(oidc_issuer,''), COALESCE(oidc_client_id,''), COALESCE(oidc_client_secret,''), ` +
 	`COALESCE(oidc_redirect_url,''), COALESCE(role_claim,''), COALESCE(admin_group,''), ` +
-	`COALESCE(cookie_domain,''), is_supertenant, enabled, created_at, updated_at`
+	`COALESCE(cookie_domain,''), is_supertenant, enabled, allow_insecure_auth, oidc_trust_email, created_at, updated_at`
 
 func scanProvider(r rowScanner) (*model.Provider, error) {
 	p := &model.Provider{}
-	if err := r.Scan(&p.ID, &p.Slug, &p.Name, &p.Host, &p.AuthType,
+	if err := r.Scan(&p.ID, &p.Slug, &p.Realm, &p.Name, &p.Host, &p.AuthType,
 		&p.OIDCIssuer, &p.OIDCClientID, &p.OIDCClientSecret, &p.OIDCRedirectURL,
 		&p.RoleClaim, &p.AdminGroup, &p.CookieDomain, &p.IsSupertenant, &p.Enabled,
-		&p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.AllowInsecureAuth, &p.OIDCTrustEmail, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -621,15 +649,32 @@ func (s *Store) CreateProvider(ctx context.Context, p *model.Provider) (*model.P
 		at = model.AuthTypeOIDC
 	}
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO providers (slug, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, cookie_domain, is_supertenant, enabled)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		p.Slug, p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
+		`INSERT INTO providers (slug, realm, name, host, auth_type, oidc_issuer, oidc_client_id, oidc_client_secret, oidc_redirect_url, role_claim, admin_group, cookie_domain, is_supertenant, enabled)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		p.Slug, db.ProviderRealmOnCreate(p), p.Name, p.Host, at, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret,
 		p.OIDCRedirectURL, p.RoleClaim, p.AdminGroup, p.CookieDomain, btoi(p.IsSupertenant), btoi(p.Enabled))
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return s.GetProvider(ctx, id)
+}
+
+// GetProviderByRealm resolves a realm (migration 00073) to its tenant, or
+// (nil, nil). Unlike GetProviderByHost it does NOT filter on enabled: a
+// suspended tenant's person who names its realm is refused by
+// auth.LoginAllowed with the suspension's own answer, exactly as when they
+// type their address on the platform's page.
+func (s *Store) GetProviderByRealm(ctx context.Context, realm string) (*model.Provider, error) {
+	r := tenant.NormalizeRealm(realm)
+	if r == "" {
+		return nil, nil
+	}
+	p, err := scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE realm=?`, r))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return p, err
 }
 
 func (s *Store) GetProvider(ctx context.Context, id int64) (*model.Provider, error) {
@@ -644,10 +689,13 @@ func (s *Store) GetProviderBySlug(ctx context.Context, slug string) (*model.Prov
 	return p, err
 }
 
+// GetProviderByHost resolves an address to its enabled tenant: a provider's
+// `host`, else an active own domain or a platform subdomain
+// (db.ResolveExtraHost, docs/TENANT-ADMIN.md).
 func (s *Store) GetProviderByHost(ctx context.Context, host string) (*model.Provider, error) {
 	p, err := scanProvider(s.conn(ctx).QueryRowContext(ctx, `SELECT `+providerCols+` FROM providers WHERE host=? AND enabled=1`, host))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return db.ResolveExtraHost(ctx, s, host)
 	}
 	return p, err
 }
@@ -1236,12 +1284,18 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash, role, local
 // SetUserProvider re-homes a user to a provider (tenant) and records its OIDC
 // subject. Used by OIDC JIT to stamp the host-resolved tenant. Passing an empty
 // oidcSubject leaves the column as-is is NOT done here — it is overwritten, so
-// callers should pass the current value when only changing the provider.
+// callers should pass the current value when only changing the provider. An
+// empty subject also drops the issuer (migration 00079): the account is then
+// bound to no SSO identity.
 func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE users SET provider_id=?, oidc_subject=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		providerID, oidcSubject, userID)
-	return err
+		`UPDATE users SET provider_id=?, oidc_subject=?, oidc_issuer=CASE WHEN ?='' THEN NULL ELSE oidc_issuer END, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		providerID, oidcSubject, oidcSubject, userID)
+	if err != nil {
+		return err
+	}
+	// A group of the tenant they left no longer holds them (migration 00074).
+	return s.DropForeignMemberships(ctx, userID, providerID)
 }
 
 // GetUserByProviderEmail looks a user up within a single provider (tenant), the
@@ -2045,7 +2099,7 @@ func (s *Store) ListAllShares(ctx context.Context, creatorID *int64, activeOnly 
 const shareMetaCols = `s.id, s.node_id, s.token, COALESCE(s.pin_hash,''), s.expires_at, s.max_downloads, s.download_count, s.visit_count, s.created_by, COALESCE(s.created_via,''), s.created_at,
 		        s.plugin_id, COALESCE(s.page_id,''), COALESCE(s.subject,''), COALESCE(s.purpose_json,''),
 		        CASE WHEN COALESCE(s.pin_enc,'') <> '' THEN 1 ELSE 0 END,
-		        s.revoked_at,
+		        s.revoked_at, COALESCE(s.kind,'download'), s.max_uploads, s.upload_count,
 		        COALESCE(u.email,''), COALESCE(n.path,''), COALESCE(st.name,''), COALESCE(ap.name,'')`
 
 const shareMetaJoins = `LEFT JOIN users u    ON u.id=s.created_by
@@ -2064,7 +2118,7 @@ func scanShareMeta(rows *sql.Rows) ([]*db.ShareWithMeta, error) {
 		var pinRecoverable int
 		if err := rows.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.VisitCount, &sh.CreatedBy, &sh.CreatedVia, &sh.CreatedAt,
 			&sh.PluginID, &sh.PageID, &sh.Subject, &sh.PurposeJSON, &pinRecoverable,
-			&sh.RevokedAt,
+			&sh.RevokedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount,
 			&creatorEmail, &nodePath, &storageName, &pluginName); err != nil {
 			return nil, err
 		}
@@ -2701,20 +2755,166 @@ func (s *Store) UpdateExternalServiceState(ctx context.Context, name string, las
 
 // ─────────────────── Thumbnails / versions ───────────────────
 
-func (s *Store) GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error) {
-	row := s.conn(ctx).QueryRowContext(ctx, `SELECT node_id, state, COALESCE(storage_key,''), COALESCE(width,0), COALESCE(height,0), COALESCE(error,''), generated_at FROM thumbnails WHERE node_id=?`, nodeID)
+// thumbCols is the one column list every thumbnail read scans (scanThumb).
+const thumbCols = `node_id, state, COALESCE(storage_key,''), COALESCE(width,0), COALESCE(height,0), COALESCE(error,''), generated_at, COALESCE(source_sig,''), attempted_at, COALESCE(generator,''), COALESCE(attempts,'')`
+
+func scanThumb(sc interface{ Scan(...any) error }) (*model.Thumbnail, error) {
 	t := &model.Thumbnail{}
-	if err := row.Scan(&t.NodeID, &t.State, &t.StorageKey, &t.Width, &t.Height, &t.Error, &t.GeneratedAt); err != nil {
+	if err := sc.Scan(&t.NodeID, &t.State, &t.StorageKey, &t.Width, &t.Height, &t.Error, &t.GeneratedAt, &t.SourceSig, &t.AttemptedAt, &t.Generator, &t.Attempts); err != nil {
 		return nil, err
 	}
 	return t, nil
 }
 
+func (s *Store) GetThumbnail(ctx context.Context, nodeID int64) (*model.Thumbnail, error) {
+	return scanThumb(s.conn(ctx).QueryRowContext(ctx, `SELECT `+thumbCols+` FROM thumbnails WHERE node_id=?`, nodeID))
+}
+
+// GetThumbnails answers many rows in one query per 500 ids (SQLite's variable
+// ceiling is 999). A node with no row is absent from the map.
+func (s *Store) GetThumbnails(ctx context.Context, ids []int64) (map[int64]*model.Thumbnail, error) {
+	out := make(map[int64]*model.Thumbnail, len(ids))
+	const batch = 500
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+thumbCols+` FROM thumbnails WHERE node_id IN (`+ph+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			t, err := scanThumb(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out[t.NodeID] = t
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// sqliteMtimeJD is backend_mtime as a julian day (UTC), 0 when there is none.
+//
+// ⚠ created_at is CURRENT_TIMESTAMP's "YYYY-MM-DD HH:MM:SS" in UTC, but a
+// time.Time bound for backend_mtime is stored as Go writes it, with the zone
+// of the clock that read it: "2026-10-01 04:09:47.036622866 +0300 +03". As
+// text the two do not compare (a local wall time is not a UTC one), and
+// julianday() cannot read the second. So: julianday() of the wall time's
+// first 19 characters, less the "+hhmm" offset that follows the first space
+// after them; a value already in a form julianday() reads is taken as it is.
+// Measured on the stored value (2026-10-01): plain julianday() answered NULL,
+// and the listing ordered every file by its catalogue time alone.
+const sqliteMtimeJD = `COALESCE(julianday(backend_mtime),
+	julianday(substr(backend_mtime, 1, 19))
+	- (CASE WHEN substr(backend_mtime, 20 + instr(substr(backend_mtime, 20), ' '), 1) = '-' THEN -1.0 ELSE 1.0 END)
+	* (CAST(substr(backend_mtime, 21 + instr(substr(backend_mtime, 20), ' '), 2) AS INTEGER) * 60
+	   + CAST(substr(backend_mtime, 23 + instr(substr(backend_mtime, 20), ' '), 2) AS INTEGER)) / 1440.0,
+	0)`
+
+func (s *Store) ListPreviewCandidates(ctx context.Context, storageID int64, parentIDs []int64, perFolder int) (map[int64][]*model.Node, error) {
+	out := map[int64][]*model.Node{}
+	if len(parentIDs) == 0 || perFolder <= 0 {
+		return out, nil
+	}
+	// The later of the two times. MySQL has DATETIME columns and compares
+	// them as they are; SQLite has text, in two spellings that do not sort
+	// together, so both are turned into julian days (sqliteMtimeJD).
+	latest := `MAX(julianday(created_at), ` + sqliteMtimeJD + `)`
+	if s.mysql {
+		latest = `GREATEST(created_at, COALESCE(backend_mtime, created_at))`
+	}
+	const batch = 400
+	for start := 0; start < len(parentIDs); start += batch {
+		end := start + batch
+		if end > len(parentIDs) {
+			end = len(parentIDs)
+		}
+		chunk := parentIDs[start:end]
+		args := []any{storageID}
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		args = append(args, perFolder)
+		q := `SELECT ` + nodeColumnsN + ` FROM (
+			SELECT nodes.*, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY ` + latest + ` DESC, name) AS rn FROM nodes
+			WHERE storage_id = ? AND type = 'file' AND deleted_at IS NULL
+			AND parent_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",") + `)
+		) n WHERE n.rn <= ? ORDER BY n.parent_id, n.rn`
+		rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			n, err := scanNode(rows)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if n.ParentID != nil {
+				out[*n.ParentID] = append(out[*n.ParentID], n)
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListThumbnailProblems(ctx context.Context, storageIDs []int64, limit int) ([]*model.ThumbnailProblem, error) {
+	if storageIDs != nil && len(storageIDs) == 0 {
+		return []*model.ThumbnailProblem{}, nil
+	}
+	q := `SELECT n.id, n.storage_id, n.path, n.name, n.size, t.state, COALESCE(t.error,''), t.attempted_at, COALESCE(t.attempts,'')
+		FROM thumbnails t JOIN nodes n ON n.id = t.node_id
+		WHERE (t.state IN ('failed','skipped') OR (t.state = 'ready' AND COALESCE(t.attempts,'') LIKE '%},{%'))
+		  AND n.deleted_at IS NULL AND COALESCE(t.error,'') NOT LIKE 'e2e-encrypted%'`
+	args := []any{}
+	if storageIDs != nil {
+		q += ` AND n.storage_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(storageIDs)), ",") + `)`
+		for _, id := range storageIDs {
+			args = append(args, id)
+		}
+	}
+	q += ` ORDER BY t.attempted_at IS NULL, t.attempted_at DESC, n.id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*model.ThumbnailProblem{}
+	for rows.Next() {
+		p := &model.ThumbnailProblem{}
+		if err := rows.Scan(&p.NodeID, &p.StorageID, &p.Path, &p.Name, &p.Size, &p.State, &p.Error, &p.AttemptedAt, &p.Attempts); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) UpsertThumbnail(ctx context.Context, t *model.Thumbnail) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		s.upsert(`INSERT INTO thumbnails (node_id, state, storage_key, width, height, error, generated_at) VALUES (?,?,?,?,?,?,?)
-		 ON CONFLICT(node_id) DO UPDATE SET state=excluded.state, storage_key=excluded.storage_key, width=excluded.width, height=excluded.height, error=excluded.error, generated_at=excluded.generated_at`),
-		t.NodeID, t.State, t.StorageKey, t.Width, t.Height, t.Error, t.GeneratedAt)
+		s.upsert(`INSERT INTO thumbnails (node_id, state, storage_key, width, height, error, generated_at, source_sig, attempted_at, generator, attempts) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+		 ON CONFLICT(node_id) DO UPDATE SET state=excluded.state, storage_key=excluded.storage_key, width=excluded.width, height=excluded.height, error=excluded.error, generated_at=excluded.generated_at, source_sig=excluded.source_sig, attempted_at=excluded.attempted_at, generator=excluded.generator, attempts=excluded.attempts`),
+		t.NodeID, t.State, t.StorageKey, t.Width, t.Height, t.Error, t.GeneratedAt, t.SourceSig, t.AttemptedAt, t.Generator, t.Attempts)
 	return err
 }
 
@@ -2810,7 +3010,7 @@ type rowScanner interface {
 // what there were, and a column added to `nodes` reached the ordinary listing,
 // the search rebuild — and silently missed the tag and starred reads, whose
 // scan then failed at runtime on a path the suite only walks in one test.
-const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,0), %[1]sdeleted_by`
+const nodeColumnsFmt = `%[1]sid, %[1]sstorage_id, %[1]sparent_id, %[1]sname, %[1]spath, %[1]spath_hash, COALESCE(%[1]sstorage_key,''), %[1]stype, %[1]ssize, COALESCE(%[1]smime,''), COALESCE(%[1]setag,''), %[1]sbackend_mtime, %[1]sdb_mtime, %[1]ssync_state, COALESCE(%[1]stransfer_state,'stored'), %[1]sseen_at, %[1]sdeleted_at, %[1]screated_at, %[1]supdated_at, %[1]sowner_id, %[1]slast_actor_id, COALESCE(%[1]sexternal_upload,0), %[1]sdeleted_by, %[1]sunavailable_reason, %[1]sunavailable_at`
 
 var (
 	// nodeColumnList is the unqualified list; nodeColumnsN is the "n."-aliased
@@ -2825,10 +3025,12 @@ func nodeSelectColumns() string {
 
 func scanNode(r rowScanner) (*model.Node, error) {
 	n := &model.Node{}
-	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload, &n.DeletedBy)
+	var unavailable sql.NullString
+	err := r.Scan(&n.ID, &n.StorageID, &n.ParentID, &n.Name, &n.Path, &n.PathHash, &n.StorageKey, &n.Type, &n.Size, &n.Mime, &n.Etag, &n.BackendMtime, &n.DBMtime, &n.SyncState, &n.TransferState, &n.SeenAt, &n.DeletedAt, &n.CreatedAt, &n.UpdatedAt, &n.OwnerID, &n.LastActorID, &n.ExternalUpload, &n.DeletedBy, &unavailable, &n.UnavailableAt)
 	if err != nil {
 		return nil, err
 	}
+	n.UnavailableReason, n.Unavailable = unavailable.String, unavailable.Valid && unavailable.String != ""
 	return n, nil
 }
 
@@ -2870,7 +3072,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 }
 
 func userSelect() string {
-	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1), COALESCE(avatar_url,''), COALESCE(username,'')`
+	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1), COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,'')`
 }
 
 func scanUser(r rowScanner) (*model.User, error) {
@@ -2879,11 +3081,12 @@ func scanUser(r rowScanner) (*model.User, error) {
 	var recoveryJSON string
 	var providerID sql.NullInt64
 	var enabled int
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled, &u.AvatarURL, &u.Username); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason); err != nil {
 		return nil, err
 	}
 	u.TOTPEnabled = totpEnabled == 1
 	u.Enabled = enabled == 1
+	u.SSOLinked = u.OIDCSubject != "" || u.OIDCIssuer != ""
 	if recoveryJSON != "" {
 		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
 	}
@@ -3250,7 +3453,7 @@ func (s *Store) SetUserEnabled(ctx context.Context, userID int64, enabled bool) 
 	if enabled {
 		v = 1
 	}
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=? WHERE id=?`, v, userID)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=?, disabled_reason=NULL WHERE id=?`, v, userID)
 	return err
 }
 
@@ -5219,9 +5422,18 @@ func (s *Store) SetAppPluginJobOp(ctx context.Context, jobID string, opID int64)
 	return err
 }
 
+// UpdateAppPluginJob writes what the worker learned about a job.
+//
+// ⚠⚠ op_id is KEPT when this copy has none. The handler records the ops row
+// on the job after queueing it (SetAppPluginJobOp), and the worker is awake
+// by then: it can read the job before that write and update it after, from a
+// copy whose OpID is nil. Writing op_id=NULL then unlinked the job from its
+// row for good, and the queue drew a nameless "plugin-action" with no
+// message, outputs or "open" link (measured in the 0.50 e2e: a bell click's
+// "sign" job ran and its ops row never said so).
 func (s *Store) UpdateAppPluginJob(ctx context.Context, j *model.AppPluginJob) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE app_plugin_jobs SET op_id=?, status=?, message=?, outputs_json=?, error=?, finished_at=? WHERE id=?`,
+		`UPDATE app_plugin_jobs SET op_id=COALESCE(?, op_id), status=?, message=?, outputs_json=?, error=?, finished_at=? WHERE id=?`,
 		j.OpID, j.Status, j.Message, orJSON(j.OutputsJSON, "[]"), j.Error, j.FinishedAt, j.ID)
 	return err
 }

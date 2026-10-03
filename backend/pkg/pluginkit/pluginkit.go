@@ -6,7 +6,8 @@
 //
 // It registers what it offers with Run (from init(), see there) and never
 // blocks: filex calls its
-// exports (describe, action_run, view_event, page_event, tick, on_event) one
+// exports (describe, action_run, view_event, page_event, tick, ui_call,
+// thumbnail, on_event) one
 // at a time, on a fresh instance per call, and the plugin answers through the host
 // functions filex hands it (files, progress, settings, engines, …), each one
 // gated by a permission the administrator granted at install.
@@ -52,6 +53,20 @@ type TickFunc func(in *wire.TickInput) (*wire.TickOutput, error)
 // interface).
 type UICallFunc func(in *wire.UICallInput) (any, error)
 
+// ThumbnailFunc draws one file's thumbnail (filex 0.50 and later): read the
+// file with ThumbnailSource(in), answer a PNG or a JPEG (thumbkit.PNG). It is
+// called only when the manifest has a `thumbnails` block naming the file's
+// kind and the administrator left the app on for it (Admin → Plugins →
+// Default apps).
+//
+// ⚠ The narrowest call there is. It is handed ONE file's bytes, its name,
+// size and type - no path, no storage, no person - and every host function
+// but reading that file, Setting, AssetFetch and HTTPDo (with an http:
+// permission) answers permission_denied. Return an error when the file is not
+// one you can draw: filex then asks the next handler in the administrator's
+// list, or keeps the file's type icon.
+type ThumbnailFunc func(in *wire.ThumbnailInput) (*wire.ThumbnailOutput, error)
+
 // Plugin is what a program registers with Run.
 type Plugin struct {
 	// Manifest is echoed by describe. It must equal the filex-app.json the
@@ -70,6 +85,10 @@ type Plugin struct {
 	// An interface-only app has no module at all; an app with both registers
 	// here what its interface may ask the module.
 	UI map[string]UICallFunc
+	// Thumbnail draws thumbnails of the kinds the manifest's `thumbnails`
+	// block names. filex refuses to install a manifest with that block whose
+	// module leaves this nil (the export answers an error then).
+	Thumbnail ThumbnailFunc
 }
 
 var registered *Plugin
@@ -202,4 +221,31 @@ func dispatchTick(input []byte) ([]byte, error) {
 		out = &wire.TickOutput{}
 	}
 	return json.Marshal(out)
+}
+
+func dispatchThumbnail(input []byte) ([]byte, error) {
+	if registered == nil {
+		return nil, ErrNotRegistered
+	}
+	if registered.Thumbnail == nil {
+		return nil, errors.New("pluginkit: this plugin has a thumbnails block but registers no Thumbnail")
+	}
+	var in wire.ThumbnailInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return nil, err
+	}
+	out, err := registered.Thumbnail(&in)
+	if err != nil {
+		return nil, err
+	}
+	if out == nil || len(out.Image) == 0 {
+		return nil, errors.New("pluginkit: Thumbnail answered no image")
+	}
+	return json.Marshal(out)
+}
+
+// ThumbnailSource opens the file a thumbnail call was handed, for reading.
+// Close it when done.
+func ThumbnailSource(in *wire.ThumbnailInput) (*Input, error) {
+	return OpenInput(in.File.Ref)
 }

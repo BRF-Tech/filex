@@ -150,6 +150,11 @@ func (c *conn) ensure(ctx context.Context, force bool) (*Client, string, error) 
 	if !force && c.instance != "" && c.client == cl {
 		return cl, c.instance, nil
 	}
+	if c.cfg == nil {
+		// Closed (readOps.Close): the configuration is gone, and nothing is
+		// created from nothing.
+		return nil, "", fmt.Errorf("%s: the storage was closed", c.h.DriverName())
+	}
 	id, err := cl.CreateInstance(ctx, c.cfg)
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: init: %w", c.h.DriverName(), mapErr(err))
@@ -168,12 +173,42 @@ func (r *readOps) Init(ctx context.Context, cfg map[string]any) error {
 	}
 	r.c.mu.Lock()
 	r.c.cfg = cfg
+	oldClient, oldInstance := r.c.client, r.c.instance
 	r.c.instance, r.c.client = "", nil
 	r.c.mu.Unlock()
+	// The instance built from the previous configuration goes: it holds that
+	// configuration's credentials in the plugin.
+	releaseInstance(oldClient, oldInstance)
 	// Eager: the admin's "test connection" and the server's pre-warm both
 	// expect Init to fail when the config is wrong, not the first List.
 	_, _, err := r.c.ensure(ctx, true)
 	return err
+}
+
+// Close releases the instance this driver created in the plugin, and with it
+// the configuration (the credentials) the storage handed over. Called when a
+// storage is edited or deleted (the server's forgetStorage) and when a "Test
+// connection" is answered; before it existed, every storage that ever was -
+// deleted ones included - lived on in the plugin's memory until the plugin
+// restarted.
+func (r *readOps) Close() error {
+	r.c.mu.Lock()
+	cl, inst := r.c.client, r.c.instance
+	r.c.instance, r.c.client, r.c.cfg = "", nil, nil
+	r.c.mu.Unlock()
+	releaseInstance(cl, inst)
+	return nil
+}
+
+// releaseInstance deletes an instance, best effort and bounded: the plugin
+// may be gone (its instances with it), and nothing waits on the answer.
+func releaseInstance(cl *Client, instance string) {
+	if cl == nil || instance == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = cl.DeleteInstance(ctx, instance)
 }
 
 func (r *readOps) Name() string { return r.c.h.DriverName() }

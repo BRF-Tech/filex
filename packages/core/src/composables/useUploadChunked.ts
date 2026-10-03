@@ -100,6 +100,14 @@ export interface UploadOptions {
    * resume after a reload — its bytes are gone with the tab.
    */
   source?: UploadSource;
+  /**
+   * wiring:e2 convert - query parameters for the COMMIT, the moment the file
+   * is replaced: `expect` (the overwrite precondition "<size>:<ms>") and
+   * `e2e_convert` (an in-place E2E conversion write, which keeps no version
+   * of the plaintext it replaces). The server checks both there
+   * (upload_staged.go → Commit).
+   */
+  commitQuery?: Record<string, string>;
   chunkSize?: number;
   onProgress?: (job: UploadJob) => void;
   onDone?: (job: UploadJob, result: UploadResult) => void;
@@ -416,8 +424,9 @@ export function useUploadChunked(
       // ── commit ──────────────────────────────────────────────────────────
       job.status = 'committing';
       report();
+      const commitQs = new URLSearchParams(opts.commitQuery ?? {}).toString();
       const result = await api.jsonFetch<UploadResult>(
-        `${base}/${encodeURIComponent(uploadId)}/commit`,
+        `${base}/${encodeURIComponent(uploadId)}/commit${commitQs ? `?${commitQs}` : ''}`,
         { method: 'POST' },
       );
       // Committed: the node is listed and the bytes are filex's problem now,

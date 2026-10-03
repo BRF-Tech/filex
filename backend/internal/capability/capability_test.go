@@ -375,7 +375,7 @@ func TestService_EnginesAreTheOneProbesAnswer(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, caps.Thumbs.ImageMagick, "the probe found ImageMagick, so About must say so")
 	assert.True(t, caps.Thumbs.Video)
-	assert.False(t, caps.Thumbs.Office, "no LibreOffice in the probe's answer")
+	assert.False(t, caps.Thumbs.Office, "no OnlyOffice configured: no office thumbnails")
 
 	restore = enginebin.SetForTest(map[string]string{})
 	caps, err = New(store).Get(context.Background())
@@ -409,4 +409,39 @@ func TestService_RefreshIsNotDecidedByOneCancelledCaller(t *testing.T) {
 	require.NoError(t, err)
 	_, ok = again.External["drawio"]
 	assert.True(t, ok, "the cached snapshot must carry the external services")
+}
+
+// Office thumbnails are drawn by the OnlyOffice document server (0.50): the
+// About page's office row says whether it is configured, whatever programs
+// the machine has. Before 0.50 the row was LibreOffice on PATH, which no
+// longer draws anything (it left the image).
+func TestService_OfficeThumbsFollowOnlyOfficeNotLibreOffice(t *testing.T) {
+	ctx := context.Background()
+	_, store := dbtest.NewTestDB(t)
+
+	// The engine's id spelled out: LibreOffice may leave enginebin too.
+	restore := enginebin.SetForTest(map[string]string{"libreoffice": "/usr/bin/soffice"})
+	defer restore()
+	caps, err := New(store).Get(ctx)
+	require.NoError(t, err)
+	assert.False(t, caps.Thumbs.Office, "LibreOffice on PATH draws no office thumbnail now")
+
+	// Configured by halves (no secret): still none, as for the editor.
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, "http://127.0.0.1:1", "", "{}", time.Time{}, "unknown"))
+	caps, err = New(store).Get(ctx)
+	require.NoError(t, err)
+	assert.False(t, caps.Thumbs.Office)
+
+	// URL and secret: office thumbnails, reachable at this instant or not
+	// (a document server that is down is retried, not unconfigured).
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", true, "http://127.0.0.1:1", "jwt", "{}", time.Time{}, "unknown"))
+	caps, err = New(store).Get(ctx)
+	require.NoError(t, err)
+	assert.True(t, caps.Thumbs.Office)
+
+	// Switched off: none.
+	require.NoError(t, store.UpsertExternalService(ctx, "onlyoffice", false, "http://127.0.0.1:1", "jwt", "{}", time.Time{}, "unknown"))
+	caps, err = New(store).Get(ctx)
+	require.NoError(t, err)
+	assert.False(t, caps.Thumbs.Office)
 }

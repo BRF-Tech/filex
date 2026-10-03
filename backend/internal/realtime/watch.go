@@ -23,7 +23,7 @@ import (
 //     account;
 //   - silent: a watcher is not a viewer, so it never appears in anyone's
 //     presence bar and never receives presence frames. A sync engine that
-//     showed up as "Burak (filex desktop)" in every folder it mirrors would
+//     showed up as "Alice (filex desktop)" in every folder it mirrors would
 //     be a lie about who is looking.
 //
 // The frame a watcher receives is its own type, "tree_change", so a browser
