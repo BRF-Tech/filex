@@ -561,6 +561,8 @@ export type {
   ArchiveEntry,
   ViewMode,
   ClipboardState,
+  E2eAnswer,
+  E2eRequestDto,
 } from './types/FileNode';
 export { isExternalUsable } from './types/FileNode';
 

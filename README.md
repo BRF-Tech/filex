@@ -143,7 +143,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   quota as the web UI. Off-LAN there is also **`filex mount`**, which attaches a remote
   server over ordinary HTTPS - a folder on Linux, a drive letter on Windows
   ([docs/PROTOCOLS.md](docs/PROTOCOLS.md)).
-- **Roles and per-user permissions** - 28 named permissions (each file action, each kind of
+- **Roles and per-user permissions** - 29 named permissions (each file action, each kind of
   sharing, each protocol, API keys, the desktop app, five admin areas), and everyone has one
   role: Administrator, User, Viewer or a custom role, which can differ in some folders ("no
   delete, except in Scratch") and carry limits (link lifetime and password, blocked file types,

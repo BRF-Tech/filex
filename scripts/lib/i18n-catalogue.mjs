@@ -127,6 +127,8 @@ export function loadNotifyTables(file) {
       for (const [f, v] of Object.entries(p.one ?? {})) say(lang, `${base}.${f}_one`, v);
       // A single encrypted file's wording of the same event (notificationText.ts `file`).
       for (const [f, v] of Object.entries(p.file ?? {})) say(lang, `${base}.${f}_file`, v);
+      // A NO to an encryption request (notificationText.ts `rejected`).
+      for (const [f, v] of Object.entries(p.rejected ?? {})) say(lang, `${base}.${f}_rejected`, v);
     }
   }
   return out;

@@ -242,6 +242,21 @@ const (
 	// carries {storage, folder, via: "password"|"recovery_key", rekey} and,
 	// when the caller was signed in, actor_email.
 	EventE2EPasswordChanged EventType = "e2e.password_changed"
+	// EventE2ERequestCreated fires when somebody asks to encrypt in a folder
+	// under their tenant's `approval` policy (internal/e2epolicy
+	// requests.go) and the request waits for an administrator. ONE broadcast
+	// placed on the folder (its NodeRef — for a single file, the folder it is
+	// in): the bell hands it to the administrators of the tenant that storage
+	// belongs to — and to the platform operator — and to nobody else (bell.go
+	// fileBroadcastEvents), and a webhook gets one delivery. Meta carries
+	// {request_id, target_kind: "folder"|"file", storage, requester, reason}.
+	// ⚠ target_kind, not kind: meta.kind picks another event's file wording.
+	EventE2ERequestCreated EventType = "e2e.request_created"
+	// EventE2ERequestDecided fires when an administrator approved or rejected
+	// an encryption request. Addressed to the person who asked, and to nobody
+	// else; the node is the request's folder. Meta carries {request_id,
+	// target_kind, storage, decision: "approved"|"rejected", note, decider}.
+	EventE2ERequestDecided EventType = "e2e.request_decided"
 	// EventPluginNotice is an app plugin (internal/wasmplugin) speaking to
 	// people through the notify_send host function: a signature request, a
 	// finished conversion, anything the plugin's author phrased. The row's

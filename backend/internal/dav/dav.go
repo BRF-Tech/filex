@@ -42,12 +42,14 @@ import (
 	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/davlock"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
@@ -84,6 +86,12 @@ type Config struct {
 	Resolver func(int64) (storage.Driver, error)
 	// ACL resolves per-user grants (RBAC). Required.
 	ACL *acl.Resolver
+	// E2EPolicy is who may encrypt (internal/e2epolicy): a write that CREATES
+	// an encrypted folder's key file or a `.fxe` asks it
+	// (protoperm.EncryptionAllowed). The router's own, handed over like ACL.
+	// nil: NewHandler builds one over Store (protoperm.EncryptionPolicy), so a
+	// lost wiring line never switches the rule off.
+	E2EPolicy *e2epolicy.Service
 	// Index — optional search index; mutated nodes are (re/de)indexed.
 	Index *search.Index
 	// Thumbs — optional thumbnail pipeline; written files get async thumbs.
@@ -129,6 +137,9 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.Realm == "" {
 		cfg.Realm = "filex"
 	}
+	// Who may encrypt: the router's rule, or one built over this handler's
+	// own store — never none (protoperm.EncryptionPolicy).
+	cfg.E2EPolicy = protoperm.EncryptionPolicy(cfg.E2EPolicy, cfg.Store, cfg.ACL, cfg.MultiTenant)
 	// protocolauth's zero ConfinePolicy is ConfineRefuse, which is the right
 	// one here: /dav has no confine middleware, so accepting a `root:`-scoped
 	// token would silently promote a subtree-limited credential to whole-tree
@@ -441,6 +452,21 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 					return http.StatusForbidden, "permission denied: your account lacks the " + string(need) + " permission"
 				}
 			}
+			// Who may encrypt (internal/e2epolicy): a MOVE onto a key file's
+			// or a `.fxe`'s name is asked as a PUT of the file there would be:
+			// onto a file there it replaces it (Overwrite: T), onto nothing or
+			// a folder it creates one. Free are only a folder, a `.fxe` that
+			// stays a `.fxe` and a key file that stays its own folder's
+			// (protoperm.RenameEncryptionAllowed). Here in the pre-gate, as
+			// gateWrite asks a COPY: the FileSystem's Rename cannot answer
+			// with a status of its own.
+			drv, err := h.cfg.Resolver(st.ID)
+			if err != nil {
+				return http.StatusInternalServerError, "storage driver unavailable"
+			}
+			if status, msg := davEncryption(protoperm.RenameEncryptionAllowed(ctx, h.cfg.E2EPolicy, drv, st, rel, drel)); status != 0 {
+				return status, msg
+			}
 		}
 	}
 	return 0, ""
@@ -511,7 +537,56 @@ func (h *Handler) gateWrite(ctx context.Context, p *principal, st *model.Storage
 	if need := davPerm(ctx, drv, method, rel, dest); need != "" && !set.AllowsAt(rel, need) {
 		return http.StatusForbidden, "permission denied: your account lacks the " + string(need) + " permission"
 	}
+	// Who may encrypt (internal/e2epolicy): a request that CREATES an
+	// encrypted folder's key file or a `.fxe` needs the policy and
+	// files.encrypt. A protocol COPY is a new file on this protocol, so it is
+	// asked too (spec, clarification 2); a MOVE is asked by preGate, and only
+	// when it is not free (a folder, a `.fxe` that stays a `.fxe`, a key file
+	// that stays its own folder's).
+	// Whether it creates is protoperm.EncryptionAllowed's to say, not davPerm's:
+	// a folder with the name reads as "something to replace" there, and a COPY
+	// onto it moves the folder to the trash and creates the file.
+	//
+	// ⚠ Here, in the pre-gate, and only here. x/net/webdav answers a refused
+	// OpenFile with 404, which a client reads as "no such folder"; and under
+	// the approval policy the question spends the approval, so the
+	// FileSystem's OpenFile after this pre-gate would ask a second time and
+	// refuse its own write. What the pre-gate does not see — the key files
+	// inside a folder a COPY duplicates — is a copy of an encryption that
+	// exists already. A rule that could not be decided is the server's
+	// failure (500), not a refusal.
+	if davWritesFile(method, dest) {
+		return davEncryption(protoperm.EncryptionAllowed(ctx, h.cfg.E2EPolicy, drv, st, rel))
+	}
 	return 0, ""
+}
+
+// davEncryption is what the pre-gate answers for the rule's verdict on a
+// write: 403 for its no, 500 for a rule that could not be decided, and
+// (0, "") to go on.
+func davEncryption(a protoperm.EncryptionAnswer) (int, string) {
+	switch a {
+	case protoperm.EncryptionRefused:
+		return http.StatusForbidden, "creating an encrypted folder or file is not allowed here"
+	case protoperm.EncryptionUndecided:
+		return http.StatusInternalServerError, protoperm.ErrEncryptionUndecided.Error()
+	}
+	return 0, ""
+}
+
+// davWritesFile reports whether method puts a FILE at its target, which
+// creates it when no file is there: a PUT, a LOCK (x/net/webdav creates an
+// empty file for a lock on nothing, and the PUT after it is then an
+// overwrite) and the destination of a COPY. Not MKCOL, whose target is a
+// folder, and not PROPPATCH, which never creates.
+func davWritesFile(method string, dest bool) bool {
+	switch method {
+	case http.MethodPut, "LOCK":
+		return !dest
+	case "COPY":
+		return dest
+	}
+	return false
 }
 
 // davPerm is the per-user permission (internal/perm) a mutating method needs

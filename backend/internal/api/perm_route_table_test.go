@@ -185,6 +185,8 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/files/ws-ticket":            exemptBecause("a realtime subscription ticket; each folder feed is checked for ≥viewer when joined"),
 	"POST /api/files/e2e/escrow/challenge": exemptBecause(whyE2EHandshake),
 	"POST /api/files/e2e/escrow/used":      exemptBecause(whyE2EHandshake),
+	"POST /api/files/e2e/allowed":          exemptBecause(whyRead),
+	"POST /api/files/e2e/requests":         inHandler("files.encrypt where it is asked: e2epolicy.AnswerFor must answer `request` there (approval policy, the permission held, no approval waiting)"),
 
 	// ── sharing and collaboration ──
 	"POST /api/files/share":                                 inHandler("share.links, or share.upload_links for a drop link"),

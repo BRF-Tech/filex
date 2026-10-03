@@ -9,9 +9,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
-func TestCatalogueIs28(t *testing.T) {
-	require.Len(t, All(), 28, "the agreed permission list is 28 entries; change this test on purpose")
-	require.Equal(t, 28, allSet.Len())
+func TestCatalogueIs29(t *testing.T) {
+	require.Len(t, All(), 29, "the agreed permission list is 29 entries; change this test on purpose")
+	require.Equal(t, 29, allSet.Len())
 }
 
 func TestSetRoundTripsThroughStrings(t *testing.T) {
@@ -31,10 +31,10 @@ func TestPresets(t *testing.T) {
 	require.False(t, Standard.Has(AdminUsers), "standard has no admin area")
 	require.True(t, Standard.Has(FilesPurge))
 	require.True(t, Standard.Has(AccessSFTP), "today's users can use every protocol")
-	require.Equal(t, 22, Standard.Len())
+	require.Equal(t, 23, Standard.Len())
 
 	// ReadOnly is today's viewer: no file mutation, no sharing, the rest kept.
-	for _, p := range []Perm{FilesCreate, FilesModify, FilesRename, FilesMove, FilesDelete, FilesPurge, ShareLinks, ShareUploadLinks, ShareUsers} {
+	for _, p := range []Perm{FilesCreate, FilesModify, FilesRename, FilesMove, FilesDelete, FilesPurge, FilesEncrypt, ShareLinks, ShareUploadLinks, ShareUsers} {
 		require.False(t, ReadOnly.Has(p), p)
 	}
 	for _, p := range []Perm{FilesDownload, FilesTag, CommentsWrite, AccessWebDAV, AccessAPI, AccessDesktop, AccountEdit} {
@@ -44,6 +44,12 @@ func TestPresets(t *testing.T) {
 	require.Equal(t, PresetStandard, MatchPreset(Standard))
 	require.Equal(t, PresetGuest, MatchPreset(Of(FilesDownload)))
 	require.Equal(t, "", MatchPreset(Of(FilesDownload, FilesTag)))
+
+	// Upload-only can encrypt, as it could before files.encrypt existed.
+	// v0.49.0's list — exactly the one the catalogue upgrade turns into this
+	// one — is no preset any more.
+	require.Equal(t, PresetUploadOnly, MatchPreset(Of(FilesCreate, FilesEncrypt, AccountEdit)))
+	require.Equal(t, "", MatchPreset(Of(FilesCreate, AccountEdit)))
 }
 
 // rule is a role whose list is the Standard preset with these changes.

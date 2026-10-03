@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -54,6 +55,13 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessCfg(t, nil)
+}
+
+// newHarnessCfg is newHarness with a say in the server's Config before it is
+// built.
+func newHarnessCfg(t *testing.T, tweak func(*nfssrv.Config)) *harness {
+	t.Helper()
 	_, raw := testutil.NewTestDB(t)
 	store := identitystore.New(raw)
 
@@ -61,15 +69,16 @@ func newHarness(t *testing.T) *harness {
 	res.Confine = protocolauth.ConfineHonor
 
 	hz := &harness{store: store, res: res, roots: map[int64]string{}}
-	srv, err := nfssrv.New(nfssrv.Config{
-		Enabled:  true,
-		Addr:     "127.0.0.1:0",
-		Store:    store,
-		Auth:     res,
-		ACL:      acl.New(store),
-		Body:     filebody.New(store, nil),
-		Quota:    quota.New(store),
-		SpoolDir: t.TempDir(),
+	cfg := nfssrv.Config{
+		Enabled:   true,
+		Addr:      "127.0.0.1:0",
+		Store:     store,
+		Auth:      res,
+		ACL:       acl.New(store),
+		E2EPolicy: e2epolicy.New(e2epolicy.Options{Store: store, ACL: acl.New(store)}),
+		Body:      filebody.New(store, nil),
+		Quota:     quota.New(store),
+		SpoolDir:  t.TempDir(),
 		Resolver: func(id int64) (storage.Driver, error) {
 			st, err := store.GetStorage(context.Background(), id)
 			if err != nil {
@@ -85,7 +94,11 @@ func newHarness(t *testing.T) *harness {
 			}
 			return drv, nil
 		},
-	})
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	srv, err := nfssrv.New(cfg)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

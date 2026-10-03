@@ -7,12 +7,18 @@
 import { describe, expect, it } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
 
-import { useE2eFiles, isFxeActionKey, isFxeRow, numberedName } from '../../../packages/core/src/composables/useE2eFiles';
+import {
+  useE2eFiles,
+  isFxeActionKey,
+  isFxeRow,
+  numberedName,
+  type E2eFilesDeps,
+} from '../../../packages/core/src/composables/useE2eFiles';
 import { useLocale } from '../../../packages/core/src/composables/useLocale';
 import { fileIconTile, isEncryptedFile, typeLabelKey } from '../../../packages/core/src/lib/fileIcons';
 import type { FileNode } from '../../../packages/core/src/types/FileNode';
 
-function files() {
+function files(extra: Partial<E2eFilesDeps> = {}) {
   let api!: ReturnType<typeof useE2eFiles>;
   const app = createApp(
     defineComponent({
@@ -29,6 +35,7 @@ function files() {
           reload: async () => undefined,
           openPreview: () => undefined,
           showRecoveryKey: () => undefined,
+          ...extra,
         });
         return () => h('div');
       },
@@ -92,6 +99,33 @@ describe('single encrypted files — the menu', () => {
     expect(isFxeRow({ ...file('x.fxe'), type: 'dir' })).toBe(false);
     expect(numberedName('Rapor 2027.pdf', 2)).toBe('Rapor 2027 (2).pdf');
     expect(numberedName('README', 3)).toBe('README (3)');
+  });
+
+  // wiring:e2 policy — the server's answer for the one file "Encrypt with
+  // E2EE…" would encrypt (FileExplorer passes it as `encryptAnswer`).
+  it('under the approval policy a plain file offers "Request encryption…" instead; denied offers neither', () => {
+    const { api, unmount } = files();
+    const ctx = { canWrite: true, inEncrypted: false, unlockedEncryptedCopy: false };
+    expect(shown(api.menuRows([file('Rapor.pdf')], { ...ctx, encryptAnswer: 'request' }))).toEqual(['fxe-request']);
+    expect(shown(api.menuRows([file('Rapor.pdf')], { ...ctx, encryptAnswer: 'denied' }))).toEqual([]);
+    expect(shown(api.menuRows([file('Rapor.pdf')], { ...ctx, encryptAnswer: 'allowed' }))).toEqual(['fxe-encrypt']);
+    // Nothing is asked for what could not be encrypted anyway…
+    expect(shown(api.menuRows([file('Rapor.pdf')], { ...ctx, canWrite: false, encryptAnswer: 'request' }))).toEqual([]);
+    // …and a .fxe keeps its own verbs: they rewrite what is already encrypted.
+    expect(shown(api.menuRows([file('Rapor.pdf.fxe')], { ...ctx, encryptAnswer: 'denied' }))).toEqual([
+      'fxe-download-raw',
+      'fxe-password',
+      'fxe-remove',
+    ]);
+    unmount();
+  });
+
+  it('"Request encryption…" is the host’s to answer: dispatch hands the file over', async () => {
+    const asked: FileNode[] = [];
+    const { api, unmount } = files({ requestEncrypt: (n) => asked.push(n) });
+    expect(await api.dispatch('fxe-request', [file('Rapor.pdf')], () => undefined)).toBe(true);
+    expect(asked.map((n) => n.path)).toEqual(['s://Rapor.pdf']);
+    unmount();
   });
 });
 

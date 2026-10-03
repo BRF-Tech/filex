@@ -33,8 +33,8 @@ const ADMIN = { email: 'demo@demo.com', password: 'demo-shots' };
 const PERSON = { email: 'deniz@example.com', password: 'deniz-shots-2026', display_name: 'Deniz Kaya' };
 const DELEGATE = { email: 'ece@example.com', password: 'ece-shots-2026', display_name: 'Ece Aydın' };
 const STANDARD = [
-  'files.download', 'files.create', 'files.modify', 'files.rename', 'files.move', 'files.purge', 'files.tag',
-  'share.links', 'share.upload_links', 'share.users', 'comments.write', 'ai.use', 'plugins.run',
+  'files.download', 'files.create', 'files.modify', 'files.rename', 'files.move', 'files.purge', 'files.encrypt',
+  'files.tag', 'share.links', 'share.upload_links', 'share.users', 'comments.write', 'ai.use', 'plugins.run',
   'access.webdav', 'access.sftp', 'access.ftp', 'access.s3', 'access.nfs', 'access.api', 'access.desktop',
   'account.edit',
 ];

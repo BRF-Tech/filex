@@ -30,6 +30,7 @@ body) for larger ones; single encrypted file (`.fxe`) **v1**. See
 - [Downloading a decrypted copy](#downloading-a-decrypted-copy) - [where it is saved](#where-a-decrypted-download-goes)
 - [Encrypting a folder you already have](#encrypting-a-folder-you-already-have) - [what the server already saw](#what-the-server-already-saw)
 - [Changing the password](#changing-the-password) - [a folder with its own key](#a-folder-with-its-own-key-v031-and-later) · [re-keying](#re-keying-a-folder-from-before-v031-or-on-purpose) · [after a recovery-key unlock](#after-a-recovery-key-unlock) · [who is told](#who-is-told) · [what it does not undo](#what-a-password-change-does-not-undo)
+- [Who may encrypt](#who-may-encrypt) - [what counts as encrypting](#what-counts-as-encrypting) · [approvals](#approvals) · [where it is asked](#where-it-is-asked) · [when the rule cannot be decided](#when-the-rule-cannot-be-decided) · [audit and notifications](#audit-and-notifications)
 - [Recovery](#recovery) - [user recovery key](#the-user-recovery-key) · [key escrow](#key-escrow-optional-operator-recovery) · [adopting escrow later](#adopting-escrow-on-an-installation-that-already-exists) · [offering an existing folder a slot](#offering-an-existing-folder-an-escrow-slot) · [what escrow cannot do](#what-escrow-can-and-cannot-do) · [before v0.31](#folders-created-before-v031)
 - [Feature trade-offs](#feature-trade-offs)
 - [Ways plaintext still reaches the server](#ways-plaintext-still-reaches-the-server)
@@ -812,10 +813,11 @@ stream, whatever the size ([`filex decrypt`](#taking-a-folder-out-filex-decrypt)
 ## Encrypting a folder you already have
 
 A plain folder can be encrypted where it is: right-click it → **Encrypt with
-E2EE…**. The dialog is the one that creates an encrypted folder - a password
-twice, the [level](#encryption-levels) (level 1 by default), the
-acknowledgement - plus what encrypting now cannot reach
-([below](#what-the-server-already-saw)). Then, in the browser:
+E2EE…** (offered where [you may encrypt](#who-may-encrypt)). The dialog is the
+one that creates an encrypted folder - a password twice, the
+[level](#encryption-levels) (level 1 by default), the acknowledgement - plus
+what encrypting now cannot reach ([below](#what-the-server-already-saw)). Then,
+in the browser:
 
 1. the key file is written **first**, with the conversion under way
    (`req: ["conv"]`, `conv.pending`; at level 2 the names are pending too). From
@@ -1009,6 +1011,225 @@ content under a different key is history, and stays.
   the folder's versions if that is the risk.
 - **Contents.** Nothing is re-encrypted: a DEK that leaked stays leaked. A
   re-key changes which key wraps each DEK, not the DEKs.
+
+---
+
+## Who may encrypt
+
+Encrypting is a decision an organisation may want to keep for itself: a folder
+encrypted by one person cannot be read by anyone who does not hold its key, and
+an in-place conversion keeps no plaintext version of what it replaces
+([Encrypting a folder you already have](#encrypting-a-folder-you-already-have)).
+Three layers decide who may **start** encrypting; all three must say yes.
+
+| Layer | Who sets it | Where | Values |
+|---|---|---|---|
+| Tenant ceiling | the platform operator (supertenant); multi-tenant installs only | Admin → Encryption → Tenants, or `PATCH /api/admin/e2e/tenants/{id}` | `e2e_allowed`: on (default) / off - off stops everyone in that tenant, administrators included |
+| Tenant policy | the tenant's administrator (on a single-tenant install: the administrator) | Admin → Encryption, or `PATCH /api/admin/e2e` | `off` (nobody, administrators included) · `admins` · `permitted` (default) · `approval` |
+| Permission | roles and exceptions ([PERMISSIONS.md](PERMISSIONS.md)) | Admin → Roles | `files.encrypt` - path-checked, so it can differ by folder, and like every change it needs editor access there. In the Standard and Upload-only presets, so the built-in User role has it until it is edited; never held by a Viewer, and not by the Read-only and Guest presets |
+
+The defaults are what filex always did: the ceiling on, the policy `permitted`.
+The first start of a version that has `files.encrypt` also gives it to every
+saved role that allows `files.create`, and to every person whose own exceptions
+allow it, so an upgrade changes nobody's access
+([PERMISSIONS.md](PERMISSIONS.md#things-to-know)).
+
+Administrators hold every permission, so the policy is how an organisation
+stops its administrators too (`off`). "Administrator" is the role: a person who
+holds an `admin.*` permission without it is an ordinary member here. Under
+`approval`, a person who holds `files.encrypt` asks first (an Administrator is
+never asked): **Request encryption…** leaves a request with a reason, the
+tenant's administrators are told (bell and webhook, `e2e.request_created`) and
+answer it under Admin → Encryption, and an approval is good for that person and
+that folder **once**, for **7 days** ([Approvals](#approvals)).
+
+### What counts as encrypting
+
+The server cannot see what a client encrypts, only the names it creates, so the
+rule is asked where a name is created:
+
+- Creating a key file (`.filex-e2e.json`) in a folder that has none - a new
+  encrypted folder, or the first step of encrypting a folder you already have.
+  `files.encrypt` is judged at the folder that would become encrypted.
+- Creating a new single encrypted file (`*.fxe`), judged at the file's own path.
+- Landing an item on one of those two names by **renaming** it, **moving** it
+  or **copying** it under a new name: upload `rapor.bin`, rename it
+  `rapor.bin.fxe`, and a `.fxe` exists that nobody was asked about. Such a
+  rename, move or named copy is asked like a create at its destination - in the
+  explorer (a rename, and the queue's copy or move under a new name or to a
+  literal destination), the agent API (`/api/ai/move`, `/api/ai/copy`, MCP
+  `file_move` and `file_copy`), WebDAV `MOVE`, SFTP (rename and posix-rename),
+  FTPS (`RNFR`/`RNTO`) and NFS `RENAME` - unless it only carries what is
+  encrypted already. That is exactly three cases: the item is a **folder**,
+  whatever its name; a **`.fxe` that stays a `.fxe`**; a **key file that stays
+  its own folder's** (a change of case). Everything else is asked: a plain file
+  given either name, a `.fxe` given the key file's name, a key file given a
+  `.fxe`'s, and a key file moved into another folder, which would encrypt that
+  folder. `files.encrypt` comes on top of the action's own permission
+  (`files.create`, `files.rename`, `files.move`).
+
+A rename, move or copy that the queue runs later is asked when it is queued.
+One that was free because its item was a folder fails when it runs if a file
+has taken the folder's place by then, and nothing moves; so does such a job
+whose source is a file when it runs after a restart, because what the queue
+was told is not kept across one. The person queues it again. A job that its
+names alone free, a `.fxe` that stays a `.fxe` or a key file within its own
+folder, is in no doubt and runs after a restart as it would have before.
+
+On the agent surface - the REST API, MCP, ShareX, upload tickets and the doors
+0.50 opened - an encrypted folder's key file is refused before the rule is
+asked: `403 RESERVED_NAME` (an MCP tool's error result says it), for a folder
+as for a file. That surface holds no key and never writes one. A `.fxe` is the
+rule's there, as everywhere.
+
+"Creates" means there is no **file** at the path. Overwriting a key file or a
+`.fxe` that is there - a new password, a recovery key, another level - is free,
+and a **folder** that happens to have the name does not make a write an
+overwrite: writing the file there is still creating one.
+
+Everything else stays as it was: opening an encrypted folder, adding files to
+it, changing its password or level, and removing its encryption. A policy that
+is switched off later leaves existing encrypted folders working. Encrypting a
+folder you already have is asked once, when its key file is written (the first
+step); a new encrypted folder is made in two steps, the folder and then its key
+file, so a refusal at the second leaves the empty plain folder, which the
+explorer shows.
+
+Not asked, because it carries what is already encrypted or encrypts nothing:
+moving or renaming a `.fxe` under a `.fxe`'s name, or a key file within its
+own folder; folders, whatever their name (but for the key file's name on the
+agent surface, above), and what they hold; an item moved or copied into a
+folder under its own name (over HTTP that is the transfer guard's: nothing
+encrypted leaves its encrypted folder, and nothing plain enters one. The
+protocols have no such guard, so over WebDAV, SFTP, FTPS, NFS and S3 nothing
+stops either, see
+[Ways plaintext still reaches the server](#ways-plaintext-still-reaches-the-server));
+restoring from the trash or from a version; and the document server's save
+(ONLYOFFICE). Over a protocol, a copy onto one of the two names - WebDAV
+`COPY`, S3 `CopyObject` - is a new file in that protocol and is asked like an
+upload; a WebDAV `COPY` of a whole folder is treated like the queue's copy, and
+the encrypted folders inside it are not asked again.
+
+### Approvals
+
+Under `approval` the explorer offers **Request encryption…** on a folder or a
+file, and **Request an encrypted folder…** in the New folder dialog, where it
+would otherwise offer to encrypt. A reason is required (2000 characters are
+kept), and the tenant's administrators answer under Admin → Encryption.
+
+- **Whom and what it covers.** An approval is for the person who asked, and is
+  spent **once**, at whichever door creates the name - never by a file request
+  ([Where it is asked](#where-it-is-asked)). A folder approval for `P`
+  covers encrypting `P` itself, or **one** folder directly inside `P`, new or
+  already there: "make an encrypted folder here" is asked from the folder the
+  person is in, before the new folder has a name. A file approval is stored
+  under the folder the `.fxe` goes into and covers **one** new encrypted file
+  there, because the name a `.fxe` is stored under cannot be known when the
+  person asks. A write that fails after the approval was spent does not give it
+  back; the person asks again.
+- **Seven days.** A request nobody answers lapses 7 days after it was made, and
+  an approval nobody uses 7 days after it was given. An hourly sweep closes
+  both as `expired`, the longest overdue first and in batches, and every list,
+  decision and new request closes what is due first - so a request that lapsed
+  is never approved by mistake. Answering one that lapsed, or one that was
+  answered already, is `409 not_pending`; the person may ask again.
+- **One at a time.** Asking again for the same folder and kind while a request
+  waits answers the one already waiting. A request is filed only where the rule
+  itself says `request` (the `approval` policy, `files.encrypt` there, and no
+  approval already waiting), and its kind has to be what is there: `folder` for
+  a folder, `file` for a file ([BACKEND.md](BACKEND.md#encryption-policy)).
+
+### Where it is asked
+
+Every door asks the same question: the web and desktop apps (uploads, single
+and chunked; the text editor; New document and a draft's save; rename; the
+queue's copy and move), the agent API (upload, move, MCP `file_write` and
+`file_move`, ShareX, upload tickets, and the doors 0.50 opened: `file_copy`,
+`archive_create`, `archive_extract`, and `app_run` through the app's output),
+file requests, archives (extraction skips a refused member; creating an
+archive, or adding to one, under such a name is refused), apps (an interface's
+*save as*, a job's output), WebDAV, SFTP, FTPS, NFS and S3. The explorer asks
+ahead (`POST /api/files/e2e/allowed`) so that it offers only what would be
+allowed - or, under `approval`, the request - and the server decides all the
+same.
+
+A file request is judged for the link's creator: the file lands in their
+storage as theirs, and the visitor has no account to judge. It never spends
+the creator's approval, which is for an encryption of their own: under
+`approval` a dropped key file or `.fxe` is refused (`approval_required`), and
+the approval stays unused.
+
+A refusal is `403 {"error":"e2e_not_allowed","reason":…,"message":…}` with
+`reason` one of `tenant_disabled`, `policy_off`, `admins_only`, `permission`,
+`approval_required`; `message` says it in the reader's language. A file request
+answers the same `error` and `reason`, and its `message` is the sentence the
+page gives any file the link does not take. An MCP tool answers an error
+result naming the reason (a door tool such as `file_copy` also carries the 403
+body in its `result`). Over a protocol it is that protocol's own refusal, in
+the table below.
+
+### When the rule cannot be decided
+
+If a lookup behind the rule fails - the tenant, the policy, the person's
+permissions or an approval could not be read - a door does not guess, and does
+not call it a refusal: the write fails as a **server failure**. So does a
+lookup a door makes in order to ask: the storage's row, the account an app
+writes for, a file request's creator (one that is gone is nobody, and is
+refused). The rule's own log line, one for each write it could not decide,
+carries the storage id, the user id and the error, and never the path or a
+member's name - a file's name can say as much as its contents - so an operator
+can tell a policy doing its job from a store that is down. That promise covers
+the rule's own line only: an app job that fails this way is also reported by
+the queue, which names the output. What the door answers is its own server
+failure:
+
+| Door | Refused | Could not be decided |
+|---|---|---|
+| HTTP | `403 e2e_not_allowed` | `500 {"error":"could not check the encryption policy"}` |
+| Agent REST API | `403 e2e_not_allowed` (`403 RESERVED_NAME` for a key file) | `500`, in the same words |
+| MCP | an error result naming the reason | an error result: "could not check the encryption policy" |
+| Upload ticket | `403 e2e_not_allowed` | `503 storage_unavailable`; the ticket stays valid |
+| File request | `403 e2e_not_allowed` | `503 storage_unavailable` |
+| App *save as* | `403 e2e_not_allowed` | `500 save_failed`; a job's output fails the job |
+| Archive extraction | the member is skipped | the member is skipped |
+| WebDAV | `403` | `500` |
+| S3 | `AccessDenied` | `InternalError` |
+| SFTP | `SSH_FX_PERMISSION_DENIED` | `SSH_FX_FAILURE` |
+| FTPS | `550` | `550`, saying "could not check the encryption policy" (the library knows no 451 for uploads) |
+| NFS | `NFS3ERR_ACCES` | a create: `NFS3ERR_ACCES` too, because the library maps every error of a create to it, and only the log tells them apart; a rename: `NFS3ERR_IO` |
+
+### Audit and notifications
+
+Every step is one audit row: `e2e_request.create`, `.approve`, `.reject`,
+`.expire` and `.use`; `e2e_policy.update` when a tenant's policy changes and
+`e2e_tenant.update` when its ceiling does, each with the value before and after
+(saving the value that is already stored writes nothing, and leaves no row). A
+single-tenant install keeps its policy in the `e2e.policy` setting: written
+through `/api/admin/settings` it is recorded as the same `e2e_policy.update`,
+not as a bare `settings.update`. Every change to who may encrypt, and every
+decision on a request, needs an administrator signed in to the admin panel: an
+API key gets `403 session_required` - on `/api/admin/e2e` as on the `e2e.policy`
+setting, whether it comes by `/api/admin/settings`, `/api/ai/admin/settings` or
+the `admin_settings_*` MCP tools. The `e2e_request.use` row keeps the approval
+as its target and names, in its `encrypted` field, the folder that was actually
+encrypted (for a folder approval `P` itself or the folder inside it, for a file
+approval the folder the `.fxe` went into); over a protocol it is the one link
+between an encryption and the approval that allowed it.
+
+The tenant's administrators - and the platform operator, for every tenant - are
+told of a waiting request (`e2e.request_created`), and the person who asked of
+the answer (`e2e.request_decided`; a request that lapses tells nobody):
+[NOTIFICATIONS.md](NOTIFICATIONS.md#event-types--severities). In a person's own
+notification settings the two switches are offered only where they can reach
+that person: under the `approval` policy with the tenant's ceiling on,
+`e2e.request_created` to an administrator account and `e2e.request_decided` to
+everyone. Anywhere else they are greyed. The switches read the person's own
+tenant, so the platform operator, whose own tenant is not under `approval`,
+sees them greyed even though the bell brings it every tenant's requests.
+
+⚠ This governs filex's own encryption. It cannot tell a file that was encrypted
+elsewhere and uploaded as ordinary bytes; versions and backups are the answer
+to that.
 
 ---
 
@@ -1458,7 +1679,10 @@ entry with a readable (and meaningless) name, shown as such.
   folder, uploads the `.filex-e2e.json` marker, and shows the **recovery key
   once** - in a dialog that will not close on ESC or a backdrop click until you
   tick that you have saved it, because there is no second showing. Encrypted
-  folders **cannot be nested** - the option is not offered inside one.
+  folders **cannot be nested** - the option is not offered inside one. Where
+  your organisation limits [who may encrypt](#who-may-encrypt), the option is
+  offered only where you may use it, and under the approval policy it reads
+  **Request an encrypted folder…** instead.
 - **Level** - the create dialog lists the [levels](#encryption-levels) that
   work, each with what it means: **1 · Contents only** (selected by default;
   a v2 marker, opens in filex 0.31 and later) and **2 · Contents and names**
@@ -1890,5 +2114,7 @@ the `.fxe` above does (`filexfxe`).
   that write plaintext
 - [TRASH-VERSIONING.md](TRASH-VERSIONING.md) - both keep working on ciphertext
 - [RBAC.md](RBAC.md) - permissions, which are independent of encryption
+- [PERMISSIONS.md](PERMISSIONS.md) - `files.encrypt`, the permission to start
+  encrypting ([who may encrypt](#who-may-encrypt))
 - [CONFIGURATION.md](CONFIGURATION.md#install-time-settings-filex_installation_) -
   `FILEX_INSTALLATION_E2E_ESCROW_KEY` and why install-time settings are frozen

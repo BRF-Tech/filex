@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/perm"
 )
 
 func mkSet(role string, rbac bool, grants ...*model.FileGrant) *Set {
@@ -178,5 +179,17 @@ func TestNilSafety(t *testing.T) {
 	anon := &Set{} // no user
 	if anon.Effective("x") != LevelNone || anon.CanSee("x") || anon.StorageVisible() {
 		t.Error("userless set must be inert")
+	}
+}
+
+// Encrypting writes into the folder — its marker file, then every file
+// rewritten — so it needs an editor grant there, as adding a file does.
+func TestCanEncryptNeedsTheEditorLevel(t *testing.T) {
+	s := mkSet(model.RoleUser, true, grant("Docs", model.GrantViewer), grant("Team", model.GrantEditor))
+	if s.Can("Docs/Q3", perm.FilesEncrypt) {
+		t.Error("a viewer grant must not encrypt")
+	}
+	if !s.Can("Team/Q3", perm.FilesEncrypt) {
+		t.Error("an editor grant may encrypt")
 	}
 }

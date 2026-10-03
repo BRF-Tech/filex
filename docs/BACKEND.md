@@ -19,6 +19,7 @@ are described on that area's page.
 - [Auth & sessions](#auth--sessions)
 - [Capabilities](#capabilities)
 - [File browsing](#file-browsing)
+- [Encryption policy](#encryption-policy)
 - [Drafts](#drafts)
 - [Uploads (multipart)](#uploads-multipart)
 - [Archives](#archives)
@@ -33,6 +34,7 @@ are described on that area's page.
 - [Admin: storages](#admin-storages)
 - [Admin: plugins](#admin-plugins)
 - [Admin: plugin requests](#admin-plugin-requests)
+- [Admin: encryption policy](#admin-encryption-policy)
 - [App plugins](#app-plugins)
 - [Admin: users](#admin-users)
 - [Admin: roles and permissions](#admin-roles-and-permissions)
@@ -55,7 +57,7 @@ are described on that area's page.
 | ![user](https://img.shields.io/badge/-user-blue)         | Any authenticated user |
 | ![admin](https://img.shields.io/badge/-admin-red)         | Admin role required - or, where the section says so, the delegated administration permission it names (`admin.users`, `admin.monitor`, `admin.audit`, …; [PERMISSIONS.md](PERMISSIONS.md#delegated-administration)). When an API token calls, the token must also carry the `admin` scope and no `root:` confinement (since v0.41.0): an administrator's token without it gets `403 token missing scope: admin` |
 | ![signed](https://img.shields.io/badge/-signed-yellow)    | A session/token **or** a signed URL - see the route |
-| ![session](https://img.shields.io/badge/-admin%20session-darkred) | An administrator **signed in to the panel**: an API key is refused `403 session_required`, whatever its scopes ([Admin: plugin requests](#admin-plugin-requests)) |
+| ![session](https://img.shields.io/badge/-admin%20session-darkred) | An administrator **signed in to the panel**: an API key is refused `403 session_required`, whatever its scopes ([Admin: plugin requests](#admin-plugin-requests), [Admin: encryption policy](#admin-encryption-policy)) |
 
 Auth is provided either by a session cookie (`filex_session`) or a Bearer
 token (`Authorization: Bearer <jwt>`). Both are accepted on the same routes.
@@ -363,6 +365,19 @@ A signed-in person also gets the rows **running apps** add to the menu
 (`app:<plugin>:<ext>`), and `app` names the app, the view that opens the new
 file and the app's own label. They are not a property of the build, so an
 anonymous caller or an app token is never told them.
+
+A signed-in caller also gets `e2e_policy: { "available": true, "policy": "permitted" }` -
+the caller's own tenant's row of [who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt):
+`available` is the platform operator's switch for the tenant, `policy` the
+tenant's choice (`off` · `admins` · `permitted` · `approval`). Not an anonymous
+caller's (a tenant's policy is not a property of the build), and absent on a
+server from before the policy, which the explorer reads as "offer encryption as
+before". The explorer's menus are not read off this row - the platform operator,
+looking at another tenant's storage, is answered by that tenant's policy - but
+asked per path (`POST /api/files/e2e/allowed`, [Encryption
+policy](#encryption-policy)); the row tells the notification settings and the
+Webhooks screen when the two request events can happen. The server decides
+every write.
 
 ⚠ `antivirus` means **configured**, not answering: the setting is on and either
 a scanner binary resolved or a clamd address is set. Reachability costs a
@@ -744,6 +759,85 @@ So a burst of Ctrl+S costs exactly one scan, and the window cannot be pushed
 out indefinitely by somebody who keeps typing. The delay is a row in the
 operation queue, not a timer in the process, so it survives a restart. See
 [PROTECTION.md → Files written in the editor](PROTECTION.md#files-written-in-the-editor).
+
+---
+
+## Encryption policy
+
+Who may start encrypting ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)).
+A door that would create an encrypted folder's key file or a `.fxe` - or land
+an item on one of those names by a rename, a move or a named copy, unless the
+item is a folder, a `.fxe` that stays a `.fxe` or a key file that stays its own
+folder's - and is refused answers
+`403 {"error":"e2e_not_allowed","reason":"tenant_disabled|policy_off|admins_only|permission|approval_required","message":…}`
+(`message` is the reason in the reader's language; a file request's is the
+sentence it gives any file the link does not take). An MCP tool answers an
+error result naming the reason. The agent surface (`/api/ai`, MCP, ShareX,
+upload tickets) refuses a key file's name before the rule, folder or file:
+`403 RESERVED_NAME`. A door that could not decide the rule - a lookup failed,
+the rule's or one it made to ask (the storage's row, the account a write is
+judged for) - answers its own server failure, never a refusal:
+`500 {"error":"could not check the encryption policy"}` on the web app's routes
+and `/api/ai`, an error result in the same words over MCP,
+`503 storage_unavailable` for an upload ticket and a file request, and
+`500 save_failed` for an app's *save as*. The rule's own log line, one for each
+write it could not decide, names the storage, the person and the error, never
+the path; an app job that fails this way is also reported by the queue, which
+names the output.
+
+### `POST /api/files/e2e/allowed` ![user](https://img.shields.io/badge/-user-blue)
+The explorer's question before it offers **Create encrypted folder…**,
+**Encrypt with E2EE…** or **Request encryption…**. Body
+`{ "items": [{ "path": "Docs://Reports" }, …] }` - at most 1000
+(`400 {"error":"too many items"}`; a body that is not JSON is
+`400 {"error":"bad json"}`); answer `{ "encrypt": ["allowed" | "request" | "denied", …] }`,
+positional, in the order of the items. A folder is asked for itself (create in
+it, or convert it); a file for itself. It changes nothing - an approval is
+looked for, never spent - so it needs only the `read` verb. It is asked for
+administrators too: the policy `off` and the tenant's ceiling stop them.
+
+A path it cannot place - an unknown storage, one outside the caller's tenant,
+`..` - is `denied`, and so is a path outside the root of a root-confined caller
+(a token's `root:` scope, `X-Filex-Root`): nothing of the rule is heard there.
+
+### `POST /api/files/e2e/requests` ![user](https://img.shields.io/badge/-user-blue)
+Asks to encrypt, under the `approval` policy. A session, or a token with the
+`write` verb. Body
+`{ "path": "Docs://Reports", "kind": "folder" | "file", "reason": "…" }` - for
+`kind: "file"` the path of the file to encrypt; the request is kept under the
+folder it goes into (a single file's approval is its folder's). It is always
+filed `pending`, for the caller's own tenant and user: nothing in the body can
+name another. `201 { request, created: true }`, or `200 { request, created: false }`
+when the same request is already waiting.
+
+| Status | `error` | When |
+|---|---|---|
+| 400 | `not_requestable` | the answer for that path is not `request` - no approval is needed there, or none could help (the body also carries `answer` and `reason`) |
+| 400 | `kind_mismatch` | `kind` is not what is there: `folder` for a folder, `file` for a file |
+| 400 | `reason_required` | an empty reason (a reason is cut at 2000 characters) |
+| 400 | `bad_request` | anything else that is wrong with the request, `message` saying what: a body that is not JSON, a path that names no storage or holds `..`, a `kind` that is neither, a file request that names no file, a path that names a key file or a `.fxe` |
+| 403 | `path outside confined root` | a root-confined caller asking outside its root |
+| 404 | `not_found` | an unknown storage, or one outside the caller's tenant |
+
+### `GET /api/files/e2e/requests` ![user](https://img.shields.io/badge/-user-blue)
+The caller's own requests, every state, newest first (up to 200):
+`{ requests: [...] }`. A session, or a token with the `read` verb. A
+root-confined token sees the ones inside its root.
+
+A request, as these routes answer it:
+
+```json
+{ "id": 12, "path": "Docs://Reports", "storage": "Docs", "kind": "folder",
+  "reason": "salary sheets", "status": "approved", "requester": "Ada",
+  "requester_id": 7, "decider": "Grace", "decided_at": "2026-10-01T09:12:03Z",
+  "decision_note": "", "expires_at": "2026-10-08T09:12:03Z", "used_at": null,
+  "created_at": "2026-10-01T08:40:00Z", "tenant_id": 3 }
+```
+
+`status` is `pending` · `approved` · `rejected` · `expired` · `used`.
+`expires_at` is when a waiting request lapses, and once it is approved, when the
+approval does: 7 days from the request, and 7 days from the approval. `used_at`
+is when the approval was spent.
 
 ---
 
@@ -2104,6 +2198,71 @@ An API key: `403 session_required` - there is no key door and no MCP tool.
 ### `POST /api/admin/plugin-requests/{id}/reject` ![session](https://img.shields.io/badge/-admin%20session-darkred)
 `{"reason": "…"}` (optional). **200** with the rejected request. Session only.
 
+## Admin: encryption policy
+
+The administrator's half of [who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt):
+the tenant's policy, the requests the `approval` policy leaves and - for the
+platform operator - each tenant's ceiling.
+
+Writes need an administrator signed in to the admin panel; an API key gets
+`403 session_required`. That includes writing the `e2e.policy` setting - a
+single-tenant install's policy - through `/api/admin/settings`,
+`/api/ai/admin/settings` and the `admin_settings_*` MCP tools, which reach the
+same handlers: a batch that holds it is refused whole. From a session the
+setting takes one of the four policies (`400 invalid_policy` otherwise) and is
+audited as `e2e_policy.update`, the same as the page's own `PATCH`.
+
+### `GET /api/admin/e2e` ![admin](https://img.shields.io/badge/-admin-red)
+`{ "available": true, "policy": "permitted", "scope": "tenant" | "instance", "tenant": { "id": 3, "name": "…" } | null, "pending": 0 }` -
+in multi-tenant mode every administrator reads their own tenant
+(`scope: "tenant"`; the platform operator reads the supertenant's row); on a
+single-tenant install the instance policy (`scope: "instance"`, setting
+`e2e.policy`). `available` is the tenant's ceiling, and `pending` the number of
+requests waiting for this administrator, counted among the newest 500. An account whose tenant cannot be
+resolved (a broken tenancy record) is `403 no_tenant`, here and on `PATCH`.
+
+### `PATCH /api/admin/e2e` ![session](https://img.shields.io/badge/-admin%20session-darkred)
+`{ "policy": "off" | "admins" | "permitted" | "approval" }` → the same shape.
+A body that is missing, not JSON or without `policy` is `400 bad_request`; a
+`policy` that is not one of the four is `400 invalid_policy`. The policy is written as its own column: a
+tenant administrator's save can never put back a ceiling the operator switched
+off meanwhile. Saving the value that is already stored writes nothing, and
+leaves no audit row. An unknown tenant is `404`; a lookup that fails is `500`,
+and logged.
+
+### `GET /api/admin/e2e/tenants` ![admin](https://img.shields.io/badge/-admin-red)
+Supertenant only (`403 supertenant_only` for a tenant's own administrator).
+`{ "multi_tenant": true, "tenants": [{ "id", "slug", "name", "is_supertenant", "e2e_allowed", "e2e_policy" }] }`;
+a single-tenant install answers its one tenant with `"multi_tenant": false`.
+
+### `PATCH /api/admin/e2e/tenants/{id}` ![session](https://img.shields.io/badge/-admin%20session-darkred)
+Supertenant only (`403 supertenant_only`). `{ "e2e_allowed": false }` → the
+tenant row. The ceiling is written as its own column, so it never undoes a policy the tenant's
+administrator saved meanwhile, and saving the value already stored writes
+nothing. `409 single_tenant` on a single-tenant install, where no ceiling is
+read (a stored `false` would switch encryption off the day multi-tenant mode is
+turned on); `404` for an unknown tenant; `500`, logged, for a lookup that
+failed.
+
+### `GET /api/admin/e2e/requests?status=pending|all` ![admin](https://img.shields.io/badge/-admin-red)
+`{ "requests": [...], "ttl_days": 7 }`, newest first and at most 500 - a
+tenant's administrator sees their tenant's; the platform operator every
+tenant's. `status` is `pending` (the
+default), `approved`, `rejected`, `expired`, `used` or `all`; anything else is
+`400 bad_request`. A request past its 7 days is closed as `expired` before the
+answer (and hourly).
+
+### `POST /api/admin/e2e/requests/{id}/approve` ![session](https://img.shields.io/badge/-admin%20session-darkred)
+`{ "note": "…" }` (optional) → `{ request }`. The approval is good for that
+person and folder **once**, for 7 days from now. `409 not_pending` for a request
+that was answered already, or whose 7 days passed - it is closed as `expired`,
+not approved; another tenant's request is `404 not_found`; an API key gets
+`403 session_required`.
+
+### `POST /api/admin/e2e/requests/{id}/reject` ![session](https://img.shields.io/badge/-admin%20session-darkred)
+`{ "reason": "…" }` (optional here; the panel asks for one, because the
+requester reads it) → `{ request }` (`note` is accepted too). Same refusals.
+
 ## App plugins
 
 The sandboxed WebAssembly apps of [APP-PLUGINS.md](APP-PLUGINS.md). The admin
@@ -2351,7 +2510,7 @@ account's history and quota intact, prefer `enabled: false` over deletion.
 
 ## Admin: roles and permissions
 
-What each account may **do** - the 28 permissions, the built-in and custom
+What each account may **do** - the 29 permissions, the built-in and custom
 roles, a person's exceptions and the permissions installed apps declare. The
 model, the limits and every body are in
 [PERMISSIONS.md → API](PERMISSIONS.md#api); the routes:
@@ -2994,6 +3153,15 @@ by: `plugin_request.create` · `plugin_request.approve` ·
 `plugin_request.reject` · `plugin_request.expire` · `plugin_request.supersede`
 (target `plugin_request` and its id; metadata the plugin, version, SHA-256
 and, when an API key asked, its id and label).
+
+So does who may encrypt (`internal/e2epolicy`, [Admin: encryption
+policy](#admin-encryption-policy)): `e2e_policy.update` (target `e2e_policy`
+and the tenant's id, none for a single-tenant install's; metadata `before` and
+`after`) · `e2e_tenant.update` (target `providers` and the tenant's id; `before`
+and `after`) · `e2e_request.create` · `e2e_request.approve` ·
+`e2e_request.reject` · `e2e_request.expire` · `e2e_request.use` (target
+`e2e_request` and its id; metadata the folder, kind, requester and state, and
+on `.use` the folder that was actually encrypted, as `encrypted`).
 
 ⚠ Filtering by `?action=` is an exact match, so the eight values this page
 used to list and no code ever writes (`auth.login`, `auth.logout`,

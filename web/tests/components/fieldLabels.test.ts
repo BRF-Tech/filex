@@ -19,6 +19,8 @@ import { mount } from '@vue/test-utils';
 
 import EncryptedFolderModal from '@brftech/filex-core/src/components/EncryptedFolderModal.vue';
 import NewFolderModal from '@brftech/filex-core/src/modals/NewFolderModal.vue';
+import E2eRequestModal from '@brftech/filex-core/src/components/E2eRequestModal.vue';
+import { unmountAll } from '../helpers/teardown';
 
 function fieldNames(root: Element): Array<{ type: string; name: string }> {
   return Array.from(
@@ -53,6 +55,28 @@ describe('the folder dialogs name their fields', () => {
   it('new folder: the name field has a visible label', () => {
     mount(NewFolderModal, { props: { open: true, locale: 'en' }, attachTo: document.body });
     expect(fieldNames(document.body)).toEqual([{ type: 'text', name: 'Folder name' }]);
+  });
+
+  // wiring:e2 policy — the request's one field is read by an administrator,
+  // and a placeholder vanishes the moment anything is typed.
+  it('encryption request: the reason has a visible label', () => {
+    for (const [locale, label] of [['en', 'Reason'], ['tr', 'Gerekçe']] as const) {
+      mount(E2eRequestModal, {
+        props: {
+          open: true,
+          locale,
+          api: { e2eRequest: async () => ({ request: {}, created: true }) },
+          path: 'docs://Kasa',
+          kind: 'folder',
+          name: 'Kasa',
+        } as never,
+        attachTo: document.body,
+      });
+      const box = document.body.querySelector('textarea');
+      expect(box, 'the reason box').not.toBeNull();
+      expect(box!.closest('label')?.querySelector('.fe-field__label')?.textContent?.trim()).toBe(label);
+      unmountAll();
+    }
   });
 });
 

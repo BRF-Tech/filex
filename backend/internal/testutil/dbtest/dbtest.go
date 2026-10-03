@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -120,4 +121,58 @@ func ReadJSON(t *testing.T, resp *http.Response, out any) {
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		t.Fatalf("dbtest: decode json: %v", err)
 	}
+}
+
+// SettingFails is store with one setting that cannot be read: GetSetting(key)
+// answers err, and everything else is store's own. It is how a test makes a
+// decision that reads a setting (e2e.policy, say) undecidable.
+func SettingFails(store db.Store, key string, err error) db.Store {
+	return &settingFails{Store: store, key: key, err: err}
+}
+
+type settingFails struct {
+	db.Store
+	key string
+	err error
+}
+
+func (s *settingFails) GetSetting(ctx context.Context, key string) (string, error) {
+	if key == s.key {
+		return "", s.err
+	}
+	return s.Store.GetSetting(ctx, key)
+}
+
+// ApproveE2E leaves what the requests service leaves when an administrator
+// approves userID's request to encrypt as kind (model.E2ERequestFolder or
+// E2ERequestFile) at path on storageID: an approved row, good for a day. path
+// is where the rule looks for it (e2epolicy.ApprovalPath): the folder itself
+// for an encrypted folder, the folder a `.fxe` goes into for a file.
+func ApproveE2E(t *testing.T, store db.Store, userID, storageID int64, path, kind string) *model.E2ERequest {
+	t.Helper()
+	ctx := context.Background()
+	expires := time.Now().UTC().Add(24 * time.Hour)
+	r, err := store.CreateE2ERequest(ctx, &model.E2ERequest{
+		UserID: userID, StorageID: storageID, Path: path, Kind: kind, Reason: "test", ExpiresAt: expires,
+	})
+	if err != nil {
+		t.Fatalf("dbtest: e2e request: %v", err)
+	}
+	decided := time.Now().UTC()
+	r.Status, r.DecidedAt, r.ExpiresAt = model.E2ERequestApproved, &decided, expires
+	if ok, err := store.UpdateE2ERequest(ctx, r, model.E2ERequestPending); err != nil || !ok {
+		t.Fatalf("dbtest: approve e2e request: %v (updated=%v)", err, ok)
+	}
+	return r
+}
+
+// E2EStatus is request id's status now: approved until a create spends it,
+// used after.
+func E2EStatus(t *testing.T, store db.Store, id int64) string {
+	t.Helper()
+	r, err := store.GetE2ERequest(context.Background(), id)
+	if err != nil {
+		t.Fatalf("dbtest: e2e request %d: %v", id, err)
+	}
+	return r.Status
 }

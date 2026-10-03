@@ -3499,6 +3499,78 @@
         "x-filex-token-verb": "write"
       }
     },
+    "/api/files/e2e/allowed": {
+      "post": {
+        "operationId": "e2eAllowed",
+        "summary": "Who may start encrypting here: one answer per path (allowed, request or denied), at most 1000 paths",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "`<storage>://<path>`: a folder (to create in it or encrypt it), or a file."
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`{encrypt}`: one answer per item, in their order. It changes nothing: an approval is looked for, never spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "encrypt": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "allowed",
+                          "request",
+                          "denied"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilese2eallowed"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
     "/api/files/e2e/cleanup": {
       "post": {
         "operationId": "e2eCleanup",
@@ -3641,6 +3713,129 @@
           "default": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/requests": {
+      "get": {
+        "operationId": "listE2eRequests",
+        "summary": "The caller's own encryption requests, every state, newest first (up to 200)",
+        "tags": [
+          "Encryption"
+        ],
+        "responses": {
+          "200": {
+            "description": "`{requests}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#get-apifilese2erequests"
+        },
+        "x-filex-token-verb": "read"
+      },
+      "post": {
+        "operationId": "createE2eRequest",
+        "summary": "Ask to encrypt a folder or one file, under the approval policy",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "`<storage>://<path>`: the folder, or the file to encrypt."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "folder",
+                      "file"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "Why, for the administrators who decide (cut at 2000 characters)."
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The same request is already waiting: `{request, created: false}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Filed, pending: `{request, created: true}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilese2erequests"
         },
         "x-filex-token-verb": "write"
       }

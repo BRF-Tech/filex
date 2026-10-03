@@ -117,7 +117,7 @@ features:
     linkText: MCP docs
   - icon: 🛡️
     title: Roles and permissions
-    details: Everyone has one role - Administrator, User, Viewer or a custom role that is its own list of 28 permissions, with limits and folder exceptions - given to the person or through a group they are in, plus per-person exceptions, per-file and per-folder grants with inheritance, and the permissions installed apps declare. Enforced in the backend on every door, from the web app and the agent API to WebDAV, SFTP, FTPS, S3 and NFS; an API key is held to its own verbs on each of them.
+    details: Everyone has one role - Administrator, User, Viewer or a custom role that is its own list of 29 permissions, with limits and folder exceptions - given to the person or through a group they are in, plus per-person exceptions, per-file and per-folder grants with inheritance, and the permissions installed apps declare. Enforced in the backend on every door, from the web app and the agent API to WebDAV, SFTP, FTPS, S3 and NFS; an API key is held to its own verbs on each of them.
     link: /PERMISSIONS
     linkText: Roles & permissions docs
   - icon: 👥

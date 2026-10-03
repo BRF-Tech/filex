@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/ftpsrv"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
@@ -47,6 +48,13 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessCfg(t, nil)
+}
+
+// newHarnessCfg is newHarness with a say in the server's Config before it is
+// built: a rule over a store that fails, say.
+func newHarnessCfg(t *testing.T, tweak func(*ftpsrv.Config)) *harness {
+	t.Helper()
 	_, raw := testutil.NewTestDB(t)
 	store := identitystore.New(raw)
 
@@ -56,7 +64,7 @@ func newHarness(t *testing.T) *harness {
 	res.Confine = protocolauth.ConfineHonor
 
 	hz := &harness{store: store, res: res, roots: map[int64]string{}, certDir: t.TempDir()}
-	srv, err := ftpsrv.New(ftpsrv.Config{
+	cfg := ftpsrv.Config{
 		Enabled:    true,
 		Addr:       "127.0.0.1:0",
 		PublicHost: "127.0.0.1",
@@ -68,6 +76,7 @@ func newHarness(t *testing.T) *harness {
 		Store:          store,
 		Auth:           res,
 		ACL:            acl.New(store),
+		E2EPolicy:      e2epolicy.New(e2epolicy.Options{Store: store, ACL: acl.New(store)}),
 		Body:           filebody.New(store, nil),
 		Quota:          quota.New(store),
 		SpoolDir:       t.TempDir(),
@@ -86,7 +95,11 @@ func newHarness(t *testing.T) *harness {
 			}
 			return drv, nil
 		},
-	})
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	srv, err := ftpsrv.New(cfg)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

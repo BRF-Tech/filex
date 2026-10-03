@@ -41,6 +41,8 @@ import type {
   ArchiveEntry,
   ArchiveCreateFormat,
   TrashEntry,
+  E2eAnswer,
+  E2eRequestDto,
 } from '../types/FileNode';
 import type {
   PluginActionsResponse,
@@ -322,6 +324,9 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     e2ePasswordChanged: derive(config.e2ePasswordChanged, '/api/files/e2e/password-changed'),
     /* wiring:e2 convert — after a folder is encrypted in place. */
     e2eCleanup: derive(config.e2eCleanup, '/api/files/e2e/cleanup'),
+    /* wiring:e2 policy — may this account encrypt here, and asking for it. */
+    e2eAllowed: derive(config.e2eAllowed, '/api/files/e2e/allowed'),
+    e2eRequests: derive(config.e2eRequests, '/api/files/e2e/requests'),
     /* App plugins — docs/APP-PLUGINS-API.md. */
     pluginActions: derive(config.pluginActions, '/api/files/plugins/actions'),
     pluginActionRun: derive(config.pluginActionRun, '/api/files/plugins/actions/{plugin}/{action}/run'),
@@ -333,6 +338,14 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     pluginUICall: derive(config.pluginUICall, '/api/files/plugins/ui/{plugin}/{view}/call'),
     pluginUISave: derive(config.pluginUISave, '/api/files/plugins/ui/{plugin}/{view}/save'),
   };
+}
+
+/** wiring:e2 policy — the answers the server gives; any other word (a newer
+ *  server's) reads as `allowed`, and the server still decides. */
+const E2E_ANSWERS: readonly E2eAnswer[] = ['allowed', 'request', 'denied'];
+
+function asE2eAnswer(v: unknown): E2eAnswer {
+  return typeof v === 'string' && (E2E_ANSWERS as readonly string[]).includes(v) ? (v as E2eAnswer) : 'allowed';
 }
 
 /**
@@ -1433,6 +1446,62 @@ export function useFileApi(config: ExplorerConfig) {
     });
   }
 
+  /**
+   * wiring:e2 policy — may this account START encrypting at each of `paths`:
+   * a folder an encrypted folder would be created in, a folder to encrypt in
+   * place, a file to encrypt (backend internal/e2epolicy AnswerFor). One
+   * answer per path, in the order asked. Changes nothing.
+   *
+   * ⚠ Never throws. A question that fails — or a server older than the
+   * policy, which has no such endpoint — answers `allowed` for every path: the
+   * menu then offers what it always did, and the server decides, as it does
+   * for every write that creates a key file or a `.fxe`. A failure is said in
+   * the console; it is never shown to the person.
+   */
+  async function e2eAllowedAt(paths: string[]): Promise<E2eAnswer[]> {
+    const url = endpoints.e2eAllowed;
+    if (!url || !paths.length) return paths.map((): E2eAnswer => 'allowed');
+    const out: E2eAnswer[] = [];
+    try {
+      // The server takes at most 1000 paths per question, as for `allowed`.
+      for (let i = 0; i < paths.length; i += 1000) {
+        const part = paths.slice(i, i + 1000);
+        const data = await jsonFetch<{ encrypt?: unknown[] }>(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: part.map((p) => ({ path: p })) }),
+        });
+        part.forEach((_, j) => out.push(asE2eAnswer(data?.encrypt?.[j])));
+      }
+    } catch (err) {
+      // Fail-open on purpose, but not silent: a question that keeps failing is
+      // how a menu goes on offering what the server then refuses, and the
+      // console is where somebody looks (the `[filex]` prefix of the other warnings).
+      console.warn('[filex] could not ask who may encrypt here; offering encryption as before', err);
+      return paths.map((): E2eAnswer => 'allowed');
+    }
+    return out;
+  }
+
+  /**
+   * wiring:e2 policy — ask an administrator to allow one encryption (the
+   * tenant's policy is `approval` and the answer here was `request`). The
+   * server keeps one waiting request per person and folder or file: asking
+   * again answers the one already there, `created: false`.
+   */
+  async function e2eRequest(body: {
+    path: string;
+    kind: 'folder' | 'file';
+    reason: string;
+  }): Promise<{ request: E2eRequestDto; created: boolean }> {
+    if (!endpoints.e2eRequests) throw new Error('e2e requests endpoint not configured');
+    return jsonFetch(endpoints.e2eRequests, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   async function createShare(payload: {
     path: string;
     password?: boolean;
@@ -1652,6 +1721,9 @@ export function useFileApi(config: ExplorerConfig) {
     e2eEscrowUsed,
     e2ePasswordChanged,
     e2eCleanup,
+    /* wiring:e2 policy */
+    e2eAllowedAt,
+    e2eRequest,
     fetchHead,
     transferNamed,
     /* App plugins */

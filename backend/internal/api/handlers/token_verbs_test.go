@@ -518,6 +518,8 @@ var readLevelMutations = map[string]bool{
 	"POST /api/files/plugins/ui/{plugin}/{view}/call":       true,
 	"POST /api/files/e2e/escrow/challenge":                  true,
 	"POST /api/files/e2e/escrow/used":                       true,
+	// The explorer's "may I encrypt here" — a question, like ?action=allowed.
+	"POST /api/files/e2e/allowed": true,
 	// The account's own credentials (each with its own ceiling). The account
 	// ITSELF — profile, password, two-factor — is NOT here: changing it needs
 	// `write` (a read token must not set a new password or switch two-factor

@@ -12,6 +12,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/newdoc"
 	"github.com/brf-tech/filex/backend/internal/share"
@@ -50,6 +51,10 @@ type Capabilities struct {
 	// create such a folder is entitled to know, before they create it, that
 	// their operator holds a second key to it.
 	E2EEscrow *e2e.EscrowKey
+	// E2EPolicy answers `e2e_policy`: whether the caller's tenant may use
+	// encryption at all, and its policy (internal/e2epolicy). Nil publishes
+	// nothing, which is what a server from before the policy said.
+	E2EPolicy *e2epolicy.Service
 	// Tenants + PublicURLSet feed `public_url`: the address this deployment is
 	// reached at, for the connection guides (see Get). Zero values publish
 	// nothing, which is what every test that builds this handler by hand gets.
@@ -261,6 +266,16 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	merged["e2e_escrow"] = esc
 
+	// Who may encrypt here (internal/e2epolicy): the caller's tenant ceiling
+	// (`available`) and its policy. The explorer leaves every encryption door
+	// out when `available` is false and asks per folder otherwise
+	// (POST /api/files/e2e/allowed); the server decides either way. A
+	// signed-in caller's only: a tenant's policy is not a property of the
+	// build, and the login screen fetches this answer too.
+	if pol, ok := h.e2ePolicy(r); ok {
+		merged["e2e_policy"] = pol
+	}
+
 	// The document types a "New document" picker may offer, from the template
 	// registry compiled into this binary (internal/newdoc).
 	//
@@ -363,6 +378,30 @@ func (h *Capabilities) callerCanConfigure(r *http.Request) bool {
 		}
 	}
 	return true
+}
+
+// e2ePolicy is the `e2e_policy` answer for the caller; ok=false leaves the
+// field out (no caller, no service, a policy that could not be read — the
+// explorer then offers what it always did and the server decides).
+//
+// ⚠ This route has no TenantResolver (the login screen fetches it), so the
+// tenant is the account's own, as e2epolicy.Service.TenantFor names it with
+// no storage: a member's tenant, the supertenant for its operators, none on a
+// single-tenant install.
+func (h *Capabilities) e2ePolicy(r *http.Request) (map[string]any, bool) {
+	u := auth.UserFrom(r.Context())
+	if u == nil || h.E2EPolicy == nil {
+		return nil, false
+	}
+	tenant, err := h.E2EPolicy.TenantFor(r.Context(), u, nil)
+	if err != nil {
+		return nil, false
+	}
+	pe, err := h.E2EPolicy.PolicyFor(r.Context(), tenant)
+	if err != nil {
+		return nil, false
+	}
+	return map[string]any{"available": pe.Allowed, "policy": pe.Policy}, true
 }
 
 func anonymousCaller(r *http.Request) bool {

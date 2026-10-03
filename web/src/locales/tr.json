@@ -159,6 +159,7 @@
     "apps": "Uygulamalar",
     "appearance": "Görünüm",
     "roles": "Roller",
+    "encryption": "Şifreleme",
     "loginSecurity": "Giriş güvenliği",
     "groups": "Gruplar",
     "tenants": "Kiracılar",
@@ -1069,6 +1070,10 @@
       "permissions": "Yerleşik rol",
       "roles": "Rol",
       "permission_rule": "Rol",
+      "e2e": "Şifreleme",
+      "e2e_policy": "Şifreleme politikası",
+      "e2e_tenant": "Kiracı şifrelemesi",
+      "e2e_request": "Şifreleme isteği",
       "login": "Oturum açma",
       "login_security": "Giriş güvenliği",
       "group": "Grup",
@@ -1142,6 +1147,10 @@
       "reject": "reddedildi",
       "expire": "süresi doldu",
       "supersede": "kaynağı değiştiği için kapatıldı",
+      "use": "kullanıldı",
+      "folder_cleanup": "klasör temizlendi",
+      "fxe_header_rewritten": "dosya başlığı yeniden yazıldı",
+      "key_file_rewritten": "anahtar dosyası yeniden yazıldı",
       "unlocked": "kilit açıldı",
       "members_add": "üye eklendi",
       "member_remove": "üye çıkarıldı",
@@ -1180,12 +1189,14 @@
       "permissions": "Yerleşik rol",
       "permission_rule": "Rol",
       "plugin_request": "Eklenti isteği",
+      "e2e_policy": "Şifreleme politikası",
       "login": "Oturum açma",
       "login_security": "Giriş güvenliği",
       "group": "Grup",
       "group_grant": "Grubun klasör erişimi",
       "settings": "Ayarlar",
       "providers": "Kiracı",
+      "e2e_request": "Şifreleme isteği",
       "tenant_domain": "Kendi alan adı",
       "file_type": "Dosya türü"
     },
@@ -1692,6 +1703,8 @@
       "comment_added": "Yeni yorum",
       "e2e_escrow_used": "Emanet anahtarı kullanıldı",
       "e2e_password_changed": "Klasör parolası değişti",
+      "e2e_request_created": "Şifreleme isteği",
+      "e2e_request_decided": "Şifreleme isteği yanıtlandı",
       "plugin_notice": "Uygulama bildirimi",
       "update_available": "Güncelleme var",
       "update_applied": "Güncelleme uygulandı",
@@ -1965,6 +1978,8 @@
       "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
       "e2e_escrow_used": "Şifreli klasör parolası yerine emanet anahtarıyla açıldı",
       "e2e_password_changed": "Şifreli bir klasörün parolası değiştirildi ya da kurtarma anahtarıyla sıfırlandı",
+      "e2e_request_created": "Şifreleme isteği - onay politikasında biri bir klasörü ya da dosyayı şifrelemek istedi",
+      "e2e_request_decided": "Şifreleme isteği bir yönetici tarafından onaylandı ya da reddedildi",
       "plugin_notice": "Uygulama bildirimi - kurulu bir uygulama mesaj gönderdi (imza isteği, biten iş, …)"
     },
     "secretSet": "Secret tanımlı",
@@ -1999,7 +2014,8 @@
     "offReason": {
       "antivirus": "Virüs taraması kapalı (Koruma).",
       "escrow": "Şifreli klasörler için emanet anahtarı kurulmamış.",
-      "appPlugins": "Bu sunucuda uygulamalar kapalı."
+      "appPlugins": "Bu sunucuda uygulamalar kapalı.",
+      "e2eApproval": "Yalnız şifreleme politikası onay istediğinde."
     }
   },
   "protection": {
@@ -3134,6 +3150,8 @@
         "comment_added": "Biri bir dosyaya yorum yaptığında",
         "e2e_escrow_used": "Şifreli bir klasör emanet anahtarıyla açıldığında",
         "e2e_password_changed": "Şifreli klasörünüzün parolası değiştiğinde",
+        "e2e_request_created": "Biri bir klasörü ya da dosyayı şifrelemek istediğinde",
+        "e2e_request_decided": "Şifreleme isteğiniz yanıtlandığında",
         "plugin_notice": "Kurulu bir uygulama size mesaj gönderdiğinde"
       }
     },
@@ -3304,6 +3322,10 @@
         "purge": {
           "label": "Kalıcı silme",
           "hint": "Çöp kutusunu boşaltma; çöp kutusu olmayan depolarda silme."
+        },
+        "encrypt": {
+          "label": "Şifreleme",
+          "hint": "Uçtan uca şifreli klasör ya da dosya oluşturma, var olan bir klasörü şifreleme."
         },
         "tag": {
           "label": "Etiketleme",
@@ -3538,6 +3560,97 @@
       "title": "İki adımlı doğrulama gerekli",
       "body": "Yöneticiniz bu hesap için iki adımlı doğrulamayı zorunlu kıldı. Devam etmek için kurun.",
       "action": "Şimdi kur"
+    }
+  },
+  "encryption": {
+    "title": "Şifreleme",
+    "subtitle": "Burada kimin uçtan uca şifreli klasör ve dosya oluşturabileceğini belirleyin; onayınızı bekleyen istekleri yanıtlayın.",
+    "policy": {
+      "title": "Kim şifreleyebilir",
+      "label": "Politika",
+      "scopeTenant": "{tenant} için geçerli.",
+      "scopeInstance": "Sunucunun tamamı için geçerli.",
+      "unavailable": "Platform işletmecisi kuruluşunuz için şifrelemeyi kapatmış. Politikayı yine de seçebilirsiniz; şifreleme yeniden açıldığında geçerli olur.",
+      "saved": "Şifreleme politikası kaydedildi",
+      "options": {
+        "off": "Kapalı - yöneticiler dahil kimse",
+        "admins": "Yalnız yöneticiler",
+        "permitted": "Rolü izin veren herkes",
+        "approval": "Rolü izin veren herkes, yönetici onayıyla"
+      },
+      "hints": {
+        "off": "Kimse yeni şifreli klasör ya da dosya oluşturamaz. Var olanlar çalışmaya devam eder: açılır, içine dosya eklenir, şifreleme kaldırılabilir.",
+        "admins": "Yalnız yöneticiler şifreleyebilir; diğer herkes reddedilir.",
+        "permitted": "O klasörde rolü “Şifreleme” iznini taşıyan herkes (Roller). filex’in bugüne kadarki davranışı budur.",
+        "approval": "Yukarıdaki gibi, ayrıca yönetici olmayan herkesin şifrelemeden önce burada onay alması gerekir. Yöneticilerden onay istenmez. Onay tek bir kişi içindir ve bir kez kullanılır. Klasör onayı o klasörü ya da hemen içindeki bir klasörü, dosya onayı ise o klasörde yeni bir şifreli dosyayı kapsar."
+      }
+    },
+    "requests": {
+      "title": "Şifreleme istekleri",
+      "subtitle": "Onay politikasında kişiler şifrelemeden önce burada izin ister.",
+      "expiresAfter": "Yanıtlanmayan istekler ve kullanılmayan onaylar {count} gün sonra geçersiz olur.",
+      "pendingCount": "{count} bekliyor",
+      "showHistory": "Yanıtlanan istekleri göster",
+      "hideHistory": "Yalnızca bekleyen istekleri göster",
+      "empty": "Bekleyen istek yok.",
+      "emptyHistory": "Henüz istek yok.",
+      "loadFailed": "İstekler yüklenemedi.",
+      "fields": {
+        "path": "Konum",
+        "requester": "İsteyen",
+        "reason": "Gerekçe",
+        "created": "İstendi",
+        "status": "Durum"
+      },
+      "kind": {
+        "folder": "Klasör",
+        "file": "Bu klasörde yeni bir şifreli dosya"
+      },
+      "status": {
+        "pending": "Bekliyor",
+        "approved": "Onaylandı",
+        "rejected": "Reddedildi",
+        "expired": "Süresi doldu",
+        "used": "Kullanıldı"
+      },
+      "actions": {
+        "approve": "Onayla",
+        "reject": "Reddet…"
+      },
+      "approvedBy": "{who} tarafından onaylandı",
+      "rejectedBy": "{who} tarafından reddedildi",
+      "approve": {
+        "title": "İsteği onayla",
+        "body": "{who} bundan sonra {path} konumunu ya da hemen içindeki bir klasörü (yeni ya da var olan) şifreleyebilir. Onay bir kez kullanılabilir.",
+        "bodyFile": "{who} bundan sonra {path} içinde yeni bir şifreli dosya oluşturabilir. Onay bir kez kullanılabilir.",
+        "note": "Not (isteğe bağlı; isteyen kişi görür)",
+        "confirm": "Onayla"
+      },
+      "reject": {
+        "title": "İsteği reddet",
+        "reason": "Neden (isteyen kişi görür)",
+        "required": "Nedenini yazın; isteyen kişiye bildirilir.",
+        "confirm": "Reddet"
+      },
+      "approved": "İstek onaylandı: {who}",
+      "rejected": "İstek reddedildi: {who}",
+      "notPending": "Bu istek artık beklemiyor: yanıtlanmış ya da süresi dolmuş."
+    },
+    "tenants": {
+      "title": "Kiracılar",
+      "subtitle": "Bir kiracıda şifrelemeyi kapatırsanız orada yöneticiler dahil kimse şifreli klasör ya da dosya oluşturamaz. Şifreli olanlar çalışmaya devam eder.",
+      "supertenant": "Platform işletmecisi",
+      "fields": {
+        "name": "Kiracı",
+        "policy": "Politika",
+        "available": "Şifreleme kullanılabilir"
+      },
+      "state": {
+        "on": "Açık",
+        "off": "Kapalı"
+      },
+      "on": "{name} için şifreleme açıldı",
+      "off": "{name} için şifreleme kapatıldı"
     }
   },
   "groups": {

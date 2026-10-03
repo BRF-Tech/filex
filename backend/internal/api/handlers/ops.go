@@ -15,10 +15,12 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
 // Ops handles async copy/move/delete tasks.
@@ -30,6 +32,15 @@ type Ops struct {
 	Service *ops.Service
 	Store   db.Store // for path → storage_id resolution in the per-verb endpoints
 	ACL     *acl.Resolver
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go): a copy or a move
+	// under a name of the caller's choosing that lands on a key file's or a
+	// `.fxe`'s name asks it (refuseE2E), unless it is free: a folder, a `.fxe`
+	// that stays a `.fxe`, a key file that stays its own folder's. nil: not
+	// wired, allowed.
+	E2EPolicy *e2epolicy.Service
+	// StorageResolver is how refuseE2E tells a file from a folder at a
+	// source. nil: every source counts as a file.
+	StorageResolver func(int64) (storage.Driver, error)
 }
 
 // NewOps constructs an Ops handler.
@@ -173,6 +184,7 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	/* wiring:e2 — same boundary rule for the unified endpoint. */
+	ctx := r.Context()
 	if req.Kind != ops.OpDelete {
 		if lk, ok := o.Store.(e2e.NodeByPathLookup); ok {
 			if err := e2e.GuardTransfer(r.Context(), lk, req.StorageID, rels, destID, drel); err != nil {
@@ -180,9 +192,13 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var done bool
+		if ctx, done = o.refuseE2E(w, r, req.StorageID, rels, destID, req.Dest); done {
+			return
+		}
 	}
 
-	op, err := o.Service.SubmitTo(r.Context(), req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest)
+	op, err := o.Service.SubmitTo(ctx, req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest)
 	if answerGate(w, err) {
 		return
 	}
@@ -364,6 +380,7 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 	 * Copy and move are server-side byte operations and the server holds no
 	 * key, so it can neither encrypt on the way in nor decrypt on the way
 	 * out. The only honest answer is no. See internal/e2e/guard.go. */
+	ctx := r.Context()
 	if kind != "delete" {
 		if lk, ok := o.Store.(e2e.NodeByPathLookup); ok {
 			if err := e2e.GuardTransfer(r.Context(), lk, storageID, sources, destStorageID, strings.Trim(dest, "/")); err != nil {
@@ -371,9 +388,13 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 				return
 			}
 		}
+		var done bool
+		if ctx, done = o.refuseE2E(w, r, storageID, sources, destStorageID, dest); done {
+			return
+		}
 	}
 
-	op, err := o.Service.SubmitTo(r.Context(), kind, storageID, destStorageID, sources, dest)
+	op, err := o.Service.SubmitTo(ctx, kind, storageID, destStorageID, sources, dest)
 	if answerGate(w, err) {
 		return
 	}
@@ -382,6 +403,47 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+}
+
+// refuseE2E is who may encrypt (e2e_policy_gate.go) at a queued copy or move,
+// and answers the request when the rule says no. A destination without a
+// trailing slash is the path every source becomes (joinIntoDir's literal
+// form): a source landing on a key file's or a `.fxe`'s name there is a new
+// encryption unless it carries what is encrypted already
+// (e2epolicy.RelocationEncrypts). A source dropped INTO a folder keeps its own
+// name, and is not asked.
+//
+// Asked for every source before anything is queued, as the transfer guard is:
+// one refusal refuses the batch. The worker runs as nobody, so this is the
+// only moment there is a person to judge — and a source let through because it
+// was a folder is not settled: ctx tells the queue which ones are
+// (ops.WithEncryptionSettled), and the worker fails any other that is a file
+// by the time it runs. done: it answered the request.
+func (o *Ops) refuseE2E(w http.ResponseWriter, r *http.Request, storageID int64, sources []string, destStorageID int64, dest string) (ctx context.Context, done bool) {
+	ctx = r.Context()
+	if dest == "" || strings.HasSuffix(dest, "/") {
+		return ctx, false
+	}
+	var srcDrv storage.Driver
+	if o.StorageResolver != nil {
+		if d, err := o.StorageResolver(storageID); err == nil {
+			srcDrv = d
+		}
+	}
+	if destStorageID == 0 {
+		destStorageID = storageID
+	}
+	var settled []string
+	for _, src := range sources {
+		done, ok := refuseE2ERenameAt(w, r, o.E2EPolicy, o.Store, srcDrv, destStorageID, src, bareRel(dest), destStorageID == storageID)
+		if done {
+			return ctx, true
+		}
+		if ok {
+			settled = append(settled, src)
+		}
+	}
+	return ops.WithEncryptionSettled(ctx, settled), false
 }
 
 // badTransferName says what is wrong with a caller-chosen transfer name, or ""

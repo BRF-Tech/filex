@@ -157,6 +157,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/groups', name: 'groups', component: Blank },
       { path: '/grants', name: 'grants', component: Blank },
       { path: '/roles', name: 'roles', component: Blank },
+      { path: '/encryption', name: 'encryption', component: Blank },
       { path: '/auth-providers', name: 'auth-providers', component: Blank },
       { path: '/tenants', name: 'tenants', component: Blank },
       { path: '/my-tenant', name: 'tenant-self', component: Blank },
@@ -359,5 +360,23 @@ describe('admin sidebar - Tenants', () => {
     const row = w.get('[data-testid="nav-tenants"]');
     expect(row.text()).toBe(en.nav.tenants);
     expect(row.attributes('href')).toBe('/admin/tenants');
+  });
+});
+
+describe('admin sidebar — Encryption', () => {
+  it('is among the access pages, for an administrator (a tenant’s administrator included)', async () => {
+    signIn('admin');
+    const w = await sidebar();
+    const link = w.find('[data-testid="nav-encryption"]');
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toBe('Encryption');
+    expect(link.attributes('href')).toBe('/admin/encryption');
+    expect(w.find('[data-testid="nav-group-access"]').find('[data-testid="nav-encryption"]').exists()).toBe(true);
+  });
+
+  it('reads in the reader’s language', async () => {
+    signIn('admin');
+    const w = await sidebar('tr');
+    expect(w.find('[data-testid="nav-encryption"]').text()).toBe('Şifreleme');
   });
 });

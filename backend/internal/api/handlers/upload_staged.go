@@ -196,6 +196,15 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 	if !h.Manager.require(w, r, st, fullRel, stagedNeed, "insufficient permission") {
 		return
 	}
+	// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go) —
+	// asked at begin, like the permission, and not again at commit. Whether
+	// the upload creates it is the rule's own look (a FILE there), not
+	// stagedNeed's: a folder made between the kind guard's look and
+	// stagedNeed's is not the file, and gone again before the commit it lets
+	// the file land.
+	if refuseE2EWrite(w, r, h.Manager.E2EPolicy, drv, st, fullRel) {
+		return
+	}
 
 	userID := currentUserID(r.Context())
 	// Quota is RESERVED here, not at commit: a staged upload that never commits

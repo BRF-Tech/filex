@@ -23,6 +23,8 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import { WEBHOOK_EVENTS, userEventKey, webhookEventKey } from '@brftech/filex-core/src/lib/webhookEvents';
 import { NOTIFICATION_PHRASES, renderNotification } from '@brftech/filex-core/src/lib/notificationText';
+import { en as coreEn } from '@brftech/filex-core/src/locales/en';
+import { tr as coreTr } from '@brftech/filex-core/src/locales/tr';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const EVENT_GO = path.resolve(here, '../../../backend/internal/notify/event.go');
@@ -170,6 +172,49 @@ describe('webhook event catalogue', () => {
           'the switches in the settings dialog are read by the person being notified, ' +
           'not by the person wiring the webhook',
       ).toEqual([]);
+    });
+  }
+
+  // ── the explorer's own catalogue ───────────────────────────────────────
+  //
+  // ⚠⚠ The per-event switches are drawn by the settings dialog in
+  // packages/core (the web app, the desktop app and every embed open that one
+  // dialog, since 2026-09-27), and it reads the EXPLORER's tables — not the
+  // admin app's JSON the two blocks above check. `e2e.password_changed` had its
+  // label in the JSON only, from v0.48.0 on, so every person's Notifications
+  // pane in the explorer and the desktop app drew the raw key
+  // `userSettings.notifications.events.e2e_password_changed` — with this file
+  // green, because it read the JSON alone.
+  const coreTables: Array<[string, Record<string, string>, Record<string, unknown>]> = [
+    ['core en.ts', coreEn, en as Record<string, unknown>],
+    ['core tr.ts', coreTr, tr as Record<string, unknown>],
+  ];
+  for (const [name, table, webBundle] of coreTables) {
+    it(`gives every event a short end-user label in ${name}`, () => {
+      const problems: string[] = [];
+      for (const ev of WEBHOOK_EVENTS) {
+        const key = userEventKey(ev);
+        const label = table[key];
+        if (!label || !label.trim()) {
+          problems.push(`${ev}: no end-user label (${name} ${key}) — the explorer would draw the key itself`);
+        } else if (label.trim() === ev || label.trim() === key) {
+          problems.push(`${ev}: the end-user label is just the ${label.trim() === key ? 'key' : 'event id'}`);
+        }
+      }
+      expect(problems, problems.join('\n')).toEqual([]);
+    });
+
+    // Two tables say the same thing to the same person; one sentence each, so
+    // a wording changed in one is changed in the other.
+    it(`says the same words as the admin app for every event in ${name}`, () => {
+      const different: string[] = [];
+      for (const ev of WEBHOOK_EVENTS) {
+        const key = userEventKey(ev);
+        const web = lookup(webBundle, key)?.trim();
+        const core = table[key]?.trim();
+        if (web && core && web !== core) different.push(`${ev}: core "${core}" / admin app "${web}"`);
+      }
+      expect(different, different.join('\n')).toEqual([]);
     });
   }
 

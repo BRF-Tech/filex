@@ -17,7 +17,7 @@ import (
 // silently do nothing. The role's limits (settings) stay account-wide.
 
 // conditionable is every permission a conditioned rule may change.
-var conditionable = Of(FilesDownload, FilesCreate, FilesModify, FilesRename, FilesMove, FilesDelete, FilesPurge, ShareLinks, ShareUploadLinks)
+var conditionable = Of(FilesDownload, FilesCreate, FilesModify, FilesRename, FilesMove, FilesDelete, FilesPurge, FilesEncrypt, ShareLinks, ShareUploadLinks)
 
 // Conditionable reports whether p may be changed by a rule with conditions.
 func Conditionable(p Perm) bool { return conditionable.Has(p) }
