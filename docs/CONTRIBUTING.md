@@ -437,6 +437,16 @@ serviceGate.ts`); "is this person an administrator who could fix it" is the
 server's answer (`capabilities.caller_admin`), never a role guessed in the
 browser.
 
+The one exception is a switch that waits for a **tenant's own setting**, not
+for a service of the instance: the two encryption request switches in the
+settings dialog (`e2e.request_created`, `e2e.request_decided`) wait for the
+tenant's encryption policy, which the tenant's own administrators set. There
+the person who could fix it - and who a new request is sent to - is an
+administrator *account*: the role the host knows (`host.isAdmin`), because
+`caller_admin` is the supertenant's alone on a multi-tenant install and would
+leave a tenant's own administrator out, and the server publishes nothing
+finer (`eventFixableBy` in `packages/core/src/lib/webhookEvents.ts`).
+
 #### Words: one term per concept
 
 A thing on screen has **one name**, in every language filex ships, on every

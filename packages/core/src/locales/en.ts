@@ -315,6 +315,23 @@ export const en: Record<string, string> = {
   'err.read_only': 'This storage is read-only',
   'err.no_secret_key': 'This server has no encryption key set, so it cannot issue an access key. Ask an administrator to configure one.',
   'err.quota': 'Your storage quota is full.',
+  /* wiring:e2 policy - who may encrypt (backend internal/e2epolicy): the
+     refusal's `reason` decides the sentence (lib/errorWords REASON_WORDS). */
+  'err.e2e_not_allowed.other': 'Encryption is not allowed here.',
+  'err.e2e_not_allowed.tenant_disabled': 'Encryption is not available here: the platform operator has switched it off.',
+  'err.e2e_not_allowed.policy_off': 'An administrator has switched encryption off here.',
+  'err.e2e_not_allowed.admins_only': 'Only administrators may encrypt here.',
+  'err.e2e_not_allowed.permission': 'Your role does not allow encrypting here.',
+  'err.e2e_not_allowed.approval_required':
+    'Encrypting here needs an administrator’s approval. Ask for it with “Request encryption…” in the menu.',
+  /* A request made on a listing gone stale (lib/errorWords CODE_WORDS
+     `kind_mismatch`, `not_requestable`): a folder became a file, or the
+     policy or an approval changed what may be asked for. */
+  'err.e2e_request.kind_mismatch': 'This item has changed since the folder was listed. Refresh the folder and try again.',
+  'err.e2e_request.not_requestable': 'What you may do here has changed since the folder was listed. Refresh the folder to see what is offered now.',
+  /* The rule could not be decided (lib/errorWords CODE_WORDS): the server
+     answered 500 "could not check the encryption policy". */
+  'err.e2e_policy.undecided': 'The encryption policy could not be checked. Please try again shortly.',
   'err.bad_kind': 'The server does not queue that kind of job this way.',
   'err.not_cancellable': 'This job cannot be stopped once it has started - it finishes on its own.',
   'err.finished': 'This job has already finished.',
@@ -996,6 +1013,23 @@ export const en: Record<string, string> = {
   'e2e.create.done': 'Encrypted folder created',
   'e2e.create.failed': 'Could not create the encrypted folder',
   'e2e.create.nested': 'You cannot create an encrypted folder inside another one.',
+  /* wiring:e2 policy - asking an administrator to allow one encryption
+     (E2eRequestModal), where the tenant's policy wants an approval first. */
+  'e2e.request.ctx': 'Request encryption…',
+  'e2e.request.option': 'Request an encrypted folder…',
+  'e2e.request.title': 'Request encryption for “{name}”',
+  'e2e.request.lead':
+    'Encrypting here needs an administrator’s approval. Say why you need it; you will be told the answer. An approval is for you and this folder: it can be used once, to encrypt the folder itself or one folder directly inside it.',
+  'e2e.request.lead_file':
+    'Encrypting this file needs an administrator’s approval. Say why you need it; you will be told the answer. An approval is for you and the folder this file is in: it can be used once, for one new encrypted file there.',
+  'e2e.request.reason': 'Reason',
+  'e2e.request.reason_placeholder': 'What it holds, and why it must be encrypted',
+  'e2e.request.reason_required': 'Write a reason for the administrator.',
+  'e2e.request.send': 'Send request',
+  'e2e.request.sending': 'Sending…',
+  'e2e.request.sent': 'Request sent. You will be notified when an administrator answers.',
+  'e2e.request.already': 'You already asked for this; it is waiting for an administrator.',
+  'e2e.request.failed': 'The request could not be sent.',
   'e2e.locked.title': 'This folder is end-to-end encrypted',
   'e2e.locked.hint': 'Enter the folder password to see its contents. The password stays in this tab’s memory only.',
   'e2e.locked.pw_placeholder': 'Folder password',
@@ -2510,6 +2544,9 @@ export const en: Record<string, string> = {
   'userSettings.notifications.events.comment_added': "Someone comments on a file",
   'userSettings.notifications.events.drop_received': "A file arrives through a request link",
   'userSettings.notifications.events.e2e_escrow_used': "An encrypted folder is opened with the escrow key",
+  'userSettings.notifications.events.e2e_password_changed': "The password of your encrypted folder is changed",
+  'userSettings.notifications.events.e2e_request_created': "Someone asks to encrypt a folder or a file",
+  'userSettings.notifications.events.e2e_request_decided': "Your encryption request is answered",
   'userSettings.notifications.events.file_deleted': "A file is deleted for good",
   'userSettings.notifications.events.file_infected': "A virus is found in a file",
   'userSettings.notifications.events.file_moved': "A file is moved or renamed",
@@ -2587,6 +2624,7 @@ export const en: Record<string, string> = {
   'users.fields.displayName': "Display name",
   'webhooks.offReason.antivirus': "Virus scanning is off (Protection).",
   'webhooks.offReason.appPlugins': "Apps are switched off on this server.",
+  'webhooks.offReason.e2eApproval': "Only when the encryption policy asks for approval.",
   'webhooks.offReason.escrow': "No escrow key is set up for encrypted folders.",
   'account.problem.emailInvalid': "This is not an email address. Write it as name@example.com.",
   'account.problem.usernameAt': "A username cannot contain @ - that belongs to an email address.",

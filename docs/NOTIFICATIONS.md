@@ -244,6 +244,8 @@ of them tickable on a target in **Admin → Webhooks**:
 | `comment.added` | Somebody commented on a file or folder. `meta` carries `comment_id` and the first 200 characters of the body. |
 | `e2e.escrow_used` | An encrypted folder - or a single encrypted file (`.fxe`) - was opened with the operator's **escrow key** instead of its owner's passphrase - not the recovery key, which the owner holds. `meta` carries `escrow_kid`, `storage`, `folder` (for a file: `file` and `kind: "file"` instead) and, when the caller was signed in, `actor_email`. |
 | `e2e.password_changed` | An encrypted folder's password was changed - or reset with its **recovery key** (`meta.via = "recovery_key"`, severity `warning`) - in the web UI, which announces it once the new key file is written ([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#changing-the-password)). Sent to the folder's **owner**, who may not be the person who changed it. `meta` carries `storage`, `folder`, `via`, `rekey` (the folder key was replaced too) and, when the caller was signed in, `actor_email`. A single encrypted file's password change is the same event, with `file` and `kind: "file"` in place of `folder`, sent to the file's owner. |
+| `e2e.request_created` | Somebody asked to encrypt a folder or a file under the tenant's `approval` policy ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)). One broadcast placed on the folder: the tenant's administrators see it, the platform operator sees every tenant's, a member never does. `meta` carries `requester`, `reason`, `request_id`, `storage` and `target_kind` (`folder` \| `file`; for a file the node is the folder it goes into). **Once** per request: asking again while it waits tells nobody. |
+| `e2e.request_decided` | An administrator approved or rejected an encryption request. Sent to the person who asked, and to nobody else. `meta` carries `decision` (`approved` \| `rejected`), `decider`, `note`, `request_id`, `storage` and `target_kind`. A request that lapses unanswered tells nobody; the audit log has it (`e2e_request.expire`). |
 | `plugin.notice` | An installed app plugin (see `APP-PLUGINS.md`) sent a message through its `notify_send` host function - a signature request, a finished job. Title/body are the plugin's English wording; `meta` carries `plugin` (the app's install id), `plugin_label_<lang>` (its name as people know it - what a reader prints in front of the message, never the id), `title_<lang>`/`body_<lang>` - one of each per language the app wrote it in (`_en`/`_tr` always, at most 16 more; the reader's own language is used, then its base language, then English), `job` for a queued action, and up to eight small facts the plugin added. The app may address one person instead of the instance feed, and may attach a target: the file plus, optionally, the app screen to open on it (`target.open = {plugin, action|view}`), so a click lands in the signing screen rather than on the notifications page. |
 
 The six **write** events (`file.uploaded`, `file.updated`, `file.upload_failed`,
@@ -356,6 +358,8 @@ otherwise hit:
 | `comment.added` | `file` **or** `dir` | Read from the node row's type - a comment can hang on a folder. |
 | `e2e.escrow_used` | `dir` - the encrypted folder; `file` - a single encrypted file | |
 | `e2e.password_changed` | `dir` - the encrypted folder; `file` - a single encrypted file | |
+| `e2e.request_created` | `dir` - the folder to encrypt (for a file, its folder) | |
+| `e2e.request_decided` | `dir` - the folder to encrypt (for a file, its folder) | |
 | `share.created` | `share` - the token | The event is "a link now exists"; the link is the thing. |
 | `admin_test` · `webhook_test` | `none` | |
 | `update_available` · `update_applied` | `none` | Not about a file. |
@@ -764,9 +768,15 @@ with **no** muted events. `PATCH` replaces the whole preference (send the full
 > switches in the dialog's **What to tell me about** list, one per event - and
 > only for events that can happen on this instance: no virus switch while
 > scanning is off, no escrow switch without an escrow key, no app switch while
-> apps are off. Both screens resend the user's existing list verbatim so
-> opening one cannot clear their mutes. The filtering itself is in force
-> regardless of how the row got written.
+> apps are off, and the two encryption-request switches only where a request
+> can reach the person (under the `approval` policy with the tenant's ceiling
+> on: `e2e.request_created` for an administrator account, `e2e.request_decided`
+> for everyone). They read the person's own tenant, so an administrator whose
+> tenant is under another policy - the platform operator's included - sees them
+> greyed. Both
+> screens resend the user's existing list verbatim so opening one cannot clear
+> their mutes. The filtering itself is in force regardless of how the row got
+> written.
 >
 > Why that matters more than it sounds: this endpoint is open to every account,
 > and until the dialog existed its only screen sat behind the admin gate - so

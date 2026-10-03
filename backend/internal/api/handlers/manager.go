@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -88,6 +89,12 @@ type Manager struct {
 	// Ops runs a folder rename asked with `queued=1` as a job of the queue
 	// (vfRename). nil renames inside the request, as it always did.
 	Ops *ops.Service
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go). The doors on this
+	// handler that CREATE a file — upload, New document, a draft's save, and
+	// through it the resumable upload and the public file request — ask it
+	// before an encrypted folder's key file or a `.fxe` comes into being.
+	// nil = the rule is not wired (a handler built by hand in a test).
+	E2EPolicy *e2epolicy.Service
 }
 
 // AttachOps wires the queue a rename asked with `queued=1` runs on.

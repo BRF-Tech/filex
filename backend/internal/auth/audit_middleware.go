@@ -52,6 +52,9 @@ func AuditMiddleware(store db.Store) func(http.Handler) http.Handler {
 			if rw.status < 200 || rw.status >= 300 {
 				return
 			}
+			if detail.Skipped() {
+				return
+			}
 			user := UserFrom(r.Context())
 			action, targetType, targetID := actionFor(r)
 			// A handler that knows its write belongs to another family than its
@@ -302,6 +305,13 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	// an MCP tool). A second, generic row here would count every event twice
 	// and call an approval a "create".
 	case strings.HasPrefix(p, "/api/admin/plugin-requests"):
+		return "", "", ""
+	// ── who may encrypt ──
+	// internal/e2epolicy writes its own rows — e2e_policy.update,
+	// e2e_tenant.update, e2e_request.* — naming the tenant and the value it
+	// had and got (e2epolicy.Audit). A generic `e2e.update` here would be a
+	// second row with neither.
+	case p == "/api/admin/e2e" || strings.HasPrefix(p, "/api/admin/e2e/"):
 		return "", "", ""
 
 	// ── groups (internal/group) ──
@@ -604,6 +614,8 @@ type AuditDetail struct {
 	// does not say (a create has no id in its path; a delete's row is gone by
 	// the time anybody reads the log). See SetAuditTarget.
 	targetID, targetName string
+	// skip: the handler recorded the request itself. See SkipAuditRow.
+	skip bool
 	// act / actType rename the row (SetAuditAction); "" = the route's name.
 	act, actType string
 }
@@ -693,6 +705,43 @@ func SetAuditTarget(ctx context.Context, id, name string) {
 		d.targetName = name
 	}
 	d.mu.Unlock()
+}
+
+// SkipAuditRow says the handler has recorded this request itself, so the
+// AuditMiddleware that records the request, or the admin MCP tools'
+// in-process copy of it (handlers.AIAdmin.auditInvoke), writes no generic row
+// beside its own. A no-op when the request is not being audited.
+//
+// It is ActionForPath's skip for a door the URL cannot tell apart: PATCH
+// /api/admin/settings carries e2e.policy only sometimes. When the policy is
+// all a request changed, internal/e2epolicy's e2e_policy.update row, with the
+// value before and after, is the record, and a bare settings.update beside it
+// would be a second row that says less (handlers/settings.go).
+//
+// One request has one recorder: an AuditMiddleware nested inside another
+// steps aside and leaves the row to the outer one (AuditMiddleware). On
+// /api/ai/admin that is the /api/ai group's, the only one it passes
+// (api/routes.go), so the mark reaches the recorder that writes the request's
+// only row, and the handler's own row is the one left.
+func SkipAuditRow(ctx context.Context) {
+	d, _ := ctx.Value(auditDetailKey{}).(*AuditDetail)
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.skip = true
+	d.mu.Unlock()
+}
+
+// Skipped reports whether the handler recorded its request itself
+// (SkipAuditRow). Nil-safe.
+func (d *AuditDetail) Skipped() bool {
+	if d == nil {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.skip
 }
 
 // ApplyTarget folds SetAuditTarget's answer into a row: the id only where the

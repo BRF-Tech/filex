@@ -109,6 +109,9 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.FileAssocSQL = &db.FileAssocSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	// The SSO identity an account is bound to (00079), the same way.
 	s.OIDCIdentitySQL = &db.OIDCIdentitySQL{Pool: sqlDB, GetUser: s.GetUser}
+	// Encryption requests (00080), the same way and with the same timestamp
+	// spelling.
+	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	return s
 }
 
@@ -147,6 +150,8 @@ type Store struct {
 	// The SSO identity an account is bound to (internal/db
 	// oidc_identity_sql.go, migration 00079).
 	*db.OIDCIdentitySQL
+	// The encryption requests (internal/db e2e_requests_sql.go).
+	*db.E2ERequestSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -821,6 +826,50 @@ func nullIfEmpty(v string) any {
 		return nil
 	}
 	return v
+}
+
+/* e2e policy (migration 00080) */
+// Who may encrypt in a tenant (internal/e2epolicy). Dedicated accessors for
+// the reason the plan's are: widening providerCols would make every
+// &model.Provider{} literal (the admin API's create, the cloud signup, the
+// tests) write a tenant with encryption switched off — the zero value — when
+// the columns' defaults are the point. The MySQL driver reuses them all.
+
+func (s *Store) GetProviderE2E(ctx context.Context, providerID int64) (model.ProviderE2E, error) {
+	var e model.ProviderE2E
+	err := s.conn(ctx).QueryRowContext(ctx,
+		`SELECT e2e_allowed, e2e_policy FROM providers WHERE id=?`, providerID).Scan(&e.Allowed, &e.Policy)
+	return e, err
+}
+
+func (s *Store) SetProviderE2E(ctx context.Context, providerID int64, e model.ProviderE2E) error {
+	if !model.ValidE2EPolicy(e.Policy) {
+		return fmt.Errorf("provider e2e: unknown policy %q", e.Policy)
+	}
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE providers SET e2e_allowed=?, e2e_policy=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		btoi(e.Allowed), e.Policy, providerID)
+	return err
+}
+
+// SetProviderE2EPolicy and SetProviderE2EAllowed each name one column, so
+// neither writes back a stale copy of the other (db.Store). RowsAffected is
+// not read: MySQL, which runs these statements too, counts a same-value write
+// as 0 rows.
+
+func (s *Store) SetProviderE2EPolicy(ctx context.Context, providerID int64, policy string) error {
+	if !model.ValidE2EPolicy(policy) {
+		return fmt.Errorf("provider e2e: unknown policy %q", policy)
+	}
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE providers SET e2e_policy=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, policy, providerID)
+	return err
+}
+
+func (s *Store) SetProviderE2EAllowed(ctx context.Context, providerID int64, allowed bool) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE providers SET e2e_allowed=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, btoi(allowed), providerID)
+	return err
 }
 
 func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {

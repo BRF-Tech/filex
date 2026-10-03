@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/perm"
@@ -44,6 +45,9 @@ type Upload struct {
 	StorageResolver func(int64) (storage.Driver, error)
 	Thumbs          *thumb.Pipeline
 	ACL             *acl.Resolver
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go): Init asks it before
+	// a multipart upload creates a key file or a `.fxe`. nil = not wired.
+	E2EPolicy *e2epolicy.Service
 }
 
 // AttachACL wires the RBAC resolver so chunked uploads require ≥editor on the
@@ -177,6 +181,14 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 		if !v.WritePerm(w, r) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		}
+		return
+	}
+	// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go) —
+	// asked here, where the upload begins, and not again at Finalize. Whether
+	// the upload creates it is the rule's own look (a FILE there), not
+	// upNeed's: a folder with the name answers the Stat above, and on an
+	// object store the parts are assembled beside it.
+	if refuseE2EWriteAt(w, r, u.E2EPolicy, drv, u.Store, storageID, target) {
 		return
 	}
 

@@ -95,7 +95,7 @@ import { deviceTimeZone, resolvedTimeZone } from '../lib/timezone';
 import { personInitial, personName } from '../lib/personName';
 import { getDensity, setDensity, type Density } from '../lib/density';
 import { downscaleImageToDataURL } from '../lib/imageDownscale';
-import { WEBHOOK_EVENTS, eventOffReason, userEventKey } from '../lib/webhookEvents';
+import { WEBHOOK_EVENTS, eventFixableBy, eventOffReason, userEventKey } from '../lib/webhookEvents';
 import type {
   BrowserNotifyPermission,
   SettingsNotificationPrefs,
@@ -587,16 +587,20 @@ const notifPrefs = ref<SettingsNotificationPrefs | null>(null);
 const inAppOn = computed(() => notifPrefs.value?.in_app_enabled !== false);
 const mutedEvents = computed<string[]>(() => notifPrefs.value?.muted_events ?? []);
 // The events that can happen on this instance (lib/webhookEvents
-// eventOffReason): a switch for virus hits with scanning off, or for the
-// escrow key where there is none, is a promise the product cannot keep. ⚠ The
-// same split as every "needs a service" entry (lib/serviceGate): an
-// ADMINISTRATOR, who can switch the service on, sees it greyed with the reason
-// (QA #39); everybody else is not offered it at all.
+// eventOffReason): a switch for virus hits with scanning off, for the escrow
+// key where there is none, or for encryption requests where the policy asks
+// for no approval, is a promise the product cannot keep. ⚠ The same split as
+// every "needs a service" entry (lib/serviceGate): an ADMINISTRATOR, who can
+// switch the service on, sees it greyed with the reason (QA #39); everybody
+// else is not offered it at all. Which administrator is the event's
+// (eventFixableBy): the instance's for a service, the tenant's own for the
+// encryption policy — the account's role, which the HOST knows and the
+// capabilities do not say.
 const offeredEvents = computed(() => {
-  const caps = props.host.capabilities ?? {};
+  const facts = { ...(props.host.capabilities ?? {}), account_admin: props.host.isAdmin === true };
   return WEBHOOK_EVENTS.map((ev) => {
-    const off = eventOffReason(ev, caps);
-    const gate = gateOnService(off === null, caps.caller_admin === true, off ? t(off) : '');
+    const off = eventOffReason(ev, facts);
+    const gate = gateOnService(off === null, eventFixableBy(ev, facts), off ? t(off) : '');
     return { ev, off, gate };
   }).filter((row) => !row.gate.hidden);
 });

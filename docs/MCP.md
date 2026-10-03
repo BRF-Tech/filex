@@ -778,9 +778,9 @@ expires after 14 days. The same reads and requests are REST routes under
   function the explorer does, and so do a public link and a revoke.
 - **Administration stays with a person.** An admin-scoped token reads the
   admin surface and manages ordinary accounts, but it cannot install a plugin,
-  make or change an administrator, or hand out an admin-area permission: those
-  answer `403 session_required` and are done by an administrator signed in to
-  the panel.
+  make or change an administrator, hand out an admin-area permission or change
+  who may encrypt: those answer `403 session_required` and are done by an
+  administrator signed in to the panel.
 - **Hashed at rest, shown once, revocable.** Only the sha256 hash is stored; the
   plaintext is displayed a single time; any token can be revoked instantly
   (`DELETE`) or aged out with `expires_in_days`.
@@ -839,6 +839,10 @@ may do. No scope changes that.
   an administrator's role or password or removing an administrator's SSO bind
   (`sso_unlink`), `admin_users_reset_password` on an administrator. Managing accounts that are not administrators works with a
   key ([RBAC.md](RBAC.md#administration-and-plugins-need-a-session)).
+- **Who may encrypt** - changing a tenant's encryption policy or the operator's
+  ceiling, deciding an encryption request, and writing the `e2e.policy` key
+  through `admin_settings_set` or `admin_settings_update`
+  ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)).
 
 ### 403 Forbidden (`permission_denied` / `your account lacks the … permission`)
 The account behind the token lacks a permission for this

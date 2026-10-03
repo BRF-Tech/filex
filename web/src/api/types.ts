@@ -361,6 +361,13 @@ export interface Capabilities {
   antivirus?: boolean;
   /** Whether this installation holds an escrow key for encrypted folders. */
   e2e_escrow?: { enabled: boolean };
+  /** Who may start encrypting here, the caller's own tenant's row:
+   *  `available` is the platform operator's switch, `policy` the tenant's
+   *  choice (`off` | `admins` | `permitted` | `approval`). Absent for an
+   *  anonymous caller and on a server from before the policy. The settings
+   *  dialog and the Webhooks screen read it to say when the two encryption
+   *  request events can happen (core lib/webhookEvents). */
+  e2e_policy?: { available: boolean; policy: string };
   /** The caller could configure the instance (the server's answer — the
    *  same checks the admin routes apply, supertenant included). */
   caller_admin?: boolean;

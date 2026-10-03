@@ -200,6 +200,13 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A new document is always a create (it refuses to overwrite, above), so
+	// one named like an encrypted folder's key file or a `.fxe` is a new
+	// encryption (e2e_policy_gate.go).
+	if refuseE2ECreate(w, r, h.E2EPolicy, current, fullRel) {
+		return
+	}
+
 	// Same reasoning as the upload path: a destination whose directories have
 	// no node rows yet is normal, and giving up here would leave the new file
 	// out of the catalogue.

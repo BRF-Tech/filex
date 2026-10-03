@@ -98,6 +98,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	// The SSO identity an account is bound to (00079), written once in
 	// internal/db.
 	s.OIDCIdentitySQL = &db.OIDCIdentitySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, GetUser: s.GetUser}
+	// Encryption requests (00080), written once in internal/db.
+	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	return s
 }
 
@@ -137,6 +139,8 @@ type Store struct {
 	// The SSO identity an account is bound to (internal/db
 	// oidc_identity_sql.go, migration 00079).
 	*db.OIDCIdentitySQL
+	// The encryption requests (internal/db e2e_requests_sql.go).
+	*db.E2ERequestSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -728,6 +732,46 @@ func nullIfEmpty(v string) any {
 		return nil
 	}
 	return v
+}
+
+/* e2e policy (migration 00080) */
+// Who may encrypt in a tenant (internal/e2epolicy). Dedicated accessors for
+// the reason the plan's are: widening providerCols would make every
+// &model.Provider{} literal write a tenant with encryption switched off.
+
+func (s *Store) GetProviderE2E(ctx context.Context, providerID int64) (model.ProviderE2E, error) {
+	var e model.ProviderE2E
+	err := s.conn(ctx).QueryRowContext(ctx,
+		`SELECT e2e_allowed, e2e_policy FROM providers WHERE id=$1`, providerID).Scan(&e.Allowed, &e.Policy)
+	return e, err
+}
+
+func (s *Store) SetProviderE2E(ctx context.Context, providerID int64, e model.ProviderE2E) error {
+	if !model.ValidE2EPolicy(e.Policy) {
+		return fmt.Errorf("provider e2e: unknown policy %q", e.Policy)
+	}
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE providers SET e2e_allowed=$1, e2e_policy=$2, updated_at=NOW() WHERE id=$3`,
+		e.Allowed, e.Policy, providerID)
+	return err
+}
+
+// SetProviderE2EPolicy and SetProviderE2EAllowed each name one column, so
+// neither writes back a stale copy of the other (db.Store).
+
+func (s *Store) SetProviderE2EPolicy(ctx context.Context, providerID int64, policy string) error {
+	if !model.ValidE2EPolicy(policy) {
+		return fmt.Errorf("provider e2e: unknown policy %q", policy)
+	}
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE providers SET e2e_policy=$1, updated_at=NOW() WHERE id=$2`, policy, providerID)
+	return err
+}
+
+func (s *Store) SetProviderE2EAllowed(ctx context.Context, providerID int64, allowed bool) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE providers SET e2e_allowed=$1, updated_at=NOW() WHERE id=$2`, allowed, providerID)
+	return err
 }
 
 func (s *Store) UpdateNodeMeta(ctx context.Context, id int64, size int64, mime, etag string, mtime time.Time) error {

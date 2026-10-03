@@ -47,9 +47,9 @@ const FOLDERS = ['Archive', 'Clients', 'Finance', 'Scratch'];
 /** Every permission of the built-in User role (e2e/tests/178's list, with delete). */
 const STANDARD = [
   'files.download', 'files.create', 'files.modify', 'files.rename', 'files.move', 'files.delete', 'files.purge',
-  'files.tag', 'share.links', 'share.upload_links', 'share.users', 'comments.write', 'ai.use', 'plugins.run',
-  'access.webdav', 'access.sftp', 'access.ftp', 'access.s3', 'access.nfs', 'access.api', 'access.desktop',
-  'account.edit',
+  'files.encrypt', 'files.tag', 'share.links', 'share.upload_links', 'share.users', 'comments.write', 'ai.use',
+  'plugins.run', 'access.webdav', 'access.sftp', 'access.ftp', 'access.s3', 'access.nfs', 'access.api',
+  'access.desktop', 'account.edit',
 ];
 const without = (...drop) => STANDARD.filter((p) => !drop.includes(p));
 

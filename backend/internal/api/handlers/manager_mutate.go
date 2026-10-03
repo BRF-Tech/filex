@@ -381,11 +381,26 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Who may encrypt (e2e_policy_gate.go): a rename onto a key file's or a
+	// `.fxe`'s name is a new encryption unless it carries what is encrypted
+	// already (e2epolicy.RelocationEncrypts). Asked once the name is known to
+	// be free, so a NAME_TAKEN answer does not spend an approval, and before a
+	// folder's rename is queued: the worker has nobody to judge.
+	done, settled := refuseE2ERenameAt(w, r, h.E2EPolicy, h.Store, drv, current.ID, srcRel, dstRel, true)
+	if done {
+		return
+	}
 	// Asked with `queued=1` (the explorer asks for a folder): the checks above
 	// have answered, and the rename is a job of the queue. A folder on an
 	// object store is one request per object, longer than any proxy waits.
+	// A folder that becomes a file before the job runs is the rule's again
+	// (ops.WithEncryptionSettled).
 	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
-		op, err := h.Ops.Submit(r.Context(), ops.OpRename, current.ID, []string{srcRel}, dstRel)
+		qctx := r.Context()
+		if settled {
+			qctx = ops.WithEncryptionSettled(qctx, []string{srcRel})
+		}
+		op, err := h.Ops.Submit(qctx, ops.OpRename, current.ID, []string{srcRel}, dstRel)
 		if answerGate(w, err) {
 			return
 		}
@@ -907,6 +922,14 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			upNeed = perm.FilesModify
 		}
 		if !h.require(w, r, current, fullRel, upNeed, "insufficient permission") {
+			_ = src.Close()
+			return
+		}
+		// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go);
+		// replacing one that is there never asks. "There" is the rule's own
+		// look — a FILE at the path — not upNeed's: a folder made between the
+		// kind guard's look and upNeed's is not the file.
+		if refuseE2EWrite(w, r, h.E2EPolicy, drv, current, fullRel) {
 			_ = src.Close()
 			return
 		}

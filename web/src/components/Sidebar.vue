@@ -39,6 +39,7 @@ import {
   BarChart3,
   Archive,
   Building2,
+  Lock,
 } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import LogoMark from './LogoMark.vue';
@@ -153,6 +154,7 @@ const items = computed<NavItem[]>(() => [
   { to: { name: 'groups' }, label: t('nav.groups'), icon: UsersRound, group: 'access' },
   { to: { name: 'grants' }, label: t('nav.grants'), icon: ShieldCheck, group: 'access' },
   { to: { name: 'roles' }, label: t('nav.roles'), icon: UserCog, group: 'access' },
+  { to: { name: 'encryption' }, label: t('nav.encryption'), icon: Lock, group: 'access' },
   {
     to: { name: 'auth-providers' },
     label: t('nav.authProviders'),

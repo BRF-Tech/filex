@@ -15,6 +15,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -166,6 +167,19 @@ func (f *fs) openWrite(name string, flags int, offset int64) (ftpserver.FileTran
 	}
 	if _, ok := drv.(storage.Writer); !ok {
 		return nil, storage.ErrUnsupported
+	}
+	// Who may encrypt (internal/e2epolicy): a STOR that CREATES an encrypted
+	// folder's key file or a `.fxe` — no file there, a folder with the name
+	// included (protoperm.EncryptionAllowed). Asked at the open, once, and
+	// after the storage said it takes writes: under the approval policy the
+	// question spends the approval. A rule that could not be decided says so
+	// in the reply rather than "permission denied"; the code stays 550, the
+	// only one ftpserverlib gives an open.
+	switch protoperm.EncryptionAllowed(f.ctx, f.srv.cfg.E2EPolicy, drv, t.Storage, t.Rel) {
+	case protoperm.EncryptionRefused:
+		return nil, os.ErrPermission
+	case protoperm.EncryptionUndecided:
+		return nil, protoperm.ErrEncryptionUndecided
 	}
 	spool, err := os.CreateTemp(f.srv.cfg.SpoolDir, "filex-ftp-*")
 	if err != nil {

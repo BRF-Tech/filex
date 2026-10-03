@@ -342,6 +342,45 @@ describe("Role editor", () => {
       }),
     );
   });
+
+  it("offers Encrypt in a role's folder part, and keeps it on save", async () => {
+    // files.encrypt differs by folder like files.create, and the catalogue
+    // upgrade writes it into every folder part that allows files.create:
+    // an editor that dropped it on save would undo the upgrade.
+    const withEncrypt = {
+      ...catalogue,
+      permissions: [
+        { key: "files.download", group: "files" },
+        { key: "files.create", group: "files", viewer_capped: true },
+        { key: "files.encrypt", group: "files", viewer_capped: true },
+      ],
+    };
+    const dropBox = {
+      ...noDelete,
+      id: 9,
+      name: "Drop box",
+      permissions: ["files.download"],
+      effects: { "files.create": "allow", "files.encrypt": "allow" },
+      conditions: { paths: ["Drop"] },
+    };
+    await mountAt(RoleEditor, {
+      props: { modelValue: true, rule: dropBox, catalogue: withEncrypt, storages: [] },
+    });
+
+    const part = '[data-testid="role-folder-effects"]';
+    const row = q(`${part} [data-testid="perm-row-files.encrypt"]`);
+    expect(row.textContent).toContain("Encrypt");
+    expect(row.textContent).toContain("end-to-end encrypted folder or file");
+    expect(q<HTMLButtonElement>(`${part} [data-testid="perm-files.encrypt-allow"]`).disabled).toBe(false);
+
+    await click(q('[data-testid="rule-save"]'));
+    expect(roles.updateRule).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        effects: { "files.create": "allow", "files.encrypt": "allow" },
+      }),
+    );
+  });
 });
 
 describe("Person card", () => {

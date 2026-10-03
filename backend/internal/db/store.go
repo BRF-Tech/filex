@@ -1034,6 +1034,23 @@ type Store interface {
 	// PruneLoginThrottles drops counters idle since before; n = rows removed.
 	PruneLoginThrottles(ctx context.Context, before time.Time) (int64, error)
 
+	// Encryption requests (migration 00080, internal/e2epolicy) — what a
+	// person leaves where the tenant's policy wants an administrator's
+	// approval before a folder or a file is end-to-end encrypted. Written once
+	// for every engine (E2ERequestSQL).
+	CreateE2ERequest(ctx context.Context, r *model.E2ERequest) (*model.E2ERequest, error)
+	// GetE2ERequest answers sql.ErrNoRows when there is no such request.
+	GetE2ERequest(ctx context.Context, id int64) (*model.E2ERequest, error)
+	// ListE2ERequests: what f matches, newest first — with f.ExpiresBefore,
+	// what is due, the longest overdue first — at most 500.
+	ListE2ERequests(ctx context.Context, f model.E2ERequestFilter) ([]*model.E2ERequest, error)
+	// UpdateE2ERequest writes the state fields; with onlyIfStatus only while
+	// the stored row is still in that state (ok = it was written).
+	UpdateE2ERequest(ctx context.Context, r *model.E2ERequest, onlyIfStatus string) (bool, error)
+	// FindApprovedE2ERequest answers an approval the person may still use
+	// (approved, not expired at now), sql.ErrNoRows when there is none.
+	FindApprovedE2ERequest(ctx context.Context, userID, storageID int64, path, kind string, now time.Time) (*model.E2ERequest, error)
+
 	// Providers (tenants). See docs/MULTI-TENANCY.md. Inert while multi-tenant
 	// mode is off; a single "default" provider always exists (migration 00014).
 	CreateProvider(ctx context.Context, p *model.Provider) (*model.Provider, error)
@@ -1097,6 +1114,34 @@ type Store interface {
 	SetProviderDomainCert(ctx context.Context, id int64, certPEM, keySealed string, notAfter *time.Time) error
 	DeleteProviderDomain(ctx context.Context, id int64) error
 	ProviderIDByActiveDomain(ctx context.Context, domain string) (int64, error)
+
+	// Who may encrypt in a tenant (migration 00080, internal/e2epolicy): the
+	// platform's ceiling and the tenant's policy. Dedicated accessors, like
+	// the plan's, so the provider CRUD SQL stays as it was and no caller that
+	// builds a model.Provider (the admin API, the cloud signup) can switch a
+	// tenant's encryption off by leaving two new fields at their zero values.
+	// GetProviderE2E answers sql.ErrNoRows for no such provider;
+	// SetProviderE2E refuses a policy that is not one of the four.
+	//
+	// SetProviderE2E writes both columns: the whole-row setter tests and
+	// fixtures use. The handlers change one column with the single-column
+	// setters below.
+	GetProviderE2E(ctx context.Context, providerID int64) (model.ProviderE2E, error)
+	SetProviderE2E(ctx context.Context, providerID int64, e model.ProviderE2E) error
+
+	// SetProviderE2EPolicy writes the tenant's policy alone, refusing one that
+	// is not one of the four as SetProviderE2E does; SetProviderE2EAllowed
+	// writes the platform's ceiling alone. With several filex instances on one
+	// database, a tenant administrator's policy change and the operator's
+	// ceiling change can land between each other's read and write, and a
+	// statement that names only its own column is what keeps the other's.
+	//
+	// Like SetProviderE2E, both answer nil for a provider id that does not
+	// exist, and neither reads RowsAffected to tell: MySQL reports CHANGED
+	// rows, so writing the value already stored counts 0 there. Callers look
+	// the tenant up first.
+	SetProviderE2EPolicy(ctx context.Context, providerID int64, policy string) error
+	SetProviderE2EAllowed(ctx context.Context, providerID int64, allowed bool) error
 }
 
 // TrashTally is one storage's share of the trash a purge sweep will walk.

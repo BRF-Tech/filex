@@ -296,6 +296,50 @@ export interface Capabilities {
     /** Base64 SPKI. Public material — it can only seal, never open. */
     public_key?: string;
   };
+  /** wiring:e2 policy — who may START encrypting here (backend
+   *  internal/e2epolicy): `available` is the platform operator's switch for
+   *  the caller's tenant, `policy` the tenant's choice — `off` | `admins` |
+   *  `permitted` | `approval`. Absent for an anonymous caller and on a server
+   *  older than the policy, which reads as before: the explorer offers
+   *  encryption and the server decides.
+   *
+   *  ⚠ The CALLER'S OWN tenant's row. The platform operator, looking at
+   *  another tenant's storage, is answered by THAT tenant's policy and ceiling
+   *  (`POST /api/files/e2e/allowed`), which can differ either way — so nothing
+   *  is hidden from this field; only the per-path answer hides a door. */
+  e2e_policy?: { available: boolean; policy: string };
+}
+
+/**
+ * wiring:e2 policy — may this account start encrypting at a path
+ * (`POST /api/files/e2e/allowed`): `allowed`; `request` — the tenant's policy
+ * wants an administrator's approval first; `denied`.
+ */
+export type E2eAnswer = 'allowed' | 'request' | 'denied';
+
+/** An encryption request as the server answers it (backend E2ERequestWire). */
+export interface E2eRequestDto {
+  id: number;
+  /** `<storage>://<rel>` — the folder the approval is for: to create an encrypted
+   *  folder in, or to encrypt. A single file's request is kept under the folder
+   *  its `.fxe` lands in (a file approval is that folder's). */
+  path: string;
+  storage: string;
+  kind: 'folder' | 'file';
+  /** The requester's own words. */
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'used';
+  /** Who asked, named as the account was when it asked. */
+  requester: string;
+  requester_id: number;
+  decider?: string;
+  decided_at?: string | null;
+  /** The approver's note, or why it was rejected. */
+  decision_note?: string;
+  expires_at: string;
+  used_at?: string | null;
+  created_at: string;
+  tenant_id?: number | null;
 }
 
 /** Single source of truth for "is the IdP/editor/diagram service ready?".

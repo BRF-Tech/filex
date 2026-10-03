@@ -323,3 +323,30 @@ func TestReadOnlyPluginRefusesWritesOverSFTP(t *testing.T) {
 		t.Fatalf("read-only plugin was written to; tree: %v", p.Paths())
 	}
 }
+
+// A write the storage cannot take is refused before who may encrypt is asked.
+// Under the approval policy the question spends the approval, and a request
+// the storage refuses anyway must not; with the policy off, as here, asking
+// first would answer PERMISSION_DENIED where the truth is "this storage does
+// not take writes".
+func TestReadOnlyPluginRefusesAnEncryptedUploadBeforeTheRuleIsAsked(t *testing.T) {
+	caps := testplugin.FullCaps()
+	caps.Write, caps.Delete = false, false
+	f, p := newPluginFSWithCaps(t, caps)
+	if err := f.srv.cfg.Store.UpsertSetting(context.Background(), model.SettingE2EPolicy, model.E2EPolicyOff); err != nil {
+		t.Fatal(err)
+	}
+	w, err := f.Filewrite(sftp.NewRequest("Put", "/eklenti/yeni.fxe"))
+	if err == nil {
+		if c, ok := w.(io.Closer); ok {
+			_ = c.Close()
+		}
+		t.Fatalf("upload to a read-only plugin was accepted; tree: %v", p.Paths())
+	}
+	if !errors.Is(err, sftp.ErrSSHFxOpUnsupported) {
+		t.Fatalf("%v, want OP_UNSUPPORTED: the storage's own refusal, before the rule", err)
+	}
+	if p.Exists("yeni.fxe") {
+		t.Fatalf("read-only plugin was written to; tree: %v", p.Paths())
+	}
+}

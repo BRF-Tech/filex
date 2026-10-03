@@ -9,9 +9,16 @@ import Modal from './Modal.vue';
 const props = defineProps<{
   open: boolean;
   locale: LocaleCode;
-  /* wiring:e2 — hosts hide the encrypted option (e.g. already inside an
-   * encrypted folder / feature-gated embeds). Default: shown. */
+  /* wiring:e2 — the "Create encrypted folder…" line. ⚠ A host passes `true`
+   * to show it: Vue casts an absent boolean prop to `false`, so a host that
+   * says nothing gets no line (the old "Default: shown" here was never true).
+   * FileExplorer passes the policy's answer (wiring:e2 policy). */
   encryptedOption?: boolean;
+  /* wiring:e2 policy — the tenant's policy wants an administrator's approval
+   * before an encrypted folder is made here: the same line offers to ask for
+   * one instead. Read only while `encryptedOption` is false — the two are one
+   * line, never both. */
+  encryptedRequest?: boolean;
   /** The server's answer when it did not make the folder. It used to go to
    *  the host's console only, and the dialog stayed open with nothing in it. */
   error?: string | null;
@@ -25,6 +32,9 @@ const emit = defineEmits<{
   /* wiring:e2 — user picked "Create encrypted folder…" — the parent swaps
    * this modal for EncryptedFolderModal. */
   (e: 'encrypted'): void;
+  /* wiring:e2 policy — user picked "Request an encrypted folder…" — the
+   * parent swaps this modal for E2eRequestModal. */
+  (e: 'request-encrypted'): void;
 }>();
 
 const { t } = useLocale(() => props.locale);
@@ -84,7 +94,8 @@ function submit() {
       <p v-if="err" class="fe-form__error" role="alert">{{ err }}</p>
       <!-- wiring:e2 — encrypted-folder entry point lives inside the normal
            new-folder flow so every trigger (toolbar / context menu / palette)
-           reaches it without extra wiring. -->
+           reaches it without extra wiring. wiring:e2 policy — where encrypting
+           here needs an administrator's approval, the same line asks for one. -->
       <button
         v-if="encryptedOption !== false"
         type="button"
@@ -94,6 +105,17 @@ function submit() {
         <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
         <span class="fe-e2e-optlink__icon" aria-hidden="true" v-html="actionIconSvg('lock')"></span>
         {{ t('e2e.create.option') }}
+      </button>
+      <button
+        v-else-if="encryptedRequest"
+        type="button"
+        class="fe-e2e-optlink"
+        data-testid="e2e-request-option"
+        @click="emit('request-encrypted')"
+      >
+        <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
+        <span class="fe-e2e-optlink__icon" aria-hidden="true" v-html="actionIconSvg('lock')"></span>
+        {{ t('e2e.request.option') }}
       </button>
       <!-- /wiring:e2 -->
     </form>

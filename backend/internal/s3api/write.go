@@ -84,6 +84,11 @@ func (h *Handler) putObject(w http.ResponseWriter, r *http.Request, p *protocola
 		WriteError(w, r, http.StatusNotImplemented, "NotImplemented", "this storage does not support writes")
 		return
 	}
+	// Who may encrypt, once the storage said it takes writes: under the
+	// approval policy the question spends the approval.
+	if h.refusesEncryption(w, r, st, key) {
+		return
+	}
 
 	// ⚠⚠ aws-chunked framing. When a client signs the payload as it streams
 	// the BODY IS NOT THE OBJECT: it is the object cut into length-prefixed,
@@ -329,6 +334,36 @@ func (h *Handler) writeNeed(ctx context.Context, st *model.Storage, key string) 
 	drv, err := h.cfg.Resolver(st.ID)
 	return protoperm.WriteNeed(ctx, drv, err, key)
 }
+
+// refusesEncryption is who may encrypt (internal/e2epolicy) at an S3 write
+// that puts an object at key on st (PUT, the start of a multipart upload, a
+// CopyObject's destination): CREATING an encrypted folder's key file or a
+// `.fxe` needs the policy and files.encrypt, and under the approval policy
+// spends an approval. A replace of an object that is there is never asked; a
+// "folder" with the name — a prefix, which the object would sit beside — is
+// not one (protoperm.EncryptionAllowed, the question every protocol shares).
+//
+// It answers the request itself and reports whether it did: AccessDenied for
+// the rule's no, InternalError for a rule that could not be decided — a
+// failed lookup is not a refusal.
+func (h *Handler) refusesEncryption(w http.ResponseWriter, r *http.Request, st *model.Storage, key string) bool {
+	drv, err := h.cfg.Resolver(st.ID)
+	if err != nil {
+		drv = nil // nothing to look at: counted as a create
+	}
+	switch protoperm.EncryptionAllowed(r.Context(), h.cfg.E2EPolicy, drv, st, key) {
+	case protoperm.EncryptionRefused:
+		WriteError(w, r, http.StatusForbidden, "AccessDenied", encryptionRefusedMsg)
+	case protoperm.EncryptionUndecided:
+		WriteError(w, r, http.StatusInternalServerError, "InternalError", protoperm.ErrEncryptionUndecided.Error())
+	default:
+		return false
+	}
+	return true
+}
+
+// encryptionRefusedMsg is the AccessDenied sentence of refusesEncryption.
+const encryptionRefusedMsg = "creating an encrypted folder or file is not allowed here"
 
 // mimeFor picks the content type to record: what the client declared, else a
 // guess from the extension. The declared value wins because the client knows

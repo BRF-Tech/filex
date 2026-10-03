@@ -81,6 +81,12 @@ export interface RequestFailure extends Error {
   /** `admin_hint` — the fix, which the SERVER sends only to a caller who can
    *  act on it (handlers/tenantown.go `callerMayConfigureInstance`). */
   hint?: string;
+  /** The refusal's `reason` (`{"error":"e2e_not_allowed","reason":"policy_off"}`),
+   *  kept whole. ⚠ `detail` is clipped to 300 characters, and a Go map writes
+   *  its keys in order — error, message, reason — so a long `message` pushes
+   *  the reason past the clip; saying the refusal again from `detail` alone
+   *  (sayFailure with a `t`) would lose it. */
+  reason?: string;
 }
 
 const STATUS_KEYS: Record<number, string> = {
@@ -139,7 +145,57 @@ const CODE_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^read_only$|read-only/i, 'err.read_only'],
   [/^no_secret_key$/, 'err.no_secret_key'],
   [/^quota_exceeded$|quota exceeded|quota: exceeded/i, 'err.quota'],
+  /* wiring:e2 policy — an encryption refused with a reason this build does
+     not know (REASON_WORDS has the ones it does): still said as an encryption
+     refused, never as a bare "you are not allowed". */
+  [/^e2e_not_allowed$/, 'err.e2e_not_allowed.other'],
+  /* wiring:e2 policy — `POST /api/files/e2e/requests` on a listing gone stale
+     (handlers/e2e_policy_files.go, e2epolicy requests.go): the kind asked for
+     is not what is at the path, or nothing can be requested there any more
+     and the refusal names no reason (the answer is now `allowed`). Its other
+     400s are `bad_request`, which the request dialog never provokes. */
+  [/^kind_mismatch$/, 'err.e2e_request.kind_mismatch'],
+  [/^not_requestable$/, 'err.e2e_request.not_requestable'],
+  /* wiring:e2 policy — a rule that could not be decided is not a yes: every
+     HTTP door that creates a key file or a `.fxe` answers `500
+     {"error":"could not check the encryption policy"}` (handlers/
+     e2e_policy_gate.go answerE2E). By status alone that reads "Server error",
+     which says nothing of what failed; the error text is the whole code. */
+  [/^could not check the encryption policy$/, 'err.e2e_policy.undecided'],
 ];
+
+/**
+ * The reasons an encryption is refused for (backend internal/e2epolicy
+ * Reason), in the order the rule asks: the platform operator's switch, the
+ * tenant's policy, the permission, an approval.
+ */
+const E2E_REFUSAL_REASONS: ReadonlyMap<string, string> = new Map([
+  ['tenant_disabled', 'err.e2e_not_allowed.tenant_disabled'],
+  ['policy_off', 'err.e2e_not_allowed.policy_off'],
+  ['admins_only', 'err.e2e_not_allowed.admins_only'],
+  ['permission', 'err.e2e_not_allowed.permission'],
+  ['approval_required', 'err.e2e_not_allowed.approval_required'],
+]);
+
+/**
+ * Refusals that say WHICH rule said no, in a `reason` beside their code — one
+ * sentence per reason. ⚠ Only for a code listed here: elsewhere `reason` is
+ * free text (a plugin request's is the requester's own words).
+ *
+ * wiring:e2 policy — `403 {"error":"e2e_not_allowed","reason":…}` from every
+ * door that creates a key file or a `.fxe`; and `400 not_requestable` from
+ * the request endpoint, which carries the same `reason` when the rule now
+ * says no (and none when it now says yes: CODE_WORDS).
+ */
+const REASON_WORDS: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map([
+  ['e2e_not_allowed', E2E_REFUSAL_REASONS],
+  ['not_requestable', E2E_REFUSAL_REASONS],
+]);
+
+function reasonWordsWith(code: string, reason: unknown, t: T): string {
+  const key = typeof reason === 'string' ? REASON_WORDS.get(code)?.get(reason) : undefined;
+  return key ? t(key) : '';
+}
 
 /**
  * A queue JOB's own error strings a person can act on — read from a failed
@@ -224,10 +280,23 @@ export function refusalWords(status: number, body: string, locale: string | unde
   return refusalWordsWith(status, body, wordsIn(locale));
 }
 
-function refusalWordsWith(status: number, body: string, t: T): string {
-  const byCode = codeFieldWordsWith(fieldsOf(body), t);
+/**
+ * `whole` is the refusal as `requestFailure` read it, for a caller that says it
+ * again from the clipped `detail` (sayFailure): its code and reason stand in
+ * for what the clip cut off.
+ */
+function refusalWordsWith(
+  status: number,
+  body: string,
+  t: T,
+  whole: Pick<RequestFailure, 'code' | 'reason'> = {},
+): string {
+  const fields = fieldsOf(body);
+  const byCode = codeFieldWordsWith(fields, t);
   if (byCode) return byCode;
-  const code = refusalCode(body);
+  const code = refusalCode(body) || whole.code || '';
+  const byReason = reasonWordsWith(code, typeof fields.reason === 'string' ? fields.reason : whole.reason, t);
+  if (byReason) return byReason;
   for (const [re, key] of CODE_WORDS) if (code && re.test(code)) return t(key);
   return statusWordsWith(status, t);
 }
@@ -239,8 +308,10 @@ export function requestFailure(status: number, body: string, locale: string | un
   err.code = refusalCode(body);
   err.detail = body.slice(0, 300);
   err.said = true;
-  const hint = fieldsOf(body).admin_hint;
+  const fields = fieldsOf(body);
+  const hint = fields.admin_hint;
   if (typeof hint === 'string' && hint) err.hint = hint;
+  if (typeof fields.reason === 'string' && fields.reason) err.reason = fields.reason;
   return err;
 }
 
@@ -343,7 +414,7 @@ export function sayFailure(
   const text = !said
     ? fallback
     : opts.t && typeof e?.status === 'number'
-      ? refusalWordsWith(e.status, e.detail ?? '', opts.t)
+      ? refusalWordsWith(e.status, e.detail ?? '', opts.t, { code: e.code, reason: e.reason })
       : e?.message || fallback;
   if (!said && raw && typeof console !== 'undefined') console.warn('[filex]', raw);
   // ⚠ Both lines are isolated for the reader's direction: `text` may be the

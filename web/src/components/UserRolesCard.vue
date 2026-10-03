@@ -15,10 +15,10 @@
  * delegated one cannot tell what an app key would hand out, and the server
  * refuses (403) — so for anyone else they are shown, read-only.
  *
- * ⚠ A preset and "Clear exceptions" are about the 28 catalogue permissions
+ * ⚠ A preset and "Clear exceptions" are about the catalogue's permissions
  * and leave the person's app exceptions exactly as they are, for everybody:
  * the app decisions are cleared in their own group ("Reset to defaults").
- * Writing the 28 alone used to wipe them silently (0.49 docs review).
+ * Writing the catalogue's alone used to wipe them silently (0.49 docs review).
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';

@@ -138,7 +138,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [RBAC, folder access & API tokens](RBAC.md) - account roles, per-storage RBAC, per-item grants
   (**Admin → Folder access**), what an API token's verbs allow on every surface,
   and the acts that need an administrator signed in
-- [Roles & per-user permissions](PERMISSIONS.md) - what an account may do: 28
+- [Roles & per-user permissions](PERMISSIONS.md) - what an account may do: 29
   permissions, built-in and custom roles, per-person exceptions, delegated
   admins, the permissions installed apps declare, public links that follow
   their creator's right to share, per-protocol enforcement

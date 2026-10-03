@@ -52,9 +52,11 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -106,6 +108,12 @@ type Config struct {
 	Quota    *quota.Service
 	Index    *search.Index
 	Thumbs   *thumb.Pipeline
+	// E2EPolicy is who may encrypt (internal/e2epolicy): a write that CREATES
+	// an encrypted folder's key file or a `.fxe` asks it
+	// (protoperm.EncryptionAllowed). The router's own, handed over like ACL.
+	// nil: New builds one over Store (protoperm.EncryptionPolicy), so a
+	// lost wiring line never switches the rule off.
+	E2EPolicy *e2epolicy.Service
 	// SpoolDir is where uploads are spooled before they are committed.
 	SpoolDir string
 	// MaxSpool caps one upload. 0 uses defaultMaxSpool.
@@ -143,6 +151,9 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Auth == nil || cfg.Store == nil || cfg.Resolver == nil || cfg.Body == nil {
 		return nil, errors.New("ftpsrv: Store, Auth, Resolver and Body are required")
 	}
+	// Who may encrypt: the router's rule, or one built over this server's own
+	// store — never none (protoperm.EncryptionPolicy).
+	cfg.E2EPolicy = protoperm.EncryptionPolicy(cfg.E2EPolicy, cfg.Store, cfg.ACL, cfg.MultiTenant)
 	if cfg.Addr == "" {
 		cfg.Addr = defaultAddr
 	}

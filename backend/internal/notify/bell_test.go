@@ -25,7 +25,7 @@ var everyEvent = []notify.EventType{
 	notify.EventFileDeleted, notify.EventFileMoved, notify.EventFileTrashed,
 	notify.EventShareCreated, notify.EventDropReceived, notify.EventFileInfected,
 	notify.EventCommentAdded, notify.EventE2EEscrowUsed, notify.EventPluginNotice,
-	notify.EventAdminTest,
+	notify.EventAdminTest, notify.EventE2ERequestCreated, notify.EventE2ERequestDecided,
 }
 
 // Bell.Admits is the Go twin of the SQL a bell reads with: "mark read" judges
@@ -86,4 +86,19 @@ func TestBell_OperatorAlarmsStayOutOfAMembersBellAtAnyAddress(t *testing.T) {
 	n, err := svc.UnreadCount(ctx, &reader.ID, notify.MemberBell)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n, "the badge agrees")
+}
+
+// An encryption request is a broadcast for the administrators who decide it:
+// a tenant administrator's bell takes it (it names a folder, so it can be
+// placed in their tenant — handlers/notifications.go does the placing), a
+// member's never does. The answer is addressed to the requester and needs no
+// broadcast rule at all.
+func TestBell_AnEncryptionRequestIsForAdministrators(t *testing.T) {
+	created := string(notify.EventE2ERequestCreated)
+	require.True(t, notify.AdminBell.Admits(created))
+	require.True(t, notify.TenantAdminBell.Admits(created))
+	require.False(t, notify.MemberBell.Admits(created))
+	require.Equal(t, notify.AudienceAdmins, notify.BroadcastAudience(&model.Notification{
+		Event: created, MetaJSON: []byte(`{"node":{"storage_id":1,"path":"Proje","name":"Proje"}}`),
+	}))
 }

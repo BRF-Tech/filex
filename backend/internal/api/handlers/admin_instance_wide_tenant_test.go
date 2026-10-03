@@ -76,6 +76,11 @@ var instanceWideRoutes = []struct {
 	// Already gated before this change — included so the list is the whole
 	// class and not just the part that moved.
 	{"tenant lifecycle", http.MethodGet, "/api/admin/providers", nil},
+	// Whether a tenant may use encryption at all — the operator's ceiling
+	// (handlers/e2e_policy_admin.go). A tenant's own policy is NOT here: it
+	// is that tenant's (TestE2EPolicyAdmin_TenantAdminHoldsItsOwnPolicy).
+	{"encryption ceilings read", http.MethodGet, "/api/admin/e2e/tenants", nil},
+	{"encryption ceiling switch", http.MethodPatch, "/api/admin/e2e/tenants/1", map[string]any{"e2e_allowed": false}},
 	{"storage plugins", http.MethodGet, "/api/admin/plugins", nil},
 	{"app plugins", http.MethodGet, "/api/admin/app-plugins", nil},
 	// Which app opens and draws which kind (0.50): the platform's, like the
@@ -138,7 +143,7 @@ func TestInstanceWideAdmin_SupertenantStillPasses(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/admin/protection", "/api/admin/archives", "/api/admin/external",
-		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers",
+		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers", "/api/admin/e2e/tenants",
 		"/api/admin/login-security", "/api/admin/login-security/locks", "/api/admin/login-security/attempts",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)
@@ -164,7 +169,7 @@ func TestInstanceWideAdmin_SingleTenantAdminUnaffected(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/admin/protection", "/api/admin/archives", "/api/admin/external",
-		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers",
+		"/api/admin/auth-providers", "/api/admin/update", "/api/admin/providers", "/api/admin/e2e/tenants",
 		"/api/admin/login-security", "/api/admin/login-security/locks", "/api/admin/login-security/attempts",
 	} {
 		status, body := doJSON(t, client, http.MethodGet, srv.URL+path, nil)

@@ -18,9 +18,11 @@ import { auditActionLabel, auditResourceOptions, auditTargetLabel, splitAction }
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIDDLEWARE = path.resolve(here, '../../../backend/internal/auth/audit_middleware.go');
 
-/** Every `return "<action>", "<target type>", …` the middleware writes. */
+/** Every `return "<action>", "<target type>", …` the middleware writes.
+ *  ⚠ Names may carry digits (`e2e.folder_cleanup`): a pattern of `[a-z_]` alone
+ *  never sees them, and what it never sees it never holds to a label. */
 function backendPairs(source: string): Array<{ action: string; target: string }> {
-  const re = /return\s+"([a-z_.]+)",\s*"([a-z_]*)",/g;
+  const re = /return\s+"([a-z0-9_.]+)",\s*"([a-z0-9_]*)",/g;
   const out: Array<{ action: string; target: string }> = [];
   for (let m = re.exec(source); m; m = re.exec(source)) out.push({ action: m[1], target: m[2] });
   return out;
@@ -68,6 +70,10 @@ describe('audit labels', () => {
       expect(auditTargetLabel('user', '12', t, te)).toMatch(/#12$/);
     });
   }
+
+  it('the middleware pattern reads a name with a digit in it (none is written there today)', () => {
+    expect(backendPairs('return "e2e.folder_cleanup", "node", nil')).toEqual([{ action: 'e2e.folder_cleanup', target: 'node' }]);
+  });
 
   it('an action the catalogue has never heard of is still readable', () => {
     const { t, te } = lookup(en as Record<string, unknown>);
@@ -139,17 +145,25 @@ function goSources(): string[] {
 }
 
 /** Actions and target types handlers write themselves: `AuditEntry{… Action:
- *  "x.y", TargetType: "z"}`, `AuditAction… = "x.y"`, and the app-plugin
- *  admin's `h.Audit(ctx, uid, "x.y", …)`. */
+ *  "x.y", TargetType: "z"}`, the constants `AuditAction… = "x.y"` and
+ *  `AuditTarget… = "z"` (the encryption policy's rows, e2epolicy/audit.go), and
+ *  the app-plugin admin's `h.Audit(ctx, uid, "x.y", …)`.
+ *
+ *  ⚠ Every name may carry a digit. These read `[a-z_]` only until 2026-10-01,
+ *  and `e2e.folder_cleanup`, `e2e.fxe_header_rewritten`, `e2e.key_file_rewritten`
+ *  (v0.48.0) and all seven `e2e_policy.*` / `e2e_request.*` / `e2e_tenant.*`
+ *  rows were invisible to them: three of those reached a Turkish panel as the
+ *  raw English verb and nothing failed. */
 function handlerRows(): { actions: string[]; targets: string[] } {
   const actions = new Set<string>();
   const targets = new Set<string>();
   for (const src of goSources()) {
-    if (!/AuditEntry\{|AuditAction|\.Audit\(/.test(src)) continue;
-    for (const m of src.matchAll(/Action:\s*"([a-z_]+\.[a-z_.]+)"/g)) actions.add(m[1]);
-    for (const m of src.matchAll(/AuditAction\w*\s*=\s*"([a-z_]+\.[a-z_.]+)"/g)) actions.add(m[1]);
-    for (const m of src.matchAll(/\.Audit\([^,]+,[^,]+,\s*"([a-z_]+\.[a-z_.]+)"/g)) actions.add(m[1]);
-    for (const m of src.matchAll(/TargetType:\s*"([a-z_]+)"/g)) targets.add(m[1]);
+    if (!/AuditEntry\{|AuditAction|AuditTarget|\.Audit\(/.test(src)) continue;
+    for (const m of src.matchAll(/Action:\s*"([a-z0-9_]+\.[a-z0-9_.]+)"/g)) actions.add(m[1]);
+    for (const m of src.matchAll(/AuditAction\w*\s*=\s*"([a-z0-9_]+\.[a-z0-9_.]+)"/g)) actions.add(m[1]);
+    for (const m of src.matchAll(/\.Audit\([^,]+,[^,]+,\s*"([a-z0-9_]+\.[a-z0-9_.]+)"/g)) actions.add(m[1]);
+    for (const m of src.matchAll(/TargetType:\s*"([a-z0-9_]+)"/g)) targets.add(m[1]);
+    for (const m of src.matchAll(/AuditTarget\w*\s*=\s*"([a-z0-9_]+)"/g)) targets.add(m[1]);
   }
   return { actions: [...actions], targets: [...targets] };
 }
@@ -162,6 +176,11 @@ describe('audit labels — every writer, not only the middleware', () => {
     expect(segments.length).toBeGreaterThan(15);
     expect(segments).toContain('app-plugins');
     expect(written.actions).toContain('share.pin_revealed');
+    // Names with a digit in them: these scans read `[a-z_]` only until 2026-10-01,
+    // and the encryption rows were never seen (see handlerRows).
+    expect(written.actions).toContain('e2e_policy.update');
+    expect(written.actions).toContain('e2e.folder_cleanup');
+    expect(written.targets).toContain('e2e_policy');
   });
 
   for (const [lang, catalogue] of [['en', en], ['tr', tr]] as const) {
@@ -205,6 +224,31 @@ describe('audit labels — every writer, not only the middleware', () => {
     const { t, te } = lookup(tr as Record<string, unknown>);
     expect(auditTargetLabel('user', '12', t, te, 'ayse@example.com')).toBe('Kullanıcı “ayse@example.com”');
     expect(auditTargetLabel('user', '12', t, te)).toBe('Kullanıcı #12');
+  });
+
+  // What the scans above cannot say: that a row READS right. They hold every name
+  // to a label's existence; this holds the encryption rows to their sentences.
+  it('the encryption rows read as sentences, and say which policy, tenant or request', () => {
+    const { t: tEn, te: teEn } = lookup(en as Record<string, unknown>);
+    const { t: tTr, te: teTr } = lookup(tr as Record<string, unknown>);
+    expect(auditActionLabel('e2e_policy.update', tEn, teEn)).toBe('Encryption policy: updated');
+    expect(auditActionLabel('e2e_tenant.update', tEn, teEn)).toBe('Tenant encryption: updated');
+    expect(auditActionLabel('e2e_request.use', tEn, teEn)).toBe('Encryption request: used');
+    expect(auditActionLabel('e2e_policy.update', tTr, teTr)).toBe('Şifreleme politikası: güncellendi');
+    expect(auditActionLabel('e2e_tenant.update', tTr, teTr)).toBe('Kiracı şifrelemesi: güncellendi');
+    expect(auditActionLabel('e2e_request.approve', tTr, teTr)).toBe('Şifreleme isteği: onaylandı');
+    // …and the three housekeeping rows the server has written since v0.48.0.
+    expect(auditActionLabel('e2e.folder_cleanup', tEn, teEn)).toBe('Encryption: folder cleaned up');
+    expect(auditActionLabel('e2e.fxe_header_rewritten', tEn, teEn)).toBe('Encryption: file header rewritten');
+    expect(auditActionLabel('e2e.key_file_rewritten', tEn, teEn)).toBe('Encryption: key file rewritten');
+    expect(auditActionLabel('e2e.folder_cleanup', tTr, teTr)).toBe('Şifreleme: klasör temizlendi');
+    expect(auditActionLabel('e2e.fxe_header_rewritten', tTr, teTr)).toBe('Şifreleme: dosya başlığı yeniden yazıldı');
+    expect(auditActionLabel('e2e.key_file_rewritten', tTr, teTr)).toBe('Şifreleme: anahtar dosyası yeniden yazıldı');
+    // A tenant's ceiling is a tenant row; a policy is a policy row; an instance's own policy has no id.
+    expect(auditTargetLabel('providers', '3', tEn, teEn, 'acme')).toBe('Tenant “acme”');
+    expect(auditTargetLabel('e2e_policy', '3', tEn, teEn, 'acme')).toBe('Encryption policy “acme”');
+    expect(auditTargetLabel('e2e_policy', '', tEn, teEn)).toBe('Encryption policy');
+    expect(auditTargetLabel('e2e_request', '7', tTr, teTr, 'Dosyalar://Maaşlar')).toBe('Şifreleme isteği “Dosyalar://Maaşlar”');
   });
 
   it('an action taken through the AI admin surface reads as the same action, marked (AI)', () => {

@@ -23,8 +23,8 @@ const ROLE = `No delete except Scratch ${RUN}`;
 
 // Standard user minus files.delete — every permission outside the admin area.
 const STANDARD_WITHOUT_DELETE = [
-  'files.download', 'files.create', 'files.modify', 'files.rename', 'files.move', 'files.purge', 'files.tag',
-  'share.links', 'share.upload_links', 'share.users', 'comments.write', 'ai.use', 'plugins.run',
+  'files.download', 'files.create', 'files.modify', 'files.rename', 'files.move', 'files.purge', 'files.encrypt',
+  'files.tag', 'share.links', 'share.upload_links', 'share.users', 'comments.write', 'ai.use', 'plugins.run',
   'access.webdav', 'access.sftp', 'access.ftp', 'access.s3', 'access.nfs', 'access.api', 'access.desktop',
   'account.edit',
 ];

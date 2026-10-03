@@ -159,6 +159,7 @@
     "apps": "Apps",
     "appearance": "Appearance",
     "roles": "Roles",
+    "encryption": "Encryption",
     "loginSecurity": "Sign-in security",
     "groups": "Groups",
     "tenants": "Tenants",
@@ -1069,6 +1070,10 @@
       "permissions": "Built-in role",
       "roles": "Role",
       "permission_rule": "Role",
+      "e2e": "Encryption",
+      "e2e_policy": "Encryption policy",
+      "e2e_tenant": "Tenant encryption",
+      "e2e_request": "Encryption request",
       "login": "Sign-in",
       "login_security": "Sign-in security",
       "group": "Group",
@@ -1142,6 +1147,10 @@
       "reject": "rejected",
       "expire": "expired",
       "supersede": "closed because its source changed",
+      "use": "used",
+      "folder_cleanup": "folder cleaned up",
+      "fxe_header_rewritten": "file header rewritten",
+      "key_file_rewritten": "key file rewritten",
       "unlocked": "lock lifted",
       "members_add": "members added",
       "member_remove": "member removed",
@@ -1180,12 +1189,14 @@
       "permissions": "Built-in role",
       "permission_rule": "Role",
       "plugin_request": "Plugin request",
+      "e2e_policy": "Encryption policy",
       "login": "Sign-in",
       "login_security": "Sign-in security",
       "group": "Group",
       "group_grant": "Group folder access",
       "settings": "Settings",
       "providers": "Tenant",
+      "e2e_request": "Encryption request",
       "tenant_domain": "Own domain",
       "file_type": "File type"
     },
@@ -1692,6 +1703,8 @@
       "comment_added": "New comment",
       "e2e_escrow_used": "Escrow key used",
       "e2e_password_changed": "Folder password changed",
+      "e2e_request_created": "Encryption request",
+      "e2e_request_decided": "Encryption request answered",
       "plugin_notice": "App notification",
       "update_available": "Update available",
       "update_applied": "Update applied",
@@ -1965,6 +1978,8 @@
       "comment_added": "Comment added to a file or folder",
       "e2e_escrow_used": "Encrypted folder opened with the escrow key instead of its password",
       "e2e_password_changed": "The password of an encrypted folder was changed, or reset with its recovery key",
+      "e2e_request_created": "Encryption request - someone asked to encrypt a folder or a file under the approval policy",
+      "e2e_request_decided": "Encryption request approved or rejected by an administrator",
       "plugin_notice": "App notification - an installed app sent a message (signature request, finished job, …)"
     },
     "secretSet": "Secret set",
@@ -1999,7 +2014,8 @@
     "offReason": {
       "antivirus": "Virus scanning is off (Protection).",
       "escrow": "No escrow key is set up for encrypted folders.",
-      "appPlugins": "Apps are switched off on this server."
+      "appPlugins": "Apps are switched off on this server.",
+      "e2eApproval": "Only when the encryption policy asks for approval."
     }
   },
   "protection": {
@@ -3134,6 +3150,8 @@
         "comment_added": "Someone comments on a file",
         "e2e_escrow_used": "An encrypted folder is opened with the escrow key",
         "e2e_password_changed": "The password of your encrypted folder is changed",
+        "e2e_request_created": "Someone asks to encrypt a folder or a file",
+        "e2e_request_decided": "Your encryption request is answered",
         "plugin_notice": "An installed app sends you a message"
       }
     },
@@ -3304,6 +3322,10 @@
         "purge": {
           "label": "Delete permanently",
           "hint": "Empty the trash; delete on storages that have no trash."
+        },
+        "encrypt": {
+          "label": "Encrypt",
+          "hint": "Create an end-to-end encrypted folder or file, or encrypt a folder you already have."
         },
         "tag": {
           "label": "Tag files",
@@ -3538,6 +3560,97 @@
       "title": "Two-factor authentication required",
       "body": "Your administrator requires two-factor authentication for this account. Set it up to continue.",
       "action": "Set up now"
+    }
+  },
+  "encryption": {
+    "title": "Encryption",
+    "subtitle": "Choose who may create end-to-end encrypted folders and files here, and answer the requests waiting for your approval.",
+    "policy": {
+      "title": "Who may encrypt",
+      "label": "Policy",
+      "scopeTenant": "Applies to {tenant}.",
+      "scopeInstance": "Applies to this whole server.",
+      "unavailable": "The platform operator has switched encryption off for your organization. You can still choose a policy; it takes effect when encryption is switched on again.",
+      "saved": "Encryption policy saved",
+      "options": {
+        "off": "Off - nobody, administrators included",
+        "admins": "Administrators only",
+        "permitted": "Everyone whose role allows it",
+        "approval": "Everyone whose role allows it, after an administrator’s approval"
+      },
+      "hints": {
+        "off": "Nobody can create a new encrypted folder or file. Existing ones keep working: they open, take new files and can be decrypted.",
+        "admins": "Only administrators may encrypt; everybody else is refused.",
+        "permitted": "Anyone whose role includes “Encrypt” in that folder (Roles). This is how filex has always worked.",
+        "approval": "As above, and anyone who is not an administrator needs an approval here first. Administrators are never asked. An approval is for one person and is used once. A folder approval covers that folder or one folder directly inside it; a file approval covers one new encrypted file in its folder."
+      }
+    },
+    "requests": {
+      "title": "Encryption requests",
+      "subtitle": "Under the approval policy, people ask here before they encrypt.",
+      "expiresAfter": "Unanswered requests and unused approvals lapse after {count} day. | Unanswered requests and unused approvals lapse after {count} days.",
+      "pendingCount": "{count} waiting",
+      "showHistory": "Show answered requests",
+      "hideHistory": "Show waiting requests only",
+      "empty": "No request is waiting.",
+      "emptyHistory": "No requests yet.",
+      "loadFailed": "The requests could not be loaded.",
+      "fields": {
+        "path": "Location",
+        "requester": "Requested by",
+        "reason": "Reason",
+        "created": "Requested",
+        "status": "Status"
+      },
+      "kind": {
+        "folder": "Folder",
+        "file": "One new encrypted file in this folder"
+      },
+      "status": {
+        "pending": "Waiting",
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "expired": "Expired",
+        "used": "Used"
+      },
+      "actions": {
+        "approve": "Approve",
+        "reject": "Reject…"
+      },
+      "approvedBy": "approved by {who}",
+      "rejectedBy": "rejected by {who}",
+      "approve": {
+        "title": "Approve the request",
+        "body": "{who} may then encrypt {path}, or one folder directly inside it, new or existing. The approval can be used once.",
+        "bodyFile": "{who} may then create one new encrypted file in {path}. The approval can be used once.",
+        "note": "Note (optional - the requester sees it)",
+        "confirm": "Approve"
+      },
+      "reject": {
+        "title": "Reject the request",
+        "reason": "Why (the requester sees it)",
+        "required": "Write why - the requester is told.",
+        "confirm": "Reject"
+      },
+      "approved": "Request approved: {who}",
+      "rejected": "Request rejected: {who}",
+      "notPending": "This request is no longer waiting: it was answered or it lapsed."
+    },
+    "tenants": {
+      "title": "Tenants",
+      "subtitle": "Switch encryption off for a tenant and nobody there - administrators included - can create encrypted folders or files. What is already encrypted keeps working.",
+      "supertenant": "Platform operator",
+      "fields": {
+        "name": "Tenant",
+        "policy": "Policy",
+        "available": "Encryption available"
+      },
+      "state": {
+        "on": "On",
+        "off": "Off"
+      },
+      "on": "Encryption switched on for {name}",
+      "off": "Encryption switched off for {name}"
     }
   },
   "groups": {

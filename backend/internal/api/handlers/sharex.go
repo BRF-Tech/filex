@@ -139,6 +139,9 @@ func (h *ShareX) Upload(w http.ResponseWriter, r *http.Request) {
 	// chunk threshold WriteStream stages it so this reply does not wait on the
 	// backend write.
 	if _, err := h.ops.WriteStream(r.Context(), dest, f, fh.Size); err != nil {
+		if writeE2ERefusal(w, r, err) {
+			return
+		}
 		writeAIError(w, err)
 		return
 	}

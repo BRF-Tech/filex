@@ -79,10 +79,10 @@ var everyoneEvents = []EventType{
 
 // fileBroadcastEvents are the broadcasts that name a file (they carry a
 // NodeRef, so meta.node.storage_id places them in a tenant): an antivirus hit,
-// an upload that never landed, an app's notice about a document, and the
-// notices that fall back to a broadcast when their emitter finds no owner to
-// address — a drop, an escrow opening, a share or a comment with no actor on
-// record.
+// an upload that never landed, an app's notice about a document, an
+// encryption request waiting for the tenant's administrators, and the notices
+// that fall back to a broadcast when their emitter finds no owner to address —
+// a drop, an escrow opening, a share or a comment with no actor on record.
 //
 // ⚠ An allowlist on purpose: a new broadcast kind reaches a tenant admin's
 // bell only once somebody decides it can be placed.
@@ -93,6 +93,7 @@ var fileBroadcastEvents = []EventType{
 	EventDropReceived,
 	EventE2EEscrowUsed,
 	EventE2EPasswordChanged,
+	EventE2ERequestCreated,
 	EventShareCreated,
 	EventCommentAdded,
 }

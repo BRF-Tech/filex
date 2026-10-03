@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Who may encrypt is an organisation's decision** ([E2E-ENCRYPTION.md → Who may encrypt](docs/E2E-ENCRYPTION.md#who-may-encrypt)).
+  Three layers must all say yes before anybody starts encrypting:
+  - the platform operator's **tenant ceiling** (`e2e_allowed`, Admin → Encryption → Tenants; multi-tenant installs only);
+  - the **tenant policy** - Off (administrators included), Administrators only, Permitted (the default: today's behaviour), or **Approval**;
+  - the new permission **`files.encrypt`** - per role, per person, per folder. The built-in User role and the Standard and Upload-only presets hold it (a drop-box account could encrypt before, and still can); a Viewer never does.
+  - Under **Approval**, **Request encryption…** leaves a request with a reason; the tenant's administrators approve or reject it under Admin → Encryption. An approval is for that person, is used **once**, and lasts **7 days**: a folder approval for `P` covers `P` itself or one folder directly inside `P`, new or existing, and a single file's approval is its folder's and covers one new encrypted file there. A request nobody answers lapses after 7 days too; an hourly sweep closes both, and answering one that lapsed, or one that was answered already, is `409 not_pending`.
+  - "Encrypting" is creating a key file where there is none, or a new `.fxe` - and landing on one of those names by a rename, a move or a copy under a new name (the explorer and the queue, the agent API, WebDAV, SFTP, FTPS and NFS ask it like a create at the destination), unless it only carries what is encrypted already: a folder of any name, a `.fxe` that stays a `.fxe`, or a key file that stays its own folder's. A `.fxe` given the key file's name, or a key file moved into another folder, is asked. A queued rename, move or copy that was free because its item was a folder fails when it runs if a file has taken the folder's place. "Creates" means there is no file at the path: overwriting a key file or a `.fxe` that is there stays free, and a folder with the name does not count as the file. Opening, adding to, re-keying and decrypting what is already encrypted stay free, and so do restores from the trash or a version and the document server's save.
+  - Asked on every door: the web and desktop apps, uploads (single and chunked), the text editor, New document and a draft's save, the agent API (upload, move, MCP `file_write` and `file_move`, ShareX, upload tickets, and 0.50's `file_copy`, `archive_create`, `archive_extract` and `app_run`), file requests, archives (a refused member is skipped), apps, WebDAV, SFTP, FTPS, NFS and S3 (over HTTP a refusal is `403 e2e_not_allowed` with a `reason`; an MCP tool answers an error result naming it; the protocols refuse in their own words). On the agent surface an encrypted folder's key file is refused before the rule, `403 RESERVED_NAME` - a folder's too: that surface never writes one. A file request is judged for the link's creator and never spends the creator's approval: under Approval its key file or `.fxe` is refused. When a store failure leaves the rule undecided - a lookup behind the rule, or the storage row, the app's account or the file request's creator a door looks up to ask it - the door fails the write as its own server failure, not as a refusal: the web app's routes and the agent REST API `500`, an MCP tool an error result, an upload ticket and a file request `503 storage_unavailable`, an archive skips the member, WebDAV `500`, S3 `InternalError`, SFTP `SSH_FX_FAILURE`, FTPS `550` saying so, NFS `ACCES` for a create. The rule's own log line, one for each write it could not decide, names the storage, the person and the error, never the path or a member's name; an app job that fails this way is also reported by the queue, which names the output.
+  - The new **Admin → Encryption** page holds the policy, the requests and - for the platform operator - every tenant's ceiling. The explorer asks ahead (`POST /api/files/e2e/allowed`, up to 1000 paths) and offers **Create encrypted folder…** and **Encrypt with E2EE…** - or, under Approval, **Request encryption…** - only where it would be allowed; capabilities carry `e2e_policy` for signed-in callers.
+  - **New notifications and audit rows.** `e2e.request_created` (one broadcast: the tenant's administrators and the platform operator) and `e2e.request_decided` (the person who asked); their two switches in a person's notification settings are offered only where they can reach that person - under Approval with the tenant's ceiling on - and greyed elsewhere, also for an administrator whose own tenant is under another policy. Audit: `e2e_request.create|approve|reject|expire|use` - the `use` row names the approval and, in `encrypted`, the folder that was actually encrypted - `e2e_policy.update` and `e2e_tenant.update`.
+  - **Changing who may encrypt is a signed-in administrator's:** an API key gets `403 session_required` on `/api/admin/e2e`, on a tenant's ceiling, on the decision of a request, and on the `e2e.policy` setting through `/api/admin/settings`, `/api/ai/admin/settings` and the MCP settings tools (a session's write there is audited as `e2e_policy.update`, like the page's own). A tenant's policy and the operator's ceiling are written one column at a time, so neither save can undo the other; saving the value already stored writes nothing; the ceiling answers `409 single_tenant` on a single-tenant install.
+  - Migration `00080` adds `providers.e2e_allowed`, `providers.e2e_policy` and the `e2e_requests` table.
+
+### Changed
+
+- **An upgrade still changes nobody's access:** on first start, every saved role
+  (the built-in User role, and each custom role and its folder parts) that holds
+  `files.create` also gets `files.encrypt`, and so does every person whose own
+  exceptions allow `files.create` - creating a key file or a `.fxe` needed only
+  `files.create` before. A rename, a move or a copy onto one of those names now
+  needs `files.encrypt` beside its own permission, so a role that may rename or
+  move but not create cannot give a file such a name any more. The catalogue a server has seen is kept in the
+  `permissions.catalogue` setting, so a permission added later is merged once and
+  never again; the setting only ever grows, so a version started after a later
+  one does not make the later one's permissions new again.
+- ⚠ **Rolling back to a version without `files.encrypt`** (0.49 or older): the
+  older Roles and People pages cannot save a role or a person's exceptions the
+  upgrade gave `files.encrypt` to (`400`, an unknown permission) until the
+  server is upgraded again. Upgrading again does not give `files.encrypt` back
+  where an administrator took it away in between, nor to a role saved on the
+  older version: it was merged once, at the first upgrade
+  ([PERMISSIONS.md](docs/PERMISSIONS.md)).
+- A refused encryption in the explorer is said in words (the server's reason)
+  instead of "could not create the encrypted folder", and a folder made before
+  its key file was refused is listed at once.
+- ⚠ **MySQL: migration `00080` makes two columns byte-exact.** The new
+  `e2e_requests.path` is `utf8mb4_0900_bin` (the collation `00041` chose for
+  names and paths), so an approval for `Muhasebe` is not one for `muhasebe`. And
+  `settings.setting_key`, which `00001` made case- and accent-insensitive, is
+  altered to the same collation, so that no spelling of a setting key reaches
+  another key's row: the settings API guards `e2e.policy` (a session, one of the
+  four values, an audit row) by comparing the key exactly, and on MySQL
+  `E2E.POLICY` or `e2é.policy` would have passed that guard and still read and
+  written the `e2e.policy` row. The `ALTER TABLE` rebuilds `settings`, a small
+  table, and cannot fail on existing data (keys that were unique ignoring case
+  and accent are unique byte for byte). filex's own keys are lower-case and
+  are read in the spelling they were written in; only something that leaned on
+  MySQL matching a key by its case or accent (a hand-written row, a script)
+  stops matching. **Rolling back** restores the old collation and stops with
+  error 1062 if two keys that differ only by case or accent were written after
+  the upgrade; rename or remove one of each first. SQLite and PostgreSQL
+  already compared keys exactly.
+
+### Fixed
+
+- The Audit page names `e2e.folder_cleanup`, `e2e.fxe_header_rewritten` and
+  `e2e.key_file_rewritten` - written since 0.48.0 - in every language; they
+  showed as their raw ids.
+
 ## [0.50.0] - 2026-10-02
 
 > ⚠ **Desktop app on Linux: Chromium's sandbox is no longer optional**

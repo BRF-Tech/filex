@@ -24,6 +24,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 
 import UserSettingsDialog from '@brftech/filex-core/src/components/UserSettingsDialog.vue';
 import type { UserSettingsHost, SettingsUser } from '@brftech/filex-core/src/lib/userSettingsHost';
+import { WEBHOOK_EVENTS, userEventKey } from '@brftech/filex-core/src/lib/webhookEvents';
+import { en as coreEn } from '@brftech/filex-core/src/locales/en';
 import { tr } from '@brftech/filex-core/src/locales/tr';
 import { answerAccountPrefs } from '../helpers/accountPrefs';
 
@@ -173,6 +175,112 @@ describe('the core settings dialog, with only what an explorer can give it', () 
     ]);
     expect(w.text()).toContain('Kullanıcı ayarları');
     expect(w.text()).not.toMatch(/Kullanici|Guvenlik|Bildirimler olmadan/);
+  });
+});
+
+// The two encryption request switches (lib/webhookEvents), as the explorer's
+// own host draws them: who the account is comes from the HOST (`isAdmin`, the
+// role the explorer read from /api/auth/me), what the server says of the
+// instance from the capabilities.
+//
+// ⚠ `caller_admin` is the supertenant's alone on a multi-tenant install. A
+// tenant's own administrator — who is sent every new request of their tenant —
+// has `isAdmin` and not `caller_admin`, and must still be offered the switch.
+describe('the encryption request switches, in the explorer’s host', () => {
+  const VERSION = '0.49.0';
+  const policy = (p: string) => ({ e2e_policy: { available: true, policy: p } });
+  const CREATED = 'e2e.request_created';
+  const DECIDED = 'e2e.request_decided';
+
+  async function notifications(extra: Partial<UserSettingsHost>, locale = 'en') {
+    const { host } = plainHost(extra, locale);
+    const w = open(host);
+    await flushPromises();
+    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+    return w;
+  }
+  const sw = (w: VueWrapper, ev: string) => w.find(`[data-testid="user-settings-event-${ev}"]`);
+
+  it('offers a tenant’s own administrator the switch for a new request — by the role, not by caller_admin', async () => {
+    const w = await notifications({ isAdmin: true, capabilities: { version: VERSION, caller_admin: false, ...policy('approval') } });
+    for (const ev of [CREATED, DECIDED]) {
+      expect(sw(w, ev).exists(), `${ev} offered`).toBe(true);
+      expect(sw(w, ev).attributes('disabled'), `${ev} switchable`).toBeUndefined();
+    }
+  });
+
+  it('still offers the supertenant both', async () => {
+    const w = await notifications({ isAdmin: true, capabilities: { version: VERSION, caller_admin: true, ...policy('approval') } });
+    for (const ev of [CREATED, DECIDED]) {
+      expect(sw(w, ev).exists(), `${ev} offered`).toBe(true);
+      expect(sw(w, ev).attributes('disabled'), `${ev} switchable`).toBeUndefined();
+    }
+  });
+
+  it('offers a member the answer to their own request and not the switch for a new one', async () => {
+    const w = await notifications({ isAdmin: false, capabilities: { version: VERSION, caller_admin: false, ...policy('approval') } });
+    expect(sw(w, CREATED).exists()).toBe(false);
+    expect(sw(w, DECIDED).exists()).toBe(true);
+  });
+
+  it('greys both for a tenant’s own administrator while the policy asks for no approval — in the reader’s language', async () => {
+    const w = await notifications(
+      { isAdmin: true, capabilities: { version: VERSION, caller_admin: false, ...policy('permitted') } },
+      'tr',
+    );
+    for (const ev of [CREATED, DECIDED]) {
+      expect(sw(w, ev).attributes('disabled'), `${ev} cannot be switched`).toBeDefined();
+      expect(w.find(`[data-testid="user-settings-event-off-${ev}"]`).text()).toBe(tr['webhooks.offReason.e2eApproval']);
+    }
+  });
+
+  it('offers a member neither while the policy asks for no approval', async () => {
+    const w = await notifications({ isAdmin: false, capabilities: { version: VERSION, caller_admin: false, ...policy('permitted') } });
+    expect(sw(w, CREATED).exists()).toBe(false);
+    expect(sw(w, DECIDED).exists()).toBe(false);
+  });
+});
+
+// Every switch the dialog offers has a NAME — a sentence, never the key it is
+// looked up by. ⚠ `e2e.password_changed` drew
+// `userSettings.notifications.events.e2e_password_changed` in the explorer and
+// the desktop app from v0.48.0 on: its label lived in the admin app's JSON
+// only. This reads what a person sees; webhooks/eventCatalog names which table
+// lacks a label.
+describe('every switch the dialog offers has a name', () => {
+  it.each(['en', 'tr'] as const)('in %s: no event is drawn as its raw key', async (locale) => {
+    // A host that makes every event possible, so none is left out of the
+    // list: the supertenant's administrator, every service on, and a tenant
+    // whose policy asks for approval.
+    const { host } = plainHost(
+      {
+        isAdmin: true,
+        capabilities: {
+          version: '0.49.0',
+          caller_admin: true,
+          antivirus: true,
+          e2e_escrow: { enabled: true },
+          app_plugins: { enabled: true },
+          e2e_policy: { available: true, policy: 'approval' },
+        },
+      },
+      locale,
+    );
+    const w = open(host);
+    await flushPromises();
+    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+    const table = locale === 'en' ? coreEn : tr;
+
+    const drawn: Record<string, string> = {};
+    for (const ev of WEBHOOK_EVENTS) {
+      const sw = w.find(`[data-testid="user-settings-event-${ev}"]`);
+      expect(sw.exists(), `${ev} is offered`).toBe(true);
+      drawn[ev] = sw.element.closest('.fx-us__switch-row')?.querySelector('.fx-us__event-label')?.textContent?.trim() ?? '';
+    }
+    const raw = WEBHOOK_EVENTS.filter((ev) => !drawn[ev] || drawn[ev].includes('userSettings.') || drawn[ev] === userEventKey(ev));
+    expect(raw, `drawn as a raw key or not at all: ${raw.join(', ')}`).toEqual([]);
+    // …and each says what the explorer's catalogue says.
+    for (const ev of WEBHOOK_EVENTS) expect(drawn[ev], ev).toBe(table[userEventKey(ev)]);
   });
 });
 
