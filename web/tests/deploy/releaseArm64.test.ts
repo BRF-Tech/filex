@@ -103,8 +103,11 @@ describe('the release ships arm64', () => {
     expect(byLabel.linux.os).toBe('ubuntu-latest');
     expect(byLabel.windows.arches).toBe('x64 arm64');
     expect(byLabel.store.arches).toBe('x64 arm64');
-    expect(byLabel.macos.os).toBe('macos-14');
+    // Pinned, never macos-latest: the runner's arch is the package's arch.
+    // macos-15 (arm64): GitHub retires the macOS 14 images on 2026-11-02.
+    expect(byLabel.macos.os).toBe('macos-15');
     const release = code('release.yml');
+    expect(release, 'no job follows macos-latest').not.toMatch(/macos-latest/);
     expect(step(release, 'fpm for the arm64 .deb and .rpm')).toMatch(/USE_SYSTEM_FPM=true/);
     const snap = step(release, 'snapcraft + LXD for the arm64 snap');
     expect(snap).toMatch(/lxd init --auto/);
@@ -177,7 +180,7 @@ describe('the release ships arm64', () => {
   it.runIf(!!DIR)('runs the arm64 CLI, server and images on arm64 machines', () => {
     const release = code('release.yml');
     const smoke = job(release, 'cli-smoke');
-    for (const [os, asset] of [['ubuntu-24.04-arm', 'filex-linux-arm64'], ['windows-11-arm', 'filex-windows-arm64.exe'], ['macos-14', 'filex-darwin-arm64']]) {
+    for (const [os, asset] of [['ubuntu-24.04-arm', 'filex-linux-arm64'], ['windows-11-arm', 'filex-windows-arm64.exe'], ['macos-15', 'filex-darwin-arm64']]) {
       expect(smoke, os).toMatch(new RegExp(`os: ${os}, label: [\\w-]+, asset: ${asset.replace('.', '\\.')}, arch: arm64`));
     }
     expect(smoke).toMatch(/smoke-cli\.mjs --binary "bin\/\$ASSET" --expect-arch/);

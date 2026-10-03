@@ -156,10 +156,12 @@ jobs:
           fi
           # The desktop rows. `script` is the package.json script for the
           # row's own (x64 or native) build; `arches` what the row produces.
-          # ⚠ macos-14 is pinned rather than macos-latest: the runner's arch IS
+          # ⚠ macos-15 is pinned rather than macos-latest: the runner's arch IS
           # the artifact's arch (electron-builder defaults to the host, and
           # fetch-cli.mjs compiles the embedded CLI for the host), so a silent
-          # image bump must not silently change what users download.
+          # image bump must not silently change what users download. It was
+          # macos-14, whose images GitHub retires on 2026-11-02; cli-smoke pins
+          # the same image.
           # ⚠ Linux arm64 builds NATIVELY on ubuntu-24.04-arm: its snap has no
           # prebuilt electron-builder template (x64 and armv7l only) and is
           # built by real snapcraft, which cannot cross-build. Windows arm64
@@ -176,7 +178,7 @@ jobs:
               {"os":"windows-latest","label":"windows","script":"dist:win","arches":"x64 arm64"},
               {"os":"ubuntu-latest","label":"linux","script":"dist:linux","arches":"x64"},
               {"os":"ubuntu-24.04-arm","label":"linux-arm64","script":"dist:linux","arches":"arm64"},
-              {"os":"macos-14","label":"macos","script":"dist:mac","arches":"arm64"},
+              {"os":"macos-15","label":"macos","script":"dist:mac","arches":"arm64"},
               {"os":"windows-latest","label":"store","script":"dist:store","arches":"x64 arm64"}]}'
           fi
           {
@@ -406,7 +408,7 @@ jobs:
         include:
           - { os: ubuntu-24.04-arm, label: linux-arm64, asset: filex-linux-arm64, arch: arm64 }
           - { os: windows-11-arm, label: windows-arm64, asset: filex-windows-arm64.exe, arch: arm64 }
-          - { os: macos-14, label: macos-arm64, asset: filex-darwin-arm64, arch: arm64 }
+          - { os: macos-15, label: macos-arm64, asset: filex-darwin-arm64, arch: arm64 }
           - { os: ubuntu-latest, label: linux-amd64, asset: filex-linux-amd64, arch: amd64 }
     runs-on: ${{ matrix.os }}
     env:

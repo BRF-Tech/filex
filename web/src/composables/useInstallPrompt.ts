@@ -331,7 +331,7 @@ export function desktopDownloadsFor(
     ];
   }
   // ⚠ Apple Silicon only, and unsigned: the CI runner's arch is the artifact's
-  // arch (macos-14 = arm64), and there is no Developer ID yet, so the first
+  // arch (macos-15 = arm64), and there is no Developer ID yet, so the first
   // launch is a Gatekeeper "Open Anyway"; the hint says so up front instead
   // of letting the user find out from a dialog that reads like a virus alert.
   // Homebrew second: the Mac app cannot update itself until it is signed, and
