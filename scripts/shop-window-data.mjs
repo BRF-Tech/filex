@@ -135,9 +135,9 @@ export const EXTERNAL_SENTINELS = [
 export const REPO_ABOUT =
   'Self-hosted file manager: one Go binary, a full web UI, and storage that ' +
   'plugs in - local, S3, SFTP, WebDAV, FTP, SMB. The same tree is also ' +
-  'reachable AS S3, SFTP, FTPS, NFS and WebDAV, so rclone, restic, WinSCP ' +
-  'or a scanner land where the browser does. Embeddable UI, desktop app, ' +
-  'built-in MCP server. MIT.';
+  'reachable AS S3, SFTP, FTPS, NFS and WebDAV. Sign in with SSO, LDAP or ' +
+  "the server's Windows/Linux accounts. Groups, multi-tenant, E2E folders, " +
+  'sandboxed apps, desktop app, built-in MCP server. MIT.';
 
 /** The `homepage` field beside it. Not the docs site: filex.sh links there. */
 export const REPO_HOMEPAGE = 'https://filex.sh';
