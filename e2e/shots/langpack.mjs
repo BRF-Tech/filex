@@ -11,12 +11,12 @@
 //
 // ⚠⚠ Three packs, and which three is not a choice this file gets to make.
 // README: "Spanish, German and French ship as examples." There is a fourth
-// pack on the maintainer's machine, `G:/filex-lang-ar`, and it is filex's
-// right-to-left TEST FIXTURE — not published, not advertised (the maintainer,
-// 2026-09-19). This picture is in README.md and in docs/APP-PLUGINS.md, so a
-// row for a language nobody can install would be the vitrine advertising
-// something that does not exist. `findApp` cannot even see it
-// (e2e/helpers/app-locations.mjs).
+// pack on the maintainer's machine, a sibling checkout (`../filex-lang-ar`),
+// and it is filex's right-to-left TEST FIXTURE — not published, not
+// advertised (the maintainer, 2026-09-19). This picture is in README.md and
+// in docs/APP-PLUGINS.md, so a row for a language nobody can install would be
+// the vitrine advertising something that does not exist. `findApp` cannot
+// even see it (e2e/helpers/app-locations.mjs).
 //
 // ⚠⚠ A language pack is a manifest and nothing that runs (docs/APP-PLUGINS.md →
 // Language packs), so it is the one "app" with no `plugin.wasm` to find: its

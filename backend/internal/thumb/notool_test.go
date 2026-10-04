@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -84,16 +82,23 @@ func TestNoTool_OfficeNeedsOnlyOfficeNotAProgramHere(t *testing.T) {
 
 // Once the program is installed (the probe runs at boot), the next listing
 // asks for the file again, and the render is real.
+//
+// The clip is made here, by the program the test is about. It used to be read
+// from e2e/fixtures, outside the Go module, and the release tool's Go gates
+// copy backend/ alone: the public export's gate failed with "no such file"
+// (0.50.0, #141).
 func TestNoTool_DrawnOnceTheProgramArrives(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		t.Skip("ffmpeg is not installed here")
+		t.Skip("ffmpeg not in PATH: the clip is made with it, and the render this test proves needs it")
 	}
 	ctx := context.Background()
 	store, pipe, st, root := localPipeline(t, thumb.Capabilities{Image: true, SVG: true})
-	_, self, _, _ := runtime.Caller(0)
-	clip, err := os.ReadFile(filepath.Join(filepath.Dir(self), "..", "..", "..", "e2e", "fixtures", "file-types", "sample.mp4"))
+	made := thumb.MakeClip(t, t.TempDir(), "tatil.mp4", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10", "-t", "0.5")
+	clip, err := os.ReadFile(made)
 	require.NoError(t, err)
-	// An MP4 named .mov: the sniff says video/mp4, the name decides.
+	// An MP4 named .mov: the sniff says video/mp4 (ffmpeg's MP4 lists the
+	// mp41 brand), the name decides.
+	require.Equal(t, "video/mp4", http.DetectContentType(clip), "the clip no longer models an MP4 named .mov")
 	n := writeFileAs(t, store, st, root, "tatil.mov", sniffed("tatil.mov", clip), clip)
 	require.ErrorIs(t, pipe.GenerateThumb(ctx, n), thumb.ErrSkipped)
 	row, err := store.GetThumbnail(ctx, n.ID)

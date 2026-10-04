@@ -438,6 +438,11 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 	entry, err := h.ops.WriteStream(ctx, t.Path, src, size)
 	if err != nil {
 		h.tickets.release(tok)
+		// The rule's refusal is its own answer, not a storage outage — which
+		// is what failWrite would call it.
+		if writeE2ERefusal(w, r, err) {
+			return
+		}
 		h.failWrite(w, err, t.Path, size)
 		return
 	}
@@ -461,12 +466,16 @@ func (h *TicketUpload) failWrite(w http.ResponseWriter, err error, dest string, 
 	case errors.Is(err, errE2EPlaintext):
 		code, status = "e2e_plaintext_refused", http.StatusConflict
 	}
-	slog.Error("upload ticket: write failed",
-		slog.String("dest", dest),
-		slog.Int64("size", size),
-		slog.String("code", code),
-		slog.String("err", err.Error()),
-	)
+	// An encryption rule that could not be decided was logged where it was
+	// asked, without the path (e2epolicy.DoorError).
+	if !isE2EUndecided(err) {
+		slog.Error("upload ticket: write failed",
+			slog.String("dest", dest),
+			slog.Int64("size", size),
+			slog.String("code", code),
+			slog.String("err", err.Error()),
+		)
+	}
 	hint := map[string]string{
 		"storage_unavailable": "The storage backend refused the write - this is not your request. The ticket is still valid: retry it later, and tell the user storage is down if it keeps failing.",
 		"quota_exceeded":      "The ticket owner is out of storage. Free space or raise the quota; retrying will not help until then.",

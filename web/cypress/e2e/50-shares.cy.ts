@@ -9,7 +9,10 @@ describe('shares', () => {
   });
 
   it('shows the page heading', () => {
-    cy.contains(/paylaşım|share/i).should('be.visible');
+    // ⚠ In the page (`main`), not the whole document: since 0.51 the admin
+    // menu's panels hold every page name, hidden until a panel opens, and an
+    // unscoped cy.contains() finds that hidden menu entry first.
+    cy.get('main').contains(/paylaşım|share/i).should('be.visible');
   });
 
   it('ListAllShares envelope fields are present per row', () => {
@@ -36,7 +39,7 @@ describe('shares', () => {
   });
 
   it('UI never prints the literal string "undefined"', () => {
-    cy.contains(/paylaşım|share/i).should('be.visible');
+    cy.get('main').contains(/paylaşım|share/i).should('be.visible');
     cy.get('body').then(($b) => {
       const text = $b.text();
       // The pre-v0.1.19 bug surfaced as "undefined" in the Downloads

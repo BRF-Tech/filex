@@ -1290,7 +1290,7 @@ function applyUpdateQuietly(): void {
 // project path opens Electron's own welcome window. Windows then keeps that
 // command in HKCU\…\Run forever, long after the checkout it pointed at is gone.
 // Measured on a real machine: `electron.app.Electron` →
-// `G:\filex\node_modules\.pnpm\electron@31.7.7\…\electron.exe`, which is exactly
+// `C:\src\filex\node_modules\.pnpm\electron@31.7.7\…\electron.exe`, which is exactly
 // what the user saw open at every sign-in.
 //
 // So: the login item is a packaged-only feature, the command is written out

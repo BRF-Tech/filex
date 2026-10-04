@@ -59,6 +59,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/perm"
@@ -85,6 +86,9 @@ type SaveText struct {
 	ACL             *acl.Resolver
 	// Index keeps the saved text searchable. Optional; nil skips indexing.
 	Index *search.Index
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go): a save that creates
+	// an encrypted folder's key file asks it. nil = not wired.
+	E2EPolicy *e2epolicy.Service
 	// Thumbs draws the saved file again. ⚠ Before 0.50 nothing did: an SVG
 	// edited in the built-in editor kept the picture of its first version.
 	Thumbs ThumbPipeline
@@ -142,7 +146,9 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	adapter, rel := splitAdapterPath(req.Path)
+	// A bare path is on a confined caller's own storage, as the middleware
+	// reads it in a JSON body (confinedPath).
+	adapter, rel := splitAdapterPath(confinedPath(r.Context(), req.Path))
 	if rel == "" || pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return
@@ -168,6 +174,15 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	if storageID == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown adapter: " + adapter})
+		return
+	}
+	// The token's `root:`. confine.Middleware rewrites `path` only in a body
+	// labelled JSON, and the decoder above reads it whatever the label: the
+	// same body as text/plain wrote a file anywhere in the storage
+	// (GHSA-8gvc-6w52-6c7j). Asked before anything about the storage or the
+	// entry is told.
+	if !rootAllowsIn(r.Context(), stRow, rel) {
+		refuseOutsideRoot(w)
 		return
 	}
 	if readOnly {
@@ -238,6 +253,14 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		if !v.WritePerm(w, r) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		}
+		return
+	}
+	// A key file saved where there was none is a new encryption
+	// (e2e_policy_gate.go); saving over one that is there is not. "There" is
+	// a FILE on the storage — the rule's own look — not the catalogue row
+	// saveNeed trusts: a folder's row can outlive the folder (on an object
+	// store, a prefix whose last file went to the trash).
+	if refuseE2EWrite(w, r, h.E2EPolicy, drv, stRow, rel) {
 		return
 	}
 	// This call predates writehook.BeforeOverwrite and still snapshots

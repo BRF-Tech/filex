@@ -32,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/dbsetting"
 	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
@@ -47,6 +48,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/pluginreq"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
@@ -219,6 +221,25 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		slog.Info("identity: named existing accounts", slog.Int("count", named))
 	}
 
+	// A permission this version added must not go missing from what an
+	// administrator saved before it existed: a saved role holds only what it
+	// allows, so a key it never saw reads "not allowed". perm.UpgradeCatalogue
+	// gives every saved role, and every person's own exceptions, the added
+	// keys they held through an older one (files.encrypt through
+	// files.create) — once, and records the catalogue.
+	// ⚠ A failure does not stop the start: it changes nothing, and the next
+	// start does the whole of it again.
+	if rep, err := perm.UpgradeCatalogue(ctx, store); err != nil {
+		slog.Error("perm: catalogue upgrade failed; roles and exceptions saved before this version lack the permissions it added until a start succeeds",
+			slog.Any("err", err))
+	} else if rep.DefaultsChanged || rep.RolesChanged > 0 || rep.ExceptionsChanged > 0 {
+		slog.Info("perm: saved roles and exceptions given the permissions this version added",
+			slog.Any("added", rep.Added),
+			slog.Int("custom_roles", rep.RolesChanged),
+			slog.Bool("builtin_roles", rep.DefaultsChanged),
+			slog.Int("exceptions", rep.ExceptionsChanged))
+	}
+
 	/* wiring:e2 — install-time settings, pinned for the life of the install.
 	 *
 	 * E2E key escrow is decided once, here, and never again: an encrypted
@@ -379,6 +400,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// confine-exempt supertenant. Reports only -- see auditSupertenantAccounts
 	// for why moving them is the operator's call and not a migration's.
 	auditSupertenantAccounts(ctx, store, cfg.MultiTenant, cfg.Auth.Drivers)
+
+	// A single-tenant install's encryption policy (the e2e.policy setting)
+	// binds the platform's own tenant from the first multi-tenant start on:
+	// carried once, never again (e2epolicy.CarryInstancePolicy). Without it an
+	// install that had switched encryption off would find it on again.
+	if _, err := e2epolicy.CarryInstancePolicy(ctx, store, cfg.MultiTenant); err != nil {
+		slog.Warn("e2e policy: the install's policy could not be carried to the platform's tenant; it is tried again at the next start",
+			slog.String("err", err.Error()))
+	}
 
 	// Search index.
 	var idx *search.Index
@@ -676,6 +706,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	if assocSvc != nil {
 		assocSvc.SetOnlyOfficeThumb(func(name, mime string) bool {
 			return thumb.OnlyOfficeDraws(name, mime) && ooSvc.EnabledCtx(context.Background())
+		})
+		// filex 0.51: a .csv opens in ONLYOFFICE's spreadsheet while it is
+		// configured (Default apps: first, filex's table second), read from
+		// the same configuration in force as the thumbnails above.
+		assocSvc.SetOnlyOfficeOpen(func(name, mime string) bool {
+			return ooSvc.EnabledCtx(context.Background())
 		})
 	}
 	logOfficeThumbs(ctx, ooSvc)
@@ -1359,6 +1395,11 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 
 	router := api.BuildRouter(deps)
 	srvObj.stagedUploads = deps.StagedUploads
+	// The encryption requests (internal/e2epolicy requests.go), built by
+	// BuildRouter: a request nobody decides, and an approval nobody spends,
+	// expire after seven days — this labels them hourly (the rule refuses a
+	// late approval whatever its row still says).
+	deps.E2ERequests.StartSweeper(ctx)
 	// Filled BY BuildRouter when nil — same reason the protocol listeners below
 	// are built after it.
 	srvObj.protocolAuth = deps.ProtocolAuth
@@ -1384,6 +1425,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			Store:       deps.Store,
 			Auth:        deps.ProtocolAuth,
 			ACL:         deps.ACL,
+			E2EPolicy:   deps.E2EPolicy,
 			Resolver:    deps.StorageResolver,
 			Body:        deps.Body,
 			Quota:       deps.Quota,
@@ -1428,6 +1470,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			Store:          deps.Store,
 			Auth:           deps.ProtocolAuth,
 			ACL:            deps.ACL,
+			E2EPolicy:      deps.E2EPolicy,
 			Resolver:       deps.StorageResolver,
 			Body:           deps.Body,
 			Quota:          deps.Quota,
@@ -1454,6 +1497,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			Store:       deps.Store,
 			Auth:        deps.ProtocolAuth,
 			ACL:         deps.ACL,
+			E2EPolicy:   deps.E2EPolicy,
 			Resolver:    deps.StorageResolver,
 			Body:        deps.Body,
 			Quota:       deps.Quota,

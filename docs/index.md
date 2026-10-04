@@ -117,7 +117,7 @@ features:
     linkText: MCP docs
   - icon: 🛡️
     title: Roles and permissions
-    details: Everyone has one role - Administrator, User, Viewer or a custom role that is its own list of 28 permissions, with limits and folder exceptions - given to the person or through a group they are in, plus per-person exceptions, per-file and per-folder grants with inheritance, and the permissions installed apps declare. Enforced in the backend on every door, from the web app and the agent API to WebDAV, SFTP, FTPS, S3 and NFS; an API key is held to its own verbs on each of them.
+    details: Everyone has one role - Administrator, User, Viewer or a custom role that is its own list of 29 permissions, with limits and folder exceptions - given to the person or through a group they are in, plus per-person exceptions, per-file and per-folder grants with inheritance, and the permissions installed apps declare. Enforced in the backend on every door, from the web app and the agent API to WebDAV, SFTP, FTPS, S3 and NFS; an API key is held to its own verbs on each of them.
     link: /PERMISSIONS
     linkText: Roles & permissions docs
   - icon: 👥
@@ -137,7 +137,7 @@ features:
     linkText: How the limit works
   - icon: 🔐
     title: End-to-end encrypted folders
-    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data - and an operator can optionally hold an escrow key, with the limits stated rather than implied."
+    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data - and an operator can optionally hold an escrow key, with the limits stated rather than implied. Who may encrypt is the organisation's call: nobody, administrators, everyone whose role allows it, or anyone after an administrator's approval."
     link: /E2E-ENCRYPTION
     linkText: How it works
   - icon: 🏙️

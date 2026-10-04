@@ -144,7 +144,9 @@ type e2eEscrowUsedReq struct {
 // resolveDir turns a wire path into (storage, relative dir) and enforces
 // that the caller may at least SEE it. Returns nil after writing the error.
 func (h *E2E) resolveDir(w http.ResponseWriter, r *http.Request, wire string) (*model.Storage, string) {
-	adapter, rel := splitAdapterPath(wire)
+	// confinedPath: for a confined caller no path is its root and a bare one
+	// is on its storage, as confine.Middleware reads a JSON body.
+	adapter, rel := splitAdapterPath(confinedPath(r.Context(), wire))
 	if adapter == "" {
 		storages, err := h.Store.ListEnabledStorages(r.Context())
 		if err != nil || len(storages) == 0 {
@@ -178,6 +180,16 @@ func (h *E2E) resolveDir(w http.ResponseWriter, r *http.Request, wire string) (*
 	rel = strings.Trim(path.Clean("/"+rel), "/")
 	if pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return nil, ""
+	}
+	// The token's `root:`. The escrow, password-change and cleanup doors all
+	// resolve their folder here, and confine.Middleware rewrites `path` only
+	// in a body labelled JSON: the same body as text/plain reached an
+	// encrypted folder outside the root - its encryption state, its owner's
+	// notices, and (cleanup) the hard delete of its versions and trash
+	// entries (GHSA-8gvc-6w52-6c7j).
+	if !rootAllowsIn(r.Context(), st, rel) {
+		refuseOutsideRoot(w)
 		return nil, ""
 	}
 	if !aclAllowID(r.Context(), h.ACL, h.Store, st.ID, rel, acl.LevelViewer) {

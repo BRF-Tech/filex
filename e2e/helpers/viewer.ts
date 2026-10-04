@@ -110,6 +110,10 @@ export const VIEWER_MATRIX: Record<string, ExtMatch> = {
   // Csv/tsv — custom table renderer.
   csv: { primary: '.filex-viewer-csv__table', fallback: '.filex-viewer-csv' },
   tsv: { primary: '.filex-viewer-csv__table', fallback: '.filex-viewer-csv' },
+  // 0.51 - a .csv opens in ONLYOFFICE while it is configured (the product's
+  // default, docs/ONLYOFFICE.md → CSV files): the editor's frame, as an
+  // office document's. Asked for by name where the document server answers.
+  'csv@onlyoffice': { primary: 'iframe[name^="frameEditor"]', timeoutMs: 20_000 },
 
   // Archives — ArchiveViewer (v0.1.7+) renders the member list via
   // /api/files/archive/list. Empty archives still mount the viewer

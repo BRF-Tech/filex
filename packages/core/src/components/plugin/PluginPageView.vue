@@ -430,6 +430,8 @@ const showsDocument = computed(() => {
         :placement="uiPlacement"
         :ui="uiRef"
         :files="uiFiles"
+        :storages="storages"
+        :start-at="startAt"
         :locale="locale"
         :theme="theme"
         :title="title"

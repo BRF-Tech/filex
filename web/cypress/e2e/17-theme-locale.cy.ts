@@ -86,6 +86,9 @@ describe('theme + locale persistence', () => {
     cy.visit('/admin/dashboard');
     cy.wait('@dash', { timeout: 15000 });
     // At least one Turkish label should appear.
-    cy.contains(/depolar|kullanıcı|toplam|dekslenmi/i, { timeout: 10000 }).should('be.visible');
+    // ⚠ In the page (`main`), not the whole document: since 0.51 the admin
+    // menu's panels hold every page name, hidden until a panel opens, and an
+    // unscoped cy.contains() finds that hidden menu entry first.
+    cy.get('main').contains(/depolar|kullanıcı|toplam|dekslenmi/i, { timeout: 10000 }).should('be.visible');
   });
 });

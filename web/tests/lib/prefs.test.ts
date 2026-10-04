@@ -135,6 +135,69 @@ describe('the first load after the upgrade', () => {
   });
 });
 
+describe('a page that closes inside the debounce window (#150)', () => {
+  function hide(): void {
+    window.dispatchEvent(new Event('pagehide'));
+  }
+
+  it('sends the waiting document at once, with keepalive', async () => {
+    const f = vi.fn(async () => answer(200, {}));
+    configurePrefs({ surface: 'web', fetchImpl: f as unknown as typeof fetch });
+    savePref('appState', JSON.stringify({ retro: { pick: 'doom' } }));
+    expect(f).not.toHaveBeenCalled();
+
+    hide();
+    expect(f).toHaveBeenCalledTimes(1);
+    const init = f.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('PUT');
+    expect(init.keepalive).toBe(true);
+    expect(JSON.parse(init.body as string)).toEqual({ prefs: { appState: JSON.stringify({ retro: { pick: 'doom' } }) } });
+  });
+
+  it('visibilitychange to hidden does the same', async () => {
+    const f = vi.fn(async () => answer(200, {}));
+    configurePrefs({ surface: 'web', fetchImpl: f as unknown as typeof fetch });
+    savePref('theme', 'dark');
+    const spy = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    spy.mockRestore();
+    expect(f).toHaveBeenCalledTimes(1);
+    expect((f.mock.calls[0][1] as RequestInit).keepalive).toBe(true);
+  });
+
+  it('sends nothing when nothing is waiting', async () => {
+    const f = vi.fn(async () => answer(200, {}));
+    configurePrefs({ surface: 'web', fetchImpl: f as unknown as typeof fetch });
+    hide();
+    expect(f).not.toHaveBeenCalled();
+    savePref('theme', 'dark');
+    vi.advanceTimersByTime(PREFS_PUT_DEBOUNCE_MS);
+    await flushPrefs();
+    expect(f).toHaveBeenCalledTimes(1);
+    hide();
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it('the debounce timer does not send it a second time', async () => {
+    const f = vi.fn(async () => answer(200, {}));
+    configurePrefs({ surface: 'web', fetchImpl: f as unknown as typeof fetch });
+    savePref('theme', 'dark');
+    hide();
+    hide();
+    vi.advanceTimersByTime(PREFS_PUT_DEBOUNCE_MS * 3);
+    await flushPrefs();
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+    it('keeps a synchronous auth header from the host', async () => {
+    const f = vi.fn(async () => answer(200, {}));
+    configurePrefs({ surface: 'desktop', fetchImpl: f as unknown as typeof fetch, headers: () => ({ Authorization: 'Bearer t' }) });
+    savePref('theme', 'dark');
+    hide();
+    expect((f.mock.calls[0][1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer t' });
+  });
+});
+
 describe('writing one', () => {
   it('mirrors immediately and PUTs once, debounced', async () => {
     const f = vi.fn(async () => answer(200, {}));

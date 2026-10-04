@@ -223,6 +223,9 @@ func (h *AppPlugins) uiSaveNew(w http.ResponseWriter, r *http.Request, p *wasmpl
 	actor := uid
 	rel, err := h.CommitSibling(r.Context(), folder.storage.ID, folder.rel, name, body, size, &actor)
 	if err != nil {
+		if writeE2ERefusal(w, r, err) {
+			return
+		}
 		writeSaveFailure(w, err)
 		return
 	}
@@ -288,7 +291,9 @@ func writeSaveFailure(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusInsufficientStorage, map[string]string{"error": "quota_exceeded", "message": "there is not enough room left in your quota"})
 		return
 	}
-	slog.Warn("app ui save failed", slog.String("err", err.Error()))
+	if !isE2EUndecided(err) { // logged where the rule was asked
+		slog.Warn("app ui save failed", slog.String("err", err.Error()))
+	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save_failed", "message": "filex could not save the file"})
 }
 

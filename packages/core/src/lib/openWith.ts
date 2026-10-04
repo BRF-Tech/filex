@@ -9,7 +9,10 @@
  * through `/api/me/open-with` (backend handlers/openwith.go) - never with the
  * surface document, whose whole-document PUT would let a copy read at boot
  * undo a choice made since on another surface. The handler is `builtin`
- * (filex's own viewer) or `app:<plugin>/<view>`.
+ * (filex's own viewer), `app:<plugin>/<view>`, or - for a kind ONLYOFFICE
+ * opens as a choice (lib/appViewer OFFICE_OPEN_KINDS: `.csv`, filex 0.51) -
+ * `onlyoffice`. A choice of ONLYOFFICE is kept while ONLYOFFICE is switched
+ * off, and the kind opens in filex's own viewer meanwhile.
  *
  * ⚠ Where the chosen app cannot open the file - this surface does not offer
  * it, or the administrator switched it off for the kind - the next handler
@@ -23,6 +26,7 @@
  */
 import { ref } from 'vue';
 import { accountFetch, currentPrefs, onPrefs, setAccountPref } from './prefs';
+import { ONLYOFFICE_VIEWER, officeOpensKind } from './appViewer';
 
 /** Bumped on every change this page makes, so computed readers re-run. */
 const version = ref(0);
@@ -35,7 +39,7 @@ function readAll(): Record<string, string> {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
     const out: Record<string, string> = {};
     for (const [k, id] of Object.entries(v as Record<string, unknown>)) {
-      if (typeof id === 'string' && validKind(k) && validHandler(id)) out[k] = id;
+      if (typeof id === 'string' && validKind(k) && validHandler(id, k)) out[k] = id;
     }
     return out;
   } catch {
@@ -48,8 +52,13 @@ export function validKind(ext: string): boolean {
   return /^[a-z0-9][a-z0-9_+-]{0,31}$/.test(ext);
 }
 
-/** A handler id the open capability knows: `builtin` or `app:<plugin>/<view>`. */
-export function validHandler(id: string): boolean {
+/**
+ * A handler id the open capability knows: `builtin`, `app:<plugin>/<view>`,
+ * or `onlyoffice` for a kind ONLYOFFICE opens as a choice (with `kind`
+ * given, only for those; backend handlers/openwith.go validOpenChoice).
+ */
+export function validHandler(id: string, kind?: string): boolean {
+  if (id === ONLYOFFICE_VIEWER) return kind === undefined || officeOpensKind(kind);
   return id === 'builtin' || /^app:[a-z0-9][a-z0-9_-]{0,31}\/[a-z0-9][a-z0-9_.-]{0,63}$/.test(id);
 }
 
@@ -74,7 +83,7 @@ async function send(path: string, init: { method: string; body?: string }): Prom
     if (!body || !body.choices || typeof body.choices !== 'object' || Array.isArray(body.choices)) return;
     const out: Record<string, string> = {};
     for (const [k, id] of Object.entries(body.choices as Record<string, unknown>)) {
-      if (typeof id === 'string' && validKind(k) && validHandler(id)) out[k] = id;
+      if (typeof id === 'string' && validKind(k) && validHandler(id, k)) out[k] = id;
     }
     setAccountPref('openWith', JSON.stringify(out));
     version.value++;
@@ -86,7 +95,7 @@ async function send(path: string, init: { method: string; body?: string }): Prom
 /** Keep (or, with null, forget) the person's choice for a kind. */
 export function setOpenWithChoice(ext: string, id: string | null): void {
   const kind = ext.toLowerCase();
-  if (!validKind(kind) || (id !== null && !validHandler(id))) return;
+  if (!validKind(kind) || (id !== null && !validHandler(id, kind))) return;
   const all = readAll();
   if (id === null) delete all[kind];
   else all[kind] = id;

@@ -19,7 +19,7 @@
 - **View**: a declarative screen (`Surface`) the plugin returns and filex draws
   with its own components. Placement `modal` (opened by an action), `page` (a
   full page in a new tab), `inspector` (a section in the details panel), `home`
-  (a row under "Apps" in the side nav).
+  (a row under "Apps": the explorer's navigation panel, and the admin menu).
 - **Public page**: a screen an outside participant reaches without an account.
   Since v3 it is a **real share**, at `/s/<token>`: the plugin declares the page
   in its manifest and opens the link with `share_create`, and the token, PIN,
@@ -706,9 +706,12 @@ after). `404` for an app that draws no thumbnails.
 "open": {"on": [Handler…], "off": [Handler…], "custom": bool, "rule": {"order",
 "off"}?}, "thumbnail": {…}}], "enabled": bool, "editable": bool}` - every kind
 an app handles (its extensions, and the known extensions of its media
-types) and every kind with a rule. A `Handler` is `{"id", "app"?, "view"?,
-"version"?, "label"?}`; `id` is `builtin`, `app:<app>/<view>` (open) or
-`app:<app>` (thumbnail). `editable` is false for an API key and on a demo.
+types), `csv` while OnlyOffice is configured (0.51), and every kind with a
+rule. A `Handler` is `{"id", "app"?, "view"?, "version"?, "label"?}`; `id` is
+`builtin`, `app:<app>/<view>` (open), `app:<app>` (thumbnail) or `onlyoffice`
+(the document server: a thumbnail handler for the office kinds, and an open
+handler for `csv` since 0.51). `editable` is false for an API key and on a
+demo.
 
 `PUT /api/admin/file-types/{ext}` `{"open"?: {"order": [...], "off": [...]} | null,
 "thumbnail"?: {…} | null}` - a capability left out is unchanged, `null` puts
@@ -727,7 +730,8 @@ a save-as name) and its module (`POST …/ui/{plugin}/{view}/call`, each path):
 **A person's own choices** ("always open this kind with this app"), one
 record per account for every surface: `GET /api/me/open-with` →
 `{"choices": {"drawio": "app:drawio/editor", …}}`; `PUT /api/me/open-with/{ext}`
-`{"handler": "builtin" | "app:<app>/<view>"}` (`400 bad_kind` / `bad_handler`,
+`{"handler": "builtin" | "app:<app>/<view>"}`, or `"onlyoffice"` for `csv`
+(0.51; for any other kind `400 bad_handler`) (`400 bad_kind` / `bad_handler`,
 at most 512 kinds) and `DELETE /api/me/open-with/{ext}` answer the new set;
 `DELETE /api/me/open-with` forgets them all. `GET /api/me/prefs` carries them
 as `openWith` (a JSON string, for every surface) and `PUT /api/me/prefs`
@@ -1591,7 +1595,7 @@ comma-separated, because `GET/PUT …/settings` carries `map[string]string`.
 - `home` - a row under "Apps" in the side navigation; opens the view with no
   path (`GET …/views/{p}/{v}`), drawn full-size. That is the explorer's side
   bar for everybody the view is offered to, and - for an administrator - also
-  an **Apps** section in the admin panel's own side navigation, one row per
+  an **Apps** section in the admin panel's menu (*Files & storage*), one row per
   running app's home view (`/admin/apps/{plugin}/home/{view}`), read from the
   same `views[]` answer; with no such view the section is not drawn at all.
   **v3.1: a page of its own, in the same tab.** The explorer's row opens
@@ -2003,7 +2007,7 @@ driver's words.
 | `session.get` | → `{v, app: {name, version}, view: {id, placement}, locale, dir, theme: {mode, tokens}, user: {name}, files: [{index, name, ext, size, mime, readOnly}], grants, settings?}` | - |
 | `file.read` | `{index?, as: stream / bytes / text}` → `{name, size, mime, stream / bytes / text}`. A stream is transferred (`ReadableStream<Uint8Array>`); text is UTF-8 and refused over 32 MiB. | `files:read` |
 | `file.save` | `{index?, data: ReadableStream / ArrayBuffer / string, mime?}` → `{saved: true, size}`. Only over a file the interface was opened with - a new version of it, or the draft it is. | `files:write` |
-| `file.saveAs` | `{name, data, mime?}` → `{saved: true, name, size}`. A NEW file, in a folder the person picks in filex's own dialog (`cancelled` when they close it). | `files:write` |
+| `file.saveAs` | `{name, data, mime?}` → `{saved: true, name, size}`. A NEW file, in a folder the person picks in filex's own folder dialog - the one *Move to…* uses, titled with the app's name and the file's. It opens in the folder of the file the interface was opened with (a draft: the folder it will be saved to; no file: the folder the person is in, else the list of storages), never in one of filex's own folders, and only a folder the person may write into can be chosen. A view-only opening (where `file.save` is `read_only`) may still save as: the new file goes elsewhere, and the server checks that folder. The same in every placement and every host (the web app, the desktop app, an embed). `name` is a file name, no folder (`invalid` otherwise); the answer's `name` is the one it was saved under (a taken name gets a free one beside it). `cancelled` when the person closes the dialog, `unavailable` while the frame's previous save-as dialog is still open. The server holds it to the view's kind of file (`invalid` / `not_applicable`) and keeps it out of an encrypted folder (`failed` / `encrypted`) - the `PUT …/save` section below. | `files:write` |
 | `ui.dirty` | `{dirty: bool}` | - |
 | `ui.title` | `{text}` - the frame's title | - |
 | `ui.toast` | `{text, tone?: info / success / warning / error}` - drawn by filex, prefixed with the app's name | - |
@@ -2018,6 +2022,10 @@ driver's words.
 There is no `fetch`, no storage and no cookie in the frame: an interface that
 needs to keep something asks `state.set`; one that needs data from elsewhere
 asks its module.
+
+`state.set` is written to the account about 400 ms after the last call, and at once
+when the page is hidden or closed (`pagehide`, sent with `keepalive`), so a
+choice made just before closing the tab is still there at the next open.
 
 **The person's call.** A call marked so above goes ahead only on a
 **gesture** - the person clicked or typed in the frame a moment ago, which
@@ -2077,7 +2085,9 @@ server's log.
 - `?path=<qualified>` - a new version of that file (versioning keeps the
   previous one) → `200 {saved, path, name, size}`; audit `app_plugin.ui_save`.
 - `?dir=<qualified folder>&name=<file name>` - a NEW file there, under a free
-  name beside anything that is there → `201`.
+  name beside anything that is there → `201`. The folder is the one the
+  person chose in the frame's folder dialog; nothing in the request proves
+  that, so it is checked like any folder (`files.create` on the new name).
 - The body is the content, as it is. Up to `FILEX_APP_PLUGIN_MAX_OUTPUT_MB`.
 - **Chunked**, for anything over 8 MiB (the explorer does it by itself): the
   first chunk with `&chunk=start` → `202 {session, received}`; the next ones

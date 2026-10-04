@@ -25,22 +25,21 @@
  * binary built with `-X …/internal/version.Version=0.47.0`.
  *
  * Point 2 installs the `echo` fixture module (backend/internal/wasmplugin/
- * testdata/echo, scripts/build-wasm-fixture.sh) and skips when it is absent.
+ * testdata/echo, scripts/build-wasm-fixture.sh, read through
+ * helpers/echoFixture), skips when it is absent and fails on a module older
+ * than its sources.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { loginAs } from '../helpers/auth';
 import { newAuthedRequest } from '../helpers/seed';
+import { guardFixture } from '../helpers/appPlugin';
+import { echoFixture } from '../helpers/echoFixture';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ECHO_DIR = resolve(HERE, '../../backend/internal/wasmplugin/testdata/echo');
-const ECHO_WASM = resolve(ECHO_DIR, 'echo.wasm');
-const HAVE_ECHO = existsSync(ECHO_WASM);
+const ECHO = echoFixture();
 
 const PACK = 'lang-e2e-updates';
 
@@ -65,10 +64,10 @@ function packManifest(version: string, extra: Record<string, unknown> = {}): Buf
 }
 
 function echoManifest(version: string, extraPermissions: string[] = []): Buffer {
-  const m = JSON.parse(readFileSync(resolve(ECHO_DIR, 'manifest.json'), 'utf8'));
+  const m = JSON.parse(readFileSync(ECHO.manifestPath, 'utf8'));
   m.version = version;
   m.permissions = [...m.permissions, ...extraPermissions];
-  const wasm = readFileSync(ECHO_WASM);
+  const wasm = readFileSync(ECHO.wasm);
   m.wasm = { url: `${origin}/echo/plugin.wasm`, sha256: createHash('sha256').update(wasm).digest('hex') };
   return Buffer.from(JSON.stringify(m));
 }
@@ -184,8 +183,8 @@ test.describe.serial('App updates — a source followed, a range said', () => {
   });
 
   test('a version that asks for a new permission waits — and "Review update" shows what it asks', async ({ page }) => {
-    test.skip(!HAVE_ECHO, 'the echo fixture is not built (scripts/build-wasm-fixture.sh)');
-    served.set('/echo/plugin.wasm', readFileSync(ECHO_WASM));
+    guardFixture(ECHO, test.skip);
+    served.set('/echo/plugin.wasm', readFileSync(ECHO.wasm));
     served.set('/echo/filex-app.json', echoManifest('0.0.1'));
     const perms = JSON.parse(served.get('/echo/filex-app.json')!.toString()).permissions as string[];
     const made = await api.post('/api/admin/app-plugins', {
@@ -239,7 +238,8 @@ test.describe.serial('App updates — a source followed, a range said', () => {
    * box.
    */
   test('the Version cell stacks, it does not overlap — at 958 and 1440px', async ({ page }) => {
-    test.skip(!HAVE_ECHO, 'needs the row the previous test left');
+    // It measures the row the previous test left.
+    guardFixture(ECHO, test.skip);
     await openApps(page);
     for (const width of [958, 1440]) {
       await page.setViewportSize({ width, height: 900 });

@@ -1,42 +1,39 @@
-// 13-navigation-ui — sidebar click navigates the SPA. Catches
-// router-link href regressions.
+// 13-navigation-ui — the admin menu navigates the SPA. Catches router-link
+// href regressions.
 //
-// ⚠ Scroll the link into view before clicking, and scope to `a.nav-link`.
+// Since 0.51 (GitHub #82) the menu is a mega menu: the dashboard is a plain
+// link and every other page sits in one of three panels (Files & storage,
+// People & security, System), opened by its entry's button. Each case opens
+// the panel the way a person would, then presses the page's link, found by
+// its test id (the route name) rather than its words.
 //
-// The sidebar is a `overflow-y-auto` column, and Cypress calls an element
-// hidden when it is clipped outside a scrollable ancestor — so at the
-// configured 1440x900 viewport every destination past "API / MCP" is invisible
-// to `.filter(':visible')` and the click never happened. Measured 2026-09-05:
-// the Audit / Sync / Shares / Trash / Replica / Queue cases all died in the
-// hook, seven of the nine skipped, in a build whose sidebar was working.
-// `cy.contains('a, button', …)` also matched a header button before the nav
-// link on some routes, which is why the query is pinned to `a.nav-link`.
+// ⚠ The old sidebar was an `overflow-y-auto` column and Cypress calls an
+// element clipped by a scrolling ancestor hidden (measured 2026-09-05: seven
+// of nine cases died in the hook). A panel shows its pages whole, so the
+// scroll-into-view dance that column needed is gone with it.
 
-describe('sidebar navigation', () => {
+describe('admin menu navigation', () => {
   beforeEach(() => {
     cy.apiLogin();
     cy.visit('/admin/dashboard');
   });
 
-  const navTargets: Array<{ link: RegExp; url: string }> = [
-    { link: /depolar|storages/i, url: '/admin/storages' },
-    { link: /kullanıcı|users/i, url: '/admin/users' },
-    { link: /ayarlar|settings/i, url: '/admin/settings' },
-    { link: /denetim|audit/i, url: '/admin/audit' },
-    { link: /senkron|sync/i, url: '/admin/sync' },
-    { link: /paylaşım|shares/i, url: '/admin/shares' },
-    { link: /çöp|trash/i, url: '/admin/trash' },
-    { link: /replika|replica/i, url: '/admin/replica' },
-    { link: /kuyruk|queue/i, url: '/admin/queue' },
+  const navTargets: Array<{ entry: string; page: string; url: string }> = [
+    { entry: 'files', page: 'storages', url: '/admin/storages' },
+    { entry: 'people', page: 'users', url: '/admin/users' },
+    { entry: 'system', page: 'settings', url: '/admin/settings' },
+    { entry: 'system', page: 'audit', url: '/admin/audit' },
+    { entry: 'files', page: 'sync', url: '/admin/sync' },
+    { entry: 'files', page: 'shares', url: '/admin/shares' },
+    { entry: 'files', page: 'trash', url: '/admin/trash' },
+    { entry: 'files', page: 'replica', url: '/admin/replica' },
+    { entry: 'system', page: 'queue', url: '/admin/queue' },
   ];
 
   for (const t of navTargets) {
-    it(`clicks "${t.link}" → lands on ${t.url}`, () => {
-      cy.get('a.nav-link', { timeout: 10000 })
-        .contains(t.link)
-        .first()
-        .scrollIntoView()
-        .click();
+    it(`opens "${t.entry}" and clicks "${t.page}" → lands on ${t.url}`, () => {
+      cy.get(`[data-testid="nav-top-${t.entry}"]`, { timeout: 10000 }).click();
+      cy.get(`[data-testid="nav-panel-${t.entry}"] [data-testid="nav-${t.page}"]`).should('be.visible').click();
       cy.url({ timeout: 10000 }).should('include', t.url);
     });
   }

@@ -67,7 +67,7 @@ which the Users page shows beside each permission and every refusal names.
 
 ## The permissions
 
-28 in five groups. Keys are stored by name, never by position.
+29 in five groups. Keys are stored by name, never by position.
 
 ### Files (path-checked - also need the folder level)
 
@@ -80,6 +80,7 @@ which the Users page shows beside each permission and every refusal names.
 | `files.move` | Into **another** folder (or storage). The protocols rename and move with one operation, so each one is judged by its two paths: same folder = rename, same name elsewhere = move, both at once needs both, at both ends. A copy is not a move - it needs `files.create` at the destination |
 | `files.delete` | Delete to the trash |
 | `files.purge` | Permanent delete - emptying the trash, and a delete on a storage that has no trash |
+| `files.encrypt` | Making something end-to-end encrypted: a new encrypted folder or `.fxe` file, the first step of encrypting a folder in place (its first `.filex-e2e.json`), an item renamed or moved onto one of those two names (unless it is a folder, a `.fxe` that stays a `.fxe` or a key file that stays its own folder's), and a copy of what is encrypted (a `.fxe`, a key file, a folder holding either). Needs the action's own permission too (`files.create` for a new file). Opening an encrypted folder, adding to it, changing its password and taking its encryption off are not encrypting ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)) |
 | `files.tag` | Add and remove tags |
 
 A write decides create vs modify **per file**: replacing a file that is there is
@@ -140,7 +141,7 @@ a tenant's administrator sees them read-only and gives their people a
 | Full admin | Everything |
 | Standard user | Everything outside the admin area - what a `user` could do before permissions existed. **The User role until it is edited.** |
 | Read-only | Standard minus file changes and sharing - what a `viewer` could do before. **The Viewer role until it is edited.** |
-| Upload-only | `files.create` and `account.edit` - a drop-box account |
+| Upload-only | `files.create`, `files.encrypt` and `account.edit` - a drop-box account |
 | Guest | `files.download` only |
 
 A preset on a person's page pins every permission of that one account to the
@@ -163,7 +164,7 @@ tenant is given only to that tenant's accounts; one held outside its tenant
 by no role, so picking a custom role for one makes them stop being an
 administrator (never the last one) - one save, one server call.
 
-![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](screenshots/v0.50.0/roles/role-editor-1440.png)
+![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](screenshots/v0.51.0/roles/role-editor-1440.png)
 
 A role has:
 
@@ -333,7 +334,7 @@ An installed app can declare permissions of its own - the actions an
 organisation would want to limit, and nothing else. A signing app puts
 *Request signatures* behind one, while signing what somebody sent you needs
 none. They appear here under the app's name and are decided the same way as
-the 28, per role and per person; the app's manifest declares them
+the 29, per role and per person; the app's manifest declares them
 (`user_permissions`, [PLUGIN-KIT.md](PLUGIN-KIT.md#user-permissions-what-an-administrator-hands-out)).
 
 - **The key** is `app.<app>.<id>` - `app.sign.request`. It is stored by name
@@ -366,7 +367,7 @@ the 28, per role and per person; the app's manifest declares them
   built-in role its people are on, then the app's default. A person's page
   has the same rows among their exceptions, beside the answer and where it
   comes from; *Default* there is what their role alone gives them. A preset
-  and *Clear exceptions* change the 28 only and leave the person's app
+  and *Clear exceptions* change the 29 only and leave the person's app
   exceptions as they are - the Apps group's own *Reset to defaults* clears
   those. A delegated administrator sees a person's app rows read-only.
 - **Through the API.** `GET /api/admin/roles/catalogue` lists the installed
@@ -381,10 +382,10 @@ the 28, per role and per person; the app's manifest declares them
   /api/admin/users/{id}/exceptions`) carries `effective.apps`: for each app
   permission `{key, allowed, source, inherited: {allowed, source}}` -
   `inherited` is the answer without the person's own exception. The whole
-  `overrides` map is replaced on `PUT`, so a client that writes the 28 must
+  `overrides` map is replaced on `PUT`, so a client that writes the 29 must
   send the `app.*` keys it read back with them, or they are cleared.
 
-![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](screenshots/v0.50.0/apppermissions/person-exceptions.png)
+![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](screenshots/v0.51.0/apppermissions/person-exceptions.png)
 
 ## Public links follow their creator
 
@@ -445,7 +446,7 @@ An **API key** is held to its own verbs on each of these doors as well -
 |---|---|---|
 | `GET /api/auth/me` | anyone signed in | now also `permissions` (account-wide), `permissions_in_folders` (allowed only in some folders), `permissions_by_folder` (whose answer differs from folder to folder), `permission_settings`, `two_factor_required` - what the explorer reads to hide what would be refused |
 | `GET /api/auth/me/permissions` | anyone signed in | effective permissions with sources, limits, role ids, path-limited role ids |
-| `GET /api/admin/roles/catalogue` | `admin.users` | the 28 permissions, the presets, and `apps`: every installed app's own permissions (`key`, `app`, `app_label`, `id`, `label`, `description`, `default`, and `default_for` - what `default` comes to on each built-in role when nobody has decided: `{"viewer":false,"user":true,"admin":true}`) |
+| `GET /api/admin/roles/catalogue` | `admin.users` | the 29 permissions, the presets, and `apps`: every installed app's own permissions (`key`, `app`, `app_label`, `id`, `label`, `description`, `default`, and `default_for` - what `default` comes to on each built-in role when nobody has decided: `{"viewer":false,"user":true,"admin":true}`) |
 | `GET /api/admin/roles/exceptions` | `admin.users` | user id → exceptions |
 | `GET` / `PUT /api/admin/users/{id}/exceptions` | `admin.users` | exceptions + effective (with `effective.apps`, [App permissions](#app-permissions)) / `{"overrides":{"files.delete":"deny","app.sign.request":"deny"}}` - `{}` clears. The whole map is replaced. Allowing an `admin.*` permission needs a session; changing an `app.*` key needs an administrator |
 | `GET` / `PUT /api/admin/users/{id}/roles` | `admin.users` | a person's one role, set in one call: `{"role_id":3}` (a custom role - also sets the level underneath), `{"role_id":null}`, or `{"role":"viewer"}` (a built-in role; ends their own custom one - a group's role still applies, [GROUPS.md](GROUPS.md#api)). An administrator given a custom role stops being one - never the last administrator (`409`) |
@@ -531,6 +532,11 @@ A change only a signed-in administrator may make
 ([Handing out administration takes a session](#handing-out-administration-takes-a-session))
 answers an API key `403 {"error":"session_required","message":…}`.
 
+A refusal of `files.encrypt` has a shape of its own. The permission is one of
+three layers of [who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt), and a door
+answers for all of them alike: `403 {"error":"e2e_not_allowed","reason":"permission","message":…}`
+(the other reasons name the tenant's ceiling and policy).
+
 ## Audit
 
 | Action | Details |
@@ -562,3 +568,26 @@ answers an API key `403 {"error":"session_required","message":…}`.
 - **Existing sessions:** changes apply at once to the web app (checked per
   request); protocol sessions keep going until they reconnect.
 - **Multiple processes** on one database see a role change within 3 seconds.
+- **A permission a new version adds does not take anything away.** A saved
+  role - the User or Viewer role once edited, every custom role and its
+  folder part - lists only what it allows, so a permission it was saved
+  without reads as not allowed. A permission carved out of an older one is
+  therefore given, at the first start of the version that adds it, wherever
+  the older one is allowed: `files.encrypt` to every role that allows
+  `files.create`, in its list or as an Allow in its folder part, and to every
+  person whose own exception allows `files.create` (an exception that
+  already decides `files.encrypt` keeps its decision; a Deny of
+  `files.create` gets nothing). Once: taking it away afterwards sticks. The
+  server keeps the catalogue it has seen in the `permissions.catalogue`
+  setting, and its start log says how many roles and people it changed. The
+  setting only ever grows: a version started on a catalogue a later version
+  recorded leaves it as it is, so that upgrading again does not take the later
+  version's own permissions for new and hand them out a second time.
+- **Rolling back to a version without `files.encrypt`** (0.49 or older): the
+  older version does not know the permission, and every saved role and
+  person's exceptions the upgrade gave it to keeps it. The older Roles and
+  People pages cannot save those (`400`, an unknown permission
+  `files.encrypt`) until the server is upgraded again. Upgrading again does
+  not give `files.encrypt` back where an administrator took it away in
+  between, nor to a role saved on the older version: the permission was
+  merged once, at the first upgrade.

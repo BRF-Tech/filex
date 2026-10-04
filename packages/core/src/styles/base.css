@@ -7403,6 +7403,20 @@ filex-explorer {
   color: var(--fe-ok);
 }
 
+/* ---- A .csv in ONLYOFFICE (0.51) ----
+   One line under the viewer's bar while a CSV is edited in ONLYOFFICE: what a
+   save as CSV keeps. A note, not a warning: nothing is wrong yet. */
+.fe-officenote {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--fe-gap-sm) var(--fe-gap);
+  background: color-mix(in srgb, var(--fe-primary) 7%, var(--fe-bg-elev));
+  border-bottom: 1px solid var(--fe-border);
+  color: var(--fe-text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 /* The two questions a draft asks (DraftCloseModal, DraftConflictModal). */
 .fe-draftq__body {
   margin: 0 0 6px;
@@ -11056,6 +11070,14 @@ filex-explorer {
   color: var(--fe-text);
   font-weight: 600;
 }
+/* The crumbs line scrolls (overflow-x), and a scroller clips on BOTH axes: an
+   outline drawn outside the button, which is what the browser's default focus
+   ring is, loses its left, top and bottom edge against the first crumb. The
+   ring is drawn inside the button's own box instead, like the list rows'. */
+.fe-destpick__crumb:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: -2px;
+}
 
 .fe-destpick__sep {
   flex: 0 0 auto;
@@ -14513,3 +14535,205 @@ filex-explorer {
   line-height: 1.4;
   pointer-events: none;
 }
+
+/* === #82 (0.51) - the mega menu (components/MegaMenu.vue) ===============
+   The admin panel's navigation: top entries, each a panel of sections, and
+   the same entries as a headed list in a phone's drawer. Here, not in the
+   component, so the web-component sheet carries it too (packageLook).
+   ⚠ Declared `--fe-*` tokens only, so an operator's theme paints the menu
+   like the rest of the admin chrome (#74).
+   ⚠ Logical properties only (web/tests/quality/rtlLogical.test.ts): the
+   panel hangs from the bar's inline START, which is its right in Arabic. */
+.fx-mega {
+  position: relative;
+  min-width: 0;
+}
+.fx-mega--bar {
+  /* The full height of the bar it sits in, so the panel's `top: 100%` is the
+     bar's bottom edge rather than a few pixels inside it. */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+.fx-mega__bar,
+.fx-mega__items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fx-mega__bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.fx-mega__toplink,
+.fx-mega__topbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  /* ⚠ Said outright: a host's `button { height }` rule reaches this control
+     (core lesson #639), and a bar whose buttons and link differ in height
+     reads as broken. */
+  height: var(--fe-h-md);
+  padding-block: 0;
+  padding-inline: 10px;
+  border: 0;
+  border-radius: var(--fe-radius-md);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+.fx-mega__toplink:hover,
+.fx-mega__topbtn:hover,
+.fx-mega__topbtn.is-open {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+/* ⚠ `--fe-primary-ink`, not `--fe-primary`: the primary on its own soft tint
+   measures 3.97:1, under the 4.5 bar (the old sidebar's `.nav-link-active`
+   learned it); the ink token is the one every palette makes clear it. */
+.fx-mega__toplink.is-current,
+.fx-mega__topbtn.is-current {
+  color: var(--fe-primary-ink);
+}
+.fx-mega__toplink:focus-visible,
+.fx-mega__topbtn:focus-visible,
+.fx-mega__item:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fx-mega__chev {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  transition: transform 120ms ease;
+}
+.fx-mega__topbtn.is-open .fx-mega__chev {
+  transform: rotate(180deg);
+}
+
+.fx-mega__panel {
+  position: absolute;
+  top: 100%;
+  inset-inline-start: 0;
+  z-index: 40;
+  display: grid;
+  grid-auto-flow: column;
+  /* A fixed column: the panel is shrink-to-fit (absolutely placed), so a
+     `minmax()` track settles at its minimum and a short line such as "Sunucu
+     geneli ayarlar ve e-posta" broke at its hyphen (measured at 200px). Three
+     columns still end inside a 1024px window (e2e 198). */
+  grid-auto-columns: 232px;
+  gap: 20px;
+  margin-block-start: 2px;
+  padding: 14px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 80px);
+  overflow: auto;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-lg);
+  box-shadow: var(--fe-shadow);
+}
+.fx-mega__section {
+  min-width: 0;
+}
+.fx-mega__heading,
+.fx-mega__grouphead {
+  margin: 0;
+  padding-block: 4px;
+  padding-inline: 10px;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.fx-mega__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  height: auto;
+  padding-block: 6px;
+  padding-inline: 10px;
+  border-radius: var(--fe-radius-md);
+  color: var(--fe-text);
+  text-decoration: none;
+}
+.fx-mega__item:hover {
+  background: var(--fe-bg-hover);
+}
+.fx-mega__item.is-current {
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fx-mega__icon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-block-start: 1px;
+  color: var(--fe-text-muted);
+}
+.fx-mega__item.is-current .fx-mega__icon {
+  color: var(--fe-primary-ink);
+}
+.fx-mega__glyph,
+.fx-mega__glyph svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.fx-mega__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.fx-mega__label {
+  font-size: var(--fe-text-md);
+  font-weight: 500;
+  line-height: 1.3;
+}
+.fx-mega__hint {
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  line-height: 1.35;
+}
+.fx-mega__item.is-current .fx-mega__hint {
+  color: var(--fe-text-muted);
+}
+
+/* ── list (a phone's drawer) ── */
+.fx-mega--list {
+  display: block;
+}
+.fx-mega__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fx-mega__group {
+  margin-block-start: 10px;
+  padding-block-start: 10px;
+  border-block-start: 1px solid var(--fe-border-soft);
+}
+.fx-mega__grouphead {
+  color: var(--fe-text);
+  font-size: var(--fe-text-sm);
+}
+.fx-mega__list .fx-mega__section + .fx-mega__section {
+  margin-block-start: 6px;
+}
+.fx-mega__list .fx-mega__item {
+  align-items: center;
+}
+.fx-mega__list .fx-mega__icon {
+  margin-block-start: 0;
+}
+/* === /#82 === */

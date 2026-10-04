@@ -487,6 +487,14 @@ func (h *Manager) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The name is free, so the save CREATES want: a draft named like an
+	// encrypted folder's key file or a `.fxe` is a new encryption
+	// (e2e_policy_gate.go). Asked after the name check, so a TARGET_TAKEN
+	// answer does not spend an approval.
+	if refuseE2ECreate(w, r, h.E2EPolicy, st, want) {
+		return
+	}
+
 	// The move and its bookkeeping finish even if the client leaves half way.
 	ctx, cancel := detachedMutation(ctx)
 	defer cancel()

@@ -36,11 +36,12 @@ export const APP_LOCATIONS = {
   //
   // ⚠⚠ THE THREE PACKS THAT SHIP, and only those. README: "Spanish, German
   // and French ship as examples." There is a fourth on the maintainer's
-  // machine — `G:/filex-lang-ar` — and it is deliberately NOT here: Arabic is
-  // filex's right-to-left test fixture, not published and not advertised
-  // (the maintainer, 2026-09-19). The specs that need a right-to-left language reach it
-  // by path through e2e/helpers/langPack.ts; nothing that takes a PICTURE may
-  // find it, because these pictures are the README's.
+  // machine — a sibling checkout, `../filex-lang-ar` — and it is deliberately
+  // NOT here: Arabic is filex's right-to-left test fixture, not published and
+  // not advertised (the maintainer, 2026-09-19). The specs that need a
+  // right-to-left language reach it by path through e2e/helpers/langPack.ts;
+  // nothing that takes a PICTURE may find it, because these pictures are the
+  // README's.
   'lang-es': {
     env: 'FILEX_LANG_ES_APP_DIR',
     dirs: [resolve(REPO, '../filex-lang-es')],

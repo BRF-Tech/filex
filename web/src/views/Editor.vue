@@ -21,9 +21,10 @@ import {
   PreviewModal,
   followOpenWithChoices,
   isExternalUsable,
+  isOfficeHandler,
   openKindOf,
   openWithChoice,
-  pickAppViewer,
+  pickOpenHandler,
   useFileApi,
   type ExplorerConfig,
   type FileNode,
@@ -136,10 +137,16 @@ async function loadAppViews(): Promise<void> {
 const appChoice = computed(() => (typeof route.query.app === 'string' && route.query.app ? route.query.app : null));
 // The explorer's rule (lib/appViewer): the tab's `app=` when that handler is
 // on for the kind, else the person's "always open with" choice, else the
-// first the administrator left on.
-const appViewer = computed(() =>
-  pickAppViewer(appViews.value, node.value, appChoice.value, appRules.value, openWithChoice(openKindOf(node.value))),
+// first the administrator left on. 0.51 - ONLYOFFICE is one of them for a
+// .csv while the capabilities say it is there (`app=onlyoffice` from a tab
+// opened out of it).
+const openHandler = computed(() =>
+  pickOpenHandler(appViews.value, node.value, appChoice.value, appRules.value, openWithChoice(openKindOf(node.value)), {
+    onlyOffice: !!onlyOfficeBase.value,
+  }),
 );
+const appViewer = computed(() => openHandler.value?.view ?? null);
+const inOffice = computed(() => isOfficeHandler(openHandler.value));
 const stopFollowingOpenWith = followOpenWithChoices();
 onBeforeUnmount(stopFollowingOpenWith);
 
@@ -249,6 +256,7 @@ onMounted(() => {
       :save-text-endpoint="api('/api/files/save-text')"
       :drafts-endpoint="api('/api/files/drafts')"
       :app-viewer="appViewer"
+      :in-office="inOffice"
       :api="fileApi"
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"

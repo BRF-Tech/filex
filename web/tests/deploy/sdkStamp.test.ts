@@ -140,8 +140,8 @@ describe('the guest SDK staleness guard', () => {
 
   it('spells one path both ways: /mnt/g/x <-> G:/x', () => {
     const bs = String.fromCharCode(92);
-    expect(crossSpelling('/mnt/g/filex-wt-apps/backend', 'win32')).toBe('G:/filex-wt-apps/backend');
-    expect(crossSpelling(`G:${bs}filex-wt-apps${bs}backend`, 'linux')).toBe('/mnt/g/filex-wt-apps/backend');
+    expect(crossSpelling('/mnt/g/src/app-wt/backend', 'win32')).toBe('G:/src/app-wt/backend');
+    expect(crossSpelling(`G:${bs}src${bs}app-wt${bs}backend`, 'linux')).toBe('/mnt/g/src/app-wt/backend');
     expect(crossSpelling('G:/a/b', 'linux')).toBe('/mnt/g/a/b');
     expect(crossSpelling('/mnt/g', 'win32')).toBe('G:/');
     // Nothing to map: a Linux path with no drive, a relative path, nothing.

@@ -283,6 +283,11 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// The archive is a new file; under a key file's or a `.fxe`'s name it is a
+	// new encryption by name (e2e_policy_gate.go).
+	if refuseE2ECreateAt(w, r, a.E2EPolicy, a.Store, destStorageID, destRel) {
+		return
+	}
 	var members []archiveMember
 	sets := map[int64]*acl.Set{}
 	for _, raw := range req.Sources {

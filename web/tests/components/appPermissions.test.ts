@@ -466,12 +466,12 @@ describe("a person's exceptions", () => {
     );
     await mountIt(UserRolesCard, { userId: 2, role: 'user' });
 
-    // A preset pins the 28; the app's exception stays.
+    // A preset pins the catalogue's permissions; the app's exception stays.
     await click(q('[data-testid="preset-read_only"]'));
     await click(q('[data-testid="user-permissions-save"]'));
     expect(roles.setOverrides).toHaveBeenLastCalledWith(2, { [KEY]: 'allow', 'files.download': 'allow', 'files.delete': 'deny' });
 
-    // Clear takes the 28's away; the app's exception stays.
+    // Clear takes the catalogue's permissions away; the app's exception stays.
     await click(q('[data-testid="user-permissions-clear"]'));
     await click(q('[data-testid="user-permissions-save"]'));
     expect(roles.setOverrides).toHaveBeenLastCalledWith(2, { [KEY]: 'allow' });

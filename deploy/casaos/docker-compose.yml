@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.50.0
+    image: ghcr.io/brf-tech/filex:v0.51.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -83,7 +83,9 @@ x-casaos:
       what is inside an archive) and folders drawn with the files that came
       into them last, trash and
       versioning, file ownership with an Owner column and a People filter,
-      end-to-end encrypted folders with a recovery key, RBAC with groups,
+      end-to-end encrypted folders with a recovery key and a policy for
+      who may create them (an administrator's approval when you want
+      one), RBAC with groups,
       TOTP 2FA, a sign-in attempt limit on the web form, WebDAV, FTPS and
       SFTP, optional SSO (OIDC/LDAP), apps - sandboxed WebAssembly add-ons installed through a review of every permission they ask for, with e-Signature, Convert, filextext and draw.io shipping alongside; language packs that add a language with no code and no release, right-to-left layouts included; instance themes on the Appearance screen; personal and team tags; and My shares, where anybody can see and revoke the links they made; a desktop app with live folder sync and an
       AI/MCP API for agents. An open folder keeps itself up to date over a
@@ -106,9 +108,9 @@ x-casaos:
   thumbnail: https://filex.sh/assets/social-preview.png
   # The current release's pictures (e2e/shots/release.mjs names the folder).
   screenshot_link:
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.50.0/explorer-grid-light.png
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.50.0/admin-dashboard.png
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.50.0/share-modal.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.51.0/explorer-grid-light.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.51.0/admin-dashboard.png
+    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.51.0/share-modal.png
   tips:
     before_install:
       en_US: >-
@@ -122,7 +124,7 @@ x-casaos:
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.50.0"
+  version: "0.51.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

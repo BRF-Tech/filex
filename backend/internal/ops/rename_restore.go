@@ -197,6 +197,9 @@ func (s *Service) runRename(ctx context.Context, drv storage.Driver, op *Op, src
 	}
 	work := context.WithoutCancel(ctx)
 	dst := normOpPath(op.Dest)
+	if err := s.refuseUnsettledEncryption(work, drv, op, src, dst); err != nil {
+		return err
+	}
 	// ⚠ Asked again, although the handler asked when it queued the rename:
 	// other work may have run in between, and every driver's Move replaces
 	// what holds the name.

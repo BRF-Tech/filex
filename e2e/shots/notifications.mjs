@@ -84,8 +84,8 @@ function binary() {
     return p;
   }
   throw new Error(
-    'build it first:\n' +
-      "  wsl -e bash -lc 'cd /mnt/g/filex/backend && CGO_ENABLED=0 GOOS=windows go build -o /mnt/g/filex/bin/filex-notifyprobe.exe ./cmd/filex'",
+    'build it first, from the repository root:\n' +
+      '  cd backend && CGO_ENABLED=0 GOOS=windows go build -o ../bin/filex-notifyprobe.exe ./cmd/filex',
   );
 }
 

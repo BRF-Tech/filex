@@ -524,9 +524,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](screenshots/v0.50.0/loginsecurity/login-remaining-1440.png)
+![The sign-in form after a wrong password: how many tries are left](screenshots/v0.51.0/loginsecurity/login-remaining-1440.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](screenshots/v0.50.0/loginsecurity/login-locked-1440.png)
+![The sign-in form on a locked account: the lock counted down on its button](screenshots/v0.51.0/loginsecurity/login-locked-1440.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -596,7 +596,7 @@ a minute. A database read that fails keeps the last value known (the default whe
 there is none). A `login.*` key written through the generic settings API reaches
 the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](screenshots/v0.50.0/loginsecurity/login-security-1440.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](screenshots/v0.51.0/loginsecurity/login-security-1440.png)
 
 | Key | Default | Range |
 |---|---|---|

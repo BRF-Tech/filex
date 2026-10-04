@@ -166,6 +166,12 @@ type fakeFilex struct {
 	cleanups []map[string]any
 	escrow   string
 	uploads  int
+	// e2eAnswer, when set, is the server's encryption policy answer to
+	// POST /api/files/e2e/allowed ("allowed", "request", "denied"), with
+	// e2eReason; unset, the endpoint is missing (a server older than the
+	// policy). e2eAsked is every question it was asked.
+	e2eAnswer, e2eReason string
+	e2eAsked             []map[string]any
 }
 
 func newFakeFilex(t *testing.T) *fakeFilex {
@@ -239,6 +245,11 @@ func (f *fakeFilex) handle(w http.ResponseWriter, r *http.Request) {
 		f.json(w, 200, map[string]any{"e2e_escrow": esc})
 	case r.URL.Path == "/api/files/upload/begin":
 		f.json(w, 404, map[string]string{"error": "no staged uploads here"})
+	case r.URL.Path == "/api/files/e2e/allowed" && f.e2eAnswer != "":
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.e2eAsked = append(f.e2eAsked, body)
+		f.json(w, 200, map[string]any{"encrypt": []string{f.e2eAnswer}, "reasons": []string{f.e2eReason}})
 	case r.URL.Path == "/api/files/e2e/cleanup":
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -474,6 +485,44 @@ func TestEncryptCmd_ServerFolderHoldingAnEncryptedFolderIsLeftAlone(t *testing.T
 	require.False(t, f.hasMarker("docs://Kasa"))
 	require.Zero(t, f.uploads)
 	require.Equal(t, "merhaba", string(f.files["docs://Kasa/notlar.txt"]))
+}
+
+// The server's encryption policy is asked BEFORE the password, and its
+// refusal is said in words with nothing written: a refusal at the key file
+// would come after somebody typed a password twice for nothing.
+func TestEncryptCmd_TheServersPolicyIsAskedBeforeAnythingIsWritten(t *testing.T) {
+	for _, c := range []struct {
+		answer, reason, says string
+	}{
+		{"denied", "policy_off", "an administrator has switched encryption off"},
+		{"denied", "tenant_disabled", "the platform operator has switched encryption off"},
+		{"denied", "permission", "your role does not allow encrypting here"},
+		{"request", "approval_required", "needs an administrator's approval first"},
+	} {
+		t.Run(c.answer+"/"+c.reason, func(t *testing.T) {
+			f := newFakeFilex(t)
+			f.seed("docs://Kasa", sampleFiles)
+			f.e2eAnswer, f.e2eReason = c.answer, c.reason
+			_, _, err := f.remote(t, encPW+"\n", "docs://Kasa", "--password-stdin")
+			require.Error(t, err)
+			require.Contains(t, err.Error(), c.says)
+			require.Contains(t, err.Error(), "nothing was changed")
+			require.False(t, f.hasMarker("docs://Kasa"), "a key file was written")
+			require.Zero(t, f.uploads)
+			require.Len(t, f.e2eAsked, 1)
+			items, _ := f.e2eAsked[0]["items"].([]any)
+			require.Len(t, items, 1)
+			require.Equal(t, map[string]any{"path": "docs://Kasa", "kind": "folder"}, items[0], "the folder, encrypted where it is")
+		})
+	}
+
+	// Allowed, it goes on as before.
+	f := newFakeFilex(t)
+	f.seed("docs://Kasa", sampleFiles)
+	f.e2eAnswer = "allowed"
+	_, stderr, err := f.remote(t, encPW+"\n", "docs://Kasa", "--password-stdin")
+	require.NoError(t, err, stderr)
+	require.True(t, f.hasMarker("docs://Kasa"))
 }
 
 func TestEncryptCmd_ServerFolderAlreadyEncryptedIsNothingToDo(t *testing.T) {

@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -71,6 +72,9 @@ type aiOps struct {
 	// leaves search falling back to SQL LIKE, exactly as it does for a
 	// manager upload on an instance with no index wired.
 	index *search.Index
+	// e2e is who may encrypt (e2e_policy_gate.go): WriteStream, Zip and Unzip
+	// ask it before they create a key file or a `.fxe`. nil = not wired.
+	e2e *e2epolicy.Service
 	// doors are the explorer's own handlers the copy, app, operations, trash,
 	// versions, archive and link tools run through (ai_doors.go). nil = those
 	// tools answer 503.
@@ -659,7 +663,16 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 	if err := a.gate(ctx, s, writegate.Writes(rel)); err != nil {
 		return nil, err
 	}
-	if err := a.can(ctx, s, rel, a.writeNeed(ctx, s, rel)); err != nil {
+	need := a.writeNeed(ctx, s, rel)
+	if err := a.can(ctx, s, rel, need); err != nil {
+		return nil, err
+	}
+	// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go): one
+	// question for every surface this funnel serves — /api/ai/upload, the MCP
+	// file_write tool, /api/sharex/upload and /u/{ticket}. Whether the write
+	// creates it is the rule's own look (a FILE there), not need's: a folder
+	// with the name makes need files.modify.
+	if err := a.checkE2E(ctx, s, rel); err != nil {
 		return nil, err
 	}
 	// Into an encrypted folder only with the caller's allow_plaintext: the
@@ -983,6 +996,18 @@ func (a *aiOps) Move(ctx context.Context, src, dst string) (out *aiEntry, err er
 		if err := e2e.GuardTransfer(ctx, lk, sSrc.ID, []string{relSrc}, sDst.ID, dstDir); err != nil {
 			return nil, err
 		}
+	}
+	// Who may encrypt (e2e_policy_gate.go): a move onto a key file's or a
+	// `.fxe`'s name is a new encryption unless it carries what is encrypted
+	// already (e2epolicy.RelocationEncrypts). Asked of the name the caller
+	// chose: a taken one only lands the file beside it as `…-copy`, which
+	// keeps a `.fxe`'s extension.
+	srcDrv, derr := a.resolver(sSrc.ID)
+	if derr != nil {
+		srcDrv = nil
+	}
+	if err := checkE2ERename(ctx, a.e2e, srcDrv, auth.UserFrom(ctx), sDst, relSrc, relDst, sSrc.ID == sDst.ID); err != nil {
+		return nil, err
 	}
 
 	// Finished even if the caller leaves half-way through a folder, on either
@@ -1475,7 +1500,14 @@ func (a *aiOps) Zip(ctx context.Context, sources []string, dest string) (*aiEntr
 	if err := a.gate(ctx, sDest, writegate.Writes(relDest)); err != nil {
 		return nil, err
 	}
-	if err := a.can(ctx, sDest, relDest, a.writeNeed(ctx, sDest, relDest)); err != nil {
+	destNeed := a.writeNeed(ctx, sDest, relDest)
+	if err := a.can(ctx, sDest, relDest, destNeed); err != nil {
+		return nil, err
+	}
+	// An archive written where there was no file, under a key file's or a
+	// `.fxe`'s name, is a new encryption by name (e2e_policy_gate.go) — a
+	// folder with the name included, which destNeed reads as files.modify.
+	if err := a.checkE2E(ctx, sDest, relDest); err != nil {
 		return nil, err
 	}
 	// The archive is a new plaintext file where it lands: into an encrypted
@@ -1801,6 +1833,19 @@ func (a *aiOps) Unzip(ctx context.Context, src, destDir string) (int, int, error
 		if kerr := storage.EnsureFileTarget(ctx, drv, target); kerr != nil {
 			slog.Warn("ai unzip: skipped member colliding with a folder",
 				slog.String("target", target), slog.String("err", kerr.Error()))
+			continue
+		}
+		// A member that would CREATE an encrypted folder's key file or a
+		// `.fxe` is skipped like one of filex's own names
+		// (e2e_policy_gate.go); replacing one that is there is not a new
+		// encryption.
+		// Neither line names the member: its name can say as much as its
+		// contents. An undecided rule was logged where it was asked
+		// (e2epolicy.DoorError).
+		if eerr := checkE2EWrite(ctx, a.e2e, drv, auth.UserFrom(ctx), sDst, target); eerr != nil {
+			if !isE2EUndecided(eerr) {
+				slog.Warn("ai unzip: skipped a member the encryption rule refused", slog.String("why", eerr.Error()))
+			}
 			continue
 		}
 		// The last moment at which the bytes this member is about to replace

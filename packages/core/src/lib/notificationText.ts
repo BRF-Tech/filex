@@ -75,6 +75,24 @@ interface Phrase {
    * that says "folder" about a file tells the owner the wrong thing.
    */
   file?: { title?: string; body?: string };
+  /**
+   * The same event when the answer was NO (`meta.decision === 'rejected'`):
+   * `e2e.request_decided` is one event for both answers — a webhook sees both
+   * — but "approved" and "rejected" are opposite news, and the word cannot be
+   * filled in from the row (`rejected` is not Turkish). A pack's
+   * `<field>_rejected` keys translate it.
+   */
+  rejected?: { title?: string; body?: string };
+  /**
+   * The same event when the SERVER phrased it, per language
+   * (`meta.title_<lang>` / `meta.body_<lang>` from its catalogue, srvtext):
+   * a file event that needs a sentence of its own. filex 0.51 - an
+   * ONLYOFFICE save written beside the file in another format (`file.uploaded`
+   * of the new file) or not written at all (`file.upload_failed`). The
+   * server's words win, in the reader's language; a language pack's phrase
+   * for the plain event is not used for them.
+   */
+  noticed?: { title?: string; body?: string };
 }
 
 /**
@@ -91,8 +109,8 @@ interface Phrase {
 export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> = {
   // writehook: meta.node.{name,path,size}, meta.origin
   'file.uploaded': {
-    en: { title: 'New file: {name}', body: '{path}' },
-    tr: { title: 'Yeni dosya: {name}', body: '{path}' },
+    en: { title: 'New file: {name}', body: '{path}', noticed: { title: '{notice_title}', body: '{notice_body}' } },
+    tr: { title: 'Yeni dosya: {name}', body: '{path}', noticed: { title: '{notice_title}', body: '{notice_body}' } },
   },
   'file.updated': {
     en: { title: 'File changed: {name}', body: '{path}' },
@@ -100,8 +118,8 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
   },
   // meta.reason is the driver's error text — the only thing that says WHY.
   'file.upload_failed': {
-    en: { title: 'Upload failed: {name}', body: '{reason}' },
-    tr: { title: 'Yükleme başarısız: {name}', body: '{reason}' },
+    en: { title: 'Upload failed: {name}', body: '{reason}', noticed: { title: '{notice_title}', body: '{notice_body}' } },
+    tr: { title: 'Yükleme başarısız: {name}', body: '{reason}', noticed: { title: '{notice_title}', body: '{notice_body}' } },
   },
   // meta.signature is the ClamAV signature name; the path is the ORIGINAL one.
   'file.infected': {
@@ -188,6 +206,28 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
       title: 'Şifreli klasörün parolası değişti',
       body: '{folder}',
       file: { title: 'Şifreli dosyanın parolası değişti', body: '{file}' },
+    },
+  },
+  // wiring:e2 policy — somebody asked to encrypt under the tenant's
+  // `approval` policy (the e2epolicy request service): meta.{requester,
+  // reason, request_id, target_kind}. The node is the folder it is for — for
+  // one file, the folder it is in — so `{folder}` names it either way.
+  'e2e.request_created': {
+    en: { title: 'Encryption request: {folder}', body: '{requester}: {reason}' },
+    tr: { title: 'Şifreleme isteği: {folder}', body: '{requester}: {reason}' },
+  },
+  // …and the answer, to the person who asked: meta.{decision, note,
+  // request_id, target_kind}. `rejected` is the NO's own title.
+  'e2e.request_decided': {
+    en: {
+      title: 'Encryption request approved: {folder}',
+      body: '{note}',
+      rejected: { title: 'Encryption request rejected: {folder}' },
+    },
+    tr: {
+      title: 'Şifreleme isteği onaylandı: {folder}',
+      body: '{note}',
+      rejected: { title: 'Şifreleme isteği reddedildi: {folder}' },
     },
   },
   // An installed app speaking through notify_send. The plugin phrased the
@@ -439,6 +479,11 @@ export function notificationVars(
     to = hide.path(to);
   }
   const uploader = str(meta.uploader).trim() || words.someone;
+  // wiring:e2 policy — a FOLDER event at the top of a storage (e2e.request_*
+  // for its root) has no path at all: `node.path` is '' and `node.name` is the
+  // storage's own name. Without this the chain above falls through to the BODY
+  // as if it were a path, and the folder is named after the requester's words.
+  const nodeAtRoot = 'path' in node && str(node.path) === '' && str(node.name) !== '';
   const num = (v: unknown) => (typeof v === 'number' ? String(v) : '');
   const count = num(meta.count) || num(meta.queued);
 
@@ -447,7 +492,7 @@ export function notificationVars(
     path,
     count,
     uploader,
-    folder: str(meta.folder) || baseName(path) || path,
+    folder: str(meta.folder) || (nodeAtRoot ? name : baseName(path) || path),
     // A single encrypted file's own events (meta.kind === 'file').
     file: str(meta.file) || baseName(path) || path,
     storage: str(meta.storage) || str(target?.storage),
@@ -465,6 +510,9 @@ export function notificationVars(
     added: str(meta.added),
     // plugin_requested: who asked (named as the account was when it asked).
     requester: str(meta.requester) || words.someone,
+    // e2e.request_decided: the approver's note, or why it was rejected — one
+    // line, like a comment's excerpt.
+    note: str(meta.note).replace(/\s+/g, ' ').trim(),
     op: str(meta.op),
     error: str(meta.error) || str(meta.primary_error),
     failed: num(meta.failed_count),
@@ -625,9 +673,14 @@ function pluralCategory(lang: string | undefined, count: string): string {
   }
 }
 
-/** The pack's file variant of one phrase field (`<field>_file`), when it has one. */
-function packFileField(opts: RenderOptions, event: string, field: 'title' | 'body'): string | undefined {
-  return packValue(opts.strings, `${NOTIFY_KEY}${event}.${field}_file`);
+/** The pack's variant of one phrase field (`<field>_file`, `<field>_rejected`), when it has one. */
+function packVariantField(
+  opts: RenderOptions,
+  event: string,
+  field: 'title' | 'body',
+  variant: 'file' | 'rejected',
+): string | undefined {
+  return packValue(opts.strings, `${NOTIFY_KEY}${event}.${field}_${variant}`);
 }
 
 /** The pack's form of one phrase field: `<field>_<category>`, then `<field>`. */
@@ -661,11 +714,27 @@ export function renderNotification(
 ): NotificationText {
   const vars = notificationVars(row, locale, opts.strings, opts.lang, opts.e2eName);
   const phrase = NOTIFICATION_PHRASES[row.event]?.[locale];
+  const meta = asRecord(row.meta);
   // ⚠ About a single encrypted file: its own wording, from the pack's `_file`
   // keys or the table's `file` variant — never the pack's folder sentence.
-  const variant = str(asRecord(row.meta).kind) === 'file' ? phrase?.file : undefined;
-  const packTitle = variant ? packFileField(opts, row.event, 'title') : packField(opts, row.event, 'title', vars.count);
-  const packBody = variant ? packFileField(opts, row.event, 'body') : packField(opts, row.event, 'body', vars.count);
+  // ⚠ A NO to an encryption request likewise (`_rejected` / `rejected`): the
+  // pack's sentence for a yes is never said for a no.
+  const rejected = str(meta.decision) === 'rejected' ? phrase?.rejected : undefined;
+  // ⚠ The server's own words (`noticed`) are already in every language it
+  // has: no pack field stands in for them.
+  const noticed = phrase?.noticed && noticeText(meta, 'title_', opts.lang, locale) ? phrase.noticed : undefined;
+  const variant = noticed ?? rejected ?? (str(meta.kind) === 'file' ? phrase?.file : undefined);
+  const suffix = rejected ? 'rejected' : 'file';
+  const packTitle = noticed
+    ? undefined
+    : variant
+      ? packVariantField(opts, row.event, 'title', suffix)
+      : packField(opts, row.event, 'title', vars.count);
+  const packBody = noticed
+    ? undefined
+    : variant
+      ? packVariantField(opts, row.event, 'body', suffix)
+      : packField(opts, row.event, 'body', vars.count);
   /** The reader's direction, applied once to whatever this ends up saying. */
   const say = (text: string): NotificationText['title'] =>
     typeof opts.foreign === 'function' ? opts.foreign(text) : text;
@@ -714,4 +783,9 @@ export function renderNotification(
  *    browser (manager_mutate.go); the same rename through AI, WebDAV or the
  *    ops worker is indistinguishable from a move, so the phrasing does not
  *    split the two.
+ *  • `e2e.request_created` / `e2e.request_decided` carry the FOLDER as their
+ *    node — for one file, the folder it is in — and `target_kind`, not the
+ *    file's name: the title names the folder either way. (`target_kind`,
+ *    never `kind`: `meta.kind === 'file'` is what picks the escrow and
+ *    password events' file wording.)
  * ───────────────────────────────────────────────────────────────────────── */

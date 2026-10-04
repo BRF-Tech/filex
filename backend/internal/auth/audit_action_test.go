@@ -50,6 +50,12 @@ func TestActionForPath(t *testing.T) {
 		// Generic fallback: replica isn't in the explicit switch.
 		{"generic replica patch", http.MethodPatch, "/api/admin/replica/settings", "", "", "replica.update", "replica", ""},
 		{"generic queue retry", http.MethodPost, "/api/admin/queue/abc/retry", "abc", "", "queue.create", "queue", "abc"},
+		// Who may encrypt writes its own rows (internal/e2epolicy audit.go):
+		// the middleware names none, at the root or below it.
+		{"e2e policy", http.MethodPatch, "/api/admin/e2e", "", "", "", "", ""},
+		{"e2e policy, slash", http.MethodPatch, "/api/admin/e2e/", "", "", "", "", ""},
+		{"e2e ceiling", http.MethodPatch, "/api/admin/e2e/tenants/3", "3", "", "", "", ""},
+		{"e2e approval", http.MethodPost, "/api/admin/e2e/requests/9/approve", "9", "", "", "", ""},
 		// Non-admin, non-mutating-significant path → empty.
 		{"unmapped path", http.MethodPost, "/api/files/nope", "", "", "", "", ""},
 	}

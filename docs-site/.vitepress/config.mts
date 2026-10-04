@@ -89,6 +89,7 @@ export default defineConfig({
           { text: 'Docker', link: '/DOCKER' },
           { text: 'Deployment', link: '/DEPLOYMENT' },
           { text: 'Configuration', link: '/CONFIGURATION' },
+          { text: 'Admin panel', link: '/ADMIN-PANEL' },
           { text: 'Databases', link: '/DATABASES' },
           { text: 'Demo mode', link: '/DEMO' },
           { text: 'Updates', link: '/UPDATES' },

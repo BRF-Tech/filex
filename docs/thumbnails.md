@@ -76,7 +76,7 @@ in its own shape:
 | **Gallery** | The same folder large behind, and up to three prints fanned out in front of it from their foot. |
 | **List** | The row's small folder, with the newest file rising out of its mouth. |
 
-![The grid: each folder drawn with the files that came into it last](screenshots/v0.50.0/thumbnails/folders-grid-1440.png)
+![The grid: each folder drawn with the files that came into it last](screenshots/v0.51.0/thumbnails/folders-grid-1440.png)
 
 **Which files.** The three files directly in the folder that came in last:
 for each file, the later of when it entered the catalogue and its own
@@ -968,7 +968,7 @@ SVG limit, after restoring the cache from elsewhere), use the repair.
 
 ### Admin → Tools → Thumbnail repair
 
-![Admin → Tools → Thumbnail repair after a Fix run: the counts, the thumbnail settings and the files without a thumbnail, with the reason](screenshots/v0.50.0/thumbnails/thumbnail-repair-1440.png)
+![Admin → Tools → Thumbnail repair after a Fix run: the counts, the thumbnail settings and the files without a thumbnail, with the reason](screenshots/v0.51.0/thumbnails/thumbnail-repair-1440.png)
 
 Pick **all storages**, one storage, or a file or folder inside a storage (the
 folder with everything in it), and a mode:

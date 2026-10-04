@@ -50,7 +50,24 @@ const (
 	TenantAdminBell
 	// MemberBell is everybody else's: only memberBroadcastEvents.
 	MemberBell
+	// PlatformAdminBell is the bell of an administrator of the supertenant on
+	// a multi-tenant install, the platform operator: AdminBell's, less a new
+	// encryption request (platformOmitted). Such a request is the tenant's
+	// own administrators' to decide; the operator sees it on Admin ->
+	// Encryption and is not told of each one (operator decision 2026-10-03).
+	// The platform's own requests reach the operator addressed to them
+	// (e2epolicy announce), never as a broadcast.
+	PlatformAdminBell
 )
+
+// platformOmitted are the broadcasts the platform operator's bell does not
+// take (PlatformAdminBell).
+var platformOmitted = []EventType{EventE2ERequestCreated}
+
+// Unconfined reports whether b is the bell of an administrator nobody confines
+// to a tenant (AdminBell, PlatformAdminBell): its broadcasts are read as
+// stored, by kind alone, with no per-row pass.
+func (b Bell) Unconfined() bool { return b == AdminBell || b == PlatformAdminBell }
 
 // personalEvents is routine file activity. Every emitter addresses it to the
 // person who did the thing (writehook.emit, handlers.emitFileEvent), so a row
@@ -79,10 +96,10 @@ var everyoneEvents = []EventType{
 
 // fileBroadcastEvents are the broadcasts that name a file (they carry a
 // NodeRef, so meta.node.storage_id places them in a tenant): an antivirus hit,
-// an upload that never landed, an app's notice about a document, and the
-// notices that fall back to a broadcast when their emitter finds no owner to
-// address — a drop, an escrow opening, a share or a comment with no actor on
-// record.
+// an upload that never landed, an app's notice about a document, an
+// encryption request waiting for the tenant's administrators, and the notices
+// that fall back to a broadcast when their emitter finds no owner to address —
+// a drop, an escrow opening, a share or a comment with no actor on record.
 //
 // ⚠ An allowlist on purpose: a new broadcast kind reaches a tenant admin's
 // bell only once somebody decides it can be placed.
@@ -93,6 +110,7 @@ var fileBroadcastEvents = []EventType{
 	EventDropReceived,
 	EventE2EEscrowUsed,
 	EventE2EPasswordChanged,
+	EventE2ERequestCreated,
 	EventShareCreated,
 	EventCommentAdded,
 }
@@ -124,6 +142,8 @@ func (b Bell) Admits(event string) bool {
 		return hasEvent(memberBroadcastEvents, event)
 	case TenantAdminBell:
 		return hasEvent(fileBroadcastEvents, event)
+	case PlatformAdminBell:
+		return !hasEvent(personalEvents, event) && !hasEvent(platformOmitted, event)
 	default:
 		return !hasEvent(personalEvents, event)
 	}
@@ -161,6 +181,8 @@ func (b Bell) filter() model.BroadcastFilter {
 		return model.BroadcastFilter{Only: eventIDs(memberBroadcastEvents)}
 	case TenantAdminBell:
 		return model.BroadcastFilter{Only: eventIDs(fileBroadcastEvents)}
+	case PlatformAdminBell:
+		return model.BroadcastFilter{Except: append(eventIDs(personalEvents), eventIDs(platformOmitted)...)}
 	default:
 		return model.BroadcastFilter{Except: eventIDs(personalEvents)}
 	}

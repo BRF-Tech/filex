@@ -29,6 +29,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
 import { arabicPack, installLangPack, removeLangPack } from '../helpers/langPack';
+import { locateApp } from '../helpers/app-locations.mjs';
 import { WEB_PREFS_URL, readWebPrefs, restoreWebPrefs } from '../helpers/prefs';
 
 const STORAGE = `e2e-notifcells-${Date.now()}`;
@@ -36,8 +37,15 @@ const MOUNT = `/tmp/filex-${STORAGE}`;
 /** A file at the ROOT of the storage — a path of ONE segment. */
 const ROOT_FILE = 'informe.pdf';
 
-/** The real Spanish pack, when this machine has it. */
-const ES_PACK = process.env.FILEX_E2E_LANG_PACK_ES ?? 'G:/filex-lang-es/filex-app.json';
+/**
+ * The real Spanish pack, when this machine has it: FILEX_E2E_LANG_PACK_ES (a
+ * manifest), or else wherever app-locations.mjs finds `lang-es` (its
+ * FILEX_LANG_ES_APP_DIR, or a sibling checkout beside this one,
+ * `../filex-lang-es`). One table, so this spec and the screenshots that show
+ * the same pack can never be looking in two places.
+ */
+const ES = locateApp('lang-es');
+const ES_PACK = process.env.FILEX_E2E_LANG_PACK_ES ?? ES.manifestPath;
 
 let api: APIRequestContext;
 const AR = arabicPack();
@@ -219,7 +227,10 @@ test.describe('The admin Notifications page draws its cells in one piece, in eve
   });
 
   test('Spanish, where the reason is long: the same', async ({ page }) => {
-    test.skip(!existsSync(ES_PACK), `the Spanish pack is not on this machine (${ES_PACK})`);
+    test.skip(
+      !existsSync(ES_PACK),
+      `the Spanish pack is not on this machine (${process.env.FILEX_E2E_LANG_PACK_ES ?? ES.how})`,
+    );
     const name = await installManifest(ES_PACK);
     try {
       await openIn(page, 'es');

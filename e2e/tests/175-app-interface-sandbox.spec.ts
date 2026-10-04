@@ -18,7 +18,12 @@
  *      chevrons stand beside the frame, not on it, and after a save the
  *      viewer's header says the new size (task #110: in Firefox and WebKit
  *      the chevrons covered filextext's page list and scroll bar, and the
- *      header kept the size the file was opened with).
+ *      header kept the size the file was opened with);
+ *   8. save as (`file.saveAs`): filex asks for the folder in its own folder
+ *      dialog, the new file lands in the folder the person chose, a name the
+ *      view does not open is refused by the server (`not_applicable`), and
+ *      closing the dialog saves nothing (task #149: until 0.51 no host drew
+ *      the dialog and save-as answered `unavailable` everywhere).
  *
  * The app is built here: an interface-only app (manifest + a zip of three
  * files) whose script speaks the bridge's protocol itself — no SDK build is
@@ -28,7 +33,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { deflateRawSync } from 'node:zlib';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { loginAs } from '../helpers/auth';
@@ -366,5 +371,113 @@ test.describe.serial('An app’s own interface — the sandbox, in every engine'
     );
     expect(saved).toMatchObject({ saved: true, size: 1500 });
     await expect(meta, 'the header says the size the save wrote').toContainText('1.5 KB');
+  });
+
+  test('save as: filex asks for the folder in its own dialog, and the new file lands there', async ({ page }) => {
+    // Through filex, not the disk: the dialog lists what filex knows.
+    const mk = await api.post('/api/files/manager?action=newfolder', { data: { path: `${store}://`, name: 'exports' } });
+    expect(mk.ok(), `newfolder: ${mk.status()} ${await mk.text()}`).toBe(true);
+    const frame = await openInterface(page);
+    /** Save as from inside the interface; what it is answered, either way. */
+    const saveAs = (name: string, data: string) =>
+      frame.evaluate(
+        ({ name, data }) =>
+          (window as unknown as { __call: (m: string, p: unknown) => Promise<unknown> })
+            .__call('file.saveAs', { name, data })
+            .then((ok) => ({ ok }), (err) => ({ err })),
+        { name, data },
+      );
+    const dialog = page.getByTestId('destpicker');
+    // The dialog's own card: the viewer around it is a dialog card too.
+    const card = dialog.locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " fe-modal__card ")][1]');
+    const name = `copy.${ext}`;
+
+    // Filex's own folder dialog, naming the app and the file, in the file's
+    // folder; the person walks into `exports` and saves there.
+    let answer = saveAs(name, 'saved as');
+    await expect(dialog, 'the folder dialog is on screen').toBeVisible();
+    await expect(card).toContainText(`${app}: save “${name}” to`);
+    await page.getByTestId('destpicker-row-exports').click();
+    await expect(page.getByTestId('destpicker-target')).toContainText('exports');
+    await page.getByTestId('destpicker-confirm').click();
+    expect(await answer).toEqual({ ok: { saved: true, name, size: 8 } });
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(() => readFileSync(join(root, 'exports', name), 'utf8')).toBe('saved as');
+
+    // A kind of file the view does not open: the server refuses it after the
+    // pick, and the interface is told the short code only.
+    answer = saveAs('page.html', '<p>not a sketch</p>');
+    await expect(dialog).toBeVisible();
+    await page.getByTestId('destpicker-confirm').click();
+    expect(await answer).toEqual({ err: { code: 'invalid', message: 'not_applicable' } });
+    expect(existsSync(join(root, 'page.html')), 'nothing was written').toBe(false);
+
+    // Closing the dialog saves nothing.
+    answer = saveAs(`closed.${ext}`, 'never');
+    await expect(dialog).toBeVisible();
+    await card.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(await answer).toMatchObject({ err: { code: 'cancelled' } });
+    await expect(dialog).toHaveCount(0);
+    expect(existsSync(join(root, `closed.${ext}`))).toBe(false);
+  });
+
+  test('save as in the standalone editor: the focus ring of the first breadcrumb is drawn whole', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('filex.tourDone', '1');
+      localStorage.setItem('filex.installPrompt.dismissed', '1');
+    });
+    await loginAs(page);
+    await page.goto(
+      `/admin/files/edit?path=${encodeURIComponent(`${store}://note.${ext}`)}&type=${ext}&mode=edit&app=${encodeURIComponent(app)}`,
+    );
+    const el = page.locator('iframe[data-testid="app-frame"]');
+    await expect(page.locator('.fe-appframe[data-connected="true"]')).toBeVisible({ timeout: 20_000 });
+    const frame = (await (await el.elementHandle())!.contentFrame())!;
+    await frame.waitForFunction(() => document.body.dataset.ready === '1' || !!document.body.dataset.error);
+    void frame.evaluate(
+      (name) =>
+        (window as unknown as { __call: (m: string, p: unknown) => Promise<unknown> })
+          .__call('file.saveAs', { name, data: 'x' })
+          .catch(() => null),
+      `ring.${ext}`,
+    );
+    const dialog = page.getByTestId('destpicker');
+    await expect(dialog).toBeVisible();
+    const crumb = dialog.locator('.fe-destpick__crumbs button').first();
+    await expect(crumb).toBeVisible();
+    // Keyboard modality first, so :focus-visible matches in every engine.
+    await page.keyboard.press('Tab');
+    await crumb.focus();
+    await expect(crumb).toBeFocused();
+    const probe = await crumb.evaluate((node) => {
+      const cs = getComputedStyle(node);
+      const ring = Math.max(parseFloat(cs.outlineWidth) || 0, 1) + (parseFloat(cs.outlineOffset) || 0);
+      const r = node.getBoundingClientRect();
+      const drawn = cs.outlineStyle !== 'none';
+      // The ring's box: the border box grown by (width + offset), a negative offset pulling it inside.
+      const box = { l: r.left - ring, t: r.top - ring, r: r.right + ring, b: r.bottom + ring };
+      const clipped: string[] = [];
+      for (let a = node.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+        const ac = getComputedStyle(a);
+        if (ac.overflowX === 'visible' && ac.overflowY === 'visible') continue;
+        const c = a.getBoundingClientRect();
+        const bl = c.left + a.clientLeft;
+        const bt = c.top + a.clientTop;
+        const br = bl + a.clientWidth;
+        const bb = bt + a.clientHeight;
+        const sides: string[] = [];
+        if (ac.overflowX !== 'visible' && box.l < bl - 0.5) sides.push('left');
+        if (ac.overflowX !== 'visible' && box.r > br + 0.5) sides.push('right');
+        if (ac.overflowY !== 'visible' && box.t < bt - 0.5) sides.push('top');
+        if (ac.overflowY !== 'visible' && box.b > bb + 0.5) sides.push('bottom');
+        if (sides.length) clipped.push(`${a.className || a.tagName} clips ${sides.join('+')}`);
+      }
+      return { drawn, style: cs.outlineStyle, width: cs.outlineWidth, offset: cs.outlineOffset, clipped };
+    });
+    await page.screenshot({ path: test.info().outputPath(`crumb-focus-${test.info().project.name}.png`) });
+    expect(probe.drawn, `the focused crumb has a ring: ${JSON.stringify(probe)}`).toBe(true);
+    expect(probe.clipped, `the ring is inside every scroller around it: ${JSON.stringify(probe)}`).toEqual([]);
+    await dialog.locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " fe-modal__card ")][1]').getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
   });
 });

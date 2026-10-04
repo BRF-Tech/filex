@@ -41,7 +41,41 @@ export function scriptNeeds(dir, file) {
   const src = fs.readFileSync(path.join(dir, file), 'utf8');
   const apps = [...new Set([...src.matchAll(/\bfindApp\(\s*['"]([\w-]+)['"]\s*\)/g)].map((m) => m[1]))];
   const set = /\bconst\s+SET\s*=\s*['"]([\w-]+)['"]/.exec(src)?.[1] ?? null;
-  return { apps, set };
+  // A picture of ONLYOFFICE's own editor needs a REAL document server: a
+  // placeholder address makes filex call the integration configured, but the
+  // spreadsheet is drawn by the document server and nothing else can draw it
+  // (e2e/shots/scene.mjs → documentServer). Read off the call, like findApp.
+  const documentServer = /\bdocumentServer\(\s*\)/.test(src);
+  return { apps, set, documentServer };
+}
+
+/** The variables that name the document server a picture is taken against. */
+export const DOCUMENT_SERVER_VARS = ['SHOTS_ONLYOFFICE_URL', 'SHOTS_ONLYOFFICE_JWT', 'SHOTS_ONLYOFFICE_CALLBACK_HOST'];
+
+/**
+ * Is a document server named for the scenes that photograph ONLYOFFICE, and
+ * if not, what to set: `{ present, url, jwt, callbackHost, how }`.
+ *
+ * ⚠ All three or nothing. The URL is where filex and the browser reach the
+ * document server; the JWT is its secret; the callback host is the name the
+ * DOCUMENT SERVER reaches filex by (filex listens on every address of the
+ * machine for these scenes, on the port the run gives it), because the
+ * document server downloads the file from filex and saves it back there. A
+ * run with two of the three draws an editor that says "Download failed".
+ */
+export function documentServerFor(env = process.env) {
+  const [url, jwt, callbackHost] = DOCUMENT_SERVER_VARS.map((k) => (env[k] ?? '').trim());
+  if (url && jwt && callbackHost) return { present: true, url, jwt, callbackHost, how: '' };
+  const missing = DOCUMENT_SERVER_VARS.filter((k) => !(env[k] ?? '').trim());
+  return {
+    present: false,
+    url: '',
+    jwt: '',
+    callbackHost: '',
+    how:
+      `${missing.join(', ')} not set - start an ONLYOFFICE Document Server (JWT on) and set SHOTS_ONLYOFFICE_URL to its ` +
+      'address, SHOTS_ONLYOFFICE_JWT to its secret and SHOTS_ONLYOFFICE_CALLBACK_HOST to the host name it reaches this machine by',
+  };
 }
 
 /**
@@ -58,33 +92,42 @@ export function appScenesLeftOutBy({ withApps = false, withoutApps = false, env 
 
 /**
  * Decides, before anything is built, what happens to the scenes that need an
- * app build (see the note at the top of scripts/shots.mjs):
+ * app build or a document server (see the note at the top of scripts/shots.mjs):
  *
  *   withoutApps  → every such scene is `excluded` (file → why); one without a
  *                  `const SET` is `refused` instead, because its pictures
  *                  could not be told apart from leftovers;
  *   otherwise    → every app build that is missing is `refused`, with where it
- *                  was looked for.
+ *                  was looked for, and so is a scene that needs a document
+ *                  server when `documentServer` (documentServerFor) names none.
  *
  * `needs` maps a script to scriptNeeds(); `locate` is app-locations.mjs's
  * locateApp. Pure, so the rule is testable without a build.
  */
-export function planAppScenes({ needs, withoutApps, locate }) {
+export function planAppScenes({ needs, withoutApps, locate, documentServer = documentServerFor({}) }) {
   const excluded = new Map();
   const refused = [];
   for (const [file, n] of needs) {
-    if (!n.apps.length) continue;
+    const wants = [
+      ...(n.apps.length ? [`the ${n.apps.join(' + ')} app build${n.apps.length > 1 ? 's' : ''}`] : []),
+      ...(n.documentServer ? ['an ONLYOFFICE Document Server'] : []),
+    ];
+    if (!wants.length) continue;
     if (withoutApps) {
       if (!n.set) {
-        refused.push(`e2e/shots/${file} needs ${n.apps.join(' + ')} and would be left out, but names no \`const SET\` — its pictures could not be told apart from leftovers. Give it one.`);
+        const what = [...n.apps, ...(n.documentServer ? ['a document server'] : [])].join(' + ');
+        refused.push(`e2e/shots/${file} needs ${what} and would be left out, but names no \`const SET\` — its pictures could not be told apart from leftovers. Give it one.`);
         continue;
       }
-      excluded.set(file, `needs the ${n.apps.join(' + ')} app build${n.apps.length > 1 ? 's' : ''}`);
+      excluded.set(file, `needs ${wants.join(' and ')}`);
       continue;
     }
     for (const app of n.apps) {
       const at = locate(app);
       if (!at.present) refused.push(`e2e/shots/${file} needs the ${app} app: ${at.how}.`);
+    }
+    if (n.documentServer && !documentServer.present) {
+      refused.push(`e2e/shots/${file} needs an ONLYOFFICE Document Server: ${documentServer.how}.`);
     }
   }
   return { excluded, refused };

@@ -70,7 +70,9 @@ func encryptCmd() *cobra.Command {
 			"encrypted after the contents. At the end filex drops the thumbnails and the search text\n" +
 			"it held for the folder, and its older versions and trash entries unless --keep-versions\n" +
 			"or --keep-trash. The connection is the one `filex client` uses (--url/--token,\n" +
-			"FILEX_URL/FILEX_TOKEN, or `filex client login`).\n\n" +
+			"FILEX_URL/FILEX_TOKEN, or `filex client login`). The server's encryption policy is\n" +
+			"asked first: where it does not let this account encrypt the folder, or wants an\n" +
+			"administrator's approval, it says so before any password is asked.\n\n" +
 			"Files over 200 MB are written in the streamed format (STREAM), as the browser writes\n" +
 			"them; nothing is held in memory but one file up to 200 MB.\n\n" +
 			"Stopped half-way (Ctrl-C, a dropped connection, a file that changed meanwhile), it\n" +
@@ -409,6 +411,12 @@ func (r *remoteRun) start(cmd *cobra.Command, o *encryptOpts) error {
 	if nested != "" {
 		return fmt.Errorf("%s holds the encrypted folder %s; encrypted folders cannot be nested, so nothing was changed", r.rootWire, nested)
 	}
+	// Who may encrypt is the server's question (the tenant's encryption
+	// policy), asked BEFORE the password: a refusal at the key file would
+	// come after somebody typed a password twice for nothing.
+	if err := r.mayEncrypt(); err != nil {
+		return err
+	}
 	escrow, err := r.api.E2EEscrowKey(r.ctx)
 	if err != nil {
 		return fmt.Errorf("reading whether the server has key escrow: %w", authHint(err))
@@ -437,6 +445,41 @@ func (r *remoteRun) start(cmd *cobra.Command, o *encryptOpts) error {
 	}
 	r.keys = made.Keys
 	return showRecoveryKey(cmd, o, made.RecoveryKey)
+}
+
+// mayEncrypt asks the server whether this account may encrypt the folder
+// where it is, and says why not in words before anything is asked or written.
+// An answer the CLI does not know reads as allowed: the key file's write is
+// asked again by the server, which decides.
+func (r *remoteRun) mayEncrypt() error {
+	answer, reason, err := r.api.E2EAllowed(r.ctx, r.rootWire, "folder")
+	if err != nil {
+		return fmt.Errorf("asking whether this account may encrypt %s: %w", r.rootWire, authHint(err))
+	}
+	switch answer {
+	case "request":
+		return fmt.Errorf("%s: encrypting this folder needs an administrator's approval first (the encryption policy). "+
+			"Ask for it in the web app (the folder's menu: Request encryption...), then run this again; nothing was changed", r.rootWire)
+	case "denied":
+		return fmt.Errorf("%s: encrypting here is not allowed: %s; nothing was changed", r.rootWire, encryptRefusal(reason))
+	}
+	return nil
+}
+
+// encryptRefusal words the layer of the policy that said no
+// (internal/e2epolicy Reason).
+func encryptRefusal(reason string) string {
+	switch reason {
+	case "tenant_disabled":
+		return "the platform operator has switched encryption off for this organisation"
+	case "policy_off":
+		return "an administrator has switched encryption off"
+	case "admins_only":
+		return "only administrators may encrypt here"
+	case "permission":
+		return "your role does not allow encrypting here"
+	}
+	return "the encryption policy does not allow it"
 }
 
 // resume unlocks the key file of a folder whose encryption was started (here

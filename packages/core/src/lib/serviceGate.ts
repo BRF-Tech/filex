@@ -20,6 +20,8 @@
  * supertenant included), never a guess made in the browser.
  */
 
+import { isExternalUsable, type ExternalServiceStatus } from '../types/FileNode';
+
 /** The fields a `ContextAction` takes from the gate. */
 export interface ServiceGate {
   hidden?: boolean;
@@ -60,4 +62,23 @@ export const OFFICE_EXTS: readonly string[] = [
 
 export function isOfficeExt(ext: string | null | undefined): boolean {
   return OFFICE_EXTS.includes(String(ext ?? '').toLowerCase());
+}
+
+/** What the capabilities answer says about the document server. */
+export interface OnlyOfficeCaps {
+  onlyoffice_url?: string | null;
+  external?: { onlyoffice?: ExternalServiceStatus };
+}
+
+/**
+ * ONLYOFFICE is configured and answering, by the capabilities answer: the
+ * probe did not fail (`external.onlyoffice`) and there is an address. The
+ * explorer reads the same two fields (FileExplorer effectiveOnlyOfficeBase),
+ * so "Open with ONLYOFFICE" means the same thing in Settings.
+ */
+export function onlyOfficeUsable(caps: OnlyOfficeCaps | null | undefined): boolean {
+  if (!caps) return false;
+  const st = caps.external?.onlyoffice;
+  if (st && !isExternalUsable(st)) return false;
+  return !!caps.onlyoffice_url;
 }

@@ -566,6 +566,9 @@ func (a *AIAdmin) auditInvoke(callCtx context.Context, principal *model.User, me
 	if status < 200 || status >= 300 {
 		return // only successful writes
 	}
+	if detail.Skipped() {
+		return // the handler recorded it itself (auth.SkipAuditRow)
+	}
 	action, targetType, targetID := auth.AIAdminAction(method, path, urlParams["id"], urlParams["name"])
 	if a, tt := detail.Action(); a != "" {
 		action, targetType = auth.DoorAction(a, true), tt

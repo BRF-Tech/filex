@@ -46,6 +46,22 @@ function packManifest(): { path: string; name: string; es: Record<string, string
 const PACK = packManifest();
 
 /**
+ * The admin panel speaks the pack: the top bar's Dashboard link, and the
+ * Plugins page in the System panel. ⚠ Since 0.51 every page name sits in a
+ * mega menu panel that is hidden until it opens, so a bare getByText finds
+ * the hidden entry; the panel is opened, after the 120 ms cross-fade between
+ * two admin layouts has left one menu (lesson #994).
+ */
+async function panelSpeaks(page: Page) {
+  await expect(page.getByTestId('mega-menu')).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.getByTestId('nav-dashboard')).toContainText(PACK.es['nav.dashboard'], { timeout: 15_000 });
+  await page.getByTestId('nav-top-system').click();
+  await expect(page.getByTestId('nav-plugins')).toBeVisible();
+  await expect(page.getByTestId('nav-plugins')).toContainText(PACK.es['nav.plugins']);
+  await page.keyboard.press('Escape');
+}
+
+/**
  * The same pack under a label long enough to fill the Label column twice over
  * — a German interface name, which is what found the overlap below.
  */
@@ -265,13 +281,13 @@ test.describe.serial('Language pack — install, every surface, uninstall', () =
 
     // The admin panel.
     await page.goto('/admin/plugins');
-    await expect(page.getByText(PACK.es['nav.plugins'], { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+    await panelSpeaks(page);
 
     // A reload: the stored choice is HELD until the offered list arrives,
     // then the pack's words replace English.
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('lang', 'es');
-    await expect(page.getByText(PACK.es['nav.plugins'], { exact: true }).first()).toBeVisible({ timeout: 15_000 });
+    await panelSpeaks(page);
 
     // The explorer half — this is what `resolveLocale` used to throw away.
     await page.goto(`/admin/explore?storage=${encodeURIComponent(STORAGE)}`);

@@ -42,6 +42,12 @@
 //
 // ⚠ The release folder is named once, in e2e/shots/release.mjs.
 //
+// ⚠ The scenes that photograph ONLYOFFICE's own editor (a script calling
+// `documentServer()`: csvoffice.mjs) need a real document server, named by
+// SHOTS_ONLYOFFICE_URL, SHOTS_ONLYOFFICE_JWT and SHOTS_ONLYOFFICE_CALLBACK_HOST.
+// They are treated exactly like the app scenes below: refused before the build
+// when it is not named, left out in CI and with --without-apps.
+//
 // ⚠⚠ The scenes that photograph an APP (a script calling `findApp('sign')` —
 // apps.mjs and signing.mjs) need that app's build, which is not in this tree:
 // filex-sign and filex-convert are their own repositories. Locally a missing
@@ -74,7 +80,14 @@ import { checkEmbeddedUI, freePort } from './check-embed.mjs';
 import { APP_LOCATIONS, locateApp } from '../e2e/helpers/app-locations.mjs';
 import { removeRunContainers } from './lib/containers.mjs';
 import { goBuild } from './lib/go-build.mjs';
-import { appScenesLeftOutBy, findShotScripts, planAppScenes, scriptNeeds } from './lib/shot-scripts.mjs';
+import {
+  DOCUMENT_SERVER_VARS,
+  appScenesLeftOutBy,
+  documentServerFor,
+  findShotScripts,
+  planAppScenes,
+  scriptNeeds,
+} from './lib/shot-scripts.mjs';
 import { RUN_MARKER, describeProcess, killProcess, listProcesses, runProcesses, sweepRun } from './lib/procs.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -264,9 +277,12 @@ const APP_DIR_VARS = new Set([
   'FILEX_LANG_FR_APP_DIR',
 ]);
 // Where the converter scene's engines come from (e2e/shots/scene.mjs →
-// bootInstance). They choose a machine to run on; none of them can make a
-// picture go missing, which is what the SHOTS_* filter below is for.
-const SHOTS_PASS = new Set(['SHOTS_VERBOSE', 'SHOTS_ENGINES', 'SHOTS_ENGINES_IMAGE', 'SHOTS_LINUX_BIN']);
+// bootInstance), and the document server the ONLYOFFICE scenes are taken
+// against (scene.mjs → documentServer; scripts/lib/shot-scripts.mjs). They
+// choose a machine to run on; none of them can make a picture go missing,
+// which is what the SHOTS_* filter below is for: a scene that needs a document
+// server and has none is refused or left out before anything is built.
+const SHOTS_PASS = new Set(['SHOTS_VERBOSE', 'SHOTS_ENGINES', 'SHOTS_ENGINES_IMAGE', 'SHOTS_LINUX_BIN', ...DOCUMENT_SERVER_VARS]);
 
 function scriptEnv(runBin, runTmp, port) {
   const env = {};
@@ -429,7 +445,7 @@ async function main() {
   // step: an hour of building is no way to learn that a sibling checkout is
   // missing (see the note at the top of this file).
   const needs = new Map(scripts.map((f) => [f, scriptNeeds(SHOTS_DIR, f)]));
-  const { excluded, refused } = planAppScenes({ needs, withoutApps, locate: locateApp });
+  const { excluded, refused } = planAppScenes({ needs, withoutApps, locate: locateApp, documentServer: documentServerFor(process.env) });
   if (refused.length) {
     const repos = Object.values(APP_LOCATIONS).map((a) => `${a.repo} (${a.env})`).join(', ');
     throw new Refusal(

@@ -128,6 +128,11 @@ const ENGLISH: Rule[] = [
   { use: 'email', wrong: /(?<![\w-])e-mails?\b/i },
   { use: 'Synchronous / Asynchronous (a write mode — "sync" is the scan)', wrong: /^(Sync|Async) \(|\bAsync\b/ },
   { use: 'exception (an Allow or Deny set for one person, beating their role)', wrong: /\boverrid(e|es|den|ing)\b/i, except: OVERRIDE_IS_ANOTHER_THING },
+  /* The supertenant's administrators are "the platform operator" on every
+     screen and in every refusal (PR #83 review, 2026-10-03: the server said
+     "the service provider has turned it off" while the explorer said "the
+     platform operator has switched it off" for the same switch). */
+  { use: 'platform operator (the supertenant)', wrong: /\bservice providers?\b/i },
 ];
 
 /* ⚠ `\b` is an ASCII word boundary in JavaScript, even under `u`: before "ş"
@@ -183,8 +188,13 @@ const TURKISH: Rule[] = [
      file viewer is "görüntüleyici" in lower case, and stays. */
   { use: 'İzleyici (the Viewer role)', wrong: /(?<!\p{L})Görüntüleyici/u },
   { use: 'istisna (an Allow or Deny set for one person)', wrong: tr('<geçersiz kıl'), except: OVERRIDE_IS_ANOTHER_THING },
-  /* ⚠ Turkish letters, never their ASCII look-alikes (G:/mail CLAUDE.md, the
-     2026-07-10 "Altyapi" report). 0.49's role editor shipped the example
+  /* "platform işletmecisi" is the supertenant on every Turkish screen (the
+     maintenance notice, Storage plugins, File types, Admin -> Encryption); the
+     server's refusal said "hizmet veren" for the same switch (PR #83 review,
+     2026-10-03). */
+  { use: 'platform işletmecisi (the supertenant)', wrong: tr('<hizmet veren|<hizmet sağlayıcı|<platform (operatörü|yöneticisi)') },
+  /* ⚠ Turkish letters, never their ASCII look-alikes (the maintainers' house
+     rules, the 2026-07-10 "Altyapi" report). 0.49's role editor shipped the example
      folders "Arsiv veya Musteriler/…/Sozlesmeler". A regex cannot know every
      word; these are the ones interface text keeps reaching for. */
   {

@@ -27,7 +27,7 @@
 
 import { onBeforeUnmount, ref, type Ref } from 'vue';
 
-import type { FileNode } from '../types/FileNode';
+import type { E2eAnswer, FileNode } from '../types/FileNode';
 import type { FileApi, PendingOpDto } from './useFileApi';
 import { isStagedUnsupported, type UploadJob, type UploadOptions, type UploadResult } from './useUploadChunked';
 import { requestFailure } from '../lib/errorWords';
@@ -108,6 +108,11 @@ export interface E2eFilesDeps {
   openPreview: (node: FileNode, url: string) => void;
   /** Show a recovery key once (RecoveryKeyModal), for the file called `name`. */
   showRecoveryKey: (key: string, name: string) => void;
+  /** wiring:e2 policy — "Request encryption…" on a plain file: the host opens
+   *  its request dialog (FileExplorer → E2eRequestModal). Absent, the row does
+   *  nothing — and a host that never passes `encryptAnswer: 'request'` never
+   *  offers it. */
+  requestEncrypt?: (node: FileNode) => void;
 }
 
 /** Why the unlock dialog is open. */
@@ -144,6 +149,7 @@ export interface FxeMenuRow {
 /** The context-menu keys this composable answers. */
 export const FXE_ACTION_KEYS = [
   'fxe-encrypt',
+  'fxe-request' /* wiring:e2 policy */,
   'fxe-download-raw',
   'fxe-remove',
   'fxe-password',
@@ -157,6 +163,18 @@ export function isFxeActionKey(key: string): boolean {
 /** A row that is a single encrypted file. */
 export function isFxeRow(n: { type?: string; basename?: string; e2e_stored?: unknown } | null | undefined): boolean {
   return !!n && n.type === 'file' && isFxeName(typeof n.e2e_stored === 'string' ? n.e2e_stored : n.basename);
+}
+
+/**
+ * wiring:e2 policy — the plain file "Encrypt with E2EE…" would encrypt: one
+ * file you may write, not a `.fxe` already, not inside an encrypted folder
+ * (the folder encrypts it). The explorer asks the policy's answer for exactly
+ * this file, so the menu and the question cannot disagree about which one.
+ */
+export function fxeEncryptTarget(sel: FileNode[], ctx: { canWrite: boolean; inEncrypted: boolean }): FileNode | null {
+  const n = sel.length === 1 ? sel[0] : null;
+  if (!n || n.type !== 'file' || isFxeRow(n) || ctx.inEncrypted || n.e2e_root || !ctx.canWrite) return null;
+  return n;
 }
 
 /** `name (2).ext` — a free name next to a taken one. */
@@ -354,20 +372,32 @@ export function useE2eFiles(deps: E2eFilesDeps) {
    *   unlockedEncryptedCopy  the selection is (inside) an UNLOCKED encrypted
    *                folder: "Download" decrypts, so the ciphertext copy is a
    *                second verb
+   *   encryptAnswer  wiring:e2 policy — the server's answer for the file
+   *                "Encrypt with E2EE…" would encrypt (`fxeEncryptTarget`):
+   *                `request` offers "Request encryption…" in its place,
+   *                `denied` neither. Absent: `allowed`, the menu of before.
    */
   function menuRows(
     sel: FileNode[],
-    ctx: { canWrite: boolean; inEncrypted: boolean; unlockedEncryptedCopy: boolean },
+    ctx: { canWrite: boolean; inEncrypted: boolean; unlockedEncryptedCopy: boolean; encryptAnswer?: E2eAnswer },
   ): FxeMenuRow[] {
     const single = sel.length === 1 ? sel[0] : null;
     const fxe = !!single && isFxeRow(single);
-    const plainFile = !!single && single.type === 'file' && !fxe && !ctx.inEncrypted && !single.e2e_root;
+    const encryptable = fxeEncryptTarget(sel, ctx) !== null;
+    const answer = ctx.encryptAnswer ?? 'allowed';
     return [
       {
         key: 'fxe-encrypt',
         label: t('e2e.fxe.ctx_encrypt'),
         icon: 'lock',
-        hidden: !plainFile || !ctx.canWrite,
+        hidden: !encryptable || answer !== 'allowed',
+      },
+      /* wiring:e2 policy — the same place, where encrypting needs an approval. */
+      {
+        key: 'fxe-request',
+        label: t('e2e.request.ctx'),
+        icon: 'lock',
+        hidden: !encryptable || answer !== 'request',
       },
       { key: 'fxe-download-raw', label: t('e2e.fxe.ctx_download_raw'), icon: 'download', hidden: !fxe },
       {
@@ -1093,6 +1123,9 @@ export function useE2eFiles(deps: E2eFilesDeps) {
     switch (key) {
       case 'fxe-encrypt':
         if (n) startEncrypt(n);
+        return true;
+      case 'fxe-request':
+        if (n) deps.requestEncrypt?.(n);
         return true;
       case 'fxe-download-raw':
         if (n) window.open(api.downloadUrl(n.path), '_blank');

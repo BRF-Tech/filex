@@ -414,6 +414,19 @@ func (f *fs) Rename(oldname, newname string) error {
 	if !ok {
 		return storage.ErrUnsupported
 	}
+	// Who may encrypt (internal/e2epolicy): an RNTO onto a key file's or a
+	// `.fxe`'s name is asked as a STOR of the file there would be (onto a
+	// file it replaces it, onto nothing or a folder it creates one), unless
+	// it is free: a folder, a `.fxe` that stays a `.fxe`, a key file that
+	// stays its own folder's (protoperm.RenameEncryptionAllowed). A rule that
+	// could not be decided says so in the reply rather than "permission
+	// denied"; ftpserverlib answers any failed RNTO 550.
+	switch protoperm.RenameEncryptionAllowed(f.ctx, f.srv.cfg.E2EPolicy, drv, src.Storage, src.Rel, dst.Rel) {
+	case protoperm.EncryptionRefused:
+		return os.ErrPermission
+	case protoperm.EncryptionUndecided:
+		return protoperm.ErrEncryptionUndecided
+	}
 	if err := mover.Move(f.ctx, src.Rel, dst.Rel); err != nil {
 		return mapStorageErr(err)
 	}

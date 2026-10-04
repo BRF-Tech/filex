@@ -225,7 +225,6 @@ export interface SaveResult {
   size: number;
 }
 
-/** `file.saveAs`: a NEW file, somewhere the person picks in filex's own dialog. */
 /**
  * `ui.download`: a file for the person's own disk. filex does it (a sandboxed
  * frame cannot download), with the app's `ui:download` grant, on a gesture in
@@ -244,7 +243,13 @@ export interface DownloadResult {
   size: number;
 }
 
+/**
+ * `file.saveAs`: a NEW file, in a folder the person picks in filex's own
+ * folder dialog (the one its Move to… uses), which opens in the opened
+ * file's folder. Closing the dialog answers `cancelled`.
+ */
 export interface SaveAsParams {
+  /** The file name — a name, not a path. */
   name: string;
   data: ReadableStream<Uint8Array> | ArrayBuffer | string;
   mime?: string;

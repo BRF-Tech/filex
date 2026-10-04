@@ -735,6 +735,13 @@ export interface Capabilities {
    *  folders you create here, and you are entitled to know before you create
    *  one. */
   e2e_escrow?: { enabled: boolean; kid?: string; alg?: string; public_key?: string };
+  /** Who may START encrypting here - the caller's own tenant's row:
+   *  `available` is the platform operator's switch, `policy` the tenant's
+   *  choice (`off` | `admins` | `permitted` | `approval`). A signed-in caller's
+   *  only, and absent on a server older than the policy (read as "offer
+   *  encryption as before"). What the explorer offers where is asked per path:
+   *  `POST /api/files/e2e/allowed` ([BACKEND.md](BACKEND.md#encryption-policy)). */
+  e2e_policy?: { available: boolean; policy: string };
 }
 ```
 

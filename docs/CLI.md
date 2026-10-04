@@ -684,7 +684,10 @@ folder the browser would make, or let the folder's owner add the slot later
 ([offering a slot](E2E-ENCRYPTION.md#offering-an-existing-folder-an-escrow-slot)).
 
 **A folder on a server** (`adapter://path`) is encrypted where it is, in the
-order the browser follows: no encrypted folder inside it, then - when the
+order the browser follows: no encrypted folder inside it, then the server's
+[encryption policy](E2E-ENCRYPTION.md#who-may-encrypt) (where it does not let
+this account encrypt the folder, or wants an administrator's approval first,
+the command says so and stops before any password is asked), then - when the
 server has [key escrow](E2E-ENCRYPTION.md#key-escrow-optional-operator-recovery) -
 a notice that its operator holds a second key, then the password, then the key
 file (with the conversion under way, `req: ["conv"]`), then the recovery key,

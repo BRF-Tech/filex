@@ -120,7 +120,7 @@ export function writeStamp(sdkDir, pluginkitDir) {
   const gen = treeHash(path.join(sdkDir, 'pkg', 'pluginkit'));
   const stamp = {
     // ⚠⚠ Written TWO ways, and read by `sourceCandidates` below. The same
-    // tree is `/mnt/g/filex-wt-apps/…` under WSL and `G:\filex-wt-apps\…`
+    // tree is `/mnt/d/src/app-wt/…` under WSL and `D:\src\app-wt\…`
     // from Windows, and the first version of this guard stored only the
     // absolute path of whichever side generated the copy — so a build started
     // from the OTHER side found no such directory and refused a perfectly

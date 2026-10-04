@@ -35,6 +35,11 @@ export interface AppFixture {
   /** The languages the manifest promises; [] when it declares none. */
   languages: string[];
   skipReason: string;
+  /**
+   * Set when the module is there but cannot be trusted: built before a
+   * change to its sources (helpers/echoFixture). A failure, never a skip.
+   */
+  failReason?: string;
 }
 
 export function requireFixtures(): boolean {
@@ -78,12 +83,22 @@ export function resolveApp(name: keyof typeof APP_LOCATIONS | string): AppFixtur
 }
 
 /**
- * Guard for a spec that needs a module: skip locally, fail on CI.
+ * Guard for a spec that needs a module: skip locally, fail on CI. A module
+ * that is there but stale (`failReason`) fails everywhere, with the command
+ * that rebuilds it. Call it in the describe, or in the one test that needs
+ * the module.
+ *
+ * ⚠ A throw in a describe is a load error, and Playwright then runs NO test
+ * of the whole run (measured 2026-10-03, 1.59.1: the stale-module sentence
+ * once per echo spec, then "No tests found"). That is on purpose: a stale or
+ * missing-on-CI module is a broken checkout, said in seconds instead of after
+ * the suite.
  *
  * Playwright's own skip, not a bespoke flag — a skipped test is reported as
  * skipped, and `--forbid-only`-style strictness stays with the runner.
  */
 export function guardFixture(app: AppFixture, testSkip: (condition: boolean, reason: string) => void) {
+  if (app.failReason) throw new Error(app.failReason);
   if (!app.present && requireFixtures()) {
     throw new Error(`FILEX_REQUIRE_WASM_FIXTURE is set and ${app.skipReason}`);
   }

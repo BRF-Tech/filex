@@ -455,7 +455,7 @@ func NeedLevel(p perm.Perm) Level {
 	case perm.FilesDownload, perm.FilesTag:
 		return LevelViewer
 	case perm.FilesCreate, perm.FilesModify, perm.FilesRename, perm.FilesMove, perm.FilesDelete, perm.FilesPurge,
-		perm.ShareLinks, perm.ShareUploadLinks:
+		perm.FilesEncrypt, perm.ShareLinks, perm.ShareUploadLinks:
 		return LevelEditor
 	case perm.ShareUsers:
 		return LevelOwner

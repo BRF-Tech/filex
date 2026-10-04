@@ -10,6 +10,7 @@ import { useToastStore } from '@/stores/toast';
 import { formatDate, formatRelative } from '@/lib/format';
 import { WEBHOOK_EVENTS, eventOffReason, webhookEventKey } from '@brftech/filex-core';
 import { useCapabilitiesStore } from '@/stores/capabilities';
+import { useAuthStore } from '@/stores/auth';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -22,6 +23,7 @@ import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-c
 
 const { t, locale } = useI18n();
 const caps = useCapabilitiesStore();
+const auth = useAuthStore();
 
 /**
  * The line under an event's box: its wire name, and — when the service it
@@ -29,9 +31,15 @@ const caps = useCapabilitiesStore();
  * eventOffReason). ⚠ The box stays tickable: an operator may subscribe ahead
  * of switching the service on. The settings dialog offered these to people
  * as if they could happen (QA #39).
+ *
+ * The account is read from the auth store, not from `caller_admin`: this
+ * screen is admin-only (the router's `requiresAdmin`, with no `adminPerm` on
+ * this page), so whoever is here is an administrator account — of a tenant, of
+ * the supertenant, or of a single-tenant install — and the note for a new
+ * encryption request then depends on the tenant's policy alone.
  */
 function eventNote(ev: string): string {
-  const off = eventOffReason(ev, caps.data);
+  const off = eventOffReason(ev, { ...caps.data, account_admin: auth.isAdmin });
   return off ? `${ev} - ${t(off)}` : ev;
 }
 const toast = useToastStore();

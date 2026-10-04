@@ -17,7 +17,7 @@ import (
 // and the write succeeds silently. Hetzner Object Storage accepts it; MinIO,
 // which is directory-backed, cannot represent it.
 //
-// What that cost us (2026-08-06, brkip DR mirror): the mirror could never
+// What that cost us (2026-08-06, a DR mirror): the mirror could never
 // settle the colliding prefix, so `mc mirror` re-copied it every run — 2760
 // syncs in 24h, 1016 versions of a single PNG, a 43 MiB folder occupying 45 GB,
 // and the disk at 96%. Worse and quieter: the colliding object made everything

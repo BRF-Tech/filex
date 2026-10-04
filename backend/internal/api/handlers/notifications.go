@@ -86,7 +86,7 @@ func (h *Notifications) List(w http.ResponseWriter, r *http.Request) {
 func (h *Notifications) bellRead(ctx context.Context, user *model.User, onlyUnread bool, limit, offset int) ([]*model.Notification, int64, error) {
 	bell := bellFor(ctx, user)
 	j := h.judge(ctx, user, bell)
-	if bell == notify.AdminBell && !j.rooted {
+	if bell.Unconfined() && !j.rooted {
 		uid := user.ID
 		return h.Service.List(ctx, &uid, bell, onlyUnread, limit, offset)
 	}
@@ -99,9 +99,11 @@ func (h *Notifications) bellRead(ctx context.Context, user *model.User, onlyUnre
 
 // bellFor picks which broadcasts the caller's bell takes from the store
 // (notify.Bell): every kind for an admin nobody confines — the admin of a
-// single-tenant install, or the supertenant's — the kinds that name a file for
-// a tenant admin, and the member kinds for everybody else. Only the first reads
-// the broadcasts as stored; the others get the per-row pass (bellJudge).
+// single-tenant install, or the supertenant's (the platform operator's bell
+// less a tenant's new encryption request, notify.PlatformAdminBell) - the
+// kinds that name a file for a tenant admin, and the member kinds for
+// everybody else. Only the first two read the broadcasts as stored; the others
+// get the per-row pass (bellJudge).
 func bellFor(ctx context.Context, user *model.User) notify.Bell {
 	_, confined := confinedScope(ctx)
 	switch {
@@ -109,9 +111,19 @@ func bellFor(ctx context.Context, user *model.User) notify.Bell {
 		return notify.MemberBell
 	case confined:
 		return notify.TenantAdminBell
+	case platformOperator(ctx):
+		return notify.PlatformAdminBell
 	default:
 		return notify.AdminBell
 	}
+}
+
+// platformOperator reports whether the caller is a member of the supertenant
+// on a multi-tenant install (the tenant scope says so; a single-tenant install
+// has none).
+func platformOperator(ctx context.Context) bool {
+	s, ok := tenant.FromContext(ctx)
+	return ok && s != nil && s.IsSupertenant
 }
 
 // bellJudge decides, one BROADCAST at a time, whether the caller may be shown
@@ -198,7 +210,7 @@ func (j *bellJudge) keep(n *model.Notification) bool {
 	if !j.inRoot(n) {
 		return false
 	}
-	if n.UserID != nil || j.bell == notify.AdminBell {
+	if n.UserID != nil || j.bell.Unconfined() {
 		return true
 	}
 	if !j.bell.Admits(n.Event) {
@@ -418,7 +430,7 @@ func (h *Notifications) UnreadCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bell := bellFor(r.Context(), user)
-	if _, rooted := callerRoot(r.Context()); bell != notify.AdminBell || rooted {
+	if _, rooted := callerRoot(r.Context()); !bell.Unconfined() || rooted {
 		_, n, err := h.bellRead(r.Context(), user, true, 1, 0)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

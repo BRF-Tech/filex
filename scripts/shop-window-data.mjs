@@ -406,4 +406,32 @@ export const SCREENSHOTS = [
     file: `${SHOTS_ROOT_REL}/thumbnails/folders-grid-1440.png`,
     depicts: ['packages/core/src/components/FolderMosaic.vue', 'packages/core/src/components/ThumbTile.vue'],
   },
+  // ── v0.51.0: the admin menu, who may encrypt, a .csv in ONLYOFFICE
+  //    (e2e/shots/megamenu.mjs, encryption.mjs, csvoffice.mjs) ──
+  {
+    // The People & security panel open over Admin → Users: sections, a line
+    // under every page, the page you are on.
+    file: `${SHOTS_ROOT_REL}/megamenu/people-panel-1440.png`,
+    depicts: ['packages/core/src/components/MegaMenu.vue', 'web/src/lib/adminNav.ts', 'web/src/components/TopNav.vue'],
+  },
+  {
+    // Admin → Encryption: the policy card and the requests waiting.
+    file: `${SHOTS_ROOT_REL}/encryption/admin-encryption-1440.png`,
+    depicts: ['web/src/views/Encryption.vue', 'web/src/components/encryption/EncryptionPolicyCard.vue', 'web/src/components/encryption/EncryptionRequestsPanel.vue'],
+  },
+  {
+    // The New folder dialog's request for an encrypted folder, a reason written.
+    file: `${SHOTS_ROOT_REL}/encryption/request-new-folder.png`,
+    depicts: ['packages/core/src/components/E2eRequestModal.vue', 'packages/core/src/modals/NewFolderModal.vue'],
+  },
+  {
+    // A semicolon CSV in ONLYOFFICE's spreadsheet, a look first.
+    file: `${SHOTS_ROOT_REL}/csvoffice/csv-view-1440.png`,
+    depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv.go'],
+  },
+  {
+    // The editor tab with the note on what a save as CSV keeps.
+    file: `${SHOTS_ROOT_REL}/csvoffice/csv-edit-1440.png`,
+    depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv.go'],
+  },
 ];

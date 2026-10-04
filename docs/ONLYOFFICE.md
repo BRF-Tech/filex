@@ -13,6 +13,11 @@ Since 0.50 the same Document Server also draws the **thumbnails** of office
 documents - a picture of the first page - and nothing else does: filex ships
 no office suite (see [Thumbnails](#thumbnails)).
 
+Since 0.51 a **`.csv`** opens in ONLYOFFICE's spreadsheet editor too while it
+is configured, and is edited there and saved back as the same kind of CSV;
+without it a `.csv` opens in filex's read-only table, as before (see
+[CSV files](#csv-files)).
+
 It works in every surface that embeds the explorer - the web app, the
 [desktop app](DESKTOP.md), and any host page using `<filex-explorer>` - because
 they all open the same editor component against the same endpoints. The desktop
@@ -376,6 +381,167 @@ preview/download for those.
 
 ---
 
+## CSV files
+
+Since 0.51 a **`.csv`** opens in ONLYOFFICE's spreadsheet editor while
+OnlyOffice is configured. That is the product's default, not a setting each
+install has to make: filex's own read-only table is the second choice, and
+without OnlyOffice it is the only one, as before. Only `.csv` (a `.tsv` still
+opens in the table).
+
+- **Opening.** A double click opens it the way an office document opens: a
+  look first, in the editor's view mode, with an **Edit** button that opens
+  the editor tab. A person without write access gets the view mode only, as
+  for every office file.
+- **A choice like any other.** ONLYOFFICE is a handler of the open capability
+  for `.csv` ([APP-PLUGINS.md → Default apps](APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail),
+  handler id `onlyoffice`): the file menu's *Open with* lists *Open with
+  ONLYOFFICE* and *Open with the built-in viewer*, **Choose an app…** can make
+  either the person's default (`PUT /api/me/open-with/csv`), and the
+  administrator can reorder or switch it off under *Admin → Plugins → Default
+  apps*, which lists `.csv` while OnlyOffice is configured
+  (`PUT /api/admin/file-types/csv`). Switch OnlyOffice off and a `.csv` opens
+  in the table again, without an error: a rule or a person's choice that names
+  ONLYOFFICE is kept, and used again once it is back. An administrator sees
+  *Open with ONLYOFFICE* greyed with where to set it up meanwhile; nobody else
+  is offered it.
+
+| | |
+|---|---|
+| ![A semicolon CSV open in ONLYOFFICE's spreadsheet, a look first](screenshots/v0.51.0/csvoffice/csv-view-1440.png) | ![The CSV in the editor tab, with the line on what a save keeps](screenshots/v0.51.0/csvoffice/csv-edit-1440.png) |
+| A double click: the spreadsheet, a look first, no "Choose CSV options" question. | **Edit**: the editor tab, and filex's line on what a save as CSV keeps. |
+| ![The file menu: Open with ONLYOFFICE, the built-in viewer, Choose an app…](screenshots/v0.51.0/csvoffice/csv-open-with-menu.png) | ![Choose an app…, ONLYOFFICE and the table](screenshots/v0.51.0/csvoffice/csv-choose-app.png) |
+| The file's menu offers both. | **Choose an app…** can make either the person's default. |
+| ![Default apps: .csv, ONLYOFFICE first, the table second](screenshots/v0.51.0/csvoffice/default-apps-csv-1440.png) | ![ONLYOFFICE switched off: its row greyed, saying where to set it up](screenshots/v0.51.0/csvoffice/csv-menu-no-onlyoffice.png) |
+| *Admin → Plugins → Default apps* lists `.csv` while ONLYOFFICE is connected. | ONLYOFFICE switched off: the table opens the file, and an administrator sees the row greyed. |
+
+### Opening without the "Choose CSV options" question
+
+ONLYOFFICE asks for a CSV's encoding and delimiter before it shows anything,
+unless the editor's config carries them (`document.options`). filex reads the
+first 64 KiB of the file and passes what it finds, so the file opens straight
+away (measured on Docs 9.4: ready in about 4 seconds, no dialog):
+
+- **the delimiter**: comma, semicolon, tab or `|` - the one that splits the
+  first lines (outside quotes) into the same number of fields; a comma when
+  nothing does (a one-column file, an empty one);
+- **the encoding**: UTF-8 (`codePage` 65001), with or without a byte order
+  mark. A file that is not UTF-8 (UTF-16, a legacy code page such as
+  Windows-1254) gets no options: ONLYOFFICE asks which encoding it is, because
+  a wrong guess would change every non-ASCII letter and the save would keep
+  the change.
+
+### What a save writes
+
+The Document Server saves an edited CSV when the last editor closes it, as for
+every document ([What a save does](#what-a-save-does)). Measured on Docs 9.4
+with its default (`assemblyFormatAsOrigin: true`), the callback's file is a
+CSV (`filetype: "csv"`), but written ONLYOFFICE's way whatever the file was:
+comma-separated, a UTF-8 byte order mark in front, `\n` line ends. filex puts
+the file's own way back before it writes it - its delimiter, its byte order
+mark or none, its `\r\n` or `\n` - and leaves every value as ONLYOFFICE
+wrote it. A semicolon file stays a semicolon file. A file that was not UTF-8
+is saved as UTF-8, with a byte order mark so that a reader knows.
+
+⚠⚠ A `.csv` is only ever written as CSV text:
+
+- A Document Server with `assemblyFormatAsOrigin: false` saves an edited CSV
+  as **XLSX** (`filetype: "xlsx"`, measured). filex converts it back to CSV
+  through the Document Server's own conversion service (the file is offered
+  to it for that one conversion, as an app's office conversion is: UTF-8,
+  then the file's own delimiter as above) and writes that. Before 0.51 the
+  XLSX bytes were written under the `.csv` name.
+- Anything else - another type, bytes that are a zip or an old Excel workbook
+  whatever the callback says, a conversion that fails, a save over 256 MiB -
+  is **not written**. The file stays as it was; the log says
+  `onlyoffice callback refused: not written` with the reason; the Document
+  Server is told the save failed; each person who edited it gets a bell
+  notice in their language (*Your edit to list.csv was not saved*, and why:
+  the `file.upload_failed` notice an upload that never reached the storage
+  gets); and the audit log writes `file.office_save_refused`. The filex
+  process that refused the save gives the next opening of the file a new
+  editing session: measured on Docs 9.4, an editor opened on the session
+  whose save was refused never finished loading.
+
+A CSV is the one kind converted back and written in place. Any other kind
+saved in another format is written beside the file and never over it: see
+[A save in another format](#a-save-in-another-format).
+
+### What a CSV cannot keep
+
+A CSV is values separated by a delimiter, nothing else. Saved as CSV, only
+the **values of the active sheet** are kept: formatting, formulas (their
+values are kept), other sheets, images and charts are not. ONLYOFFICE says so
+itself when a CSV opens in its editor ("The CSV format does not support saving
+a multi-sheet file or any elements except text. Only the active sheet will be
+saved.") - in English only, and, on a browser that opens it for the first
+time, partly under ONLYOFFICE's own "New" tip. So filex says it as well, in
+the person's language, in a line under the viewer's bar for as long as a CSV
+is open for editing. To keep any of that, save a copy in another format from
+ONLYOFFICE (*File → Download as*, *Save copy as*).
+
+---
+
+## A save in another format
+
+The Document Server writes an edited document back in its own format when it
+can (`assemblyFormatAsOrigin`, on by default) and in OOXML when it cannot, or
+when that setting is off. It writes no Word 97, Excel 97 or PowerPoint 97
+file: measured on Docs 9.4 with its defaults, an edited **`.xls` comes back as
+XLSX** and a **`.doc` as DOCX** (the callback's `filetype`, and zip bytes).
+Before 0.51 filex wrote those bytes under the old name: a `rapor.doc` that was
+a DOCX inside, which some programs open and some refuse.
+
+Since 0.51 the file is **not touched**. The edit is written **beside it**, in
+the format it came back in, under the same name with that format's extension:
+`rapor.doc` stays as it was and `rapor.docx` holds the edit. When that name is
+taken, the next free one is used - `rapor (2).docx`, the numbering *New
+document* uses - and nothing is replaced. Then:
+
+- the new file is catalogued, indexed, scanned and announced like any new
+  file (`file.uploaded`, `meta.origin: "onlyoffice"`, `meta.saved_beside`: the
+  path of the file that was edited);
+- each person who edited the document gets that notice in their bell, in
+  their language: *Your edit was saved as rapor.docx* - *ONLYOFFICE saved
+  rapor.doc as DOCX, which a .doc file cannot hold, so your edit is in
+  rapor.docx, in the same folder. rapor.doc did not change.* (the webhook
+  hears it once);
+- the audit log writes `file.office_saved_beside`, with the new file, the one
+  that was edited and the format;
+- the next opening of `rapor.doc` is a new editing session (the file did not
+  change, so its session key would not either).
+
+**Only for somebody who may create that file there.** The new file is
+created for one of the people who edited the document, and only for one who
+may create it in that folder. filex records whom it handed an editing session
+of the document (every editor config it signs names the person), takes the
+editors from the callback's signed token (never from its body), keeps those
+the session had, and checks for each, at the save and on the new file's own
+name, that their account is on, their tenant reaches the storage, and their
+permissions let them create it there (`files.create`: role, folder
+exceptions, grants, a blocked file type, an app's lock). The first who may is
+the one it is written for (the audit row names them). When nobody may, the
+save is not written: the editors read *Your edit to rapor.doc was not
+saved* with *You cannot create new files in this folder, and ONLYOFFICE saves
+a .doc file only as a new DOCX file beside it. To keep an edit, download it
+from ONLYOFFICE's File menu before you close the document, and save it
+somewhere else.*, and the audit log writes `file.office_save_refused`. The record of
+who opened a session is the filex process's memory: after a restart the
+signed editors are taken as they are.
+
+It is kept only for the formats a document is saved in - DOCX, XLSX, PPTX
+(and their macro-enabled forms), ODT, ODS, ODP - and only when the bytes are
+the package the callback names. Anything else is **not written**: the file
+stays as it was, the log says `onlyoffice callback refused: not written` and
+why, the Document Server is told the save failed, the people who edited it
+get *Your edit to rapor.doc was not saved* with the reason (the bell's
+*upload failed* notice, `file.upload_failed`, in their language), and the audit
+log writes `file.office_save_refused`. A file in its own format (a `.docx`
+saved as DOCX, an `.odt` as ODT) is written in place, as always; a `.csv` is
+converted back and written in place ([CSV files](#csv-files)).
+
+---
+
 ## Creating new documents
 
 **+ New → New document** makes an empty Word, Excel, PowerPoint or OpenDocument
@@ -439,7 +605,7 @@ field selects the name part only, the way a rename does, so typing replaces
   extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
   one you chose (`test.conf`), stays as it is.
 
-![The New document dialog with a Plain text document named LICENSE](screenshots/v0.50.0/newdoc/newdoc-any-name-1280.png)
+![The New document dialog with a Plain text document named LICENSE](screenshots/v0.51.0/newdoc/newdoc-any-name-1280.png)
 
 The create itself is `POST /api/files/manager?action=newfile` with
 `{path, name, type, exact_name}`, where `type` is one of the `newdoc_types`
@@ -489,11 +655,11 @@ you were in gets nothing until you save it.
 
 | What Create opens - a draft, under the bar that says where Save puts it | Closing a draft that was never saved |
 |---|---|
-| ![The text editor on a new draft, with the draft bar](screenshots/v0.50.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.50.0/newdoc/drafts-close-1280.png) |
+| ![The text editor on a new draft, with the draft bar](screenshots/v0.51.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.51.0/newdoc/drafts-close-1280.png) |
 
 | Save, when a file has taken the name meanwhile | Drafts, in the navigation panel |
 |---|---|
-| ![Save the draft under another name?](screenshots/v0.50.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.50.0/newdoc/drafts-view-1280.png) |
+| ![Save the draft under another name?](screenshots/v0.51.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.51.0/newdoc/drafts-view-1280.png) |
 
 Drafts belong to a person, so a caller that is not one creates the file
 directly, as before: an app token, and an embed confined to one folder by its
@@ -541,6 +707,9 @@ Nothing breaks. With no URL and secret - from either source:
 
 - filex reports OnlyOffice as **disabled** in its capabilities.
 - Office files open in the **read-only preview** (or download), not an editor.
+- A `.csv` opens in filex's **read-only table** (0.51; [CSV files](#csv-files)),
+  and *Open with ONLYOFFICE* is greyed for an administrator, not offered to
+  anybody else.
 - **+ New → New document** offers only the types a built-in editor opens -
   Markdown, plain text, CSV, JSON, YAML, XML, HTML and the code formats - and
   names the missing service for the rest (see

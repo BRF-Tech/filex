@@ -110,7 +110,7 @@ opens this machine (and nothing else) to the downloads -
 5. The wizard ends on *"The app is installed and running."* The app's rows are
    in the file menu from the next time it is opened.
 
-![The install wizard stopped at the permission review](screenshots/v0.50.0/apps/apps-install-review-1440.png)
+![The install wizard stopped at the permission review](screenshots/v0.51.0/apps/apps-install-review-1440.png)
 
 ### The permission review
 
@@ -229,9 +229,9 @@ and install**, or **Reject** with an optional reason the requester can read.
 **Show decided requests** lists the rest: approved, rejected, expired and
 source changed.
 
-![Plugins → Install requests: two requests an agent's API key left](screenshots/v0.50.0/pluginrequests/requests-1440.png)
+![Plugins → Install requests: two requests an agent's API key left](screenshots/v0.51.0/pluginrequests/requests-1440.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](screenshots/v0.50.0/pluginrequests/review.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](screenshots/v0.51.0/pluginrequests/review.png)
 
 ### Leaving one
 
@@ -267,7 +267,7 @@ here, which engines this host has, whether signatures are required, and when
 the apps' sources were last checked for updates; **Check for updates** beside
 **Refresh** asks them now.
 
-![The Apps tab, a language pack among the apps](screenshots/v0.50.0/langpack/apps-list-1440.png)
+![The Apps tab, a language pack among the apps](screenshots/v0.51.0/langpack/apps-list-1440.png)
 
 A **language pack** (below) sits in the same list and is read the same way -
 its row says what it is, and, per language, how much of THIS filex it
@@ -295,7 +295,7 @@ translates.
 **Details** opens the app's own page - `/admin/plugins/apps/<name>`, one
 section per card, **Back** returns to the Apps tab:
 
-![An installed app's details](screenshots/v0.50.0/apps/apps-detail-1440.png)
+![An installed app's details](screenshots/v0.51.0/apps/apps-detail-1440.png)
 
 - **The facts** - name, version, the version kept to go back to, source (for
   a GitHub install, `https://github.com/<repo>@<tag>`), signed or unsigned,
@@ -356,7 +356,7 @@ person, like the permissions filex has itself. A signing app can put
 *Request signatures* behind one: everybody may sign what they were sent, and
 only the roles you choose may send documents round for signature.
 
-![Admin → Roles → the User role: the Apps group, e-Signature's "Request signatures" set to Default (allowed)](screenshots/v0.50.0/apppermissions/role-user.png)
+![Admin → Roles → the User role: the Apps group, e-Signature's "Request signatures" set to Default (allowed)](screenshots/v0.51.0/apppermissions/role-user.png)
 
 - **What the app declares.** Its manifest lists them (`user_permissions`: an
   id, a label and a description in every language the app speaks, and a
@@ -788,6 +788,13 @@ permission and stops at the review like any other.
 - **Unsaved changes.** An interface says when it holds changes it has not
   saved; closing it then asks **Save and close**, **Close without saving** or
   **Keep editing**, and the browser asks before the tab goes.
+- **Save as.** An interface may save a new file (a copy, an export of its
+  own kind): filex asks where in its own folder dialog - the one **Move
+  to…** uses, titled with the app's name and the file's - opened in the
+  file's folder. Only a folder you may write into can be chosen; closing the
+  dialog saves nothing. The app saves only its own kind of file there, and
+  never into an encrypted folder. A file you may only view can still be
+  saved as a new file somewhere you may write.
 - **Dialogs, pages, the details panel, the Apps list.** An action whose screen
   is the app's interface opens it in a dialog or a tab; an interface can be a
   section of a file's details, or the app's home screen under **Apps**.
@@ -799,11 +806,11 @@ permission and stops at the review like any other.
 
 | The review of an app with its own interface | Its kind of file in **New document**, under **Apps** |
 |---|---|
-| ![The install review's Interface group](screenshots/v0.50.0/apps/app-interface-review-1440.png) | ![New document offering the app's kind of file](screenshots/v0.50.0/apps/app-new-document-1440.png) |
+| ![The install review's Interface group](screenshots/v0.51.0/apps/app-interface-review-1440.png) | ![New document offering the app's kind of file](screenshots/v0.51.0/apps/app-new-document-1440.png) |
 
 | …and the interface open on its file type, where filex's preview would be (a small example app, written for these pictures) |
 |---|
-| ![An app's own interface open as a file's viewer](screenshots/v0.50.0/apps/app-interface-viewer-1440.png) |
+| ![An app's own interface open as a file's viewer](screenshots/v0.51.0/apps/app-interface-viewer-1440.png) |
 
 ### An origin of their own
 
@@ -846,14 +853,14 @@ has two **capabilities**, and each capability an ordered list of
 
 | Capability | Handlers | Who chooses |
 |---|---|---|
-| **Open** | filex's own viewer (*built-in*) and every app interface that opens the kind (a `viewer` view: [An app's own interface](#an-apps-own-interface)) | the administrator says which are **on** and in which order; each person picks among those, and may say "always open this kind with this one" |
+| **Open** | filex's own viewer (*built-in*), every app interface that opens the kind (a `viewer` view: [An app's own interface](#an-apps-own-interface)) and, for `.csv` while OnlyOffice is configured, ONLYOFFICE's spreadsheet editor (*ONLYOFFICE*, 0.51: [ONLYOFFICE.md → CSV files](ONLYOFFICE.md#csv-files)) | the administrator says which are **on** and in which order; each person picks among those, and may say "always open this kind with this one" |
 | **Thumbnail** | the OnlyOffice document server (*ONLYOFFICE*, for the office kinds while OnlyOffice is configured: [thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice)), filex's own drawer (*built-in*, for the kinds it draws) and every app that declares the kind in its `thumbnails` block | the administrator alone; the first in the list that draws the file wins, the next one is asked when it cannot ([thumbnails.md → Thumbnails drawn by apps](thumbnails.md#thumbnails-drawn-by-apps-one-chain-per-kind)) |
 
 **Handlers** are named the same way everywhere (the API, the audit log, the
-rows): `builtin`; `onlyoffice` for the OnlyOffice document server (a
-thumbnail handler only, and one of filex's own, not an app); `app:<app>/<view>`
-for an app's interface that opens files; `app:<app>` for an app that draws
-thumbnails.
+rows): `builtin`; `onlyoffice` for the OnlyOffice document server (one of
+filex's own, not an app: a thumbnail handler for the office kinds, and since
+0.51 an open handler for `.csv` only); `app:<app>/<view>` for an app's
+interface that opens files; `app:<app>` for an app that draws thumbnails.
 
 ### The default order
 
@@ -862,6 +869,13 @@ Until an administrator decides otherwise, nothing changes from 0.49:
 - **Open**: the apps that open the kind first (by name, then each app's views
   in its manifest's order), filex's own viewer last. An installed draw.io
   app opens `.drawio` files; *Open with* still offers filex's own viewer.
+  0.51: a `.csv` opens in ONLYOFFICE first while OnlyOffice is configured,
+  then in the apps that open `.csv`, filex's table last; an app installed for
+  `.csv` lands after ONLYOFFICE unless the install review puts it first. Like
+  the thumbnail handler, `onlyoffice` is not in the list while OnlyOffice is
+  not configured, and a new rule naming it is refused then; a rule written
+  while it was there is kept, and the kind opens in the next handler that is
+  on until it is back.
 - **Thumbnail**: the OnlyOffice document server first for an office kind
   while OnlyOffice is configured (0.50; it is not in the list while it is
   not), then filex's own drawer when it draws the kind, then the apps by name.
@@ -873,10 +887,11 @@ Until an administrator decides otherwise, nothing changes from 0.49:
 
 ### What the administrator decides
 
-![Admin → Plugins → Default apps: every kind something besides filex handles, who opens it and who draws its thumbnails](screenshots/v0.50.0/defaultapps/default-apps-1440.png)
+![Admin → Plugins → Default apps: every kind something besides filex handles, who opens it and who draws its thumbnails](screenshots/v0.51.0/defaultapps/default-apps-1440.png)
 
 **Admin → Plugins → Default apps** lists every kind something other than
-filex handles, plus every kind the administrator has already changed: its
+filex handles (`.csv` too while OnlyOffice is configured, 0.51), plus every
+kind the administrator has already changed: its
 extension and type, who opens it and who draws its thumbnails, in order, and
 whether that is the default or a choice. **Edit** opens the two lists for that
 kind: switch a handler on or off, move it up or down, or **Back to the
@@ -927,7 +942,7 @@ with every thumbnail handler off gets no thumbnail (`skipped`, `no_handler`).
   choice is kept on the person's **account**, and every later opening of that
   kind uses it.
 
-  ![Choose an app…, with Always use this app](screenshots/v0.50.0/defaultapps/open-with-dialog.png)
+  ![Choose an app…, with Always use this app](screenshots/v0.51.0/defaultapps/open-with-dialog.png)
 
 - **One choice for the whole account.** The browser, the desktop app and an
   explorer embedded in another product read and write the same record: a
@@ -953,7 +968,8 @@ request) is refused when it saves or calls its module: `403 handler_off`.
 
 **The person's choices on the API.** `GET /api/me/open-with` answers
 `{"choices": {ext: handler}}`; `PUT /api/me/open-with/{ext}` with
-`{"handler": "builtin" | "app:<app>/<view>"}` keeps one,
+`{"handler": "builtin" | "app:<app>/<view>"}` (or `"onlyoffice"` for `.csv`,
+0.51) keeps one,
 `DELETE /api/me/open-with/{ext}` forgets one and `DELETE /api/me/open-with`
 forgets them all. They change one kind at a time: `GET /api/me/prefs` carries
 them as `openWith` for every surface, and `PUT /api/me/prefs` ignores that key,
@@ -1043,7 +1059,7 @@ some other way (an old bookmark) says this and offers no button.
    purpose: what is being asked of whom is one decision, where it goes is
    the next. Every signer needs at least one signature box.
 
-   ![Defining the boxes](screenshots/v0.50.0/signing/sign-define-1440.png)
+   ![Defining the boxes](screenshots/v0.51.0/signing/sign-define-1440.png)
 
 4. **Place them** - the document, and the boxes that still need a place.
    Choose one, then tap the page where it goes, or drag to size it as you
@@ -1051,7 +1067,7 @@ some other way (an old bookmark) says this and offers no button.
    again, copied to another page or deleted. The step cannot be left while a
    box has nowhere to go.
 
-   ![Placing the boxes on the document](screenshots/v0.50.0/signing/sign-place-1440.png)
+   ![Placing the boxes on the document](screenshots/v0.51.0/signing/sign-place-1440.png)
 
 5. **Time** - *How long do they have?* How many days the links are valid
    (14 by default, at most 90 - both pulled down to the instance's maximum
@@ -1122,7 +1138,7 @@ during which even the right PIN is refused.
 
 | The partner's link, behind its PIN | …and what it opens: only their own boxes |
 |---|---|
-| ![The outside signer's PIN gate](screenshots/v0.50.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.50.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](screenshots/v0.51.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.51.0/signing/sign-outside-fill-1440.png) |
 
 Both kinds of signer then walk the same three steps:
 
@@ -1152,7 +1168,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](screenshots/v0.50.0/signing/sign-status-1440.png)
+  ![The document frozen, its Signatures panel open](screenshots/v0.51.0/signing/sign-status-1440.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1163,7 +1179,7 @@ fingerprint, and the certificate files to keep.
   asked for, only the requester's own links listed, and every read written to
   filex's audit trail.
 
-  ![The Signatures screen's PINs section](screenshots/v0.50.0/signing/sign-pins-1440.png)
+  ![The Signatures screen's PINs section](screenshots/v0.51.0/signing/sign-pins-1440.png)
 - **The bell** tells the requester when an outside signer opened the
   document, when somebody signed or refused, and when everything is done.
 
@@ -1346,7 +1362,7 @@ short wizard in a dialog, with only the steps that have something to ask:
 4. **Review** - what will happen, including the route the conversion takes,
    then **Convert**.
 
-![The converter's wizard](screenshots/v0.50.0/apps/convert-wizard-1440.png)
+![The converter's wizard](screenshots/v0.51.0/apps/convert-wizard-1440.png)
 
 The result lands **beside the input**, as `<name>.<new extension>` (pages and
 frames as `<name>-1.png`, `<name>-2.png`, …); a taken name gets a suffix, and

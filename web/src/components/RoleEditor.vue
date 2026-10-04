@@ -168,6 +168,7 @@ const CONDITIONABLE = [
   'files.move',
   'files.delete',
   'files.purge',
+  'files.encrypt',
   'share.links',
   'share.upload_links',
 ];

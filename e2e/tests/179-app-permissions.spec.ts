@@ -5,8 +5,9 @@
  * role and per person (manifest `user_permissions`, backend perm/app.go) —
  * "Request signatures" for the signing app. The fixture is the `echo` module
  * the Go suite runs (backend/internal/wasmplugin/testdata/echo, built by
- * scripts/build-wasm-fixture.sh): it declares ONE, `request` (default: people
- * who can change files), and one action that `requires` it.
+ * scripts/build-wasm-fixture.sh, read through helpers/echoFixture, which fails
+ * the spec on a module older than its sources): it declares ONE, `request`
+ * (default: people who can change files), and one action that `requires` it.
  *
  * Walked:
  *   1. The administrator installs the app; Admin → Roles → User lists the
@@ -25,17 +26,12 @@
  * own session.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { apiLogin, dismissInstallBanner, loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
-import { installThroughWizard, requireFixtures, type AppFixture, type AppManifest } from '../helpers/appPlugin';
+import { guardFixture, installThroughWizard } from '../helpers/appPlugin';
+import { echoFixture } from '../helpers/echoFixture';
 
-const FIXTURE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../backend/internal/wasmplugin/testdata/echo');
-const WASM = resolve(FIXTURE_DIR, 'echo.wasm');
-const MANIFEST = resolve(FIXTURE_DIR, 'manifest.json');
-const HAVE_FIXTURE = existsSync(WASM);
+const ECHO = echoFixture();
 
 const RUN = Date.now();
 const STORAGE = `e2e-appperm-${RUN}`;
@@ -53,11 +49,6 @@ let api: APIRequestContext;
 let personId = 0;
 /** The User role as it was, put back afterwards. */
 let userRoleBefore: { permissions: string[]; apps?: Record<string, string> } | null = null;
-
-function echoFixture(): AppFixture {
-  const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')) as AppManifest;
-  return { name: 'echo', present: true, wasm: WASM, manifestPath: MANIFEST, manifest, languages: manifest.languages ?? [], skipReason: '' };
-}
 
 async function removeEcho() {
   const list = await api.get('/api/admin/app-plugins');
@@ -124,10 +115,7 @@ async function userRoleApps(): Promise<Record<string, string>> {
 
 test.describe('app permissions: per role and per person', () => {
   test.describe.configure({ mode: 'serial' });
-  if (!HAVE_FIXTURE && requireFixtures()) {
-    throw new Error(`FILEX_REQUIRE_WASM_FIXTURE is set and echo.wasm is not built: bash scripts/build-wasm-fixture.sh (${WASM})`);
-  }
-  test.skip(!HAVE_FIXTURE, `echo.wasm not built: bash scripts/build-wasm-fixture.sh (${WASM})`);
+  guardFixture(ECHO, test.skip);
 
   test.beforeAll(async ({ playwright, baseURL, request }) => {
     api = await newAuthedRequest(playwright, baseURL ?? '');
@@ -165,7 +153,7 @@ test.describe('app permissions: per role and per person', () => {
 
   test("the User role lists the app's permission under Apps; Deny is saved as the role's decision", async ({ page }) => {
     await loginAs(page);
-    await installThroughWizard(page, echoFixture());
+    await installThroughWizard(page, ECHO);
 
     const editor = await openUserRole(page);
     const apps = editor.getByTestId('perm-group-apps');

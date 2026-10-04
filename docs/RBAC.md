@@ -15,7 +15,7 @@ before.
 > the roles are **Admin → Roles**. (Before 0.49 the grants page was called
 > *Permissions*.)
 
-![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](screenshots/v0.50.0/roles/folder-access-1440.png)
+![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](screenshots/v0.51.0/roles/folder-access-1440.png)
 
 > A grant can also be given to a **group** - every member holds it, the
 > highest covering level still wins and the account ceiling still caps it.
@@ -134,6 +134,10 @@ and the `admin_*` MCP tools alike):
   an app or a storage plugin, and approving or rejecting an install request -
   the refusal names `request_endpoint`, where a token leaves a request
   instead ([APP-PLUGINS.md → Install requests](APP-PLUGINS.md#install-requests)).
+- changing who may encrypt - a tenant's policy, the operator's ceiling for a
+  tenant, answering an encryption request, and the `e2e.policy` setting by
+  whichever door reaches it
+  ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)).
 
 An administrator signed in to the admin panel does all of them as before.
 Managing accounts that are not administrators, taking a permission away, and

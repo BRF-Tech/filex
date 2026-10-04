@@ -4,8 +4,10 @@
 // Every kind of file - its extension - has two CAPABILITIES, and each an
 // ordered list of HANDLERS:
 //
-//   - open: filex's own viewer ("builtin") and every app interface that opens
-//     the kind ("app:<app>/<view>", a `viewer` view);
+//   - open: filex's own viewer ("builtin"), every app interface that opens
+//     the kind ("app:<app>/<view>", a `viewer` view) and, for the kinds it
+//     opens as a choice (OnlyOfficeOpens: `.csv`, filex 0.51), the document
+//     server ("onlyoffice") while OnlyOffice is configured;
 //   - thumbnail: the document server ("onlyoffice", for the office kinds it
 //     draws, while OnlyOffice is configured), filex's own drawer ("builtin",
 //     for the kinds it draws) and every app whose `thumbnails` block names
@@ -39,13 +41,42 @@ const (
 // Builtin is filex's own handler: its viewer, or its thumbnail drawer.
 const Builtin = "builtin"
 
-// OnlyOffice is the document server's thumbnail handler (filex 0.50): a
-// picture of an office document's first page, drawn by the OnlyOffice
-// document server filex is configured with (docs/thumbnails.md → Office
-// through OnlyOffice). A thumbnail handler only, and one of filex's own, not
-// an app's: it is available for the kinds it draws while OnlyOffice is
-// configured, and first in their default order.
+// OnlyOffice is the document server filex is configured with, as a handler of
+// filex's own (not an app's):
+//
+//   - thumbnail (filex 0.50): a picture of an office document's first page
+//     (docs/thumbnails.md → Office through OnlyOffice), for the kinds it draws
+//     while OnlyOffice is configured, first in their default order;
+//   - open (filex 0.51): ONLYOFFICE's spreadsheet editor, for the kinds whose
+//     opening is a choice between it and filex's own viewer (OnlyOfficeOpens,
+//     `.csv` only), first in their default order while OnlyOffice is
+//     configured (docs/ONLYOFFICE.md → CSV files).
+//
+// ⚠ The office kinds themselves (docx, xlsx, ...) are not opened through this
+// chain: the document server is the only thing that opens them, there is
+// nothing to choose.
 const OnlyOffice = "onlyoffice"
+
+// onlyOfficeOpenKinds are the kinds the document server opens as one choice
+// among others: filex's own viewer opens them too (a read-only table for a
+// CSV), so "Open with" offers both and the administrator and the person may
+// pick. ⚠ The ONE list; packages/core lib/appViewer OFFICE_OPEN_KINDS is its
+// twin and a test holds the two together.
+var onlyOfficeOpenKinds = []string{"csv"}
+
+// OnlyOfficeOpens reports whether the document server is an open handler of
+// this kind (an extension, as ExtOf gives it).
+func OnlyOfficeOpens(ext string) bool {
+	for _, k := range onlyOfficeOpenKinds {
+		if k == ext {
+			return true
+		}
+	}
+	return false
+}
+
+// OnlyOfficeOpenKinds is the list OnlyOfficeOpens answers from, sorted.
+func OnlyOfficeOpenKinds() []string { return append([]string(nil), onlyOfficeOpenKinds...) }
 
 // appPrefix starts every app handler's id.
 const appPrefix = "app:"
@@ -94,7 +125,8 @@ type Handler struct {
 // IsBuiltin reports whether h is filex's own handler.
 func (h Handler) IsBuiltin() bool { return h.ID == Builtin }
 
-// IsOnlyOffice reports whether h is the document server's thumbnail handler.
+// IsOnlyOffice reports whether h is the document server (its thumbnail
+// handler, or its editor for a kind it opens as a choice).
 func (h Handler) IsOnlyOffice() bool { return h.ID == OnlyOffice }
 
 // IsApp reports whether h is an app's handler (not one of filex's own).
@@ -140,7 +172,7 @@ func ValidID(capability, id string) bool {
 		return true
 	}
 	if id == OnlyOffice {
-		return capability == CapThumbnail
+		return capability == CapThumbnail || capability == CapOpen
 	}
 	rest, ok := strings.CutPrefix(id, appPrefix)
 	if !ok {
@@ -295,6 +327,18 @@ func DefaultOrder(capability string, builtin bool, apps []Handler) []Handler {
 	out = append(out, apps...)
 	if capability == CapOpen {
 		out = append(out, b)
+	}
+	return out
+}
+
+// OpenDefault is the open capability's default order: the document server
+// first for a kind it opens as a choice while OnlyOffice is configured
+// (onlyoffice: the product's default for a CSV is ONLYOFFICE's spreadsheet,
+// filex 0.51), then DefaultOrder - the apps, filex's own viewer last.
+func OpenDefault(onlyoffice bool, apps []Handler) []Handler {
+	out := DefaultOrder(CapOpen, true, apps)
+	if onlyoffice {
+		out = append([]Handler{{ID: OnlyOffice}}, out...)
 	}
 	return out
 }

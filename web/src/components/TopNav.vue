@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { defineAsyncComponent, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import {
   Menu as MenuIcon,
   LogOut,
@@ -25,6 +25,8 @@ import { useSettingsDeepLink } from '@/composables/useSettingsDeepLink';
 // pass; this was the last pair.
 import NotificationBell from './NotificationBell.vue';
 import QuotaWidget from './QuotaWidget.vue';
+import AdminNav from './AdminNav.vue';
+import LogoMark from './LogoMark.vue';
 
 // Async so the modal's markup, its strings and core's stylesheet stay out of
 // the panel's first paint — nothing here is needed until somebody opens it.
@@ -32,7 +34,11 @@ const UserSettingsModal = defineAsyncComponent(() => import('./UserSettingsModal
 
 const showSettings = ref(false);
 
-const emit = defineEmits<{ (e: 'toggleSidebar'): void }>();
+/* `wide`: the layout's own answer to "is this a wide screen" (AdminLayout's
+   1024px query). Wide, the menu is in this bar; narrow, this bar has the
+   button that opens the drawer instead. */
+defineProps<{ wide: boolean; drawerOpen?: boolean }>();
+const emit = defineEmits<{ (e: 'toggleDrawer'): void }>();
 
 const router = useRouter();
 
@@ -57,22 +63,49 @@ function gotoSearch() {
   <header
     class="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur px-4 sm:px-6 lg:px-8"
   >
+    <!-- ⚠ Named "Menu", not "Dashboard": it opens the menu (it was labelled
+         with the dashboard's name until 0.51, so a screen reader announced a
+         page it does not go to). -->
     <button
+      v-if="!wide"
       type="button"
-      class="lg:hidden rounded p-1.5 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-      @click="emit('toggleSidebar')"
-      :aria-label="$t('nav.dashboard')"
+      class="rounded p-1.5 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+      :aria-label="t('nav.menu')"
+      :aria-expanded="drawerOpen ? 'true' : 'false'"
+      aria-controls="admin-nav-drawer"
+      data-testid="nav-drawer-toggle"
+      @click="emit('toggleDrawer')"
     >
       <MenuIcon class="h-5 w-5" />
     </button>
 
+    <!-- The words stay in the document on a phone (only out of sight), so the
+         link keeps a name a screen reader can say. -->
+    <RouterLink
+      :to="{ name: 'dashboard' }"
+      class="flex shrink-0 items-center gap-2"
+      data-testid="admin-logo"
+    >
+      <LogoMark class="h-7 w-7" />
+      <span class="sr-only sm:not-sr-only sm:flex flex-col leading-tight">
+        <span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">filex</span>
+        <span class="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{{ t('app.admin') }}</span>
+      </span>
+    </RouterLink>
+
+    <AdminNav v-if="wide" mode="bar" />
+
+    <!-- The placeholder is long ("Search files… by name, or tag:label"), and
+         beside the menu it fits only from 1536px: the glyph alone below that,
+         with the words as its name. -->
     <button
       type="button"
       class="hidden md:inline-flex items-center gap-2 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+      :aria-label="t('search.queryPlaceholder')"
       @click="gotoSearch"
     >
       <Search class="h-4 w-4" />
-      <span>{{ t('search.queryPlaceholder') }}</span>
+      <span class="hidden 2xl:inline">{{ t('search.queryPlaceholder') }}</span>
     </button>
 
     <div class="ms-auto flex items-center gap-1.5">
@@ -93,7 +126,9 @@ function gotoSearch() {
           >
             {{ personInitial(auth.user, localeTag(locale)) || '?' }}
           </span>
-          <span class="hidden sm:inline truncate max-w-[12rem]">
+          <!-- The name from 1280px up: below it, beside the menu, the bar
+               keeps the avatar alone (the menu's email row names the account). -->
+          <span class="hidden xl:inline truncate max-w-[12rem]">
             {{ personName(auth.user) || '-' }}
           </span>
           <ChevronDown class="h-4 w-4 opacity-60" />

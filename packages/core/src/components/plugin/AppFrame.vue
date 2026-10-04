@@ -36,6 +36,12 @@
  * promise that it cannot send anything out: WebRTC ignores a page's policy
  * (closed by Connection-Allowlist in Chrome, by the bootstrap in Firefox;
  * docs/APP-PLUGINS.md → What a sandbox cannot promise).
+ *
+ * ⚠ `file.saveAs` asks the person for a folder in filex's own dialog — the
+ * one Move to… / Copy to… use (modals/DestinationPickerModal) — and THIS
+ * frame draws it, so every placement in every host offers save-as the same
+ * way. It used to be a prop no host passed: save-as answered `unavailable`
+ * everywhere while the documentation promised the dialog (task #149).
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
@@ -63,8 +69,11 @@ import { createAppBridge, BridgeFailure, type AppBridge } from '../../lib/appBri
 import { appStateGet, appStateSet, AppStateTooLarge, appSeenVersion, markAppSeen } from '../../lib/appState';
 import { onAppUpdated } from '../../lib/appUpdates';
 import { labelOf } from '../../lib/pluginLabel';
+import { parentOfWire } from '../../lib/destinationTree';
+import { isInternalPath, listingAddress } from '../../lib/internalPaths';
 import PluginConfirmModal from './PluginConfirmModal.vue';
 import Modal from '../../modals/Modal.vue';
+import DestinationPickerModal from '../../modals/DestinationPickerModal.vue';
 
 /** A file the interface was opened with. `path` is adapter-qualified. */
 export interface AppFrameFile {
@@ -100,9 +109,19 @@ const props = defineProps<{
   userName?: string;
   /** The frame's accessible name (the view's label). */
   title?: string;
-  /** Pick a folder for `file.saveAs` (filex's own dialog); null = cancelled.
-   *  Absent: save-as is not offered here. */
-  pickFolder?: () => Promise<string | null>;
+  /**
+   * Storage names the save-as dialog may span (`file.saveAs`) — the host's
+   * own list, the one its Move to… / Copy to… offer. Absent: the server's
+   * listing names them.
+   */
+  storages?: string[];
+  /**
+   * Where the save-as dialog opens when the opened file's folder will not do
+   * — no file (a home screen): the folder the person is in; a draft: the
+   * folder it will be saved to. With an ordinary file, the dialog opens in
+   * that file's folder.
+   */
+  startAt?: string;
 }>();
 
 const emit = defineEmits<{
@@ -436,6 +455,87 @@ async function saveToDisk(name: string, data: string | ArrayBuffer | ReadableStr
   return { saved: true as const, size };
 }
 
+/* ── file.saveAs: a new file, in a folder the person picks ────────────── */
+
+/**
+ * The save-as question while it is on screen: filex's own folder dialog
+ * (modals/DestinationPickerModal — the one Move to… / Copy to… use, not a
+ * second private browser), titled with the app's name and the file's. One
+ * at a time, like every question an interface can raise.
+ */
+const saveAsAsk = ref<{ name: string; storages: string[]; startAt?: string; resolve: (dir: string | null) => void } | null>(null);
+/** From the call to the dialog (the storages may still be on their way). */
+let saveAsPending = false;
+/** The person's storages as the server's listing names them, once asked. */
+let learnedStorages: string[] | null = null;
+
+/**
+ * Where the dialog opens: the folder of the file the interface was opened
+ * with, else the folder the host names (`startAt`).
+ *
+ * ⚠ A draft (issue #71) and a desktop open-with copy live in filex's OWN
+ * folders (`.filex-drafts/…`, `.filex-open`), which a person is never shown
+ * and never writes into: the dialog opens where the host says instead (a
+ * draft's own folder-to-be), else at that storage's root.
+ */
+function saveAsStart(): string | undefined {
+  const first = props.files?.[0]?.path ?? '';
+  const own = first.includes('://') ? (parentOfWire(first, false) ?? '') : '';
+  if (own && !isInternalPath(own)) return own;
+  const host = props.startAt ?? '';
+  if (host.includes('://') && !isInternalPath(host)) return host;
+  return own ? listingAddress(own) : undefined;
+}
+
+/**
+ * The storages the dialog may span: the host's own list when it gave one
+ * (what its Move to… offers), else the ones the server's listing names —
+ * a host without the list (the viewer, an app's page) offers the same.
+ */
+async function saveAsStorages(start: string | undefined): Promise<string[]> {
+  if (props.storages?.length) return props.storages;
+  if (learnedStorages) return learnedStorages;
+  try {
+    const r = await props.api.index(start ?? '');
+    learnedStorages = Array.isArray(r?.storages) ? r.storages.filter((s) => typeof s === 'string' && !!s) : [];
+    return learnedStorages;
+  } catch {
+    return [];
+  }
+}
+
+/** Ask the person for a folder; null when they closed the dialog. */
+async function askFolder(name: string): Promise<string | null> {
+  if (saveAsPending || saveAsAsk.value) throw new BridgeFailure('unavailable', 'a question is already on screen');
+  saveAsPending = true;
+  try {
+    const startAt = saveAsStart();
+    const storages = await saveAsStorages(startAt);
+    if (!startAt && !storages.length) throw new BridgeFailure('unavailable', 'there is no folder to save into here');
+    return await new Promise<string | null>((resolve) => {
+      saveAsAsk.value = { name, storages, startAt, resolve };
+    });
+  } finally {
+    saveAsPending = false;
+  }
+}
+
+function answerSaveAs(dir: string | null) {
+  const q = saveAsAsk.value;
+  saveAsAsk.value = null;
+  q?.resolve(dir);
+}
+
+/* The dialog's title: who asks, and for which file (security review UI-14). */
+function saveAsTitle(name: string): string {
+  return t('appframe.save_as_title', { app: who.value, name });
+}
+
+/** A stream the interface handed over and nothing will read: let it go. */
+async function release(body: Blob | ReadableStream<Uint8Array>): Promise<void> {
+  if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) await body.cancel().catch(() => undefined);
+}
+
 /** An action's label, for the question; its id when the list cannot say. */
 async function actionLabel(id: string): Promise<string> {
   try {
@@ -499,10 +599,18 @@ const handlers = {
     if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..' || name.length > 255) {
       throw new BridgeFailure('invalid', 'name is a file name, without a folder');
     }
-    if (!props.pickFolder) throw new BridgeFailure('unavailable', 'save-as is not offered here');
     const body = await toBody(p.data, p.mime);
-    const dir = await props.pickFolder();
-    if (!dir) throw new BridgeFailure('cancelled');
+    let dir: string | null;
+    try {
+      dir = await askFolder(name);
+    } catch (e) {
+      await release(body);
+      throw e;
+    }
+    if (!dir) {
+      await release(body);
+      throw new BridgeFailure('cancelled');
+    }
     const r = await props.api.pluginUISave(props.app, props.view, { dir, name }, body);
     emit('saved-as', { path: r.path, name: r.name, size: r.size });
     return { saved: true, name: r.name, size: r.size };
@@ -690,6 +798,7 @@ function unmount() {
   if (confirmAsk.value) answerConfirm(false);
   if (consentAsk.value) answerConsent(false);
   if (closeAsk.value) answerClose('keep');
+  if (saveAsAsk.value) answerSaveAs(null);
 }
 
 let offUpdated: (() => void) | null = null;
@@ -909,6 +1018,19 @@ defineExpose({ requestSave, confirmClose, notifyUpdated, notifyClosing, reload, 
         </button>
       </template>
     </Modal>
+    <DestinationPickerModal
+      v-if="saveAsAsk"
+      :open="true"
+      :api="api"
+      :locale="locale"
+      :theme="theme"
+      mode="save"
+      :title="saveAsTitle(saveAsAsk.name)"
+      :storages="saveAsAsk.storages"
+      :start-at="saveAsAsk.startAt"
+      @close="answerSaveAs(null)"
+      @pick="answerSaveAs"
+    />
   </div>
 </template>
 

@@ -123,6 +123,13 @@ func (h *Handler) createMultipartUpload(w http.ResponseWriter, r *http.Request, 
 		WriteError(w, r, http.StatusNotImplemented, "NotImplemented", "multipart uploads need a staging directory")
 		return
 	}
+	// Who may encrypt is asked here, when the upload is created — after the
+	// staging area said it can take one — and not again at UploadPart or
+	// Complete: under the approval policy it spends the approval
+	// (refusesEncryption).
+	if h.refusesEncryption(w, r, st, key) {
+		return
+	}
 
 	id := uuid.NewString()
 	if _, err := h.cfg.Staging.CreateVariable(id); err != nil {

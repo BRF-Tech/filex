@@ -28,9 +28,9 @@ import { git } from './engine.mjs';
 import {
   capabilitiesBuild,
   docsPageUrl,
-  headingsAdded,
   htmlText,
   manifestNewest,
+  newHeadings,
   parseFeed,
   readmeImages,
 } from './checks.mjs';
@@ -178,6 +178,12 @@ export function desktopFeeds(name, baseUrl, feeds, { mustExist = [], bytes = tru
  * publish (404, e.g. srcExclude) are listed and not counted. With no new
  * headings in the release there is nothing that could be stale, and the
  * Releases page is checked alone.
+ *
+ * A page's new headings are read from the whole page at both releases
+ * (newHeadings), not from the diff: a diff line cannot tell a heading from a
+ * `#` comment inside a code block, and v0.50.0's deploy was held red by one
+ * (lesson #964). A page the previous release did not have is new throughout;
+ * a page the release deleted has nothing to probe.
  */
 export function docsSite(name, baseUrl, { dir = 'docs', ...opts } = {}) {
   return {
@@ -191,16 +197,25 @@ export function docsSite(name, baseUrl, { dir = 'docs', ...opts } = {}) {
       else if (!htmlText(rel.text).includes(c.tag)) problems.push(`${base}/RELEASES does not mention ${c.tag} — step 10 (the Releases page) has not reached the site`);
 
       if (!c.prevTag) return { ok: false, detail: 'no previous release tag to diff against' };
-      const diff = git(c.repo, 'diff', '--no-color', '--unified=0', `${c.prevTag}..${c.releaseCommit}`, '--', `${dir}/*.md`, `${dir}/**/*.md`);
-      if (diff.status !== 0) return { ok: false, detail: `git diff failed: ${diff.stderr}` };
-      const probes = headingsAdded(diff.stdout).filter((h) => !/\/?RELEASES\.md$/.test(h.file));
+      const changed = git(c.repo, 'diff', '--name-only', '-z', '--no-renames', '--diff-filter=d', `${c.prevTag}..${c.releaseCommit}`, '--', `${dir}/*.md`, `${dir}/**/*.md`);
+      if (changed.status !== 0) return { ok: false, detail: `git diff failed: ${changed.stderr}` };
       const byPage = new Map();
-      for (const p of probes) byPage.set(p.file, [...(byPage.get(p.file) ?? []), p.text]);
+      for (const file of changed.stdout.split('\0').filter((f) => f && !/\/?RELEASES\.md$/.test(f))) {
+        const now = git(c.repo, 'show', `${c.releaseCommit}:${file}`);
+        if (now.status !== 0) return { ok: false, detail: `could not read ${file} at ${c.releaseCommit}: ${now.stderr.trim()}` };
+        const was = git(c.repo, 'show', `${c.prevTag}:${file}`);
+        const added = newHeadings(was.status === 0 ? was.stdout : '', now.stdout);
+        if (added.length) byPage.set(file, added);
+      }
+      const probes = [...byPage.values()].flat();
       let checked = 0;
+      let live = 0;
+      const unpublished = [];
       for (const [file, headings] of byPage) {
         const url = docsPageUrl(base, file);
         const page = await getText(url, opts);
         if (page.status === 404) {
+          unpublished.push(file);
           notes.push(`${file}: not published (404) — not counted`);
           continue;
         }
@@ -208,6 +223,7 @@ export function docsSite(name, baseUrl, { dir = 'docs', ...opts } = {}) {
           problems.push(page.error);
           continue;
         }
+        live += 1;
         // Whitespace is squeezed out of both sides: htmlText turns every tag
         // into a space, so a heading with inline code (MCP.md's "403 Forbidden
         // (session_required)" in backticks) reads "( session_required )" on the page and
@@ -226,10 +242,15 @@ export function docsSite(name, baseUrl, { dir = 'docs', ...opts } = {}) {
         }
       }
       if (problems.length) return { ok: false, detail: problems.join('\n'), log: notes.join('\n') };
+      // Only the pages that answered count as live: a page the site does not
+      // publish proves nothing either way, and is named apart, not added in.
+      const skipped = unpublished.length
+        ? `; ${unpublished.length} page(s) with new headings are not published (404) and not counted: ${unpublished.join(', ')}`
+        : '';
       return {
         ok: true,
         detail: probes.length
-          ? `${checked} new heading(s) on ${byPage.size} page(s) are live; RELEASES names ${c.tag}`
+          ? `${checked} new heading(s) on ${live} page(s) are live${skipped}; RELEASES names ${c.tag}`
           : `RELEASES names ${c.tag}; this release added no headings to probe`,
         log: notes.join('\n'),
       };

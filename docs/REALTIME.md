@@ -24,6 +24,9 @@ host application proxies step 1 (injecting its own credential server-side) and
 hands the browser only the one-shot ticket, which the browser spends
 immediately. A ticket inherits the caller's identity, RBAC and root
 confinement, so a confined embed can only ever subscribe inside its own root.
+A socket opened with an API token itself (rather than a ticket) is confined
+the same way, by the token's `root:` and a trusted proxy's `X-Filex-Root`; up
+to v0.50.0 it was not.
 
 ### Client → server
 

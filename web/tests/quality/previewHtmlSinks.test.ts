@@ -97,8 +97,9 @@ describe('markup sinks in @brftech/filex-core', () => {
  */
 const WEB = resolve(__dirname, '../../src');
 const WEB_SINKS: Record<string, string[]> = {
-  // Static markup from lib/actionIcons.
-  'components/Sidebar.vue': ['item.svg'],
+  // Static markup from lib/actionIcons. (The menu's app rows used to be the
+  // third, in components/Sidebar.vue; since 0.51 core's MegaMenu draws them
+  // from an icon NAME, under the package's own rule above.)
   'views/AppHome.vue': ['icon'],
   'views/AppScreen.vue': ['icon'],
   // A release's notes: only markdownToSafeHtml's answer (markdown-it, then

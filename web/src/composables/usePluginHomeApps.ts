@@ -45,6 +45,11 @@ export interface PluginHomeApp {
    * to the puzzle piece, the mark every extension surface wears.
    */
   svg: string;
+  /**
+   * The same glyph by NAME - what the admin menu (core `MegaMenu`) takes, so
+   * only a name crosses into the package and it draws its own markup.
+   */
+  icon: string;
 }
 
 export function usePluginHomeApps() {
@@ -62,13 +67,17 @@ export function usePluginHomeApps() {
   const apps = computed<PluginHomeApp[]>(() =>
     store.views.value
       .filter((v) => v.placement === 'home')
-      .map((v) => ({
-        key: `${v.plugin}/${v.id}`,
-        plugin: v.plugin,
-        view: v.id,
-        label: pluginLabelOf(v.label, locale.value) || v.id,
-        svg: actionIconSvg(v.icon && actionIconSvg(v.icon) !== '' ? v.icon : 'plugin'),
-      })),
+      .map((v) => {
+        const icon = v.icon && actionIconSvg(v.icon) !== '' ? v.icon : 'plugin';
+        return {
+          key: `${v.plugin}/${v.id}`,
+          plugin: v.plugin,
+          view: v.id,
+          label: pluginLabelOf(v.label, locale.value) || v.id,
+          svg: actionIconSvg(icon),
+          icon,
+        };
+      }),
   );
 
   /** The row behind a `<plugin>/<view>` pair, if that view is still there. */

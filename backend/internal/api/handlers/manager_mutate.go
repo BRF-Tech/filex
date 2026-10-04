@@ -151,12 +151,13 @@ func (h *Manager) vfAllowed(w http.ResponseWriter, r *http.Request) {
 	for i, it := range body.Items {
 		held := []string{}
 		out[i] = held
-		adapter, rel := splitAdapterPath(it.Path)
+		adapter, rel := splitAdapterPath(confinedPath(r.Context(), it.Path))
 		if adapter == "" && len(storages) > 0 {
 			adapter = storages[0].Name
 		}
 		st := byName[adapter]
-		if st == nil || pathHasDotDot(rel) {
+		// Outside the token's root nothing is held, whatever the ACL says.
+		if st == nil || pathHasDotDot(rel) || !rootAllowsIn(r.Context(), st, rel) {
 			continue
 		}
 		if h.ACL == nil {
@@ -381,11 +382,26 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Who may encrypt (e2e_policy_gate.go): a rename onto a key file's or a
+	// `.fxe`'s name is a new encryption unless it carries what is encrypted
+	// already (e2epolicy.RelocationEncrypts). Asked once the name is known to
+	// be free, so a NAME_TAKEN answer does not spend an approval, and before a
+	// folder's rename is queued: the worker has nobody to judge.
+	done, settled := refuseE2ERenameAt(w, r, h.E2EPolicy, h.Store, drv, current.ID, srcRel, dstRel, true)
+	if done {
+		return
+	}
 	// Asked with `queued=1` (the explorer asks for a folder): the checks above
 	// have answered, and the rename is a job of the queue. A folder on an
 	// object store is one request per object, longer than any proxy waits.
+	// A folder that becomes a file before the job runs is the rule's again
+	// (ops.WithEncryptionSettled).
 	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
-		op, err := h.Ops.Submit(r.Context(), ops.OpRename, current.ID, []string{srcRel}, dstRel)
+		qctx := r.Context()
+		if settled {
+			qctx = ops.WithEncryptionSettled(qctx, []string{srcRel})
+		}
+		op, err := h.Ops.Submit(qctx, ops.OpRename, current.ID, []string{srcRel}, dstRel)
 		if answerGate(w, err) {
 			return
 		}
@@ -910,6 +926,14 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			_ = src.Close()
 			return
 		}
+		// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go);
+		// replacing one that is there never asks. "There" is the rule's own
+		// look — a FILE at the path — not upNeed's: a folder made between the
+		// kind guard's look and upNeed's is not the file.
+		if refuseE2EWrite(w, r, h.E2EPolicy, drv, current, fullRel) {
+			_ = src.Close()
+			return
+		}
 
 		// Checked as late as possible — after every other refusal, right
 		// before the snapshot and the write — so the window in which a
@@ -1036,6 +1060,10 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 // validate the relative path. On error it writes the response and
 // returns ok=false so the caller can early-exit.
 func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, pathStr string, need perm.Perm) (*model.Storage, string, []string, bool) {
+	// Read the way confine.Middleware reads a JSON body it can see: for a
+	// confined caller no path is its root and a bare path is on its storage,
+	// whatever shape the request came in (the root check below still holds).
+	pathStr = confinedPath(r.Context(), pathStr)
 	storages, err := h.Store.ListEnabledStorages(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -1068,6 +1096,20 @@ func (h *Manager) resolveAdapterDir(w http.ResponseWriter, r *http.Request, path
 	}
 	if pathHasDotDot(rel) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return nil, "", nil, false
+	}
+	// The token `root:` confinement. Every manager mutation resolves its base
+	// dir here, so this is the one place it is held to the token's folder
+	// WHATEVER shape the path arrived in: a JSON body (confine.Middleware
+	// rewrites it, but only when it reads the body as the handler does — the
+	// same bytes under a different Content-Type, or with a tail after the
+	// object, it did not), a multipart form field (the upload reads `path`
+	// from the form; the middleware never looks at form fields), or absent
+	// (the storage root, which for a confined token is its folder, never the
+	// top of a storage). rootAllows is inert for an unconfined caller, so the
+	// native panel is unchanged.
+	if !rootAllows(r.Context(), h.Store, current.ID, rel) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root"})
 		return nil, "", nil, false
 	}
 	// RBAC: every mutation writes into this base dir (create/upload/move-dest

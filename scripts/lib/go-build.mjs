@@ -80,7 +80,8 @@ export function moduleRootOf(dir) {
  * disk (~/wt/<repository>/<module path in it>) and changes into `dir`'s place
  * inside the mirror. Every Go call this repository makes through WSL starts
  * with it. Only the module is copied: no Go test here reads outside backend/
- * (checked 2026-09-26), and it is a third of the tree.
+ * (web/tests/deploy/goWslMirror.test.ts, "no Go test reads a file outside the
+ * backend module"), and it is a third of the tree.
  *
  * ⚠⚠ Never run Go on /mnt/<drive>. /mnt/g is a 9P bridge: Go reads and hashes
  * every package source on each build, and each read goes through dllhost.exe

@@ -23,6 +23,8 @@ import type {
   ClipboardState,
   Capabilities,
   ArchiveCreateFormat,
+  E2eAnswer,
+  E2eRequestKind,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
 import { useFileApi, type GlobalSearchHit, type ManagerResponse, type PendingOpDto, type QuotaSnapshot } from './composables/useFileApi';
@@ -209,7 +211,9 @@ import { registerE2eNameResolver } from './lib/e2eNameRegistry';
 import E2eFileEncryptModal from './components/E2eFileEncryptModal.vue';
 import E2eFileUnlockModal from './components/E2eFileUnlockModal.vue';
 import E2eTooBigModal from './components/E2eTooBigModal.vue';
-import { useE2eFiles, isFxeActionKey, isFxeRow } from './composables/useE2eFiles';
+import { useE2eFiles, isFxeActionKey, isFxeRow, fxeEncryptTarget } from './composables/useE2eFiles';
+/* wiring:e2 policy — asking an administrator to allow one encryption */
+import E2eRequestModal from './components/E2eRequestModal.vue';
 import { e2eMimeForExt } from './lib/e2emime';
 import type { UploadSource } from './lib/uploadSource';
 import { ownedByViewer, ownerNameOf } from './lib/fileFilters';
@@ -289,11 +293,14 @@ import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App pl
 import AppFrameModal from './components/plugin/AppFrameModal.vue'; /* App plugins — an app's own interface */
 import { appliesItemOf, appliesMatches } from './lib/pluginApplies';
 import {
+  isOfficeHandler,
+  officeOpensKind,
   openHandlersFor,
   openKindOf,
-  pickAppViewer,
   pickOpenHandler,
+  ONLYOFFICE_VIEWER,
   type OpenHandler,
+  type OpenHandlerOptions,
 } from './lib/appViewer';
 import { followOpenWithChoices, openWithChoice, setOpenWithChoice } from './lib/openWith';
 import OpenWithDialog from './modals/OpenWithDialog.vue';
@@ -1626,12 +1633,17 @@ const pluginViewList = computed<PluginViewRow[]>(() => (pluginsEnabled.value ? p
 /** 0.50 - the administrator's open rules, by kind (Default apps). */
 const pluginOpenRules = computed(() => (pluginsEnabled.value ? pluginActions.openRules.value : {}));
 
+/** What only this explorer knows about the handlers (lib/appViewer): 0.51 -
+ *  ONLYOFFICE opens a .csv while it is configured and answering, the same
+ *  answer an office document's Open reads (effectiveOnlyOfficeBase). */
+const openOpts = computed<OpenHandlerOptions>(() => ({ onlyOffice: !!effectiveOnlyOfficeBase.value }));
+
 /** The handlers that open a file (lib/appViewer): on, in the administrator's
  *  order, and off. Inside an encrypted folder only filex's own (decrypting)
  *  viewer opens anything. */
 function openHandlersOf(n: FileNode | null | undefined) {
   if (e2eActive.value) return { on: n && n.type === 'file' ? [{ id: 'builtin', view: null }] : [], off: [], custom: false };
-  return openHandlersFor(pluginViewList.value, n, pluginOpenRules.value);
+  return openHandlersFor(pluginViewList.value, n, pluginOpenRules.value, openOpts.value);
 }
 
 /** The person's "always open with" choice for a file's kind (lib/openWith). */
@@ -1646,14 +1658,26 @@ function personalOpenChoice(n: FileNode | null | undefined): string | null {
  * own viewer.
  */
 const previewAppChoice = ref<string | null>(null);
-const previewAppViewer = computed<PluginViewRow | null>(() =>
+const previewHandler = computed<OpenHandler | null>(() =>
   e2eActive.value
     ? null
-    : pickAppViewer(pluginViewList.value, previewTarget.value, previewAppChoice.value, pluginOpenRules.value, personalOpenChoice(previewTarget.value)),
+    : pickOpenHandler(
+        pluginViewList.value,
+        previewTarget.value,
+        previewAppChoice.value,
+        pluginOpenRules.value,
+        personalOpenChoice(previewTarget.value),
+        openOpts.value,
+      ),
 );
+const previewAppViewer = computed<PluginViewRow | null>(() => previewHandler.value?.view ?? null);
+/** 0.51 - the file being previewed opens in ONLYOFFICE (a .csv, by default
+ *  while ONLYOFFICE is configured, or chosen in "Open with"). */
+const previewInOffice = computed(() => isOfficeHandler(previewHandler.value));
 
 /** A handler as the file menu names it. */
 function openWithLabel(h: OpenHandler): string {
+  if (isOfficeHandler(h)) return t('ctx.open_with', { app: 'ONLYOFFICE' });
   if (!h.view) return t('ctx.open_with_builtin');
   return t('ctx.open_with', { app: pluginLabelOf(h.view.label, locale.value) || h.view.plugin });
 }
@@ -1662,14 +1686,32 @@ function openWithLabel(h: OpenHandler): string {
  * "Open with" rows for one file: every handler that is on for its kind, and
  * "Choose an app…" (the dialog that can make one the default) - only when
  * there is more than one way to open it.
+ *
+ * 0.51 - a kind ONLYOFFICE opens (a .csv) while ONLYOFFICE is not there: the
+ * owner's rule for a missing service (lib/serviceGate) - an administrator
+ * sees "Open with ONLYOFFICE" greyed with where to set it up, everybody else
+ * nothing.
  */
 function openWithRows(sel: FileNode[]): ContextAction[] {
   if (sel.length !== 1) return [];
   const { on } = openHandlersOf(sel[0]);
-  if (on.length < 2) return [];
+  const missing: ContextAction[] =
+    !e2eActive.value && sel[0]?.type === 'file' && officeOpensKind(openKindOf(sel[0])) && !openOpts.value.onlyOffice
+      ? [
+          {
+            key: `open-with:${ONLYOFFICE_VIEWER}`,
+            label: t('ctx.open_with', { app: 'ONLYOFFICE' }),
+            icon: 'open',
+            testid: `ctx-open-with-${ONLYOFFICE_VIEWER}`,
+            ...gateOnService(false, callerAdmin.value, t('ctx.needs_onlyoffice')),
+          },
+        ].filter((r) => !r.hidden)
+      : [];
+  if (on.length < 2 && missing.length === 0) return [];
   return [
     ...on.map((h) => ({ key: `open-with:${h.id}`, label: openWithLabel(h), icon: 'open', testid: `ctx-open-with-${h.id}` })),
-    { key: 'open-with-choose', label: t('ctx.open_with_choose'), icon: 'open', testid: 'ctx-open-with-choose' },
+    ...missing,
+    ...(on.length < 2 ? [] : [{ key: 'open-with-choose', label: t('ctx.open_with_choose'), icon: 'open', testid: 'ctx-open-with-choose' }]),
   ];
 }
 
@@ -1680,7 +1722,7 @@ const openWithKind = computed(() => (openWithTarget.value ? openKindOf(openWithT
 const openWithCurrent = computed(() => {
   const n = openWithTarget.value;
   if (!n) return null;
-  return pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n))?.id ?? null;
+  return pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n), openOpts.value)?.id ?? null;
 });
 
 /** Open the file with the chosen handler; with `always`, keep it for the kind. */
@@ -3796,6 +3838,89 @@ function permHeldAt(p: string, paths: string[]): boolean {
   askFolderAllowed(paths);
   return paths.every((x) => folderAllowed.value[x]?.includes(p) ?? false);
 }
+/* wiring:e2 policy — may this account START encrypting here? The server's
+ * answer per path (`POST /api/files/e2e/allowed`, backend internal/e2epolicy):
+ * the platform operator's switch for the tenant, the tenant's policy,
+ * `files.encrypt` on that path and — under the `approval` policy — an
+ * approval: `allowed`, `request` or `denied`.
+ *
+ * ⚠ Asked for administrators too: the policy `off` stops them as well, and
+ * the per-folder permission question above is never asked for them.
+ * ⚠ It only shapes the menu — every door that creates a key file or a `.fxe`
+ * asks the same rule on the server. A question that fails answers `allowed`
+ * (useFileApi e2eAllowedAt), and a server older than the policy says nothing
+ * in its capabilities, which reads `allowed` too: the menu of before, and the
+ * server decides.
+ * ⚠ And it only ever OFFERS what the account may do anyway: "allowed" is
+ * necessary, not sufficient. The answer does not look at `files.create`, at a
+ * read-only storage or at what a key may write, so every caller also asks the
+ * question that was already there — `canWriteHere`, the row's own `w`.
+ *
+ * Remembered per path until the listing is read again (`load` forgets them),
+ * so an approval granted meanwhile shows at the next visit. */
+const e2eAnswers = ref<Record<string, E2eAnswer>>({});
+const e2eAsking = new Set<string>();
+// Bumped when the answers are forgotten: a question asked before is dropped,
+// not written into the fresh cache.
+let e2eGen = 0;
+function forgetE2eAnswers(): void {
+  e2eGen++;
+  e2eAsking.clear();
+  e2eAnswers.value = {};
+}
+watch(
+  () => [
+    heldPermissions.value,
+    heldByFolder.value,
+    capabilitiesData.value?.e2e_policy?.available,
+    capabilitiesData.value?.e2e_policy?.policy,
+  ],
+  forgetE2eAnswers,
+);
+/** The cache key of one question: the kind first (it holds no `:`), then the
+ *  wire path. */
+function e2eAskKey(path: string, kind: E2eRequestKind): string {
+  return `${kind}:${path}`;
+}
+async function askE2eAnswers(asks: { path: string; kind: E2eRequestKind }[]): Promise<void> {
+  const missing = asks.filter((a) => {
+    const k = e2eAskKey(a.path, a.kind);
+    return !(k in e2eAnswers.value) && !e2eAsking.has(k);
+  });
+  if (!missing.length) return;
+  for (const a of missing) e2eAsking.add(e2eAskKey(a.path, a.kind));
+  const gen = e2eGen;
+  const answers = await api.e2eAllowedAt(missing);
+  if (gen !== e2eGen) return;
+  const next = { ...e2eAnswers.value };
+  missing.forEach((a, i) => {
+    const k = e2eAskKey(a.path, a.kind);
+    next[k] = answers[i] ?? 'allowed';
+    e2eAsking.delete(k);
+  });
+  e2eAnswers.value = next;
+}
+/** The encryption answer for one wire path and one kind of encryption:
+ *  `new_folder` - a new encrypted folder made IN this folder (the New folder
+ *  dialog); `folder` - this folder encrypted where it is; `file` - this file.
+ *  ⚠ The kind is the server's too (operator decision 2026-10-03): an approval
+ *  opens only the kind it was asked for, so asking without one would show
+ *  "allowed" where the server then refuses. */
+function e2eAnswerAt(path: string, kind: E2eRequestKind): E2eAnswer {
+  const policy = capabilitiesData.value?.e2e_policy;
+  if (!policy) return 'allowed';
+  // ⚠ Nothing is answered from the capabilities' row itself — not even "the
+  // operator switched it off". It is the row of the CALLER'S OWN tenant; the
+  // platform operator looking at another tenant's storage is answered by THAT
+  // tenant's ceiling and policy, which can differ either way. Only the per-path
+  // answer hides a door.
+  // ⚠ Starts a request from inside a computed, as permHeldAt does; the answer
+  // lands in `e2eAnswers`, which re-runs it.
+  void askE2eAnswers([{ path, kind }]);
+  // 'denied' while the question is on its way: a row that appears a moment
+  // late is better than one that appears and is taken back.
+  return e2eAnswers.value[e2eAskKey(path, kind)] ?? 'denied';
+}
 // Can the current user write into the directory being viewed? Gates the
 // toolbar New Folder / Upload / Paste + drag-drop upload.
 const canWriteHere = computed(
@@ -4121,6 +4246,9 @@ async function loadListing(path?: string) {
   // answered yet (the "more results than shown" strip reads this).
   searchTruncated.value = false;
   const { ticket, want } = tickets.begin(path, currentPath.value ?? '');
+  // wiring:e2 policy — who may encrypt where is asked again for this
+  // listing: an approval granted meanwhile shows at the next read.
+  forgetE2eAnswers();
   /* === etiket:t1 — a sentinel is a VIEW, not a folder ===================
    * A restored tab, a reload on `#.trash` / `#.starred` / `#.tag~invoices`,
    * or the breadcrumb crumb for the view you are standing in all arrive here
@@ -5377,8 +5505,15 @@ function openNode(n: FileNode) {
   previewAppChoice.value = null;
   // An app's interface for this type edits it (unless this person may not):
   // the one the person's choice or the administrator's order opens it with.
-  if (!e2eActive.value && pickAppViewer(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n)) && nodeCanEdit(n)) {
+  // 0.51 - ONLYOFFICE opening a .csv is an office document's open: a look
+  // first (view), its Edit button to change it - as a .xlsx opens.
+  const handler = e2eActive.value
+    ? null
+    : pickOpenHandler(pluginViewList.value, n, null, pluginOpenRules.value, personalOpenChoice(n), openOpts.value);
+  if (handler?.view && nodeCanEdit(n)) {
     previewMode.value = 'edit';
+  } else if (isOfficeHandler(handler)) {
+    previewMode.value = 'view';
   }
   previewTarget.value = n;
   showPreview.value = true;
@@ -5937,6 +6072,15 @@ const ACTION_PERMS: Record<string, string[]> = {
   'copy-to': ['files.create'],
   paste: ['files.create', 'files.move'],
   tags: ['files.tag'],
+  /* wiring:e2 policy — the four rows that START an encryption make something,
+     a key file or a `.fxe`, and the server asks files.create for that beside
+     files.encrypt (backend perm.FilesEncrypt: "carved out of files.create,
+     which the same write needs as well"). A place can allow the one and deny
+     the other; the row is then hidden, not offered to be refused. */
+  'fxe-encrypt': ['files.create'],
+  'fxe-request': ['files.create'],
+  'e2e-convert': ['files.create'],
+  'e2e-request': ['files.create'],
 };
 /** The sharing kinds held on `paths` (lib/sharingHeld) — the one answer the
  *  Share action, the share dialog, "Request files" and the details panel's
@@ -6031,6 +6175,8 @@ function selectionActionListAll(sel: FileNode[]): ContextAction[] {
       : openExt === 'drawio' || openExt === 'dio'
         ? gateOnService(!!effectiveDrawioUrl.value, callerAdmin.value, t('ctx.needs_drawio'))
         : {};
+  /* wiring:e2 policy — the plain file "Encrypt with E2EE…" would encrypt. */
+  const fxeTarget = fxeEncryptTarget(sel, { canWrite: w, inEncrypted: e2eActive.value });
   return [
     { key: 'open', label: t('ctx.open'), ...openGate, hidden: !single || openGate.hidden === true },
     { key: 'open-tab', label: t('ctx.open_new_tab'), hidden: !single || sel[0]?.type !== 'dir' } /* wiring:d1 — open the folder in a new tab */,
@@ -6047,11 +6193,15 @@ function selectionActionListAll(sel: FileNode[]): ContextAction[] {
        size downloads DECRYPTED now (a zip made in this tab); the ciphertext is
        "Download encrypted copy" below. */
     { key: 'download', label: t('ctx.download'), hidden: !any || (e2eLocked.value && !single), disabled: !any },
-    /* wiring:e2 fxe — single encrypted files, and the ciphertext copy. */
+    /* wiring:e2 fxe — single encrypted files, and the ciphertext copy.
+       wiring:e2 policy — "Encrypt with E2EE…" asks the answer for the file it
+       would encrypt, and becomes "Request encryption…" under the approval
+       policy (useE2eFiles menuRows). */
     ...e2eFiles.menuRows(sel, {
       canWrite: w,
       inEncrypted: e2eActive.value,
       unlockedEncryptedCopy: e2eUnlocked.value || (single && e2eUnlockedRootRow(sel[0]) !== null),
+      encryptAnswer: fxeTarget ? e2eAnswerAt(fxeTarget.path, 'file') : undefined,
     }),
     { key: 'archive-create', label: t('ctx.archive_create'), hidden: !any || (single && isArchive) || !w || e2eActive.value || archiveAllowedFormats.value.length === 0, disabled: !any },
     { key: 'archive-extract', label: t('ctx.archive_extract'), hidden: !isArchive || !w || e2eActive.value, disabled: !isArchive },
@@ -6068,8 +6218,11 @@ function selectionActionListAll(sel: FileNode[]): ContextAction[] {
       title: single ? undefined : t('ctx.access.one_only'),
     },
     { key: 'details', label: t('ctx.details'), hidden: !any } /* koru:k1 */,
-    /* wiring:e2 convert — encrypt a folder that already exists, in place. */
-    { key: 'e2e-convert', label: t('e2e.convert.ctx'), icon: 'lock', hidden: !e2eCanConvert(sel, w) },
+    /* wiring:e2 convert — encrypt a folder that already exists, in place.
+       wiring:e2 policy — offered where the policy lets this account encrypt
+       that folder; where it wants an approval, the menu asks for one. */
+    { key: 'e2e-convert', label: t('e2e.convert.ctx'), icon: 'lock', hidden: !e2eConvertAnswerIs(sel, w, 'allowed') },
+    { key: 'e2e-request', label: t('e2e.request.ctx'), icon: 'lock', hidden: !e2eConvertAnswerIs(sel, w, 'request') },
     /* ⚠ "Copy node id" is NOT here any more (owner's call, 2026-09-13): it is a
        developer's handle on a support ticket, not an everyday verb, and this
        list is rendered by BOTH the right-click menu and the selection bar — so
@@ -6237,6 +6390,10 @@ async function dispatchItemAction(key: string, targets: FileNode[]) {
       break;
     case 'e2e-convert':
       if (targets[0]) e2eOpenConvert(targets[0]);
+      break;
+    /* wiring:e2 policy — a folder whose encryption needs an approval. */
+    case 'e2e-request':
+      if (targets[0]) openE2eRequest(targets[0].path, 'folder', targets[0].basename);
       break;
     case 'download':
       await downloadSelection(targets);
@@ -8757,6 +8914,8 @@ const e2eFiles = useE2eFiles({
     recoveryKeyVariant.value = 'file';
     showRecoveryKey.value = true;
   },
+  /* wiring:e2 policy — "Request encryption…" on a plain file. */
+  requestEncrypt: (n) => openE2eRequest(n.path, 'file', n.basename),
 });
 
 /** The preview on screen is a decrypted `.fxe`: nothing that would send its
@@ -8812,6 +8971,32 @@ const e2eUnlockErr = ref('');
 // Encrypted-folder creation modal.
 const showEncFolder = ref(false);
 const e2eCreateBusy = ref(false);
+/* wiring:e2 policy — what the New folder dialog offers for an encrypted
+ * folder. It is created in the folder the main pane shows
+ * (submitEncryptedFolder), so that folder is asked about — and only while the
+ * dialog is open. Inside an encrypted folder nothing is offered: they do not
+ * nest. And nothing where this account may not create a folder anyway
+ * (`canWriteHere`: a read-only storage, `files.create`) — the dialog also
+ * opens from a key, which the toolbar's buttons do not. */
+const newFolderE2e = computed<E2eAnswer>(() =>
+  showNewFolder.value && !e2eActive.value && canWriteHere.value ? e2eAnswerAt(qualify(currentPath.value), 'new_folder') : 'denied',
+);
+/* wiring:e2 policy — "Request encryption…": what it is for, while its dialog
+ * is open (E2eRequestModal). */
+const e2eRequestFor = ref<{ path: string; kind: E2eRequestKind; name: string } | null>(null);
+function openE2eRequest(path: string, kind: E2eRequestKind, name: string): void {
+  e2eRequestFor.value = { path, kind, name };
+}
+/** The New folder dialog's "Request an encrypted folder…": the request is for
+ *  the folder the encrypted one would be created in. */
+function requestEncryptedFolder(): void {
+  showNewFolder.value = false;
+  openE2eRequest(qualify(currentPath.value), 'new_folder', folderLabelOf(currentPath.value));
+}
+function onE2eRequestSent(answer: { created: boolean }): void {
+  e2eRequestFor.value = null;
+  flashToast(answer.created ? t('e2e.request.sent') : t('e2e.request.already'));
+}
 
 /* wiring:e2 recovery — recovery key + escrow.
  *
@@ -9139,9 +9324,14 @@ async function submitEncryptedFolder(payload: { name: string; password: string; 
     return;
   }
   e2eCreateBusy.value = true;
+  // The folder is made first and the key file goes into it, so a refusal at the
+  // second step (the policy switched, an approval spent or expired after the
+  // listing) leaves the plain folder behind.
+  let folderMade = false;
   try {
     const dirWire = qualify(currentPath.value);
     await api.newFolder(dirWire, payload.name);
+    folderMade = true;
     /* wiring:e2 recovery — the folder gets a recovery key at birth, and an
      * escrow slot when the installation has one. Both are decided HERE and
      * never again: the wrapped copies are written into the marker now, so a
@@ -9172,7 +9362,13 @@ async function submitEncryptedFolder(payload: { name: string; password: string; 
     await load();
   } catch (err) {
     emit('error', { message: (err as Error).message, context: { op: 'e2e-create' } });
-    flashToast(t('e2e.create.failed'));
+    // wiring:e2 policy — the server's refusal in words ("your role does not
+    // allow encrypting here"), not a bare "could not create".
+    showToast({ message: failureText(err, t('e2e.create.failed')) }, ERROR_TOAST_MS);
+    // The plain folder the first step made is there now, and stays — deleting
+    // it is not this dialog's to decide. Show what the folder holds instead of
+    // a listing that predates it.
+    if (folderMade) await load();
   } finally {
     e2eCreateBusy.value = false;
   }
@@ -9805,6 +10001,11 @@ function e2eCanConvert(sel: FileNode[], writable: boolean): boolean {
   );
 }
 
+/** wiring:e2 policy — a folder `e2eCanConvert` accepts, whose answer is `want`. */
+function e2eConvertAnswerIs(sel: FileNode[], writable: boolean, want: E2eAnswer): boolean {
+  return e2eCanConvert(sel, writable) && e2eAnswerAt(sel[0].path, 'folder') === want;
+}
+
 function e2eOpenConvert(n: FileNode) {
   e2eConvTarget.value = n;
   showEncFolder.value = true;
@@ -9874,7 +10075,7 @@ async function submitConvertFolder(payload: {
     }
   } catch (err) {
     emit('error', { message: (err as Error).message, context: { op: 'e2e-convert' } });
-    flashToast(t('e2e.convert.failed'));
+    showToast({ message: failureText(err, t('e2e.convert.failed')) }, ERROR_TOAST_MS);
   } finally {
     e2eCreateBusy.value = false;
   }
@@ -9962,7 +10163,7 @@ async function e2eRunConversion() {
       emit('error', { message: (err as Error).message, context: { op: 'e2e-convert-cleanup' } });
     }
   } catch (err) {
-    e2eConvErr.value = t('e2e.convert.failed');
+    e2eConvErr.value = failureText(err, t('e2e.convert.failed'));
     emit('error', { message: (err as Error).message, context: { op: 'e2e-convert' } });
   } finally {
     e2eConvRunning.value = false;
@@ -11371,12 +11572,14 @@ function closeRecoveryKey() {
     <NewFolderModal
       :open="showNewFolder"
       :locale="locale"
-      :encrypted-option="!e2eActive /* wiring:e2 — no nested encrypted folders */"
+      :encrypted-option="newFolderE2e === 'allowed' /* wiring:e2 policy - never nested, and only where this account may encrypt */"
+      :encrypted-request="newFolderE2e === 'request' /* wiring:e2 policy - an approval first */"
       :busy="newFolderBusy"
       :error="newFolderError"
       @close="showNewFolder = false"
       @submit="submitNewFolder"
       @encrypted="showNewFolder = false; showEncFolder = true /* wiring:e2 */"
+      @request-encrypted="requestEncryptedFolder"
     />
     <ArchiveCreateModal
       :open="showArchiveCreate"
@@ -11440,6 +11643,18 @@ function closeRecoveryKey() {
       :existing="e2eConvTarget ? e2eConvTarget.basename : null"
       @close="showEncFolder = false; e2eConvTarget = null"
       @submit="(p) => (e2eConvTarget ? submitConvertFolder(p) : submitEncryptedFolder(p))"
+    />
+    <!-- wiring:e2 policy — "Request encryption…": asking an administrator to
+         allow one encryption, where the tenant's policy wants that. -->
+    <E2eRequestModal
+      :open="!!e2eRequestFor"
+      :locale="locale"
+      :api="api"
+      :path="e2eRequestFor?.path ?? ''"
+      :kind="e2eRequestFor?.kind ?? 'folder'"
+      :name="e2eRequestFor?.name ?? ''"
+      @close="e2eRequestFor = null"
+      @sent="onE2eRequestSent"
     />
     <!-- wiring:e2 recovery — the key, shown exactly once. -->
     <RecoveryKeyModal
@@ -11632,8 +11847,11 @@ function closeRecoveryKey() {
       :api-base="props.config.apiBase ?? ''"
       :drafts-endpoint="draftsEnabled ? api.draftsBase : null /* Drafts, issue #71 */"
       :app-viewer="previewAppViewer /* v4 — an app's own interface for this type */"
+      :in-office="previewInOffice /* 0.51 - a .csv in ONLYOFFICE */"
       :api="api"
       :user-name="props.config.userName || ''"
+      :storages="(props.config.storages ?? []).map((st) => st.name) /* #149 — an app's save-as
+                 offers the storages Move to… offers */"
       @toast="flashToast"
       @op="(op) => onPluginOpQueued(op)"
       @nav="onPreviewNav"
@@ -11684,6 +11902,9 @@ function closeRecoveryKey() {
       :label="appFrameView.label"
       :files="appFrameView.files"
       :user-name="props.config.userName || ''"
+      :storages="(props.config.storages ?? []).map((st) => st.name)"
+      :start-at="qualify(paneIsActive ? (splitPaneRef?.getPath() ?? '') : currentPath) /* #149 — a home
+                 screen's save-as opens where the person is */"
       @close="appFrameView = null"
       @toast="flashToast"
       @op="(op) => onPluginOpQueued(op)"

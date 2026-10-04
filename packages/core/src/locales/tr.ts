@@ -308,6 +308,22 @@ export const tr: Record<string, string> = {
   'err.read_only': 'Bu depo salt okunur',
   'err.no_secret_key': 'Bu sunucuda şifreleme anahtarı tanımlı değil, bu yüzden erişim anahtarı verilemiyor. Yöneticinizden tanımlamasını isteyin.',
   'err.quota': 'Depolama kotanız dolu.',
+  /* wiring:e2 policy - kim şifreleyebilir: ret nedeni cümleyi seçer. */
+  'err.e2e_not_allowed.other': 'Burada şifrelemeye izin verilmiyor.',
+  'err.e2e_not_allowed.tenant_disabled': 'Şifreleme burada kullanılamıyor: platform işletmecisi kapatmış.',
+  'err.e2e_not_allowed.policy_off': 'Bir yönetici burada şifrelemeyi kapatmış.',
+  'err.e2e_not_allowed.admins_only': 'Burada yalnız yöneticiler şifreleyebilir.',
+  'err.e2e_not_allowed.permission': 'Rolünüz burada şifrelemeye izin vermiyor.',
+  'err.e2e_not_allowed.approval_required':
+    'Burada şifrelemek için yönetici onayı gerekiyor. Menüdeki “Şifreleme iste…” ile isteyebilirsiniz.',
+  /* Eskimiş bir listeden yapılan istek (lib/errorWords CODE_WORDS `kind_mismatch`, `not_requestable`). */
+  'err.e2e_request.kind_mismatch': 'Bu öğe, klasör listelendiğinden beri değişmiş. Klasörü yenileyip tekrar deneyin.',
+  'err.e2e_request.not_requestable': 'Burada yapabilecekleriniz klasör listelendiğinden beri değişmiş. Şimdi nelerin sunulduğunu görmek için klasörü yenileyin.',
+  /* Orada olmayan bir şey için istek (lib/errorWords CODE_WORDS `path_missing`) ve bekleyen istek sınırı (`too_many_pending`). */
+  'err.e2e_request.path_missing': 'Bu klasör ya da dosya artık burada değil. Klasörü yenileyip tekrar deneyin.',
+  'err.e2e_request.too_many_pending': 'Yanıt bekleyen çok sayıda şifreleme isteğiniz var. Bir yönetici bunlardan birini yanıtlayınca yeniden isteyin.',
+  /* Kural karara bağlanamadı (lib/errorWords CODE_WORDS): sunucu 500 "could not check the encryption policy" yanıtladı. */
+  'err.e2e_policy.undecided': 'Şifreleme politikası denetlenemedi. Lütfen biraz sonra yeniden deneyin.',
   'err.bad_kind': 'Sunucu bu türde bir işi bu yoldan kuyruğa almıyor.',
   'err.not_cancellable': 'Bu iş başladıktan sonra durdurulamaz - kendiliğinden tamamlanır.',
   'err.finished': 'Bu iş zaten bitti.',
@@ -370,6 +386,7 @@ export const tr: Record<string, string> = {
   'viewer.office_unreachable_admin':
     'ONLYOFFICE belge sunucusu yanıt vermiyor. Yönetim panelinde Dış servisler altından kontrol edin.',
   'viewer.office_failed': 'Bu belge ONLYOFFICE ile açılamadı. Bilgisayarınızda açmak için indirin.',
+  'viewer.csv_office_note': 'CSV olarak kaydedilir: yalnızca etkin sayfanın değerleri kalır. Biçimlendirme, formüller ve diğer sayfalar kaydedilmez.',
   'viewer.office_forbidden': 'Bu belgeyi ONLYOFFICE ile açma izniniz yok.',
   /* ONLYOFFICE'in "Download failed" (İndirme başarısız) hatasından sonra:
      iki durumdan hangisi olduğu, filex'in gördüğüyle (lib/officeDiagnosis,
@@ -639,6 +656,7 @@ export const tr: Record<string, string> = {
   'appframe.reload': 'Yeniden yükle',
   'appframe.dismiss': 'Kapat',
   'appframe.not_connected': '{app} başlamadı. Kapatıp yeniden açın; tekrar ederse yöneticinize haber verin.',
+  'appframe.save_as_title': '{app}: “{name}” nereye kaydedilsin?',
   'plugin.view.busy': 'Çalışıyor…',
   'plugin.view.unsupported': 'Bu ekran, bu sürümün çizemediği bir bileşen kullanıyor ({type})',
   'plugin.view.error': 'Uygulama hata döndürdü',
@@ -904,6 +922,7 @@ export const tr: Record<string, string> = {
   'openWith.title': "Birlikte aç",
   'openWith.lead': "{name} hangi uygulamayla açılsın?",
   'openWith.builtin': "filex görüntüleyicisi (yerleşik)",
+  'openWith.onlyoffice': 'ONLYOFFICE (tablo düzenleyici)',
   'openWith.now': "Şu an bununla açılıyor",
   'openWith.always': "{ext} dosyalarını her zaman bu uygulamayla aç",
   'openWith.hint': "Hesabınızda saklanır. Ayarlar, Varsayılan uygulamalar bölümünden değiştirebilirsiniz.",
@@ -981,6 +1000,24 @@ export const tr: Record<string, string> = {
   'e2e.create.done': 'Şifreli klasör oluşturuldu',
   'e2e.create.failed': 'Şifreli klasör oluşturulamadı',
   'e2e.create.nested': 'Şifreli klasörün içine ikinci bir şifreli klasör açılamaz.',
+  /* wiring:e2 policy - bir yöneticiden şifreleme izni istemek. */
+  'e2e.request.ctx': 'Şifreleme iste…',
+  'e2e.request.option': 'Şifreli klasör iste…',
+  'e2e.request.title': '“{name}” için şifreleme iste',
+  'e2e.request.lead':
+    'Burada şifreli klasör oluşturmak için yönetici onayı gerekiyor. Neden gerektiğini yazın; yanıt size bildirilir. Onay sizin ve bu klasör içindir: hemen içinde yeni bir şifreli klasör oluşturmak için bir kez kullanılabilir.',
+  'e2e.request.lead_folder':
+    'Bu klasörü şifrelemek için yönetici onayı gerekiyor. Neden gerektiğini yazın; yanıt size bildirilir. Onay sizin ve bu klasör içindir: bu klasörü olduğu yerde şifrelemek için bir kez kullanılabilir, içindeki bir klasör için kullanılamaz.',
+  'e2e.request.lead_file':
+    'Bu dosyayı şifrelemek için yönetici onayı gerekiyor. Neden gerektiğini yazın; yanıt size bildirilir. Onay sizin ve bu dosyanın bulunduğu klasör içindir: orada yeni bir şifreli dosya için bir kez kullanılabilir.',
+  'e2e.request.reason': 'Gerekçe',
+  'e2e.request.reason_placeholder': 'İçinde ne var, neden şifrelenmesi gerekiyor',
+  'e2e.request.reason_required': 'Yönetici için bir gerekçe yazın.',
+  'e2e.request.send': 'İsteği gönder',
+  'e2e.request.sending': 'Gönderiliyor…',
+  'e2e.request.sent': 'İstek gönderildi. Bir yönetici yanıtladığında size bildirilecek.',
+  'e2e.request.already': 'Bunu zaten istediniz; bir yöneticinin yanıtını bekliyor.',
+  'e2e.request.failed': 'İstek gönderilemedi.',
   'e2e.locked.title': 'Bu klasör uçtan uca şifreli',
   'e2e.locked.hint': 'İçeriği görmek için klasör parolasını girin. Parola yalnız bu sekmede, bellekte tutulur.',
   'e2e.locked.pw_placeholder': 'Klasör parolası',
@@ -2116,6 +2153,8 @@ export const tr: Record<string, string> = {
   'destpicker.confirm.choose': 'Bu klasörü seç',
   'destpicker.title.choose_file': 'Dosya seç',
   'destpicker.confirm.choose_file': 'Bu dosyayı seç',
+  'destpicker.title.save': 'Şuraya kaydet',
+  'destpicker.confirm.save': 'Buraya kaydet',
   'destpicker.pick_a_file': 'Listeden bir dosya seçin.',
   'destpicker.empty_files': 'Bu klasör boş',
   'destpicker.cancel': 'Vazgeç',
@@ -2481,6 +2520,9 @@ export const tr: Record<string, string> = {
   'userSettings.notifications.events.comment_added': "Biri bir dosyaya yorum yaptığında",
   'userSettings.notifications.events.drop_received': "İstek bağlantısıyla bir dosya geldiğinde",
   'userSettings.notifications.events.e2e_escrow_used': "Şifreli bir klasör emanet anahtarıyla açıldığında",
+  'userSettings.notifications.events.e2e_password_changed': "Şifreli klasörünüzün parolası değiştiğinde",
+  'userSettings.notifications.events.e2e_request_created': "Biri bir klasörü ya da dosyayı şifrelemek istediğinde",
+  'userSettings.notifications.events.e2e_request_decided': "Şifreleme isteğiniz yanıtlandığında",
   'userSettings.notifications.events.file_deleted': "Bir dosya kalıcı olarak silindiğinde",
   'userSettings.notifications.events.file_infected': "Bir dosyada virüs bulunduğunda",
   'userSettings.notifications.events.file_moved': "Bir dosya taşındığında ya da adı değiştiğinde",
@@ -2558,6 +2600,7 @@ export const tr: Record<string, string> = {
   'users.fields.displayName': "Görünen ad",
   'webhooks.offReason.antivirus': "Virüs taraması kapalı (Koruma).",
   'webhooks.offReason.appPlugins': "Bu sunucuda uygulamalar kapalı.",
+  'webhooks.offReason.e2eApproval': "Yalnız şifreleme politikası onay istediğinde.",
   'webhooks.offReason.escrow': "Şifreli klasörler için emanet anahtarı kurulmamış.",
   'account.problem.emailInvalid': "Bu bir e-posta adresi değil. ad@ornek.com biçiminde yazın.",
   'account.problem.usernameAt': "Kullanıcı adında @ olamaz; @ e-posta adresine aittir.",

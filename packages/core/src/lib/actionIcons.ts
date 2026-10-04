@@ -272,7 +272,7 @@ const GLYPHS: Record<string, string> = {
      the empty screen's account menu draws both rows one under the other
      ("Paylaştıklarım", then "Bağlantılar"), and one mark on two adjacent rows
      is the misreading this set exists to stop. It is also the mark the admin
-     panel's own Connections entry already wears (Sidebar.vue, lucide `Cable`),
+     panel's own Connections entry already wears (web lib/adminNav.ts, lucide `Cable`),
      so the two ways into the same screen agree on what it looks like. */
   connect:
     '<path d="M9 8.5V3"/><path d="M15 8.5V3"/>' +

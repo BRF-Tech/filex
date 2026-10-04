@@ -30,7 +30,7 @@ func TestPermAdmin_CatalogueDefaultsAndRules(t *testing.T) {
 	status, body := fxJSON(t, "GET", pf.URL+"/api/admin/roles/catalogue", pf.adminTok, nil)
 	require.Equal(t, http.StatusOK, status, body)
 	cat := decode(t, body)
-	assert.Len(t, cat["permissions"], 28)
+	assert.Len(t, cat["permissions"], 29)
 	assert.Len(t, cat["presets"], 5)
 
 	status, body = fxJSON(t, "GET", pf.URL+"/api/admin/roles/builtin", pf.adminTok, nil)

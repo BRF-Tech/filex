@@ -17,6 +17,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/search"
@@ -54,6 +55,7 @@ type AIMCP struct {
 	acl       *acl.Resolver
 	thumbs    *thumb.Pipeline
 	staged    *StagedUpload
+	e2e       *e2epolicy.Service
 	// index is held rather than pushed into the core once, because a fresh
 	// aiOps is built per tool call below.
 	index   *search.Index
@@ -137,6 +139,7 @@ func (h *AIMCP) getServer(r *http.Request) *mcp.Server {
 	ops.attachSearchIndex(h.index)
 	ops.tenants = h.tenants
 	ops.acl = h.acl
+	ops.e2e = h.e2e
 	ops.thumbs = h.thumbs
 	ops.staged = h.staged
 	ops.body = h.body

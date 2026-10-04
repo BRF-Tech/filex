@@ -9,11 +9,14 @@ test.describe('Search — admin Search index test page', () => {
     // The page renders one of: localised stats labels (count/size/index),
     // a backend Bleve stats blob, or the search input itself. We just
     // need to know the route mounted SOMETHING.
-    const statsLabel = page.getByText(
+    // ⚠ In the page (`main`): since 0.51 the admin menu's hidden panels hold
+    // "Search index" too, and the first match would be that hidden entry.
+    const main = page.locator('main');
+    const statsLabel = main.getByText(
       /document.?count|belge sayısı|index|arama|search|veriyor/i,
     );
-    const searchInput = page.getByRole('searchbox')
-      .or(page.getByPlaceholder(/search|ara/i));
+    const searchInput = main.getByRole('searchbox')
+      .or(main.getByPlaceholder(/search|ara/i));
     await expect(statsLabel.or(searchInput).first()).toBeVisible({ timeout: 10_000 });
   });
 
