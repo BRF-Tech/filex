@@ -1,4 +1,4 @@
-<!-- Translated from README.md as of c1e0ba60 (v0.50.0). The English README is the source: change it first, then carry the change here. -->
+<!-- Translated from README.md as of d388d4f0 (v0.51.0). The English README is the source: change it first, then carry the change here. -->
 
 <div align="center">
 
@@ -14,13 +14,13 @@
 
 [English](README.md) · [Türkçe](README.tr.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [Français](README.fr.md) · **简体中文**
 
-<sub>本文译自 v0.50.0 版的[英文 README](README.md)；两者不一致时，以英文版为准。本文为机器翻译，尚待母语者审校，欢迎指正。文中链接指向的文档均为英文。</sub>
+<sub>本文译自 v0.51.0 版的[英文 README](README.md)；两者不一致时，以英文版为准。本文为机器翻译，尚待母语者审校，欢迎指正。文中链接指向的文档均为英文。</sub>
 
 filex 是单个 Go 二进制文件，自带功能完整的 Web 界面、可插拔的存储、认证和数据库驱动、**实时协作**、**可嵌入的 Web 组件**、**文件夹同步实时进行的桌面应用**（任何一边的修改大约一秒就到另一边）、让 AI 智能体可以原生驱动它的**内置 MCP 服务器**，以及**应用**：教会 filex 对文件做新事情的插件，可以是沙箱化的 WebAssembly 模块，可以是放在沙箱 iframe 里的自带界面，也可以两者兼有。第一个应用是与组织内外的人一起**签署文档**。**语言包**也是一种应用，所以翻译 filex 不必等新的发行版；对于从右到左书写的语言，filex 还会按**从右到左**排布界面。大家用已有的账户登录：SSO、LDAP，或者运行 filex 的那台机器上的 **Windows 或 Linux 账户**；在多租户实例上，**每个租户自己管理自己**：有自己的登录提供方，有自己的域名和证书。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.50.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.50.0/explorer-grid-light.png" alt="filex 资源管理器 - 缩略图网格" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.51.0/explorer-grid-dark.png">
+  <img src="docs/screenshots/v0.51.0/explorer-grid-light.png" alt="filex 资源管理器 - 缩略图网格" width="900">
 </picture>
 
 </div>
@@ -58,7 +58,7 @@ docker run -p 5212:5212 \
 - **实时**：在线头像（头像在账户上设置一次，每个以你的身份登录的客户端都显示为这个头像）和基于 WebSocket 的实时文件更新，在原生界面中，*也*在嵌入场景中（短时效票据认证、回退到 API 轮询）。批量任务的更新在发出时会合并，所以解压一个含五千个文件的压缩包，对一个打开着的资源管理器来说只需数量有上限的少量帧，而不是五千帧（[docs/REALTIME.md](docs/REALTIME.md)）。
 - **桌面上也有**：同一个资源管理器以 Windows/Linux/macOS 应用的形式提供，这个应用在系统托盘里让本地文件夹与服务器保持一致（**实时**，大约一秒，双向），会自动更新，还能让多个账户（或租户）并排共存。右键点击一个文件夹 → **Keep on this computer**（保留在此电脑上），它就镜像到一个 filex 文件夹下；其余的一切在窗口中保持仅在线。没有图形界面的机器通过 `filex sync` / `filex client` 用上同一个引擎。
 - **协议双向都通**：filex 可以*连接到*本地磁盘、S3、FTP、SFTP、WebDAV 和 SMB/NAS 共享，也可以*被当作* **S3**、**SFTP**、**FTPS**、**NFSv3** 和 **WebDAV** 来访问。把 `rclone`、`restic`、`aws s3`、WinSCP、FileZilla、只会 FTP 的扫描仪，或者只会 NFS 的媒体播放器指向 filex，它们就和 Web 界面一样，落在同一棵文件树上，用同样的权限、同一个回收站和同样的配额。LAN 之外还有 **`filex mount`**，它通过普通的 HTTPS 挂载远程服务器：在 Linux 上是一个文件夹，在 Windows 上是一个盘符（[docs/PROTOCOLS.md](docs/PROTOCOLS.md)）。
-- **角色与按用户设置的权限**：28 项具名权限（每种文件操作、每种共享方式、每种协议、API 密钥、桌面应用、五个管理区域），每个人都有一个角色：Administrator（管理员）、User（用户）、Viewer（查看者）或自定义角色；角色在某些文件夹中可以不同（“不能删除，Scratch 文件夹除外”），还可以带有限制（链接有效期和密码、禁止的文件类型、文件大小上限、强制双因素认证）。针对个人的例外优先于角色；委派管理员可以管理用户，但发放出去的权限永远不会超过自己持有的权限；无论从哪个入口进来，得到的答复都一样：Web 应用、智能体 API、WebDAV、SFTP、FTPS、S3、NFS 和 API 密钥。已安装的应用可以添加自己的权限，例如“Request signatures”（请求签名），发放方式相同；公开链接只有在创建者仍有权创建它的期间才保持有效（[docs/PERMISSIONS.md](docs/PERMISSIONS.md)）。
+- **角色与按用户设置的权限**：29 项具名权限（每种文件操作、每种共享方式、每种协议、API 密钥、桌面应用、五个管理区域），每个人都有一个角色：Administrator（管理员）、User（用户）、Viewer（查看者）或自定义角色；角色在某些文件夹中可以不同（“不能删除，Scratch 文件夹除外”），还可以带有限制（链接有效期和密码、禁止的文件类型、文件大小上限、强制双因素认证）。针对个人的例外优先于角色；委派管理员可以管理用户，但发放出去的权限永远不会超过自己持有的权限；无论从哪个入口进来，得到的答复都一样：Web 应用、智能体 API、WebDAV、SFTP、FTPS、S3、NFS 和 API 密钥。已安装的应用可以添加自己的权限，例如“Request signatures”（请求签名），发放方式相同；公开链接只有在创建者仍有权创建它的期间才保持有效（[docs/PERMISSIONS.md](docs/PERMISSIONS.md)）。
 - **群组**：具名的一组人，按租户划分：像与某个人共享那样与群组共享文件夹，也可以给群组一个角色，群组里没有自己角色的每个人都持有这个角色（群组之间由角色优先级决定）。人可以手动添加进来，也可以通过登录带来的群组加入（OIDC 声明、LDAP `memberOf`、操作系统的群组或代理请求头），身份提供方说该离开时就离开（[docs/GROUPS.md](docs/GROUPS.md)）。
 - **用大家已有的账户登录**：本地密码、OIDC、LDAP / Active Directory、认证代理，或者运行 filex 的那台机器上的 **Windows 或 Linux 账户**：密码由操作系统判定，filex 从不保存，而且这个提供方只有在一个真实账户用它登录过之后才会开启。首次登录时谁能获得账户，每个提供方都遵循同一条规则（[docs/OS-LOGIN.md](docs/OS-LOGIN.md)）。
 - **猜密码快不起来**：输错的密码按账户、按地址分别计数，Web 表单、WebDAV、FTPS 和 SFTP 都一样；锁定时间每次加倍，最长 15 分钟；IP 允许列表是重新进来的途径；转发来的客户端地址，只有出自受信任的代理才采信：默认是这台机器和 filex 旁边的容器，其他的由你指明（[登录尝试次数限制](docs/CONFIGURATION.md#sign-in-attempt-limits)）。其他站点带着访客的会话发来的更改会被拒绝（[来自其他源的请求](docs/CONFIGURATION.md#requests-from-other-origins)）。
@@ -118,105 +118,117 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 
 | 定义填写框：给每个填写框命名，并说明它是谁的；下一步是文档 | 放置填写框：选一个填写框，在页面上轻点要放的位置 |
 |---|---|
-| ![定义签名请求的填写框](docs/screenshots/v0.50.0/signing/sign-define-1440.png) | ![在文档上放置填写框](docs/screenshots/v0.50.0/signing/sign-place-1440.png) |
+| ![定义签名请求的填写框](docs/screenshots/v0.51.0/signing/sign-define-1440.png) | ![在文档上放置填写框](docs/screenshots/v0.51.0/signing/sign-place-1440.png) |
 
 | 合作伙伴的链接：filex 仅有的一个公开页面，以你的实例的名义出现，凭 PIN 才能打开 | …以及链接打开的内容：只有对方自己的填写框，这里是一个用发起人选定的字体键入的姓名（另外两种是绘制和上传） |
 |---|---|
-| ![外部签署人的 PIN 验证页](docs/screenshots/v0.50.0/signing/sign-outside-pin-1440.png) | ![外部签署人正在填写自己的填写框](docs/screenshots/v0.50.0/signing/sign-outside-fill-1440.png) |
+| ![外部签署人的 PIN 验证页](docs/screenshots/v0.51.0/signing/sign-outside-pin-1440.png) | ![外部签署人正在填写自己的填写框](docs/screenshots/v0.51.0/signing/sign-outside-fill-1440.png) |
 
 | 等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到 | 安装应用：在任何东西运行之前，先用直白的文字列出它请求的每一项权限 |
 |---|---|
-| ![文档已锁定，Signatures 面板已打开](docs/screenshots/v0.50.0/signing/sign-status-1440.png) | ![安装向导的权限审核](docs/screenshots/v0.50.0/apps/apps-install-review-1440.png) |
+| ![文档已锁定，Signatures 面板已打开](docs/screenshots/v0.51.0/signing/sign-status-1440.png) | ![安装向导的权限审核](docs/screenshots/v0.51.0/apps/apps-install-review-1440.png) |
 
 | 已安装的应用：它从哪里来、指纹是什么，以及它持有的每一项权限，用直白的文字写明（它的设置和操作接在后面，在页面更靠下的地方） | 转换器，另一个应用：每种目标格式都列在各自的类别下，共三步 |
 |---|---|
-| ![已安装应用的详情](docs/screenshots/v0.50.0/apps/apps-detail-1440.png) | ![转换器的向导](docs/screenshots/v0.50.0/apps/convert-wizard-1440.png) |
+| ![已安装应用的详情](docs/screenshots/v0.51.0/apps/apps-detail-1440.png) | ![转换器的向导](docs/screenshots/v0.51.0/apps/convert-wizard-1440.png) |
 
 | 自带界面的应用：审核时会显示应用包的指纹、应用包之外的每个地址（实时加载的地址是一项权限，以黄色显示），以及浏览器无法保证的事 | …以及这个界面，打开的是它自己的文件类型，就在 filex 预览本来所在的位置。它在沙箱 iframe 中通过 filex 读取和保存文件（一个小型示例应用，为这些截图而写） |
 |---|---|
-| ![自带界面的应用的安装审核](docs/screenshots/v0.50.0/apps/app-interface-review-1440.png) | ![应用自带的界面作为文件查看器打开](docs/screenshots/v0.50.0/apps/app-interface-viewer-1440.png) |
+| ![自带界面的应用的安装审核](docs/screenshots/v0.51.0/apps/app-interface-review-1440.png) | ![应用自带的界面作为文件查看器打开](docs/screenshots/v0.51.0/apps/app-interface-viewer-1440.png) |
 
 | 实例上的每个应用，其中有一个**语言包**：一份没有任何可运行内容的清单，会说明自己翻译了这个 filex 的多少内容；语言包一走，它的语言也跟着走 |
 |---|
-| ![Apps 列表，其中有一个语言包](docs/screenshots/v0.50.0/langpack/apps-list-1440.png) |
+| ![Apps 列表，其中有一个语言包](docs/screenshots/v0.51.0/langpack/apps-list-1440.png) |
 
 ### 你自己的内容，随处可达
 
 | 铃铛：未读数就在铃铛上，每一行都通向它所说的地方 | 你的全部通知，都在资源管理器里：每个人都可以用，而不只是管理员 |
 |---|---|
-| ![带未读角标的铃铛，已展开](docs/screenshots/v0.50.0/signing/bell-badge-1440.png) | ![覆盖在资源管理器之上的完整通知列表](docs/screenshots/v0.50.0/signing/notifications-list-1440.png) |
+| ![带未读角标的铃铛，已展开](docs/screenshots/v0.51.0/signing/bell-badge-1440.png) | ![覆盖在资源管理器之上的完整通知列表](docs/screenshots/v0.51.0/signing/notifications-list-1440.png) |
 
 | My shares（我的共享）：你创建的链接，以及这些链接的 PIN，需要转告别人时用得上 | 管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单 |
 |---|---|
-| ![My shares，其中一行的 Actions 菜单已打开](docs/screenshots/v0.50.0/signing/my-shares-1440.png) | ![Admin → Shares，其中一行的 Actions 菜单已打开](docs/screenshots/v0.50.0/signing/admin-table-actions-1440.png) |
+| ![My shares，其中一行的 Actions 菜单已打开](docs/screenshots/v0.51.0/signing/my-shares-1440.png) | ![Admin → Shares，其中一行的 Actions 菜单已打开](docs/screenshots/v0.51.0/signing/admin-table-actions-1440.png) |
 
 ### 你的品牌
 
 | Appearance（外观）：用你自己的颜色组合出一个主题，边输入边预览 | 设为默认之后，每个人的资源管理器套用的就是它… |
 |---|---|
-| ![主题编辑器](docs/screenshots/v0.50.0/appearance/theme-editor-1440.png) | ![套用了运维人员主题的资源管理器](docs/screenshots/v0.50.0/appearance/themed-explorer-1440.png) |
+| ![主题编辑器](docs/screenshots/v0.51.0/appearance/theme-editor-1440.png) | ![套用了运维人员主题的资源管理器](docs/screenshots/v0.51.0/appearance/themed-explorer-1440.png) |
 
 | …登录页也是，这时还没有任何人登录 | filex 不会跟随的符号链接会明确说明：既在列表里，也在它的详细信息里用文字写明 |
 |---|---|
-| ![套用了运维人员主题的登录页](docs/screenshots/v0.50.0/appearance/themed-signin-1440.png) | ![指向存储之外的符号链接，带有标记](docs/screenshots/v0.50.0/symlinks/symlink-badge-1440.png) |
+| ![套用了运维人员主题的登录页](docs/screenshots/v0.51.0/appearance/themed-signin-1440.png) | ![指向存储之外的符号链接，带有标记](docs/screenshots/v0.51.0/symlinks/symlink-badge-1440.png) |
 
 ### 文件管理器
 
 | 共享：PIN、过期时间、下载次数上限、单行 `curl` 命令 | Markdown 查看器 |
 |---|---|
-| ![共享对话框](docs/screenshots/v0.50.0/share-modal.png) | ![Markdown 查看器](docs/screenshots/v0.50.0/viewer-markdown.png) |
+| ![共享对话框](docs/screenshots/v0.51.0/share-modal.png) | ![Markdown 查看器](docs/screenshots/v0.51.0/viewer-markdown.png) |
 
 | …以及另一端的人打开的内容。filex 只有唯一一个对外页面：一个共享的文件、一个文件夹、一个文件请求、应用的签署页面，以及挡在其中任何一个前面的 PIN，全都是这个页面，都以你的实例的名义出现 |
 |---|
-| ![接收者看到的公开共享链接](docs/screenshots/v0.50.0/public-share.png) |
+| ![接收者看到的公开共享链接](docs/screenshots/v0.51.0/public-share.png) |
 
 | 管理面板 | 演示首页 |
 |---|---|
-| ![管理仪表盘](docs/screenshots/v0.50.0/admin-dashboard.png) | ![演示首页](docs/screenshots/v0.50.0/demo-landing.png) |
+| ![管理仪表盘](docs/screenshots/v0.51.0/admin-dashboard.png) | ![演示首页](docs/screenshots/v0.51.0/demo-landing.png) |
+
+| 管理菜单：所有页面分在 **Files & storage**（文件与存储）、**People & security**（人员与安全）和 **System**（系统）三个菜单面板里，每个页面下面都有一行简短说明；在手机上，同一批页面放在抽屉里（[docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)） |
+|---|
+| ![管理菜单的 People & security 面板已打开，覆盖在 Admin → Users 之上](docs/screenshots/v0.51.0/megamenu/people-panel-1440.png) |
 
 | Roles（角色）：Administrator（管理员）、User（用户）、Viewer（查看者）以及你自己的角色，每个角色由谁持有、允许什么、在哪些文件夹上有所不同、有哪些限制（[docs/PERMISSIONS.md](docs/PERMISSIONS.md)） |
 |---|
-| ![Admin → Roles：内置角色和两个自定义角色](docs/screenshots/v0.50.0/roles/roles-list-1440.png) |
+| ![Admin → Roles：内置角色和两个自定义角色](docs/screenshots/v0.51.0/roles/roles-list-1440.png) |
 
 | Groups（群组）：具名的一组人，带有文件夹访问权限和一个角色；成员手动添加，或者与登录带来的群组保持一致（[docs/GROUPS.md](docs/GROUPS.md)） | 与群组共享文件夹，群组和人并列：Owner（所有者）要经对话框询问后才授予，而不是点一下就授予 |
 |---|---|
-| ![Admin → Groups](docs/screenshots/v0.50.0/groups/groups-list-1440.png) | ![与群组共享文件夹](docs/screenshots/v0.50.0/groups/share-group-1440.png) |
+| ![Admin → Groups](docs/screenshots/v0.51.0/groups/groups-list-1440.png) | ![与群组共享文件夹](docs/screenshots/v0.51.0/groups/share-group-1440.png) |
 
 | Sign-in security（登录安全）：尝试次数限制、允许的地址、受信任的代理、锁定，以及登录记录（[登录尝试次数限制](docs/CONFIGURATION.md#sign-in-attempt-limits)） | …以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上 |
 |---|---|
-| ![Admin → Sign-in security](docs/screenshots/v0.50.0/loginsecurity/login-security-1440.png) | ![账户被锁定时的登录表单](docs/screenshots/v0.50.0/loginsecurity/login-locked-1440.png) |
+| ![Admin → Sign-in security](docs/screenshots/v0.51.0/loginsecurity/login-security-1440.png) | ![账户被锁定时的登录表单](docs/screenshots/v0.51.0/loginsecurity/login-locked-1440.png) |
+
+| 谁可以加密：关闭、仅限管理员、角色允许的每个人，或者经管理员批准之后；还有等待处理的请求，注明是谁提出的、为什么提出（[谁可以加密](docs/E2E-ENCRYPTION.md#who-may-encrypt)） | …以及提出请求的人这一侧：New folder（新建文件夹）对话框向管理员请求一个加密文件夹，并附上理由 |
+|---|---|
+| ![Admin → Encryption：策略设为须经批准，三个请求等待处理](docs/screenshots/v0.51.0/encryption/admin-encryption-1440.png) | ![在 New folder 对话框中请求一个加密文件夹](docs/screenshots/v0.51.0/encryption/request-new-folder.png) |
 
 | Default apps（默认应用）：每一种由 filex 之外的东西处理的文件，谁来打开它、谁来绘制它的缩略图，按你设定的顺序（[默认应用](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)） | 文件夹预览：每个文件夹用最近进入其中的三个文件绘制；这些 SVG 由 filex 的内置引擎绘制（[docs/thumbnails.md](docs/thumbnails.md#folder-previews)） |
 |---|---|
-| ![Plugins → Default apps](docs/screenshots/v0.50.0/defaultapps/default-apps-1440.png) | ![用最新文件绘制的文件夹](docs/screenshots/v0.50.0/thumbnails/folders-grid-1440.png) |
+| ![Plugins → Default apps](docs/screenshots/v0.51.0/defaultapps/default-apps-1440.png) | ![用最新文件绘制的文件夹](docs/screenshots/v0.51.0/thumbnails/folders-grid-1440.png) |
+
+| 连接了 ONLYOFFICE 时，`.csv` 在 ONLYOFFICE 的电子表格中打开，先是查看，而且没有分隔符对话框：文件自己的分隔符会一并传过去（[CSV 文件](docs/ONLYOFFICE.md#csv-files)） | …以及它的编辑器，其中会说明保存为 CSV 时保留什么；文件写回去时仍是同一种 CSV |
+|---|---|
+| ![以分号分隔的 CSV，在 ONLYOFFICE 的电子表格中打开](docs/screenshots/v0.51.0/csvoffice/csv-view-1440.png) | ![ONLYOFFICE 编辑器中的 CSV，附有保存时保留什么的说明](docs/screenshots/v0.51.0/csvoffice/csv-edit-1440.png) |
 
 | 外壳：每个人进入后看到的界面 | 在这个文件夹中搜索；`⌘K` / `Ctrl K` 把查询交给命令面板 |
 |---|---|
-| ![filex 外壳](docs/screenshots/v0.50.0/driveshell/driveshell-hero-1440.png) | ![在文件夹中搜索](docs/screenshots/v0.50.0/driveshell/driveshell-search-1440.png) |
+| ![filex 外壳](docs/screenshots/v0.51.0/driveshell/driveshell-hero-1440.png) | ![在文件夹中搜索](docs/screenshots/v0.51.0/driveshell/driveshell-search-1440.png) |
 
 | 导航面板：Home（主页）、Shared with me（与我共享）、My shares、Recent（最近）、Starred（已加星标）、Trash（回收站），以及你能访问的存储 | 折叠为图标栏 |
 |---|---|
-| ![导航面板](docs/screenshots/v0.50.0/sidenav/sidenav-expanded-1440.png) | ![折叠为图标栏](docs/screenshots/v0.50.0/sidenav/sidenav-rail-1440.png) |
+| ![导航面板](docs/screenshots/v0.51.0/sidenav/sidenav-expanded-1440.png) | ![折叠为图标栏](docs/screenshots/v0.51.0/sidenav/sidenav-rail-1440.png) |
 
 | 标签：你自己的，或者你团队的；一个标签会打开带这个标签的每个文件，无论这些文件在哪个文件夹里 | Trash：删除了什么、原本在哪里，以及离清除还剩多久 |
 |---|---|
-| ![个人标签和团队标签](docs/screenshots/v0.50.0/tags/tags-kinds-1440.png) | ![回收站视图](docs/screenshots/v0.50.0/sidenav/view-trash-1440.png) |
+| ![个人标签和团队标签](docs/screenshots/v0.51.0/tags/tags-kinds-1440.png) | ![回收站视图](docs/screenshots/v0.51.0/sidenav/view-trash-1440.png) |
 
 | Shared with me：其他人授予你访问权限的文件夹，无需挂载说明 | 嵌入在另一个产品的页面中 |
 |---|---|
-| ![Shared with me](docs/screenshots/v0.50.0/sidenav/view-shared-1440.png) | ![嵌入的 Web 组件](docs/screenshots/v0.50.0/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](docs/screenshots/v0.51.0/sidenav/view-shared-1440.png) | ![嵌入的 Web 组件](docs/screenshots/v0.51.0/sidenav/embed-webcomponent-1440.png) |
 
 | How to connect（如何连接）：各份指南，都根据*你的*部署生成 | API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目） |
 |---|---|
-| ![How to connect](docs/screenshots/v0.50.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.50.0/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](docs/screenshots/v0.51.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.51.0/sidenav/apikeys-minted-1440.png) |
 
 | 用什么都能访问 filex：S3、SFTP、FTPS、NFS、WebDAV。每条命令都根据*你的*部署生成 |
 |---|
-| ![连接指南](docs/screenshots/v0.50.0/connections-guide.png) |
+| ![连接指南](docs/screenshots/v0.51.0/connections-guide.png) |
 
 | filex 未内置的一个存储：在 **Plugins → Storage plugins**（插件 > 存储插件）中以插件形式安装，配置表单由插件自己描述 |
 |---|
-| ![Plugins](docs/screenshots/v0.50.0/admin-plugins.png) |
+| ![Plugins](docs/screenshots/v0.51.0/admin-plugins.png) |
 
 ## 快速开始 - 二进制文件
 
@@ -236,7 +248,7 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 
   First run detected. Initial admin user created:
     Email:    admin@local
-    Password: kT9_x4Pq2Nm-BvLs
+    Password: <printed once>
   Saved to:  ~/.filex/.first-run.txt (mode 0600, shown ONCE)
   Change at: /admin/dashboard?settings=1
 ═══════════════════════════════════════════════════════════════
@@ -420,7 +432,7 @@ API 密钥的权限按动词划分（`read`、`write`、`delete`，另有 `mcp` 
 - **桌面应用 + 文件夹同步**：Windows/Linux/macOS 应用，常驻系统托盘做双向同步，支持**选择性同步**（右键点击 → *Keep on this computer*（保留在此电脑上），每个账户一个根文件夹，其余仅在线），可同时使用多个账户，在服务器的编辑器中**打开你本地磁盘上的 Office 文档**，自动更新（macOS：未签名的构建版本，签名之前靠重新下载来更新）。每个文档在**自己的窗口**中打开（窗口标题是文件名），窗口是**无边框**的，用的是应用自己的控件（macOS 上是原生的红绿灯按钮），**Settings → Open files with**（设置 > 打开文件的方式）用来选择单击还是双击打开（[docs/DESKTOP.md](docs/DESKTOP.md)、[docs/SYNC.md](docs/SYNC.md)）。
 - **回收站与版本历史**：删除后在保留期限内可以恢复，写入会保留快照；两者都存放在你已经挂载的存储里（[docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)）。
 - **写入防护**：可选的 ClamAV 病毒扫描，覆盖每一个写入的文件（内置编辑器写入的也算，存储同步在后端发现的、并非经由 filex 进来的文件也算），扫描器通过本地二进制文件或网络上的 clamd 容器调用；再加上回收站/版本保留，都归在同一个管理入口之下。开关、扫描器的模式和地址、大小上限以及针对编辑器保存的扫描时间窗口，都放在 **Settings → Protection**（设置 > 防护）中；`FILEX_CLAMAV*` 变量在首次启动时为它们填入初始值，之后就退到一边（扫描器的二进制文件路径有意只留在环境变量里：它是这台服务器要执行的命令）（[docs/PROTECTION.md](docs/PROTECTION.md)）。
-- **端到端加密文件夹**：在客户端用 WebCrypto 加密；服务器存储的是密文，从不接收密钥。文件夹有一个**级别**：仅内容（默认级别：WebDAV、CLI 和桌面同步仍照常使用其中的名称）或**内容和名称**（AES-SIV，因此服务器不保留任何可读的名称）；之后可以在文件夹的 **Encryption settings**（加密设置）中提高级别，过程可续传，文件夹的密码也在那里修改。你已有的文件夹会**就地加密**，超过 200 MB 的文件也不例外；**任何单个文件都可以单独加密**（成为一个自包含的 `.fxe`，带有自己的密码和恢复密钥）；任意大小的文件都采用流式加密；已解锁的文件夹下载下来是一个在浏览器中生成的**解密后的 zip**；`filex decrypt` 在你自己的机器上打开下载下来的文件夹或 `.fxe`，**`filex encrypt`** 则把磁盘上的文件夹做成加密文件夹，或者把服务器上的文件夹就地加密：适用于大到标签页处理不了的文件夹，可续传，密钥在你的机器上生成（[docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)）。每个文件夹都有一个**恢复密钥**，只显示一次，这样忘记密码并不必然意味着数据丢失；运维人员可以选择启用**密钥托管**（在安装时启用，或之后在运行中的实例上采用；它不会自行作用于已有的文件夹，但解锁时会让这些文件夹的所有者自己选择），动用密钥托管时会通知文件夹的所有者（[docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)）。
+- **端到端加密文件夹**：在客户端用 WebCrypto 加密；服务器存储的是密文，从不接收密钥。文件夹有一个**级别**：仅内容（默认级别：WebDAV、CLI 和桌面同步仍照常使用其中的名称）或**内容和名称**（AES-SIV，因此服务器不保留任何可读的名称）；之后可以在文件夹的 **Encryption settings**（加密设置）中提高级别，过程可续传，文件夹的密码也在那里修改。你已有的文件夹会**就地加密**，超过 200 MB 的文件也不例外；**任何单个文件都可以单独加密**（成为一个自包含的 `.fxe`，带有自己的密码和恢复密钥）；任意大小的文件都采用流式加密；已解锁的文件夹下载下来是一个在浏览器中生成的**解密后的 zip**；`filex decrypt` 在你自己的机器上打开下载下来的文件夹或 `.fxe`，**`filex encrypt`** 则把磁盘上的文件夹做成加密文件夹，或者把服务器上的文件夹就地加密：适用于大到标签页处理不了的文件夹，可续传，密钥在你的机器上生成（[docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)）。每个文件夹都有一个**恢复密钥**，只显示一次，这样忘记密码并不必然意味着数据丢失；运维人员可以选择启用**密钥托管**（在安装时启用，或之后在运行中的实例上采用；它不会自行作用于已有的文件夹，但解锁时会让这些文件夹的所有者自己选择），动用密钥托管时会通知文件夹的所有者（[docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)）。**谁可以加密**由组织自己决定：平台运维人员按租户设置的开关，租户策略（关闭、仅限管理员、角色允许的每个人，或者**经管理员批准之后**：一个带理由的请求，获批后只对一个人、一个文件夹和一种加密类型有效，而且只能用一次），以及 `files.encrypt` 权限，每一个可能产生新的加密内容的入口都会检查这项权限，复制也不例外（[docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md#who-may-encrypt)）。
 - **原生多租户**：平台方/租户模式，在一个实例上按租户隔离。每个租户有一个 **realm**（领域），也就是它的登录名，创建时给定，之后不再更改；所以登录时靠租户自己的地址（网页、WebDAV 的 `Host`、FTPS 证书名称）指明所属租户，或者靠 realm：登录表单上的 **Realm** 字段，SFTP 上的 `realm/name`。账户查找从不越出租户；在平台的页面上输入的 realm，如果所属租户有自己的地址，就凭一张一次性、60 秒有效的票据**移交**到那个地址（[docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md)、[realm](docs/MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)）。租户在 **Admin → Tenants**（管理 > 租户）和 **My tenant**（我的租户）中自己管理自己：绑定到一个或多个租户的登录提供方、租户自己的 OIDC 和 LDAP、每个租户一个平台子域名，以及经 CNAME 验证的自有域名，证书由代理颁发、由 filex 自己颁发（ACME），或者使用租户自己的证书（[docs/TENANT-ADMIN.md](docs/TENANT-ADMIN.md)）。
 - **一切驱动皆可插拔**：存储、认证、数据库、队列驱动通过环境变量按需启用（`FILEX_AUTH_DRIVERS=local,oidc`、`FILEX_QUEUE_DRIVER=postgres`、…）；操作系统登录（`windows`、`pam`）是例外，要等它的测试通过后，再从管理面板中开启。
 - **OIDC SSO 优先**：可选择自动重定向到你的 IdP，同时保留应急用的本地登录（`?local=1`）；管理员角色在每次登录时都以一个 IdP 群组为准。
@@ -429,13 +441,14 @@ API 密钥的权限按动词划分（`read`、`write`、`delete`，另有 `mcp` 
 - **持久化操作队列**：重启后不丢失的队列，放在你自己的数据库（SQLite / Postgres / MySQL）或 Redis 中；工作池带重试 + 取消 + 管理仪表盘。每个驱动都按优先级给任务排序，所以某个人刚上传了一个文件，它的病毒扫描会先于首次导入排进队列的那两万个得到处理。未设置时，驱动跟随数据库，而不是默认用 SQLite：把 SQLite 语句发到 Postgres 服务器上，每次轮询都是语法错误，一个任务都不会运行。
 - **由数据库支撑的文件树**：列表来自数据库缓存（1-5 ms），而不是存储后端（~100 ms）；定期同步会发现不经 filex 发生的更改，后端报告 etag 时按 etag 比较，不报告时按大小 + 修改时间比较。存储的 **Paths to exclude from scanning**（扫描时排除的路径），例如 `.*`、`downloads/incomplete/**`、`*.tmp`，会把现有文件树中 filex 用不上的部分挡在遍历、编目、搜索索引和病毒扫描器之外：这是成本控制手段，不是访问控制手段（[docs/STORAGE.md](docs/STORAGE.md#scan-exclusions)）。
 - **面向大型本地文件树的延迟编目**：`sync_mode: lazy` 跳过一开始的遍历：你打开的文件夹会立刻从磁盘直接列出，并最先编目；其余部分由一个会给人让路的慢速后台过程编目（或者只在有人打开文件夹时才编目）。打开过的文件夹在预算范围内受监视，没人访问过的文件夹绝不会被当作已删除；搜索、文件夹大小和用量在尚未覆盖全部内容时会明确说明（[docs/STORAGE.md](docs/STORAGE.md#lazy-catalogue)、[设计文档](docs/LAZY-CATALOGUE.md)）。想法来自 Alex（[#45](https://github.com/BRF-Tech/filex/issues/45)）。
-- **查看器与编辑器**：图片/视频/音频、PDF、Markdown（分栏编辑器 + 预览）、CSV、代码（Monaco）、通过 OnlyOffice 支持的 Office 文档、Drawio + Mermaid 图表、3D 模型。OnlyOffice 的 **Test now**（立即测试）会经由文档所用的同一个入口获取一遍，并在文档服务器没有强制使用 JWT 时发出警告；出现 *Download failed*（下载失败）之后，编辑器会说明这条消息背后是两种失败中的哪一种（[docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-editor-shows-download-failed)）。某类文件有不止一个应用或查看器时，用 **Open with**（打开方式）和 **Choose an app…**（选择应用）选定一个，*Always use this app*（始终使用此应用）记在你的账户上。
+- **查看器与编辑器**：图片/视频/音频、PDF、Markdown（分栏编辑器 + 预览）、CSV（配置了 ONLYOFFICE 时用它的电子表格，否则用只读表格）、代码（Monaco）、通过 OnlyOffice 支持的 Office 文档、Drawio + Mermaid 图表、3D 模型。ONLYOFFICE 只能保存为较新格式的文档（`.doc` 编辑后保存为 DOCX），会用正确的扩展名存放在原文件**旁边**，绝不覆盖原文件，编辑过这份文档的人会收到通知（[docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#a-save-in-another-format)）。OnlyOffice 的 **Test now**（立即测试）会经由文档所用的同一个入口获取一遍，并在文档服务器没有强制使用 JWT 时发出警告；出现 *Download failed*（下载失败）之后，编辑器会说明这条消息背后是两种失败中的哪一种（[docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-editor-shows-download-failed)）。某类文件有不止一个应用或查看器时，用 **Open with**（打开方式）和 **Choose an app…**（选择应用）选定一个，*Always use this app*（始终使用此应用）记在你的账户上。
 - **通知**：通用 JSON webhook（不绑定 Slack/Discord），目标数量不限，每个目标有自己的签名密钥，并各自按事件订阅；另有界面内的铃铛，带已读/未读状态和按用户设置的静音矩阵。未读数是**铃铛上的角标**（99 以内显示确切数字，超过则显示 `99+`；系统有程序坞图标的话，桌面应用的程序坞图标上也有）；一行通知能否点击，只看它有没有去处（签名请求打开的是签署界面，而不是通知页面）；**View all**（查看全部）在资源管理器之上打开你的每一条通知，每个人都可以用，而不只是管理员。**创建**文件的写入和**替换**文件的写入是不同的事件（`file.uploaded` / `file.updated`）；运维人员最想单独收到的那几种事件（受感染的上传被隔离、上传失败、加密文件夹用恢复密钥打开）可以逐个订阅（[docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)）。
 - **搜索**：内嵌 Bleve，全文 + 元数据，遵循权限。VS Code 风格的文件名评分：文件夹算数，词序不算（`main code` 能找到 `Code/main.go`），分隔符和拼写错误不计较（`invoice 2026` 能找到 `invoice_2026.pdf`，`mian.go` 能找到 `main.go`），数字则按字面匹配（`2026` 绝不会当成 `2025`），`tag:` 筛选，精确匹配排在最前。⌘K 的结果可以下载（文件夹打包成一个 zip），也可以就地拖出（[docs/SEARCH.md](docs/SEARCH.md)）。
 - **看得出内容的缩略图**：PDF 显示**第一页**，按顶部对齐，所以标题就在卡片里；视频显示第一个不是黑色的帧（过去，以淡入开场的视频会生成一个黑色方块，不到一秒的片段则什么都生成不出来，那一行却仍然显示“就绪”）；Office 文档显示渲染出来的第一页；文本、代码或 CSV 文件则**用自己的开头几行填满卡片**，而不是重复那一行已经显示的扩展名。图片、视频（ffmpeg）、PDF（ghostscript）、Office（已连接的 OnlyOffice）；会感知各项能力是否可用，服务器如果缺少其中某个二进制文件，现在会在启动时的日志里明确说明，而不是悄悄画一些彩色方块。文件被彻底删除时，它的缓存缩略图随之释放；定期运行的对账任务会回收旧实例积累下来的孤立缩略图。缩略图**跟着自己的文件走**：在 filex 之外改动过的文件，或者一直没有图片的文件，会在列表或同步遇到它时重新绘制缩略图；**SVG** 在每个实例上都由内置引擎绘制（大小和时间限制由管理员设置），**HEIC/AVIF** 照片则通过 ImageMagick 绘制；透明图片衬在棋盘格上；**文件夹显示最近进入其中的文件**，在网格、画廊和列表中与文件夹画在一起，悬停时显示文件夹里有什么（管理员可以关闭这项功能）；文本文件显示开头几行，压缩包显示其中的内容；缺少处理工具的文件会被指明，而不是被遮掩过去；**Admin → Tools → Thumbnail repair**（管理 > 工具 > 缩略图修复）按需重新绘制一个文件、一个文件夹或一个存储的缩略图（[docs/thumbnails.md](docs/thumbnails.md)）。
 - **标签页、主题与深层链接**：多个文件夹并排打开，浅色/深色/自动主题，地址栏跟随当前打开的文件夹，所以粘贴的链接会直达那个文件夹。主题库自带八套配色，每一套都是 `--fe-*` 变量的一份映射，而不是第二份样式表，所以宿主页面或嵌入端可以选用其中一套，或者设置自己的值，而不必分叉任何 CSS；运维人员可以添加自己的配色（见*外观*）。
 - **外观：处处都是你的颜色**：管理面板的 **Appearance**（外观）界面用来组合具名主题（浅色和深色各十二种颜色、一个圆角半径、一个字体栈），边输入边预览，并把其中一个设为**实例默认主题**。彩色按钮上的文字颜色按对比度选定，而不是假定为白色；配色的其余部分由服务器推导；主题会延伸到登录页和每个公开链接（用主题自己的色调，或者用你单独给这两个页面指定的颜色），因为到登录页就止步的品牌化，算不上品牌化：未登录的页面套用实例默认主题，绝不会套用上一个用过那个浏览器的人的配色，已登录的人则以自己的选择为准。主题以一个 JSON 文件导出和导入。**自定义样式表**是它旁边那件危险的工具：现在它在你打开之前一直关闭，绝不会提供给任何未登录的人，无法获取任何内容，也触及不到用来关闭它的那个界面（[docs/INTEGRATION.md](docs/INTEGRATION.md#themes)）。
 - **一张表格，处处通用**：filex 里只剩一张表格，就是资源管理器的那张，其他每个列表都是这一张：管理面板的各个菜单、**My shares**（我的共享）、应用自己的界面。每个列表都把第一列冻结在左侧，把操作冻结在右侧，调整大小、调整顺序和排序的方式都一样，每一行都以**一个固定的 Actions（操作）菜单**收尾，菜单里是这一行能做的全部操作，也就是资源管理器的 ⋮ 打开的那个菜单，所以第二张表格不可能偏离第一张。带主界面的已安装应用，在管理面板导航的 **Apps**（应用）下有自己的一行。
+- **找得到路的管理面板**：管理员的页面都放在顶栏的一个大型菜单里：先是仪表盘，然后是 **Files & storage**（文件与存储）、**People & security**（人员与安全）和 **System**（系统），各是一个由具名分区组成的菜单面板，每个页面下面都有一行简短说明。每个页面点两下就到，地址还是它一直以来的那个；委派管理员只会看到自己的权限能打开的页面；键盘和屏幕阅读器都支持；在手机上，同一批页面以列表的形式放在抽屉里（[管理面板](docs/ADMIN-PANEL.md)）。
 - **符号链接，止于存储边界**：`local` 存储里的链接如果指向该存储内部，filex 会跟随它，并按它指向的内容打开；指向存储之外的链接会**带着标记和原因列出**，读取、写入和删除都会被拒绝，除非你为那个存储打开 *Follow symlinks that leave this folder*（跟随指向此文件夹之外的符号链接）这一选项（[docs/STORAGE.md](docs/STORAGE.md#symlinks)）。
 - **按每种设备习惯的方式打开**：用**鼠标**时，单击选中，**双击打开**（Enter 打开所选内容），这是文件管理器的经典操作方式，也是一项按查看者设置的偏好（`ExplorerConfig.openTrigger`，默认为 `'double'`；桌面应用把它显示为 **Settings → Open files with**（设置 > 打开文件的方式），`'single'` 则恢复单击打开）。在**触摸屏**上，轻点始终是打开：不存在悬停即选中。在每种设备上，点击或轻点一下**复选框**就是选中（Shift 扩展范围），右键点击或长按则打开菜单；列表行、网格卡片和画廊图块都带有复选框。
 - **支持键盘，而且标在明处**：右键菜单和工具栏里的每一项操作都会标出执行它的按键，按键从快捷键注册表读取，所以重新映射后也会跟着变。三十二个操作可以在 *Shortcut settings*（快捷键设置）中重新映射（按浏览器保存）；浏览器留给自己用的少数几个组合键，比如 `Ctrl+W`，会被拒绝并说明原因，而不是存成一个永远不会触发的按键。
@@ -458,7 +471,7 @@ API 密钥的权限按动词划分（`read`、`write`、`delete`，另有 `mcp` 
 
 ## 文档
 
-**入门**：[安装](docs/INSTALLATION.md) · [配置](docs/CONFIGURATION.md) · [数据库](docs/DATABASES.md) · [发行版](docs/RELEASES.md) · [更新](docs/UPDATES.md) · [演示模式](docs/DEMO.md)
+**入门**：[安装](docs/INSTALLATION.md) · [配置](docs/CONFIGURATION.md) · [管理面板](docs/ADMIN-PANEL.md) · [数据库](docs/DATABASES.md) · [发行版](docs/RELEASES.md) · [更新](docs/UPDATES.md) · [演示模式](docs/DEMO.md)
 
 **客户端**：[桌面应用](docs/DESKTOP.md) · [文件夹同步](docs/SYNC.md) · [CLI](docs/CLI.md) · [集成 / 嵌入](docs/INTEGRATION.md) · [AI 与 MCP](docs/MCP.md)
 
@@ -470,9 +483,9 @@ API 密钥的权限按动词划分（`read`、`write`、`delete`，另有 `mcp` 
 
 **存储与访问**：[存储](docs/STORAGE.md) · [存储插件](docs/PLUGINS.md) · [用量与费用](docs/USAGE.md) · [上传与续传](docs/UPLOADS.md) · [配额](docs/QUOTAS.md) · [SSO（OIDC）](docs/SSO.md) · [LDAP 与代理认证](docs/LDAP.md) · [Windows 与 Linux 账户](docs/OS-LOGIN.md) · [登录尝试次数限制与受信任的代理](docs/CONFIGURATION.md#sign-in-attempt-limits) · [RBAC、文件夹访问权限与 API 令牌](docs/RBAC.md) · [角色与按用户设置的权限](docs/PERMISSIONS.md) · [群组](docs/GROUPS.md) · [多租户与 realm](docs/MULTI-TENANCY.md) · [租户自助管理](docs/TENANT-ADMIN.md)
 
-**数据与功能**：[共享与文件请求](docs/SHARING.md) · [ShareX](docs/SHAREX.md) · [回收站与版本管理](docs/TRASH-VERSIONING.md) · [防护](docs/PROTECTION.md) · [压缩包](docs/ARCHIVES.md) · [端到端加密](docs/E2E-ENCRYPTION.md) · [搜索](docs/SEARCH.md) · [实时与在线状态](docs/REALTIME.md) · [通知](docs/NOTIFICATIONS.md) · [缩略图](docs/thumbnails.md) · [副本复制](docs/REPLICATION.md) · [主题与外观](docs/INTEGRATION.md#themes)
+**数据与功能**：[共享与文件请求](docs/SHARING.md) · [ShareX](docs/SHAREX.md) · [回收站与版本管理](docs/TRASH-VERSIONING.md) · [防护](docs/PROTECTION.md) · [压缩包](docs/ARCHIVES.md) · [端到端加密](docs/E2E-ENCRYPTION.md) · [谁可以加密](docs/E2E-ENCRYPTION.md#who-may-encrypt) · [搜索](docs/SEARCH.md) · [实时与在线状态](docs/REALTIME.md) · [通知](docs/NOTIFICATIONS.md) · [缩略图](docs/thumbnails.md) · [副本复制](docs/REPLICATION.md) · [主题与外观](docs/INTEGRATION.md#themes)
 
-**运维与扩展**：[部署](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) · [指标](docs/METRICS.md) · [架构](docs/ARCHITECTURE.md) · [后端 API 规范](docs/BACKEND.md) · [OpenAPI 3.1（`/api/files`、`/api/ai`）](backend/internal/api/openapi.json) · [组件 API](docs/API.md) · [OnlyOffice](docs/ONLYOFFICE.md) · [来自其他源的请求](docs/CONFIGURATION.md#requests-from-other-origins)
+**运维与扩展**：[部署](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) · [指标](docs/METRICS.md) · [架构](docs/ARCHITECTURE.md) · [后端 API 规范](docs/BACKEND.md) · [OpenAPI 3.1（`/api/files`、`/api/ai`）](backend/internal/api/openapi.json) · [组件 API](docs/API.md) · [OnlyOffice](docs/ONLYOFFICE.md) · [ONLYOFFICE 中的 CSV](docs/ONLYOFFICE.md#csv-files) · [来自其他源的请求](docs/CONFIGURATION.md#requests-from-other-origins)
 
 [完整文档索引](docs/README.md)
 
