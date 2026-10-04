@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { nativeGo, toWslPath, wslGo, wslMirrorCd } from '../lib/go-build.mjs';
 import { docker, dockerArgv, run, shq, slash } from './engine.mjs';
+import { githubActions } from './github.mjs';
 import { desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, updateManifest, windowsFeedArches } from './verify.mjs';
 
 const IS_WIN = process.platform === 'win32';
@@ -70,6 +71,12 @@ const WORKFLOW_GUARDS = [
   'the release calls the gate WITHOUT skip_docker',
   "ci.yml's docker job cannot be switched off, and builds both images",
   'every publishing job waits for the gate',
+  // #76: the tag is made after GitHub tested its commit; the tag run checks.
+  'a tag run publishes only a commit that passed CI and a dry run, and fails closed',
+  'every job that publishes waits for verify, a partial (only=arm64) run too',
+  'a run started by hand runs the suite itself, and a tag run does not run it again',
+  'names a dry run of everything after its commit, as the release gate looks for it',
+  "ci.yml's concurrency keeps a run the release calls apart from the branch's own",
   'the release hands every token variable to the goreleaser step',
   'every repository token is a single {{ .Env.NAME }}, as GoReleaser demands',
   // v0.45.1: a tolerated winget warning code still failed the desktop job.
@@ -239,7 +246,7 @@ export default function plan({ repo, version, tag }) {
     // signs and pushes `${backendTagPrefix}${tag}`). 0.50: the plan did not
     // name it and the sign/push stages looked for "undefinedv0.50.0".
     backendTagPrefix: 'backend/',
-    // The maintainer key (docs/CONTRIBUTING.md → Release process, step 7).
+    // The maintainer key (docs/CONTRIBUTING.md → Release process, step 8).
     signingKeys: ['EFA3B1262FD992800DBBB5E3A8FEBA97FF786513'],
     // The public tree may name this project's hosts only as these two
     // contact addresses, which the export keeps reachable on purpose.
@@ -440,7 +447,16 @@ export default function plan({ repo, version, tag }) {
       },
     ],
 
-    // ── 9. ci: what the tag's workflow actually published ───────────────────
+    // ── 8. gate: GitHub tests the export commit before it is tagged ─────────
+    // #76: both mains go out untagged; the gate starts release.yml's dry run
+    // (publish=false) on the export commit and waits until it and ci.yml (the
+    // push of main) passed there. Only then are the tags made, and the tag
+    // run's `verify` job refuses a commit without those two runs. A dry run
+    // takes about as long as a release run; four hours is a stuck runner.
+    github: githubActions('BRF-Tech/filex'),
+    gateWait: { pollMs: 60_000, timeoutMs: 4 * 3600_000, appearMs: 10 * 60_000 },
+
+    // ── 11. ci: what the tag's workflow actually published ──────────────────
     ciWatch: [
       'gh run list -R BRF-Tech/filex --workflow release.yml -L 3',
       'gh run watch <run id> -R BRF-Tech/filex --exit-status',
@@ -482,7 +498,7 @@ export default function plan({ repo, version, tag }) {
       },
     ],
 
-    // ── 10. deploy: a person's, then read back ──────────────────────────────
+    // ── 12. deploy: a person's, then read back ──────────────────────────────
     deployChecklist: [
       '1. fm + demo (backup first — docs/DEPLOY_BRF.md):   ssh main "bash /root/filex-deploy.sh {tag}"',
       '2. update manifest (servers + CLI):                bash /g/mail/scripts/filex-publish-manifest.sh',

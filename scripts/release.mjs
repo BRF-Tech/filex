@@ -14,7 +14,20 @@
 //                                          chain later)
 //   pnpm release 0.45.0 --plan             print the stages and their gates, run nothing
 //   pnpm release 0.45.0 --status           what the recorded run has done so far
+//   pnpm release 0.45.0 --resume --only deploy
+//                                          once the tags are out: the deploy checks
+//                                          alone, on the tagged commits (when the ci
+//                                          stage is held red by a store that is not
+//                                          ours to hurry). Confirms nothing.
 //   --export <dir>                         the public checkout (default: the plan's)
+//
+// ⚠⚠ The order (task #76): stamp → pretag → export → a person commits the
+// export and pushes BOTH mains WITHOUT a tag → the gate starts release.yml's
+// dry run on the export commit and waits until it and ci.yml passed there →
+// a person signs the tags on exactly those commits and pushes them → the tag
+// run publishes (its `verify` job refuses a commit without those two runs) →
+// ci → deploy. A red gate spends no number: fix main and resume. Once a tag
+// is on a remote, a resume never goes back to stamp or pretag.
 //
 // ⚠⚠ Why this exists. A release was ~10 ordered steps plus six more to
 // deploy, and every step that was skipped was skipped SILENTLY: nothing
@@ -35,11 +48,13 @@
 // red gate STOPS the release. There is no option to skip a gate — an unknown
 // option is refused, so `--skip`, `--force` and friends do not quietly work.
 //
-// ⚠ What this script never does: sign a tag, push anything, deploy anything.
-// Those are a person's steps. The script stops, prints the exact commands, and
-// on --resume checks what the person did — the tag's signature and target,
-// what the remotes now hold (a public tag naming a private commit is refused
-// loudly, lesson #55), and what the servers, feeds and docs site serve.
+// ⚠ What this script never does: commit the export, sign a tag, push anything,
+// deploy anything. Those are a person's steps. The script stops, prints the
+// exact commands, and on --resume checks what the person did — the tag's
+// signature and target, what the remotes now hold (a public tag naming a
+// private commit is refused loudly, lesson #55), and what the servers, feeds
+// and docs site serve. The one thing it starts on GitHub is the dry run of
+// release.yml (publish=false), which publishes nothing.
 //
 // Where things are:
 //   the order and the gate logic   scripts/release/stages.mjs
@@ -58,7 +73,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { versionProblems } from './release/checks.mjs';
-import { Gates, banner, bold, dim, findBash, gitOut, green, loadState, red, revParse, saveState, slash, stateFile, takeLock, yellow } from './release/engine.mjs';
+import { Gates, banner, bold, dim, findBash, gitOut, green, loadState, lsRemote, red, revParse, saveState, slash, stateFile, takeLock, yellow } from './release/engine.mjs';
 import { ACKS, RUNNERS, STAGES, forgetRemotes } from './release/stages.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -78,7 +93,7 @@ function usage(msg) {
 // option it does not know as absent — a filter silently drops, a "skip" flag
 // silently "works". Every option is on this table; anything else stops.
 const argv = process.argv.slice(2);
-const opts = { dry: false, resume: false, plan: false, status: false, until: null, exportDir: null, acks: new Set() };
+const opts = { dry: false, resume: false, plan: false, status: false, until: null, only: null, exportDir: null, acks: new Set() };
 const positional = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -92,6 +107,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--plan') opts.plan = true;
   else if (a === '--status') opts.status = true;
   else if (a === '--until') opts.until = next();
+  else if (a === '--only') opts.only = next();
   else if (a === '--export') opts.exportDir = next();
   else if (a === '--ack') {
     const v = next();
@@ -107,6 +123,15 @@ const shape = versionProblems(version, null);
 if (shape.length) usage(shape.join('\n'));
 if (opts.until && !STAGES.some((s) => s.id === opts.until)) usage(`--until ${opts.until}: stages are ${STAGES.map((s) => s.id).join(', ')}`);
 if (opts.dry && opts.resume) usage('--dry-run always starts from the beginning; it does not read or write a recorded run');
+// --only re-reads what a published release deployed. It runs no other stage,
+// and it can neither finish a release nor take a person's confirmation: a red
+// ci stage stays red (lesson #1023: a Snap review held v0.51.0's ci stage, and
+// the deploy checks had to be run by a hand-written script).
+if (opts.only !== null) {
+  if (opts.only !== 'deploy') usage(`--only ${opts.only}: only the deploy checks run on their own (--only deploy)`);
+  if (!opts.resume) usage('--only deploy reads back a release that is under way: use it with --resume');
+  if (opts.acks.size || opts.until) usage('--only deploy confirms nothing and stops nowhere else: drop --ack and --until');
+}
 const tag = `v${version}`;
 
 // ── the plan ────────────────────────────────────────────────────────────────
@@ -207,6 +232,7 @@ const R = {
   state,
   bash,
   tmp,
+  save,
   exportTarget: exp,
   gates: new Gates({
     logsDir,
@@ -249,33 +275,75 @@ console.log(`  export  ${slash(exp)}`);
 console.log(`  ${opts.dry ? 'logs  ' : 'state '}  ${slash(opts.dry ? logsDir : stFile)}`);
 if (!bash) console.log(`  ${red('no bash')}: Git for Windows' bash.exe was not found; every shell gate will fail`);
 
-// ⚠ Once the push is done the release IS the published tag, and main is free
-// to move on — a deploy can take hours. Everything up to the push is a record
-// of how that tag was made, not something to redo on today's HEAD: v0.47.0's
-// resume, after fixes landed on main, re-stamped HEAD as the release commit,
-// re-ran the whole test chain on it, and would have asked for the published
-// tag to be moved. The release commit is read back from the tag, and it has
-// to be the commit the test chain passed on.
-const PUBLISHED = new Set(['preflight', 'audit', 'docs', 'stamp', 'pretag', 'export', 'sign', 'push']);
+// ⚠ Once a tag is on a remote the release IS that tag, and main is free to
+// move on — a deploy can take hours. Everything before the tag is a record of
+// how it was made, not something to redo on today's HEAD: v0.47.0's resume,
+// after fixes landed on main, re-stamped HEAD as the release commit, re-ran
+// the whole test chain on it, and would have asked for the published tag to
+// be moved (v0.46.0 the same, 2026-09-26). The release commit is read back
+// from the tag, and it has to be the commit the test chain passed on.
+//
+// "On a remote" is asked of the remotes, not of the record: a person who
+// pushed the tags and then a fix to main, before running --resume, has a
+// record that still says "push: waiting" — and that resume re-stamped too.
+const BEFORE_TAG = ['preflight', 'audit', 'docs', 'stamp', 'pretag', 'export'];
+const PUBLISHED = new Set([...BEFORE_TAG, 'land', 'gate', 'sign', 'push']);
 const published = !opts.dry && state.stages.push?.status === 'done';
-if (published) {
-  const tagged = revParse(REPO, `${tag}^{commit}`);
-  if (!tagged || tagged !== state.stages.pretag?.head) {
+let frozen = published;
+if (!opts.dry && !published && state.releaseCommit) {
+  const asked = [lsRemote(REPO, plan.remote, ['--tags']), fs.existsSync(exp) ? lsRemote(exp, plan.exportRemote, ['--tags']) : { map: new Map() }];
+  const err = asked.find((a) => a.error);
+  if (err) {
+    console.log(`  ${red('FAILED')}  could not ask the remotes whether ${tag} is pushed (${err.error}) — unknown does not pass: a resume that guesses "not yet" re-stamps a published release`);
+    process.exit(1);
+  }
+  frozen = asked.some((a) => a.map.has(`refs/tags/${tag}`));
+}
+if (frozen) {
+  const remoteTagged = lsRemote(REPO, plan.remote, ['--tags']).map?.get(`refs/tags/${tag}^{}`) ?? null;
+  const tagged = revParse(REPO, `${tag}^{commit}`) ?? remoteTagged;
+  if (published ? !tagged || tagged !== state.stages.pretag?.head : tagged && tagged !== state.stages.pretag?.head) {
     console.log(`  ${red('FAILED')}  ${tag} names ${tagged?.slice(0, 10) ?? 'nothing here'}, but the test chain passed on ${state.stages.pretag?.head?.slice(0, 10) ?? 'no commit'}`);
     process.exit(1);
   }
-  state.releaseCommit = tagged;
+  const unfinished = BEFORE_TAG.filter((id) => state.stages[id]?.status !== 'done');
+  if (unfinished.length) {
+    console.log(`  ${red('FAILED')}  ${tag} is on a remote, but ${unfinished.join(', ')} never finished: a published tag is never moved, and nothing before it can be redone. Tell the maintainer.`);
+    process.exit(1);
+  }
+  if (tagged) state.releaseCommit = tagged;
   save();
+}
+if (opts.only && !frozen) {
+  console.log(`  ${red('FAILED')}  --only deploy reads back a published release; ${tag} is on no remote yet`);
+  process.exit(1);
 }
 
 let exitCode = 0;
 let dryWaits = 0;
 for (let i = 0; i < STAGES.length; i++) {
   const s = STAGES[i];
+  if (opts.only && s.id !== opts.only) continue;
   banner(`${i + 1}/${STAGES.length} ${s.title}`, dim(s.what));
-  if (published && PUBLISHED.has(s.id)) {
+  if ((published && PUBLISHED.has(s.id)) || (frozen && BEFORE_TAG.includes(s.id))) {
     console.log(`  ${green('ok')}      published as ${tag} (${state.releaseCommit.slice(0, 10)}) — recorded ${state.stages[s.id]?.at ?? ''}; main has moved on and that is fine`);
     continue;
+  }
+  if (opts.only) {
+    // The deploy checks, on the tagged commits; nothing is recorded as done
+    // and no confirmation is taken, so the release stays where it was.
+    forgetRemotes();
+    let res;
+    try {
+      res = await RUNNERS[s.id](R);
+    } catch (e) {
+      console.log(`  ${red('FAILED')}  the ${s.id} stage crashed: ${e?.stack ?? e}`);
+      res = { status: 'red' };
+    }
+    const passed = res.status !== 'red';
+    console.log(`\n${passed ? green(bold(`the ${s.id} checks are green`)) : red(bold(`the ${s.id} checks are red`))} on ${tag} (${state.releaseCommit.slice(0, 10)}). The release stays where it was: ${dim(`pnpm release ${version} --status`)}`);
+    exitCode = passed ? 0 : 1;
+    break;
   }
   let res;
   try {

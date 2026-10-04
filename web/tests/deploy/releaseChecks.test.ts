@@ -14,6 +14,7 @@ import {
   compareVersions,
   dateChangelog,
   docsPageUrl,
+  dryRunTitle,
   globMatch,
   hasContent,
   headingsOf,
@@ -24,6 +25,7 @@ import {
   parseFeed,
   privateHostLines,
   readmeImages,
+  runVerdict,
   setPackageVersion,
   unreleasedBody,
   versionProblems,
@@ -181,6 +183,44 @@ describe('what was published', () => {
     ]);
   });
 
+  it('has one reader of headings: the heading ids of the Releases page use the same fence rules', async () => {
+    const { headingLines } = (await import('../../../docs-site/scripts/markdown-headings.mjs')) as {
+      headingLines: (md: string) => { level: number; text: string }[];
+    };
+    const { headingIds } = (await import('../../../docs-site/scripts/fetch-releases.mjs')) as {
+      headingIds: (file: string) => Set<string>;
+    };
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+    const dir = mkdtempSync(path.join(tmpdir(), 'filex-headings-'));
+    // a shorter run, and a run with text after it, do not close a four-backtick fence
+    const loose = ['## Real', '````md', '```', '# Fake one', '``` text', '# Fake two', '````', '## After', ''].join('\n');
+    const cases: Record<string, string> = {
+      loose,
+      tilde: ['~~~', '# Fake', '~~~', '## After', ''].join('\n'),
+      indented: ['   ```sh', '# Fake', '   ```', '## After', ''].join('\n'),
+      mixed: ['~~~', '```', '# Fake', '~~~', '## After', ''].join('\n'),
+      unclosed: ['## Before', '```yaml', '# Fake', ''].join('\n'),
+      front: ['---', '# Fake', 'layout: home', '---', '## After', ''].join('\n'),
+      crlf: ['```yaml', '# Fake', '```', '## After', ''].join('\r\n'),
+    };
+    for (const [name, md] of Object.entries(cases)) {
+      const file = path.join(dir, `${name}.md`);
+      writeFileSync(file, md);
+      const slugs = headingLines(md).map((h) => h.text.toLowerCase());
+      expect([...headingIds(file)], name).toEqual(slugs);
+      expect([...headingIds(file)].some((id) => id.startsWith('fake')), name).toBe(false);
+    }
+    expect([...headingIds(path.join(dir, 'loose.md'))]).toEqual(['real', 'after']);
+    // the gate drops the levels and shapes it cannot compare; ids keep every level
+    expect(headingLines('##### Deep heading\n###### Deeper')).toEqual([
+      { level: 5, text: 'Deep heading' },
+      { level: 6, text: 'Deeper' },
+    ]);
+    expect(headingsOf('##### Deep heading')).toEqual([]);
+  });
+
   it('knows ~~~ fences, indented fences, longer fences and a fence never closed', () => {
     const page = (...lines: string[]) => lines.join('\n');
     expect(headingsOf(page('~~~', '# not a heading', '~~~', '## After tildes'))).toEqual(['After tildes']);
@@ -257,5 +297,31 @@ describe('README and globs', () => {
     expect(globMatch('deploy/**/README.md', 'deploy/helm/filex/README.md')).toBe(true);
     expect(globMatch('web/src/locales/*.json', 'web/src/locales/en.json')).toBe(true);
     expect(globMatch('a.b', 'aXb')).toBe(false);
+  });
+});
+
+// #76: the tag is made only after GitHub tested its commit. The gate stage
+// waits for two runs on the export commit; these are its two judgements.
+describe('what GitHub ran on a commit', () => {
+  it("names the dry run as release.yml's run-name does, and its verify job looks for", () => {
+    // run-name: format('{0} {1} {2}{3}', 'dry run', inputs.only, '', github.sha)
+    // for a run by hand with publish off, only=all and no tag
+    // (releaseGatesImages.test.ts pins the workflow's side of it)
+    expect(dryRunTitle('0123abcd')).toBe('dry run all 0123abcd');
+  });
+
+  it('a success anywhere wins, anything still going waits, and only then a run that ended otherwise is the answer', () => {
+    const run = (status: string, conclusion: string, id = 1) => ({ id, status, conclusion });
+    expect(runVerdict([])).toEqual({ state: 'none', run: null });
+    expect(runVerdict(undefined)).toEqual({ state: 'none', run: null });
+    // a re-run that passed is a pass, whatever else ran on the commit
+    expect(runVerdict([run('completed', 'failure', 1), run('completed', 'success', 2)])).toMatchObject({ state: 'success', run: { id: 2 } });
+    expect(runVerdict([run('in_progress', '', 1), run('completed', 'success', 2)]).state).toBe('success');
+    // a failed run that is running again is not an answer yet
+    expect(runVerdict([run('completed', 'failure', 1), run('queued', '', 2)])).toMatchObject({ state: 'running', run: { id: 2 } });
+    // cancelled, timed out, skipped: none of them is a pass
+    for (const c of ['failure', 'cancelled', 'timed_out', 'skipped', 'neutral']) {
+      expect(runVerdict([run('completed', c)]).state, c).toBe('failure');
+    }
   });
 });

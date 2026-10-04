@@ -1,7 +1,20 @@
 // The release, in the order it has to happen. Each stage either finishes
 // ("done"), stops on a red gate ("red"), or stops because the next step is a
-// person's ("waiting") — tagging, pushing and deploying are never done by this
-// script, only checked after a person has done them.
+// person's ("waiting") — committing the export, pushing, tagging and deploying
+// are never done by this script, only checked after a person has done them.
+// The one thing it starts on GitHub is a dry run of release.yml
+// (`publish=false`), which publishes nothing.
+//
+// ⚠⚠ The tag comes LAST, on commits GitHub has already tested (task #76).
+// Both mains are pushed without a tag; ci.yml runs on the public push, the
+// gate stage starts release.yml's dry run on the same commit and waits for
+// both; only when both passed are the tags made and pushed, and the tag run's
+// `verify` job publishes nothing unless it finds those two runs on its commit.
+// A red gate spends no number: fix main, resume, and the gate runs again.
+// Before this, the tag started the test: 0.43.0 shipped without images,
+// 0.43.1 stopped at the gate, 0.44.0/0.44.1 died in goreleaser after npm and
+// the images were out, 0.45.0 published nothing — five numbers, and each one
+// could only be fixed with the next.
 //
 // A stage that finished is not trusted blindly on --resume: it records what it
 // ran against (the commit, the export tree) and runs again when that moved.
@@ -15,6 +28,7 @@ import {
   classifyDeletions,
   closingKeywords,
   dateChangelog,
+  dryRunTitle,
   globMatch,
   hasContent,
   hasSection,
@@ -22,6 +36,7 @@ import {
   newestTag,
   packageVersion,
   privateHostLines,
+  runVerdict,
   sectionGroups,
   setPackageVersion,
   unreleasedBody,
@@ -49,10 +64,18 @@ export const STAGES = [
     builtin: ['public checkout gates again', 'scripts/export-public.sh', 'no deletion without a reason (deleted in source / withheld: --ack export-withheld)', 'no private host or module path', 'workflows untouched'],
   },
   {
-    id: 'sign', title: 'sign', what: 'signed tags — a person',
-    builtin: ['private tag: annotated, good signature by the release key, on the tested commit', 'public commit: exactly the exported tree, one commit, no closing keywords', 'public tag: signed, on the export commit, not the private one', 'backend/ tag (optional): signed, backend/ identical'],
+    id: 'land', title: 'land', what: 'the export commit, then both mains pushed WITHOUT a tag — a person',
+    builtin: ['public commit: exactly the exported tree, one commit, no closing keywords', 'private remote: main is the release commit', 'public remote: main is the export commit', '(no tag yet: the tag goes on what GitHub tested)'],
   },
-  { id: 'push', title: 'push', what: 'one ref at a time — a person', builtin: ['private remote: main and the tag are the release commit', 'public remote: main and the tag are the export commit — a tag naming the private commit is the lesson #55 leak'] },
+  {
+    id: 'gate', title: 'gate', what: 'GitHub tests the export commit before anything is tagged',
+    builtin: ['ci.yml, started by the push of main, passed on the export commit', 'release.yml dry run (publish=false, started here) passed on the export commit', 'waits for both; red spends no number — fix main, resume, and it runs again'],
+  },
+  {
+    id: 'sign', title: 'sign', what: 'signed tags on the commits that were tested — a person',
+    builtin: ['private tag: annotated, good signature by the release key, on the release commit', 'public tag: signed, on the export commit GitHub tested, not the private one', 'backend/ tag (optional): signed, backend/ identical'],
+  },
+  { id: 'push', title: 'push', what: 'the tags, one ref at a time — a person', builtin: ['private remote: the tag is the release commit', 'public remote: the tag is the export commit — a tag naming the private commit is the lesson #55 leak'] },
   { id: 'ci', title: 'ci', what: 'what the release workflow published', builtin: [] },
   { id: 'deploy', title: 'deploy', what: 'servers, feeds, embeds, docs — a person, then verified', builtin: ['waits for: --ack deploy'] },
 ];
@@ -684,7 +707,257 @@ export async function exportStage(R) {
   return done({ privateHead: h, exportBase: base });
 }
 
-// ── 7. sign (a person) ──────────────────────────────────────────────────────
+// ── 7. land (a person) ──────────────────────────────────────────────────────
+
+/**
+ * The public commit the export became: one commit on top of the checkout the
+ * export ran in — or HEAD itself when the export staged nothing because HEAD
+ * already holds its tree (after a red gate, a fix to a workflow is committed
+ * in the public checkout, and the export on top of it has nothing to add).
+ */
+function exportCommitOf(R) {
+  const S = R.state;
+  const h = head(R.exp);
+  if (h && h !== S.exportBase) return { commit: h, made: true };
+  if (h && revParse(R.exp, 'HEAD^{tree}') === S.exportTree) return { commit: h, made: false };
+  return { commit: null, made: false };
+}
+
+export async function land(R) {
+  const S = R.state;
+  const exp = R.exp;
+  const tag = R.tag;
+  const { remote, exportRemote, branch } = R.plan;
+  const commands = [
+    `# the public checkout — commit exactly what the export staged:`,
+    `git -C ${slash(exp)} commit -m "${tag} - <one line: what this release is>"     # no "Fixes #N" — it closes issues`,
+    ``,
+    `# both mains, WITHOUT a tag: the tags go on the commits GitHub has tested, after the gate`,
+    `git -C ${slash(R.repo)} push ${remote} ${branch}`,
+    `git -C ${slash(exp)} push ${exportRemote} ${branch}     # to the terminal or a file, never into a pipe (lessons #722/#726)`,
+    ``,
+    `then:  pnpm release ${R.version} --resume     (it starts release.yml's dry run on that commit and waits for GitHub)`,
+  ];
+  if (R.dry) return waiting(commands, { dry: true });
+
+  // Landed already, for this release commit and this export: what the mains
+  // hold now no longer matters (they move on once the tags are out).
+  const prevRun = S.stages.land;
+  if (prevRun?.status === 'done' && prevRun.releaseCommit === S.releaseCommit && prevRun.exportTree === S.exportTree && prevRun.exportHead) {
+    S.exportHead = prevRun.exportHead;
+    return done({ ...prevRun, note: `landed as ${short(prevRun.exportHead)}` });
+  }
+
+  const found = exportCommitOf(R);
+  const pr = remoteRefs(R.repo, remote);
+  const er = remoteRefs(exp, exportRemote);
+  const todo = [];
+  const specs = [
+    {
+      name: 'public commit: exactly the export, nothing more',
+      check: () => {
+        if (!found.commit) {
+          todo.push('the export commit');
+          return { ok: true, detail: 'not made yet' };
+        }
+        if (!found.made) return { ok: true, detail: `the export added nothing: ${short(found.commit)} already holds its tree` };
+        const problems = [];
+        const parent = revParse(exp, 'HEAD^');
+        if (parent !== S.exportBase) problems.push(`HEAD's parent is ${short(parent)}, not ${short(S.exportBase)} — one commit on top of the checkout the export ran in`);
+        if (revParse(exp, 'HEAD^{tree}') !== S.exportTree) problems.push('the committed tree is not the tree the export produced and the gates checked');
+        const dirty = git(exp, 'status', '--porcelain', '--untracked-files=all').stdout.trim();
+        if (dirty) problems.push(`the checkout still has changes:\n${dirty}`);
+        const kw = closingKeywords(git(exp, 'log', '-1', '--format=%B').stdout);
+        if (kw.length) problems.push(`the message says ${kw.map((k) => `"${k}"`).join(', ')} — on GitHub that CLOSES the issue (lesson #163). Amend it: write "(#N)" instead.`);
+        return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: short(found.commit) };
+      },
+    },
+    {
+      name: `${remote}: ${branch} is the release commit`,
+      check: () => {
+        if (pr.error) return { ok: false, detail: `could not ask ${remote}: ${pr.error}` };
+        const main = pr.map.get(`refs/heads/${branch}`);
+        if (main === S.releaseCommit) return { ok: true, detail: short(main) };
+        if (main && git(R.repo, 'merge-base', '--is-ancestor', main, S.releaseCommit).status === 0) {
+          todo.push(`${remote} ${branch}`);
+          return { ok: true, detail: 'not pushed yet' };
+        }
+        return { ok: false, detail: `${remote}'s ${branch} is ${short(main)}, not the release commit ${short(S.releaseCommit)}` };
+      },
+    },
+    {
+      name: `${exportRemote}: ${branch} is the export commit`,
+      check: () => {
+        if (er.error) return { ok: false, detail: `could not ask ${exportRemote}: ${er.error}` };
+        if (!found.commit) return { ok: true, detail: 'once the export commit is made' };
+        const main = er.map.get(`refs/heads/${branch}`);
+        if (main === found.commit) return { ok: true, detail: short(main) };
+        if (main && git(exp, 'merge-base', '--is-ancestor', main, found.commit).status === 0) {
+          todo.push(`${exportRemote} ${branch}`);
+          return { ok: true, detail: 'not pushed yet' };
+        }
+        return { ok: false, detail: `${exportRemote}'s ${branch} is ${short(main)}, not the export commit ${short(found.commit)}` };
+      },
+    },
+  ];
+  const ok = await R.gates.all('land', specs, R.ctx());
+  if (!er.error && er.map.get(`refs/tags/${tag}`)) {
+    console.log(
+      `  ${yellow('note  ')}  ${tag} is on ${exportRemote} already, before GitHub tested anything: its release run stops at "verify" and publishes nothing. ` +
+        `When the gate is green, re-run that run's failed jobs (gh run rerun <id> --failed).`,
+    );
+  }
+  if (!ok) return red();
+  if (todo.length) return waiting([`Still to do: ${todo.join(', ')}.`, '', ...commands]);
+  S.exportHead = found.commit;
+  return done({ exportHead: found.commit, releaseCommit: S.releaseCommit, exportTree: S.exportTree });
+}
+
+// ── 8. gate: GitHub tests the export commit ─────────────────────────────────
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Waits until GitHub has run, on the export commit, the two things the tag
+ * run's `verify` job will look for: ci.yml started by the push of main, and a
+ * dry run of release.yml (publish=false: it builds, tests and packages every
+ * artifact and publishes none). The dry run is started here, once per commit.
+ *
+ * ⚠ A run is matched by its commit AND, for the dry run, by its name
+ * (release.yml's `run-name`, dryRunTitle): GitHub's API does not give a run's
+ * inputs, and a dry run of only=arm64, or of a tag, did not test this commit.
+ */
+export async function gate(R) {
+  const S = R.state;
+  const sha = S.exportHead;
+  const gh = R.plan.github;
+  const wf = { ci: 'ci.yml', release: 'release.yml', ...(R.plan.gateWorkflows ?? {}) };
+  const { exportRemote, branch } = R.plan;
+  const dispatch = { workflow: wf.release, ref: branch, inputs: { publish: 'false' } };
+  const title = dryRunTitle(sha ?? '<export commit>');
+  const startCmd = gh?.command ? gh.command(dispatch) : `gh workflow run ${wf.release} --ref ${branch} -f publish=false`;
+  if (R.dry) {
+    return waiting(
+      [
+        `GitHub tests the export commit; nothing is tagged until both of these passed on it:`,
+        `  - ${wf.ci}, started by the push of ${branch}`,
+        `  - ${wf.release} as a dry run, started here:  ${startCmd}`,
+        `    (named "${title}": it builds, tests and packages everything, and publishes nothing)`,
+      ],
+      { dry: true },
+    );
+  }
+  if (!sha) {
+    console.log(`  ${bold('FAILED')}  no export commit is recorded — the land stage records it`);
+    return red();
+  }
+  const prevRun = S.stages.gate;
+  if (prevRun?.status === 'done' && prevRun.exportHead === sha) return done({ ...prevRun, note: `GitHub passed ${short(sha)}` });
+  if (!gh) {
+    console.log(`  ${bold('FAILED')}  the plan names no GitHub to ask (plan.github)`);
+    return red();
+  }
+
+  const wait = { pollMs: 60_000, timeoutMs: 4 * 3600_000, appearMs: 10 * 60_000, ...(R.plan.gateWait ?? {}) };
+  const t0 = Date.now();
+  const fail = async (name, detail) => {
+    await R.gates.one('gate', { name, check: () => ({ ok: false, detail }) }, R.ctx());
+    return red();
+  };
+  let shown = '';
+  for (;;) {
+    const ci = gh.runs({ workflow: wf.ci, sha, event: 'push' });
+    const dr = gh.runs({ workflow: wf.release, sha, event: 'workflow_dispatch' });
+    const error = ci.error || dr.error;
+    if (error) return fail('GitHub answered', `could not ask GitHub (${error}) — whether ${short(sha)} passed is unknown, and unknown does not pass`);
+
+    const dryRuns = dr.runs.filter((x) => x.title === title);
+    if (!dryRuns.length) {
+      if (dr.runs.length) {
+        return fail(
+          `${wf.release} names its dry runs "${dryRunTitle('<sha>')}"`,
+          `${dr.runs.length} run(s) of ${wf.release} were started by hand on ${short(sha)}, none named "${title}" ` +
+            `(${dr.runs.slice(0, 3).map((x) => `"${x.title}"`).join(', ')}). The public ${wf.release} needs the run-name that names a dry run, ` +
+            `and the verify job the tag run waits on: packaging/ci/release-verify.patch.`,
+        );
+      }
+      if (S.gate?.sha !== sha) {
+        forgetRemotes();
+        const er = remoteRefs(R.exp, exportRemote);
+        const main = er.error ? null : er.map.get(`refs/heads/${branch}`);
+        if (main !== sha) {
+          return fail(
+            `${exportRemote}'s ${branch} is the export commit, so the dry run tests it`,
+            er.error ? `could not ask ${exportRemote}: ${er.error}` : `${exportRemote}'s ${branch} is ${short(main)}, not the export commit ${short(sha)} — a dry run started now would test that instead`,
+          );
+        }
+        const d = gh.dispatch(dispatch);
+        if (!d.ok) return fail(`started the dry run of ${wf.release}`, d.detail);
+        S.gate = { sha, dispatchedAt: new Date().toISOString() };
+        R.save?.();
+        console.log(`  ${dim('started ')}  ${startCmd}`);
+      } else if (Date.now() - Date.parse(S.gate.dispatchedAt) > wait.appearMs) {
+        return fail(
+          `the dry run started at ${S.gate.dispatchedAt} reached ${short(sha)}`,
+          `no run named "${title}" appeared. If ${exportRemote}'s ${branch} had moved when it started, it tested that commit instead: ` +
+            `look with gh run list --workflow ${wf.release}, then start it on the export commit by hand (${startCmd}), or land again.`,
+        );
+      }
+    }
+
+    const v = { ci: runVerdict(ci.runs), dry: runVerdict(dryRuns) };
+    const said = (x) => `${x.state}${x.run?.url ? ` ${x.run.url}` : ''}`;
+    const line = `${wf.ci}: ${said(v.ci)}  ·  dry run: ${said(v.dry)}`;
+    if (line !== shown) {
+      console.log(`  ${dim('github  ')}  ${line}`);
+      shown = line;
+    }
+    const finished = v.ci.state === 'failure' || v.dry.state === 'failure' || (v.ci.state === 'success' && v.dry.state === 'success');
+    if (finished) {
+      const verdict = (name, x, none) => ({
+        name,
+        check: () => {
+          if (x.state === 'success') return { ok: true, detail: x.run.url };
+          if (x.state === 'failure') return { ok: false, detail: `${x.run.url ?? `run ${x.run.id}`} ended "${x.run.conclusion}"` };
+          return { ok: false, detail: x.state === 'none' ? none : `not finished (${x.state})` };
+        },
+      });
+      const ok = await R.gates.all(
+        'gate',
+        [
+          verdict(`${wf.ci} (push) passed on ${short(sha)}`, v.ci, `no ${wf.ci} run was started by a push of ${short(sha)}`),
+          verdict(`${wf.release} dry run passed on ${short(sha)}`, v.dry, `no run named "${title}"`),
+        ],
+        R.ctx(),
+      );
+      if (ok) return done({ exportHead: sha, ci: v.ci.run.url, dryRun: v.dry.run.url });
+      const failed = [v.ci, v.dry].find((x) => x.state === 'failure')?.run;
+      for (const l of [
+        '',
+        `Nothing is tagged, and ${R.tag} is not spent. Then:`,
+        `  - a flake:  ${failed && gh.rerun ? gh.rerun(failed.id) : 'gh run rerun <id> --failed'}, then  pnpm release ${R.version} --resume`,
+        `  - a fault in the code: fix it on ${branch} (a commit on top of the release commit), push, pnpm release ${R.version} --resume —`,
+        `    the chain, the export, the landing and this gate run again on the fix`,
+        `  - a fault in a workflow: fix it in ${slash(R.exp)}, commit, push ${branch}, pnpm release ${R.version} --resume —`,
+        `    the export finds nothing new to stage, and this gate runs on the new public ${branch}`,
+      ]) {
+        console.log(`  ${l}`);
+      }
+      return red();
+    }
+    if (Date.now() - t0 >= wait.timeoutMs) {
+      return waiting([
+        `GitHub has not finished on ${short(sha)} yet (waited ${Math.round((Date.now() - t0) / 60_000)} min):`,
+        `  ${line}`,
+        '',
+        `Carry on waiting with:  pnpm release ${R.version} --resume`,
+      ]);
+    }
+    await sleep(wait.pollMs);
+  }
+}
+
+// ── 9. sign (a person) ──────────────────────────────────────────────────────
 
 /**
  * Verifies a signed, annotated tag. With `keys` set, the signature must be
@@ -710,25 +983,26 @@ export async function sign(R) {
   const exp = R.exp;
   const tag = R.tag;
   const backendTag = `${R.plan.backendTagPrefix}${tag}`;
+  const releaseCommit = S.releaseCommit ?? '<release commit>';
+  const exportCommit = S.exportHead ?? '<export commit>';
   const commands = [
-    `# the private tree — on the commit the chain tested:`,
-    `git -C ${slash(R.repo)} tag -s ${tag} -m "${tag}" ${S.releaseCommit ?? '<release commit>'}`,
+    `# GitHub has tested the export commit: tag exactly what was tested.`,
+    `# the private tree — the release commit the chain passed on:`,
+    `git -C ${slash(R.repo)} tag -s ${tag} -m "${tag}" ${releaseCommit}`,
     `git -C ${slash(R.repo)} tag -v ${tag}`,
     ``,
-    `# the public checkout — commit exactly what the export staged, then tag THAT commit:`,
-    `git -C ${slash(exp)} commit -m "${tag} - <one line: what this release is>"     # no "Fixes #N" — it closes issues`,
-    `git -C ${slash(exp)} tag -s ${tag} -m "${tag}"`,
+    `# the public checkout — the export commit, already on ${R.plan.branch}:`,
+    `git -C ${slash(exp)} tag -s ${tag} -m "${tag}" ${exportCommit}`,
     `git -C ${slash(exp)} tag -v ${tag}`,
-    `# only when the Go module is published this time:  git -C ${slash(exp)} tag -s ${backendTag} -m "${backendTag}"`,
+    `# only when the Go module is published this time:  git -C ${slash(exp)} tag -s ${backendTag} -m "${backendTag}" ${exportCommit}`,
     ``,
     `then:  pnpm release ${R.version} --resume`,
   ];
   if (R.dry) return waiting(commands, { dry: true });
 
   const privateTag = revParse(R.repo, `refs/tags/${tag}^{commit}`);
-  const exportMoved = head(exp) !== S.exportBase;
   const exportTag = revParse(exp, `refs/tags/${tag}^{commit}`);
-  if (!privateTag && !exportMoved && !exportTag) return waiting(commands);
+  if (!privateTag && !exportTag) return waiting(commands);
 
   const todo = [];
   const specs = [
@@ -745,32 +1019,14 @@ export async function sign(R) {
       },
     },
     {
-      name: 'public commit: exactly the export, nothing more',
-      check: () => {
-        if (!exportMoved) {
-          todo.push('the export commit');
-          return { ok: true, detail: 'not made yet' };
-        }
-        const problems = [];
-        const parent = revParse(exp, 'HEAD^');
-        if (parent !== S.exportBase) problems.push(`HEAD's parent is ${short(parent)}, not ${short(S.exportBase)} — one commit on top of the checkout the export ran in`);
-        if (revParse(exp, 'HEAD^{tree}') !== S.exportTree) problems.push('the committed tree is not the tree the export produced and the gates checked');
-        const dirty = git(exp, 'status', '--porcelain', '--untracked-files=all').stdout.trim();
-        if (dirty) problems.push(`the checkout still has changes:\n${dirty}`);
-        const kw = closingKeywords(git(exp, 'log', '-1', '--format=%B').stdout);
-        if (kw.length) problems.push(`the message says ${kw.map((k) => `"${k}"`).join(', ')} — on GitHub that CLOSES the issue (lesson #163). Amend it: write "(#N)" instead.`);
-        return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: short(head(exp)) };
-      },
-    },
-    {
-      name: `public ${tag}: signed, on the export commit`,
+      name: `public ${tag}: signed, on the export commit GitHub tested`,
       check: () => {
         if (!exportTag) {
           todo.push('the public tag');
           return { ok: true, detail: 'not made yet' };
         }
-        if (exportTag !== head(exp)) return { ok: false, detail: `${tag} is on ${short(exportTag)}, not the export commit ${short(head(exp))}` };
         if (exportTag === S.releaseCommit) return { ok: false, detail: `${tag} in the public checkout names the PRIVATE release commit — that is the leak of lesson #55` };
+        if (exportTag !== S.exportHead) return { ok: false, detail: `${tag} is on ${short(exportTag)}, not the export commit GitHub tested, ${short(S.exportHead)}. Delete the LOCAL tag (git -C ${slash(exp)} tag -d ${tag}) and tag ${short(S.exportHead)}.` };
         const bad = verifyTag(exp, `refs/tags/${tag}`, R.plan.signingKeys);
         return bad ? { ok: false, detail: bad } : { ok: true };
       },
@@ -782,7 +1038,7 @@ export async function sign(R) {
         if (!b) return { ok: true, detail: 'not made — fine unless the Go module is published this time' };
         const bad = verifyTag(exp, `refs/tags/${backendTag}`, R.plan.signingKeys);
         if (bad) return { ok: false, detail: bad };
-        const same = git(exp, 'diff', '--quiet', b, 'HEAD', '--', 'backend').status === 0;
+        const same = git(exp, 'diff', '--quiet', b, S.exportHead, '--', 'backend').status === 0;
         return same ? { ok: true } : { ok: false, detail: `${backendTag} (${short(b)}) has a different backend/ from the release` };
       },
     },
@@ -790,11 +1046,10 @@ export async function sign(R) {
   const ok = await R.gates.all('sign', specs, R.ctx());
   if (!ok) return red();
   if (todo.length) return waiting([`Still to do: ${todo.join(', ')}.`, '', ...commands]);
-  S.exportHead = head(exp);
   return done({ exportHead: S.exportHead });
 }
 
-// ── 8. push (a person) ──────────────────────────────────────────────────────
+// ── 10. push (a person) ─────────────────────────────────────────────────────
 
 export async function push(R) {
   const S = R.state;
@@ -804,9 +1059,7 @@ export async function push(R) {
   const hasBackend = !R.dry && !!revParse(exp, `refs/tags/${backendTag}`);
   const commands = [
     `# ⚠ one ref at a time, never --tags (lesson #55: a rejected --tags push still sends the tags)`,
-    `git -C ${slash(R.repo)} push ${R.plan.remote} ${R.plan.branch}`,
     `git -C ${slash(R.repo)} push ${R.plan.remote} refs/tags/${tag}`,
-    `git -C ${slash(exp)} push ${R.plan.exportRemote} ${R.plan.branch}`,
     `git -C ${slash(exp)} push ${R.plan.exportRemote} refs/tags/${tag}`,
     ...(hasBackend ? [`git -C ${slash(exp)} push ${R.plan.exportRemote} refs/tags/${backendTag}`] : []),
     ``,
@@ -819,31 +1072,26 @@ export async function push(R) {
   const todo = [];
   const specs = [
     {
-      name: `${R.plan.remote}: ${R.plan.branch} and ${tag} are the release`,
+      name: `${R.plan.remote}: ${tag} is the release commit`,
       check: () => {
         if (pr.error) return { ok: false, detail: `could not ask ${R.plan.remote}: ${pr.error}` };
-        const main = pr.map.get(`refs/heads/${R.plan.branch}`);
         const tagObj = pr.map.get(`refs/tags/${tag}`);
         const peeled = pr.map.get(`refs/tags/${tag}^{}`);
-        const problems = [];
-        if (main !== S.releaseCommit) {
-          if (main && git(R.repo, 'merge-base', '--is-ancestor', main, S.releaseCommit).status === 0) todo.push(`${R.plan.remote} ${R.plan.branch}`);
-          else problems.push(`${R.plan.remote}'s ${R.plan.branch} is ${short(main)}, not the release commit ${short(S.releaseCommit)}`);
+        if (!tagObj) {
+          todo.push(`${R.plan.remote} ${tag}`);
+          return { ok: true, detail: 'not pushed yet' };
         }
-        if (!tagObj) todo.push(`${R.plan.remote} ${tag}`);
-        else if (peeled !== S.releaseCommit) problems.push(`${R.plan.remote}'s ${tag} names ${short(peeled)}, not the release commit`);
-        else if (tagObj !== revParse(R.repo, `refs/tags/${tag}`)) problems.push(`${R.plan.remote}'s ${tag} is a different tag object from the signed one here`);
-        return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true };
+        if (peeled !== S.releaseCommit) return { ok: false, detail: `${R.plan.remote}'s ${tag} names ${short(peeled)}, not the release commit` };
+        if (tagObj !== revParse(R.repo, `refs/tags/${tag}`)) return { ok: false, detail: `${R.plan.remote}'s ${tag} is a different tag object from the signed one here` };
+        return { ok: true };
       },
     },
     {
-      name: `${R.plan.exportRemote}: ${R.plan.branch} and ${tag} are the EXPORT commit`,
+      name: `${R.plan.exportRemote}: ${tag} is the EXPORT commit`,
       check: () => {
         if (er.error) return { ok: false, detail: `could not ask ${R.plan.exportRemote}: ${er.error}` };
-        const main = er.map.get(`refs/heads/${R.plan.branch}`);
         const tagObj = er.map.get(`refs/tags/${tag}`);
         const peeled = er.map.get(`refs/tags/${tag}^{}`);
-        const problems = [];
         if (peeled && peeled === S.releaseCommit) {
           // ⚠⚠ Lesson #55, twice (v0.26.0, v0.27.5): the public tag named the
           // private commit, and with it every internal file in its history.
@@ -856,10 +1104,7 @@ export async function push(R) {
               `  3. gh run list --workflow Release: if a run built from that tag, its binaries came from the private tree — that is a real leak, tell the maintainer.`,
           };
         }
-        if (main !== S.exportHead) {
-          if (main === S.exportBase) todo.push(`${R.plan.exportRemote} ${R.plan.branch}`);
-          else problems.push(`${R.plan.exportRemote}'s ${R.plan.branch} is ${short(main)}, not the export commit ${short(S.exportHead)}`);
-        }
+        const problems = [];
         if (!tagObj) todo.push(`${R.plan.exportRemote} ${tag}`);
         else if (peeled !== S.exportHead) problems.push(`${R.plan.exportRemote}'s ${tag} names ${short(peeled)}, not the export commit ${short(S.exportHead)}`);
         else if (tagObj !== revParse(exp, `refs/tags/${tag}`)) problems.push(`${R.plan.exportRemote}'s ${tag} is a different tag object from the signed one in the checkout`);
@@ -878,7 +1123,7 @@ export async function push(R) {
   return done();
 }
 
-// ── 9. ci ───────────────────────────────────────────────────────────────────
+// ── 11. ci ──────────────────────────────────────────────────────────────────
 
 export async function ci(R) {
   const lines = (R.plan.ciWatch ?? []).map((l) => l.replaceAll('{tag}', R.tag).replaceAll('{version}', R.version));
@@ -892,7 +1137,7 @@ export async function ci(R) {
   return done();
 }
 
-// ── 10. deploy (a person, then verified) ────────────────────────────────────
+// ── 12. deploy (a person, then verified) ───────────────────────────────────
 
 export async function deploy(R) {
   const S = R.state;
@@ -917,4 +1162,4 @@ export async function deploy(R) {
   return done();
 }
 
-export const RUNNERS = { preflight, audit, docs, stamp, pretag, export: exportStage, sign, push, ci, deploy };
+export const RUNNERS = { preflight, audit, docs, stamp, pretag, export: exportStage, land, gate, sign, push, ci, deploy };

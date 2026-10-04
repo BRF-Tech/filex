@@ -1,4 +1,4 @@
-<!-- Translated from README.md as of d388d4f0 (v0.51.0). The English README is the source: change it first, then carry the change here. -->
+<!-- Translated from README.md as of bf857aad (v0.51.0). The English README is the source: change it first, then carry the change here. -->
 
 <div align="center">
 
@@ -14,7 +14,7 @@
 
 [English](README.md) · **Türkçe** · [Deutsch](README.de.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
 
-<sub>Bu sayfa, [İngilizce README](README.md) dosyasının v0.51.0 sürümündeki hâlinin çevirisidir; ikisi arasında fark olduğunda İngilizce metin geçerlidir. Makine çevirisidir; ana dili Türkçe olan birinin gözden geçirmesini bekliyor - düzeltmeler memnuniyetle karşılanır. Bağlantı verdiği belgeler İngilizcedir.</sub>
+<sub>Bu sayfa, [İngilizce README](README.md) dosyasının v0.51.0 sürümündeki hâlinin çevirisidir; ikisi arasında fark olduğunda İngilizce metin geçerlidir. Bağlantı verdiği belgeler İngilizcedir.</sub>
 
 Tam donanımlı bir web arayüzü olan tek bir Go ikili dosyası (binary), takılabilir
 depolama/kimlik doğrulama/veritabanı sürücüleri, **gerçek zamanlı iş birliği**,
@@ -108,7 +108,7 @@ bir grup çalışması paketi). filex aradaki boşluğu hedefler:
   bir REST yüzeyi (`/api/ai`), ayrıca yerleşik bir **MCP sunucusu** (`/api/ai/mcp`);
   `/api/ai` ve `/api/files` yüzeylerini, bir testin yönlendiriciyle uyumlu tuttuğu bir
   [OpenAPI 3.1 dosyası](backend/internal/api/openapi.json) tanımlar. Bir ajana, tek bir
-  klasöre sınırlandırılmış bir token verin, ajan orada gezginin kendi işlemleriyle
+  klasöre sınırlandırılmış bir API anahtarı verin, ajan orada gezginin kendi işlemleriyle
   çalışır - listeleme, okuma, yazma, kopyalama, dönüştürme, paylaşma, çöp kutusu,
   sürümler, arşivler - o klasörün dışında ise hiçbir şey yapmaz.
 - **Yalnızca onayladığınız şeyi yapabilen uygulamalar** - hesabı olmayan bir iş ortağıyla
@@ -190,12 +190,12 @@ bir grup çalışması paketi). filex aradaki boşluğu hedefler:
   sitenin, bir ziyaretçinin oturumuyla gönderdiği değişiklik reddedilir
   ([başka kökenlerden gelen istekler](docs/CONFIGURATION.md#requests-from-other-origins)).
 - **Tasarımı gereği çok kiracılı** - yerleşik kiracılık moduyla kiracı başına depo, RBAC
-  rolleri + öğe bazlı yetkiler, sınırlandırılmış API token'ları, denetim kayıtları için
-  token başına kimlik ve uygulama ile kullanıcı olarak ayrılan token türleri; böylece
+  rolleri + öğe bazlı yetkiler, sınırlandırılmış API anahtarları, denetim kayıtları için
+  API anahtarı başına kimlik ve uygulama ile kullanıcı olarak ayrılan API anahtarı türleri; böylece
   gömülü gezginde ortak kullanılan bir kimlik bilgisi kimsenin anahtarlarını yönetemez.
-  Token, sahip olduğu izinleri tek tek sayar - boş liste "her şey" diye okunmaz,
+  Bir API anahtarı, sahip olduğu izinleri tek tek sayar - boş liste "her şey" diye okunmaz,
   reddedilir - ve **verdiği hiçbir kimlik bilgisi kendisinden geniş olamaz**: dar bir
-  token'la oluşturulan API anahtarı, S3 anahtarı, NFS export'u ya da SSH anahtarı onun
+  API anahtarıyla oluşturulan yeni bir API anahtarı, S3 anahtarı, NFS export'u ya da SSH anahtarı onun
   eylemlerini aşamaz, klasörünün dışına çıkamaz, son kullanma tarihinden uzun yaşayamaz
   (`403 token_ceiling`).
   Kiracı sınırı, yalnızca satırları listeleyen rotalarda değil, bir satırı adıyla anan
@@ -372,7 +372,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 |---|---|
 | ![Benimle paylaşılanlar](docs/screenshots/v0.51.0/sidenav/view-shared-1440.png) | ![Gömülü web bileşeni](docs/screenshots/v0.51.0/sidenav/embed-webcomponent-1440.png) |
 
-| Nasıl bağlanılır - kılavuzlar, *sizin* kurulumunuzdan üretilir | API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da token'ıyla; tek bir ortak *uygulama* token'ıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz) |
+| Nasıl bağlanılır - kılavuzlar, *sizin* kurulumunuzdan üretilir | API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz) |
 |---|---|
 | ![Nasıl bağlanılır](docs/screenshots/v0.51.0/sidenav/connect-1440.png) | ![API anahtarları](docs/screenshots/v0.51.0/sidenav/apikeys-minted-1440.png) |
 
@@ -479,8 +479,8 @@ yüzden Vue ve React sarmalayıcıları onları aynı biçimde ayarlar - bkz.
 [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
 Barındıran uygulama çok kiracılıysa genellikle API'ye sunucu tarafında vekillik eder, her
-isteğe **sınırlandırılmış bir token** (`root: tenant-folder`) ekler ve istemci başlıklarını
-siler - sınırlamayı bileşen değil, arka uç uygular. Böyle bir token `kind: "app"`
+isteğe **sınırlandırılmış bir API anahtarı** (`root: tenant-folder`) ekler ve istemci başlıklarını
+siler - sınırlamayı bileşen değil, arka uç uygular. Böyle bir API anahtarı `kind: "app"`
 türündedir, bu yüzden panel tek bir kişiye ait bölümleri - API anahtarları, Son
 kullanılanlar, Yıldızlılar, Benimle paylaşılanlar - gizler; Yükle, depolar, Çöp kutusu ve
 "Nasıl bağlanılır" ise kalır. Bkz.
@@ -488,10 +488,10 @@ kullanılanlar, Yıldızlılar, Benimle paylaşılanlar - gizler; Yükle, depola
 [docs/MCP.md](docs/MCP.md#token-kinds---user-vs-app).
 
 ⚠ Gömülü bir gezgin, başka bir kökendeki sayfada - kardeş bir alt alan adı dâhil -
-ziyaretçinin kendi filex **oturum çereziyle** (token olmadan) çalışıyorsa eskisi gibi okur,
+ziyaretçinin kendi filex **oturum çereziyle** (API anahtarı olmadan) çalışıyorsa eskisi gibi okur,
 ama gönderdiği her değişiklik, o köken `FILEX_CORS_ALLOWED_ORIGINS` ayarında yer alana kadar
-reddedilir (`403 cross_origin_refused`); varsayılan `*` değeri bu izni vermez. Bir bearer
-token, anahtarla vekillik eden bir barındıran uygulama, masaüstü uygulaması ve kurulu web
+reddedilir (`403 cross_origin_refused`); varsayılan `*` değeri bu izni vermez. Bearer olarak
+gönderilen bir API anahtarı, anahtarla vekillik eden bir barındıran uygulama, masaüstü uygulaması ve kurulu web
 uygulaması hiçbir şey gerektirmez
 ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#requests-from-other-origins)).
 
@@ -527,7 +527,7 @@ bir kopya değil, web arayüzünün ve gömülü gezginlerin gösterdiği bileş
   ([docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)).
 - **Sürücü olarak bağla** - Ayarlar'daki bir düğme sunucuyu WebDAV üzerinden işletim
   sisteminin bir sürücüsü olarak bağlar, bir başkası ayırır; kimlik bilgisi hesabın kendi
-  token'ıdır ve hiçbir komut satırında görünmez. Windows'ta sınandı; macOS ve Linux için
+  API anahtarıdır ve hiçbir komut satırında görünmez. Windows'ta sınandı; macOS ve Linux için
   kod yolları var ama henüz doğrulanmadı
   ([docs/DESKTOP.md](docs/DESKTOP.md#mounting-the-server-as-a-drive)).
 - **⌘K her hesapta arar**: sonuçlar şeritteki her hesap için tek bir rozet altında
@@ -615,7 +615,7 @@ Bkz. [docs/CLI.md](docs/CLI.md) ve [docs/SYNC.md](docs/SYNC.md).
 
 ## Yapay zekâ ajanları / MCP
 
-filex, `/api/ai` adresinde token ile kimlik doğrulayan bir otomasyon yüzeyi (listeleme,
+filex, `/api/ai` adresinde API anahtarıyla kimlik doğrulayan bir otomasyon yüzeyi (listeleme,
 okuma, yazma, taşıma, kopyalama, silme, arama, paylaşma, zip) sunar ve `/api/ai/mcp`
 adresinde **Model Context Protocol** konuşur. Ajan, gezginin kendi işlemlerini de
 yürütür - depolar arası kopyalama, **dönüştürme** gibi uygulama işlemleri, işlem kuyruğu,
@@ -644,7 +644,7 @@ yöneticinin panelde onayladığı **bir kurulum isteği bırakır** - ve birini
 Her anahtar en az bir izin belirtmek zorundadır - boş liste reddedilir, asla "hepsi" diye
 okunmaz - ve **verdiği hiçbir şey anahtarın kendisinden geniş olamaz**: salt okunur ya da
 bir klasöre sınırlandırılmış bir anahtarla, daha fazla eyleme, anahtarın kökünün dışında
-bir köke ya da daha uzun bir ömre sahip bir API token'ı, S3 erişim anahtarı, NFS export'u
+bir köke ya da daha uzun bir ömre sahip bir API anahtarı, S3 erişim anahtarı, NFS export'u
 ya da SSH anahtarı istenirse bu istek, neyin fazla geniş olduğunu söyleyen bir
 `403 token_ceiling` yanıtıyla reddedilir. Ajanın yaptığı **taşıma asla üzerine yazmaz**:
 alınmış bir ada giden öğe, tıpkı arayüzdeki bir taşımada olduğu gibi, var olanın yanına
@@ -657,7 +657,7 @@ klasöre yazılan şifresiz içerik, çağıran bunu bilerek yaptığını söyl
 Ajanın diskinde zaten duran büyük bir dosya, bir araç çağrısına asla sığmaz - baytlarının
 modelin bağlamından geçmesi gerekirdi. **Yükleme biletleri** bunu çözer: yetkilendirilmiş
 tek bir çağrı, hedefi sabitler ve kısa ömürlü, tek kullanımlık, **kimlik bilgisi
-gerektirmeyen** bir URL döndürür; böylece filex token'ı olmayan bir ajan bile aktarımı
+gerektirmeyen** bir URL döndürür; böylece filex API anahtarı olmayan bir ajan bile aktarımı
 `curl -T bigfile <url>` komutuyla tamamlayabilir. Ayrıntılar: [docs/MCP.md](docs/MCP.md).
 
 ## Uygulamalar
@@ -784,7 +784,7 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
 - **RBAC + öğe izinleri** - roller (Yönetici, Kullanıcı, İzleyici ve özel roller; her biri bir izin listesi - [docs/PERMISSIONS.md](docs/PERMISSIONS.md)), **Yönetim → Klasör erişimi** altında üst klasörden devralınarak uygulanan dosya/klasör bazlı yetkiler, bütün üyeleri için klasör erişimi ve bir rol taşıyan **gruplar** - üyeler elle eklenir ya da oturum açmanın taşıdığı gruplarla eşitlenir ([docs/GROUPS.md](docs/GROUPS.md)) - e-postayla (SMTP) paylaşım davetleri, yetkiye duyarlı arama ve listelemeler. **Benimle paylaşılanlar**, sorunun tersini alıcının gözünden yanıtlar - başkalarının size neler için yetki verdiğini ve hangi depolara yalnızca bir yetki üzerinden ulaştığınızı.
 - **Kabuk** - işletmeci için de son kullanıcı için de, yönetim uygulamasında, masaüstü uygulamasında ve her gömülü gezginde tek bir yerleşim: sol kenarında daraltma düğmesi ile ürün logosunun bulunduğu, tam genişlikte bir üst çubuk, ⌘K / Ctrl+K çipi sorguyu komut paletine devreden tek bir **arama alanı** (alan bu klasörde arar; "Her yerde", kayıtlı aramalar ve komutlar ise palette durur), birincil bir **+ Yeni** menüsü (dosya yükle · yeni klasör · **yeni belge** · dosya iste), konum yolunun altında bir **Tür · Sahibi · Değiştirilme · Boyut** filtre satırı, ızgara görünümünde başlıklı bölümler olarak **Klasörler** ve **Dosyalar**, **Ayrıntılar** ("Erişimi olan kişiler" ve bir paylaşım bağlantısı satırıyla) ve **Etkinlik** (sürüm geçmişi ve yorumlar) olarak bölünmüş bir ayrıntılar paneli ve gezintinin altında bir **depolama satırı**. Tema, palet, dil, yoğunluk, saat dilimi, açılış sayfası ve bildirim anahtarlarının hepsi, avatardan ulaşılan **Kullanıcı ayarları**'nda durur - web uygulaması da tema, palet, yoğunluk ve dil seçiminizi tarayıcıda değil, **hesabınızda** tutar, böylece bir sonraki tarayıcıda sizi hazır bekler; kısayol düzenleyicisi ve *Turu tekrar başlat* da aynı menüdedir. Derlemeden hiçbir şey çıkarılmaz - ayarlar iletişim kutusu olmayan gömülü gezgin, bunları yine de barındıran bir "⋯" menüsü taşır ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Ana sayfa, kabuğun içinde** - yöneticiler dâhil herkes için açılış görünümü: depolarınız, en son açtıklarınız ve yıldızladıklarınız, içerik alanında kartlar olarak, dosyalardakiyle aynı gezinti paneli ve aynı üst çubukla. Ana sayfa ile bir klasör arasında geçiş yapınca içerik değişir, başka hiçbir şey değişmez. Açılış sayfası olarak yönetim panelini tercih eden işletmeci, bunu kullanıcı ayarlarından seçer.
-- **Gezinti paneli** - birincil işlem olarak **+ Yeni** menüsü, Ana sayfa / Dosyalarım / Benimle paylaşılanlar / **Paylaştıklarım** / Son kullanılanlar / Yıldızlılar / **Taslaklar** / Çöp kutusu hedefleri, görebildiğiniz depolar - **kendi sıranızla** (bir satırı sürükleyin ya da menüsünden Yukarı taşı / Aşağı taşı / Ada göre sırala seçeneklerini kullanın; hesabınızda saklanır), yoksa yöneticinin Depolar sayfasında belirlediği sırayla ([docs/STORAGE.md](docs/STORAGE.md#ordering-storages)) - kurulu bir uygulamanın ana ekranı varsa bir **Uygulamalar** bölümü ve **Nasıl bağlanılır** + **API anahtarları**: her protokol için ayrı kılavuzlar ve kullanıcının kendi token'larını yönettiği token yöneticisi; bunlar gezginin içinden açılır, böylece gömülü bir kopyanın kullanıcıları WebDAV/FTPS/`filex mount` için gereken kimlik bilgisini bir yöneticiden istemek yerine kendileri oluşturabilir. Üst çubuktan bir simge şeridine daraltılabilir (her tarayıcıda ayrı hatırlanır), 560px'in altında sütun yerine çekmece olur. Web uygulamasında, masaüstü uygulamasında ve her gömülü gezginde varsayılan olarak açıktır; `uiProfile: 'simple'` ayarı ayrıca sekme şeridini, bölünmüş görünümü, galeri görünüm modunu ve "Nasıl bağlanılır" bölümünü kapatır, ama hiçbirini derlemeden çıkarmaz ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
+- **Gezinti paneli** - birincil işlem olarak **+ Yeni** menüsü, Ana sayfa / Dosyalarım / Benimle paylaşılanlar / **Paylaştıklarım** / Son kullanılanlar / Yıldızlılar / **Taslaklar** / Çöp kutusu hedefleri, görebildiğiniz depolar - **kendi sıranızla** (bir satırı sürükleyin ya da menüsünden Yukarı taşı / Aşağı taşı / Ada göre sırala seçeneklerini kullanın; hesabınızda saklanır), yoksa yöneticinin Depolar sayfasında belirlediği sırayla ([docs/STORAGE.md](docs/STORAGE.md#ordering-storages)) - kurulu bir uygulamanın ana ekranı varsa bir **Uygulamalar** bölümü ve **Nasıl bağlanılır** + **API anahtarları**: her protokol için ayrı kılavuzlar ve kullanıcının kendi API anahtarlarını yönettiği ekran; bunlar gezginin içinden açılır, böylece gömülü bir kopyanın kullanıcıları WebDAV/FTPS/`filex mount` için gereken kimlik bilgisini bir yöneticiden istemek yerine kendileri oluşturabilir. Üst çubuktan bir simge şeridine daraltılabilir (her tarayıcıda ayrı hatırlanır), 560px'in altında sütun yerine çekmece olur. Web uygulamasında, masaüstü uygulamasında ve her gömülü gezginde varsayılan olarak açıktır; `uiProfile: 'simple'` ayarı ayrıca sekme şeridini, bölünmüş görünümü, galeri görünüm modunu ve "Nasıl bağlanılır" bölümünü kapatır, ama hiçbirini derlemeden çıkarmaz ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Paylaşım** - PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, yöneticinin belirlediği **en uzun bağlantı süresi** içinde (varsayılan 7 gün - iletişim kutusu yalnızca sunucunun tutacağı süreleri sunar); klasör bağlantıları ZIP olarak akıtılır (önbelleğe alınır, bir boyut üst sınırına kadar önceden hazırlanır, bir hafta sonra süpürülür); gelen dosyalar için **dosya isteği** yükleme bağlantıları; ShareX uyumlu yükleme ucu. **Paylaştıklarım**, oluşturduğunuz bağlantıları - yalnızca yöneticiler için değil, herkes için - *Bağlantıyı kopyala*, *PIN'i kopyala* ve *İptal et* ile birlikte listeler: bir bağlantının PIN'i, onu koruyan özetin yanında mühürlenerek saklanır; böylece biri ona tekrar ihtiyaç duyduğunda bağlantıyı oluşturan kişi ya da bir yönetici PIN'i yeniden okuyabilir, her okuma da denetim kaydına yazılır. Beş yanlış PIN, herkese açık herhangi bir bağlantıyı on dakikalığına kapatır. Bir indirme bağlantısı, bir dosya isteği ve bir uygulamanın sayfası **kurumsal kimliğinizi taşıyan tek bir herkese açık ekrandır** - kurulumunuzun adı, logosu ve renkleri, tek bir PIN ekranı, tek bir son kullanma tarihi mantığı ve bir dil seçici ([docs/SHARING.md](docs/SHARING.md)).
 - **Masaüstü uygulaması + klasör eşitleme** - Windows/Linux/macOS uygulaması: sistem tepsisinde duran çift yönlü eşitleme, **seçmeli eşitleme** (sağ tık → *Bilgisayarda tut*, hesap başına tek bir kök klasör, gerisi yalnızca çevrimiçi), aynı anda birden çok hesap, sunucunun düzenleyicisinde **Office belgelerini kendi diskinizden açar**, kendini günceller (macOS: imzasız derleme, imzalanana kadar yeniden indirilerek güncellenir). Her belge **kendi penceresinde** açılır (başlığı dosyanın adıdır), pencereler **çerçevesizdir** ve uygulamanın kendi düğmelerini taşır (macOS'te sistemin kendi trafik ışıkları), açmak için tek tık mı çift tık mı kullanılacağını da **Ayarlar → Dosyaları açma** belirler ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
 - **Çöp kutusu ve sürüm geçmişi** - silmeler bir saklama süresi içinde geri alınabilir, yazmalar anlık görüntü bırakır; ikisi de zaten bağladığınız depoda durur ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
@@ -935,7 +935,7 @@ Bkz. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 [Windows ve Linux hesapları](docs/OS-LOGIN.md) ·
 [Giriş denemesi sınırları ve
 güvenilir vekil sunucular](docs/CONFIGURATION.md#sign-in-attempt-limits) ·
-[RBAC, klasör erişimi ve API token'ları](docs/RBAC.md) ·
+[RBAC, klasör erişimi ve API anahtarları](docs/RBAC.md) ·
 [Roller ve kullanıcıya özel izinler](docs/PERMISSIONS.md) · [Gruplar](docs/GROUPS.md) ·
 [Çok kiracılılık ve realm'ler](docs/MULTI-TENANCY.md) ·
 [Kiracının kendini yönetmesi](docs/TENANT-ADMIN.md)

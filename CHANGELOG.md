@@ -19,10 +19,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   English label and glosses it. Code blocks, commands, link targets and
   screenshots are the English README's, unchanged. Each translation names the
   commit it was made from and says that the English text holds where the two
-  differ; all five are machine-translated and awaiting review by a native
-  speaker. `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs` read
+  differ; the German, Spanish, French and Chinese pages are machine
+  translations awaiting review by a native speaker, and say so.
+  `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs` read
   the translations too, so a renamed docs heading names the link to fix in each
-  of them ([CONTRIBUTING.md](docs/CONTRIBUTING.md#docs)).
+  of them ([CONTRIBUTING.md](docs/CONTRIBUTING.md#docs)). Contributed by Berk
+  Başarır ([#84](https://github.com/BRF-Tech/filex/pull/84)).
+
+### Changed
+
+- **A release is tagged only after GitHub has tested its commit (#76).** `pnpm release` pushes both `main` branches untagged, starts a dry run of `release.yml` on the export commit and waits until it and CI have passed there; only then are the tags made, and the tag run's new `verify` job publishes nothing without those two runs on its commit. A red run spends no version number, a resume never goes back past a pushed tag, and `--resume --only deploy` re-reads the deploy on the tagged commits ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+
+### Fixed
+
+- **One reader of a docs page's headings.** The release gate
+  (`scripts/release/checks.mjs`) and the Releases page generator
+  (`docs-site/scripts/fetch-releases.mjs`) each had a fence-aware heading
+  parser, and the generator's closed a code fence on any line starting with the
+  same character, so a `#` line inside a longer fence was a heading for one and
+  not for the other. Both now read `docs-site/scripts/markdown-headings.mjs`
+  (CommonMark fences, front matter, CRLF), so a fragment id can no longer come
+  from a line the gate calls code.
+
+- **The one table passes axe, and WebKit stops reporting it.** `DataTable` (the
+  explorer's list, every admin page, the Apps store) fixes four things for all
+  of them at once: the column resize handle, a focusable `separator`, now
+  carries `aria-valuenow` / `aria-valuemin` / `aria-valuemax` (the column's
+  width in px and its own limits, following keyboard steps, drags and resets);
+  an empty or loading table's notice is a `row` with one spanning cell instead
+  of a bare box inside the `rowgroup`; the table's ResizeObserver applies its
+  width on the next animation frame, so WebKit no longer raises "ResizeObserver
+  loop completed with undelivered notifications" as a page error; and an
+  `empty` of `''` or `null` draws no empty-state box at all (a caller showing an
+  error beside the table passes `''`; an `empty` slot still draws).
+
+- **The README names what the screen shows.** The shell's bullet in
+  `README.md` still called the filter chip *People*; the screen says *Owner*
+  (`filter.people`), as the *Why filex* paragraph already did. The Chinese page
+  carries the English labels the README now uses (*Add storage*, *Owner*,
+  *Lift the lock*), the Spanish one the button's own name
+  (*Agregar almacenamiento*), and the Turkish one says *API anahtarı* where it
+  said *token*, as the Turkish interface does. Contributed by Berk Başarır
+  ([#85](https://github.com/BRF-Tech/filex/pull/85)); the Turkish wording was
+  added on top.
 
 ## [0.51.0] - 2026-10-04
 

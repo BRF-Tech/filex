@@ -43,7 +43,7 @@
  * them. Nothing here carries a colour of its own — every value is a `--fe-*`
  * token, so every table follows the palette the person picked.
  */
-import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
@@ -124,8 +124,10 @@ const props = withDefaults(
     locale?: LocaleCode;
     theme?: ThemeMode;
     loading?: boolean;
-    /** What an empty table says. */
-    empty?: string;
+    /** What an empty table says. '' or null says nothing: no empty-state box
+     *  is drawn at all (a caller showing an error beside the table passes '').
+     *  An `empty` slot still draws. */
+    empty?: string | null;
     ariaLabel?: string;
     /** A tick column that selects (issue #26). */
     selectable?: boolean;
@@ -299,6 +301,8 @@ const metrics = computed<LayoutMetrics>(() => ({
 const listEl = ref<HTMLElement | null>(null);
 const listWidth = ref(0);
 let ro: ResizeObserver | null = null;
+let pendingWidth = 0;
+let widthFrame = 0;
 
 /** Is the table scrolled off its START edge? Draws the frozen edges' dividers —
  *  a permanent divider would claim a column floats when it simply fits. */
@@ -322,6 +326,8 @@ watch(
   (el) => {
     ro?.disconnect();
     ro = null;
+    if (widthFrame) cancelAnimationFrame(widthFrame);
+    widthFrame = 0;
     if (!el || typeof ResizeObserver === 'undefined') return;
     /* ⚠ Straight in, no filter (PR #39's "settler" was taken back out). The
        loop it guarded against — this width feeding a layout that summons the
@@ -331,9 +337,19 @@ watch(
        filter itself held a REAL resize that came back within 500 ms (a panel
        toggled open and shut) at the narrower width: measured, the table stayed
        300px narrower than its pane (e2e 139). */
+    /* ⚠ The width is applied on the next frame, not inside the callback: a
+       layout that changes what is observed in the same delivery makes WebKit
+       report "ResizeObserver loop completed with undelivered notifications"
+       as a page error (task #153). A frame later the change is a new
+       observation, not an undelivered one. Only the newest width is applied. */
     ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect?.width ?? 0;
-      if (Math.abs(w - listWidth.value) >= 1) listWidth.value = w;
+      pendingWidth = w;
+      if (widthFrame) return;
+      widthFrame = requestAnimationFrame(() => {
+        widthFrame = 0;
+        if (Math.abs(pendingWidth - listWidth.value) >= 1) listWidth.value = pendingWidth;
+      });
     });
     ro.observe(el);
   },
@@ -547,6 +563,15 @@ const sortedRows = computed<any[]>(() => {
 
 const segments = computed<Group[]>(() => props.groups ?? [{ id: 'all', items: sortedRows.value }]);
 
+/** What an empty table says; '' (or null) says nothing and draws no box. */
+const slots = useSlots();
+const emptyText = computed(() => (props.empty === undefined ? t('table.empty') : (props.empty ?? '')));
+const emptyShown = computed(() => !props.loading && rowCount.value === 0 && (!!slots.empty || emptyText.value !== ''));
+/** Is anything in the body to own? An empty rowgroup is invalid ARIA. */
+const bodyHasContent = computed(() => rowCount.value > 0 || (props.loading && rowCount.value === 0) || emptyShown.value);
+/** The one cell of a notice row spans the lead, the visible columns and the ⋮. */
+const spanCols = computed(() => visibleCols.value.length + 2 + (props.selectable ? 1 : 0));
+
 const rowCount = computed(() => segments.value.reduce((s, g) => s + g.items.length, 0));
 
 // ── rows ──────────────────────────────────────────────────────────────
@@ -610,6 +635,20 @@ function freezeBeforeEdit() {
 
 function isResizable(id: string): boolean {
   return store.value.spec(id)?.resizable === true;
+}
+
+/* The handle is a focusable `separator`, so ARIA wants its value: the column's
+ * drawn width in px, between the column's own min and max. Read from the same
+ * layout the cell is drawn from, so a keyboard step, a drag, a double-click
+ * reset and a pane resize all show up in `aria-valuenow` with no extra wiring. */
+function resizeNow(id: string): number {
+  return Math.round(layout.value.widths[id] ?? store.value.width(id));
+}
+function resizeMin(id: string): number | undefined {
+  return store.value.spec(id)?.min;
+}
+function resizeMax(id: string): number | undefined {
+  return store.value.spec(id)?.max;
 }
 
 function onResizeStart(id: string, ev: PointerEvent) {
@@ -978,6 +1017,8 @@ function onResetColumns() {
 onBeforeUnmount(() => {
   ro?.disconnect();
   ro = null;
+  if (widthFrame) cancelAnimationFrame(widthFrame);
+  widthFrame = 0;
   onResizeEnd();
   endDrag();
   if (typeof window !== 'undefined') window.removeEventListener('keydown', onColMenuKey, true);
@@ -1099,6 +1140,9 @@ defineExpose({ store, layout, pinLead });
             role="separator"
             aria-orientation="vertical"
             tabindex="0"
+            :aria-valuenow="resizeNow(store.lead)"
+            :aria-valuemin="resizeMin(store.lead)"
+            :aria-valuemax="resizeMax(store.lead)"
             :aria-label="t('cols.resize', { col: label(store.lead) })"
             :title="t('cols.resize', { col: label(store.lead) })"
             @pointerdown="onResizeStart(store.lead, $event)"
@@ -1144,6 +1188,9 @@ defineExpose({ store, layout, pinLead });
             role="separator"
             aria-orientation="vertical"
             tabindex="0"
+            :aria-valuenow="resizeNow(id)"
+            :aria-valuemin="resizeMin(id)"
+            :aria-valuemax="resizeMax(id)"
             :aria-label="t('cols.resize', { col: label(id) })"
             :title="t('cols.resize', { col: label(id) })"
             @pointerdown="onResizeStart(id, $event)"
@@ -1168,7 +1215,7 @@ defineExpose({ store, layout, pinLead });
           ><span aria-hidden="true">&#8942;</span></button>
         </div>
       </div>
-      <div class="fe-list__body" role="rowgroup">
+      <div class="fe-list__body" :role="bodyHasContent ? 'rowgroup' : 'presentation'">
         <template v-for="seg in segments" :key="seg.id">
           <div v-if="seg.label" class="fe-list__group" role="presentation">{{ seg.label }}</div>
           <div
@@ -1247,11 +1294,15 @@ defineExpose({ store, layout, pinLead });
             </div>
           </div>
         </template>
-        <div v-if="loading && rowCount === 0" class="fe-list__empty fe-list__empty--loading" role="status">
-          {{ t('loading') }}
+        <!-- ⚠ A rowgroup holds ROWS (axe aria-required-children): the loading
+             and empty notices are a row with one cell spanning the table. -->
+        <div v-if="loading && rowCount === 0" class="fe-list__empty fe-list__empty--loading" role="row">
+          <div role="gridcell" :aria-colspan="spanCols" aria-live="polite">{{ t('loading') }}</div>
         </div>
-        <div v-else-if="!loading && rowCount === 0" class="fe-list__empty">
-          <slot name="empty">{{ empty ?? t('table.empty') }}</slot>
+        <div v-else-if="emptyShown" class="fe-list__empty" role="row">
+          <div role="gridcell" :aria-colspan="spanCols">
+            <slot name="empty">{{ emptyText }}</slot>
+          </div>
         </div>
       </div>
     </div>

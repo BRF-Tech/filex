@@ -3,7 +3,7 @@
 // ⚠⚠ Why this is tested end to end and not only function by function: the
 // point of the release command is ORDER and REFUSAL. A unit test can show that
 // `closingKeywords` finds "Fixes #12"; only a run can show that the release
-// does not get past `sign` while the public commit says it. Every red case
+// does not get past `land` while the public commit says it. Every red case
 // below is one that shipped, or nearly shipped, a broken release:
 //
 //   a Helm chart left behind           23 releases (2026-08-29, lesson #52)
@@ -13,6 +13,11 @@
 //   a public tag on a private commit   v0.26.0, v0.27.5 (lesson #55)
 //   an unsigned / wrong-key tag        releases <= v0.27.5 were unsigned
 //   "Fixes #N" in the export commit    v0.41.2 closed an issue (lesson #163)
+//   a tag before GitHub tested it      0.43.0-0.45.0, five numbers (#76)
+//   a resume that re-stamps a tag      v0.46.0, v0.47.0 (2026-09-26/27)
+//
+// GitHub Actions is the fixture plan's stand-in (FIXTURE_GH_*): the gate
+// stage asks it for runs and starts the dry run through it, never `gh`.
 //
 // The fixture is a real git history: a private repository with its bare
 // remote, a public checkout with its own, the real release engine
@@ -47,6 +52,7 @@ const COPY = [
   'scripts/release-notes.mjs',
   'scripts/sync-deploy-versions.mjs',
   'docs-site/.vitepress/github-slug.mjs',
+  'docs-site/scripts/markdown-headings.mjs',
   'deploy/helm/filex/Chart.yaml',
   'deploy/casaos/docker-compose.yml',
   'deploy/umbrel/filex/docker-compose.yml',
@@ -114,6 +120,9 @@ const FEATURE =
   '  too, and everybody who leaves loses it, without anyone touching the share.\n\n';
 
 const fwd = (p: string) => p.split(path.sep).join('/');
+
+const STAGE_ORDER = ['preflight', 'audit', 'docs', 'stamp', 'pretag', 'export', 'land', 'gate', 'sign', 'push', 'ci', 'deploy'];
+const banner = (stage: string) => `── ${STAGE_ORDER.indexOf(stage) + 1}/${STAGE_ORDER.length} ${stage} `;
 
 function makeFixture(): Fixture {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-release-test-'));
@@ -241,7 +250,12 @@ function release(fx: Fixture, args: string[], extraEnv: Record<string, string> =
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(fx.src, 'scripts', 'release.mjs'), ...args], {
       cwd: fx.src,
-      env: { ...fx.env, TMPDIR: tmp, TEMP: tmp, TMP: tmp, FIXTURE_EXPORT: fx.exp, FIXTURE_SITE: fx.site, FIXTURE_SIGNING_KEY: fx.fingerprint, ...extraEnv },
+      env: {
+        ...fx.env, TMPDIR: tmp, TEMP: tmp, TMP: tmp, FIXTURE_EXPORT: fx.exp, FIXTURE_SITE: fx.site, FIXTURE_SIGNING_KEY: fx.fingerprint,
+        // GitHub: CI passed on whatever the public main is, dry runs pass.
+        FIXTURE_GH: path.join(fx.root, 'gh'), FIXTURE_GH_CI: 'success',
+        ...extraEnv,
+      },
     });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
@@ -264,6 +278,30 @@ function footprint(fx: Fixture) {
     publicRemote: run(fx.env, 'git', [`--git-dir=${fx.publicRemote}`, 'for-each-ref']),
     state: fs.existsSync(path.join(fx.src, '.git', 'filex-release')),
   };
+}
+
+/** The dry runs the gate started on the fixture's GitHub: one entry per dispatch. */
+function dispatched(fx: Fixture): Array<{ sha: string; title: string; ref: string; inputs: Record<string, string> }> {
+  const f = path.join(fx.root, 'gh', 'dispatched.json');
+  return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : [];
+}
+
+/** From the start to WAITING at land: audit confirmed, stamped, tested, exported. */
+async function toLand(fx: Fixture) {
+  let r = await release(fx, [VERSION]);
+  expect(r.code, r.out).toBe(3);
+  r = await release(fx, [VERSION, '--resume', '--ack', 'audit']);
+  expect(r.out).toContain('WAITING at land');
+  expect(r.code, r.out).toBe(3);
+  return r;
+}
+
+/** A person's land: the export commit, then both mains pushed, no tag. */
+function landBoth(fx: Fixture, message = `${TAG} - folders shared with a team (#12)`) {
+  gitIn(fx, fx.exp, 'commit', '-q', '-m', message);
+  gitIn(fx, fx.src, 'push', '-q', 'origin', 'main');
+  gitIn(fx, fx.exp, 'push', '-q', 'origin', 'main');
+  return gitIn(fx, fx.exp, 'rev-parse', 'HEAD');
 }
 
 /** The published surfaces, as files the fixture plan's fetch serves. */
@@ -325,7 +363,7 @@ describe.concurrent('pnpm release — preflight stops before anything is written
     expect(r.out).toContain('FAILED  working tree clean, tracked and untracked');
     expect(r.out).toContain('stray-wip.txt');
     expect(r.out).toContain('STOPPED at preflight');
-    expect(r.out).not.toContain('2/10 audit');
+    expect(r.out).not.toContain(banner('audit'));
   });
 
   // Every preflight gate runs even after one is red, so one run shows each
@@ -362,16 +400,22 @@ describe.concurrent('pnpm release --dry-run', () => {
     const r = await release(fx, [VERSION, '--dry-run']);
     expect(r.out).toContain('DRY RUN GREEN');
     expect(r.code).toBe(0);
-    const order = ['preflight', 'audit', 'docs', 'stamp', 'pretag', 'export', 'sign', 'push', 'ci', 'deploy'].map((s, i) =>
-      r.out.indexOf(`── ${i + 1}/10 ${s} `),
-    );
+    const order = STAGE_ORDER.map((s) => r.out.indexOf(banner(s)));
     expect(order.every((at) => at >= 0), `every stage banner is printed: ${order}`).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const f of ['CHANGELOG.md', 'web/package.json', 'packages/core/package.json', 'deploy/helm/filex/Chart.yaml', 'deploy/umbrel/filex/umbrel-app.yml']) {
       expect(r.out).toContain(`            ${f}`);
     }
-    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}"`);
-    expect(r.out).toContain(`push origin refs/tags/${TAG}`);
+    // #76: both mains go out untagged, GitHub tests that commit, THEN the tags.
+    const at = (text: string) => r.out.indexOf(text);
+    expect(at('push origin main')).toBeGreaterThan(at(banner('land')));
+    expect(at('gh workflow run release.yml --ref main -f publish=false')).toBeGreaterThan(at(banner('gate')));
+    expect(r.out).toContain('dry run all <export commit>');
+    expect(at(`tag -s ${TAG} -m "${TAG}"`)).toBeGreaterThan(at(banner('sign')));
+    expect(at(`push origin refs/tags/${TAG}`)).toBeGreaterThan(at(banner('push')));
+    expect(r.out.slice(at(banner('land')), at(banner('gate')))).not.toContain('refs/tags/');
+    // nothing was started on GitHub
+    expect(dispatched(fx)).toEqual([]);
     expect(footprint(fx)).toEqual(before);
   });
 
@@ -382,7 +426,7 @@ describe.concurrent('pnpm release --dry-run', () => {
     expect(r.code).toBe(1);
     expect(r.out).toContain('FAILED  the fixture test suite');
     expect(r.out).toContain('STOPPED at pretag');
-    expect(r.out).not.toContain('6/10 export');
+    expect(r.out).not.toContain(banner('export'));
     expect(footprint(fx)).toEqual(before);
   });
 
@@ -437,7 +481,7 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(r.out).toContain('discarded the export');
     expect(r.out).not.toContain('FAILED  export checkout');
     expect(r.code).toBe(3);
-    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain('WAITING at land');
   });
 
   it('stamps once, stops at every human step, refuses every wrong move, and verifies what was published', { timeout: TIMEOUT }, async () => {
@@ -456,11 +500,11 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     // without --resume a second start is refused: one run per release
     expect((await release(fx, [VERSION])).code).toBe(2);
 
-    // 2. stamp, pretag, export — then the tags are a person's
+    // 2. stamp, pretag, export — then landing the export is a person's
     const baseCommits = commits();
     r = await release(fx, [VERSION, '--resume', '--ack', 'audit']);
     expect(r.code).toBe(3);
-    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain('WAITING at land');
     expect(commits()).toBe(baseCommits + 1);
     expect(git(fx.src, 'log', '-1', '--format=%s')).toBe(`chore(release): ${TAG}`);
     const changelog = fs.readFileSync(path.join(fx.src, 'CHANGELOG.md'), 'utf8');
@@ -479,7 +523,46 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(r.code).toBe(3);
     expect(commits()).toBe(baseCommits + 1);
 
-    // 3. wrong moves at sign
+    // 3. land: the export commit must not close an issue, and both mains go out untagged
+    git(fx.exp, 'commit', '-q', '-m', `${TAG} - teams (fixes #12)`);
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('CLOSES the issue');
+    expect(r.out).toContain('STOPPED at land');
+    git(fx.exp, 'commit', '-q', '--amend', '-m', `${TAG} - folders shared with a team (#12)`);
+    const exportCommit = git(fx.exp, 'rev-parse', 'HEAD');
+
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('WAITING at land');
+    expect(r.out).toContain('Still to do: origin main, origin main');
+    git(fx.src, 'push', '-q', 'origin', 'main');
+    git(fx.exp, 'push', '-q', 'origin', 'main');
+    expect(dispatched(fx)).toEqual([]);
+
+    // 4. gate: GitHub tests the export commit before any tag. A red dry run
+    // stops the release, tags nothing, and spends no number.
+    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_DRY: 'failure' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('STOPPED at gate');
+    expect(r.out).toContain(`FAILED  release.yml dry run passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain(`${TAG} is not spent`);
+    expect(r.out).toContain('gh run rerun 100 --failed');
+    expect(dispatched(fx)).toEqual([{ workflow: 'release.yml', ref: 'main', inputs: { publish: 'false' }, sha: exportCommit, title: `dry run all ${exportCommit}` }]);
+    expect(git(fx.src, 'tag', '--list', TAG)).toBe('');
+    expect(git(fx.exp, 'tag', '--list', TAG)).toBe('');
+
+    // …its failed jobs re-run and pass: the same run is read again, no second dry run
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.code).toBe(3);
+    expect(r.out).toContain(`ok      ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain(`ok      release.yml dry run passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}" ${releaseCommit}`);
+    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}" ${exportCommit}`);
+    expect(dispatched(fx)).toHaveLength(1);
+
+    // 5. wrong moves at sign
     git(fx.src, 'tag', '-a', TAG, '-m', TAG, releaseCommit);
     r = await release(fx, [VERSION, '--resume']);
     expect(r.code).toBe(1);
@@ -493,19 +576,19 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     git(fx.src, 'tag', '-d', TAG);
 
     git(fx.src, 'tag', '-s', TAG, '-m', TAG, releaseCommit);
-    git(fx.exp, 'commit', '-q', '-m', `${TAG} - teams (fixes #12)`);
+    // the public tag on a commit GitHub did not test
+    git(fx.exp, 'tag', '-s', TAG, '-m', TAG, `${exportCommit}^`);
     r = await release(fx, [VERSION, '--resume']);
     expect(r.code).toBe(1);
-    expect(r.out).toContain('CLOSES the issue');
-    git(fx.exp, 'commit', '-q', '--amend', '-m', `${TAG} - folders shared with a team (#12)`);
+    expect(r.out).toContain('not the export commit GitHub tested');
+    git(fx.exp, 'tag', '-d', TAG);
 
     r = await release(fx, [VERSION, '--resume']);
     expect(r.code).toBe(3);
     expect(r.out).toContain('Still to do: the public tag');
-    git(fx.exp, 'tag', '-s', TAG, '-m', TAG);
-    const exportCommit = git(fx.exp, 'rev-parse', 'HEAD');
+    git(fx.exp, 'tag', '-s', TAG, '-m', TAG, exportCommit);
 
-    // 4. push: the lesson #55 leak is refused out loud
+    // 6. push the tags: the lesson #55 leak is refused out loud
     r = await release(fx, [VERSION, '--resume']);
     expect(r.code).toBe(3);
     expect(r.out).toContain('WAITING at push');
@@ -516,10 +599,10 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(r.out).toContain('names the PRIVATE release commit');
     git(fx.exp, 'push', '-q', 'origin', `:refs/tags/${TAG}`);
 
-    git(fx.src, 'push', '-q', 'origin', 'main', `refs/tags/${TAG}`);
-    git(fx.exp, 'push', '-q', 'origin', 'main', `refs/tags/${TAG}`);
+    git(fx.src, 'push', '-q', 'origin', `refs/tags/${TAG}`);
+    git(fx.exp, 'push', '-q', 'origin', `refs/tags/${TAG}`);
 
-    // 5. ci: nothing published yet is red, not "probably fine"
+    // 7. ci: nothing published yet is red, not "probably fine"
     r = await release(fx, [VERSION, '--resume']);
     expect(r.code).toBe(1);
     expect(r.out).toContain('FAILED  the fixture release workflow published');
@@ -529,9 +612,11 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     // Store upload landed on both mains between the push and the deploy). The
     // release is the published tag from here: the next resume re-stamped HEAD
     // as the release commit, re-ran the whole test chain on it and would have
-    // asked for the tag to be moved to it.
+    // asked for the tag to be moved to it. A docs heading written after the
+    // tag is not this release's, and the deploy checks must not ask for it.
     fs.writeFileSync(path.join(fx.src, 'AFTER.md'), 'work that is not in the release\n');
-    git(fx.src, 'add', 'AFTER.md');
+    fs.appendFileSync(path.join(fx.src, 'docs/GUIDE.md'), '\n## Written after the tag\n\nNot in this release.\n');
+    git(fx.src, 'add', 'AFTER.md', 'docs/GUIDE.md');
     git(fx.src, 'commit', '-q', '-m', 'docs: after the tag');
     git(fx.src, 'push', '-q', 'origin', 'main');
     fs.writeFileSync(path.join(fx.exp, 'AFTER.md'), 'work that is not in the release\n');
@@ -545,7 +630,25 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(r.out).not.toContain('WAITING at sign');
     expect(r.out).toContain('STOPPED at ci');
 
-    // 6. deploy: (c) a docs site serving the previous snapshot is refused
+    // --only deploy: the deploy checks alone while ci is held red (lesson
+    // #1023), on the TAGGED commits, confirming nothing
+    publish(fx, { docsFresh: false });
+    r = await release(fx, [VERSION, '--resume', '--only', 'deploy']);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('is an OLD snapshot');
+    expect(r.out).not.toContain(banner('ci'));
+    publish(fx, { docsFresh: true });
+    r = await release(fx, [VERSION, '--resume', '--only', 'deploy']);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain(`ok      the fixture docs serve ${TAG}`);
+    expect(r.out).toContain('the deploy checks are green');
+    expect(r.out).not.toContain('is released');
+    expect((await release(fx, [VERSION, '--resume', '--only', 'deploy', '--ack', 'deploy'])).code).toBe(2);
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('STOPPED at ci');
+
+    // 8. deploy: (c) a docs site serving the previous snapshot is refused
     publish(fx, { docsFresh: false });
     r = await release(fx, [VERSION, '--resume'], { FIXTURE_CI_DONE: '1' });
     expect(r.code).toBe(1);
@@ -569,5 +672,109 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(run(fx.env, 'git', [`--git-dir=${fx.privateRemote}`, 'rev-parse', `${TAG}^{commit}`])).toBe(releaseCommit);
     expect(run(fx.env, 'git', [`--git-dir=${fx.publicRemote}`, 'rev-parse', `${TAG}^{commit}`])).toBe(exportCommit);
     expect((await release(fx, [VERSION, '--resume'])).out).toContain('has already been released');
+  });
+
+  // ⚠ v0.46.0/v0.47.0: tags pushed, a fix pushed to main, and only then
+  // --resume — whose record still said "push: waiting". That resume took HEAD
+  // for the release commit and ran the whole chain on it again. Whether a tag
+  // is out is asked of the remotes, not of the record.
+  it('once a tag is on a remote, a resume never goes back to the stamp or the test chain', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    const git = (dir: string, ...args: string[]) => gitIn(fx, dir, ...args);
+    await toLand(fx);
+    const releaseCommit = git(fx.src, 'rev-parse', 'HEAD');
+    const exportCommit = landBoth(fx);
+    let r = await release(fx, [VERSION, '--resume']);
+    expect(r.out).toContain('WAITING at sign');
+    git(fx.src, 'tag', '-s', TAG, '-m', TAG, releaseCommit);
+    git(fx.exp, 'tag', '-s', TAG, '-m', TAG, exportCommit);
+    git(fx.src, 'push', '-q', 'origin', `refs/tags/${TAG}`);
+    git(fx.exp, 'push', '-q', 'origin', `refs/tags/${TAG}`);
+    // …and main moves on before anybody runs --resume
+    fs.writeFileSync(path.join(fx.src, 'AFTER.md'), 'a fix after the tags\n');
+    git(fx.src, 'add', 'AFTER.md');
+    git(fx.src, 'commit', '-q', '-m', 'fix: after the tags');
+    git(fx.src, 'push', '-q', 'origin', 'main');
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.out).toContain(`published as ${TAG} (${releaseCommit.slice(0, 10)})`);
+    expect(r.out).not.toContain('on top of the release commit');
+    expect(r.out).not.toContain('FAILED  the fixture test suite');
+    expect(r.out).toContain(`ok      origin: ${TAG} is the release commit`);
+    expect(r.out).toContain('STOPPED at ci');
+    expect(r.code).toBe(1);
+    expect(git(fx.src, 'rev-list', '--count', `${releaseCommit}..HEAD`)).toBe('1');
+    const state = JSON.parse(fs.readFileSync(path.join(fx.src, '.git', 'filex-release', `${TAG}.json`), 'utf8'));
+    expect(state.releaseCommit).toBe(releaseCommit);
+    expect(dispatched(fx)).toHaveLength(1);
+  });
+
+  it('a red gate spends no number: the fix lands on main, and GitHub tests the new commits', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    const git = (dir: string, ...args: string[]) => gitIn(fx, dir, ...args);
+    await toLand(fx);
+    const first = landBoth(fx);
+    let r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_DRY: 'failure' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('STOPPED at gate');
+
+    // the fix: a commit on top of the release commit, pushed
+    commitAndPush(fx, fx.src, { 'docs/GUIDE.md': '# Guide\n\n## Getting started\n\nOpen it.\n\n## Sharing a folder with a team\n\nPick the team, then share.\n' }, 'fix: what the dry run found');
+    const fixed = git(fx.src, 'rev-parse', 'HEAD');
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.out).toContain('1 commit(s) on top of the release commit');
+    expect(r.out).toContain('ok      the fixture test suite');
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('WAITING at land');
+    expect(git(fx.exp, 'diff', '--cached', '--name-only')).toContain('docs/GUIDE.md');
+
+    const second = landBoth(fx);
+    expect(git(fx.exp, 'rev-parse', `${second}^`)).toBe(first);
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}" ${fixed}`);
+    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}" ${second}`);
+    expect(dispatched(fx).map((d) => d.sha)).toEqual([first, second]);
+    expect(git(fx.src, 'tag', '--list', TAG)).toBe('');
+    expect(run(fx.env, 'git', [`--git-dir=${fx.publicRemote}`, 'tag', '--list'])).not.toContain(TAG);
+  });
+
+  it('refuses a dry run GitHub does not name as one; fixed in a workflow, the gate tests the new public main', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    const git = (dir: string, ...args: string[]) => gitIn(fx, dir, ...args);
+    await toLand(fx);
+    landBoth(fx);
+    let r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_NAME: 'old' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('none named "dry run all');
+    expect(r.out).toContain('release-verify.patch');
+
+    // the workflow fix is the public checkout's own commit; the export on
+    // top of it has nothing to add, and that commit is what gets tested
+    commitAndPush(fx, fx.exp, { '.github/workflows/release.yml': 'name: Release\nrun-name: named\non: push\njobs: {}\n' }, 'ci(release): name the dry runs');
+    const fixedWorkflows = git(fx.exp, 'rev-parse', 'HEAD');
+    r = await release(fx, [VERSION, '--resume']);
+    expect(r.out).toContain(`the export added nothing: ${fixedWorkflows.slice(0, 10)} already holds its tree`);
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}" ${fixedWorkflows}`);
+    expect(dispatched(fx).at(-1)).toMatchObject({ sha: fixedWorkflows, title: `dry run all ${fixedWorkflows}` });
+  });
+
+  it('waits for GitHub, and a resume carries on waiting without starting a second dry run', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    await toLand(fx);
+    const exportCommit = landBoth(fx);
+    let r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_DRY: 'in_progress' });
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('WAITING at gate');
+    expect(r.out).toContain('GitHub has not finished');
+    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: '' });
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('ci.yml: none');
+    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: 'failure' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`FAILED  ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
+    expect(dispatched(fx)).toHaveLength(1);
   });
 });

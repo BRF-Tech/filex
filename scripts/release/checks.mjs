@@ -8,6 +8,8 @@
 // is written next to the rule, so nobody deletes one as "too strict" without
 // reading what it cost the last time.
 
+import { headingLines } from '../../docs-site/scripts/markdown-headings.mjs';
+
 // ── versions ────────────────────────────────────────────────────────────────
 
 export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -337,32 +339,15 @@ export function htmlText(html) {
  * run of the same character at least as long, with nothing after it, closes
  * it; a fence never closed runs to the end of the page. A backtick run with
  * another backtick on its line is inline code, not a fence. YAML front matter
- * at the top of a page is not part of the page either.
+ * at the top of a page is not part of the page either. The rules live in
+ * docs-site/scripts/markdown-headings.mjs, which the Releases page generator
+ * reads as well: one reader, so the two cannot disagree (task #148).
  */
 export function headingsOf(markdown) {
-  const lines = String(markdown).split(/\r?\n/);
-  let i = 0;
-  if (lines[0] === '---') {
-    const end = lines.findIndex((l, n) => n > 0 && /^---\s*$/.test(l));
-    if (end > 0) i = end + 1;
-  }
   const out = [];
-  let fence = null;
-  for (; i < lines.length; i++) {
-    const line = lines[i];
-    if (fence) {
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
-      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
-      continue;
-    }
-    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
-      fence = open[1];
-      continue;
-    }
-    const h = /^#{1,4}\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!h || /[<>{}]/.test(h[1])) continue;
-    const text = markdownInline(h[1]);
+  for (const { level, text: raw } of headingLines(markdown)) {
+    if (level > 4 || /[<>{}]/.test(raw)) continue;
+    const text = markdownInline(raw);
     if (text.length >= 4) out.push(text);
   }
   return out;
@@ -466,6 +451,33 @@ export function globMatch(glob, file) {
     }
   }
   return new RegExp(`${re}$`).test(file);
+}
+
+// ── what GitHub ran on a commit ─────────────────────────────────────────────
+
+/**
+ * The name release.yml's `run-name` gives a dry run of a branch: started by
+ * hand, `publish` off, every package (`only: all`), no tag. A run's inputs are
+ * not in GitHub's API, so the name is how the release gate and the tag run's
+ * `verify` job tell the one dry run that tested everything from the others.
+ */
+export function dryRunTitle(sha) {
+  return `dry run all ${sha}`;
+}
+
+/**
+ * One workflow's runs on one commit, as one answer. A success anywhere wins
+ * (a re-run that passed is a pass); then anything still going means wait;
+ * only then is a run that ended any other way the answer.
+ */
+export function runVerdict(runs) {
+  const list = runs ?? [];
+  if (!list.length) return { state: 'none', run: null };
+  const ok = list.find((r) => r.status === 'completed' && r.conclusion === 'success');
+  if (ok) return { state: 'success', run: ok };
+  const going = list.find((r) => r.status !== 'completed');
+  if (going) return { state: 'running', run: going };
+  return { state: 'failure', run: list[0] };
 }
 
 // ── README ──────────────────────────────────────────────────────────────────

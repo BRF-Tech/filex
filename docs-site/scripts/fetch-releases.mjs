@@ -60,6 +60,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { githubSlug } from '../.vitepress/github-slug.mjs'
+import { headingLines } from './markdown-headings.mjs'
 import { exportRules, neutralize } from './neutralize.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -459,25 +460,15 @@ const headingIdCache = new Map()
 export function headingIds(file) {
   if (headingIdCache.has(file)) return headingIdCache.get(file)
   const ids = new Set()
-  let fence = null
   let text = ''
   try {
     text = fs.readFileSync(file, 'utf8')
   } catch {
     // no page, no ids
   }
-  for (const line of text.split(/\r?\n/)) {
-    const f = line.match(/^\s{0,3}(`{3,}|~{3,})/)
-    if (f) {
-      if (!fence) fence = f[1][0]
-      else if (f[1][0] === fence) fence = null
-      continue
-    }
-    if (fence) continue
-    const h = line.match(/^\s{0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$/)
-    if (!h) continue
-    const custom = h[1].match(/\{#([^}\s]+)\}\s*$/)
-    const base = custom ? custom[1] : githubSlug(headingText(h[1]))
+  for (const { text: raw } of headingLines(text)) {
+    const custom = raw.match(/\{#([^}\s]+)\}\s*$/)
+    const base = custom ? custom[1] : githubSlug(headingText(raw))
     let id = base
     for (let n = 1; ids.has(id); n++) id = `${base}-${n}`
     ids.add(id)

@@ -28,7 +28,7 @@ const rows: Row[] = [
 const columns = [{ id: 'name', label: 'Name', sortable: true }];
 
 const mounted: VueWrapper[] = [];
-function table(props: Record<string, unknown> = {}) {
+function table(props: Record<string, unknown> = {}, slots: Record<string, string> = {}) {
   const w = mount(DataTable, {
     props: {
       rows,
@@ -38,6 +38,7 @@ function table(props: Record<string, unknown> = {}) {
       rowAttrs: (r: Row) => ({ 'data-testid': `row-${r.id}` }),
       ...props,
     },
+    slots,
     attachTo: document.body,
   });
   mounted.push(w);
@@ -118,5 +119,118 @@ describe('DataTable — one Actions control, only where there is something to do
     expect(w.find('[data-testid="actions-1"]').exists()).toBe(true);
     expect(w.find('[data-testid="actions-2"]').exists()).toBe(false);
     expect(w.find('[data-testid="actions-3"]').exists()).toBe(true);
+  });
+});
+
+// ── accessibility (task #153) ───────────────────────────────────────────────
+// axe, measured on the Apps store's 22 tables: a focusable `separator` has to
+// carry its value (critical), a `rowgroup` has to hold rows, and the empty box
+// is drawn only when there is something to say.
+describe('DataTable — the column handle is a real separator', () => {
+  const sized = [
+    { id: 'name', label: 'Name', width: 200, min: 120, max: 400 },
+    { id: 'size', label: 'Size', width: 100, min: 60, max: 240 },
+  ];
+  const handle = (w: VueWrapper, id: string) => w.get(`.fe-list__head [data-col="${id}"] [role="separator"]`);
+
+  it('carries aria-valuenow / min / max, for the lead and for the others', () => {
+    const w = table({ tableId: 'test.aria', columns: sized });
+    for (const [id, now, min, max] of [
+      ['name', 200, 120, 400],
+      ['size', 100, 60, 240],
+    ] as const) {
+      const h = handle(w, id);
+      expect(h.attributes('aria-valuenow'), id).toBe(String(now));
+      expect(h.attributes('aria-valuemin'), id).toBe(String(min));
+      expect(h.attributes('aria-valuemax'), id).toBe(String(max));
+    }
+  });
+
+  it('follows a keyboard step, and stops at the column max', async () => {
+    const w = table({ tableId: 'test.aria.key', columns: sized });
+    const h = handle(w, 'size');
+    await h.trigger('keydown', { key: 'ArrowRight' });
+    expect(h.attributes('aria-valuenow')).toBe('116');
+    for (let i = 0; i < 20; i++) await h.trigger('keydown', { key: 'ArrowRight' });
+    expect(h.attributes('aria-valuenow')).toBe('240');
+    await h.trigger('keydown', { key: 'ArrowLeft' });
+    expect(h.attributes('aria-valuenow')).toBe('224');
+  });
+});
+
+describe('DataTable — an empty table', () => {
+  const body = (w: VueWrapper) => w.get('.fe-list__body');
+
+  it('puts the notice in a row, so the rowgroup holds only rows', () => {
+    const w = table({ rows: [], empty: 'Nothing here' });
+    const box = w.get('.fe-list__empty');
+    expect(body(w).attributes('role')).toBe('rowgroup');
+    expect(box.attributes('role')).toBe('row');
+    const cell = box.get('[role="gridcell"]');
+    expect(cell.text()).toBe('Nothing here');
+    expect(Number(cell.attributes('aria-colspan'))).toBeGreaterThanOrEqual(2);
+    for (const child of Array.from(body(w).element.children)) expect(child.getAttribute('role')).toBe('row');
+  });
+
+  it('loading with no rows is a row too', () => {
+    const w = table({ rows: [], loading: true });
+    expect(w.get('.fe-list__empty--loading').attributes('role')).toBe('row');
+    expect(body(w).attributes('role')).toBe('rowgroup');
+  });
+
+  it('says the shipped words when `empty` is not given', () => {
+    expect(table({ rows: [] }).get('.fe-list__empty').text()).toBe(en['table.empty']);
+  });
+
+  it("draws no box at all for '' or null, and no rowgroup to hold nothing", () => {
+    for (const empty of ['', null]) {
+      const w = table({ rows: [], empty });
+      expect(w.find('.fe-list__empty').exists(), `empty=${JSON.stringify(empty)}`).toBe(false);
+      expect(body(w).element.children.length).toBe(0);
+      expect(body(w).attributes('role')).toBe('presentation');
+    }
+  });
+
+  it('an `empty` slot still draws when `empty` is ""', () => {
+    const w = table({ rows: [], empty: '' }, { empty: '<em>custom</em>' });
+    expect(w.get('.fe-list__empty').text()).toBe('custom');
+  });
+});
+
+describe('DataTable — the width observer answers a frame later', () => {
+  it('applies a reported width on the next animation frame, not inside the callback', async () => {
+    // WebKit raises "ResizeObserver loop completed with undelivered
+    // notifications" as a page error when the callback's own change lands in
+    // the same delivery (task #153).
+    const real = window.ResizeObserver;
+    let report: ResizeObserverCallback | null = null;
+    window.ResizeObserver = class {
+      constructor(cb: ResizeObserverCallback) {
+        report = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const w = table({
+        tableId: 'test.ro',
+        columns: [
+          { id: 'name', label: 'Name', width: 300, min: 120, max: 600 },
+          { id: 'size', label: 'Size', width: 300, min: 120, max: 600 },
+        ],
+      });
+      await w.vm.$nextTick();
+      const head = () => (w.get('.fe-list__head').element as HTMLElement).style.width;
+      const shipped = head();
+      report!([{ contentRect: { width: 360 } } as ResizeObserverEntry], {} as ResizeObserver);
+      await w.vm.$nextTick();
+      expect(head(), 'applied inside the callback').toBe(shipped);
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      await w.vm.$nextTick();
+      expect(head(), 'never applied').not.toBe(shipped);
+    } finally {
+      window.ResizeObserver = real;
+    }
   });
 });

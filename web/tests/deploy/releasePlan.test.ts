@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { toWslPath } from '../../../scripts/lib/go-build.mjs';
 import { findBash, shq, slash } from '../../../scripts/release/engine.mjs';
 import plan from '../../../scripts/release/plan.mjs';
+import { STAGES } from '../../../scripts/release/stages.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 const bash = findBash();
@@ -79,6 +80,28 @@ describe("this repository's release plan", () => {
       }
     });
   }
+
+  // ⚠⚠ #76: the tag started the test, and 0.43.0, 0.43.1, 0.44.0, 0.44.1 and
+  // 0.45.0 each spent a number on a red tag run. The tags come after GitHub
+  // has tested the very commits they name.
+  it('tags only after GitHub tested the export commit: export, land, gate, sign, push, ci', () => {
+    const ids = STAGES.map((s: { id: string }) => s.id);
+    const order = ['stamp', 'pretag', 'export', 'land', 'gate', 'sign', 'push', 'ci', 'deploy'].map((id) => ids.indexOf(id));
+    expect(order.every((i) => i >= 0), `the stages are ${ids.join(', ')}`).toBe(true);
+    expect([...order].sort((a, b) => a - b), `the stages are ${ids.join(', ')}`).toEqual(order);
+  });
+
+  it('the gate asks GitHub through the plan, starts the dry run CONTRIBUTING names, and stops waiting', () => {
+    expect(p.github?.repo).toBe('BRF-Tech/filex');
+    expect(typeof p.github.runs).toBe('function');
+    expect(typeof p.github.dispatch).toBe('function');
+    const cmd = p.github.command({ workflow: 'release.yml', ref: p.branch, inputs: { publish: 'false' } });
+    expect(cmd).toBe('gh workflow run release.yml -R BRF-Tech/filex --ref main -f publish=false');
+    expect(fs.readFileSync(path.join(REPO, 'docs', 'CONTRIBUTING.md'), 'utf8'), 'the Release process names another command').toContain(cmd);
+    expect(p.gateWait.pollMs).toBeGreaterThan(0);
+    expect(p.gateWait.timeoutMs).toBeGreaterThan(p.gateWait.pollMs);
+    expect(Number.isFinite(p.gateWait.timeoutMs)).toBe(true);
+  });
 
   it('gate names are unique (each writes its own log)', () => {
     for (const stage of ['audit', 'docs', 'pretag', 'exportGates', 'published', 'deployed']) {

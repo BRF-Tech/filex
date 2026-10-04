@@ -704,14 +704,19 @@ Maintainer-only. Reproducible, automated by CI.
 **Cut it with `pnpm release X.Y.Z`.** The steps below are what that command
 does, in this order, and every step it can check is a gate that stops the
 release when it is red - there is no option to skip one, and an option it does
-not know is refused rather than ignored. It never signs, pushes or deploys: at
-those steps it stops, prints the exact commands, and on `--resume` reads back
-what was done - each tag's signature and target, what both remotes now hold (a
-public tag naming a private commit is refused out loud), and what the servers,
-the update feeds and docs.filex.sh actually serve. The two judgements no script
-can make are a person's to confirm: the README, screenshot and documentation
-audit (steps 1-3, `--ack audit`) and the parts of the deploy nothing can read
-back (`--ack deploy`).
+not know is refused rather than ignored. It never commits the export, signs,
+pushes or deploys: at those steps it stops, prints the exact commands, and on
+`--resume` reads back what was done - each tag's signature and target, what both
+remotes now hold (a public tag naming a private commit is refused out loud), and
+what the servers, the update feeds and docs.filex.sh actually serve. The one
+thing it starts on GitHub is a dry run of `release.yml`, which publishes nothing
+(step 7). The two judgements no script can make are a person's to confirm: the
+README, screenshot and documentation audit (steps 1-3, `--ack audit`) and the
+parts of the deploy nothing can read back (`--ack deploy`).
+
+**The tag comes last.** Both `main` branches are pushed without a tag, GitHub
+tests that very commit, and only a commit that passed is tagged (steps 7-8). A
+red run spends no version number: fix `main` and resume.
 
 ```bash
 pnpm release 0.45.0 --plan      # every stage and gate, in order; runs nothing
@@ -720,6 +725,8 @@ pnpm release 0.45.0 --dry-run   # every gate, nothing written: the stamp goes to
 pnpm release 0.45.0             # stops at the first red gate or person's step
 pnpm release 0.45.0 --resume    # carry on (exit 3 = waiting for you, 1 = a red gate)
 pnpm release 0.45.0 --status    # where the recorded run got to
+pnpm release 0.45.0 --resume --only deploy   # once the tags are out: the deploy
+                                # checks alone, on the tagged commits
 ```
 
 > ⚠ The gates live in `scripts/release/plan.mjs` (this repository's list,
@@ -974,42 +981,110 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    a single line of frontend, so the admin build is the only local check that
    would have caught it - CI catches it afterwards, when the tag is already
    public.
-   ⚠⚠ **The tag is now gated on the test suite, and it did not used to be.**
-   `release.yml`'s first job calls `ci.yml`, and everything that publishes -
-   binaries, images, npm, the installers - waits for it. Before this, CI ran on
-   the branch push and the release on the tag pushed two seconds later, in
-   parallel and unaware of each other, with no required status check anywhere
-   in the repository. Measured 2026-09-06: **CI had been red since v0.31.0 and
-   four tags shipped over it.** The failure was real (a user who had chosen
-   Turkish saw an English admin panel on any second device) and none of the
-   steps above would ever have caught it - they check README, screenshots,
-   links, anchors and version manifests, and never run a test.
-   ⚠⚠ **The gate builds both images, and cannot be told not to.** Until
+   ⚠⚠ **Nothing publishes over a red suite, and it used to.** Everything in
+   `release.yml` that publishes - binaries, images, npm, the installers -
+   waits for its gate, `verify` (step 7 says what it checks). Before
+   2026-09-06, CI ran on the branch push and the release on the tag pushed two
+   seconds later, in parallel and unaware of each other, with no required
+   status check anywhere in the repository. Measured 2026-09-06: **CI had been
+   red since v0.31.0 and four tags shipped over it.** The failure was real (a
+   user who had chosen Turkish saw an English admin panel on any second
+   device) and none of the steps above would ever have caught it - they check
+   README, screenshots, links, anchors and version manifests, and never run a
+   test.
+   ⚠⚠ **The suite builds both images, and cannot be told not to.** Until
    v0.43.2 the release called `ci.yml` with `skip_docker: true` ("the release's
    own docker job builds the same image") - but `binaries`, `docker` and `npm`
    start *beside* one another once the gate passes, so when v0.43.0's images
    failed, npm and the Release were already public. The input is gone, the
    image job has no `if:`, and `web/tests/deploy/releaseGatesImages.test.ts`
-   fails if either comes back or a publishing job stops waiting for the gate.
-   (It reads `.github/workflows`; in a checkout without them, point
+   fails if either comes back, if a publishing job stops waiting for
+   `verify`, or if `verify` stops asking for both runs of step 7. (It reads
+   `.github/workflows`; in a checkout without them, point
    `FILEX_WORKFLOWS_DIR` at the published ones.)
 
-7. Tag: `git tag -s vX.Y.Z -m "vX.Y.Z"` - **signed**, and `git tag -v vX.Y.Z`
-   must answer `Good signature` before you push. Releases up to and including
-   v0.27.5 are plain annotated tags: the instruction said `-s` for months while
-   no signing key existed, so nobody could follow it and nobody noticed. The
-   maintainer key is `EFA3B126 2FD99280 0DBBB5E3 A8FEBA97 FF786513` (ed25519,
-   expires 2028-08-31); its passphrase and a recovery copy live in the team
-   vault, not on disk.
-8. Push: `git push origin main` and then the one tag you just made
-   (`git push origin refs/tags/vX.Y.Z`). Push the tag by name rather than
-   `--tags`: this checkout accumulates local tags, and `--tags` publishes
-   every one of them, including any you were not ready to release.
+7. **Push both `main` branches without a tag, and let GitHub test that
+   commit.** Commit the export in the public checkout - one commit, exactly
+   what the export staged, no `Fixes #N` (it would close the issue) - then
+   push the private `main` and the public `main`, and no tag. On `--resume`
+   the tool starts
 
-   > ⚠ Steps 6-8 happen in the checkout whose `origin` is **GitHub** - that is
-   > what `release.yml` watches. Development happens on GitLab; the public tree
-   > is produced by `scripts/export-public.sh`, and the signed tag is made
-   > there, on the commit that is actually published.
+   ```bash
+   gh workflow run release.yml -R BRF-Tech/filex --ref main -f publish=false
+   ```
+
+   a dry run of the whole release on that commit - the test suite, both
+   images, goreleaser `--snapshot`, every desktop package including arm64,
+   nothing published - and waits until it and `ci.yml`, which the push
+   started, have both passed on the export commit. The workflow names that run
+   `dry run all <commit>` (its `run-name`): GitHub's API does not give a run's
+   inputs, so the name is how the tool, and later the tag run, tell the dry
+   run of everything from any other run started by hand.
+
+   A red run spends no version number, because nothing is tagged yet:
+
+   * a flake: re-run its failed jobs (`gh run rerun <id> --failed`, the tool
+     prints it), then `--resume`;
+   * a fault in the code: fix it on `main` - a commit on top of the release
+     commit - push it, and `--resume`: the chain, the export, this step and
+     the gate run again on the fix;
+   * a fault in a workflow: fix it in the public checkout, commit, push
+     `main`, and `--resume`: the export has nothing new to stage, and the gate
+     runs on the new public `main`.
+
+   > Why the tag moved to the end (#76): the tag used to start the test. 0.43.0
+   > shipped without images, 0.43.1 stopped at the gate, 0.44.0 and 0.44.1
+   > failed in goreleaser after npm and the images were out, and 0.45.0
+   > published nothing - five numbers, each one fixable only by the next. From
+   > 0.45.1 `main` went out first and the tag waited for CI by hand; the tool
+   > now does it, and adds the dry run, because 0.44.0 and 0.44.1 died in a
+   > build step no test runs.
+
+   > ⚠ `ci.yml` groups its runs by the workflow that started them as well as by
+   > the ref. Called from `release.yml` it runs with the caller's `github`
+   > context, and grouped by the ref alone, the dry run on `main` and the CI run
+   > of that push of `main` would share a group - and the newer would cancel the
+   > older, one of the two runs the tag waits for.
+
+8. **Tag the commits GitHub tested, then push the tags.** The tool prints
+   both commits: `git tag -s vX.Y.Z -m "vX.Y.Z" <release commit>` in this
+   checkout and `git tag -s vX.Y.Z -m "vX.Y.Z" <export commit>` in the public
+   one - **signed**, and `git tag -v vX.Y.Z` must answer `Good signature`
+   before you push. Releases up to and including v0.27.5 are plain annotated
+   tags: the instruction said `-s` for months while no signing key existed, so
+   nobody could follow it and nobody noticed. The maintainer key is
+   `EFA3B126 2FD99280 0DBBB5E3 A8FEBA97 FF786513` (ed25519, expires
+   2028-08-31); its passphrase and a recovery copy live in the team vault, not
+   on disk.
+
+   Then push each tag by name, one at a time
+   (`git push origin refs/tags/vX.Y.Z`), never `--tags`: a checkout
+   accumulates local tags, and `--tags` publishes every one of them, including
+   any you were not ready to release.
+
+   The tag run publishes. Its gate, `verify`, publishes nothing unless GitHub
+   holds a successful `ci.yml` run started by a push and a successful run named
+   `dry run all <commit>` on the tagged commit itself, and it fails when it
+   cannot ask - so a tag on a commit nobody tested publishes nothing. (A tag
+   pushed before the gate was green waits the same way: when the gate is
+   green, re-run that tag run's failed jobs.) The tag run builds everything
+   again from the tag; it does not reuse the dry run's artifacts. A run
+   started by hand that adds the ARM packages to a release (`-f only=arm64
+   -f publish=true`) is asked the same of that tag's commit, so it publishes
+   nothing for a tag cut before this check existed.
+
+   Once a tag is on a remote, `--resume` never goes back to the stamp or the
+   test chain, whatever `main` has done since: the release is the tag. When
+   the `ci` stage is held red by something that is not ours to hurry (0.51.0:
+   a Snap Store review still open from the previous release),
+   `pnpm release X.Y.Z --resume --only deploy` runs the deploy checks alone,
+   on the tagged commits, and confirms nothing.
+
+   > ⚠ The public halves of steps 7 and 8 happen in the checkout whose
+   > `origin` is **GitHub** - that is what `release.yml` watches. Development
+   > happens on GitLab; the public tree is produced by
+   > `scripts/export-public.sh`, and the signed tag is made there, on the
+   > commit that is actually published.
 
    > ⚠ **An export that refuses half-way leaves that checkout half rebuilt.**
    > `scripts/export-public.sh` checks the tree after it has rewritten it, so
@@ -1093,11 +1168,11 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > answer: a refusal means something about to become public should not -
    > stop and tell the maintainer first.
 
-CI does the rest (GitHub Actions `release.yml`: the `test` gate above, then
-five jobs):
-- `binaries` (needs `test`) - goreleaser: multi-arch binaries → the GitHub
+CI does the rest (GitHub Actions `release.yml` on the tag: the `verify` gate
+of step 8, then five jobs):
+- `binaries` (needs `verify`) - goreleaser: multi-arch binaries → the GitHub
   Release. It is what *creates* the Release, so `desktop` below depends on it.
-- `docker` (needs `test`, nothing else) - a **matrix**, one native runner per
+- `docker` (needs `verify`, nothing else) - a **matrix**, one native runner per
   architecture (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm`), each
   pushing by digest. ⚠ It does **not** wait for `binaries` - it builds its own
   binary and never wanted the release. arm64 used to run under QEMU behind
@@ -1119,7 +1194,7 @@ five jobs):
   *Settings → Updates* **Download** button points into it. Put
   `filex-desktop-portable-x64.exe` there with the installer, or that button
   leads to a file that is not on the server.
-- `npm` (needs `test`, nothing else) - publishes every package under
+- `npm` (needs `verify`, nothing else) - publishes every package under
   `packages/`: `@brftech/filex-core`, `@brftech/filex`, `@brftech/filex-react`
   and (since 0.48) `@brftech/filex-app-ui`, the SDK an app's own interface
   bundles. ⚠ The core package depends on the SDK at run time, so a release
@@ -1267,7 +1342,7 @@ five jobs):
     The third of this gate that needs neither a server nor the network -
     the URL grammar, the quickstart command, the publish paths that carry no
     converter - is `web/tests/deploy/shopWindow.test.ts`, so it runs on every
-    push and in `pnpm test`, and step 6's CI gate already blocks the tag on it.
+    push and in `pnpm test`, and steps 6 and 7 already block the tag on it.
     Nothing to run by hand.
 
     ⚠ `--instance` boots a throwaway on port 5941 with demo mode on, an
