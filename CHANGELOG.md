@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The README in five more languages** - Turkish, German, Spanish, French and
+  Simplified Chinese (`README.tr.md`, `README.de.md`, `README.es.md`,
+  `README.fr.md`, `README.zh-CN.md`), each linked from a language line under
+  the badges of all six. An interface label is written as filex's interface
+  shows it in that language - the built-in Turkish catalogue, the German,
+  Spanish and French language packs - so a reader finds on screen what the page
+  named; there is no Chinese interface yet, so the Chinese page keeps the
+  English label and glosses it. Code blocks, commands, link targets and
+  screenshots are the English README's, unchanged. Each translation names the
+  commit it was made from and says that the English text holds where the two
+  differ; all five are machine-translated and awaiting review by a native
+  speaker. `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs` read
+  the translations too, so a renamed docs heading names the link to fix in each
+  of them ([CONTRIBUTING.md](docs/CONTRIBUTING.md#docs)).
+
 ## [0.50.0] - 2026-10-02
 
 > ⚠ **Desktop app on Linux: Chromium's sandbox is no longer optional**

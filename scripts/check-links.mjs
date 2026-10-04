@@ -34,6 +34,9 @@ function collect() {
   for (const r of ['README.md', 'CHANGELOG.md', 'SECURITY.md', 'docs',
                    'desktop/README.md', 'e2e/README.md', 'deploy/README.md']) add(r)
   for (const d of ['core', 'react', 'webcomponent']) add(`packages/${d}/README.md`)
+  // The README's translations (README.tr.md, README.zh-CN.md, ...) link to the
+  // same files it does, from the same directory.
+  for (const f of fs.readdirSync(root).sort()) if (/^README\.[\w-]+\.md$/.test(f)) add(f)
   return out
 }
 

@@ -10,6 +10,8 @@
 [![Container](https://img.shields.io/badge/ghcr.io-brf--tech%2Ffilex-2496ed?logo=docker&logoColor=white)](https://github.com/BRF-Tech/filex/pkgs/container/filex)
 [![Live demo](https://img.shields.io/badge/live_demo-demo.filex.sh-f59e0b)](https://demo.filex.sh)
 
+**English** · [Türkçe](README.tr.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
 A single Go binary with a full-featured web UI, pluggable storage/auth/DB drivers,
 **real-time collaboration**, **an embeddable web component**, a **desktop app whose
 folder sync is live** - an edit on either side arrives in about a second - a

@@ -93,6 +93,9 @@ function rel(p) {
 // export, so an anchor rotting inside one is not a reader-visible defect.
 const FILES = [
   'README.md',
+  // Its translations (README.tr.md, README.zh-CN.md, ...): the same links into
+  // `docs/…#section`, and in-page links that follow each one's own headings.
+  ...ls(REPO).filter((f) => /^README\.[\w-]+\.md$/.test(f)),
   'CHANGELOG.md',
   'SECURITY.md',
   'CODE_OF_CONDUCT.md',
