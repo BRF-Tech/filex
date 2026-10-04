@@ -10,6 +10,8 @@
 [![Container](https://img.shields.io/badge/ghcr.io-brf--tech%2Ffilex-2496ed?logo=docker&logoColor=white)](https://github.com/BRF-Tech/filex/pkgs/container/filex)
 [![Live demo](https://img.shields.io/badge/live_demo-demo.filex.sh-f59e0b)](https://demo.filex.sh)
 
+**English** · [Türkçe](README.tr.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [Français](README.fr.md) · [简体中文](README.zh-CN.md)
+
 A single Go binary with a full-featured web UI, pluggable storage/auth/DB drivers,
 **real-time collaboration**, **an embeddable web component**, a **desktop app whose
 folder sync is live** - an edit on either side arrives in about a second - a
@@ -48,7 +50,7 @@ there. `/data` is filex's own directory (SQLite database, search index, thumbnai
 which is why it is a named volume and not the folder you drop files into; the two are
 separate on purpose. Point `$PWD` somewhere else, or add more storages from the admin
 panel later - a bucket with several top-level folders can be mounted as one storage
-per folder in one go (*Storages → Add → Mount several folders at once*).
+per folder in one go (*Storages → Add storage → Mount several folders at once*).
 
 The container runs as **root** by default, so what it writes into `/data` is root-owned;
 set `PUID`/`PGID` to run it as yourself
@@ -82,7 +84,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
   view *in* the app, not a page beside it - your drives, what you opened last and what
   you starred, under the same sidebar and the same header as the files. This is the
   shell everybody gets: a single search field across the header with its ⌘K palette
-  hint, a Type / People / Modified / Size filter row, Folders and Files as labelled
+  hint, a Type / Owner / Modified / Size filter row, Folders and Files as labelled
   sections, Details and Activity in the info panel, and a storage line. For people who
   want a file drive rather than a file manager, `uiProfile: 'simple'` presets the rest
   of the chrome off - one pane, one folder, list or grid. One explorer in every case:
@@ -843,7 +845,7 @@ of plugin, a storage backend: [docs/PLUGINS.md](docs/PLUGINS.md).
   way back in - no account is privileged, the first administrator included
   (only a public demo's shared account is counted per address alone,
   [docs/DEMO.md](docs/DEMO.md)) - and **Admin → Sign-in security** holds the
-  limits, the list, the locks with *Unlock*, and the sign-in trail: every wrong
+  limits, the list, the locks with *Lift the lock*, and the sign-in trail: every wrong
   attempt, lock, release and settings change, once each, whichever door an
   administrator used (the panel, an API key, MCP). The address counted is the
   socket's peer unless that peer is a proxy you trust (`FILEX_TRUSTED_PROXIES`,

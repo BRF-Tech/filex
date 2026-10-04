@@ -252,7 +252,9 @@ export default function plan({ repo, version, tag }) {
     // prints which of them this release touched — a reminder, never a list
     // that could be "complete".
     docSurfaces: [
-      'README.md', 'site/index.html', 'web/src/views/Login.vue', 'web/src/locales/*.json',
+      // README.*.md: its translations, carried along or left behind whole
+      // (CONTRIBUTING → Docs); listed so the audit says which way it went.
+      'README.md', 'README.*.md', 'site/index.html', 'web/src/views/Login.vue', 'web/src/locales/*.json',
       'docs/*.md', 'docs/index.md', 'docs/README.md', 'docs-site/.vitepress/config.mts',
       'packages/*/README.md', 'desktop/README.md', 'deploy/*/README.md',
       'deploy/umbrel/*/umbrel-app.yml', 'deploy/casaos/*', 'deploy/runtipi/*/metadata/description.md',

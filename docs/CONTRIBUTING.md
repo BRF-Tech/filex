@@ -601,6 +601,25 @@ the translations have `noLongDashes.test.ts`); both read the rule from
 anchor changes with its dash: `node scripts/check-doc-anchors.mjs` names every
 link that has to follow it.
 
+**The README's translations follow the English one.** `README.md` is the
+source; `README.<lang>.md` at the root (`tr`, `de`, `es`, `fr`, `zh-CN`) are
+translations of it, linked from the language line under the badges. Each opens
+with a comment naming the commit it was translated from, so
+`git diff <that commit> -- README.md` is exactly what it is missing. A change
+to `README.md` does not wait for them: carry it into the translations in the
+same change when you can, and when you cannot, leave them whole and behind
+rather than half-updated - each one says in its first lines that the English
+text holds. Three things never differ from the English: code blocks and
+commands, link targets, image paths. And an interface label is written as the
+interface shows it in that language (the Turkish catalogue, a language pack's
+`translations/`), not as a translator would word it, so the page names what
+is on screen. A window that does not speak that language keeps its English
+label, glossed once: the desktop app's own windows (*Settings → Accounts*,
+*Settings → Open files with*) are English and Turkish only, whatever language
+pack the explorer inside them wears. `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs`
+read every `README.*.md` at the root; the long-dash test reads every tracked
+markdown file, these included.
+
 ---
 
 ## Screenshots
@@ -716,7 +735,8 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    filex*, *Features* and *Documentation*. The README is the page most readers
    see and the one nobody remembers to touch: a feature documented only under
    `docs/` does not exist as far as a new reader is concerned. Update
-   `docs/README.md` (the index) in the same pass.
+   `docs/README.md` (the index) in the same pass, and carry the change into
+   the translated READMEs or leave them behind whole ([Docs](#docs)).
 
    > Why this is step 1: by 2026-08-13 the desktop app, folder sync, the CLI,
    > trash & versioning, E2E folders and self-update had all shipped - six
