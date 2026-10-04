@@ -24,9 +24,15 @@ on:
   # exists gets used again, and re-adding one should be a decision, not a flag.
   workflow_call:
 
-# Cancel superseded runs on the same ref.
+# Cancel superseded runs on the same ref - started the same way.
+# ⚠ Called by release.yml, this runs with the CALLER's github context:
+# github.ref is the branch the release runs on and github.workflow is
+# "Release". Grouped by the ref alone, the dry run the release tool starts on
+# main before a tag would share a group with the CI run of the push of main
+# it starts beside, and the newer would cancel the older - one of the two
+# runs the tag waits for (docs/CONTRIBUTING.md, Release process, step 7).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -8,15 +8,22 @@ name: Release
 #
 # Job graph — and why it is shaped like this:
 #
-#   plan ── test ─┬─ binaries ─┬─ desktop  (installers, attached to the Release;
-#                 │            │     │      the snaps also to the Snap Store)
-#                 │            │     ├─ desktop-arm64-check (install + open on
-#                 │            │     │   real arm64 machines and Linux x64,
-#                 │            │     │   sandbox checked, screenshots)
-#                 │            │     └─ aur (PKGBUILD push)
-#                 │            └─ cli-smoke (CLI + server on arm64 machines)
-#                 ├─ docker ─── docker-manifest   (one native runner per arch)
-#                 └─ npm       (independent)
+#   plan ── test ── verify ─┬─ binaries ─┬─ desktop  (installers, attached to
+#                           │            │     │      the Release; the snaps
+#                           │            │     │      also to the Snap Store)
+#                           │            │     ├─ desktop-arm64-check (install +
+#                           │            │     │   open on real arm64 machines
+#                           │            │     │   and Linux x64, sandbox
+#                           │            │     │   checked, screenshots)
+#                           │            │     └─ aur (PKGBUILD push)
+#                           │            └─ cli-smoke (CLI + server on arm64)
+#                           ├─ docker ─── docker-manifest   (one native runner
+#                           │                                per arch)
+#                           └─ npm       (independent)
+#
+# `test` (ci.yml) runs in a run started by hand. A tag run skips it: its
+# commit was tested before it was tagged, and `verify` checks that it was
+# (see "The gate" below).
 #
 # `binaries` is goreleaser alone: it is what CREATES the GitHub Release, and
 # the only thing the other two need. Until v0.25.0 goreleaser and the docker
@@ -39,6 +46,11 @@ name: Release
 #       tested — the gate, goreleaser (--snapshot), both images, every desktop
 #       package including arm64 — and kept as run artifacts. Nothing is
 #       published: no Release, no image tag, no npm, no store.
+#       The run is named "dry run all <commit>" (run-name, below). Before a
+#       tag, the release tool starts one on main with -f publish=false, on the
+#       export commit it is about to tag, and the tag run's `verify` looks for
+#       exactly that name on its commit (docs/CONTRIBUTING.md → Release
+#       process, step 7).
 #
 #   gh workflow run release.yml -R BRF-Tech/filex -f tag=v0.48.0 -f only=arm64 [-f publish=true]
 #       The ARM packages for a release that shipped without them: the Linux
@@ -47,16 +59,29 @@ name: Release
 #       publish=true they are attached to its Release, the Windows update feed
 #       (latest.yml) gains the arm64 installer beside the x64 one, the snap
 #       goes to the Snap Store and the Store package to the Microsoft Store.
-#       Without it, a dry run of exactly that.
+#       Without it, a dry run of exactly that. With it, `verify` first asks
+#       the same of THAT tag's commit as of a tag push: CI and a dry run of
+#       everything passed on it. A tag cut before #76 has neither, and its
+#       ARM packages are not published from here.
 #
 # A FULL release publishes from its tag push and nothing else: `plan` refuses
 # publish=true without only=arm64 (goreleaser cannot recreate a Release, and a
-# half-rerun release is how v0.34.0's tag had to be moved).
+# half-rerun release is how v0.34.0's tag had to be moved). And the tag push
+# publishes only a commit that passed ci.yml and a dry run first (`verify`).
 #
 # ⚠ In a run on a tag the workflow file comes from the branch it was started
 # on and the code from the tag. The tag's tree has the tag's
 # .github/workflows/scripts, not these; every job that runs a script from there
 # checks this commit's copy out into .ci/ and runs that one (CI_SCRIPTS).
+
+# ⚠ The name says what a run was asked to do, because GitHub's API does not
+# give a run's inputs: "dry run all <commit>" is a run by hand with publish
+# off, every package and no tag - the one dry run that tested everything on
+# that commit, which the release tool waits for before a tag and `verify`
+# looks for on a tag run. "dry run arm64 v1.2.3 <commit>" and "publish arm64
+# v1.2.3 <commit>" are the ARM-only runs; a tag push is "Release v1.2.3".
+# scripts/release/checks.mjs (dryRunTitle) spells the same name.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('{0} {1} {2}{3}', inputs.publish && 'publish' || 'dry run', inputs.only, inputs.tag && format('{0} ', inputs.tag) || '', github.sha) || format('Release {0}', github.ref_name) }}
 
 on:
   push:
@@ -197,7 +222,8 @@ jobs:
 
   # ── The gate ────────────────────────────────────────────────────────────
   #
-  # ⚠⚠ Everything that publishes anything needs this. It exists because
+  # ⚠⚠ Everything that publishes anything needs `verify`, and `verify` needs
+  # the suite to have passed on the commit. It exists because
   # nothing connected a tag to the test suite: CI runs on the branch push and
   # this workflow on the tag pushed two seconds later, in parallel, neither
   # aware of the other, and the repository required no status check at all.
@@ -209,16 +235,31 @@ jobs:
   # screenshots, links, anchors and version manifests, and never once run a
   # test.
   #
-  # Cost: the release critical path grows by one CI run (~7 min). A release
-  # that has to wait seven minutes to prove it works is not a cost worth
-  # arguing about against four releases nobody could see were broken.
+  # ⚠⚠ And the tag came FIRST, so a red gate spent a version number: 0.43.0
+  # shipped without images, 0.43.1 stopped at the gate, 0.44.0 and 0.44.1
+  # died in goreleaser after npm and the images were out, 0.45.0 published
+  # nothing - and each could only be fixed by the next number. Since #76 the
+  # tag comes LAST: both mains are pushed untagged, ci.yml runs on that push,
+  # the release tool starts a dry run of this workflow on the same commit and
+  # waits for both, and only then is that commit tagged.
   #
-  # Skipped only when a run adds the ARM packages to a release that already
-  # passed it (only=arm64): the code is that tag's, tested when it shipped.
+  # So a run started by hand runs the suite itself (`test`), and a tag run
+  # does not run it again: `verify` asks GitHub whether THIS commit has a
+  # successful ci.yml run started by a push AND a successful dry run of this
+  # workflow (named "dry run all <commit>", see run-name). Either missing, or
+  # GitHub not answering, and it fails: nothing is published. The tag run
+  # still builds everything again from the tag; it does not reuse the dry
+  # run's artifacts.
+  #
+  # A run that adds the ARM packages to a release (only=arm64) builds THAT
+  # tag's code: `test` is skipped, and with publish=true `verify` asks of the
+  # tag's commit exactly what it asks on a tag push. Without publish it
+  # publishes nothing and `verify` lets it through. So every job that
+  # publishes anything waits for `verify`, a partial run's included.
   test:
     name: Test suite
     needs: plan
-    if: needs.plan.outputs.full == 'true'
+    if: needs.plan.outputs.full == 'true' && github.event_name != 'push'
     uses: ./.github/workflows/ci.yml
     # ⚠⚠ No `with: skip_docker`. The gate builds both images before
     # `binaries`, `docker` and `npm` may start: v0.43.0 skipped that build here,
@@ -226,12 +267,85 @@ jobs:
     # out (run 36026548054). The build this adds to the gate is the price of
     # never publishing half a release again.
 
+  verify:
+    name: Verify
+    needs: [plan, test]
+    # !cancelled(), not the implicit success(): on a tag push, and in a run
+    # that adds the ARM packages, `test` is skipped and this must run anyway.
+    # It decides for itself, closed.
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: The commit this run publishes passed CI and a dry run of this workflow
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+          FULL: ${{ needs.plan.outputs.full }}
+          PUBLISH: ${{ needs.plan.outputs.publish }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          TEST: ${{ needs.test.result }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != push ]; then
+            if [ "$FULL" = true ]; then
+              if [ "$TEST" != success ]; then
+                echo "::error::the test suite of this run ended '$TEST'"
+                exit 1
+              fi
+              echo "A run started by hand: its own test suite passed." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$PUBLISH" != true ]; then
+              echo "A dry run of the ARM packages of $TAG: nothing is published." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            # Adds to $TAG's release, built from $TAG: its commit is asked.
+            SHA=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          fi
+          export SHA
+          export WANT="dry run all $SHA"
+          # The newest successful run of each on this very commit. A call
+          # that fails ends the step here (set -e): unknown does not pass.
+          ci=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$SHA" -f event=push -f status=success -f per_page=100 \
+            --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "push" and .conclusion == "success")][0].html_url // empty')
+          dry=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs" \
+            -f head_sha="$SHA" -f event=workflow_dispatch -f status=success -f per_page=100 \
+            --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "workflow_dispatch" and .conclusion == "success" and .display_title == env.WANT)][0].html_url // empty')
+          missing=0
+          if [ -n "$ci" ]; then
+            echo "ci.yml passed on $SHA: $ci"
+          else
+            echo "::error::no successful ci.yml run started by a push of $SHA"
+            missing=1
+          fi
+          if [ -n "$dry" ]; then
+            echo "the dry run passed on $SHA: $dry"
+          else
+            echo "::error::no successful run of release.yml named '$WANT'"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::$TAG publishes nothing: a commit is tagged only after both passed on it (docs/CONTRIBUTING.md, Release process, step 7)"
+            exit 1
+          fi
+          {
+            echo "### $TAG ($SHA) was tested before it was tagged"
+            echo "- CI: $ci"
+            echo "- dry run: $dry"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───────
   # Creates the Release. Everything that uploads to it depends on this job
   # and on nothing else. In a dry run: goreleaser --snapshot, nothing leaves
   # the runner but the bare binaries cli-smoke tests.
   binaries:
-    needs: [plan, test]
+    needs: [plan, verify]
     if: needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     env:
@@ -497,7 +611,7 @@ jobs:
   # GitHub Release beside it — delete the tag from ghcr.io by hand if that
   # happens; it has to be a deliberate cleanup, not a silent inconsistency.
   docker:
-    needs: [plan, test]
+    needs: [plan, verify]
     if: needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
@@ -677,7 +791,7 @@ jobs:
   # still demands an OTP and fails with EOTP in CI. Package versions are pinned
   # to the tag, so a `v0.1.60` tag publishes @brftech/*@0.1.60.
   npm:
-    needs: [plan, test]
+    needs: [plan, verify]
     if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -721,8 +835,9 @@ jobs:
   # and an 87 MB .deb, then attached neither. It does NOT wait for `docker`:
   # the images are not an input to the installers, and waiting for them cost
   # every release ~25 minutes of idle (v0.20.2 measurement in the header).
-  # (When only the ARM packages are added to an existing release, `test` and
-  # `binaries` do not run and are not waited for: the Release exists.)
+  # (When only the ARM packages are added to an existing release, `binaries`
+  # does not run and is not waited for: the Release exists. `verify` is
+  # waited for in every run: it is what lets a publishing run publish.)
   #
   # ⚠ macOS ships UNSIGNED but ad-hoc SEALED (desktop/scripts/adhoc-sign.cjs).
   # The distinction is what dialog the user gets: a linker-signed-only bundle
@@ -754,8 +869,8 @@ jobs:
   # open, and fail at the first sync.
   desktop:
     name: Desktop packages (${{ matrix.label }})
-    needs: [plan, test, binaries]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.full != 'true' || (needs.test.result == 'success' && needs.binaries.result == 'success')) }}
+    needs: [plan, verify, binaries]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.verify.result == 'success' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.desktop) }}
