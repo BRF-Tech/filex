@@ -119,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `permissions.catalogue` setting, so a permission added later is merged once and
   never again; the setting only ever grows, so a version started after a later
   one does not make the later one's permissions new again.
-- ⚠ **Rolling back to a version without `files.encrypt`** (0.49 or older): the
+- ⚠ **Rolling back to a version without `files.encrypt`** (0.50 or older): the
   older Roles and People pages cannot save a role or a person's exceptions the
   upgrade gave `files.encrypt` to (`400`, an unknown permission) until the
   server is upgraded again. Upgrading again does not give `files.encrypt` back

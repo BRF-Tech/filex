@@ -583,7 +583,7 @@ answers for all of them alike: `403 {"error":"e2e_not_allowed","reason":"permiss
   setting only ever grows: a version started on a catalogue a later version
   recorded leaves it as it is, so that upgrading again does not take the later
   version's own permissions for new and hand them out a second time.
-- **Rolling back to a version without `files.encrypt`** (0.49 or older): the
+- **Rolling back to a version without `files.encrypt`** (0.50 or older): the
   older version does not know the permission, and every saved role and
   person's exceptions the upgrade gave it to keeps it. The older Roles and
   People pages cannot save those (`400`, an unknown permission
