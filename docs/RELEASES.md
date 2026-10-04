@@ -19,14 +19,174 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.50.0, 3 October 2026
-Office documents open, convert and get their thumbnails through the connected ONLYOFFICE Document Server: LibreOffice is gone from every image and from filex, and the Test on the ONLYOFFICE card now downloads the way a document does. Groups, contributed by @manjotsc (#78): named sets of people with folder access and a role, kept in step with the groups a sign-in carries. People can sign in with the server's own Windows or Linux (PAM) accounts, wrong passwords are counted per account, and FILEX_TRUSTED_PROXIES names the proxies whose forwarded address is believed. Multi-tenant installs gain tenant realms, sign-in providers bound to tenants and self-service for a tenant's own domain; an OIDC sign-in finds its account by its SSO identity inside its own tenant, and a tenant's administrator can no longer change the built-in roles, found and fixed by @berkbasarir (#77). Also: SVG, HEIC, text, archive and folder thumbnails, Default apps per file type, e-Signature for PDFs only, and Chromium's sandbox required by every Linux desktop package. Read the upgrade notes first: LDAP accounts, realms, provider bindings and SSO trust change on upgrade.
+::: tip Latest - v0.51.0, 4 October 2026
+Who may encrypt is now an organisation's decision, contributed by @berkbasarir (#83): the tenant policy (Off, Administrators only, Permitted, or Approval), a new files.encrypt permission and, on multi-tenant installs, a ceiling the platform operator sets per tenant must all say yes. Under Approval people ask with a reason and an administrator approves once, on the new Admin > Encryption page. With ONLYOFFICE configured a .csv opens in its spreadsheet editor and keeps its own delimiter, byte order mark and line ends when it is saved (#81), and an office file in an older format is saved beside the document with the right extension instead of getting newer-format bytes under its old name. The admin panel's navigation is a mega menu: three panels of grouped pages, each two clicks away at the address it always had (#82). An upgrade changes nobody's access: roles and exceptions that could create files can also encrypt. Security: a folder-confined API token is now held to its folder however a request is sent; upgrade if you rely on root: scopes.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.50.0
-docker pull ghcr.io/brf-tech/filex:full-v0.50.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.51.0
+docker pull ghcr.io/brf-tech/filex:full-v0.51.0
 ```
+
+## v0.51.0
+
+<span class="filex-release-date">4 October 2026</span>
+
+Who may encrypt is now an organisation's decision, contributed by @berkbasarir (#83): the tenant policy (Off, Administrators only, Permitted, or Approval), a new files.encrypt permission and, on multi-tenant installs, a ceiling the platform operator sets per tenant must all say yes. Under Approval people ask with a reason and an administrator approves once, on the new Admin > Encryption page. With ONLYOFFICE configured a .csv opens in its spreadsheet editor and keeps its own delimiter, byte order mark and line ends when it is saved (#81), and an office file in an older format is saved beside the document with the right extension instead of getting newer-format bytes under its old name. The admin panel's navigation is a mega menu: three panels of grouped pages, each two clicks away at the address it always had (#82). An upgrade changes nobody's access: roles and exceptions that could create files can also encrypt. Security: a folder-confined API token is now held to its folder however a request is sent; upgrade if you rely on root: scopes.
+
+## What changed
+
+### Added
+
+- **Who may encrypt is an organisation's decision** ([E2E-ENCRYPTION.md → Who may encrypt](./E2E-ENCRYPTION.md#who-may-encrypt)).
+  Three layers must all say yes before anybody starts encrypting:
+  - the platform operator's **tenant ceiling** (`e2e_allowed`, Admin → Encryption → Tenants; multi-tenant installs only);
+  - the **tenant policy** - Off (administrators included), Administrators only, Permitted (the default: today's behaviour), or **Approval**;
+  - the new permission **`files.encrypt`** - per role, per person, per folder. The built-in User role and the Standard and Upload-only presets hold it (a drop-box account could encrypt before, and still can); a Viewer never does.
+  - Under **Approval**, **Request encryption…** leaves a request with a reason; the tenant's administrators approve or reject it under Admin → Encryption. An approval is for that person, is used **once**, and lasts **7 days**, and it opens only its own kind, in the folder it was asked for and never in one below: a folder **encrypted where it is**, **one new encrypted folder** directly inside a folder (never spent on a folder that already holds something), or **one new encrypted file** in a folder (a single file's approval is its folder's). The explorer asks for the kind it would use and is answered from the same approvals the create doors spend, so it offers what the server accepts. A request must name a folder or a file that is there (`404 path_missing`), and one person has at most **20** waiting (`429 too_many_pending`). A request nobody answers lapses after 7 days too; an hourly sweep closes both, and answering one that lapsed, or one that was answered already, is `409 not_pending`.
+  - "Encrypting" is creating a key file where there is none, or a new `.fxe` - and landing on one of those names by a rename or a move (the explorer and the queue, the agent API, WebDAV, SFTP, FTPS and NFS ask it like a create at the destination), unless it only carries what is encrypted already: a folder of any name, a `.fxe` that stays a `.fxe`, or a key file that stays its own folder's. A `.fxe` given the key file's name, or a key file moved into another folder, is asked. A **copy** of what is encrypted makes a second one and is asked like a create where it lands, whatever its name: a `.fxe` or a key file copied anywhere, and a folder that holds either anywhere below it (asked once, as a new encrypted folder) - the explorer's paste and Copy to, the queue, the agent API's and MCP's `file_copy`, and WebDAV `COPY`. A move or a rename of the same item stays free. A queued rename, move or copy that was free because its item was a folder fails when it runs if a file has taken the folder's place. "Creates" means there is no file at the path: overwriting a key file or a `.fxe` that is there stays free - a password change cannot be told from new key material, so the policy cannot stop the re-keying of what is encrypted already (an honest limit, in the docs) - and a folder with the name does not count as the file. Opening, adding to, re-keying and decrypting what is already encrypted stay free, and so do restores from the trash or a version and the document server's save.
+  - Asked on every door: the web and desktop apps, uploads (single and chunked), the text editor, New document and a draft's save, the agent API (upload, move, MCP `file_write` and `file_move`, ShareX, upload tickets, and 0.50's `file_copy`, `archive_create`, `archive_extract` and `app_run`), file requests, archives (a refused member is skipped), apps, WebDAV, SFTP, FTPS, NFS and S3 (over HTTP a refusal is `403 e2e_not_allowed` with a `reason`; an MCP tool answers an error result naming it; the protocols refuse in their own words). On the agent surface an encrypted folder's key file is refused before the rule, `403 RESERVED_NAME` - a folder's too: that surface never writes one. A file request is judged for the link's creator and never spends the creator's approval: under Approval its key file or `.fxe` is refused. When a store failure leaves the rule undecided - a lookup behind the rule, or the storage row, the app's account or the file request's creator a door looks up to ask it - the door fails the write as its own server failure, not as a refusal: the web app's routes and the agent REST API `500`, an MCP tool an error result, an upload ticket and a file request `503 storage_unavailable`, an archive skips the member, WebDAV `500`, S3 `InternalError`, SFTP `SSH_FX_FAILURE`, FTPS `550` saying so, NFS `ACCES` for a create. The rule's own log line, one for each write it could not decide, names the storage, the person and the error, never the path or a member's name; an app job that fails this way is also reported by the queue, which names the output.
+  - The new **Admin → Encryption** page holds the policy, the requests and - for the platform operator - every tenant's ceiling. On a multi-tenant install the platform operator sees every tenant's requests there and answers only the platform's own; another tenant's is that tenant's administrators' decision (its row says so, and the API answers `403 not_decidable`). The explorer asks ahead (`POST /api/files/e2e/allowed`, up to 1000 paths, each with the kind it would use; the answer carries the refusing layer in `reasons`) and offers **Create encrypted folder…** and **Encrypt with E2EE…** - or, under Approval, **Request encryption…** - only where it would be allowed; capabilities carry `e2e_policy` for signed-in callers. `filex encrypt` asks the same question before it asks for a password, and says why not in words.
+  - **New notifications and audit rows.** `e2e.request_created` (to whoever decides it: a tenant's administrators, as one broadcast the platform operator's bell does not take; the platform's own request to the supertenant's administrators; webhooks get every tenant's, once each) and `e2e.request_decided` (the person who asked); their two switches in a person's notification settings are offered only where they can reach that person - under Approval with the tenant's ceiling on - and greyed elsewhere, also for an administrator whose own tenant is under another policy. Audit: `e2e_request.create|approve|reject|expire|use` - the `use` row names the approval and, in `encrypted`, the folder that was actually encrypted - `e2e_policy.update` and `e2e_tenant.update`.
+  - **Changing who may encrypt is a signed-in administrator's:** an API key gets `403 session_required` on `/api/admin/e2e`, on a tenant's ceiling, on the decision of a request, and on the `e2e.policy` setting through `/api/admin/settings`, `/api/ai/admin/settings` and the MCP settings tools (a session's write there is audited as `e2e_policy.update`, like the page's own). A tenant's policy and the operator's ceiling are written one column at a time, so neither save can undo the other; saving the value already stored writes nothing; the ceiling answers `409 single_tenant` on a single-tenant install.
+  - Migration `00080` adds `providers.e2e_allowed`, `providers.e2e_policy` and the `e2e_requests` table. A single-tenant install keeps its policy in the `e2e.policy` setting; when it turns multi-tenant mode on, the first start copies that setting to the platform's own tenant once (logged and audited), so an install that had switched encryption off does not find it on again.
+  - Contributed by Berk Başarır ([#83](https://github.com/BRF-Tech/filex/pull/83)). The copy rule, the separate approval kinds, the operator's role, the request limits, the policy's carry into multi-tenant mode and the CLI's question were added on top of it before the release.
+- **A `.csv` opens in ONLYOFFICE** ([ONLYOFFICE.md → CSV files](./ONLYOFFICE.md#csv-files), [GitHub #81](https://github.com/BRF-Tech/filex/issues/81)).
+  With ONLYOFFICE configured, a CSV opens in its spreadsheet editor and is edited there; without it, in filex's read-only table, as before. It is the product's default, not a setting each install makes, and only `.csv`.
+  - **A choice like any other.** ONLYOFFICE is an open handler of `.csv` (`onlyoffice`): *Open with* lists it beside filex's table, **Choose an app…** and *Always use this app* keep it on the account (`PUT /api/me/open-with/csv`), and Admin → Plugins → Default apps lists `.csv` with ONLYOFFICE first while it is configured (`PUT /api/admin/file-types/csv`). Switched off, a `.csv` opens in the table without an error and a choice or rule that names ONLYOFFICE is kept for when it is back; an administrator sees *Open with ONLYOFFICE* greyed with where to set it up.
+  - **Opened without the "Choose CSV options" question.** filex reads the file's first 64 KiB and passes its delimiter (comma, semicolon, tab or `|`) and UTF-8 to the editor. A file that is not UTF-8 gets ONLYOFFICE's question, rather than a guess.
+  - **Saved as the same kind of CSV.** ONLYOFFICE writes an edited CSV comma-separated with a UTF-8 byte order mark whatever it was (measured on Docs 9.4); filex puts the file's own delimiter, byte order mark (or none) and line ends back before it writes it. A document server set to `assemblyFormatAsOrigin: false` saves it as XLSX: filex converts that back to CSV through the document server and never writes XLSX bytes under a `.csv` name. Anything else is not written: the file stays as it was, the log says why, the people who edited it get a bell notice in their language (`file.upload_failed`) and the audit log a row (`file.office_save_refused`).
+  - **What CSV cannot keep is said before it is lost:** a line under the viewer's bar, in the person's language, while a CSV is open for editing (only the active sheet's values; not formatting, formulas or other sheets).
+
+### Changed
+
+- **The admin panel's navigation is a mega menu** ([ADMIN-PANEL.md](./ADMIN-PANEL.md),
+  [#82](https://github.com/BRF-Tech/filex/issues/82)). The long sidebar is gone:
+  the top bar holds the **Dashboard** link and three panels - **Files & storage**,
+  **People & security** and **System** - each laid out in sections (Files, Apps,
+  Storage; People & access, Security; Plugins & integrations, Customization,
+  Maintenance & records), with a short line under every page. Every page is two
+  clicks away and keeps its address, so links and bookmarks still work, and who
+  is offered which page is unchanged. A panel opens on a click or a key, never on
+  hover; with the keyboard, ↓ enters a panel, ↑ / ↓ / Home / End move inside it,
+  ← / → move along the bar and Esc goes back to the button; a screen reader hears
+  a named landmark, which panel each button opens and whether it is open, lists
+  labelled by their headings and the current page. Below 1024 pixels a **Menu**
+  button opens a drawer with the same pages as a headed list, every section open.
+  The menu is one component in the core package (`MegaMenu`); the grouping is one
+  list in the admin app (`web/src/lib/adminNav.ts`).
+- The trail under the bar names the menu section between the dashboard and the
+  page (*Dashboard › People & access › Users*), as words rather than a link.
+- **Auth providers** is called **Identity providers** in English, as the guides
+  already called it (the Turkish was already *Kimlik sağlayıcılar*), and the
+  menu's **Search** is **Search index**, the page's own title.
+- **An upgrade still changes nobody's access:** on first start, every saved role
+  (the built-in User role, and each custom role and its folder parts) that holds
+  `files.create` also gets `files.encrypt`, and so does every person whose own
+  exceptions allow `files.create` - creating a key file or a `.fxe` needed only
+  `files.create` before. A rename, a move or a copy onto one of those names now
+  needs `files.encrypt` beside its own permission, so a role that may rename or
+  move but not create cannot give a file such a name any more. The catalogue a server has seen is kept in the
+  `permissions.catalogue` setting, so a permission added later is merged once and
+  never again; the setting only ever grows, so a version started after a later
+  one does not make the later one's permissions new again.
+- ⚠ **Rolling back to a version without `files.encrypt`** (0.49 or older): the
+  older Roles and People pages cannot save a role or a person's exceptions the
+  upgrade gave `files.encrypt` to (`400`, an unknown permission) until the
+  server is upgraded again. Upgrading again does not give `files.encrypt` back
+  where an administrator took it away in between, nor to a role saved on the
+  older version: it was merged once, at the first upgrade
+  ([PERMISSIONS.md](./PERMISSIONS.md)).
+- A refused encryption in the explorer is said in words (the server's reason)
+  instead of "could not create the encrypted folder", and a folder made before
+  its key file was refused is listed at once.
+- ⚠ **File request links whose creator is not on record** - the creator was
+  deleted before 0.49.0, so the link names nobody - keep taking ordinary files
+  but no longer take an encrypted folder's key file or a `.fxe`: a file request
+  is judged for its creator, and there is nobody to judge. Make a new link if
+  such a drop is needed.
+- ⚠ **MySQL: migration `00080` makes two columns byte-exact.** The new
+  `e2e_requests.path` is `utf8mb4_0900_bin` (the collation `00041` chose for
+  names and paths), so an approval for `Muhasebe` is not one for `muhasebe`. And
+  `settings.setting_key`, which `00001` made case- and accent-insensitive, is
+  altered to the same collation, so that no spelling of a setting key reaches
+  another key's row: the settings API guards `e2e.policy` (a session, one of the
+  four values, an audit row) by comparing the key exactly, and on MySQL
+  `E2E.POLICY` or `e2é.policy` would have passed that guard and still read and
+  written the `e2e.policy` row. The `ALTER TABLE` rebuilds `settings`, a small
+  table, and cannot fail on existing data (keys that were unique ignoring case
+  and accent are unique byte for byte). filex's own keys are lower-case and
+  are read in the spelling they were written in; only something that leaned on
+  MySQL matching a key by its case or accent (a hand-written row, a script)
+  stops matching. **Rolling back** restores the old collation and stops with
+  error 1062 if two keys that differ only by case or accent were written after
+  the upgrade; rename or remove one of each first. SQLite and PostgreSQL
+  already compared keys exactly.
+
+- **The repository no longer describes a maintainer's machine.** The README
+  and the API reference show the first-run admin password as `<printed once>`
+  instead of an example that looked real, the end-to-end tests look for the
+  local language packs in a sibling checkout (`../filex-lang-es`) instead of
+  at a fixed drive path, comments no longer name the project's own machines,
+  and a unit test refuses a drive-letter path in any file the export publishes.
+- **The release's macOS jobs run on `macos-15`.** GitHub retires its macOS 14
+  images on 2026-11-02. The runner stays pinned, never `macos-latest`: its
+  architecture is the package's (arm64).
+
+### Fixed
+
+- **A choice made just before the tab closes is no longer lost.** Preferences are sent 400 ms after the last change, and anything still waiting when the page was hidden or closed never left the browser - most visibly an app interface's `state.set`, which the next open read back as the older value. The waiting document is now sent at once on `pagehide` and when the page turns hidden, with `keepalive`, from the same shared code on every surface.
+- **An office file in an older format no longer gets newer-format bytes under its old name** ([ONLYOFFICE.md → A save in another format](./ONLYOFFICE.md#a-save-in-another-format)).
+  ONLYOFFICE writes no Word 97, Excel 97 or PowerPoint 97 file: an edited `.doc` comes back as DOCX and a `.xls` as XLSX (measured on Docs 9.4 with its defaults), and filex wrote those bytes over the old file. Now the old file is not touched: the edit is saved beside it under the format's extension (`rapor.doc` stays, `rapor.docx` is the edit; `rapor (2).docx` when that name is taken), the people who edited it are told in their language, and the audit log writes `file.office_saved_beside`. The new file is created only for an editor of that session who may create it in that folder (their account, their tenant, `files.create` on the new name); when nobody may, nothing is written and they are told to download the edit from ONLYOFFICE before closing. A save that is not one of the document formats, or not the package it says it is, is not written at all (`file.office_save_refused`).
+- The admin panel's menu button on a phone was announced as "Dashboard"; it is
+  **Menu** now, and says whether the drawer is open. While closed, the drawer is
+  out of the tab order (its links could be reached with Tab off screen).
+- The trail on a file's versions page read *Dashboard › admin-files › Versions*;
+  the middle step is *File history*, the menu's name for the page.
+- The Audit page names `e2e.folder_cleanup`, `e2e.fxe_header_rewritten` and
+  `e2e.key_file_rewritten` - written since 0.48.0 - in every language; they
+  showed as their raw ids.
+- **An app's interface can save a new file.** `file.saveAs` (`fx.saveAs` in
+  the SDK) answered `unavailable` everywhere since app interfaces arrived in
+  0.48.1: no screen that draws an interface gave it the folder dialog the
+  documentation promised. Now filex asks in its own folder dialog - the one
+  *Move to…* uses, titled with the app's name and the file's, opened in the
+  file's folder - in the viewer and in an app's dialog, page and details
+  section alike, in the web app, the desktop app and an embed
+  ([APP-PLUGINS-API.md](./APP-PLUGINS-API.md#the-interface-bridge)).
+
+- **Every Go test runs from the backend module alone (#141).** A thumbnail
+  test read its clip from `e2e/fixtures`, outside the module the release tool
+  copies, and the public export's Go gate failed on it with "no such file". The
+  test makes its clip with ffmpeg now, and a web test fails when a Go test
+  reaches for a file outside `backend/`.
+
+- **The release's export no longer stops on build output it does not
+  publish.** Its check for a private name, a server address or a credential
+  read every file in the public checkout, ignored ones included, and at 0.50
+  stopped half-way on the previous release's UI left in `backend/embed/web`.
+  It now reads only the files the export publishes, and empties the two embed
+  directories the release fills with its own UI.
+
+- **The release's browser suite installs the echo test app it just built.** On
+  Windows the `go: echo.wasm fixture` gate built the module only in its WSL
+  mirror, so the checkout's copy, the one Playwright installs, could predate
+  the change a spec tested (the v0.50.0 release check lost an hour to it). The
+  gate now builds in the Go module and writes the result back into the
+  checkout, and the specs that install the app fail on a module older than its
+  sources, naming `bash scripts/build-wasm-fixture.sh`, instead of running it.
+
+- **The folder dialog's first breadcrumb shows its whole focus ring.** The breadcrumb line scrolls sideways, and a scroller clips its children on both axes, so the browser's default outside ring lost its left, top and bottom edge when the first crumb was focused (all three engines). The ring is now drawn inside the crumb, like the list rows'.
+
+**This release has more to it than fits on one page.** The rest of the
+entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0510---2026-10-04).
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.51.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.51.0`
 
 ## v0.50.0
 
@@ -2893,75 +3053,13 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.0`
 
-## v0.39.1
-
-<span class="filex-release-date">12 September 2026</span>
-
-The quick-look key legend is a small pill again. Pressing Space over a file opens the preview with a legend at the bottom edge; in the web UI it was drawn as a giant rounded shape across the whole window, on top of the file being previewed. The hint carries the explorer's root class so it can read the theme variables, and the admin UI sized the embedded explorer with a rule that reached every descendant carrying that class - a host selector outranks the package's own, so the pill inherited the window height. The desktop app has no such wrapper, which is why the same build looked right there.
-
-The same audit found the legend lying for a second reason. Shortcuts are remappable, and three surfaces spelled a key out by hand: this legend, the drive shell's search chip and two steps of the onboarding tour. The quick-look overlay also compared against the default key, so remapping it gave three different answers to one question - the new key opened the peek, the old one still closed it, and the pill named the old one. Every hint reads the binding now, and shortcutHint() is exported for embedders who draw their own.
-
-## What changed
-
-### Changed
-
-- **Every key hint now reads the key that is actually bound.** Shortcuts are
-  remappable, and several hints spelled a key out by hand: the quick-look
-  legend, the drive shell's search chip, and two steps of the onboarding tour.
-  Remap the command palette and the chip on the search field - the one control
-  whose whole job is to teach that key - kept naming `Ctrl+K`.
-
-  Worse than a stale label, the quick-look overlay also *compared* against the
-  default key. Remapping quick-look onto `Q` gave you three different answers
-  to one question: `Q` opened the peek, `Space` still closed it, and the pill
-  said "Space". The overlay and the search field now ask the registry, so the
-  key that is named, the key that opens and the key that closes are the same
-  key.
-
-  `shortcutHint(action)` and `eventMatchesShortcut(event, action)` are exported
-  for embedders who render their own hints ([docs/API.md](./API.md#naming-a-key-on-screen)).
-  Two gates keep it honest every release: one remaps an action and measures the
-  surface that names it, the other fails the build on a key typed into a
-  template or a locale string.
-
-### Fixed
-
-- **The quick-look key legend no longer fills the window** (#22). Pressing
-  Space over a file opens the preview with a small pill at the bottom edge
-  reading "Space close · ↑↓ previous/next · Enter open". In the web UI that
-  pill was drawn as a giant rounded shape across the whole viewport, on top of
-  the file being previewed.
-
-  Nothing was wrong with the component. The hint carries the explorer's root
-  class, which is how it reaches the theme variables, and the admin app sized
-  the embedded explorer with a rule that reached *every* descendant carrying
-  that class - a host selector, so it outranked the package's own. The pill
-  inherited the full viewport height. The desktop app wraps the explorer in
-  nothing of the sort, which is why the same build looked right there and
-  wrong in the browser.
-
-  The hint is now teleported under `<body>`, out of reach of any host
-  container, the package rule that sizes it no longer depends on source order
-  to win, and the admin app's own rule targets the explorer root alone instead
-  of anything below it. `e2e/tests/101-quicklook-hint.spec.ts` measures the
-  rendered pill in a real browser, because a cascade bug renders the same DOM
-  either way and no unit test can see it.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0391---2026-09-12)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.39.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.39.1`
-
 ## Earlier releases
 
-The 111 releases before v0.39.1, in brief. Full notes are on GitHub.
+The 112 releases before v0.41.0, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.39.1](https://github.com/BRF-Tech/filex/releases/tag/v0.39.1) | 12 September 2026 | The quick-look key legend is a small pill again. Pressing Space over a file opens the preview with a legend at the bottom edge; in the web UI it was drawn as a giant rounded shape across the whole window, on top of the file being… |
 | [v0.39.0](https://github.com/BRF-Tech/filex/releases/tag/v0.39.0) | 12 September 2026 | Two things a storage was missing. First, an address that does not move: a storage's name is the first path segment on WebDAV, SFTP, NFS and the S3-compatible API, so renaming one silently re-addressed it and every mount written… |
 | [v0.38.2](https://github.com/BRF-Tech/filex/releases/tag/v0.38.2) | 12 September 2026 | Editing a storage now takes effect on the running process. Creating one started its syncer and deleting one stopped it, but editing one did neither: the row was written and the save reported as successful while the syncer and… |
 | [v0.38.1](https://github.com/BRF-Tech/filex/releases/tag/v0.38.1) | 11 September 2026 | Renaming a folder no longer puts its contents in the trash. The rename moved one row and left every file and subfolder pointing at the old path, so the next sync tombstoned them and then collided with itself once per file; a… |
@@ -3076,4 +3174,4 @@ The 111 releases before v0.39.1, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-03 from 131 published releases.</small>
+<small>Last refreshed 2026-10-04 from 132 published releases.</small>
