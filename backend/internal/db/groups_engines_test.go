@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -229,6 +230,102 @@ func TestGroupsIntegrityOnEveryEngine(t *testing.T) {
 			_, ok, err = store.GetUserGroupLevel(ctx, ada.ID)
 			require.NoError(t, err)
 			require.False(t, ok)
+		})
+	}
+}
+
+// Migration 00081: where an account comes from, and the groups of its last
+// LDAP sign-in — a long DN and a name differing only by case included.
+func TestLDAPGroupsAndAuthSourceOnEveryEngine(t *testing.T) {
+	for _, e := range engines() {
+		t.Run(e.name, func(t *testing.T) {
+			sqlDB, drv := openMigrated(t, e)
+			store := drv.NewStore(sqlDB)
+			ctx := context.Background()
+
+			ada, err := store.CreateUser(ctx, "ada@example.test", "", model.RoleUser, "en", "UTC")
+			require.NoError(t, err)
+			require.Equal(t, model.AuthSourceLocal, ada.AuthSource, "a new account is Local until a directory says otherwise")
+			require.NoError(t, store.SetUserAuthSource(ctx, ada.ID, model.AuthSourceLDAP))
+			got, err := store.GetUser(ctx, ada.ID)
+			require.NoError(t, err)
+			require.Equal(t, model.AuthSourceLDAP, got.AuthSource)
+			all, err := store.ListUsers(ctx)
+			require.NoError(t, err)
+			require.Equal(t, model.AuthSourceLDAP, all[len(all)-1].AuthSource)
+			require.NoError(t, store.SetUserAuthDirectory(ctx, ada.ID, "ldap-partner"))
+			got, err = store.GetUser(ctx, ada.ID)
+			require.NoError(t, err)
+			require.Equal(t, "ldap-partner", got.AuthDirectory)
+			require.Equal(t, "ldap-partner", got.DirectoryOwner())
+
+			// A removed directory's settings, and only its.
+			for _, k := range []string{"auth.ldap-partner.url", "auth.ldap-partner.enabled", "auth.ldap-partnerx.url", "auth.ldap.url"} {
+				require.NoError(t, store.UpsertSetting(ctx, k, "v"))
+			}
+			require.NoError(t, store.DeleteSettingsWithPrefix(ctx, "auth.ldap-partner."))
+			left, err := store.ListSettings(ctx)
+			require.NoError(t, err)
+			require.NotContains(t, left, "auth.ldap-partner.url")
+			require.NotContains(t, left, "auth.ldap-partner.enabled")
+			require.Contains(t, left, "auth.ldap-partnerx.url")
+			require.Contains(t, left, "auth.ldap.url")
+
+			long := "cn=" + strings.Repeat("x", 400) + ",ou=groups,dc=example,dc=com"
+			require.NoError(t, store.SetUserLDAPGroups(ctx, ada.ID, []string{"finance", "Finance", long, "finance", ""}))
+			groups, err := store.ListUserLDAPGroups(ctx, ada.ID)
+			require.NoError(t, err)
+			require.ElementsMatch(t, []string{"finance", "Finance", long}, groups, "blanks and duplicates dropped; case kept apart")
+
+			require.NoError(t, store.SetUserLDAPGroups(ctx, ada.ID, nil))
+			groups, err = store.ListUserLDAPGroups(ctx, ada.ID)
+			require.NoError(t, err)
+			require.Empty(t, groups)
+
+			require.NoError(t, store.SetUserLDAPGroups(ctx, ada.ID, []string{"ops"}))
+			require.NoError(t, store.DeleteUser(ctx, ada.ID))
+			var n int
+			require.NoError(t, sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_ldap_groups`).Scan(&n))
+			require.Zero(t, n, "a deleted account takes its LDAP groups with it")
+		})
+	}
+}
+
+// Migration 00081's directory columns on user_groups, on every engine.
+func TestGroupDirectoryOnEveryEngine(t *testing.T) {
+	for _, e := range engines() {
+		t.Run(e.name, func(t *testing.T) {
+			sqlDB, drv := openMigrated(t, e)
+			store := drv.NewStore(sqlDB)
+			ctx := context.Background()
+			g, err := store.CreateGroup(ctx, &model.Group{Name: "dept-legal", DirectoryID: "ldap:e4191e09-5166-3785-9099-4557eb72e805", DirectoryName: "dept-legal"})
+			require.NoError(t, err)
+			require.Equal(t, "ldap:e4191e09-5166-3785-9099-4557eb72e805", g.DirectoryID)
+			require.True(t, g.Synced())
+			plain, err := store.CreateGroup(ctx, &model.Group{Name: "Plain"})
+			require.NoError(t, err)
+			require.Empty(t, plain.DirectoryID)
+
+			require.NoError(t, store.SetGroupDirectory(ctx, g.ID, g.DirectoryID, "legal", model.GroupDirectoryRemoved))
+			got, err := store.GetGroup(ctx, g.ID)
+			require.NoError(t, err)
+			require.Equal(t, "legal", got.DirectoryName)
+			require.Equal(t, model.GroupDirectoryRemoved, got.DirectoryState)
+			require.False(t, got.Synced())
+
+			// UpdateGroup never touches where it comes from.
+			got.Name = "Legal"
+			require.NoError(t, store.UpdateGroup(ctx, got))
+			got, err = store.GetGroup(ctx, g.ID)
+			require.NoError(t, err)
+			require.Equal(t, "ldap:e4191e09-5166-3785-9099-4557eb72e805", got.DirectoryID)
+
+			require.NoError(t, store.SetGroupDirectory(ctx, g.ID, "", "", ""))
+			all, err := store.ListGroups(ctx)
+			require.NoError(t, err)
+			for _, x := range all {
+				require.Empty(t, x.DirectoryID)
+			}
 		})
 	}
 }

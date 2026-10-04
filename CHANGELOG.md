@@ -25,10 +25,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the translations too, so a renamed docs heading names the link to fix in each
   of them ([CONTRIBUTING.md](docs/CONTRIBUTING.md#docs)). Contributed by Berk
   Başarır ([#84](https://github.com/BRF-Tech/filex/pull/84)).
+- **LDAP groups** ([docs/LDAP.md → Groups](docs/LDAP.md#groups), migration
+  00081). A group can name LDAP / Active Directory groups, by DN or by name,
+  beside its SSO groups: every sign-in to the web UI reads the person's
+  directory groups (`group_attr`, or a search with `group_filter`) and joins
+  and leaves the linked groups as the directory says. A failed group read
+  never refuses a sign-in or takes anybody out of a group; the file protocols
+  never move memberships. New settings: `group_filter`, `group_base_dn`
+  (`FILEX_LDAP_GROUP_*`), also on Admin → Identity providers.
+- **LDAP directory sync** ([docs/LDAP.md → Directory sync](docs/LDAP.md#directory-sync)).
+  Admin → Identity providers → an LDAP provider → **Sync now**, and every
+  `sync_interval` on its own: filex reads every person the directory lists,
+  opens the accounts nobody has signed in to yet (as their first sign-in
+  would: the first sign-in rule decides) and brings everyone's LDAP-linked
+  group memberships in step; accounts the directory stopped listing lose
+  them, and are switched off with `sync_disable_missing`. A search that finds
+  nobody changes nothing. It also brings **every directory group in as a
+  filex group** (`sync_groups`, on by default; `sync_group_filter` picks
+  which), followed by its permanent id: renamed with it, and flagged
+  *Removed from LDAP* - never deleted - when it is gone. Which groups exist
+  is managed on the directory. Each LDAP provider syncs its own directory,
+  accounts and groups. New settings `sync_interval`, `sync_filter`,
+  `sync_disable_missing`, `sync_groups`, `sync_group_filter`
+  (`FILEX_LDAP_SYNC_*`).
+- **Each LDAP directory keeps to its own** ([docs/LDAP.md → Several directories](docs/LDAP.md#several-directories),
+  migration 00081). An account belongs to the LDAP provider that made it -
+  another never signs it in - and `email_domains` limits a directory to its
+  own addresses; the Users page makes no local account at an address a
+  directory owns.
+- **LDAP: switched off there, switched off here** ([docs/LDAP.md → Directory sync](docs/LDAP.md#directory-sync),
+  migration 00082). Directory sync switches off the account of a person the
+  directory has switched off - Active Directory's "account disabled",
+  389-ds's `nsAccountLock`, an OpenLDAP password-policy lock with no end -
+  administrators included (never the last one), so their sessions, API keys
+  and SFTP keys stop with their password. An account sync switched off (this
+  way or with `sync_disable_missing`) comes back on when the directory lets
+  the person back in; one switched off or on by hand stays as the
+  administrator left it. The Users list and a person's page say **Disabled
+  by LDAP**.
+- **LDAP: people known by their permanent id** ([docs/LDAP.md → Who is who](docs/LDAP.md#who-is-who),
+  migration 00082). A sign-in or sync finds a person by `entryUUID` /
+  `objectGUID` before their e-mail: someone whose address changes in the
+  directory keeps their account and files, and its e-mail follows; an
+  address the directory gives to someone new no longer signs them in to the
+  previous owner's account - sign-in is refused and sync lists the problem.
+- **A group can make its members administrators** ([docs/GROUPS.md → Administrators](docs/GROUPS.md#administrators),
+  migration 00083). A group's role can be **Administrator (full access)**:
+  linked to an LDAP or SSO group, the directory decides who administers
+  filex, so the local administrator from setup can go. Its LDAP links are
+  full DNs and count only for people of the group's own directory. Leaving
+  the group gives back the earlier level; the last administrator of a tenant
+  is never demoted; an administrator made by hand is never demoted by a
+  group. Only a signed-in full administrator sets one up or changes who is
+  in it.
+- **Where people come from.** The Users page has a **Source** column -
+  Local, SSO, LDAP or Proxy - and a **Groups** column (two groups a row,
+  those that give a role or folder access first, then "+N") with a group
+  filter; a person's page and a group's member list show the source too. The
+  Groups page says whether a group's members are added by hand or come from
+  SSO or LDAP, and filters by it.
+- **Add user makes a local account** - people from LDAP or SSO arrive at
+  sign-in or with directory sync. The dialog suggests the username and
+  display name from the e-mail, says what the role gives, sets a password
+  (generate, show, copy) or sends an invitation, adds the account to groups
+  made here, and has **Create and add another**.
+- **Identity providers, one tab per kind.** The page is a set of summary
+  cards, one tab per kind of sign-in (LDAP first, Windows and PAM too); a
+  card opens the provider's own page - for LDAP its settings in sections
+  (Connection, People, Groups, Directory sync) and its sync.
 
 ### Changed
 
 - **A release is tagged only after GitHub has tested its commit (#76).** `pnpm release` pushes both `main` branches untagged, starts a dry run of `release.yml` on the export commit and waits until it and CI have passed there; only then are the tags made, and the tag run's new `verify` job publishes nothing without those two runs on its commit. A red run spends no version number, a resume never goes back past a pushed tag, and `--resume --only deploy` re-reads the deploy on the tagged commits ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+- Nothing changes on upgrade: migrations 00081 to 00083 add the LDAP group
+  table, empty, a label saying where each account comes from (an account
+  with an OIDC subject is SSO; the rest start Local, and a directory account
+  with no password here takes its directory's label at its next sign-in),
+  the permanent id column and the administrator switch, off.
+- The Roles page's introduction says one role per person.
 
 ### Fixed
 

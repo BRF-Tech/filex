@@ -44,6 +44,10 @@ vi.mock('@/api/roles', () => ({
     setUserRole: vi.fn(),
   },
 }));
+// The Users list's Groups column and filter (best effort).
+vi.mock('@/api/groups', () => ({
+  GroupsApi: { list: vi.fn(async () => []), memberships: vi.fn(async () => ({})), forUser: vi.fn(async () => []), addMembers: vi.fn() },
+}));
 vi.mock('@/api/quota', () => ({
   quotaApi: { adminGet: vi.fn(async () => ({ quota_bytes: 0, used_bytes: 0, percent_used: 0, unlimited: true })) },
 }));

@@ -46,8 +46,44 @@ type ProvisionStore interface {
 	DeleteUser(ctx context.Context, id int64) error
 	GetUser(ctx context.Context, id int64) (*model.User, error)
 	SetUserProvider(ctx context.Context, userID, providerID int64, oidcSubject string) error
+	SetUserAuthSource(ctx context.Context, userID int64, source string) error
 	GetProviderByHost(ctx context.Context, host string) (*model.Provider, error)
 	GetProviderBySlug(ctx context.Context, slug string) (*model.Provider, error)
+}
+
+// SourceOf is the users.auth_source (model.AuthSource*) of an account an auth
+// driver made: "ldap" → LDAP, a proxy-header driver → Proxy, an OpenID Connect
+// driver → SSO; anything else is Local.
+func SourceOf(driver string) string {
+	switch strings.ToLower(driver) {
+	case "ldap":
+		return model.AuthSourceLDAP
+	case "proxy_header", "proxy-header", "proxyheader", "header-proxy":
+		return model.AuthSourceProxy
+	case "oidc", "multioidc":
+		return model.AuthSourceSSO
+	}
+	return model.AuthSourceLocal
+}
+
+// ClaimSource labels an existing account with the directory it just signed
+// in through (model.AuthSource*), when it has no password of its own here
+// and is still labelled Local — an account made before migration 00081 by
+// that directory. An account with a password here was made here: it stays
+// Local whatever it later signs in with.
+func ClaimSource(ctx context.Context, store interface {
+	SetUserAuthSource(ctx context.Context, userID int64, source string) error
+}, u *model.User, source string) {
+	if u == nil || u.PasswordHash != "" || source == model.AuthSourceLocal ||
+		(u.AuthSource != "" && u.AuthSource != model.AuthSourceLocal) {
+		return
+	}
+	if err := store.SetUserAuthSource(ctx, u.ID, source); err != nil {
+		slog.Warn("auth: could not record where an account comes from",
+			slog.Int64("user_id", u.ID), slog.String("err", err.Error()))
+		return
+	}
+	u.AuthSource = source
 }
 
 // TenantHoming is a driver's policy for where its JIT accounts land.
@@ -127,6 +163,16 @@ func provision(ctx context.Context, store ProvisionStore, h TenantHoming, pinned
 	u, err := store.CreateUser(ctx, email, "", role, "en", model.TimezoneUnset)
 	if err != nil {
 		return nil, err
+	}
+	// Where it comes from, for the Users page. A label only: failing to write
+	// it must not refuse a sign-in the directory accepted.
+	if src := SourceOf(driver); src != model.AuthSourceLocal {
+		if err := store.SetUserAuthSource(ctx, u.ID, src); err != nil {
+			slog.Warn(driver+": could not record where the new account comes from",
+				slog.Int64("user_id", u.ID), slog.String("err", err.Error()))
+		} else {
+			u.AuthSource = src
+		}
 	}
 	if providerID == 0 {
 		return u, nil

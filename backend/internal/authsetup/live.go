@@ -319,6 +319,10 @@ type Live struct {
 	// flows are the OIDC sign-ins in flight (oidcflow.go): which instance and
 	// which tenant each was started for.
 	flows *flowBook
+
+	// Directory sync (dirsync.go): the LDAP instances whose sync is running.
+	syncMu  sync.Mutex
+	syncing map[string]bool
 }
 
 type built struct {
@@ -545,6 +549,12 @@ func (l *Live) buildOne(key, driver string, s *Stored, e Entry, tweak func(map[s
 	}
 	if tweak != nil {
 		tweak(cfg)
+	}
+	if driver == "ldap" {
+		// Each LDAP instance knows its own slug: the accounts it makes are
+		// its own (users.auth_directory), and so are its people's permanent
+		// ids and its directory sync (docs/LDAP.md → Several directories).
+		cfg["directory"] = key
 	}
 	e.Directory = directory
 	fp := fingerprint(cfg)

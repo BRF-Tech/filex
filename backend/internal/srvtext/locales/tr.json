@@ -2,6 +2,7 @@
   "server.account.email_invalid": "“{email}” bir e-posta adresi değil. ad@ornek.com biçiminde yazın.",
   "server.account.email_required": "Bir e-posta adresi yazın.",
   "server.account.email_taken": "{email} başka bir hesaba ait.",
+  "server.account.directory_email": "{email}, {directory} dizininin bir adresi: kişileri oturum açtıklarında ya da dizin eşitlendiğinde gelir. Burada oluşturulan hesap, o dizinin asla oturum açtırmayacağı yerel bir hesap olur.",
   "server.account.username_at": "Kullanıcı adında @ olamaz; @ e-posta adresine aittir.",
   "server.account.username_char": "Kullanıcı adında “{char}” kullanılamaz. a-z, 0-9, nokta, tire ya da alt çizgi kullanın.",
   "server.account.username_digit": "Kullanıcı adı rakamla başlayamaz.",

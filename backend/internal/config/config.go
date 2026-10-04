@@ -708,6 +708,31 @@ type LDAPConfig struct {
 	// fallback is `default`, and `default` is the confine-exempt supertenant.
 	// An account that already exists signs in over every protocol either way.
 	Provider string `yaml:"provider"`
+	// LDAP links (docs/LDAP.md → Groups): where a browser sign-in reads the
+	// person's LDAP groups, for filex groups linked to them — GroupAttr above
+	// (memberOf when empty) — unless GroupFilter is set, which finds their
+	// groups by a search instead: %s is their DN, %u the name they signed in
+	// with, under GroupBaseDN (base_dn when empty).
+	GroupFilter string `yaml:"group_filter"`
+	GroupBaseDN string `yaml:"group_base_dn"`
+	// Directory sync (docs/LDAP.md → Directory sync): read every person and
+	// their groups without waiting for them to sign in. SyncInterval is how
+	// often (a duration, at least 5m; empty = only from Sync now),
+	// SyncFilter the search listing every person (empty: user_filter with
+	// "*"), SyncDisableMissing switches off an account the directory made
+	// once it no longer lists it.
+	SyncInterval       string `yaml:"sync_interval"`
+	SyncFilter         string `yaml:"sync_filter"`
+	SyncDisableMissing bool   `yaml:"sync_disable_missing"`
+	// SyncGroups brings every directory group in as a filex group (on by
+	// default); SyncGroupFilter picks which (empty: every group of the usual
+	// kinds). Which groups exist is managed on the directory.
+	SyncGroups      bool   `yaml:"sync_groups"`
+	SyncGroupFilter string `yaml:"sync_group_filter"`
+	// EmailDomains, when set, are the only e-mail domains the directory
+	// signs in or makes accounts for — what keeps several directories apart
+	// (docs/LDAP.md → Several directories).
+	EmailDomains string `yaml:"email_domains"`
 }
 
 // HeaderProxyConfig — accept Cloudflare Access / Authelia headers.
@@ -855,6 +880,7 @@ func Default() Config {
 			RecoveryLogin: true,
 			LDAP: LDAPConfig{
 				ProtocolLogin: true,
+				SyncGroups:    true,
 			},
 		},
 		Sync: SyncConfig{
@@ -1644,6 +1670,33 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_LDAP_PROVIDER"); v != "" {
 		c.Auth.LDAP.Provider = v
+	}
+	if v := os.Getenv("FILEX_LDAP_GROUP_ATTR"); v != "" {
+		c.Auth.LDAP.GroupAttr = v
+	}
+	if v := os.Getenv("FILEX_LDAP_GROUP_FILTER"); v != "" {
+		c.Auth.LDAP.GroupFilter = v
+	}
+	if v := os.Getenv("FILEX_LDAP_GROUP_BASE_DN"); v != "" {
+		c.Auth.LDAP.GroupBaseDN = v
+	}
+	if v := os.Getenv("FILEX_LDAP_SYNC_INTERVAL"); v != "" {
+		c.Auth.LDAP.SyncInterval = v
+	}
+	if v := os.Getenv("FILEX_LDAP_SYNC_FILTER"); v != "" {
+		c.Auth.LDAP.SyncFilter = v
+	}
+	if v := os.Getenv("FILEX_LDAP_SYNC_DISABLE_MISSING"); v != "" {
+		c.Auth.LDAP.SyncDisableMissing = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_LDAP_SYNC_GROUPS"); v != "" {
+		c.Auth.LDAP.SyncGroups = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_LDAP_SYNC_GROUP_FILTER"); v != "" {
+		c.Auth.LDAP.SyncGroupFilter = v
+	}
+	if v := os.Getenv("FILEX_LDAP_EMAIL_DOMAINS"); v != "" {
+		c.Auth.LDAP.EmailDomains = v
 	}
 
 	// Reverse-proxy header auth (previously YAML-only). Enable with

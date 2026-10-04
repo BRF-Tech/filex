@@ -969,6 +969,12 @@ func (h *PermissionsAdmin) PutUserRoles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A group makes them an administrator (migration 00083): it would at
+	// once again. Who is in that group decides.
+	if target.AdminByGroup && newRole != "" && newRole != target.Role {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "this person is an administrator through a group; take them out of the group (or its LDAP / SSO group) instead"})
+		return
+	}
 	// Judged by the result as well: a built-in role, or no custom role, can
 	// hand out what a restrictive custom role took away (refuseGain).
 	var nextRoleID int64

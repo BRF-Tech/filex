@@ -101,13 +101,46 @@ export function toAuthProvider(p: BackendProvider): AuthProvider {
   };
 }
 
+/** One directory sync's report (backend auth.DirectorySyncReport). */
+export interface DirectorySyncReport {
+  provider: string;
+  trigger: 'manual' | 'schedule' | string;
+  started_at: string;
+  finished_at: string;
+  found: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  missing: number;
+  disabled: number;
+  enabled?: number;
+  emails_changed?: number;
+  groups_found: number;
+  groups_created: number;
+  groups_renamed: number;
+  groups_restored: number;
+  groups_removed: number;
+  groups_linked_by_hand: number;
+  problems?: string[];
+  error?: string;
+}
+
+/** An LDAP provider's directory sync: can it run, is it running, the last run. */
+export interface DirectorySyncStatus {
+  name: string;
+  available: boolean;
+  running: boolean;
+  interval_seconds: number;
+  last: DirectorySyncReport | null;
+}
+
 /**
  * What a save answered: applied, or refused because the test failed.
  *
  * `superAdmin`: the test account of an operating-system provider passed and
  * is now a super administrator of the instance. `confirmAllowed` false (with
  * `strict`): the provider is one that is never switched on over a failing
- * test — there is no "switch on anyway" to offer.
+ * test - there is no "switch on anyway" to offer.
  */
 export type AuthProviderSaveResult =
   | { status: 'saved'; provider: AuthProvider | null; checks: AuthProviderCheck[]; testOk: boolean; superAdmin: boolean }
@@ -121,6 +154,17 @@ export type AuthProviderSaveResult =
     };
 
 export const AuthProvidersApi = {
+  /** An LDAP provider's directory sync (docs/LDAP.md - Directory sync). */
+  async syncStatus(name: string): Promise<DirectorySyncStatus> {
+    const { data } = await api.get<DirectorySyncStatus>(`/admin/auth-providers/${encodeURIComponent(name)}/sync`);
+    return data;
+  },
+
+  /** Starts a sync on the server; it goes on in the background. */
+  async syncStart(name: string): Promise<void> {
+    await api.post(`/admin/auth-providers/${encodeURIComponent(name)}/sync`, {});
+  },
+
   async overview(): Promise<AuthProvidersOverview> {
     const { data } = await api.get<ListResponse>('/admin/auth-providers');
     return {

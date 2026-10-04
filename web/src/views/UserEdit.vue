@@ -15,6 +15,7 @@ import { personName } from '@brftech/filex-core';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import SourceBadge from '@/components/SourceBadge.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -298,6 +299,7 @@ onMounted(() => {
         <h1 class="text-xl font-semibold flex items-center gap-2">
           {{ personName(user) }}
           <!-- ⚠ The role in words (it printed "user" under the name). -->
+          <SourceBadge :source="user.auth_source" data-testid="user-edit-source" />
           <Badge size="xs" data-testid="user-edit-role">{{ roleInForce && user.role !== 'admin' ? roleName(roleInForce, locale) : t(`users.roles.${user.role}`) }}</Badge>
         </h1>
         <p class="text-sm text-zinc-500">{{ user.email }}</p>
@@ -313,7 +315,10 @@ onMounted(() => {
            SSO sign-in is matched on), so the field is shown, not offered. -->
       <Input v-model="email" type="email" :label="t('common.email')" readonly disabled />
       <Input v-model="displayName" :label="t('users.fields.displayName')" required />
-      <Select v-model="role" :options="roleOptions" :label="t('common.role')" />
+      <Select v-model="role" :options="roleOptions" :label="t('common.role')" :disabled="user.admin_by_group" />
+      <p v-if="user.admin_by_group" class="text-xs text-zinc-600 dark:text-zinc-300" data-testid="user-admin-by-group">
+        {{ t('users.adminByGroup') }}
+      </p>
       <p v-if="user.role !== 'admin' && !heldRole && roleInForce?.group" class="text-xs text-zinc-600 dark:text-zinc-300" data-testid="user-group-role">
         {{ t('groups.userCard.roleFromGroup', { role: roleName(roleInForce, locale), group: roleInForce.group }) }}
       </p>
@@ -342,7 +347,7 @@ onMounted(() => {
       :class="pending ? 'border-amber-300 dark:border-amber-700' : ''"
       data-testid="user-account-off"
     >
-      <p class="text-sm">{{ pending ? t('users.account.pendingAbout') : t('users.account.disabledAbout') }}</p>
+      <p class="text-sm">{{ pending ? t('users.account.pendingAbout') : user.disabled_reason === 'directory' ? t('users.account.directoryAbout') : t('users.account.disabledAbout') }}</p>
       <div class="flex justify-end">
         <Button type="button" :loading="enabling" data-testid="user-account-enable" @click="enableAccount">
           <ShieldCheck class="h-4 w-4" />

@@ -377,6 +377,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	authLive.Start(ctx)
+	// Directory sync on each provider's interval (sync_interval; off unless
+	// set) — docs/LDAP.md → Directory sync.
+	go authLive.RunDirectorySync(ctx)
 	authSet := authLive.Current()
 	recoveryLogin := authSet.Recovery()
 	if recoveryLogin {
@@ -2110,6 +2113,16 @@ func envAuthEntries(ctx context.Context, cfg config.Config, store db.Store, logi
 				"email_attr":    cfg.Auth.LDAP.EmailAttr,
 				"start_tls":     cfg.Auth.LDAP.StartTLS,
 				"ca_file":       cfg.Auth.LDAP.CAFile,
+				// LDAP links, directory sync and the directory's e-mail
+				// domains (docs/LDAP.md).
+				"group_filter":         cfg.Auth.LDAP.GroupFilter,
+				"group_base_dn":        cfg.Auth.LDAP.GroupBaseDN,
+				"sync_interval":        cfg.Auth.LDAP.SyncInterval,
+				"sync_filter":          cfg.Auth.LDAP.SyncFilter,
+				"sync_disable_missing": cfg.Auth.LDAP.SyncDisableMissing,
+				"sync_groups":          cfg.Auth.LDAP.SyncGroups,
+				"sync_group_filter":    cfg.Auth.LDAP.SyncGroupFilter,
+				"email_domains":        cfg.Auth.LDAP.EmailDomains,
 				// Tenant homing for just-in-time accounts. Without these the
 				// driver falls back to db.CreateUser's hard-coded `default`
 				// provider, which is the confine-exempt supertenant.

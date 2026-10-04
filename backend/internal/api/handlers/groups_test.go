@@ -1005,3 +1005,144 @@ func TestGroups_TenthReviewFindings(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, status, body)
 	})
 }
+
+// An LDAP link is stored in the form it is compared in, applies at once from
+// each account's last LDAP sign-in, and every member row says where the
+// account comes from.
+func TestGroups_LDAPLinkAppliesAtOnce(t *testing.T) {
+	pf := newPermFix(t)
+	ctx := context.Background()
+	require.NoError(t, pf.Store.SetUserLDAPGroups(ctx, pf.UserA, []string{"cn=finance,ou=groups,dc=example,dc=com", "finance"}))
+	require.NoError(t, pf.Store.SetUserAuthSource(ctx, pf.UserA, model.AuthSourceLDAP))
+	gid := newGroup(t, pf, map[string]any{"name": "Finance"})
+
+	status, body := fxJSON(t, "PUT", pf.URL+"/api/admin/groups/"+idStr(gid), pf.adminTok, map[string]any{
+		"name": "Finance", "links": []map[string]string{{"kind": "ldap", "value": "CN=Finance, OU=Groups, DC=example, DC=com"}},
+	})
+	require.Equal(t, http.StatusOK, status, body)
+	d := decode(t, body)
+	links := d["group"].(map[string]any)["links"].([]any)
+	assert.Equal(t, "cn=finance,ou=groups,dc=example,dc=com", links[0].(map[string]any)["value"], "stored as it is compared")
+	members := d["members"].([]any)
+	require.Len(t, members, 1, "their last LDAP sign-in showed the group")
+	assert.Equal(t, model.GroupSourceLDAP, members[0].(map[string]any)["source"])
+	assert.Equal(t, model.AuthSourceLDAP, members[0].(map[string]any)["auth_source"])
+
+	// An SSO link of the same name is another directory: nobody joins by it.
+	status, body = fxJSON(t, "PUT", pf.URL+"/api/admin/groups/"+idStr(gid), pf.adminTok, map[string]any{
+		"name": "Finance", "links": []map[string]string{{"kind": "sso", "value": "finance"}},
+	})
+	require.Equal(t, http.StatusOK, status, body)
+	assert.Empty(t, decode(t, body)["members"], "the LDAP link is gone, and an SSO one does not read LDAP groups")
+
+	status, body = fxJSON(t, "PUT", pf.URL+"/api/admin/groups/"+idStr(gid), pf.adminTok, map[string]any{
+		"name": "Finance", "links": []map[string]string{{"kind": "nfs", "value": "x"}},
+	})
+	assert.Equal(t, http.StatusBadRequest, status, body)
+}
+
+// The Users list says where each account comes from.
+func TestUsers_ListSaysWhereAnAccountComesFrom(t *testing.T) {
+	pf := newPermFix(t)
+	ctx := context.Background()
+	require.NoError(t, pf.Store.SetUserAuthSource(ctx, pf.UserA, model.AuthSourceLDAP))
+	status, body := fxReq(t, "GET", pf.URL+"/api/admin/users", pf.adminTok, nil, "")
+	require.Equal(t, http.StatusOK, status, body)
+	seen := map[float64]any{}
+	for _, u := range decodeList(t, body) {
+		seen[u["id"].(float64)] = u["auth_source"]
+	}
+	assert.Equal(t, model.AuthSourceLDAP, seen[float64(pf.UserA)])
+	assert.Equal(t, model.AuthSourceLocal, seen[float64(pf.UserB)])
+}
+
+// The Users list's Groups column: every person's groups in one call, each
+// with how they are in it — and a tenant administrator sees only their
+// tenant's groups.
+func TestGroups_MembershipsForTheUsersList(t *testing.T) {
+	f := newMTFix(t, true)
+	t.Cleanup(perm.Invalidate)
+	ctx := context.Background()
+
+	status, body := sessionJSON(t, f.AdminA, "POST", f.URL+"/api/admin/groups", map[string]any{"name": "Alpha team"})
+	require.Equal(t, http.StatusCreated, status, body)
+	alpha := int64(decode(t, body)["group"].(map[string]any)["id"].(float64))
+	require.NoError(t, f.Store.AddGroupMember(ctx, alpha, f.UserA))
+	status, body = sessionJSON(t, f.Super, "POST", f.URL+"/api/admin/groups", map[string]any{"name": "Bravo team", "provider_id": f.ProvB})
+	require.Equal(t, http.StatusCreated, status, body)
+	bravo := int64(decode(t, body)["group"].(map[string]any)["id"].(float64))
+	require.NoError(t, f.Store.AddGroupMember(ctx, bravo, f.UserB))
+
+	status, body = sessionJSON(t, f.Super, "GET", f.URL+"/api/admin/groups/memberships", nil)
+	require.Equal(t, http.StatusOK, status, body)
+	all := decode(t, body)["memberships"].(map[string]any)
+	a := all[idStr(f.UserA)].([]any)[0].(map[string]any)
+	assert.Equal(t, "Alpha team", a["name"])
+	assert.Equal(t, model.GroupSourceManual, a["source"])
+	assert.Contains(t, all, idStr(f.UserB))
+
+	status, body = sessionJSON(t, f.AdminA, "GET", f.URL+"/api/admin/groups/memberships", nil)
+	require.Equal(t, http.StatusOK, status, body)
+	assert.Contains(t, body, "Alpha team")
+	assert.NotContains(t, body, "Bravo team", "another tenant's groups stay out of sight")
+}
+
+// A group directory sync brought in: its LDAP link is the directory's (an
+// edit keeps it); once its directory group is gone, an administrator keeps
+// it as a filex group — which drops the dead link and keeps the rest.
+func TestGroups_SyncedFromTheDirectory(t *testing.T) {
+	pf := newPermFix(t)
+	ctx := context.Background()
+	dn := "cn=ops,ou=groups,dc=example,dc=com"
+	g, err := pf.Store.CreateGroup(ctx, &model.Group{
+		Name: "ops", Links: []model.GroupLink{{Kind: model.GroupLinkLDAP, Value: dn}},
+		DirectoryID: "ldap:u-ops", DirectoryName: "ops",
+	})
+	require.NoError(t, err)
+
+	status, body := fxJSON(t, "PUT", pf.URL+"/api/admin/groups/"+idStr(g.ID), pf.adminTok, map[string]any{
+		"name": "Operations", "links": []map[string]string{{"kind": "sso", "value": "ops"}, {"kind": "ldap", "value": "cn=other"}},
+	})
+	require.Equal(t, http.StatusOK, status, body)
+	got := decode(t, body)["group"].(map[string]any)
+	assert.Equal(t, "Operations", got["name"])
+	assert.Equal(t, "ldap:u-ops", got["directory_id"])
+	links := got["links"].([]any)
+	require.Len(t, links, 2)
+	assert.Contains(t, body, dn, "the directory's link stays")
+	assert.NotContains(t, body, "cn=other")
+
+	status, body = fxJSON(t, "POST", pf.URL+"/api/admin/groups/"+idStr(g.ID)+"/detach", pf.adminTok, nil)
+	assert.Equal(t, http.StatusConflict, status, "the directory still has it: "+body)
+
+	require.NoError(t, pf.Store.SetGroupDirectory(ctx, g.ID, "ldap:u-ops", "ops", model.GroupDirectoryRemoved))
+	status, body = fxJSON(t, "POST", pf.URL+"/api/admin/groups/"+idStr(g.ID)+"/detach", pf.adminTok, nil)
+	require.Equal(t, http.StatusOK, status, body)
+	got = decode(t, body)["group"].(map[string]any)
+	assert.Nil(t, got["directory_id"])
+	assert.NotContains(t, body, dn)
+	assert.Contains(t, body, `"kind":"sso"`)
+}
+
+// A person's groups for the Users list: the ones that give a role or folder
+// access first, and said to be.
+func TestGroups_MembershipsPutGroupsInUseFirst(t *testing.T) {
+	pf := newPermFix(t)
+	ctx := context.Background()
+	plain, err := pf.Store.CreateGroup(ctx, &model.Group{Name: "aaa-plain"})
+	require.NoError(t, err)
+	withFolders := newGroup(t, pf, map[string]any{"name": "zzz-with-folders"})
+	require.NoError(t, pf.Store.AddGroupMember(ctx, plain.ID, pf.UserA))
+	require.NoError(t, pf.Store.AddGroupMember(ctx, withFolders, pf.UserA))
+	_, err = pf.Store.CreateGroupFileGrant(ctx, &model.FileGrant{StorageID: pf.StA.ID, PathPrefix: "", IsDir: true, GroupID: withFolders, Level: model.GrantViewer})
+	require.NoError(t, err)
+
+	status, body := fxReq(t, "GET", pf.URL+"/api/admin/groups/memberships", pf.adminTok, nil, "")
+	require.Equal(t, http.StatusOK, status, body)
+	rows := decode(t, body)["memberships"].(map[string]any)[idStr(pf.UserA)].([]any)
+	require.Len(t, rows, 2)
+	first := rows[0].(map[string]any)
+	assert.Equal(t, "zzz-with-folders", first["name"], "in use first, whatever its name")
+	assert.Equal(t, true, first["in_use"])
+	assert.Nil(t, rows[1].(map[string]any)["in_use"])
+}

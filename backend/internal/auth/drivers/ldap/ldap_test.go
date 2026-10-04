@@ -41,6 +41,8 @@ type fakeConn struct {
 	searches []*goldap.SearchRequest
 	// entries is what Search answers with.
 	entries []*goldap.Entry
+	// groups is what a directory-sync group search answers with.
+	groups []*goldap.Entry
 	// searchErr, when set, is what Search returns.
 	searchErr error
 	// userPassword is the password the entry's own bind accepts. Any other
@@ -78,10 +80,17 @@ func (f *fakeConn) Bind(dn, password string) error {
 
 func (f *fakeConn) Search(req *goldap.SearchRequest) (*goldap.SearchResult, error) {
 	f.searches = append(f.searches, req)
+	if strings.Contains(req.Filter, "objectClass=group") {
+		return &goldap.SearchResult{Entries: f.groups}, nil
+	}
 	if f.searchErr != nil {
 		return &goldap.SearchResult{Entries: f.entries}, f.searchErr
 	}
 	return &goldap.SearchResult{Entries: f.entries}, nil
+}
+
+func (f *fakeConn) SearchWithPaging(req *goldap.SearchRequest, _ uint32) (*goldap.SearchResult, error) {
+	return f.Search(req)
 }
 
 func (f *fakeConn) Close() error { f.closed = true; return nil }

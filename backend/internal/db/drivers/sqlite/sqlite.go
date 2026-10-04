@@ -1347,6 +1347,53 @@ func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, o
 	return s.DropForeignMemberships(ctx, userID, providerID)
 }
 
+// SetUserAuthDirectory records which LDAP directory made an account.
+func (s *Store) SetUserAuthDirectory(ctx context.Context, userID int64, directory string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_directory=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, directory, userID)
+	return err
+}
+
+// GetUserByDirectoryID finds the account a directory entry's permanent id is
+// recorded on.
+func (s *Store) GetUserByDirectoryID(ctx context.Context, directoryID string) (*model.User, error) {
+	if directoryID == "" {
+		return nil, sql.ErrNoRows
+	}
+	return scanUser(s.conn(ctx).QueryRowContext(ctx, userSelect()+` FROM users WHERE directory_id=?`, directoryID))
+}
+
+// SetUserDirectoryID records a directory account's permanent id.
+func (s *Store) SetUserDirectoryID(ctx context.Context, userID int64, directoryID string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET directory_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, directoryID, userID)
+	return err
+}
+
+// SetUserEnabledByDirectory switches an account on or off for directory sync,
+// recording that the directory made the change (model.DisabledByDirectory).
+func (s *Store) SetUserEnabledByDirectory(ctx context.Context, userID int64, enabled bool) error {
+	if enabled {
+		_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=1, disabled_reason=NULL WHERE id=?`, userID)
+		return err
+	}
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=0, disabled_reason=? WHERE id=?`, model.DisabledByDirectory, userID)
+	return err
+}
+
+// DeleteSettingsWithPrefix removes every setting whose key starts with prefix.
+func (s *Store) DeleteSettingsWithPrefix(ctx context.Context, prefix string) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM settings WHERE substr(setting_key, 1, ?) = ?`, len(prefix), prefix)
+	return err
+}
+
+// SetUserAuthSource records where an account comes from (migration 00081).
+func (s *Store) SetUserAuthSource(ctx context.Context, userID int64, source string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_source=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, source, userID)
+	return err
+}
+
 // GetUserByProviderEmail looks a user up within a single provider (tenant), the
 // multi-tenant analogue of GetUserByEmail. Returns (nil, nil) if absent.
 func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
@@ -1481,7 +1528,13 @@ func (s *Store) UpdateUserLocale(ctx context.Context, id int64, locale, tz strin
 }
 
 func (s *Store) UpdateUserRole(ctx context.Context, id int64, role string) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, role, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=?, admin_by_group=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`, role, id)
+	return err
+}
+
+// SetUserAdminByGroup makes the account an administrator through a group.
+func (s *Store) SetUserAdminByGroup(ctx context.Context, id int64) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role='admin', admin_by_group=1, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
@@ -3121,7 +3174,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 }
 
 func userSelect() string {
-	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1), COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,'')`
+	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1), COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,''), COALESCE(auth_source,'local'), COALESCE(auth_directory,''), COALESCE(directory_id,''), COALESCE(admin_by_group,0)`
 }
 
 func scanUser(r rowScanner) (*model.User, error) {
@@ -3129,13 +3182,14 @@ func scanUser(r rowScanner) (*model.User, error) {
 	var totpEnabled int
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	var enabled int
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason); err != nil {
+	var enabled, adminByGroup int
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason, &u.AuthSource, &u.AuthDirectory, &u.DirectoryID, &adminByGroup); err != nil {
 		return nil, err
 	}
 	u.TOTPEnabled = totpEnabled == 1
 	u.Enabled = enabled == 1
 	u.SSOLinked = u.OIDCSubject != "" || u.OIDCIssuer != ""
+	u.AdminByGroup = adminByGroup == 1
 	if recoveryJSON != "" {
 		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
 	}

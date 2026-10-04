@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useRoute, RouterLink } from 'vue-router';
+import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { ChevronRight } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
 import { adminNavPages, adminNavSectionOf } from '@/lib/adminNav';
 
 const route = useRoute();
+const router = useRouter();
 const { t } = useI18n();
 
 interface Crumb {

@@ -5,16 +5,18 @@ import { api } from './client';
  * group can be given folder access (in the explorer's sharing panel, like a
  * person) and a custom role — the role of every member who has none of their
  * own. People are in a group because an administrator added them, or because
- * the group is linked to an SSO group their sign-in carries.
+ * the group is linked to an SSO or LDAP group their sign-in carries.
  */
 
-/** "manual": added by an administrator; "sso": through an SSO link, and
- *  kept in step with the identity provider at every sign-in. */
-export type GroupSource = 'manual' | 'sso' | string;
+/** "manual": added by an administrator; "sso" / "ldap": through a link to
+ *  an SSO or LDAP group, and kept in step with the directory at every
+ *  sign-in. */
+export type GroupSource = 'manual' | 'sso' | 'ldap' | string;
 
-/** An outside directory's group whose people are members too. */
+/** An outside directory's group whose people are members too. An LDAP group
+ *  is named by its DN or its common name, compared without case. */
 export interface GroupLink {
-  kind: 'sso' | string;
+  kind: 'sso' | 'ldap' | string;
   value: string;
 }
 
@@ -24,9 +26,18 @@ export interface Group {
   description: string;
   provider_id?: number | null;
   role_id: number | null;
+  /** The group makes its members administrators (full access) instead of
+   *  giving a role (migration 00083); role_id is then null. */
+  gives_admin?: boolean;
   /** Whose role a member of several groups gets: the highest first. */
   priority: number;
   links: GroupLink[];
+  /** A group directory sync brought in: its directory group's permanent id,
+   *  the name it has there, and "removed" once the directory no longer has
+   *  it. Absent for every other group. */
+  directory_id?: string;
+  directory_name?: string;
+  directory_state?: '' | 'removed';
   created_by?: number | null;
   created_at?: string;
   updated_at?: string;
@@ -42,6 +53,8 @@ export interface GroupMember {
   name: string;
   role: string;
   source: GroupSource;
+  /** Where the account comes from (User.auth_source). */
+  auth_source?: string;
   added_at: string;
 }
 
@@ -61,7 +74,7 @@ export interface GroupDetail {
   grants: GroupGrant[];
 }
 
-export type GroupInput = Pick<Group, 'name' | 'description' | 'role_id' | 'links'> & { priority?: number };
+export type GroupInput = Pick<Group, 'name' | 'description' | 'role_id' | 'links'> & { priority?: number; gives_admin?: boolean };
 
 /** One account's group, as its page lists it. */
 export interface UserGroup {
@@ -71,7 +84,22 @@ export interface UserGroup {
   source: GroupSource;
 }
 
+/** One of a person's groups, as the Users list shows it. */
+export interface Membership {
+  id: number;
+  name: string;
+  source: GroupSource;
+  /** The group gives a role or folder access; such groups come first. */
+  in_use?: boolean;
+}
+
 export const GroupsApi = {
+  /** Every person's groups the caller may see, by user id. */
+  async memberships(): Promise<Record<string, Membership[]>> {
+    const { data } = await api.get<{ memberships: Record<string, Membership[]> }>('/admin/groups/memberships');
+    return data.memberships ?? {};
+  },
+
   async list(): Promise<Group[]> {
     const { data } = await api.get<{ groups: Group[] }>('/admin/groups');
     return data.groups ?? [];
@@ -93,6 +121,12 @@ export const GroupsApi = {
   },
 
   /** Deletes the group, its memberships and its folder access. */
+  /** Keeps a group whose directory group was removed as a filex group. */
+  async detach(id: number): Promise<GroupDetail> {
+    const { data } = await api.post<GroupDetail>(`/admin/groups/${id}/detach`, {});
+    return data;
+  },
+
   async remove(id: number): Promise<void> {
     await api.delete(`/admin/groups/${id}`);
   },

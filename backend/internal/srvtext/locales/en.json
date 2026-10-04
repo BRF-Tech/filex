@@ -2,6 +2,7 @@
   "server.account.email_invalid": "“{email}” is not an email address. Write it as name@example.com.",
   "server.account.email_required": "Enter an email address.",
   "server.account.email_taken": "{email} already belongs to another account.",
+  "server.account.directory_email": "{email} is an address of the {directory} directory: its people arrive when they sign in or when it syncs. An account made here would be a local one that directory never signs in.",
   "server.account.username_at": "A username cannot contain @ - that belongs to an email address.",
   "server.account.username_char": "“{char}” cannot be used in a username. Use a-z, 0-9, dot, dash or underscore.",
   "server.account.username_digit": "A username cannot start with a digit.",

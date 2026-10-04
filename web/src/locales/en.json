@@ -490,14 +490,16 @@
   },
   "users": {
     "title": "Users",
-    "subtitle": "Local accounts and OIDC mappings",
+    "subtitle": "Local, SSO and LDAP accounts - the Source column says which",
     "addNew": "Add user",
-    "newTitle": "Add user",
+    "newTitle": "Add a local account",
     "editTitle": "Edit user",
     "fields": {
       "displayName": "Display name",
       "lastLogin": "Last sign-in",
-      "sendInvite": "Send invitation email"
+      "sendInvite": "Send invitation email",
+      "source": "Source",
+      "groups": "Groups"
     },
     "roles": {
       "admin": "Administrator",
@@ -518,14 +520,17 @@
     "status": {
       "disabled": "Disabled",
       "pending": "Waiting for approval",
-      "pendingTitle": "Opened switched off by an SSO sign-in whose identity provider did not confirm the email address. Switch the account on to approve it."
+      "pendingTitle": "Opened switched off by an SSO sign-in whose identity provider did not confirm the email address. Switch the account on to approve it.",
+      "directory": "Disabled by LDAP",
+      "directoryTitle": "Disabled or no longer listed in the LDAP directory. Directory sync enables the account again when the directory does."
     },
     "account": {
       "pendingAbout": "This account was opened switched off by an SSO sign-in: the identity provider did not confirm that the email address is verified. Switching it on approves it.",
       "disabledAbout": "This account is switched off: it cannot sign in.",
       "approve": "Approve and switch on",
       "enable": "Switch on",
-      "enabledOk": "Account switched on"
+      "enabledOk": "Account switched on",
+      "directoryAbout": "Disabled by LDAP directory sync: the person is disabled in the directory, or no longer listed there. Their sessions, API keys and SFTP keys do not work. Sync enables the account again when the directory does; enabling it here keeps it on until an administrator or the directory switches it off again."
     },
     "sso": {
       "title": "SSO identity",
@@ -546,7 +551,40 @@
     },
     "viaGroup": "through {group}",
     "groupRoleConfirm": "{name} has the role “{role}” through the group “{group}”. A built-in role picked here does not replace it: give them a custom role, or take them out of the group. Save anyway?",
-    "groupRoleStill": "Saved, but the role “{role}” from the group “{group}” still applies."
+    "groupRoleStill": "Saved, but the role “{role}” from the group “{group}” still applies.",
+    "allGroups": "All groups",
+    "add": {
+      "intro": "A local account, signing in with its own password. People of an LDAP directory or an SSO provider are not added here: they appear when they sign in, or when their directory syncs.",
+      "username": "Username",
+      "usernameHint": "For SFTP and FTP; filled in from the email.",
+      "signIn": "How they sign in",
+      "access": {
+        "password": "Set a password",
+        "invite": "Send an invitation"
+      },
+      "generate": "Generate",
+      "show": "Show the password",
+      "hide": "Hide the password",
+      "copied": "Copied",
+      "passwordNeeded": "Type a password, generate one, or send an invitation instead.",
+      "inviteHint": "filex makes a first password and emails it with the address to sign in at. If no email can be sent, you get the password here to pass on.",
+      "groups": "Add to groups",
+      "groupNotSet": "The account was made, but not added to {group}: {error}",
+      "invitedOk": "Invitation sent to {email}",
+      "notEmailed": "The account {email} was made, but no email could be sent. Pass this first password on to them:",
+      "shownOnce": "It is shown only now. They can change it after signing in.",
+      "addAnother": "Add another",
+      "createAnother": "Create and add another",
+      "createAnyway": "Make a local account anyway",
+      "openDirectory": "Sync {directory}",
+      "roleHint": {
+        "admin": "Everything, including this admin area.",
+        "user": "Works with files: upload, change, share - as the User role allows.",
+        "viewer": "Read-only: browse and download.",
+        "custom": "A custom role - its permissions are on the Roles page."
+      }
+    },
+    "adminByGroup": "Administrator through a group. To change their role, take them out of that group (or its LDAP / SSO group)."
   },
   "profile": {
     "saved": "Profile saved",
@@ -755,10 +793,19 @@
       "auto_provision": "Auto-provision users",
       "ca_file": "CA certificate file",
       "protocol_login": "Accept directory passwords on WebDAV, SFTP, FTPS, S3 and NFS",
+      "sync_interval": "Directory sync every",
+      "sync_filter": "Directory sync filter",
+      "sync_disable_missing": "Switch off accounts the directory no longer lists",
+      "sync_groups": "Bring in every directory group as a filex group",
+      "sync_group_filter": "Groups to bring in (filter; empty = all)",
+      "label": "Name",
+      "email_domains": "Email domains",
       "auto_create": "Open an account at the first sign-in",
       "allowed_groups": "Only members of these groups (comma list)",
       "domain": "Default domain (CORP or corp.example; empty = this machine)",
       "group_attr": "Group attribute",
+      "group_filter": "Group search filter",
+      "group_base_dn": "Group search base DN",
       "pamtester_path": "pamtester path",
       "service": "PAM service (its file in /etc/pam.d)",
       "use_sudo": "Run pamtester through sudo (switch it off only if filex runs as root)",
@@ -776,7 +823,17 @@
       "email_domain": "With corp.example, the account alex signs in as alex{'@'}corp.example. Empty: the address this installation chose for operating-system accounts. Choose it before the first sign-in.",
       "ca_pem": "The private CA the directory's certificate is signed by, pasted as it is. Empty: the system's trusted roots.",
       "show_refusal_reason": "Off by default. On, a person whose password was right but who still may not sign in here (no account is opened at a first sign-in, or they are in no allowed group) is told why. The sign-in form then also tells anybody who is guessing that a password is right - a password that may open other services that use the same accounts.",
-      "trust_email": "Off by default. Off, an address the provider does not mark verified (email_verified) opens no existing account that is not yet bound to an SSO identity, and a new account for it is opened switched off until an administrator approves it. Turn it on only for a provider whose addresses all belong to the people who hold them: anybody who can set an address there can then sign in to the account with that address."
+      "trust_email": "Off by default. Off, an address the provider does not mark verified (email_verified) opens no existing account that is not yet bound to an SSO identity, and a new account for it is opened switched off until an administrator approves it. Turn it on only for a provider whose addresses all belong to the people who hold them: anybody who can set an address there can then sign in to the account with that address.",
+      "user_filter": "Finds the person signing in. Every %s is the name they typed.",
+      "group_attr": "The attribute on a person that lists their groups. Active Directory and lldap: memberOf.",
+      "group_filter": "Only when people don’t carry their groups: finds them by a search instead. %s is the person’s DN, %u the name they signed in with - e.g. (member=%s).",
+      "group_base_dn": "Where groups are searched for. Empty: the base DN.",
+      "sync_interval": "How often sync runs on its own - e.g. 6h, at least 5m. Empty: only when you press Sync now.",
+      "sync_filter": "Who sync lists. Empty: the user filter with * - everyone who can sign in.",
+      "sync_disable_missing": "Accounts the directory made are switched off once it no longer lists them. Never an administrator or an account made here.",
+      "sync_groups": "Every directory group becomes a filex group, kept in step. Which groups exist is managed on the directory.",
+      "sync_group_filter": "Which directory groups to bring in. Empty: all of them - e.g. (&(objectClass=groupOfNames)(cn=dept-*)).",
+      "email_domains": "Only these domains may sign in through it or get an account from it (e.g. partner.com). Empty: any."
     },
     "upgradeHints": {
       "trust_email": "The upgrade switched this on so that this provider works as it did before. Switch it off if the provider sends email_verified."
@@ -826,7 +883,8 @@
       "no_password": "the test account has no password",
       "no_group_source": "set the role/group claim (OIDC), the group attribute (LDAP) or the roles header, so there is something to read groups from",
       "public": "a client without a secret can only be checked when somebody signs in",
-      "unclear": "the provider’s answer ({status}) does not say either way"
+      "unclear": "the provider’s answer ({status}) does not say either way",
+      "no_people": "check the base DN and the user filter"
     },
     "checks": {
       "required": {
@@ -902,6 +960,24 @@
       "secret": {
         "fail": "A secret stored for this provider cannot be opened - {env} may have changed. Type it again."
       },
+      "people": {
+        "ok": "{n} person found with {filter}; {mail} with an email ({attr}). | {n} people found with {filter}; {mail} with an email ({attr}).",
+        "fail": "Nobody with an email ({attr}) found with {filter}: {reason}."
+      },
+      "groups": {
+        "ok": "{n} of {of} person lists their groups in {attr}. | {n} of {of} people list their groups in {attr}.",
+        "unchecked": "Nobody lists groups in {attr}. If your directory has groups, set a group search filter."
+      },
+      "groups_search": {
+        "ok": "The group search finds {n} group for {who}. | The group search finds {n} groups for {who}.",
+        "fail": "The group search {filter} failed: {reason}.",
+        "unchecked": "The group search {filter} finds no groups for {who}."
+      },
+      "sync_groups": {
+        "ok": "Directory sync would bring in {n} group. | Directory sync would bring in {n} groups.",
+        "fail": "The search for groups to bring in ({filter}) failed: {reason}.",
+        "unchecked": "No group matches {filter}: directory sync would bring none in."
+      },
       "config": {
         "ok": "The settings are well-formed.",
         "fail": "The configuration is not valid: {detail}"
@@ -942,7 +1018,6 @@
     "passwordOff": "Password sign-in is off on this server. Only the environment can turn it on ({env}).",
     "recoveryOn": "The installation administrator can still sign in with a password, for recovery ({env}).",
     "recoveryOff": "Recovery sign-in for the installation administrator is off ({env} is false).",
-    "apiTokenAlways": "API keys are always accepted; they are issued on the API / MCP page.",
     "noSecretKey": "{env} is not set on this server, so a client secret or bind password cannot be stored here: secrets are only ever kept sealed.",
     "envReadOnly": "Configured by the environment: {from}. Change it there and restart filex - this page cannot override it.",
     "shadowed": "A configuration saved on this page under the same name is kept, but not used while the environment defines this provider.",
@@ -962,6 +1037,66 @@
       "builtin": "Built in"
     },
     "technicalDetailIs": "Technical detail: {detail}",
+    "sync": {
+      "title": "Directory sync",
+      "every": "Runs on its own every {every}, and when you press Sync now.",
+      "manualOnly": "Runs when you press Sync now. Set “Directory sync every” (e.g. 6h) to run it on its own.",
+      "now": "Sync now",
+      "running": "Syncing…",
+      "never": "Not run yet. People appear here at their first sign-in until it does.",
+      "lastManual": "Last run {when}, started by hand",
+      "lastScheduled": "Last run {when}, on schedule",
+      "found": "{n} person in the directory | {n} people in the directory",
+      "created": "{n} new account | {n} new accounts",
+      "updated": "{n} person’s groups changed | {n} people’s groups changed",
+      "skipped": "{n} skipped | {n} skipped",
+      "missing": "{n} no longer listed | {n} no longer listed",
+      "disabled": "{n} switched off | {n} switched off",
+      "enabled": "{n} back on | {n} back on",
+      "emailsChanged": "{n} email changed | {n} emails changed",
+      "problems": "{n} problem | {n} problems",
+      "groupsFound": "{n} group in the directory | {n} groups in the directory",
+      "groupsCreated": "{n} new group | {n} new groups",
+      "groupsRenamed": "{n} renamed | {n} renamed",
+      "groupsRestored": "{n} back in the directory | {n} back in the directory",
+      "groupsRemoved": "{n} removed from the directory | {n} removed from the directory",
+      "groupsByHand": "{n} already linked by hand | {n} already linked by hand"
+    },
+    "sections": {
+      "connection": "Connection",
+      "people": "People",
+      "groups": "Groups",
+      "sync": "Directory sync"
+    },
+    "defaultIs": "{value} (default)",
+    "tabs": {
+      "ldap": "LDAP",
+      "local": "Local",
+      "oidc": "OIDC",
+      "proxy-header": "Reverse-proxy header",
+      "windows": "Windows",
+      "pam": "Linux (PAM)"
+    },
+    "editTitle": "Provider",
+    "notFound": "There is no such sign-in provider. It may have been removed.",
+    "syncNeedsRunning": "Switch the directory on and save it to sync it.",
+    "editSections": {
+      "settings": "Settings",
+      "sync": "Sync"
+    },
+    "card": {
+      "domains": "Email domains: {list}",
+      "anyDomain": "Any email domain",
+      "client": "Client: {id}",
+      "proxies": "Trusted proxies: {list}",
+      "local": "Email and password, checked here",
+      "localOff": "Password sign-in is off",
+      "synced": "Synced {when}",
+      "neverSynced": "Not synced yet",
+      "every": "every {every}",
+      "manualOnly": "on request only",
+      "tenants": "{n} tenant | {n} tenants"
+    },
     "add": "Add a provider",
     "addTitle": "Another sign-in provider",
     "addHint": "A second provider of a kind: another directory, or an SSO for some tenants only. It is made switched off: fill it in on its card, test it and switch it on there.",
@@ -987,7 +1122,8 @@
     "platformTenant": "The platform's own tenant",
     "lockoutConfirm": "This takes away a tenant's last way in. Go on?",
     "review": "Every sign-in provider is now bound to the tenants it serves. The upgrade bound every provider to every tenant that existed, so nothing changed for anyone: review the bindings below and remove the tenants a provider should not serve.",
-    "reviewDone": "Reviewed"
+    "reviewDone": "Reviewed",
+    "noneOfKind": "None of this kind yet. Add a provider makes one."
   },
   "grants": {
     "title": "Folder access",
@@ -1209,6 +1345,8 @@
       "unlocked": "lock lifted",
       "members_add": "members added",
       "member_remove": "member removed",
+      "sync": "directory synced",
+      "detach": "kept as a filex group",
       "repair": "repaired",
       "settings_update": "limits changed",
       "storage_link": "storage linked",
@@ -3349,7 +3487,7 @@
   },
   "permissions": {
     "title": "Roles",
-    "subtitle": "A role is a named set of permissions. Everyone has exactly one role: Administrator (everything, locked), User, Viewer, or a custom role, picked on the person’s own page - or, when they have none of their own, given by a group they are in. A person’s own exceptions beat their role.",
+    "subtitle": "A role is a named set of permissions. Everyone has exactly one - a built-in or a custom role, their own or given by a group they are in.",
     "items": {
       "files": {
         "download": {
@@ -3578,13 +3716,10 @@
       "deleted": "Role deleted",
       "summaryAllow": "Allows: {list}",
       "summaryDeny": "Denies: {list}",
-      "summaryLimits": "Limits: {list}",
       "members": "{count} member | {count} members",
       "locked": "Everything, always - cannot be changed",
-      "builtin": "Built-in",
       "builtinSummary": "Its permissions are set from the row’s actions",
       "membersColumn": "People",
-      "custom": "Custom",
       "editBuiltin": "Edit the {role} role",
       "viewBuiltin": "View the {role} role",
       "builtinPlatformOwned": "The built-in roles belong to the whole platform and its operator manages them. For permissions of your own, create a role.",
@@ -3607,10 +3742,17 @@
       "translationsCount": "{count} language | {count} languages",
       "nameIn": "Role name ({language})",
       "descriptionIn": "Description ({language})",
-      "groups": "{count} group | {count} groups",
       "deleteMoveGroups": "Groups holding it: {count}. They get the role you pick, or none for User or Viewer.",
-      "viaGroups": "{count} member through a group | {count} members through groups",
-      "startingRoleLegacy": "This only sets the role of a new account, once, at its first sign-in. For membership that follows the identity provider at every sign-in, link a group to the SSO group instead (Admin → Groups) and give the group this role."
+      "startingRoleLegacy": "This only sets the role of a new account, once, at its first sign-in. For membership that follows the identity provider at every sign-in, link a group to the SSO group instead (Admin → Groups) and give the group this role.",
+      "allThroughGroups": "all through {count} group | all through {count} groups",
+      "someThroughGroups": "{n} through {count} group | {n} through {count} groups",
+      "givenByGroups": "given by {count} group | given by {count} groups",
+      "allPermissions": "All permissions - cannot be changed",
+      "alwaysOn": "Always on",
+      "statusColumn": "Status",
+      "limitsBadge": "{count} limit | {count} limits",
+      "builtinHeading": "Built-in roles",
+      "customHeading": "Custom roles"
     },
     "customBadge": "Exceptions",
     "twoFactor": {
@@ -3715,7 +3857,7 @@
   },
   "groups": {
     "title": "Groups",
-    "subtitle": "Named sets of people. Share a folder with a group like with a person, and give a group a role: everyone in it without a role of their own gets it. People join by hand here, or through an SSO group their sign-in carries.",
+    "subtitle": "Named sets of people. Share a folder with a group like with a person, and give a group a role: everyone in it without a role of their own gets it. People join by hand here, or through an SSO or LDAP group their sign-in carries.",
     "editTitle": "Group",
     "add": "New group",
     "create": "Create",
@@ -3738,7 +3880,12 @@
       "ssoAdminOnly": "Only an administrator can link a group to SSO groups.",
       "priority": "Role priority",
       "priorityHint": "For someone in several groups that give a role: the group with the highest priority decides (equal: the older group). A switched-off role is skipped for the next one.",
-      "priorityAdminOnly": "Only an administrator can change which group’s role wins."
+      "priorityAdminOnly": "Only an administrator can change which group’s role wins.",
+      "ldap": "LDAP groups",
+      "ldapHint": "One per line: the group’s DN (cn=finance,ou=groups,dc=example,dc=com) or its name (finance), in any case. People whose LDAP sign-in shows the group join it, and leave it when it stops.",
+      "ldapAdminOnly": "Only an administrator can link a group to LDAP groups.",
+      "adminRole": "Administrator (full access)",
+      "adminHint": "Everyone in the group is an administrator of filex. Linked to an LDAP group - named by its full DN, and counting only for people of that group’s own directory - the directory decides who: people who leave it lose administrator again (never the last administrator)."
     },
     "membersTitle": "Members",
     "addMember": "Add a person by name or email…",
@@ -3770,7 +3917,59 @@
       "removeConfirm": "Remove {name} from “{group}”?",
       "roleFromGroup": "With no role of their own, they have the role “{role}” through the group “{group}”."
     },
-    "prioritySummary": "priority {n}"
+    "prioritySummary": "priority {n}",
+    "ldapSummary": "LDAP: {list}",
+    "removeLdapConfirm": "{name} is in this group through LDAP. Remove them now? They join again at their next sign-in if the directory still puts them in it.",
+    "count": "{n} of {total}",
+    "kind": {
+      "all": "All sources",
+      "local": "Local",
+      "sso": "SSO",
+      "ldap": "LDAP",
+      "synced": "Synced from LDAP",
+      "removed": "Removed from LDAP"
+    },
+    "directory": {
+      "synced": "Brought in by directory sync from the LDAP group “{name}”. Its members and its LDAP link follow the directory; its folders, role and priority are yours to set here. Which LDAP groups exist is managed on the directory.",
+      "linkHint": "Kept by directory sync on this group’s directory group.",
+      "removed": "Removed from LDAP",
+      "removedHint": "Its LDAP group no longer exists: its LDAP members were taken out. Open it to delete it or keep it as a filex group.",
+      "removedBody": "The LDAP group “{name}” no longer exists in the directory, so its LDAP members were taken out of this group. Its folders, role and anyone added by hand are still here. Delete the group, or keep it as a filex group that no longer follows the directory. If the directory lists that same group again (for example after a filter change), this group follows it again; a group made anew there comes in as a new group.",
+      "keep": "Keep as a filex group",
+      "kept": "This group no longer follows the directory.",
+      "deleteNote": "While the LDAP group exists, the next directory sync makes this group again - without its folders or role. To leave it out, remove it on the directory or narrow “Groups to bring in”."
+    },
+    "card": {
+      "fromMain": "Synced from the LDAP directory",
+      "fromDirectory": "Synced from the {name} directory",
+      "byHand": "Members added by hand"
+    },
+    "ssoSummary": "SSO: {list}",
+    "kindColumn": "Members from",
+    "originColumn": "Linked to"
+  },
+  "sources": {
+    "local": "Local",
+    "manual": "Added",
+    "sso": "SSO",
+    "ldap": "LDAP",
+    "proxy": "Proxy",
+    "accountHint": {
+      "local": "Made in filex: on this page, by an invitation or at setup.",
+      "sso": "Made by a sign-in through the SSO identity provider.",
+      "ldap": "Made by a sign-in through LDAP / Active Directory.",
+      "proxy": "Made by a sign-in through a trusted reverse proxy."
+    },
+    "memberHint": {
+      "manual": "Added to the group by an administrator.",
+      "sso": "In the group through SSO - kept in step with the identity provider at each sign-in.",
+      "ldap": "In the group through LDAP - kept in step with the directory at each sign-in."
+    },
+    "groupHint": {
+      "local": "Members are added by hand only.",
+      "sso": "Linked to SSO groups: members join and leave with the identity provider.",
+      "ldap": "Linked to LDAP groups: members join and leave with the directory."
+    }
   },
   "tenants": {
     "title": "Tenants",

@@ -125,7 +125,7 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
 vi.mock("@/api/roles", () => ({ RolesApi: roles }));
 vi.mock("@/api/users", () => ({ UsersApi: usersApi }));
 vi.mock("@/api/groups", () => ({
-  GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []) },
+  GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []), memberships: vi.fn(async () => ({})) },
 }));
 vi.mock("@/api/storages", () => ({
   StoragesApi: { list: vi.fn(async () => []) },
@@ -572,6 +572,7 @@ describe('Add user', () => {
     ) as HTMLSelectElement | undefined;
     expect(roleSelect, 'the Add user role list offers NoDelete').toBeTruthy();
     await choose(roleSelect!, 'custom:7');
+    await click(q('[data-testid="user-create-access-invite"]'));
     await click(q('[data-testid="user-create-submit"]'));
 
     expect(usersApi.create).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@local', role: 'viewer' }));
@@ -579,3 +580,49 @@ describe('Add user', () => {
     w.unmount();
   });
 });
+
+describe("Roles page — the table", () => {
+  it("built-in roles first, then a Custom roles heading; every row says its permissions and status", async () => {
+    roles.getDefaults = vi.fn(async (role: string) => ({ permissions: role === "viewer" ? ["files.download"] : ["files.download", "files.delete"], preset: "" }));
+    await mountAt(Roles);
+    const heads = [...document.body.querySelectorAll(".fe-list__group")].map((h) => h.textContent?.trim());
+    expect(heads).toEqual([en.permissions.rules.builtinHeading, en.permissions.rules.customHeading]);
+
+    expect(q('[data-testid="role-summary-builtin-admin"]').textContent).toContain(en.permissions.rules.allPermissions);
+    expect(q('[data-testid="role-summary-builtin-user"]').textContent).toContain("2 of");
+    expect(q('[data-testid="role-summary-builtin-viewer"]').textContent).toContain("1 of");
+    expect(q('[data-testid="role-enabled-builtin-admin"]').textContent).toContain(en.permissions.rules.alwaysOn);
+    expect(q('[data-testid="role-enabled-builtin-user"]').textContent).toContain(en.permissions.rules.alwaysOn);
+    expect(q('[data-testid="role-enabled-rule-7"]').querySelector('input, button, [role="switch"]')).not.toBeNull();
+  });
+
+  it("says how people hold a role under its count, and its limits as a badge", async () => {
+    roles.listRules.mockResolvedValueOnce({
+      rules: [{ ...noDelete, settings: { share_link_max_days: 7, blocked_extensions: ["exe", "bat"] } }],
+      assignments: {},
+      groupAssignments: { "3": { role_id: 7, group_id: 1, group_name: "Finance" }, "4": { role_id: 7, group_id: 1, group_name: "Finance" } },
+      builtinMembers: { admin: 1, user: 3, viewer: 0 },
+    } as never);
+    const groups = (await import("@/api/groups")).GroupsApi as unknown as { list: ReturnType<typeof vi.fn> };
+    groups.list.mockResolvedValueOnce([{ id: 1, name: "Finance", role_id: 7, links: [], description: "", priority: 0 }]);
+    await mountAt(Roles);
+    const members = q('[data-testid="role-members-rule-7"]').textContent ?? "";
+    expect(members).toContain("2 members");
+    expect(q('[data-testid="role-members-how-rule-7"]').textContent).toContain("all through 1 group");
+    const limits = q('[data-testid="role-limits-rule-7"]');
+    expect(limits.textContent).toContain("2 limits");
+    expect(limits.getAttribute("title")).toContain("exe");
+    // Nobody on Viewer: its count is drawn faint.
+    expect(q('[data-testid="role-members-builtin-viewer"] span').className).toContain("text-zinc-400");
+  });
+
+  it("a row opens its editor", async () => {
+    const w = await mountAt(Roles);
+    const row = [...document.body.querySelectorAll('[role="row"]')].find((r) => r.querySelector('[data-testid="role-name-rule-7"]')) as HTMLElement;
+    row.click();
+    await flushPromises();
+    expect(document.body.querySelector('[data-testid="rule-editor"]')).not.toBeNull();
+    w.unmount();
+  });
+});
+

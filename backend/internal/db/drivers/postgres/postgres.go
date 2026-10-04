@@ -1132,7 +1132,8 @@ const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,'
 	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
 	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at, ` +
 	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,TRUE), ` +
-	`COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,'')`
+	`COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,''), ` +
+	`COALESCE(auth_source,'local'), COALESCE(auth_directory,''), COALESCE(directory_id,''), COALESCE(admin_by_group,FALSE)`
 
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
 	// New users default to the always-present "default" provider (the
@@ -1154,6 +1155,53 @@ func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, o
 	}
 	// A group of the tenant they left no longer holds them (migration 00074).
 	return s.DropForeignMemberships(ctx, userID, providerID)
+}
+
+// SetUserAuthDirectory records which LDAP directory made an account.
+func (s *Store) SetUserAuthDirectory(ctx context.Context, userID int64, directory string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_directory=$1, updated_at=NOW() WHERE id=$2`, directory, userID)
+	return err
+}
+
+// GetUserByDirectoryID finds the account a directory entry's permanent id is
+// recorded on.
+func (s *Store) GetUserByDirectoryID(ctx context.Context, directoryID string) (*model.User, error) {
+	if directoryID == "" {
+		return nil, sql.ErrNoRows
+	}
+	return scanUser(s.conn(ctx).QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE directory_id=$1`, directoryID))
+}
+
+// SetUserDirectoryID records a directory account's permanent id.
+func (s *Store) SetUserDirectoryID(ctx context.Context, userID int64, directoryID string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET directory_id=$1, updated_at=NOW() WHERE id=$2`, directoryID, userID)
+	return err
+}
+
+// SetUserEnabledByDirectory switches an account on or off for directory sync,
+// recording that the directory made the change (model.DisabledByDirectory).
+func (s *Store) SetUserEnabledByDirectory(ctx context.Context, userID int64, enabled bool) error {
+	if enabled {
+		_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=TRUE, disabled_reason=NULL WHERE id=$1`, userID)
+		return err
+	}
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=FALSE, disabled_reason=$1 WHERE id=$2`, model.DisabledByDirectory, userID)
+	return err
+}
+
+// DeleteSettingsWithPrefix removes every setting whose key starts with prefix.
+func (s *Store) DeleteSettingsWithPrefix(ctx context.Context, prefix string) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM settings WHERE substr(setting_key, 1, $1) = $2`, len(prefix), prefix)
+	return err
+}
+
+// SetUserAuthSource records where an account comes from (migration 00081).
+func (s *Store) SetUserAuthSource(ctx context.Context, userID int64, source string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_source=$1, updated_at=NOW() WHERE id=$2`, source, userID)
+	return err
 }
 
 func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
@@ -1239,7 +1287,13 @@ func (s *Store) UpdateUserLocale(ctx context.Context, id int64, locale, tz strin
 }
 
 func (s *Store) UpdateUserRole(ctx context.Context, id int64, role string) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=$1, updated_at=NOW() WHERE id=$2`, role, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=$1, admin_by_group=FALSE, updated_at=NOW() WHERE id=$2`, role, id)
+	return err
+}
+
+// SetUserAdminByGroup makes the account an administrator through a group.
+func (s *Store) SetUserAdminByGroup(ctx context.Context, id int64) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role='admin', admin_by_group=TRUE, updated_at=NOW() WHERE id=$1`, id)
 	return err
 }
 
@@ -2533,7 +2587,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason, &u.AuthSource, &u.AuthDirectory, &u.DirectoryID, &u.AdminByGroup); err != nil {
 		return nil, err
 	}
 	u.SSOLinked = u.OIDCSubject != "" || u.OIDCIssuer != ""

@@ -686,6 +686,10 @@ func BuildRouter(d *Deps) http.Handler {
 	stg.DemoMode = d.Cfg.Demo.Mode
 	ush := handlers.NewUsers(d.Store)
 	ush.ACL = d.ACL
+	ush.Mailer, ush.Tenants = d.Mailer, tenants
+	if d.AuthLive != nil {
+		ush.DirectoryFor = d.AuthLive.DirectoryFor
+	}
 	permH := handlers.NewPermissionsAdmin(d.Store, d.ACL)
 	if d.AppPlugins != nil {
 		permH.AppPermissions = d.AppPlugins.UserPermissions
@@ -1743,9 +1747,11 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(users).Get("/groups/", groupsH.List)
 				r.With(users).Post("/groups", groupsH.Create)
 				r.With(users).Post("/groups/", groupsH.Create)
+				r.With(users).Get("/groups/memberships", groupsH.Memberships)
 				r.With(users).Get("/groups/{id}", groupsH.Get)
 				r.With(users).Put("/groups/{id}", groupsH.Update)
 				r.With(users).Delete("/groups/{id}", groupsH.Delete)
+				r.With(users).Post("/groups/{id}/detach", groupsH.Detach)
 				r.With(users).Post("/groups/{id}/members", groupsH.AddMembers)
 				r.With(users).Delete("/groups/{id}/members/{user_id}", groupsH.RemoveMember)
 				r.With(users).Get("/users/{id}/groups", groupsH.UserGroups)
@@ -2099,6 +2105,8 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Delete("/{name}", authProvH.Delete)
 					r.Put("/{name}/tenants", authProvH.SetTenants)
 					r.Post("/{name}/test", authProvH.Test)
+					r.Get("/{name}/sync", authProvH.SyncStatus)
+					r.Post("/{name}/sync", authProvH.SyncStart)
 				})
 
 				r.Route("/search", func(r chi.Router) {

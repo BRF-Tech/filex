@@ -81,10 +81,14 @@ The LDAP driver performs a classic *search-then-bind*:
 > custom role whose SSO-group target matches one of its directory groups
 > (`group_attr`, see [the first sign-in rule](#the-first-sign-in-rule-who-gets-an-account));
 > a filex group linked to one of its groups can give it a role too
-> ([GROUPS.md](GROUPS.md#members-and-sso-links)). There is **no
-> group → admin mapping** for LDAP (unlike [OIDC](SSO.md#roles--admin-access)).
-> To make an LDAP user an admin, elevate them once in the admin UI
-> (**Users**); the role then sticks in filex's DB.
+> ([GROUPS.md](GROUPS.md#members-and-sso-links)). To make administrators from
+> the directory, link a filex group to the LDAP group (e.g.
+> `cn=it-admins,ou=groups,dc=example,dc=com`) and pick **Administrator (full
+> access)** as its role - see [GROUPS.md → Administrators](GROUPS.md#administrators).
+> Its members are administrators from their next sign-in or directory sync,
+> and stop being one when they leave it. One person can also be made an
+> administrator by hand on their page (**Users**); that sticks whatever their
+> groups do.
 
 **TLS note.** `ldaps://` is selected purely by the URL scheme. With no `ca_file`
 both `ldaps://` and StartTLS verify against the **system trust roots**, so a
@@ -110,8 +114,16 @@ error, not a login that fails hours later with a TLS message.
 | `protocol_login` | no | `true` | Let directory accounts sign in over WebDAV, SFTP and FTPS with their directory password. S3 and NFS never receive a password - they use the access keys and exports the account mints in the web app. See [the protocols section](#directory-accounts-on-the-file-protocols). |
 | `auto_create` | no | `true` | Open an account at a person's first sign-in. See [the first sign-in rule](#the-first-sign-in-rule-who-gets-an-account). |
 | `allowed_groups` | no | - | Comma list: only members of one of these directory groups get an account on the first sign-in. |
-| `group_attr` | no | - (`memberOf` once `allowed_groups` is set) | The entry attribute listing a person's groups. Here groups are read only when this or `allowed_groups` is set; on the Identity providers page it defaults to `memberOf` and groups are always read. |
+| `group_attr` | no | - (`memberOf` once `allowed_groups` is set) | The entry attribute listing a person's groups. Here groups are read only when this or `allowed_groups` is set; on the Identity providers page it defaults to `memberOf` and groups are always read. The same attribute feeds filex groups linked to LDAP groups - see [Groups](#groups). |
 | `provider` | no | - | **Multi-tenant installs only.** Tenant slug a newly created account is homed in when the login names no tenant - neither a realm nor a tenant's own address (a bare name over SFTP, FTPS without SNI, an empty Realm on the platform's page). Environment or `config.yaml` only: the Identity providers page has no such field. See [Which tenant a new account lands in](#which-tenant-a-new-account-lands-in). |
+| `group_filter` | no | - | Find the person's groups for the LDAP links by a **search** instead of `group_attr`: `%s` is their DN, `%u` the name they signed in with (both escaped). E.g. `(member=%s)`, `(uniqueMember=%s)`, `(memberUid=%u)`. Runs as `bind_dn`. |
+| `group_base_dn` | no | `base_dn` | Where `group_filter` searches. |
+| `sync_interval` | no | - (off) | Run [directory sync](#directory-sync) on its own this often: a duration such as `30m` or `6h`, at least `5m`. Without it, sync runs only from **Sync now**. |
+| `sync_filter` | no | `user_filter` with `*` | The search that lists every person for directory sync. By default `user_filter` with the sign-in name replaced by `*` - `(mail=%s)` becomes `(mail=*)` - so sync finds exactly the people who can sign in. |
+| `sync_disable_missing` | no | `false` | Directory sync switches off an account the directory made once the directory no longer lists it. |
+| `sync_groups` | no | `true` | Directory sync brings every directory group in as a filex group. See [Groups from the directory](#groups-from-the-directory). |
+| `sync_group_filter` | no | every group | Which directory groups sync brings in, searched under `group_base_dn` (default `base_dn`). Default: `(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=group)(objectClass=posixGroup))`. Narrow it to leave groups out, e.g. `(&(objectClass=groupOfNames)(cn=dept-*))`. |
+| `email_domains` | no | any | Comma-separated domains this directory may sign in or make accounts for, e.g. `partner.com`. See [Several directories](#several-directories). |
 
 `url` and `base_dn` are the only hard requirements; everything else has a working
 default.
@@ -176,10 +188,213 @@ FILEX_LDAP_EMAIL_ATTR=mail
 FILEX_LDAP_START_TLS=true
 FILEX_LDAP_CA_FILE=/etc/filex/ad-root-ca.pem
 # FILEX_LDAP_PROVIDER=acme        # multi-tenant only; see "Which tenant …" below
+# FILEX_LDAP_GROUP_ATTR=memberOf   # groups, for filex groups linked to them
+# FILEX_LDAP_GROUP_FILTER=(member=%s)
+# FILEX_LDAP_GROUP_BASE_DN=OU=Groups,DC=example,DC=com
+# FILEX_LDAP_SYNC_INTERVAL=6h       # directory sync on its own (off by default)
+# FILEX_LDAP_SYNC_DISABLE_MISSING=true
+# FILEX_LDAP_SYNC_GROUPS=false       # don't bring directory groups in as filex groups
+# FILEX_LDAP_SYNC_GROUP_FILTER=(&(objectClass=group)(cn=filex-*))
 ```
 
 > Keep `local` in the driver list if you still want the built-in `admin@local`
-> account (and any other password users) to work alongside LDAP.
+> account (and any other password users) to work alongside LDAP. To retire
+> `admin@local`, first make the directory's administrators administrators
+> here (a group with **Administrator (full access)**, above), sign in as one
+> of them, then delete it.
+
+### Groups
+
+A filex group can be **linked to LDAP groups** ([GROUPS.md → LDAP
+links](GROUPS.md#ldap-links)): at every sign-in to the web UI, filex reads the
+person's directory groups and puts them in - and takes them out of - every
+filex group linked to one, and the role and folder access those groups carry
+follow.
+
+Where the groups are read:
+
+- **`group_attr`** - the attribute on the person's own entry, read in the
+  same search that found them; no extra round trip. Active Directory has it
+  (`memberOf`), and OpenLDAP with the `memberof` overlay. The Identity
+  providers page fills in `memberOf`; from the environment, set
+  `FILEX_LDAP_GROUP_ATTR`.
+- **`group_filter`** - a search for the groups instead, as the service
+  account, under `group_base_dn` (default `base_dn`). For OpenLDAP without the
+  overlay: `(member=%s)` (`groupOfNames`), `(uniqueMember=%s)`
+  (`groupOfUniqueNames`) or `(memberUid=%u)` (`posixGroup`). For nested groups
+  on Active Directory: `(member:1.2.840.113556.1.4.1941:=%s)`.
+
+A group is matched by its DN or its common name, without case. Each group's
+DN and common name are kept per person (`user_ldap_groups`), so a link added
+to a group later takes effect at once.
+
+```yaml
+auth:
+  ldap:
+    # …
+    group_attr: memberOf                 # the page's default
+    # or, for OpenLDAP without memberof:
+    # group_filter: "(member=%s)"
+    # group_base_dn: "ou=groups,dc=example,dc=com"
+```
+
+Neither set, groups are not read and nobody's LDAP-linked memberships move.
+Only the web sign-in reads them for the links - the file protocols present
+the password on every request and are left alone. A failed group read never refuses a
+sign-in and never takes anybody out of a group; it is logged as `ldap: could
+not read the account's LDAP groups`.
+
+An account an LDAP sign-in made is labelled **LDAP** on the Users page
+([GROUPS.md → Where people come from](GROUPS.md#where-people-come-from)).
+
+### Several directories
+
+An install can sign people in from more than one directory - a second
+Active Directory domain, a partner's directory. The first is `ldap` (the
+environment's `FILEX_LDAP_*`, or the page's); Admin → Identity providers →
+**Add a provider** → LDAP adds more, each with its own slug, page, settings,
+**Test now**, **Sync now**, schedule and tenants
+([TENANT-ADMIN.md](TENANT-ADMIN.md)). A new one starts switched off. One made
+that way can be deleted; the accounts and groups it made stay, with their
+files.
+
+- **Sign-in** asks the local password first, then each directory in the
+  order they were added, and the file protocols (WebDAV, SFTP, FTPS) the same
+  way.
+- **An account belongs to the directory that made it**
+  (`users.auth_directory`, its slug): only that directory signs it in, so a
+  directory that lists someone else's address cannot take their account. An
+  account made here (with a password here) is signed in by the first
+  directory only, as when there was one. An LDAP account from before is the
+  first one's.
+- **Email domains** (`email_domains`, e.g. `partner.com`) limits a directory
+  to the addresses it may sign in or make accounts for, and the Users page
+  makes no local account at them.
+- **Sync** counts only a directory's own accounts as no longer listed, and
+  flags only its own groups as removed (a synced group's id starts with its
+  directory's slug: `ldap:…`, `partner:…`). An address another directory owns
+  is skipped and named in the report.
+- A filex group can link LDAP groups of any directory; a link by DN names
+  one directory's group, a link by name alone (`staff`) matches that name in
+  every directory. A group that makes its members administrators counts
+  only full DNs, and only for people of its own directory
+  ([GROUPS.md → Administrators](GROUPS.md#administrators)).
+
+### Testing a configuration
+
+**Test now** on an LDAP provider's page (Admin → Identity providers) - and every save -
+checks, in order: the address, the connection (and StartTLS), the service
+bind, the base DN, then what sign-in and sync will find there: how many
+people the user filter lists and how many of them have an e-mail
+(`email_attr`); whether their groups can be read - listed in `group_attr`,
+or found by `group_filter` for the first person found; and how many groups
+directory sync would bring in. It counts up to 1000 of each ("1000+"). No
+one with an e-mail is a failure; no groups is said, not failed - groups are
+optional. Nothing is written. The page lays its settings out as
+**Connection**, **People**, **Groups** and **Directory sync**.
+
+### Directory sync
+
+Sign-in alone makes an account only when a person first signs in, and moves
+their groups only when they sign in again. **Directory sync** reads the whole
+directory instead - Admin → Identity providers → an LDAP provider → **Sync
+now**, and every
+`sync_interval` on its own:
+
+1. With `sync_groups` (on by default): every group `sync_group_filter`
+   finds becomes a filex group - see below.
+2. One paged search (500 a page) as `bind_dn` under `base_dn` with
+   `sync_filter`, reading each person's e-mail and groups.
+3. Each person with no account gets one, exactly as at their first sign-in
+   (same tenant homing, labelled **LDAP**); an entry with no e-mail is
+   skipped.
+4. Each person's LDAP groups are recorded and their memberships of filex
+   groups linked to LDAP groups brought in step - members added by hand stay.
+5. A person the directory has **switched off** is switched off here too -
+   administrators included - so their sessions, API keys and SFTP keys stop
+   working along with their password. That is Active Directory's "account
+   disabled" (`userAccountControl`), 389-ds's `nsAccountLock`, and an OpenLDAP
+   password-policy lock with no end (`pwdAccountLockedTime` =
+   `000001010000Z`; a lockout after wrong passwords ends on its own and is
+   ignored). Nobody gets a new account while switched off there. The last
+   administrator still on is never switched off: the report lists them as a
+   problem instead, so a directory change cannot lock everyone out.
+6. Accounts the directory made (**LDAP**) that it no longer lists lose their
+   LDAP memberships; with `sync_disable_missing` they are also switched off
+   (never an administrator; an account made here is never touched).
+7. An account sync switched off (5 or 6) is switched back on when the
+   directory lets the person back in - at the next sync, or at their next
+   sign-in. An account switched off or on **by hand** stays as the
+   administrator left it.
+
+⚠ A search that finds **nobody** changes nothing - that is far likelier a
+wrong `base_dn` or filter than an empty directory - and the run reports an
+error instead.
+
+One run at a time; a run goes on in the background and the card shows what
+the last one did (found, new accounts, groups changed, no longer listed,
+switched off, back on, e-mails changed, and the first problems).
+
+Without a `sync_interval`, step 5 waits for someone to press **Sync now**:
+the directory refuses the person's password at once, but the rest of their
+access lasts until the next run.
+
+### Who is who
+
+A person is known by their **permanent id** in the directory - `entryUUID`
+(OpenLDAP, lldap, 389-ds) or `objectGUID` (Active Directory) - before their
+e-mail, recorded on the account at its first sign-in or sync:
+
+- **E-mail changed there** (a new surname, a new domain): the person keeps
+  their account, files and shares, and the account's e-mail follows. Their
+  SFTP/FTP username does not change. If another account already has the new
+  address, the account keeps the old one and sync lists it as a problem.
+- **Address given to someone new**: the newcomer is **not** signed in to the
+  previous owner's account. Sign-in is refused and sync lists the problem -
+  rename or delete the old account, and the newcomer gets their own at their
+  next sign-in or sync.
+
+A directory that offers neither attribute works by e-mail alone, as before. The report is kept, so the schedule
+carries on across a restart. Starting a run is audited as
+`auth_provider.sync`; each run is logged as `auth: directory sync`.
+
+#### Groups from the directory
+
+Every directory group becomes a filex group of the same name, linked to it,
+so its members fill it; on the Groups page they carry **LDAP**, and the
+filter **Synced from LDAP** lists them. Give them folders and roles in
+filex as with any group. **Which groups exist is managed on the directory**:
+
+- **Renamed there** - each group is followed by its directory group's
+  permanent id (`entryUUID`; `objectGUID` on Active Directory), so it is
+  renamed here too, keeping its folders, role and members. A name an
+  administrator changed here is kept.
+- **Removed there** - the filex group is **not** deleted (its folders and
+  role were set up here): its LDAP members leave it and it is flagged
+  **Removed from LDAP**. On its page an administrator deletes it,
+  or **keeps it as a filex group**, which no longer follows the directory.
+  If the directory lists that same group again (a filter change, a
+  restore), the group follows it again; a group deleted and made anew there
+  has a new id and comes in as a new group.
+- **Deleted here** - while the directory still has the group, the next sync
+  makes it again (without its folders or role). To leave a group out,
+  remove it on the directory or narrow `sync_group_filter`.
+- **Linked by hand already** - a directory group a filex group already
+  names in its LDAP links is not brought in twice.
+- A synced group's LDAP link is the directory's: sync keeps it on the
+  group's current DN, and the page does not edit it.
+- A group search that finds **no** groups changes nothing.
+- On a multi-tenant install, synced groups belong to the tenant directory
+  accounts are homed in (`provider`), or are install-wide without one.
+
+```yaml
+auth:
+  ldap:
+    # …
+    sync_interval: 6h
+    # sync_filter: "(&(objectClass=person)(mail=*))"
+    # sync_disable_missing: true
+```
 
 ### Directory accounts on the file protocols
 

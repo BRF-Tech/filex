@@ -53,12 +53,21 @@ type conn interface {
 	StartTLS(*tls.Config) error
 	Bind(username, password string) error
 	Search(*ldap.SearchRequest) (*ldap.SearchResult, error)
+	SearchWithPaging(*ldap.SearchRequest, uint32) (*ldap.SearchResult, error)
 	Close() error
 }
 
-// Driver is the LDAP/AD auth driver.
+// Driver is the LDAP/AD auth driver — one directory. An install may have
+// several (Admin → Identity providers → Add a provider): each is its own
+// instance, and directory is its slug.
 type Driver struct {
-	store      db.Store
+	store db.Store
+	// directory is the instance's slug ("ldap" for the first; authsetup
+	// sets it). The accounts it makes are its own (users.auth_directory),
+	// and so are its people's permanent ids and its sync. emailDomains, when
+	// set, are the only e-mail domains it signs in or opens accounts for.
+	directory    string
+	emailDomains []string
 	url        string // ldap:// or ldaps://
 	bindDN     string // service account
 	bindPass   string
@@ -97,6 +106,24 @@ type Driver struct {
 	// The account an older build keyed by the bare name is adopted
 	// (auth.AdoptAccount), not doubled.
 	emailToken string
+	// LDAP links (docs/LDAP.md → Groups): groupFilter, when set, finds a
+	// person's groups by a search — (member=%s) with %s their DN, or
+	// (memberUid=%u) with %u the name they signed in with — under groupBaseDN
+	// (base_dn when empty) instead of reading group_attr (memberOf when
+	// unset) off their entry.
+	groupFilter string
+	groupBaseDN string
+	// Directory sync (sync.go): how often (0 = only when asked), the search
+	// that lists every person (empty = user_filter with "*"), and whether an
+	// account the directory stopped listing is switched off.
+	syncInterval       time.Duration
+	syncFilterRaw      string
+	syncDisableMissing bool
+	// importGroupsOn brings every directory group in as a filex group
+	// (sync_groups.go) — on unless sync_groups is false; syncGroupFilterRaw
+	// picks which (empty: every group).
+	importGroupsOn     bool
+	syncGroupFilterRaw string
 
 	// dial is swapped in tests. Nil means the real dialer.
 	dial func(ctx context.Context) (conn, error)
@@ -109,6 +136,14 @@ func New(store db.Store) *Driver {
 
 // Name implements auth.Driver.
 func (d *Driver) Name() string { return "ldap" }
+
+// Directory is the instance's slug: "ldap" for the first.
+func (d *Driver) Directory() string {
+	if d.directory == "" {
+		return model.MainDirectory
+	}
+	return d.directory
+}
 
 // Init configures the driver.
 func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
@@ -126,6 +161,13 @@ func (d *Driver) Init(_ context.Context, cfg map[string]any) error {
 // settings table stores ("true"); a bare type assertion to bool read the
 // panel's saved "true" as false.
 func (d *Driver) load(cfg map[string]any) error {
+	d.directory = auth.CfgString(cfg, "directory")
+	d.emailDomains = nil
+	for _, dom := range strings.FieldsFunc(strings.ToLower(auth.CfgString(cfg, "email_domains")), func(r rune) bool {
+		return r == ',' || r == ' ' || r == ';'
+	}) {
+		d.emailDomains = append(d.emailDomains, strings.TrimPrefix(dom, "@"))
+	}
 	d.url = auth.CfgString(cfg, "url")
 	d.bindDN = auth.CfgString(cfg, "bind_dn")
 	d.bindPass, _ = cfg["bind_password"].(string)
@@ -153,6 +195,26 @@ func (d *Driver) load(cfg map[string]any) error {
 	d.groupAttr = auth.CfgString(cfg, "group_attr")
 	if d.groupAttr == "" && len(d.firstLogin.AllowedGroups) > 0 {
 		d.groupAttr = defaultGroupAttr
+	}
+	d.groupFilter = auth.CfgString(cfg, "group_filter")
+	d.groupBaseDN = auth.CfgString(cfg, "group_base_dn")
+	d.syncFilterRaw = auth.CfgString(cfg, "sync_filter")
+	d.syncDisableMissing = auth.CfgBool(cfg, "sync_disable_missing")
+	d.syncGroupFilterRaw = auth.CfgString(cfg, "sync_group_filter")
+	d.importGroupsOn = true
+	if v, ok := cfg["sync_groups"]; ok && v != nil && fmt.Sprint(v) != "" {
+		d.importGroupsOn = auth.CfgBool(cfg, "sync_groups")
+	}
+	d.syncInterval = 0
+	if v := strings.TrimSpace(auth.CfgString(cfg, "sync_interval")); v != "" && v != "0" {
+		iv, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("ldap: sync_interval %q: a duration such as 30m or 6h", v)
+		}
+		if iv < minSyncInterval {
+			return fmt.Errorf("ldap: sync_interval %s is shorter than %s", iv, minSyncInterval)
+		}
+		d.syncInterval = iv
 	}
 	tok, err := identity.EmailToken(auth.CfgString(cfg, "email_token"))
 	if err != nil {
@@ -288,8 +350,14 @@ func (d *Driver) connect(ctx context.Context) (conn, error) {
 
 // Login verifies the credentials against the directory and mints a browser
 // session for the resulting account.
+//
+// The browser sign-in is also where the person's LDAP links are brought in
+// step with the directory (syncLinkGroups); the file protocols, which present
+// the password on every request, never move those memberships.
 func (d *Driver) Login(ctx context.Context, identifier, password string) (*model.User, string, error) {
-	return authlocal.LoginWith(ctx, d.store, d.verify, identifier, password)
+	return authlocal.LoginWith(ctx, d.store, func(ctx context.Context, identifier, password string) (*model.User, error) {
+		return d.verifyWith(ctx, identifier, password, true)
+	}, identifier, password)
 }
 
 // Logout revokes a session minted by Login.
@@ -311,6 +379,12 @@ func (d *Driver) VerifyPassword(ctx context.Context, identifier, password string
 
 // verify performs the search-then-bind and upserts the account.
 func (d *Driver) verify(ctx context.Context, identifier, password string) (*model.User, error) {
+	return d.verifyWith(ctx, identifier, password, false)
+}
+
+// verifyWith is verify; withLinks also brings the person's LDAP links in step
+// with the directory (a browser sign-in).
+func (d *Driver) verifyWith(ctx context.Context, identifier, password string, withLinks bool) (*model.User, error) {
 	// An empty password is refused up front: many directories treat a bind
 	// with an empty password as a successful ANONYMOUS bind, which would turn
 	// "no password" into "authenticated as whoever was searched for".
@@ -370,9 +444,30 @@ func (d *Driver) verify(ctx context.Context, identifier, password string) (*mode
 	if !identity.LooksLikeEmail(em) {
 		em = identity.DeriveEmail(name, "", realm, d.emailToken)
 	}
+	if !d.domainAllowed(em) {
+		slog.Debug("ldap: the address is outside this directory's e-mail domains",
+			slog.String("directory", d.Directory()), slog.String("email", em))
+		return nil, auth.ErrUnauthorized
+	}
+	if why := switchedOff(entry); why != "" {
+		// The bind normally fails first; a directory that lets a locked
+		// account bind still gets no for an answer.
+		slog.Debug("ldap: the directory has switched the person off",
+			slog.String("dn", entry.DN), slog.String("why", why))
+		return nil, auth.ErrUnauthorized
+	}
 	groups := d.groupsOf(entry)
-	user, created, err := d.account(ctx, name, em, groups, entry.DN)
+	user, created, err := d.account(ctx, entry, name, em, groups, true, nil)
 	if err != nil {
+		var nm errNotMine
+		if errors.As(err, &nm) {
+			// Another directory's account, one made here that only the main
+			// directory may sign in, or a previous owner's: this directory's
+			// answer is no, and the login chain asks the next one.
+			slog.Debug("ldap: the account is not this directory's",
+				slog.String("directory", d.Directory()), slog.String("email", em), slog.String("why", nm.why))
+			return nil, auth.ErrUnauthorized
+		}
 		return nil, err
 	}
 	// ⚠ Before anything is written to the account: it must be one the
@@ -385,12 +480,29 @@ func (d *Driver) verify(ctx context.Context, identifier, password string) (*mode
 			slog.Int64("user_id", user.ID), slog.String("dn", entry.DN))
 		return nil, auth.ErrUnauthorized
 	}
+	if user.DisabledByDirectory() {
+		// Switched off by directory sync, and the directory has since let
+		// them back in.
+		if err := d.store.SetUserEnabledByDirectory(ctx, user.ID, true); err != nil {
+			return nil, err
+		}
+		user.Enabled, user.DisabledReason = true, ""
+		slog.Info("ldap: the directory let a person back in; their account is on again",
+			slog.String("email", user.Email), slog.String("directory", d.Directory()))
+	}
+	// An account from before migration 00081 with no password here is the
+	// directory's (a no-op once labelled).
+	auth.ClaimSource(ctx, d.store, user, model.AuthSourceLDAP)
+	d.claimDirectory(ctx, user)
 	if d.groupAttr != "" {
 		// Recorded at every sign-in and REPLACED: the directory is the authority
 		// on membership (as for OIDC's claim) — the starting role of a new
 		// account and the filex groups linked to these (auth.RecordSignInGroups,
 		// the one rule for every provider). A failure is loud, not fatal.
 		user = auth.RecordSignInGroups(ctx, d.store, "ldap", user, groups, created)
+	}
+	if withLinks {
+		user = d.syncLinkGroups(ctx, c, user, entry, name)
 	}
 	return user, nil
 }
@@ -417,60 +529,6 @@ func (d *Driver) find(c conn, identifier, realm string) (*ldap.Entry, string, er
 	}
 	entry, err = d.search(c, name)
 	return entry, name, err
-}
-
-// account is the filex account of a directory person: the one at their
-// address; else the one an older build opened under their bare name, adopted
-// (auth.AdoptAccount — it counts as existing, the first-login rule does not
-// judge it); else a new one, if the first-login rule opens it. created reports
-// the last case.
-func (d *Driver) account(ctx context.Context, name, em string, groups []string, dn string) (*model.User, bool, error) {
-	if user, err := d.store.GetUserByEmail(ctx, em); err == nil && user != nil {
-		return user, false, nil
-	}
-	adopted, err := auth.AdoptAccount(ctx, d.store, auth.Adoption{
-		Driver: "ldap", LoginName: name, Email: em, Homing: d.homing,
-	})
-	if err != nil {
-		return nil, false, err
-	}
-	if adopted != nil {
-		return adopted, false, nil
-	}
-	// ⚠⚠ NOT store.CreateUser directly. That call hard-codes provider_id to
-	// `default`, which is seeded is_supertenant = 1 and therefore
-	// confine-EXEMPT: on a multi-tenant install every directory user it created
-	// could reach every storage on the box. auth.ProvisionUser homes the account
-	// in the tenant this login arrived for — the request Host, which
-	// handlers.Auth.Login stamps onto the context (the same signal multioidc uses
-	// to pick a realm), or an operator's pinned `provider` slug.
-	//
-	// ⚠ A protocol login (SFTP/FTPS/NFS — internal/protocolauth) has no Host at
-	// all, so on a multi-tenant install with no pin this REFUSES rather than
-	// falling back to the supertenant. The account still works over those
-	// protocols the moment it exists; what it cannot do is come into existence
-	// there.
-	//
-	// ⚠ The first-login rule (auth.ProvisionFirstLogin) sits in front of that:
-	// auto_create off, or allowed_groups with no match, refuses. The person is
-	// answered exactly as for a wrong password (no account/group oracle) unless
-	// show_refusal_reason is on (auth.RefusedAfterPassword); the reason is in
-	// the log and the audit row either way.
-	user, err := auth.ProvisionFirstLogin(ctx, d.store, auth.FirstLogin{
-		Driver: "ldap", Identifier: name, Email: em, Role: model.RoleUser,
-		Groups: groups, Policy: d.firstLogin, Homing: d.homing,
-	})
-	if err != nil {
-		if errors.Is(err, auth.ErrFirstLoginRefused) {
-			// After the bind: the password was right. The answer a wrong
-			// password gets, unless the operator chose to tell why.
-			return nil, false, auth.RefusedAfterPassword(d.tellRefusal, err)
-		}
-		return nil, false, err
-	}
-	slog.Info("ldap: provisioned a directory account",
-		slog.String("email", em), slog.String("dn", dn))
-	return user, true, nil
 }
 
 // defaultGroupAttr is where Active Directory (and OpenLDAP with the memberOf
@@ -567,10 +625,13 @@ func (d *Driver) filter(identifier string) string {
 
 // searchAttrs is what a search asks the directory for: the DN, the e-mail
 // attribute, and the group attribute when groups are being read.
+//
+// Every search also asks for the person's permanent id and whether the
+// directory has switched them off (personAttrs, people.go).
 func (d *Driver) searchAttrs() []string {
 	attrs := []string{"dn", d.emailAttr}
 	if d.groupAttr != "" {
 		attrs = append(attrs, d.groupAttr)
 	}
-	return attrs
+	return append(attrs, personAttrs...)
 }

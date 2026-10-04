@@ -99,6 +99,10 @@ var Schema = map[string][]Field{
 		{Key: "bind_password", Kind: FieldSecret},
 		{Key: "user_filter", Kind: FieldText},
 		{Key: "email_attr", Kind: FieldText},
+		// The e-mail domains this directory's people are at: it signs in and
+		// opens accounts only for them, and the Users page makes no local
+		// account at them (docs/LDAP.md → Several directories).
+		{Key: "email_domains", Kind: FieldText},
 		{Key: "start_tls", Kind: FieldBool},
 		{Key: "ca_file", Kind: FieldText},
 		// A private CA pasted as PEM text: what a tenant's own directory uses
@@ -111,6 +115,20 @@ var Schema = map[string][]Field{
 		{Key: "auto_create", Kind: FieldBool, Default: "true"},
 		{Key: "allowed_groups", Kind: FieldText},
 		{Key: "group_attr", Kind: FieldText, Default: "memberOf"},
+		// LDAP links (docs/LDAP.md → Groups): a person's groups found by a
+		// search instead of group_attr — (member=%s) with %s their DN — under
+		// group_base_dn (base_dn when empty).
+		{Key: "group_filter", Kind: FieldText},
+		{Key: "group_base_dn", Kind: FieldText},
+		// Directory sync (docs/LDAP.md → Directory sync): how often (empty =
+		// only when asked), who (empty = user_filter with *), whether people
+		// no longer listed are switched off, and the directory's groups
+		// brought in as filex groups.
+		{Key: "sync_interval", Kind: FieldText},
+		{Key: "sync_filter", Kind: FieldText},
+		{Key: "sync_disable_missing", Kind: FieldBool},
+		{Key: "sync_groups", Kind: FieldBool, Default: "true"},
+		{Key: "sync_group_filter", Kind: FieldText},
 		// Tell a person whose password was right why the first-login rule
 		// refused them (auth.RefusedAfterPassword). OFF by default: the form
 		// would then confirm a directory password to anybody guessing.

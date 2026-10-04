@@ -245,6 +245,26 @@ type Store interface {
 	ClearUserOIDCIdentity(ctx context.Context, userID int64) (bool, error)
 	SetProviderOIDCTrustEmail(ctx context.Context, providerID int64, trust bool) error
 	SetUserDisabledReason(ctx context.Context, userID int64, reason string) error
+	// SetUserAuthSource records where an account comes from (migration 00081):
+	// model.AuthSourceLocal, SSO, LDAP or Proxy.
+	SetUserAuthSource(ctx context.Context, userID int64, source string) error
+	// SetUserAuthDirectory records which LDAP directory made an account
+	// (its provider slug: "ldap", "ldap-2"…; migration 00081).
+	SetUserAuthDirectory(ctx context.Context, userID int64, directory string) error
+	// GetUserByDirectoryID finds the account a directory entry's permanent id
+	// was recorded on (model.User.DirectoryID; migration 00082).
+	GetUserByDirectoryID(ctx context.Context, directoryID string) (*model.User, error)
+	// SetUserDirectoryID records a directory account's permanent id.
+	SetUserDirectoryID(ctx context.Context, userID int64, directoryID string) error
+	// SetUserEnabledByDirectory is SetUserEnabled for directory sync: switched
+	// off, the account's disabled_reason says the directory did it
+	// (model.DisabledByDirectory), so sync may undo it; switched on, the
+	// reason is cleared.
+	SetUserEnabledByDirectory(ctx context.Context, userID int64, enabled bool) error
+	// SetUserAdminByGroup makes an account an administrator because a group
+	// gives its members Administrator (model.User.AdminByGroup). Every
+	// UpdateUserRole clears the mark.
+	SetUserAdminByGroup(ctx context.Context, userID int64) error
 	ListUsersByProvider(ctx context.Context, providerID int64) ([]*model.User, error)
 	ListUsers(ctx context.Context) ([]*model.User, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -529,6 +549,12 @@ type Store interface {
 	GetUserGroupLevel(ctx context.Context, userID int64) (string, bool, error)
 	SetUserGroupLevel(ctx context.Context, userID int64, level string) error
 	DeleteUserGroupLevel(ctx context.Context, userID int64) error
+	// The groups of a person's latest LDAP sign-in (migration 00081), for
+	// re-applying a changed LDAP link without waiting for them to sign in.
+	ListUserLDAPGroups(ctx context.Context, userID int64) ([]string, error)
+	// Where a group directory sync brought in comes from (migration 00081).
+	SetGroupDirectory(ctx context.Context, id int64, directoryID, name, state string) error
+	SetUserLDAPGroups(ctx context.Context, userID int64, groups []string) error
 
 	// A group's folder grants (group_file_grants). Rows come back as
 	// model.FileGrant with GroupID set and UserID zero.
@@ -656,6 +682,9 @@ type Store interface {
 	// Settings
 	GetSetting(ctx context.Context, key string) (string, error)
 	UpsertSetting(ctx context.Context, key, value string) error
+	// DeleteSettingsWithPrefix removes every setting whose key starts with
+	// prefix — a removed LDAP directory's rows ("auth.ldap-partner.").
+	DeleteSettingsWithPrefix(ctx context.Context, prefix string) error
 	ListSettings(ctx context.Context) (map[string]string, error)
 
 	// External services

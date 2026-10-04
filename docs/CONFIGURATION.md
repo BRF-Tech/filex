@@ -476,8 +476,16 @@ the page can never lock the instance out. See
 | `FILEX_LDAP_AUTO_CREATE` | `false` stops the directory from opening an account at a person's first sign-in (only existing accounts sign in). Default `true`. See [LDAP.md](LDAP.md#the-first-sign-in-rule-who-gets-an-account). |
 | `FILEX_LDAP_ALLOWED_GROUPS` | Comma list: only members of one of these groups get an account on their first sign-in. |
 | `FILEX_LDAP_SHOW_REFUSAL_REASON` | `true` tells a person whose directory password was right why the first sign-in rule still refuses them (403 with a reason code). Default `false`: the wrong-password answer, so the form never confirms a directory password ([why](LDAP.md#the-first-sign-in-rule-who-gets-an-account)). The same switch is `show_refusal_reason` on every LDAP, PAM and Windows provider of the Identity providers page. |
-| `FILEX_LDAP_GROUP_ATTR` | Entry attribute listing a person's groups. Default `memberOf`. Unset, groups are read only once `FILEX_LDAP_ALLOWED_GROUPS` is set; set it to feed [groups](GROUPS.md#members-and-sso-links) and starting roles without restricting who gets an account. |
+| `FILEX_LDAP_GROUP_ATTR` | Entry attribute listing a person's groups. Default `memberOf`. Unset, groups are read only once `FILEX_LDAP_ALLOWED_GROUPS` is set; set it to feed [groups](GROUPS.md#members-and-sso-links) and starting roles without restricting who gets an account. It is also where a browser sign-in and directory sync read a person's groups for filex groups linked to LDAP groups ([LDAP.md → Groups](LDAP.md#groups)). |
 | `FILEX_OS_LOGIN_EMAIL_TOKEN` | What follows the `@` of an account known only by a login name (`alex` → `alex@local`; in a tenant's realm on a multi-tenant install `alex@acme.local`). Default `local`. **Set once at installation and never change it** - a later change makes a second account of the same person. The environment or `config.yaml` (`auth.login_email_token`) only - no page or API changes it - and a value that is not a DNS-like label (`a-z`, `0-9`, `.`, `-`) stops the server at start. It applies to the operating-system providers too ([OS-LOGIN.md](OS-LOGIN.md#the-e-mail-token---choose-it-once)). See [LDAP.md](LDAP.md#e-mail-address-for-an-account-that-has-only-a-login-name). |
+| `FILEX_LDAP_GROUP_FILTER` | Find a person's groups for the LDAP links by a search instead: `%s` is their DN, `%u` the name they signed in with, e.g. `(member=%s)` |
+| `FILEX_LDAP_GROUP_BASE_DN` | Where that search runs (default: the base DN) |
+| `FILEX_LDAP_SYNC_INTERVAL` | Run directory sync on its own this often (e.g. `6h`, at least `5m`); unset = only from **Sync now**. See [LDAP.md → Directory sync](LDAP.md#directory-sync) |
+| `FILEX_LDAP_SYNC_FILTER` | The search listing every person for directory sync (default: the user filter with `*`) |
+| `FILEX_LDAP_SYNC_DISABLE_MISSING` | `true` to switch off accounts the directory made once it no longer lists them |
+| `FILEX_LDAP_SYNC_GROUPS` | `false` to stop directory sync bringing every directory group in as a filex group (on by default) |
+| `FILEX_LDAP_SYNC_GROUP_FILTER` | Which directory groups sync brings in (default: every group) |
+| `FILEX_LDAP_EMAIL_DOMAINS` | Only these e-mail domains (comma-separated) sign in through this directory or get an account from it. See [LDAP.md → Several directories](LDAP.md#several-directories) |
 
 > `FILEX_LDAP_USER_FILTER` may contain the placeholder more than once - every
 > `%s` is filled with the same escaped identifier, so the usual AD filter that
@@ -1495,6 +1503,14 @@ auth:
     allowed_groups: ""
     group_attr: ""                 # memberOf when empty; read once allowed_groups is set
     show_refusal_reason: false     # tell a refused first sign-in why (confirms the password)
+    group_filter: ""               # LDAP links: find a person's groups by a search, e.g. "(member=%s)"
+    group_base_dn: ""              # where that search runs (default base_dn)
+    sync_interval: ""              # directory sync on its own, e.g. 6h (off by default)
+    sync_filter: ""                # who sync lists (default: user_filter with *)
+    sync_disable_missing: false    # switch off accounts the directory stopped listing
+    sync_groups: true              # bring every directory group in as a filex group
+    sync_group_filter: ""          # which ones (default: every group)
+    email_domains: ""              # only these e-mail domains sign in through it
   header_proxy:                    # trust an auth proxy - also FILEX_HEADER_*
     email_header: X-Auth-Email
     group_header: X-Auth-Roles

@@ -1,25 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Plus, Trash2, Pencil, KeyRound, RefreshCcw } from 'lucide-vue-next';
+import { Plus, Trash2, Pencil, KeyRound, RefreshCcw, Eye, EyeOff, Wand2, Copy } from 'lucide-vue-next';
 
 import { useUsersStore } from '@/stores/users';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
-import { emailProblem, refusalField } from '@brftech/filex-core';
+import { emailProblem, normalizeUsername, refusalField, usernameProblem } from '@brftech/filex-core';
 import { formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import SourceBadge from '@/components/SourceBadge.vue';
 import { RolesApi, type PermissionRule } from '@/api/roles';
-import { roleName } from '@/lib/roleName';
+import { GroupsApi, type Group, type Membership } from '@/api/groups';
+import { useAuthStore } from '@/stores/auth';
+import { roleDescription, roleName } from '@/lib/roleName';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Modal from '@/components/ui/Modal.vue';
-import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
+import { DataTable, setTableSort, tableSort, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import ResetPasswordModal from '@/components/ResetPasswordModal.vue';
 
 const { t, locale } = useI18n();
@@ -38,6 +41,8 @@ const q = ref('');
 // here: people on a custom role are listed under it, not under the level
 // underneath it.
 const role = ref<string>('');
+/** "" is every group; otherwise a group's id. */
+const groupFilter = ref<string>('');
 const page = ref(1);
 const pageSize = 25;
 
@@ -50,6 +55,23 @@ const newName = ref('');
 // A built-in role, or a custom one as "custom:<id>".
 const newRole = ref<string>('viewer');
 const newPassword = ref('');
+const newUsername = ref('');
+/** How the new account signs in: a password typed or generated here, or an
+ *  invitation that e-mails a first one. (People of an LDAP directory or an
+ *  SSO provider are not added here: they arrive by sign-in and sync.) */
+const newAccess = ref<'password' | 'invite'>('password');
+const showPassword = ref(false);
+/** Hand-made groups to put the new account in. */
+const newGroups = ref<number[]>([]);
+const handGroups = ref<Group[]>([]);
+/** Suggestions follow the address until a box is typed into by hand. */
+const nameTouched = ref(false);
+const usernameTouched = ref(false);
+/** An address an LDAP directory owns: said, with a way to go on anyway. */
+const directoryRefusal = ref<{ directory: string; label: string; message: string } | null>(null);
+/** An invitation that could not be e-mailed: its first password, once. */
+const invited = ref<{ email: string; password: string } | null>(null);
+const auth = useAuthStore();
 const creating = ref(false);
 const deleting = ref(false);
 
@@ -64,9 +86,66 @@ const deleting = ref(false);
 const createTried = ref(false);
 const createRefusal = ref<{ field: string; message: string } | null>(null);
 const createFailure = ref('');
-watch(newEmail, () => {
+watch(newEmail, (email) => {
   createRefusal.value = null;
   createFailure.value = '';
+  directoryRefusal.value = null;
+  if (!nameTouched.value) newName.value = suggestName(email);
+  if (!usernameTouched.value) newUsername.value = suggestUsername(email);
+});
+
+/** "jane.doe@corp.com" → "Jane Doe". */
+function suggestName(email: string): string {
+  const local = email.trim().split('@')[0] ?? '';
+  return local
+    .split(/[._\-+]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toLocaleUpperCase() + w.slice(1))
+    .join(' ');
+}
+/** "Jane.Doe+x@corp.com" → "jane.doe": what identity allows, from the
+ *  address's own name. */
+function suggestUsername(email: string): string {
+  const local = normalizeUsername(email.split('@')[0] ?? '').split('+')[0];
+  let name = local.replace(/[^a-z0-9._-]+/g, '.').replace(/^[._-]+|[._-]+$/g, '');
+  if (/^[0-9]/.test(name)) name = `u${name}`;
+  return name;
+}
+const newUsernameError = computed(() => {
+  if (createRefusal.value?.field === 'username') return createRefusal.value.message;
+  if (!newUsername.value.trim()) return '';
+  const p = usernameProblem(newUsername.value);
+  return p ? t(`account.errors.${p.key}`, p.params ?? {}) : '';
+});
+watch(newUsername, () => {
+  if (createRefusal.value?.field === 'username') createRefusal.value = null;
+});
+
+/** A strong first password: 16 characters, none that read alike. */
+function generatePassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789-_!';
+  const bytes = new Uint32Array(16);
+  crypto.getRandomValues(bytes);
+  newPassword.value = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
+  showPassword.value = true;
+}
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(t('users.add.copied'));
+  } catch {
+    // No clipboard (an insecure origin): the text is on screen to copy.
+  }
+}
+
+/** One line under the role picker saying what it gives. */
+const newRoleHint = computed(() => {
+  const picked = newRole.value;
+  if (picked.startsWith('custom:')) {
+    const rule = customRules.value.find((r) => r.id === Number(picked.slice(7)));
+    return (rule && roleDescription(rule, locale.value)) || t('users.add.roleHint.custom');
+  }
+  return t(`users.add.roleHint.${picked}`);
 });
 const newEmailError = computed(() => {
   if (createRefusal.value?.field === 'email') return createRefusal.value.message;
@@ -77,15 +156,33 @@ const newEmailError = computed(() => {
   return p ? t(`account.errors.${p.key}`, p.params ?? {}) : '';
 });
 
-function openCreate() {
+function resetCreate() {
   newEmail.value = '';
   newName.value = '';
   newPassword.value = '';
-  newRole.value = 'viewer';
+  newUsername.value = '';
+  nameTouched.value = false;
+  usernameTouched.value = false;
+  showPassword.value = false;
   createTried.value = false;
   createRefusal.value = null;
   createFailure.value = '';
+  directoryRefusal.value = null;
+}
+function openCreate() {
+  resetCreate();
+  newRole.value = 'viewer';
+  newAccess.value = 'password';
+  newGroups.value = [];
+  invited.value = null;
   showCreate.value = true;
+  // Groups made here (a synced group fills itself from its directory).
+  GroupsApi.list()
+    .then((gs) => (handGroups.value = gs.filter((g) => !g.directory_id).sort((a, b) => a.name.localeCompare(b.name))))
+    .catch(() => (handGroups.value = []));
+}
+function toggleNewGroup(id: number) {
+  newGroups.value = newGroups.value.includes(id) ? newGroups.value.filter((x) => x !== id) : [...newGroups.value, id];
 }
 
 async function load() {
@@ -97,8 +194,35 @@ async function load() {
       page_size: pageSize,
     }),
     loadCustom(),
+    loadGroups(),
   ]);
 }
+
+// user id → their groups (the Groups column), and every group anybody is in
+// (the filter). Best effort, like the role markers: the list is whole
+// without it.
+const groupsOf = ref<Map<number, Membership[]>>(new Map());
+async function loadGroups() {
+  try {
+    const all = await GroupsApi.memberships();
+    groupsOf.value = new Map(Object.entries(all).map(([uid, gs]) => [Number(uid), gs]));
+  } catch {
+    groupsOf.value = new Map();
+  }
+}
+const groupOptions = computed(() => {
+  const names = new Map<number, string>();
+  for (const gs of groupsOf.value.values()) for (const g of gs) names.set(g.id, g.name);
+  return [
+    { value: '', label: t('users.allGroups') },
+    ...[...names].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => ({ value: String(id), label: name })),
+  ];
+});
+const MEMBER_TONE: Record<string, 'zinc' | 'sky' | 'violet'> = { manual: 'zinc', sso: 'sky', ldap: 'violet' };
+/** Groups a row names before "+N": a directory person is in dozens, and a
+ *  row of chips per group made the list a wall. The server puts the groups
+ *  that give a role or folder access first — the ones that matter here. */
+const SHOWN_GROUPS = 2;
 
 // Which accounts have their own permission overrides (backend internal/perm),
 // for the "Custom permissions" marker. Best effort: an older server has no
@@ -156,7 +280,7 @@ async function loadCustom() {
 // Search and the role filter narrow the rows already here (visibleRows):
 // the server answers every account and reads neither, so asking it again
 // on each keystroke only fetched the same list.
-watch([q, role], () => {
+watch([q, role, groupFilter], () => {
   page.value = 1;
 });
 
@@ -180,12 +304,14 @@ const createRoleOptions = computed(() => [
 
 const visibleRows = computed(() => {
   const f = role.value;
+  const gf = groupFilter.value === '' ? null : Number(groupFilter.value);
   const needle = q.value.trim().toLocaleLowerCase();
-  if (!f && !needle) return users.page.items;
+  if (!f && !needle && gf === null) return users.page.items;
   return users.page.items.filter((u) => {
     if (needle && ![u.email, u.display_name, u.username].some((x) => (x ?? '').toLocaleLowerCase().includes(needle))) {
       return false;
     }
+    if (gf !== null && !(groupsOf.value.get(u.id) ?? []).some((g) => g.id === gf)) return false;
     if (!f) return true;
     const held = u.role !== 'admin' ? roleIdOf.value.get(u.id) : undefined;
     if (f.startsWith('custom:')) return held === Number(f.slice(7));
@@ -195,14 +321,54 @@ const visibleRows = computed(() => {
 
 /* The explorer's table (DataTable): every column resizes, hides, moves and
  * sorts, and the arrangement is remembered on the account under
- * `admin.users`. ⚠ The list is paged by the SERVER, which has no sort
- * parameter — so while it spans more than one page the table closes its
- * headers and says why, rather than re-ordering 25 rows of 300 and calling
- * that sorted. (It used to draw an arrow on Email and move nothing at all.) */
+ * `admin.users`. ⚠ The server answers EVERY account in one list (it reads no
+ * page or sort parameter), so this page sorts and pages that list itself
+ * (sortedRows, pagedRows) and hands the table one page of it. The table is
+ * told the sort (`sort`), so it neither re-sorts 25 rows of 300 nor closes
+ * its headers: the order is the whole list's. Paging used to ask the server
+ * for "page 2" and get all of them again — Next did nothing. */
 const ROLE_RANK: Record<UserRole, number> = { admin: 0, user: 1, viewer: 2 };
+
+type Sort = { key: string; dir: 'asc' | 'desc' };
+const TABLE_ID = 'admin.users';
+const sort = ref<Sort | null>(tableSort(TABLE_ID));
+function onSort(next: Sort) {
+  sort.value = next;
+  setTableSort(TABLE_ID, next);
+  page.value = 1;
+}
+/** Empty last either way; numbers as numbers; words in the panel's language. */
+function compare(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b), locale.value, { numeric: true, sensitivity: 'base' });
+}
+const sortedRows = computed(() => {
+  const s = sort.value;
+  const col = s ? columns.value.find((c) => c.id === s.key) : undefined;
+  if (!s || !col) return visibleRows.value;
+  const value = (u: User): unknown => (col.sortValue ? col.sortValue(u) : (u as unknown as Record<string, unknown>)[col.id]);
+  const dir = s.dir === 'asc' ? 1 : -1;
+  return visibleRows.value
+    .map((u, i) => ({ u, i, v: value(u) }))
+    .sort((x, y) => {
+      const xe = x.v === null || x.v === undefined || x.v === '';
+      const ye = y.v === null || y.v === undefined || y.v === '';
+      if (xe !== ye) return xe ? 1 : -1;
+      return (xe ? 0 : dir * compare(x.v, y.v)) || x.i - y.i;
+    })
+    .map((x) => x.u);
+});
+const pagedRows = computed(() => sortedRows.value.slice((page.value - 1) * pageSize, page.value * pageSize));
 const columns = computed<DataColumn<User>[]>(() => [
   { id: 'email', label: t('common.email'), sortable: true, width: 240 },
   { id: 'display_name', label: t('users.fields.displayName'), sortable: true, width: 180 },
+  {
+    id: 'auth_source',
+    label: t('users.fields.source'),
+    sortable: true,
+    width: 90,
+    sortValue: (u) => u.auth_source || 'local',
+  },
   {
     id: 'role',
     label: t('common.role'),
@@ -210,6 +376,13 @@ const columns = computed<DataColumn<User>[]>(() => [
     // Wide enough for a role and "through {group}" on one line.
     width: 180,
     sortValue: (u) => ROLE_RANK[u.role] ?? 9,
+  },
+  {
+    id: 'groups',
+    label: t('users.fields.groups'),
+    sortable: true,
+    width: 200,
+    sortValue: (u) => (groupsOf.value.get(u.id) ?? []).map((g) => g.name).join(', ') || null,
   },
   {
     id: 'last_login_at',
@@ -220,6 +393,17 @@ const columns = computed<DataColumn<User>[]>(() => [
     sortValue: (u) => (u.last_login_at ? Date.parse(u.last_login_at) : null),
   },
 ]);
+// A filter, a deletion or a reload can leave the page past the end.
+// ⚠ Below `columns`: the watch reads sortedRows at once, and with a sort
+// remembered from an earlier visit that reads `columns` — above it, the page
+// failed to open for anyone who had sorted the list.
+watch(
+  () => sortedRows.value.length,
+  (n) => {
+    const last = Math.max(1, Math.ceil(n / pageSize));
+    if (page.value > last) page.value = last;
+  },
+);
 
 const roleTone = (r: UserRole) => {
   if (r === 'admin') return 'rose';
@@ -227,22 +411,30 @@ const roleTone = (r: UserRole) => {
   return 'zinc';
 };
 
-async function submitCreate() {
+async function submitCreate(another = false, anyway = false) {
   createTried.value = true;
   createFailure.value = '';
-  if (newEmailError.value || creating.value) return;
+  if (newEmailError.value || newUsernameError.value || creating.value) return;
+  if (newAccess.value === 'password' && !newPassword.value) {
+    createFailure.value = t('users.add.passwordNeeded');
+    return;
+  }
   creating.value = true;
   const picked = newRole.value;
   const customId = picked.startsWith('custom:') ? Number(picked.slice(7)) : null;
+  const email = newEmail.value.trim();
   try {
     // A custom role: the account starts as a Viewer — the least it can be —
     // and the role call then sets the level the role needs. If that call
     // fails, the person is a Viewer, never more.
     const created = await users.create({
-      email: newEmail.value.trim(),
+      email,
       display_name: newName.value.trim(),
       role: customId ? 'viewer' : (picked as UserRole),
-      password: newPassword.value || undefined,
+      username: newUsername.value.trim() || undefined,
+      password: newAccess.value === 'password' ? newPassword.value : undefined,
+      send_invite: newAccess.value === 'invite' || undefined,
+      allow_directory_email: anyway || undefined,
     });
     if (customId) {
       try {
@@ -250,15 +442,34 @@ async function submitCreate() {
       } catch (e: unknown) {
         toast.error(t('users.createdRoleNotSet', { error: extractError(e, t('errors.generic')) }));
       }
-      await Promise.all([load(), loadCustom()]);
     }
-    toast.success(t('users.createdOk'));
-    showCreate.value = false;
-    newEmail.value = '';
-    newName.value = '';
-    newPassword.value = '';
-    newRole.value = 'viewer';
+    // Its groups: each on its own, so one refused (a delegated
+    // administrator's line) does not undo the account or the others.
+    for (const gid of newGroups.value) {
+      try {
+        await GroupsApi.addMembers(gid, [created.id]);
+      } catch (e: unknown) {
+        const g = handGroups.value.find((x) => x.id === gid);
+        toast.error(t('users.add.groupNotSet', { group: g?.name ?? `#${gid}`, error: extractError(e, t('errors.generic')) }));
+      }
+    }
+    if (customId || newGroups.value.length) await Promise.all([load(), loadCustom()]);
+    if (created.invite?.emailed) toast.success(t('users.add.invitedOk', { email }));
+    else toast.success(t('users.createdOk'));
+    if (created.invite && !created.invite.emailed && created.invite.temp_password) {
+      // No mail could go out: the first password, once, for passing on.
+      invited.value = { email, password: created.invite.temp_password };
+      resetCreate();
+      return;
+    }
+    if (another) resetCreate();
+    else showCreate.value = false;
   } catch (e: unknown) {
+    const body = (e as { response?: { data?: { error?: string; directory?: string; label?: string; message?: string } } })?.response?.data;
+    if (body?.error === 'directory_email') {
+      directoryRefusal.value = { directory: body.directory ?? '', label: body.label ?? '', message: body.message ?? '' };
+      return;
+    }
     const refusal = refusalField(e);
     if (refusal) createRefusal.value = refusal;
     else createFailure.value = extractError(e, t('errors.generic'));
@@ -337,17 +548,19 @@ function onRowAction(key: string, row: User) {
     <DataTable
       table-id="admin.users"
       :columns="columns"
-      :rows="visibleRows"
+      :rows="pagedRows"
       :loading="users.loading"
       :empty="t('common.none')"
       :page="page"
       :page-size="pageSize"
-      :total="role || q.trim() ? visibleRows.length : users.page.total"
+      :total="sortedRows.length"
+      :sort="sort"
       row-key="id"
       :row-actions="(row: User) => rowActions(row)"
       :row-actions-test-id="(row: User) => `user-actions-${row.id}`"
       @row-action="(key: string, row: User) => onRowAction(key, row)"
-      @page="(p: number) => ((page = p), load())"
+      @page="(p: number) => (page = p)"
+      @sort="onSort"
     >
       <template #toolbar>
         <Input
@@ -358,6 +571,13 @@ function onRowAction(key: string, row: User) {
           autocomplete="off"
         />
         <Select v-model="role" :options="roleOptions" size="sm" />
+        <Select
+          v-if="groupOptions.length > 1"
+          v-model="groupFilter"
+          :options="groupOptions"
+          size="sm"
+          data-testid="users-group-filter"
+        />
       </template>
 
       <template #cell-role="{ row }">
@@ -395,6 +615,15 @@ function onRowAction(key: string, row: User) {
           {{ t('users.status.pending') }}
         </Badge>
         <Badge
+          v-else-if="(row as User).enabled === false && (row as User).disabled_reason === 'directory'"
+          tone="zinc"
+          size="xs"
+          :title="t('users.status.directoryTitle')"
+          :data-testid="`user-disabled-${(row as User).id}`"
+        >
+          {{ t('users.status.directory') }}
+        </Badge>
+        <Badge
           v-else-if="(row as User).enabled === false"
           tone="zinc"
           size="xs"
@@ -403,6 +632,32 @@ function onRowAction(key: string, row: User) {
           {{ t('users.status.disabled') }}
         </Badge>
         </span>
+      </template>
+
+      <template #cell-auth_source="{ row }">
+        <SourceBadge :source="(row as User).auth_source" :directory="(row as User).auth_directory" />
+      </template>
+
+      <template #cell-groups="{ row }">
+        <span v-if="groupsOf.get((row as User).id)?.length" class="inline-flex flex-wrap items-center gap-1" :data-testid="`user-groups-${(row as User).id}`">
+          <RouterLink
+            v-for="g in (groupsOf.get((row as User).id) ?? []).slice(0, SHOWN_GROUPS)"
+            :key="g.id"
+            :to="{ name: 'groups.edit', params: { id: g.id } }"
+            :title="t(`sources.memberHint.${MEMBER_TONE[g.source] ? g.source : 'manual'}`)"
+          >
+            <Badge :tone="MEMBER_TONE[g.source] ?? 'zinc'" size="xs" class="hover:underline">{{ g.name }}</Badge>
+          </RouterLink>
+          <RouterLink
+            v-if="(groupsOf.get((row as User).id)?.length ?? 0) > SHOWN_GROUPS"
+            :to="{ name: 'users.edit', params: { id: (row as User).id } }"
+            :title="(groupsOf.get((row as User).id) ?? []).slice(SHOWN_GROUPS).map((g) => g.name).join(', ')"
+            :data-testid="`user-groups-more-${(row as User).id}`"
+          >
+            <Badge tone="zinc" size="xs" class="hover:underline">+{{ (groupsOf.get((row as User).id)?.length ?? 0) - SHOWN_GROUPS }}</Badge>
+          </RouterLink>
+        </span>
+        <span v-else class="text-xs text-zinc-500">-</span>
       </template>
 
       <template #cell-last_login_at="{ row }">
@@ -417,13 +672,25 @@ function onRowAction(key: string, row: User) {
 
     <!-- Create modal -->
     <Modal v-model="showCreate" :title="t('users.newTitle')" size="md">
+      <!-- An invitation that could not be e-mailed: its first password, once. -->
+      <div v-if="invited" class="space-y-3" data-testid="user-invited">
+        <p class="text-sm">{{ t('users.add.notEmailed', { email: invited.email }) }}</p>
+        <div class="flex items-center gap-2">
+          <code class="flex-1 rounded-md border border-[var(--fe-border)] px-3 py-2 text-sm font-mono select-all" data-testid="user-invited-password">{{ invited.password }}</code>
+          <Button variant="outline" size="sm" @click="copyText(invited.password)"><Copy class="h-4 w-4" /> {{ t('common.copy') }}</Button>
+        </div>
+        <p class="text-xs text-zinc-500">{{ t('users.add.shownOnce') }}</p>
+      </div>
       <!-- ⚠ novalidate: the boxes are marked `required` for the star and for
            assistive tech, but the checking is ours (said in the panel's
            language, inside the dialog). Without it the browser intercepts
            Enter / a submit button with its own bubble, in the BROWSER's
            language, and our check never runs (seen in the RC re-test,
            2026-09-21: an empty New webhook save showed no message of ours). -->
-      <form class="space-y-3" novalidate @submit.prevent="submitCreate">
+      <!-- Hidden, not removed, while the invited password shows: swapping the
+           form out (v-else) broke Vue's unmount of it in the tests' DOM. -->
+      <form v-show="!invited" class="space-y-3" novalidate data-testid="user-create-form" @submit.prevent="submitCreate()">
+        <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ t('users.add.intro') }}</p>
         <Input
           v-model="newEmail"
           type="email"
@@ -432,18 +699,99 @@ function onRowAction(key: string, row: User) {
           :error="newEmailError || null"
           name="new-user-email"
         />
-        <!-- ⚠ Not marked required: the server creates an account without a
-             display name (the address stands in for it), so a star here was a
-             rule the form did not keep. -->
-        <Input v-model="newName" :label="t('users.fields.displayName')" name="new-user-name" />
-        <Select v-model="newRole" :options="createRoleOptions" :label="t('common.role')" />
-        <Input
-          v-model="newPassword"
-          type="password"
-          :label="t('common.password')"
-          autocomplete="new-password"
-          :hint="t('users.passwordOptionalHint')"
-        />
+        <!-- An address an LDAP directory owns: its people arrive by sign-in
+             and sync. Said before anything is made; going on is a choice. -->
+        <div
+          v-if="directoryRefusal"
+          class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200 space-y-2"
+          role="alert"
+          data-testid="user-create-directory"
+        >
+          <p>{{ directoryRefusal.message }}</p>
+          <div class="flex flex-wrap gap-2">
+            <RouterLink
+              v-if="auth.isAdmin"
+              :to="{ name: 'auth-providers.edit', params: { name: directoryRefusal.directory }, query: { section: 'sync' } }"
+              class="text-sm underline"
+              data-testid="user-create-directory-sync"
+            >{{ t('users.add.openDirectory', { directory: directoryRefusal.label }) }}</RouterLink>
+            <button type="button" class="text-sm underline" data-testid="user-create-anyway" @click="submitCreate(false, true)">
+              {{ t('users.add.createAnyway') }}
+            </button>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <!-- ⚠ Not marked required: the server creates an account without a
+               display name (the address stands in for it). -->
+          <Input v-model="newName" :label="t('users.fields.displayName')" name="new-user-name" @update:model-value="nameTouched = true" />
+          <Input
+            v-model="newUsername"
+            :label="t('users.add.username')"
+            :hint="newUsernameError ? undefined : t('users.add.usernameHint')"
+            :error="newUsernameError || null"
+            name="new-user-username"
+            autocomplete="off"
+            @update:model-value="usernameTouched = true"
+          />
+        </div>
+        <div>
+          <Select v-model="newRole" :options="createRoleOptions" :label="t('common.role')" />
+          <p class="mt-1 text-xs text-zinc-500" data-testid="user-create-role-hint">{{ newRoleHint }}</p>
+        </div>
+
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium">{{ t('users.add.signIn') }}</legend>
+          <div class="inline-flex rounded-lg border border-[var(--fe-border)] p-0.5" role="radiogroup">
+            <button
+              v-for="opt in (['password', 'invite'] as const)"
+              :key="opt"
+              type="button"
+              role="radio"
+              :aria-checked="newAccess === opt"
+              class="rounded-md px-3 py-1 text-sm"
+              :class="newAccess === opt ? 'bg-brand-600 text-white' : 'text-zinc-600 dark:text-zinc-300'"
+              :data-testid="`user-create-access-${opt}`"
+              @click="newAccess = opt"
+            >{{ t(`users.add.access.${opt}`) }}</button>
+          </div>
+          <div v-show="newAccess === 'password'" class="flex items-end gap-2">
+            <Input
+              v-model="newPassword"
+              :type="showPassword ? 'text' : 'password'"
+              :label="t('common.password')"
+              autocomplete="new-password"
+              name="new-user-password"
+              class="flex-1"
+            />
+            <Button type="button" variant="ghost" size="sm" :aria-label="showPassword ? t('users.add.hide') : t('users.add.show')" @click="showPassword = !showPassword">
+              <EyeOff v-if="showPassword" class="h-4 w-4" /><Eye v-else class="h-4 w-4" />
+            </Button>
+            <Button type="button" variant="outline" size="sm" data-testid="user-create-generate" @click="generatePassword">
+              <Wand2 class="h-4 w-4" /> {{ t('users.add.generate') }}
+            </Button>
+            <Button v-if="newPassword" type="button" variant="ghost" size="sm" :aria-label="t('common.copy')" @click="copyText(newPassword)">
+              <Copy class="h-4 w-4" />
+            </Button>
+          </div>
+          <p v-show="newAccess === 'invite'" class="text-xs text-zinc-500" data-testid="user-create-invite-hint">{{ t('users.add.inviteHint') }}</p>
+        </fieldset>
+
+        <div v-if="handGroups.length" class="space-y-1">
+          <p class="text-sm font-medium">{{ t('users.add.groups') }}</p>
+          <div class="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto" data-testid="user-create-groups">
+            <button
+              v-for="g in handGroups"
+              :key="g.id"
+              type="button"
+              :aria-pressed="newGroups.includes(g.id)"
+              class="rounded-full border px-2.5 py-0.5 text-xs"
+              :class="newGroups.includes(g.id) ? 'border-brand-600 bg-brand-600 text-white' : 'border-[var(--fe-border)] text-zinc-600 dark:text-zinc-300'"
+              :data-testid="`user-create-group-${g.id}`"
+              @click="toggleNewGroup(g.id)"
+            >{{ g.name }}</button>
+          </div>
+        </div>
+
         <p v-if="createFailure" class="error-text" role="alert" data-testid="user-create-error">{{ createFailure }}</p>
         <!-- ⚠ Enter in a box submits: the form's visible buttons sit in the
              dialog footer, OUTSIDE this <form>, and a form with more than one
@@ -454,8 +802,13 @@ function onRowAction(key: string, row: User) {
         <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true" data-testid="user-create-submit">{{ t('common.create') }}</button>
       </form>
       <template #footer>
-        <Button variant="ghost" @click="showCreate = false">{{ t('common.cancel') }}</Button>
-        <Button :loading="creating" @click="submitCreate">{{ t('common.create') }}</Button>
+        <!-- One button list, each shown or not: swapping two fragments of the
+             slot tripped Vue's unmount of the dialog's footer. -->
+        <Button v-if="invited" variant="ghost" data-testid="user-invited-another" @click="invited = null">{{ t('users.add.addAnother') }}</Button>
+        <Button v-if="invited" @click="(invited = null), (showCreate = false)">{{ t('common.close') }}</Button>
+        <Button v-if="!invited" variant="ghost" @click="showCreate = false">{{ t('common.cancel') }}</Button>
+        <Button v-if="!invited" variant="outline" :loading="creating" data-testid="user-create-another" @click="submitCreate(true)">{{ t('users.add.createAnother') }}</Button>
+        <Button v-if="!invited" :loading="creating" data-testid="user-create" @click="submitCreate()">{{ t('common.create') }}</Button>
       </template>
     </Modal>
 

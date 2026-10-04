@@ -64,7 +64,8 @@ func TestFirstLogin_UpgradeAdoptsTheOlderAccount(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ayse@example.com", u.Email)
 	require.Len(t, fc.searches, 1)
-	assert.Equal(t, []string{"dn", "mail"}, fc.searches[0].Attributes, "no group attribute is asked for unless configured")
+	assert.Equal(t, append([]string{"dn", "mail"}, personAttrs...), fc.searches[0].Attributes,
+		"no group attribute is asked for unless configured (the permanent id and the switched-off flags always are)")
 	groups, err := store.ListUserSSOGroups(ctx, u.ID)
 	require.NoError(t, err)
 	assert.Empty(t, groups, "groups are not recorded unless configured")
@@ -124,7 +125,7 @@ func TestFirstLogin_AllowedGroupsAreTheDoor(t *testing.T) {
 	u, _, err := d.Login(ctx, "ayse@example.com", "pw")
 	require.NoError(t, err)
 	assert.Equal(t, "ayse@example.com", u.Email)
-	assert.Equal(t, []string{"dn", "mail", "memberOf"}, fc.searches[0].Attributes)
+	assert.Equal(t, append([]string{"dn", "mail", "memberOf"}, personAttrs...), fc.searches[0].Attributes)
 	groups, err := store.ListUserSSOGroups(ctx, u.ID)
 	require.NoError(t, err)
 	assert.Contains(t, groups, "editors")

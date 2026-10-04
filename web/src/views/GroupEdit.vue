@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * One group (admin.users): its name, its role, the SSO groups whose people are
- * members too, its members, and the folders it can reach. The server holds the
+ * One group (admin.users): its name, its role, the SSO and LDAP groups whose
+ * people are members too, where it comes from (directory sync), its members, and the folders it can reach. The server holds the
  * lines — a delegated administrator gives only roles whose permissions they
  * hold, never changes their own membership, and never edits the SSO links
  * (an administrator's) — and a refusal comes back as a toast.
@@ -9,7 +9,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ArrowLeft, Save, Trash2, UsersRound, FolderLock, UserPlus } from 'lucide-vue-next';
+import { ArrowLeft, Save, Trash2, UsersRound, FolderLock, UserPlus, Info, TriangleAlert } from 'lucide-vue-next';
 
 import { GroupsApi, type GroupDetail, type GroupGrant, type GroupMember } from '@/api/groups';
 import { RolesApi, type PermissionRule } from '@/api/roles';
@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/auth';
 import { DataTable, personName, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import SourceBadge from '@/components/SourceBadge.vue';
 import Input from '@/components/ui/Input.vue';
 import Select from '@/components/ui/Select.vue';
 import Textarea from '@/components/ui/Textarea.vue';
@@ -46,6 +47,8 @@ const roleId = ref<string>('');
 const priority = ref<number>(0);
 /** One SSO group per line. */
 const ssoText = ref('');
+/** One LDAP group per line: a DN or a common name. */
+const ldapText = ref('');
 
 async function load() {
   loading.value = true;
@@ -69,10 +72,15 @@ function apply(d: GroupDetail) {
   detail.value = d;
   name.value = d.group.name;
   description.value = d.group.description;
-  roleId.value = d.group.role_id == null ? '' : String(d.group.role_id);
+  roleId.value = d.group.gives_admin ? ADMIN : d.group.role_id == null ? '' : String(d.group.role_id);
   priority.value = d.group.priority ?? 0;
-  ssoText.value = d.group.links
-    .filter((l) => l.kind === 'sso')
+  ssoText.value = linkText(d, 'sso');
+  ldapText.value = linkText(d, 'ldap');
+}
+
+function linkText(d: GroupDetail, kind: string): string {
+  return d.group.links
+    .filter((l) => l.kind === kind)
     .map((l) => l.value)
     .join('\n');
 }
@@ -92,8 +100,13 @@ function ssoValues(raw: string): string[] {
   return out;
 }
 
+// The group makes its members administrators instead of giving a role
+// (gives_admin): offered to a full administrator only - the server refuses
+// anyone else - and shown to others when the group already does.
+const ADMIN = 'admin';
 const roleOptions = computed(() => [
   { value: '', label: t('groups.fields.noRole') },
+  ...(auth.isAdmin || roleId.value === ADMIN ? [{ value: ADMIN, label: t('groups.fields.adminRole') }] : []),
   ...roles.value.map((r) => ({ value: String(r.id), label: r.enabled ? r.name : `${r.name} (${t('permissions.rules.disabled')})` })),
 ]);
 
@@ -102,14 +115,19 @@ async function save() {
   saving.value = true;
   try {
     // Links of kinds this page does not edit are kept as they are.
-    const other = detail.value.group.links.filter((l) => l.kind !== 'sso');
+    const other = detail.value.group.links.filter((l) => l.kind !== 'sso' && l.kind !== 'ldap');
     apply(
       await GroupsApi.update(id.value, {
         name: name.value.trim(),
         description: description.value.trim(),
-        role_id: roleId.value === '' ? null : Number(roleId.value),
+        role_id: roleId.value === '' || roleId.value === ADMIN ? null : Number(roleId.value),
+        gives_admin: roleId.value === ADMIN,
         priority: Number(priority.value) || 0,
-        links: [...other, ...ssoValues(ssoText.value).map((value) => ({ kind: 'sso', value }))],
+        links: [
+          ...other,
+          ...ssoValues(ssoText.value).map((value) => ({ kind: 'sso', value })),
+          ...ssoValues(ldapText.value).map((value) => ({ kind: 'ldap', value })),
+        ],
       }),
     );
     toast.success(t('groups.savedOk'));
@@ -122,6 +140,22 @@ async function save() {
 
 // ── delete ──
 const showDelete = ref(false);
+
+// ── where it comes from (directory sync) ──
+const synced = computed(() => !!detail.value?.group.directory_id && detail.value.group.directory_state !== 'removed');
+const removed = computed(() => detail.value?.group.directory_state === 'removed');
+const detaching = ref(false);
+async function detach() {
+  detaching.value = true;
+  try {
+    apply(await GroupsApi.detach(id.value));
+    toast.success(t('groups.directory.kept'));
+  } catch (e) {
+    toast.error(extractError(e, t('errors.generic')));
+  } finally {
+    detaching.value = false;
+  }
+}
 const deleting = ref(false);
 async function confirmDelete() {
   deleting.value = true;
@@ -184,17 +218,15 @@ async function removeMember(m: GroupMember) {
   const msg =
     m.source === 'sso'
       ? t('groups.removeSsoConfirm', { name: m.name })
-      : t('groups.removeConfirm', { name: m.name });
+      : m.source === 'ldap'
+        ? t('groups.removeLdapConfirm', { name: m.name })
+        : t('groups.removeConfirm', { name: m.name });
   if (!confirm(msg)) return;
   try {
     apply(await GroupsApi.removeMember(id.value, m.user_id));
   } catch (e) {
     toast.error(extractError(e, t('errors.generic')));
   }
-}
-
-function sourceLabel(src: string): string {
-  return src === 'sso' ? t('groups.source.sso') : t('groups.source.manual');
 }
 
 const levelLabel = (l: string) => t(`groups.level.${l}`);
@@ -237,12 +269,31 @@ const grantColumns = computed<DataColumn<GroupGrant>[]>(() => [
       </Button>
     </div>
 
+    <div v-if="synced" class="card card-body text-sm flex gap-2" data-testid="group-synced">
+      <Info class="h-4 w-4 shrink-0 mt-0.5 text-[var(--fe-brand)]" />
+      <p>{{ t('groups.directory.synced', { name: detail.group.directory_name }) }}</p>
+    </div>
+    <div v-else-if="removed" class="card card-body text-sm space-y-2 border-amber-300 dark:border-amber-700" data-testid="group-directory-removed">
+      <p class="flex gap-2"><TriangleAlert class="h-4 w-4 shrink-0 mt-0.5 text-amber-600" /> {{ t('groups.directory.removedBody', { name: detail.group.directory_name }) }}</p>
+      <div v-if="auth.isAdmin" class="flex gap-2 flex-wrap">
+        <Button size="sm" variant="outline" :loading="detaching" data-testid="group-detach" @click="detach">{{ t('groups.directory.keep') }}</Button>
+        <Button size="sm" variant="danger" @click="showDelete = true">{{ t('common.delete') }}</Button>
+      </div>
+    </div>
+
     <form class="card card-body space-y-3" data-testid="group-form" @submit.prevent="save">
       <Input v-model="name" :label="t('groups.fields.name')" required />
       <Input v-model="description" :label="t('groups.fields.description')" />
-      <Select v-model="roleId" :options="roleOptions" :label="t('groups.fields.role')" :hint="t('groups.fields.roleHint')" data-testid="group-role" />
+      <Select
+        v-model="roleId"
+        :options="roleOptions"
+        :label="t('groups.fields.role')"
+        :hint="roleId === ADMIN ? t('groups.fields.adminHint') : t('groups.fields.roleHint')"
+        :disabled="roleId === ADMIN && !auth.isAdmin"
+        data-testid="group-role"
+      />
       <Input
-        v-if="roleId !== ''"
+        v-if="roleId !== '' && roleId !== ADMIN"
         v-model="priority"
         type="number"
         :min="-1000"
@@ -260,6 +311,14 @@ const grantColumns = computed<DataColumn<GroupGrant>[]>(() => [
         :hint="auth.isAdmin ? t('groups.fields.ssoHint') : t('groups.fields.ssoAdminOnly')"
         :disabled="!auth.isAdmin"
         data-testid="group-sso"
+      />
+      <Textarea
+        v-model="ldapText"
+        :rows="3"
+        :label="t('groups.fields.ldap')"
+        :hint="synced ? t('groups.directory.linkHint') : auth.isAdmin ? t('groups.fields.ldapHint') : t('groups.fields.ldapAdminOnly')"
+        :disabled="!auth.isAdmin || synced"
+        data-testid="group-ldap"
       />
 
       <div class="flex justify-between items-center pt-2 gap-2">
@@ -307,7 +366,10 @@ const grantColumns = computed<DataColumn<GroupGrant>[]>(() => [
         <template #cell-name="{ row }">
           <div>
             <RouterLink :to="{ name: 'users.edit', params: { id: (row as GroupMember).user_id } }" class="font-medium hover:underline">{{ (row as GroupMember).name }}</RouterLink>
-            <span class="tbl-sub"><bdi>{{ (row as GroupMember).email }}</bdi></span>
+            <span class="tbl-sub flex items-center gap-1.5">
+              <bdi class="truncate">{{ (row as GroupMember).email }}</bdi>
+              <SourceBadge :source="(row as GroupMember).auth_source" :data-testid="`member-account-${(row as GroupMember).user_id}`" />
+            </span>
           </div>
         </template>
         <template #cell-role="{ row }">
@@ -315,10 +377,7 @@ const grantColumns = computed<DataColumn<GroupGrant>[]>(() => [
         </template>
         <template #cell-source="{ row }">
           <div>
-            <Badge
-              :tone="(row as GroupMember).source === 'sso' ? 'sky' : 'zinc'"
-              :title="(row as GroupMember).source === 'sso' ? t('groups.source.ssoHint') : undefined"
-            >{{ sourceLabel((row as GroupMember).source) }}</Badge>
+            <SourceBadge :source="(row as GroupMember).source" of="member" />
           </div>
         </template>
       </DataTable>
@@ -348,6 +407,7 @@ const grantColumns = computed<DataColumn<GroupGrant>[]>(() => [
 
     <Modal v-model="showDelete" :title="t('common.delete')" size="sm">
       <p class="text-sm">{{ t('groups.deleteConfirm', { name: detail.group.name }) }}</p>
+      <p v-if="synced" class="text-sm text-amber-700 dark:text-amber-400 mt-2" data-testid="group-delete-synced">{{ t('groups.directory.deleteNote') }}</p>
       <template #footer>
         <Button variant="ghost" @click="showDelete = false">{{ t('common.cancel') }}</Button>
         <Button variant="danger" :loading="deleting" @click="confirmDelete">{{ t('common.yesDelete') }}</Button>

@@ -490,14 +490,16 @@
   },
   "users": {
     "title": "Kullanıcılar",
-    "subtitle": "Yerel hesaplar ve OIDC eşlemeleri",
+    "subtitle": "Yerel, SSO ve LDAP hesapları - hangisi olduğunu Kaynak sütunu söyler",
     "addNew": "Kullanıcı ekle",
-    "newTitle": "Kullanıcı ekle",
+    "newTitle": "Yerel hesap ekle",
     "editTitle": "Kullanıcı düzenle",
     "fields": {
       "displayName": "Görünen ad",
       "lastLogin": "Son oturum açma",
-      "sendInvite": "Davet e-postası gönder"
+      "sendInvite": "Davet e-postası gönder",
+      "source": "Kaynak",
+      "groups": "Gruplar"
     },
     "roles": {
       "admin": "Yönetici",
@@ -518,14 +520,17 @@
     "status": {
       "disabled": "Devre dışı",
       "pending": "Onay bekliyor",
-      "pendingTitle": "Kimlik sağlayıcısı e-posta adresini doğrulanmış olarak bildirmeyen bir SSO oturum açışıyla devre dışı açıldı. Onaylamak için hesabı açın."
+      "pendingTitle": "Kimlik sağlayıcısı e-posta adresini doğrulanmış olarak bildirmeyen bir SSO oturum açışıyla devre dışı açıldı. Onaylamak için hesabı açın.",
+      "directory": "LDAP tarafından devre dışı",
+      "directoryTitle": "LDAP dizininde devre dışı veya artık listelenmiyor. Dizin hesabı yeniden etkinleştirdiğinde dizin eşitlemesi de etkinleştirir."
     },
     "account": {
       "pendingAbout": "Bu hesap bir SSO oturum açışıyla devre dışı olarak açıldı: kimlik sağlayıcısı e-posta adresinin doğrulandığını bildirmedi. Hesabı açmak onu onaylar.",
       "disabledAbout": "Bu hesap devre dışı: oturum açamaz.",
       "approve": "Onayla ve aç",
       "enable": "Hesabı aç",
-      "enabledOk": "Hesap açıldı"
+      "enabledOk": "Hesap açıldı",
+      "directoryAbout": "LDAP dizin eşitlemesi tarafından devre dışı bırakıldı: kişi dizinde devre dışı ya da artık listelenmiyor. Oturumları, API anahtarları ve SFTP anahtarları çalışmaz. Dizin hesabı yeniden etkinleştirdiğinde eşitleme de etkinleştirir; burada etkinleştirmek, bir yönetici ya da dizin yeniden kapatana kadar açık tutar."
     },
     "sso": {
       "title": "SSO kimliği",
@@ -546,7 +551,40 @@
     },
     "viaGroup": "{group} üzerinden",
     "groupRoleConfirm": "{name}, “{group}” grubu üzerinden “{role}” rolüne sahip. Burada seçilen yerleşik rol bunun yerine geçmez: kişiye özel bir rol verin ya da onu gruptan çıkarın. Yine de kaydedilsin mi?",
-    "groupRoleStill": "Kaydedildi, ancak “{group}” grubundan gelen “{role}” rolü geçerli olmaya devam ediyor."
+    "groupRoleStill": "Kaydedildi, ancak “{group}” grubundan gelen “{role}” rolü geçerli olmaya devam ediyor.",
+    "allGroups": "Tüm gruplar",
+    "add": {
+      "intro": "Kendi parolasıyla oturum açan yerel bir hesap. Bir LDAP dizininin ya da SSO sağlayıcısının kişileri buradan eklenmez: oturum açtıklarında ya da dizinleri eşitlendiğinde görünürler.",
+      "username": "Kullanıcı adı",
+      "usernameHint": "SFTP ve FTP için; e-postadan doldurulur.",
+      "signIn": "Nasıl oturum açar",
+      "access": {
+        "password": "Parola belirle",
+        "invite": "Davet gönder"
+      },
+      "generate": "Oluştur",
+      "show": "Parolayı göster",
+      "hide": "Parolayı gizle",
+      "copied": "Kopyalandı",
+      "passwordNeeded": "Bir parola yazın, oluşturun ya da bunun yerine davet gönderin.",
+      "inviteHint": "filex ilk parolayı oluşturur ve oturum açılacak adresle birlikte e-postayla gönderir. E-posta gönderilemezse parolayı iletmeniz için burada görürsünüz.",
+      "groups": "Gruplara ekle",
+      "groupNotSet": "Hesap oluşturuldu ama {group} grubuna eklenmedi: {error}",
+      "invitedOk": "Davet {email} adresine gönderildi",
+      "notEmailed": "{email} hesabı oluşturuldu ama e-posta gönderilemedi. Bu ilk parolayı ona iletin:",
+      "shownOnce": "Yalnızca şimdi gösterilir. Oturum açtıktan sonra değiştirebilir.",
+      "addAnother": "Bir tane daha ekle",
+      "createAnother": "Oluştur ve bir tane daha ekle",
+      "createAnyway": "Yine de yerel hesap oluştur",
+      "openDirectory": "{directory} dizinini eşitle",
+      "roleHint": {
+        "admin": "Bu yönetim alanı dahil her şey.",
+        "user": "Dosyalarla çalışır: yükler, değiştirir, paylaşır - Kullanıcı rolünün izin verdiği kadar.",
+        "viewer": "Salt okunur: göz atar ve indirir.",
+        "custom": "Özel bir rol - izinleri Roller sayfasında."
+      }
+    },
+    "adminByGroup": "Bir grup aracılığıyla yönetici. Rolünü değiştirmek için kişiyi o gruptan (veya LDAP / SSO grubundan) çıkarın."
   },
   "profile": {
     "saved": "Profil kaydedildi",
@@ -755,10 +793,19 @@
       "auto_provision": "Otomatik kullanıcı oluştur",
       "ca_file": "CA sertifika dosyası",
       "protocol_login": "Dizin parolalarını WebDAV, SFTP, FTPS, S3 ve NFS’te de kabul et",
+      "sync_interval": "Dizin eşitleme sıklığı",
+      "sync_filter": "Dizin eşitleme filtresi",
+      "sync_disable_missing": "Dizinin artık listelemediği hesapları kapat",
+      "sync_groups": "Her dizin grubunu filex grubu olarak getir",
+      "sync_group_filter": "Getirilecek gruplar (filtre; boş = hepsi)",
+      "label": "Ad",
+      "email_domains": "E-posta etki alanları",
       "auto_create": "İlk oturum açmada hesap aç",
       "allowed_groups": "Yalnızca bu grupların üyeleri (virgüllü liste)",
       "domain": "Varsayılan etki alanı (CORP ya da corp.example; boş = bu makine)",
       "group_attr": "Grup niteliği",
+      "group_filter": "Grup arama filtresi",
+      "group_base_dn": "Grup arama base DN",
       "pamtester_path": "pamtester yolu",
       "service": "PAM hizmeti (/etc/pam.d içindeki dosyası)",
       "use_sudo": "pamtester’ı sudo ile çalıştır (yalnızca filex root olarak çalışıyorsa kapatın)",
@@ -776,7 +823,17 @@
       "email_domain": "Örneğin corp.example ise alex hesabı alex{'@'}corp.example olarak oturum açar. Boş: bu kurulumun işletim sistemi hesapları için seçtiği adres. İlk oturum açmadan önce seçin.",
       "ca_pem": "Dizinin sertifikasını imzalayan özel CA, olduğu gibi yapıştırılır. Boşsa sistemin güvendiği kökler.",
       "show_refusal_reason": "Varsayılan olarak kapalı. Açıkken, parolası doğru olduğu hâlde burada oturum açamayan kişiye (ilk oturum açışta hesap açılmıyorsa ya da izinli bir grupta değilse) nedeni söylenir. O zaman oturum açma formu, tahmin yürüten birine de parolanın doğru olduğunu söyler; bu parola, aynı hesapları kullanan başka servisleri de açıyor olabilir.",
-      "trust_email": "Varsayılan olarak kapalı. Kapalıyken, sağlayıcının doğrulanmış olarak işaretlemediği bir adres, henüz bir SSO kimliğine bağlanmamış mevcut bir hesabı açmaz; bu adres için yeni hesap da bir yönetici onaylayana kadar devre dışı açılır. Yalnız adresleri gerçekten sahiplerine ait olan bir sağlayıcıda açın: orada bir adres belirleyebilen herkes, o adresteki hesapla oturum açabilir."
+      "trust_email": "Varsayılan olarak kapalı. Kapalıyken, sağlayıcının doğrulanmış olarak işaretlemediği bir adres, henüz bir SSO kimliğine bağlanmamış mevcut bir hesabı açmaz; bu adres için yeni hesap da bir yönetici onaylayana kadar devre dışı açılır. Yalnız adresleri gerçekten sahiplerine ait olan bir sağlayıcıda açın: orada bir adres belirleyebilen herkes, o adresteki hesapla oturum açabilir.",
+      "user_filter": "Oturum açan kişiyi bulur. Her %s, yazdığı addır.",
+      "group_attr": "Kişinin gruplarını listeleyen nitelik. Active Directory ve lldap: memberOf.",
+      "group_filter": "Yalnızca kişiler gruplarını taşımıyorsa: onları bir aramayla bulur. %s kişinin DN’i, %u oturum açtığı ad - ör. (member=%s).",
+      "group_base_dn": "Grupların arandığı yer. Boş: base DN.",
+      "sync_interval": "Eşitlemenin kendiliğinden ne sıklıkla çalışacağı - ör. 6h, en az 5m. Boş: yalnızca Şimdi eşitle’ye bastığınızda.",
+      "sync_filter": "Eşitlemenin kimleri listeleyeceği. Boş: * ile kullanıcı filtresi - oturum açabilen herkes.",
+      "sync_disable_missing": "Dizinin oluşturduğu hesaplar, dizin onları artık listelemediğinde kapatılır. Asla bir yönetici ya da burada oluşturulmuş bir hesap değil.",
+      "sync_groups": "Her dizin grubu, eşit tutulan bir filex grubu olur. Hangi grupların olduğu dizinde yönetilir.",
+      "sync_group_filter": "Hangi dizin gruplarının getirileceği. Boş: hepsi - ör. (&(objectClass=groupOfNames)(cn=dept-*)).",
+      "email_domains": "Yalnızca bu etki alanları onunla oturum açabilir ya da ondan hesap alabilir (ör. partner.com). Boş: hepsi."
     },
     "upgradeHints": {
       "trust_email": "Bu ayar yükseltmede eski davranışı korumak için açık geldi. Sağlayıcınız e-postanın doğrulandığını bildiriyorsa kapatın."
@@ -826,7 +883,8 @@
       "no_password": "deneme hesabının parolası yok",
       "no_group_source": "grupların okunacağı bir kaynak tanımlayın: rol/grup claim'i (OIDC), grup niteliği (LDAP) ya da roller başlığı",
       "public": "gizli anahtarı olmayan bir istemci ancak biri oturum açtığında doğrulanabilir",
-      "unclear": "sağlayıcının yanıtı ({status}) kesin bir sonuç vermiyor"
+      "unclear": "sağlayıcının yanıtı ({status}) kesin bir sonuç vermiyor",
+      "no_people": "base DN’i ve kullanıcı filtresini denetleyin"
     },
     "checks": {
       "required": {
@@ -935,6 +993,24 @@
       },
       "secret": {
         "fail": "Bu sağlayıcı için saklanan gizli değer açılamıyor - {env} değişmiş olabilir. Onu yeniden yazın."
+      },
+      "people": {
+        "ok": "{filter} ile {n} kişi bulundu; {mail} tanesinin e-postası ({attr}) var.",
+        "fail": "{filter} ile e-postası ({attr}) olan kimse bulunamadı: {reason}."
+      },
+      "groups": {
+        "ok": "{of} kişiden {n} tanesi gruplarını {attr} içinde listeliyor.",
+        "unchecked": "Kimse gruplarını {attr} içinde listelemiyor. Dizininizde gruplar varsa bir grup arama filtresi ayarlayın."
+      },
+      "groups_search": {
+        "ok": "Grup araması {who} için {n} grup buluyor.",
+        "fail": "{filter} grup araması başarısız: {reason}.",
+        "unchecked": "{filter} grup araması {who} için grup bulmuyor."
+      },
+      "sync_groups": {
+        "ok": "Dizin eşitleme {n} grup getirir.",
+        "fail": "Getirilecek grupların araması ({filter}) başarısız: {reason}.",
+        "unchecked": "{filter} ile eşleşen grup yok: dizin eşitleme hiç grup getirmez."
       }
     },
     "lockoutNote": "Parolayla oturum açmayı ve kurulum yöneticisinin kurtarma amaçlı oturum açmasını bu sayfa değil ortam belirler - bu yüzden burada yapılan hiçbir şey sizi dışarıda bırakamaz. Burada açılan sağlayıcılar ortamınkilerden sonra eklenir ve kaydedildikleri anda geçerli olur.",
@@ -942,7 +1018,6 @@
     "passwordOff": "Bu sunucuda parolayla oturum açma kapalı. Onu yalnızca ortam açabilir ({env}).",
     "recoveryOn": "Kurulum yöneticisi kurtarma için yine de parolayla oturum açabilir ({env}).",
     "recoveryOff": "Kurulum yöneticisinin kurtarma amaçlı oturum açması kapalı ({env} false).",
-    "apiTokenAlways": "API anahtarları her zaman kabul edilir; API / MCP sayfasında verilir.",
     "noSecretKey": "Bu sunucuda {env} ayarlı değil; bu yüzden istemci gizli anahtarı ya da bağlanma parolası burada saklanamaz: gizli değerler yalnızca mühürlü tutulur.",
     "envReadOnly": "Ortam tarafından yapılandırılmış: {from}. Orada değiştirip filex’i yeniden başlatın - bu sayfa onu geçersiz kılamaz.",
     "shadowed": "Bu sayfada aynı adla kaydedilmiş bir yapılandırma saklanıyor, ama ortam bu sağlayıcıyı tanımladığı sürece kullanılmıyor.",
@@ -962,6 +1037,66 @@
       "builtin": "Yerleşik"
     },
     "technicalDetailIs": "Teknik ayrıntı: {detail}",
+    "sync": {
+      "title": "Dizin eşitleme",
+      "every": "Her {every} bir kendiliğinden ve Şimdi eşitle’ye bastığınızda çalışır.",
+      "manualOnly": "Şimdi eşitle’ye bastığınızda çalışır. Kendiliğinden çalışması için “Dizin eşitleme sıklığı”nı (ör. 6h) ayarlayın.",
+      "now": "Şimdi eşitle",
+      "running": "Eşitleniyor…",
+      "never": "Henüz çalışmadı. O zamana kadar kişiler ilk oturum açışlarında burada görünür.",
+      "lastManual": "Son çalışma {when}, elle başlatıldı",
+      "lastScheduled": "Son çalışma {when}, zamanlamayla",
+      "found": "Dizinde {n} kişi",
+      "created": "{n} yeni hesap",
+      "updated": "{n} kişinin grupları değişti",
+      "skipped": "{n} atlandı",
+      "missing": "{n} artık listelenmiyor",
+      "disabled": "{n} kapatıldı",
+      "enabled": "{n} yeniden açıldı",
+      "emailsChanged": "{n} e-posta değişti",
+      "problems": "{n} sorun",
+      "groupsFound": "Dizinde {n} grup",
+      "groupsCreated": "{n} yeni grup",
+      "groupsRenamed": "{n} yeniden adlandırıldı",
+      "groupsRestored": "{n} dizine geri döndü",
+      "groupsRemoved": "{n} dizinden kaldırıldı",
+      "groupsByHand": "{n} zaten elle bağlı"
+    },
+    "sections": {
+      "connection": "Bağlantı",
+      "people": "Kişiler",
+      "groups": "Gruplar",
+      "sync": "Dizin eşitleme"
+    },
+    "defaultIs": "{value} (varsayılan)",
+    "tabs": {
+      "ldap": "LDAP",
+      "local": "Yerel",
+      "oidc": "OIDC",
+      "proxy-header": "Ters proxy başlığı",
+      "windows": "Windows",
+      "pam": "Linux (PAM)"
+    },
+    "editTitle": "Sağlayıcı",
+    "notFound": "Böyle bir oturum açma sağlayıcısı yok. Kaldırılmış olabilir.",
+    "syncNeedsRunning": "Eşitlemek için dizini açın ve kaydedin.",
+    "editSections": {
+      "settings": "Ayarlar",
+      "sync": "Eşitleme"
+    },
+    "card": {
+      "domains": "E-posta etki alanları: {list}",
+      "anyDomain": "Her e-posta etki alanı",
+      "client": "İstemci: {id}",
+      "proxies": "Güvenilen proxy’ler: {list}",
+      "local": "E-posta ve parola, burada denetlenir",
+      "localOff": "Parolayla oturum açma kapalı",
+      "synced": "{when} eşitlendi",
+      "neverSynced": "Henüz eşitlenmedi",
+      "every": "her {every}",
+      "manualOnly": "yalnızca istenince",
+      "tenants": "{n} kiracı"
+    },
     "add": "Sağlayıcı ekle",
     "addTitle": "Başka bir oturum açma sağlayıcısı",
     "addHint": "Aynı türden ikinci bir sağlayıcı: başka bir dizin ya da yalnızca bazı kiracılar için bir SSO. Kapalı olarak oluşturulur: kartında doldurun, deneyin ve orada açın.",
@@ -987,7 +1122,8 @@
     "platformTenant": "Platformun kendi kiracısı",
     "lockoutConfirm": "Bu, bir kiracının oturum açabildiği son yolu kaldırır. Devam edilsin mi?",
     "review": "Artık her oturum açma sağlayıcısı hizmet verdiği kiracılara bağlı. Yükseltme her sağlayıcıyı o an var olan her kiracıya bağladı, yani kimse için hiçbir şey değişmedi: aşağıdaki bağları gözden geçirin ve bir sağlayıcının hizmet vermemesi gereken kiracıları kaldırın.",
-    "reviewDone": "Gözden geçirdim"
+    "reviewDone": "Gözden geçirdim",
+    "noneOfKind": "Bu türden henüz yok. Sağlayıcı ekle ile bir tane oluşturun."
   },
   "grants": {
     "title": "Klasör erişimi",
@@ -1209,6 +1345,8 @@
       "unlocked": "kilit açıldı",
       "members_add": "üye eklendi",
       "member_remove": "üye çıkarıldı",
+      "sync": "dizin eşitlendi",
+      "detach": "filex grubu olarak tutuldu",
       "repair": "onarıldı",
       "settings_update": "sınırlar değiştirildi",
       "storage_link": "depo bağlandı",
@@ -3349,7 +3487,7 @@
   },
   "permissions": {
     "title": "Roller",
-    "subtitle": "Rol, adı olan bir izin kümesidir. Herkesin tam olarak bir rolü vardır: Yönetici (her şey, kilitli), Kullanıcı, İzleyici ya da kişinin kendi sayfasında seçilen özel bir rol - kendi rolü yoksa üyesi olduğu bir grubun verdiği rol. Kişiye özel istisnalar rolün önüne geçer.",
+    "subtitle": "Rol, adlandırılmış bir izin kümesidir. Herkesin tam bir rolü vardır - yerleşik ya da özel, kendisinin ya da içinde olduğu bir grubun verdiği.",
     "items": {
       "files": {
         "download": {
@@ -3578,13 +3716,10 @@
       "deleted": "Rol silindi",
       "summaryAllow": "İzin verir: {list}",
       "summaryDeny": "Reddeder: {list}",
-      "summaryLimits": "Sınırlar: {list}",
       "members": "{count} üye",
       "locked": "Her şey, her zaman - değiştirilemez",
-      "builtin": "Yerleşik",
       "builtinSummary": "İzinleri satırın Aksiyon menüsünden ayarlanır",
       "membersColumn": "Kişiler",
-      "custom": "Özel",
       "editBuiltin": "{role} rolünü düzenle",
       "viewBuiltin": "{role} rolünü görüntüle",
       "builtinPlatformOwned": "Yerleşik roller platformun tamamınındır ve platform işletmecisi tarafından yönetilir. Kendi izinleriniz için yeni bir rol oluşturun.",
@@ -3607,10 +3742,17 @@
       "translationsCount": "{count} dil",
       "nameIn": "Rol adı ({language})",
       "descriptionIn": "Açıklama ({language})",
-      "groups": "{count} grup",
       "deleteMoveGroups": "Bu role sahip grup sayısı: {count}. Seçtiğiniz role geçerler; Kullanıcı ya da İzleyici seçilirse rolsüz kalırlar.",
-      "viaGroups": "gruplar üzerinden {count} üye",
-      "startingRoleLegacy": "Bu yalnızca yeni bir hesabın rolünü, ilk oturum açışında bir kez belirler. Her oturum açışta kimlik sağlayıcıyı izleyen üyelik için bunun yerine bir grubu SSO grubuna bağlayın (Yönetim → Gruplar) ve gruba bu rolü verin."
+      "startingRoleLegacy": "Bu yalnızca yeni bir hesabın rolünü, ilk oturum açışında bir kez belirler. Her oturum açışta kimlik sağlayıcıyı izleyen üyelik için bunun yerine bir grubu SSO grubuna bağlayın (Yönetim → Gruplar) ve gruba bu rolü verin.",
+      "allThroughGroups": "tümü {count} grup üzerinden",
+      "someThroughGroups": "{n} tanesi {count} grup üzerinden",
+      "givenByGroups": "{count} grup veriyor",
+      "allPermissions": "Tüm izinler - değiştirilemez",
+      "alwaysOn": "Her zaman açık",
+      "statusColumn": "Durum",
+      "limitsBadge": "{count} sınır",
+      "builtinHeading": "Yerleşik roller",
+      "customHeading": "Özel roller"
     },
     "customBadge": "İstisnalar",
     "twoFactor": {
@@ -3715,7 +3857,7 @@
   },
   "groups": {
     "title": "Gruplar",
-    "subtitle": "Adlandırılmış kişi grupları. Bir klasörü bir grupla, bir kişiyle paylaşır gibi paylaşın; bir gruba rol verin: kendi rolü olmayan her üye o rolü alır. Kişiler buradan elle ya da oturum açarken gelen SSO grubu üzerinden katılır.",
+    "subtitle": "Adlandırılmış kişi grupları. Bir klasörü bir grupla, bir kişiyle paylaşır gibi paylaşın; bir gruba rol verin: kendi rolü olmayan her üye o rolü alır. Kişiler buradan elle ya da oturum açarken gelen SSO ya da LDAP grubu üzerinden katılır.",
     "editTitle": "Grup",
     "add": "Yeni grup",
     "create": "Oluştur",
@@ -3738,7 +3880,12 @@
       "ssoAdminOnly": "Bir grubu SSO gruplarına yalnızca bir yönetici bağlayabilir.",
       "priority": "Rol önceliği",
       "priorityHint": "Rol veren birden fazla grupta olan biri için en yüksek öncelikli grup belirler (eşitse daha eski grup). Kapalı bir rol atlanır, sıradakine geçilir.",
-      "priorityAdminOnly": "Hangi grubun rolünün geçerli olacağını yalnızca bir yönetici değiştirebilir."
+      "priorityAdminOnly": "Hangi grubun rolünün geçerli olacağını yalnızca bir yönetici değiştirebilir.",
+      "ldap": "LDAP grupları",
+      "ldapHint": "Her satıra bir tane: grubun DN’i (cn=finance,ou=groups,dc=example,dc=com) ya da adı (finance); büyük/küçük harf fark etmez. LDAP ile oturum açarken bu grubu gösteren kişiler gruba katılır, göstermediğinde ayrılır.",
+      "ldapAdminOnly": "Bir grubu LDAP gruplarına yalnızca yönetici bağlayabilir.",
+      "adminRole": "Yönetici (tam erişim)",
+      "adminHint": "Gruptaki herkes filex yöneticisidir. Bir LDAP grubuna bağlıysa - tam DN ile yazılır ve yalnızca o grubun kendi dizinindeki kişiler için geçerlidir - kimin yönetici olacağına dizin karar verir: gruptan ayrılanlar yöneticiliği kaybeder (son yönetici hiçbir zaman)."
     },
     "membersTitle": "Üyeler",
     "addMember": "Ad ya da e-postayla kişi ekleyin…",
@@ -3770,7 +3917,59 @@
       "removeConfirm": "{name}, “{group}” grubundan çıkarılsın mı?",
       "roleFromGroup": "Kendi rolü olmadığı için “{group}” grubu üzerinden “{role}” rolüne sahip."
     },
-    "prioritySummary": "öncelik {n}"
+    "prioritySummary": "öncelik {n}",
+    "ldapSummary": "LDAP: {list}",
+    "removeLdapConfirm": "{name} bu gruba LDAP üzerinden katıldı. Şimdi çıkarılsın mı? Dizin onu hâlâ bu gruba koyuyorsa bir sonraki oturum açışında yeniden katılır.",
+    "count": "{n} / {total}",
+    "kind": {
+      "all": "Tüm kaynaklar",
+      "local": "Yerel",
+      "sso": "SSO",
+      "ldap": "LDAP",
+      "synced": "LDAP’den eşitlenen",
+      "removed": "LDAP’den kaldırılan"
+    },
+    "directory": {
+      "synced": "Dizin eşitleme bunu “{name}” LDAP grubundan getirdi. Üyeleri ve LDAP bağlantısı dizini izler; klasörlerini, rolünü ve önceliğini burada siz belirlersiniz. Hangi LDAP gruplarının olduğu dizinde yönetilir.",
+      "linkHint": "Dizin eşitleme bunu bu grubun dizin grubunda tutar.",
+      "removed": "LDAP’den kaldırıldı",
+      "removedHint": "LDAP grubu artık yok: LDAP üyeleri çıkarıldı. Silmek ya da filex grubu olarak tutmak için açın.",
+      "removedBody": "“{name}” LDAP grubu artık dizinde yok, bu yüzden LDAP üyeleri bu gruptan çıkarıldı. Klasörleri, rolü ve elle eklenen kişiler duruyor. Grubu silin ya da artık dizini izlemeyen bir filex grubu olarak tutun. Dizin aynı grubu yeniden listelerse (örneğin bir filtre değişikliğinden sonra) bu grup onu yeniden izler; orada yeniden oluşturulan bir grup yeni bir grup olarak gelir.",
+      "keep": "Filex grubu olarak tut",
+      "kept": "Bu grup artık dizini izlemiyor.",
+      "deleteNote": "LDAP grubu var oldukça bir sonraki dizin eşitleme bu grubu yeniden oluşturur - klasörleri ve rolü olmadan. Dışarıda bırakmak için dizinde kaldırın ya da “Getirilecek gruplar”ı daraltın."
+    },
+    "card": {
+      "fromMain": "LDAP dizininden eşitlenir",
+      "fromDirectory": "{name} dizininden eşitlenir",
+      "byHand": "Üyeler elle eklenir"
+    },
+    "ssoSummary": "SSO: {list}",
+    "kindColumn": "Üyeler",
+    "originColumn": "Bağlı olduğu"
+  },
+  "sources": {
+    "local": "Yerel",
+    "manual": "Eklendi",
+    "sso": "SSO",
+    "ldap": "LDAP",
+    "proxy": "Proxy",
+    "accountHint": {
+      "local": "filex’te oluşturuldu: bu sayfada, bir davetle ya da kurulumda.",
+      "sso": "SSO kimlik sağlayıcısı üzerinden oturum açılınca oluşturuldu.",
+      "ldap": "LDAP / Active Directory üzerinden oturum açılınca oluşturuldu.",
+      "proxy": "Güvenilen bir ters proxy üzerinden oturum açılınca oluşturuldu."
+    },
+    "memberHint": {
+      "manual": "Gruba bir yönetici ekledi.",
+      "sso": "Gruba SSO üzerinden katıldı - her oturum açışta kimlik sağlayıcıyla eşitlenir.",
+      "ldap": "Gruba LDAP üzerinden katıldı - her oturum açışta dizinle eşitlenir."
+    },
+    "groupHint": {
+      "local": "Üyeler yalnızca elle eklenir.",
+      "sso": "SSO gruplarına bağlı: üyeler kimlik sağlayıcıyla katılır ve ayrılır.",
+      "ldap": "LDAP gruplarına bağlı: üyeler dizinle katılır ve ayrılır."
+    }
   },
   "tenants": {
     "title": "Kiracılar",

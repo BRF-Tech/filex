@@ -3,6 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"github.com/brf-tech/filex/backend/internal/identity"
+	"github.com/brf-tech/filex/backend/internal/mailer"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,6 +30,14 @@ type Users struct {
 	// lines (refuseGain, refuseTakeover). Unset, a delegated administrator is
 	// refused those changes; a full administrator never needs it.
 	ACL *acl.Resolver
+	// Mailer and Tenants send a new account its invitation (send_invite):
+	// the address to sign in at and a first password. No mailer, or a send
+	// that fails: the password comes back once for the administrator.
+	Mailer  *mailer.Service
+	Tenants tenanturl.Resolver
+	// DirectoryFor names the LDAP directory that owns an address
+	// (authsetup.Live.DirectoryFor); nil on a harness with none.
+	DirectoryFor func(email string) (name, label string, ok bool)
 }
 
 // NewUsers constructs a Users handler.
@@ -98,6 +110,27 @@ type userCreateReq struct {
 	// ProviderID homes the new user in a tenant. Optional; when absent the
 	// caller's own tenant is used.
 	ProviderID *int64 `json:"provider_id,omitempty"`
+	// Username is the login name (SFTP, FTP…); empty derives one from the
+	// address, as every other account gets.
+	Username string `json:"username,omitempty"`
+	// SendInvite makes a first password and e-mails it with the address to
+	// sign in at; Password is then ignored.
+	SendInvite bool `json:"send_invite,omitempty"`
+	// AllowDirectoryEmail makes the account although an LDAP directory owns
+	// the address (it is refused with directory_email otherwise).
+	AllowDirectoryEmail bool `json:"allow_directory_email,omitempty"`
+}
+
+// userCreated is a new account and, when it was invited, how: e-mailed, or
+// its first password shown once because no mail could go out.
+type userCreated struct {
+	*model.User
+	Invite *userInvite `json:"invite,omitempty"`
+}
+
+type userInvite struct {
+	Emailed      bool   `json:"emailed"`
+	TempPassword string `json:"temp_password,omitempty"`
 }
 
 // resolveProvider decides which provider a created/updated user belongs to
@@ -156,6 +189,26 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 		p.write(w, r)
 		return
 	}
+	// An address an LDAP directory owns (its email_domains): its people
+	// arrive by sign-in and directory sync. A local account made here would
+	// be one that directory could never sign in — said, not assumed.
+	if h.DirectoryFor != nil && !req.AllowDirectoryEmail {
+		if name, label, ok := h.DirectoryFor(req.Email); ok {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "directory_email", "directory": name, "label": label,
+				"message": srvtext.Text(userLang(r), "server.account.directory_email", srvtext.Vars{"email": req.Email, "directory": label}),
+			})
+			return
+		}
+	}
+	username := ""
+	if strings.TrimSpace(req.Username) != "" {
+		username = identity.Normalize(req.Username)
+		if p := usernameProblem(r.Context(), h.Store, username, 0); p != nil {
+			p.write(w, r)
+			return
+		}
+	}
 	if req.Role == "" {
 		req.Role = model.RoleUser
 	}
@@ -193,6 +246,15 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := ""
+	invitePw := ""
+	if req.SendInvite {
+		var err error
+		if invitePw, err = generateRandomPassword(16); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		req.Password = invitePw
+	}
 	if req.Password != "" {
 		var err error
 		if hash, err = local.HashPassword(req.Password); err != nil {
@@ -233,8 +295,29 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 			u.DisplayName = name
 		}
 	}
+	// The username asked for, over the one derived from the address. Taken
+	// between the check and now: the derived one stays, and the page shows it.
+	if username != "" && username != u.Username {
+		if err := h.Store.SetUserUsername(r.Context(), u.ID, username); err == nil {
+			u.Username = username
+		}
+	}
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(u.ID, 10), u.Email)
-	writeJSON(w, http.StatusOK, u)
+	out := userCreated{User: u}
+	if req.SendInvite {
+		// The same letter a folder invitation that makes an account sends
+		// (grants.go): where to sign in, the address, a first password.
+		lang := srvtext.Pick(u.Locale, userLang(r))
+		subject, body := accountCreatedText(lang, h.Tenants.FromRequest(r)+"/admin/", u.Email, invitePw)
+		emailed := h.Mailer != nil && h.Mailer.Send(mailer.WithLanguage(r.Context(), lang), u.Email, subject, body) == nil
+		out.Invite = &userInvite{Emailed: emailed}
+		if !emailed {
+			out.Invite.TempPassword = invitePw // shown once, for the administrator to pass on
+		}
+		auth.AddAuditDetail(r.Context(), "invited", true)
+		auth.AddAuditDetail(r.Context(), "emailed", emailed)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type userUpdateReq struct {
@@ -323,6 +406,12 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.Role != model.RoleAdmin {
 			if last, err := h.isLastAdmin(r.Context(), id); err == nil && last {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "cannot demote the last admin"})
+				return
+			}
+			// A group makes them one (migration 00083): it would at once
+			// again. Who is in that group decides.
+			if target != nil && target.AdminByGroup && *req.Role != target.Role {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "this person is an administrator through a group; take them out of the group (or its LDAP / SSO group) instead"})
 				return
 			}
 		}

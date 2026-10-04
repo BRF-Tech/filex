@@ -29,11 +29,20 @@ export interface User {
   /** Switched on: the account may sign in (absent from older servers = on). */
   enabled?: boolean;
   /** Why the SERVER switched it off: `pending_approval` for an account an SSO
-   *  sign-in opened whose identity provider did not confirm the address; an
-   *  administrator switching it on approves it (docs/SSO.md). */
+   *  sign-in opened whose identity provider did not confirm the address
+   *  (docs/SSO.md); `directory` for one LDAP directory sync switched off,
+   *  which sync switches back on when the directory does (docs/LDAP.md). An
+   *  administrator switching it on or off clears it. */
   disabled_reason?: string;
   /** Bound to the SSO identity it first signed in with (docs/SSO.md). */
   sso_linked?: boolean;
+  /** Where the account comes from (migration 00081): made here, or by an SSO,
+   *  LDAP or reverse-proxy sign-in. A label only. */
+  auth_source?: 'local' | 'sso' | 'ldap' | 'proxy' | string;
+  /** The LDAP provider that made it ("ldap", "ldap-2"…), if one did. */
+  auth_directory?: string;
+  /** An administrator because a group gives its members Administrator (00083). */
+  admin_by_group?: boolean;
 }
 
 export interface MeResponse {

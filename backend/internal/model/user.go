@@ -101,16 +101,77 @@ type User struct {
 	Enabled bool `json:"enabled"`
 	// DisabledReason says why the SERVER switched the account off (migration
 	// 00079): DisabledPendingApproval for an account an SSO sign-in opened
-	// whose address the identity provider did not confirm. "" for an account
-	// that is on, or that an administrator switched off; switching it on or
-	// off clears it. The users page shows it beside the disabled state.
+	// whose address the identity provider did not confirm, DisabledByDirectory
+	// for one LDAP directory sync switched off. "" for an account that is on,
+	// or that an administrator switched off; switching it on or off clears it.
+	// The users page shows it beside the disabled state.
 	DisabledReason string `json:"disabled_reason,omitempty"`
+	// AuthSource says where the account comes from (migration 00081): one of
+	// the AuthSource* values. A label for the Users page — it gates nothing.
+	AuthSource string `json:"auth_source"`
+	// AuthDirectory names the LDAP provider that made the account — its
+	// slug, "ldap" or another instance's (migration 00081); "" for any other
+	// account. Only that directory signs it in (DirectoryOwner).
+	AuthDirectory string `json:"auth_directory,omitempty"`
+	// DirectoryID is the person's permanent id in that directory —
+	// "<directory>:<entryUUID or objectGUID>" (migration 00082); "" when the
+	// directory has none, or for any other account. A sign-in or sync finds
+	// the account by it before the e-mail.
+	DirectoryID string `json:"-"`
+	// AdminByGroup: an administrator because a group gives its members
+	// Administrator (migration 00083); back to their earlier level when no
+	// group does. Any other change of role clears it.
+	AdminByGroup bool `json:"admin_by_group,omitempty"`
 }
 
 // DisabledPendingApproval is the DisabledReason of an account opened, switched
 // off, by an SSO sign-in whose identity provider did not say the e-mail
 // address was verified: an administrator switches it on to approve it.
 const DisabledPendingApproval = "pending_approval"
+
+// DisabledByDirectory is the DisabledReason of an account LDAP directory sync
+// switched off — its person switched off in the directory, or no longer
+// listed there (sync_disable_missing). Sync switches it back on when the
+// directory lets the person back in.
+const DisabledByDirectory = "directory"
+
+// DisabledByDirectory reports whether directory sync switched the account
+// off (and may switch it back on).
+func (u *User) DisabledByDirectory() bool {
+	return u != nil && !u.Enabled && u.DisabledReason == DisabledByDirectory
+}
+
+// MainDirectory is the provider name of the first LDAP directory.
+const MainDirectory = "ldap"
+
+// DirectoryOwner is the LDAP directory an account belongs to: the one that
+// made it, and the main directory for an LDAP account from before
+// users.auth_directory. "" for an account no directory made.
+func (u *User) DirectoryOwner() string {
+	if u == nil {
+		return ""
+	}
+	if u.AuthDirectory != "" {
+		return u.AuthDirectory
+	}
+	if u.AuthSource == AuthSourceLDAP {
+		return MainDirectory
+	}
+	return ""
+}
+
+// Where an account comes from (users.auth_source, migration 00081).
+const (
+	// AuthSourceLocal: made here — on the Users page, by an invitation, at
+	// first run.
+	AuthSourceLocal = "local"
+	// AuthSourceSSO: an OpenID Connect sign-in made it.
+	AuthSourceSSO = "sso"
+	// AuthSourceLDAP: an LDAP / Active Directory sign-in made it.
+	AuthSourceLDAP = "ldap"
+	// AuthSourceProxy: a trusted reverse proxy's headers made it.
+	AuthSourceProxy = "proxy"
+)
 
 // IsAdmin returns true if the user has the admin role.
 // PersonLabel is how filex names a person to anybody reading a screen: the

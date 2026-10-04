@@ -88,7 +88,7 @@ const { catalogue, accounting, roles, usersApi } = vi.hoisted(() => {
 
 vi.mock('@/api/roles', () => ({ RolesApi: roles }));
 vi.mock('@/api/users', () => ({ UsersApi: usersApi }));
-vi.mock('@/api/groups', () => ({ GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []) } }));
+vi.mock('@/api/groups', () => ({ GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []), memberships: vi.fn(async () => ({})) } }));
 vi.mock('@/api/storages', () => ({ StoragesApi: { list: vi.fn(async () => []) } }));
 vi.mock('@/api/quota', () => ({
   quotaApi: {

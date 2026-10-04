@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ import (
 //	bind       the service account binds with its password — or, with no
 //	           service account, the bind is anonymous and said to be
 //	base       the base DN exists and is readable by that bind
+//	people, groups / groups_search, sync_groups — what sign-in and directory
+//	           sync will find there (probeDirectory)
 //
 // ⚠ Nothing is written and nobody signs in: this is the service bind and one
 // base-scope read, which is what every login starts with. What it cannot
@@ -96,7 +99,120 @@ func (d *Driver) Probe(ctx context.Context, cfg map[string]any, _ *http.Request)
 		}
 		return append(out, auth.Check("base", auth.ProbeFail, "dn", p.baseDN, "reason", reason, "detail", err.Error()))
 	}
-	return append(out, auth.Check("base", auth.ProbeOK, "dn", p.baseDN))
+	out = append(out, auth.Check("base", auth.ProbeOK, "dn", p.baseDN))
+	return append(out, p.probeDirectory(c)...)
+}
+
+// probeCount is how many entries a provider test counts at most: enough to
+// tell "none" from "some" from "many" without reading a whole directory
+// while an administrator waits.
+const probeCount = 1000
+
+// countOf is a count as a test says it: "1000+" past probeCount.
+func countOf(n int, more bool) string {
+	if more {
+		return strconv.Itoa(n) + "+"
+	}
+	return strconv.Itoa(n)
+}
+
+// limited runs a search capped at probeCount, reading a size-limit answer
+// as "at least that many". A directory that ignores the cap (lldap) answers
+// everything: that count is exact, and said without the "+".
+func limited(c conn, req *ldap.SearchRequest) ([]*ldap.Entry, bool, error) {
+	req.SizeLimit = probeCount
+	res, err := c.Search(req)
+	if err != nil {
+		if ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded) && res != nil {
+			return res.Entries, true, nil
+		}
+		return nil, false, err
+	}
+	return res.Entries, false, nil
+}
+
+// probeDirectory is the rest of a test, after the base DN: what sign-in and
+// directory sync will find there —
+//
+//	people     the people the user filter lists (sync_filter), and how many
+//	           have an e-mail (email_attr) — nobody is a failure
+//	groups     whether their groups can be read: listed in group_attr on the
+//	           people found, or found by group_filter for the first of them
+//	sync_groups how many groups directory sync would bring in
+//	           (sync_groups, sync_group_filter)
+//
+// A directory with no groups is said ("unchecked"), not failed: groups are
+// optional.
+func (p *Driver) probeDirectory(c conn) []auth.ProbeCheck {
+	var out []auth.ProbeCheck
+	attrs := []string{p.emailAttr}
+	if p.groupFilter == "" {
+		attrs = append(attrs, p.groupAttr)
+	}
+	filter := p.syncFilter()
+	people, more, err := limited(c, ldap.NewSearchRequest(p.baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0,
+		int(probeTimeout.Seconds()), false, filter, attrs, nil))
+	if err != nil {
+		return append(out, auth.Check("people", auth.ProbeFail, "filter", filter, "reason", "other", "detail", err.Error()))
+	}
+	withMail, withGroups := 0, 0
+	var first *ldap.Entry
+	for _, e := range people {
+		if e.GetAttributeValue(p.emailAttr) != "" {
+			withMail++
+			if first == nil {
+				first = e
+			}
+		}
+		if p.groupFilter == "" && len(e.GetAttributeValues(p.groupAttr)) > 0 {
+			withGroups++
+		}
+	}
+	if withMail == 0 {
+		return append(out, auth.Check("people", auth.ProbeFail, "filter", filter, "attr", p.emailAttr,
+			"n", countOf(len(people), more), "reason", "no_people"))
+	}
+	out = append(out, auth.Check("people", auth.ProbeOK, "filter", filter, "attr", p.emailAttr,
+		"n", countOf(len(people), more), "mail", countOf(withMail, more)))
+
+	if p.groupFilter == "" {
+		if withGroups == 0 {
+			out = append(out, auth.Check("groups", auth.ProbeUnchecked, "attr", p.groupAttr))
+		} else {
+			out = append(out, auth.Check("groups", auth.ProbeOK, "attr", p.groupAttr,
+				"n", countOf(withGroups, more), "of", countOf(len(people), more)))
+		}
+	} else {
+		dns, err := p.linkGroupsOf(c, first, first.GetAttributeValue(p.emailAttr))
+		switch {
+		case err != nil:
+			out = append(out, auth.Check("groups_search", auth.ProbeFail, "filter", p.groupFilter, "reason", "other", "detail", err.Error()))
+		case len(dns) == 0:
+			out = append(out, auth.Check("groups_search", auth.ProbeUnchecked, "filter", p.groupFilter, "who", first.GetAttributeValue(p.emailAttr)))
+		default:
+			// groupsOf gives each group as its DN and its name: half are groups.
+			out = append(out, auth.Check("groups_search", auth.ProbeOK, "filter", p.groupFilter,
+				"who", first.GetAttributeValue(p.emailAttr), "n", strconv.Itoa((len(dns)+1)/2)))
+		}
+	}
+
+	if p.importGroupsOn {
+		base := p.groupBaseDN
+		if base == "" {
+			base = p.baseDN
+		}
+		groups, more, err := limited(c, ldap.NewSearchRequest(base, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0,
+			int(probeTimeout.Seconds()), false, p.syncGroupFilter(), []string{"1.1"}, nil))
+		switch {
+		case err != nil:
+			out = append(out, auth.Check("sync_groups", auth.ProbeFail, "filter", p.syncGroupFilter(), "reason", "other", "detail", err.Error()))
+		case len(groups) == 0:
+			out = append(out, auth.Check("sync_groups", auth.ProbeUnchecked, "filter", p.syncGroupFilter()))
+		default:
+			out = append(out, auth.Check("sync_groups", auth.ProbeOK, "n", countOf(len(groups), more)))
+		}
+	}
+	return out
 }
 
 // probeTimeout bounds each step of a provider test: an administrator is

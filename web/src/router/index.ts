@@ -443,6 +443,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'tenants.editTitle', parent: 'tenants' },
       },
       {
+        path: 'auth-providers/:name',
+        name: 'auth-providers.edit',
+        component: () => import('@/views/AuthProviderEdit.vue'),
+        meta: { breadcrumb: 'authProviders.editTitle', parent: 'auth-providers' },
+      },
+      {
         path: 'api-mcp',
         name: 'api-mcp',
         component: () => import('@/views/ApiMcp.vue'),
