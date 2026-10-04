@@ -738,9 +738,17 @@ pnpm release 0.45.0 --resume --only deploy   # once the tags are out: the deploy
 
 1. **Re-read `README.md` against what actually shipped since the last tag.**
    Run `git log --oneline vPREVIOUS..HEAD`, then ask of every new surface - a
-   client, a feature, a docs page - whether it appears in the intro, *Why
-   filex*, *Features* and *Documentation*. The README is the page most readers
-   see and the one nobody remembers to touch: a feature documented only under
+   client, a feature, a docs page - whether it appears in *Features* and
+   *Documentation*, and which part of *Why filex* it belongs to. In *Features*
+   it is an entry in the full list, and a word in the table above that list
+   only when one of its rows no longer covers it. In *Why filex* it goes into
+   the block under its part, the one that opens on a click; the part itself
+   stays a line, at most four bullets and one picture, so a new surface
+   replaces words there or stays out of it. The opening is not a list of what
+   shipped either: the repository's description, the buttons and six cards. Read the
+   comparison table against today as well: what it says another product is,
+   and every "no" it says of filex. The README is the page most readers see
+   and the one nobody remembers to touch: a feature documented only under
    `docs/` does not exist as far as a new reader is concerned. Update
    `docs/README.md` (the index) in the same pass, and carry the change into
    the translated READMEs or leave them behind whole ([Docs](#docs)).
