@@ -1,4 +1,4 @@
-<!-- Translated from README.md as of d388d4f0 (v0.51.0). The English README is the source: change it first, then carry the change here. -->
+<!-- Translated from README.md as of bf857aad (v0.51.0). The English README is the source: change it first, then carry the change here. -->
 
 <div align="center">
 

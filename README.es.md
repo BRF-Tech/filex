@@ -1,4 +1,4 @@
-<!-- Translated from README.md as of d388d4f0 (v0.51.0). The English README is the source: change it first, then carry the change here. -->
+<!-- Translated from README.md as of bf857aad (v0.51.0). The English README is the source: change it first, then carry the change here. -->
 
 <div align="center">
 
@@ -57,7 +57,7 @@ búsqueda, caché de miniaturas), por lo que es un volumen con nombre y no la ca
 que usted deja archivos; los dos están separados a propósito. Apunte `$PWD` a otro lugar, o
 agregue después más almacenamientos desde el panel de administración - un bucket con varias
 carpetas de nivel superior se puede montar de una sola vez como un almacenamiento por
-carpeta (*Almacenamientos → Agregar → Montar varias carpetas a la vez*).
+carpeta (*Almacenamientos → Agregar almacenamiento → Montar varias carpetas a la vez*).
 
 El contenedor se ejecuta como **root** de forma predeterminada, así que lo que escribe en
 `/data` pertenece a root; defina `PUID`/`PGID` para ejecutarlo con su propio usuario
