@@ -95,11 +95,17 @@ type Store interface {
 	// without one, because drivers differ on that.
 	ListLiveNodesInTrash(ctx context.Context, storageID int64, trashPrefix string) ([]*model.Node, error)
 	// ListNodesUnder returns the row at dir and every row below it, in both
-	// path spellings drivers produce ("/a/b" and "a/b"); includeDeleted adds
-	// soft-deleted rows. The match is EXACT: names compare byte for byte, and
-	// the prefix bound is counted in characters, so a folder whose name is not
-	// ASCII matches as reliably as one that is. The storage root ("" or "/")
-	// is never a subtree and returns nothing.
+	// path spellings drivers produce ("/a/b" and "a/b"), in id order;
+	// includeDeleted adds soft-deleted rows. The match is EXACT: names compare
+	// byte for byte, so a folder of another case, a sibling that only starts
+	// with its name and a `%` or `_` read as a wildcard never match, and a
+	// folder whose name is not ASCII matches as reliably as one that is. The
+	// storage root ("" or "/") is never a subtree and returns nothing.
+	//
+	// "Below dir" is a byte range of path that an index answers (migration
+	// 00081, NodesUnderSQL), here and in the three questions further down
+	// that are matched the same way: what they cost follows the folder's
+	// rows, not the storage's.
 	ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error)
 	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 	// AggNodes returns a lightweight {id, parent_id, is_dir, size} row for every
@@ -147,6 +153,12 @@ type Store interface {
 	// CountLiveNodesUnder counts the live rows strictly below dir — the
 	// baseline a folder rescan's 70% guard compares what it saw against.
 	CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error)
+	// HasLiveNodesUnder reports whether a live row sits strictly below dir,
+	// matched exactly as ListNodesUnder matches - what tells a new folder
+	// from one that holds something. It is CountLiveNodesUnder > 0 for a
+	// caller that does not need the number, answered by the first row found.
+	// The storage root is never a subtree: false.
+	HasLiveNodesUnder(ctx context.Context, storageID int64, dir string) (bool, error)
 	CountNodesByStorage(ctx context.Context, storageID int64) (int64, error)
 
 	// Replication targets — separate entity. Storages.replica_target_id

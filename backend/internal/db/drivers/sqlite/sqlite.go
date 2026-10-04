@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 
@@ -95,6 +94,11 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// Rows deleted where they stood (issue #74), the same way.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB}
+	// What is at and below a folder (00081), the same way; seen_at is
+	// compared as text on both engines this file serves, and path byte for
+	// byte.
+	s.NodesUnderSQL = &db.NodesUnderSQL{Pool: sqlDB, Time: db.CatalogueTime, Columns: nodeColumnList,
+		Scan: func(r db.RowScanner) (*model.Node, error) { return scanNode(r) }}
 	// Plugin install requests (00070), the same way; timestamps in
 	// CURRENT_TIMESTAMP's spelling, as both engines this file serves compare
 	// them as text.
@@ -135,6 +139,9 @@ type Store struct {
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
 	// node_unavailable_sql.go, migration 00078).
 	*db.NodeUnavailableSQL
+	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,
+	// HasLiveNodesUnder (internal/db nodes_under_sql.go, migration 00081).
+	*db.NodesUnderSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
@@ -500,60 +507,6 @@ func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trash
 		` FROM nodes WHERE storage_id=? AND deleted_at IS NULL`+
 		` AND (path=? OR path=? OR path LIKE ? OR path LIKE ?) ORDER BY id`,
 		storageID, slashed, bare, slashed+"/%", bare+"/%")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-// treeSpellings returns the two spellings a row's path can carry for dir —
-// "/a/b" and "a/b" — or ok=false for the storage root, which is never a
-// subtree.
-func treeSpellings(dir string) (slashed, bare string, ok bool) {
-	bare = strings.Trim(path.Clean("/"+strings.Trim(dir, "/")), "/")
-	if bare == "" || bare == "." {
-		return "", "", false
-	}
-	return "/" + bare, bare, true
-}
-
-// belowClause matches every row strictly below a directory, in both
-// spellings, exactly. Its four arguments come from belowArgs.
-//
-// ⚠ SUBSTR counts CHARACTERS on SQLite, MySQL and PostgreSQL alike, so the
-// bound is the prefix's rune count, never len(): a byte count overshoots a
-// prefix with a single non-ASCII letter in it and the comparison then matches
-// nothing at all. LIKE is not used on purpose: it is case-insensitive on
-// SQLite and treats `_` and `%` in a folder name as wildcards.
-const belowClause = `(SUBSTR(path,1,?)=? OR SUBSTR(path,1,?)=?)`
-
-func belowArgs(slashed, bare string) []any {
-	return []any{
-		utf8.RuneCountInString(slashed + "/"), slashed + "/",
-		utf8.RuneCountInString(bare + "/"), bare + "/",
-	}
-}
-
-func (s *Store) ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	q := nodeSelectColumns() + ` FROM nodes WHERE storage_id=? AND (path=? OR path=? OR ` + belowClause + `)`
-	if !includeDeleted {
-		q += ` AND deleted_at IS NULL`
-	}
-	args := append([]any{storageID, slashed, bare}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, q+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1093,43 +1046,6 @@ func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time
 		out = append(out, n)
 	}
 	return out, rows.Err()
-}
-
-func (s *Store) ListStaleNodesUnder(ctx context.Context, storageID int64, dir string, before time.Time) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	// The same CURRENT_TIMESTAMP wire format ListStaleNodes explains.
-	beforeStr := before.UTC().Format("2006-01-02 15:04:05")
-	args := append([]any{storageID, beforeStr}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, nodeSelectColumns()+
-		` FROM nodes WHERE storage_id=? AND seen_at < ? AND deleted_at IS NULL AND `+belowClause, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return 0, nil
-	}
-	var n int64
-	args := append([]any{storageID}, belowArgs(slashed, bare)...)
-	err := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE storage_id=? AND deleted_at IS NULL AND `+belowClause, args...).Scan(&n)
-	return n, err
 }
 
 func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64, error) {

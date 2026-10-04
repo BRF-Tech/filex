@@ -1,0 +1,45 @@
+-- +goose Up
+-- WHAT IS BELOW A FOLDER IS FOUND THROUGH AN INDEX.
+--
+-- Nothing indexed nodes.path. "The rows below this folder" was asked as
+-- SUBSTR(path,1,n)=?, which no index can answer: counting or listing them read
+-- every row of the storage - found here by its storage_id, then fetched one at
+-- a time to look at its path - and a rescan's stale rows every row it had not
+-- just seen. A folder rescan asked twice, and every scan of a storage twice
+-- more, for its .versions and .thumbs trees. The encryption policy (00080)
+-- asks for every folder somebody may encrypt - the explorer when a menu opens
+-- on one, an API caller for up to 1000 at a time - under the approval policy,
+-- for whoever holds files.encrypt there and is not an administrator. On a
+-- catalogue of 170,245 nodes that was 206 to 262 ms a folder, and the store
+-- runs one SQLite connection, so every other request queued behind it: four
+-- minutes for a thousand folders, 80 ms with this index.
+--
+-- nodes.path is compared byte for byte, so "below /a" is the byte range
+-- path >= '/a/' AND path < '/a0' - '0' is the byte after '/' - and this index
+-- answers it (internal/db nodes_under_sql.go). deleted_at is in it so that
+-- "is anything live below?" and "how many?" are answered from the index alone.
+--
+-- ⚠ WHERE path IS NOT NULL. Every row has a path; the clause is there so that
+-- ONLY a statement that compares path can be planned on this index. SQLite has
+-- no statistics here (nothing runs ANALYZE), and with none it enters nodes
+-- through whichever index led by storage_id it estimates narrowest. A plain
+-- (storage_id, path) index is that one: it took eight of the driver's
+-- statements off their own index - five that never mention path, three that
+-- read it only through SUBSTR - and the name search with them, off the only
+-- index that holds `name`: 27 ms became 51 ms on a storage of 152,562 rows
+-- written in path order and 240 ms on one that was not. An install that has
+-- statistics from an ANALYZE of its own loses its plans the same way: the new
+-- index has no row among them. With the clause no statement that does not
+-- compare path changes plan
+-- (TestThePathIndexIsOnlyForStatementsThatComparePath). One that does, moves,
+-- and gains: the rows deleted where they stood (ListVanishedNodeIDs,
+-- `path <> ?`) are read off this index alone, 41 ms to 13 ms.
+--
+-- The build reads every row once: 0.2 to 0.3 s and 10 MiB for 170,245 rows.
+--
+-- IF NOT EXISTS so that a second run is a no-op. ⚠ An index made by hand under
+-- this name is kept as it is, whatever it is on: drop it first.
+CREATE INDEX IF NOT EXISTS idx_nodes_storage_path ON nodes(storage_id, path, deleted_at) WHERE path IS NOT NULL;
+
+-- +goose Down
+DROP INDEX IF EXISTS idx_nodes_storage_path;

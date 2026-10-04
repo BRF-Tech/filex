@@ -32,6 +32,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Asking what is below a folder no longer reads the whole storage.** Nothing
+  indexed `nodes.path`, and "the rows below this folder" was matched with
+  `SUBSTR(path,1,n)=?`, which no index can answer: every such question read
+  the storage's rows. A folder rescan asked, every scan of a storage asked for
+  its `.versions` and `.thumbs` trees, and under the **Approval** policy of
+  0.51 the rule asked for every folder of a `POST /api/files/e2e/allowed` - one
+  when the explorer opens a menu on a folder, up to 1000 from an API caller -
+  for whoever holds `files.encrypt` there and is not an administrator. On a
+  catalogue of 170,245 nodes that was 206-262 ms a folder on SQLite, where the
+  store has one connection and every other request waits behind it (MySQL
+  140-154 ms, PostgreSQL 15-26 ms): four minutes for a thousand folders.
+  Migration `00081` (SQLite, PostgreSQL, MySQL) adds `idx_nodes_storage_path`,
+  "below a folder" is a byte range of `path` that the index answers, and the
+  rule asks whether anything is there instead of counting it: 0.02 ms a folder
+  on SQLite, 0.15 ms on MySQL, 0.4 ms on PostgreSQL, 80 ms for the thousand.
+  - **The upgrade.** The first start builds the index: 0.2 to 0.3 s and 10 MiB
+    for those 170,245 nodes on SQLite. On PostgreSQL the build blocks writes
+    to `nodes` until it is done (reads go on), and the index holds the first
+    512 characters of a path, as MySQL's does. Cataloguing writes one more
+    index entry a row: on SQLite 12.5 s to 12.8 s for those nodes in path
+    order, 12.7 s to 14.8 s in no order.
+  - **What got slower.** Two things a rescan of a folder that is most of its
+    storage asks: its stale rows on SQLite (0.03 ms to 60 ms for 151,560 rows,
+    260 ms with the rows in no order) and its count on PostgreSQL (14 ms to
+    30 ms).
+  - **The match is what it was** - byte for byte, both path spellings, on
+    every engine - with one correction: on SQLite a folder whose name is not
+    valid UTF-8, or holds a NUL, no longer looks empty. Trashing and restoring
+    a folder, and naming who deleted it, still match with `SUBSTR` and still
+    read the storage's rows.
+  - Measured with
+    `go test -tags measure -run TestMeasureSubtreeQuestions -v ./internal/db`
+    and
+    `-run TestMeasureAListingUnderTheApprovalPolicy -v ./internal/e2epolicy`.
+
 - **One reader of a docs page's headings.** The release gate
   (`scripts/release/checks.mjs`) and the Releases page generator
   (`docs-site/scripts/fetch-releases.mjs`) each had a fence-aware heading

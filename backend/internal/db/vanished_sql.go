@@ -26,24 +26,31 @@ type VanishedSQL struct {
 
 func (o *VanishedSQL) q(query string) string { return rebind(o.Placeholders, query) }
 
+// vanishedNodeIDsSQL is the statement of ListVanishedNodeIDs, with `?`. It is
+// a constant so that the test that reads its plan on SQLite
+// (TestThePathIndexIsOnlyForStatementsThatComparePath) reads this text and
+// not a copy of it.
+const vanishedNodeIDsSQL = `
+		SELECT id FROM nodes
+		 WHERE storage_id=? AND deleted_at IS NOT NULL AND id > ?
+		   AND path <> ? AND path <> ?
+		   AND SUBSTR(path,1,?) <> ? AND SUBSTR(path,1,?) <> ?
+		 ORDER BY id LIMIT ?`
+
 // ListVanishedNodeIDs returns up to limit ids, above afterID and in id order,
 // of storageID's vanished rows: deleted, and with a path that is neither the
 // trash directory nor inside it, in either spelling the path column carries.
 //
 // ⚠ The trash prefix is matched with SUBSTR on the CHARACTER count (see
-// PrefixChars), never LIKE, like every other subtree match in this package.
+// PrefixChars), never LIKE. What is BELOW a folder is a byte range of path
+// that an index answers (NodesUnderSQL); "not in the trash" has no range.
 func (o *VanishedSQL) ListVanishedNodeIDs(ctx context.Context, storageID, afterID int64, limit int) ([]int64, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 500
 	}
 	bare := syspath.Trash
 	slashed := "/" + bare
-	rows, err := Conn(ctx, o.Pool).QueryContext(ctx, o.q(`
-		SELECT id FROM nodes
-		 WHERE storage_id=? AND deleted_at IS NOT NULL AND id > ?
-		   AND path <> ? AND path <> ?
-		   AND SUBSTR(path,1,?) <> ? AND SUBSTR(path,1,?) <> ?
-		 ORDER BY id LIMIT ?`),
+	rows, err := Conn(ctx, o.Pool).QueryContext(ctx, o.q(vanishedNodeIDsSQL),
 		storageID, afterID,
 		slashed, bare,
 		PrefixChars(slashed+"/"), slashed+"/", PrefixChars(bare+"/"), bare+"/",

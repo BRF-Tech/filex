@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -84,6 +83,14 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	// Rows deleted where they stood (issue #74), written once in internal/db.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// What is at and below a folder (00081), written once in internal/db.
+	// nodes.path has the database's collation here, so the byte range a
+	// subtree is has to be asked for in "C"; and the index holds the first
+	// 512 characters of path, not path, so that expression - the migration's
+	// own - is what the range enters it by.
+	s.NodesUnderSQL = &db.NodesUnderSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime, Columns: nodeColumnList,
+		Scan: func(r db.RowScanner) (*model.Node, error) { return scanNode(r) },
+		Path: `path COLLATE "C"`, Key: func(of string) string { return `left(` + of + `, 512) COLLATE "C"` }}
 	// Plugin install requests (00070), written once in internal/db.
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// Sign-in attempt counters (00072), written once in internal/db.
@@ -124,6 +131,9 @@ type Store struct {
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
 	// node_unavailable_sql.go, migration 00078).
 	*db.NodeUnavailableSQL
+	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,
+	// HasLiveNodesUnder (internal/db nodes_under_sql.go, migration 00081).
+	*db.NodesUnderSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
@@ -419,58 +429,6 @@ func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trash
 		` FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL`+
 		` AND (path=$2 OR path=$3 OR path LIKE $4 OR path LIKE $5) ORDER BY id`,
 		storageID, slashed, bare, slashed+"/%", bare+"/%")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-// treeSpellings returns the two spellings a row's path can carry for dir —
-// "/a/b" and "a/b" — or ok=false for the storage root, which is never a
-// subtree.
-func treeSpellings(dir string) (slashed, bare string, ok bool) {
-	bare = strings.Trim(path.Clean("/"+strings.Trim(dir, "/")), "/")
-	if bare == "" || bare == "." {
-		return "", "", false
-	}
-	return "/" + bare, bare, true
-}
-
-// belowClause matches every row strictly below a directory, in both
-// spellings, exactly; its placeholders start at $n and take the four
-// arguments belowArgs returns. See the SQLite store for why the bound is a
-// rune count and why this is not LIKE.
-func belowClause(n int) string {
-	return fmt.Sprintf(`(SUBSTR(path,1,$%d)=$%d OR SUBSTR(path,1,$%d)=$%d)`, n, n+1, n+2, n+3)
-}
-
-func belowArgs(slashed, bare string) []any {
-	return []any{
-		utf8.RuneCountInString(slashed + "/"), slashed + "/",
-		utf8.RuneCountInString(bare + "/"), bare + "/",
-	}
-}
-
-func (s *Store) ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	q := `SELECT ` + nodeColumns() + ` FROM nodes WHERE storage_id=$1 AND (path=$2 OR path=$3 OR ` + belowClause(4) + `)`
-	if !includeDeleted {
-		q += ` AND deleted_at IS NULL`
-	}
-	args := append([]any{storageID, slashed, bare}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, q+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -958,41 +916,6 @@ func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time
 		out = append(out, n)
 	}
 	return out, rows.Err()
-}
-
-func (s *Store) ListStaleNodesUnder(ctx context.Context, storageID int64, dir string, before time.Time) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	args := append([]any{storageID, before}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+nodeColumns()+
-		` FROM nodes WHERE storage_id=$1 AND seen_at < $2 AND deleted_at IS NULL AND `+belowClause(3), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return 0, nil
-	}
-	var n int64
-	args := append([]any{storageID}, belowArgs(slashed, bare)...)
-	err := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL AND `+belowClause(2), args...).Scan(&n)
-	return n, err
 }
 
 func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64, error) {
