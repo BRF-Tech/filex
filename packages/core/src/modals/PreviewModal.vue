@@ -153,10 +153,20 @@ const props = defineProps<{
    * behaviour, the same close question. Needs `api`.
    */
   appViewer?: PluginViewRow | null;
+  /**
+   * 0.51 - the host opens this file in ONLYOFFICE although its extension picks
+   * another viewer: a .csv, whose handler (lib/appViewer) is ONLYOFFICE by
+   * default while it is configured, or "Open with" chose it. The office editor
+   * takes the built-in viewer's place, with an office document's Edit button.
+   */
+  inOffice?: boolean;
   /** The explorer's API — what an app's interface reads and saves through. */
   api?: FileApi | null;
   /** The person's display name, for an app's interface. */
   userName?: string;
+  /** Storage names an app's save-as may span (AppFrame `storages`); absent,
+   *  the frame asks the server's listing. */
+  storages?: string[];
 }>();
 
 const emit = defineEmits<{
@@ -338,6 +348,8 @@ const kind = computed<PreviewKind>(() => {
   if (appView.value) return 'app';
   const e = ext(props.file);
   if (!e) return 'other';
+  // 0.51 - ONLYOFFICE, when the host opens the file there (a .csv).
+  if (props.inOffice) return 'office';
   if (IMAGE.includes(e)) return 'image';
   if (VIDEO.includes(e)) return 'video';
   if (AUDIO.includes(e)) return 'audio';
@@ -448,8 +460,13 @@ function buildAndOpenStandalone(mode: 'view' | 'edit'): void {
   const base = props.viewerBaseUrl || withAppBase('/files/edit');
   const sep = base.includes('?') ? '&' : '?';
   // The app's interface it is open in goes along (`app=plugin/view`): the
-  // tab opens it in the same app, whatever else opens the type.
-  const app = appView.value ? `&app=${encodeURIComponent(`${appView.value.plugin}/${appView.value.id}`)}` : '';
+  // tab opens it in the same app, whatever else opens the type. So does
+  // ONLYOFFICE (0.51, `app=onlyoffice`).
+  const app = appView.value
+    ? `&app=${encodeURIComponent(`${appView.value.plugin}/${appView.value.id}`)}`
+    : props.inOffice
+      ? '&app=onlyoffice'
+      : '';
   const url =
     `${base}${sep}path=${encodeURIComponent(props.file.path)}` +
     `&type=${encodeURIComponent(e)}` +
@@ -482,8 +499,15 @@ const EDITABLE_EXTS = new Set([
 ]);
 
 const canEditKind = computed<boolean>(() =>
-  !!props.file && EDITABLE_EXTS.has(ext(props.file)),
+  !!props.file && (EDITABLE_EXTS.has(ext(props.file)) || props.inOffice === true),
 );
+
+/**
+ * 0.51 - a .csv being edited in ONLYOFFICE is saved as a CSV: what that keeps
+ * and what it does not, before anything is saved. ONLYOFFICE says it too, in
+ * English only and under its own tips (measured on Docs 9.4).
+ */
+const csvOfficeNote = computed(() => kind.value === 'office' && ext(props.file) === 'csv' && props.openMode !== 'view');
 
 /**
  * The Edit button of a document whose editor is an optional service that is
@@ -493,7 +517,7 @@ const canEditKind = computed<boolean>(() =>
  */
 const editNeeds = computed<'' | 'onlyoffice' | 'drawio'>(() => {
   const e = ext(props.file);
-  if (OFFICE.includes(e) && !props.onlyOfficeBase) return 'onlyoffice';
+  if ((OFFICE.includes(e) || props.inOffice) && !props.onlyOfficeBase) return 'onlyoffice';
   if ((e === 'drawio' || e === 'dio') && !props.drawioUrl) return 'drawio';
   return '';
 });
@@ -1833,6 +1857,9 @@ onBeforeUnmount(() => {
           {{ t('draft.saved_to', { name: draftSaved?.name ?? '', folder: savedFolder }) }}
         </span>
       </div>
+      <p v-if="file && csvOfficeNote" class="fe-officenote" role="note" data-testid="office-csv-note">
+        {{ t('viewer.csv_office_note') }}
+      </p>
 
       <div
         class="fe-viewer__stage"
@@ -1944,6 +1971,8 @@ onBeforeUnmount(() => {
               placement="viewer"
               :ui="appView.ui"
               :files="appFiles"
+              :storages="storages"
+              :start-at="draft?.target_dir || undefined /* a draft's save-as opens where it will go */"
               :save-path="livePath"
               :read-only="openMode === 'view'"
               :locale="locale"

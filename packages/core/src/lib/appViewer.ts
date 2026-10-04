@@ -4,9 +4,11 @@
  * (/files/edit). ONE rule, so a file opens in the same place wherever it is
  * opened (0.50: docs/APP-PLUGINS.md → Default apps):
  *
- *  - the handlers of a file are the app interfaces that open it (`viewer`
- *    views with a `ui`, in the server's order: by app name, then the app's
- *    own order) and filex's own viewer, `builtin`, last;
+ *  - the handlers of a file are ONLYOFFICE (`onlyoffice`, filex 0.51) for a
+ *    kind it opens as a choice (OFFICE_OPEN_KINDS: `.csv`) while it is
+ *    configured, then the app interfaces that open it (`viewer` views with a
+ *    `ui`, in the server's order: by app name, then the app's own order) and
+ *    filex's own viewer, `builtin`, last - backend assoc.OpenDefault;
  *  - the administrator's rule for the file's kind (`open_rules[ext]`, from
  *    the server, backend internal/assoc) puts the handlers it names first, in
  *    its order, and leaves out the ones it switched off; the rest follow in
@@ -21,6 +23,33 @@ import { appliesItemOf, appliesMatches, type AppliesNodeLike } from './pluginApp
 
 /** filex's own viewer, as a handler id (and "Open with"'s choice of it). */
 export const BUILTIN_VIEWER = 'builtin';
+
+/** ONLYOFFICE's editor, as a handler id (filex 0.51, backend assoc.OnlyOffice). */
+export const ONLYOFFICE_VIEWER = 'onlyoffice';
+
+/**
+ * The kinds ONLYOFFICE opens as ONE choice among others: filex's own viewer
+ * opens them too (a read-only table for a CSV), so "Open with" offers both.
+ * ⚠ The twin of backend assoc `onlyOfficeOpenKinds`; a test holds the two
+ * together. The office kinds (docx, xlsx...) are not here: ONLYOFFICE is the
+ * only thing that opens them, there is nothing to choose.
+ */
+export const OFFICE_OPEN_KINDS: readonly string[] = ['csv'];
+
+/** ONLYOFFICE is an open handler of this kind (an extension, no dot). */
+export function officeOpensKind(ext: string | null | undefined): boolean {
+  return OFFICE_OPEN_KINDS.includes(String(ext ?? '').toLowerCase());
+}
+
+/** What only the host knows about a file's handlers. */
+export interface OpenHandlerOptions {
+  /**
+   * ONLYOFFICE is configured and answering here (the capabilities probe, the
+   * same answer the office documents' Open reads). Absent or false: it opens
+   * nothing, and a choice of it falls through to the next handler.
+   */
+  onlyOffice?: boolean;
+}
 
 type NodeLike = (AppliesNodeLike & { type?: string }) | null | undefined;
 
@@ -41,8 +70,13 @@ export function openHandlerId(v: Pick<PluginViewRow, 'plugin' | 'id'>): string {
  */
 export function normalizeOpenChoice(choice: string | null | undefined): string | null {
   if (!choice) return null;
-  if (choice === BUILTIN_VIEWER || choice.startsWith('app:')) return choice;
+  if (choice === BUILTIN_VIEWER || choice === ONLYOFFICE_VIEWER || choice.startsWith('app:')) return choice;
   return `app:${choice}`;
+}
+
+/** The handler is ONLYOFFICE's editor (not an app's interface, not filex's viewer). */
+export function isOfficeHandler(h: Pick<OpenHandler, 'id'> | null | undefined): boolean {
+  return h?.id === ONLYOFFICE_VIEWER;
 }
 
 /** A file's kind: its extension, lower-case, no dot ('' for none). */
@@ -77,9 +111,11 @@ export function openHandlersFor(
   views: readonly PluginViewRow[],
   node: NodeLike,
   rules?: Readonly<Record<string, OpenRule>> | null,
+  opts?: OpenHandlerOptions | null,
 ): OpenHandlers {
   if (!node || node.type !== 'file') return { on: [], off: [], custom: false };
   const avail: OpenHandler[] = [
+    ...(opts?.onlyOffice && officeOpensKind(openKindOf(node)) ? [{ id: ONLYOFFICE_VIEWER, view: null }] : []),
     ...appViewersFor(views, node).map((v) => ({ id: openHandlerId(v), view: v })),
     { id: BUILTIN_VIEWER, view: null },
   ];
@@ -110,20 +146,23 @@ export function pickOpenHandler(
   choice?: string | null,
   rules?: Readonly<Record<string, OpenRule>> | null,
   personal?: string | null,
+  opts?: OpenHandlerOptions | null,
 ): OpenHandler | null {
   if (!node || node.type !== 'file') return null;
-  const { on } = openHandlersFor(views, node, rules);
+  const { on } = openHandlersFor(views, node, rules, opts);
   const find = (id: string | null) => (id ? (on.find((h) => h.id === id) ?? null) : null);
   return find(normalizeOpenChoice(choice)) ?? find(normalizeOpenChoice(personal)) ?? on[0] ?? null;
 }
 
-/** The app interface that opens the file; null is filex's own viewer. */
+/** The app interface that opens the file; null is filex's own viewer, or
+ *  ONLYOFFICE (pickOpenHandler tells the two apart). */
 export function pickAppViewer(
   views: readonly PluginViewRow[],
   node: NodeLike,
   choice?: string | null,
   rules?: Readonly<Record<string, OpenRule>> | null,
   personal?: string | null,
+  opts?: OpenHandlerOptions | null,
 ): PluginViewRow | null {
-  return pickOpenHandler(views, node, choice, rules, personal)?.view ?? null;
+  return pickOpenHandler(views, node, choice, rules, personal, opts)?.view ?? null;
 }

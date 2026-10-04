@@ -317,31 +317,69 @@ export function htmlText(html) {
 }
 
 /**
- * The headings a diff ADDS to documentation pages, as `{ file, text }` — the
- * probe that tells a docs site serving this release from one serving an old
- * snapshot. Headings with markup the site renders differently (HTML, Vue
+ * The headings of a Markdown page, as the text a reader sees, in page order:
+ * the probes that tell a docs site serving this release from one serving an
+ * old snapshot. Headings with markup the site renders differently (HTML, Vue
  * braces) are left out rather than half-matched.
  *
  * ⚠ Why headings and not the Releases page: the docs server regenerates
- * RELEASES.md by itself on a cron, so "Latest — vX.Y.Z" goes green even while
+ * RELEASES.md by itself on a cron, so "Latest - vX.Y.Z" goes green even while
  * every other page is the previous release's snapshot (2026-08-29 and again
  * 2026-09-25, Altyapı lesson #339 / filex #511).
+ *
+ * ⚠ A `#` line inside a code block is not a heading. The gate used to read
+ * `git diff --unified=0` line by line, where no fence can be seen: v0.50.0
+ * added the comment "# an existing SFTP / NAS - any driver via `config`" to a
+ * yaml block in docs/STORAGE.md, the gate took it for a heading, and called a
+ * site that was already current an "OLD snapshot" (lesson #964, task #142).
+ * So the whole page is read with CommonMark's fence rules: a run of three or
+ * more backticks or tildes, indented at most three spaces, opens a fence; a
+ * run of the same character at least as long, with nothing after it, closes
+ * it; a fence never closed runs to the end of the page. A backtick run with
+ * another backtick on its line is inline code, not a fence. YAML front matter
+ * at the top of a page is not part of the page either.
  */
-export function headingsAdded(unifiedDiff) {
+export function headingsOf(markdown) {
+  const lines = String(markdown).split(/\r?\n/);
+  let i = 0;
+  if (lines[0] === '---') {
+    const end = lines.findIndex((l, n) => n > 0 && /^---\s*$/.test(l));
+    if (end > 0) i = end + 1;
+  }
   const out = [];
-  let file = null;
-  for (const line of String(unifiedDiff).split('\n')) {
-    const f = /^\+\+\+ b\/(.+)$/.exec(line);
-    if (f) {
-      file = f[1];
+  let fence = null;
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
       continue;
     }
-    if (!file || line.startsWith('+++')) continue;
-    const h = /^\+#{1,4}\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!h) continue;
-    if (/[<>{}]/.test(h[1])) continue;
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+      fence = open[1];
+      continue;
+    }
+    const h = /^#{1,4}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!h || /[<>{}]/.test(h[1])) continue;
     const text = markdownInline(h[1]);
-    if (text.length >= 4) out.push({ file, text });
+    if (text.length >= 4) out.push(text);
+  }
+  return out;
+}
+
+/**
+ * The headings `after` has and `before` did not, counted as a multiset: a
+ * heading that only moved is not new, a second "Example" on the page is.
+ */
+export function newHeadings(before, after) {
+  const had = new Map();
+  for (const h of headingsOf(before)) had.set(h, (had.get(h) ?? 0) + 1);
+  const out = [];
+  for (const h of headingsOf(after)) {
+    const n = had.get(h) ?? 0;
+    if (n > 0) had.set(h, n - 1);
+    else out.push(h);
   }
   return out;
 }

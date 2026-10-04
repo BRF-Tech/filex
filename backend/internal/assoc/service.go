@@ -46,6 +46,10 @@ type Service struct {
 	// and type now: OnlyOffice is configured and it is a kind it draws. Nil:
 	// it draws nothing.
 	ooThumb func(name, mime string) bool
+	// ooOpen reports whether the document server opens a file of this name
+	// and type now, as one choice among others: OnlyOffice is configured and
+	// it is a kind of OnlyOfficeOpens (filex 0.51). Nil: it opens nothing here.
+	ooOpen func(name, mime string) bool
 
 	rulesMu sync.Mutex
 	rules   map[string]map[string]*Rule
@@ -80,6 +84,28 @@ func (s *Service) SetOnlyOfficeThumb(f func(name, mime string) bool) {
 	s.mu.Lock()
 	s.ooThumb = f
 	s.mu.Unlock()
+}
+
+// SetOnlyOfficeOpen attaches the answer to "does the document server open
+// this file now, as one choice among others" (OnlyOffice configured, and a
+// kind of OnlyOfficeOpens). Read on every open chain, so it must answer from
+// memory.
+func (s *Service) SetOnlyOfficeOpen(f func(name, mime string) bool) {
+	s.mu.Lock()
+	s.ooOpen = f
+	s.mu.Unlock()
+}
+
+// OnlyOfficeOpen reports whether the document server opens a file of this
+// name and type now, as one choice among others.
+func (s *Service) OnlyOfficeOpen(name, mime string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	f := s.ooOpen
+	s.mu.RUnlock()
+	return f != nil && OnlyOfficeOpens(ExtOf(name)) && f(name, mime)
 }
 
 // OnlyOfficeThumb reports whether the document server draws a file of this
@@ -202,7 +228,7 @@ func (s *Service) Available(capability, name, mime string) []Handler {
 	if capability == CapThumbnail {
 		return ThumbDefault(s.OnlyOfficeThumb(name, mime), s.BuiltinThumb(name, mime), apps)
 	}
-	return DefaultOrder(capability, true, apps)
+	return OpenDefault(s.OnlyOfficeOpen(name, mime), apps)
 }
 
 // Chain is the handlers of the capability for a file of this name and type:
@@ -427,7 +453,9 @@ type Kind struct {
 }
 
 // Kinds lists every kind an app handles (its extensions, and the known
-// extensions of its media types) and every kind with a rule, sorted.
+// extensions of its media types), every kind the document server opens as a
+// choice while OnlyOffice is configured (`.csv`, filex 0.51) and every kind
+// with a rule, sorted.
 //
 // ⚠ A kind only filex handles is not listed: there is nothing to choose
 // between. Its rule, once written, keeps it on the list.
@@ -447,6 +475,11 @@ func (s *Service) Kinds(ctx context.Context) []Kind {
 			}
 		}
 		for e := range s.load(ctx)[capability] {
+			exts[e] = true
+		}
+	}
+	for _, e := range onlyOfficeOpenKinds {
+		if s.OnlyOfficeOpen("file."+e, MimeOf(e)) {
 			exts[e] = true
 		}
 	}
@@ -588,7 +621,7 @@ func (s *Service) defaultPlace(ctx context.Context, capability, ext string, h Ap
 	for i, a := range apps {
 		hs[i] = a.Handler
 	}
-	order := DefaultOrder(capability, true, hs)
+	order := OpenDefault(s.OnlyOfficeOpen(name, mime), hs)
 	if capability == CapThumbnail {
 		order = ThumbDefault(s.OnlyOfficeThumb(name, mime), s.BuiltinThumb(name, mime), hs)
 	}

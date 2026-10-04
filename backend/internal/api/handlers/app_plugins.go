@@ -31,6 +31,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -61,6 +62,10 @@ type AppPlugins struct {
 	// Quota is the per-person ceiling an interface's save is held to, like
 	// every other write (security review UI-7). Nil = no ceiling.
 	Quota *quota.Service
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go): CommitSibling — an
+	// interface's "save as" and a job's output — asks it before it creates a
+	// key file or a `.fxe`. nil = not wired.
+	E2EPolicy *e2epolicy.Service
 	// Assoc keeps which handler opens which kind of file (internal/assoc):
 	// the listing carries its rules, and an interface switched off for a
 	// kind is refused on it (openAllowed). Nil: every viewer opens its kinds.
@@ -898,6 +903,19 @@ func (h *AppPlugins) CommitSibling(ctx context.Context, storageID int64, dir, na
 	}
 	if err := storage.EnsureFileTarget(ctx, drv, rel); err != nil {
 		return "", err
+	}
+	// The name is free (UniqueDest), so this CREATES rel: an output named like
+	// an encrypted folder's key file or a `.fxe` is a new encryption, judged
+	// for the person the app writes for (e2e_policy_gate.go) — an interface's
+	// "save as" (uiSaveNew) and a job's output alike.
+	if e2epolicy.IsEncryptionName(rel) && h.E2EPolicy != nil {
+		u, err := e2eActor(ctx, h.Store, st, actor)
+		if err == nil {
+			err = checkE2ECreate(ctx, h.E2EPolicy, u, st, rel)
+		}
+		if err != nil {
+			return "", err
+		}
 	}
 	if err := wr.Write(ctx, rel, r, size); err != nil {
 		return "", err

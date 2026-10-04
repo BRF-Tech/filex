@@ -175,6 +175,9 @@ func (h *AI) Upload(w http.ResponseWriter, r *http.Request) {
 		ctx := withPlaintextConsent(r.Context(), formFlag(r, "allow_plaintext"))
 		e, err := h.ops.WriteStream(ctx, dest, f, fh.Size)
 		if err != nil {
+			if writeE2ERefusal(w, r, err) {
+				return
+			}
 			writeAIError(w, err)
 			return
 		}
@@ -202,6 +205,9 @@ func (h *AI) Upload(w http.ResponseWriter, r *http.Request) {
 
 	e, err := h.ops.Write(withPlaintextConsent(r.Context(), body.AllowPlaintext), body.Path, data)
 	if err != nil {
+		if writeE2ERefusal(w, r, err) {
+			return
+		}
 		writeAIError(w, err)
 		return
 	}
@@ -263,6 +269,9 @@ func (h *AI) Move(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := h.ops.Move(r.Context(), body.Src, body.Dst)
 	if err != nil {
+		if writeE2ERefusal(w, r, err) {
+			return
+		}
 		writeAIError(w, err)
 		return
 	}
@@ -363,6 +372,9 @@ func (h *AI) Zip(w http.ResponseWriter, r *http.Request) {
 	}
 	e, err := h.ops.Zip(withPlaintextConsent(r.Context(), body.AllowPlaintext), body.Sources, body.Dest)
 	if err != nil {
+		if writeE2ERefusal(w, r, err) {
+			return
+		}
 		writeAIError(w, err)
 		return
 	}
@@ -462,6 +474,17 @@ func aiStatus(err error) int {
 	}
 	if errors.Is(err, syspath.ErrReserved) {
 		return http.StatusForbidden
+	}
+	// Who may encrypt (e2e_policy_gate.go): permanent, like a permission —
+	// a 5xx would read as "retry".
+	if isE2ERefusal(err) {
+		return http.StatusForbidden
+	}
+	// …unless the rule could not be decided: a server failure, logged where
+	// it was asked. Its words are filex's own, so mapDriverErr's match on the
+	// text (a store's "not found") never makes it a 404 or a 409.
+	if isE2EUndecided(err) {
+		return http.StatusInternalServerError
 	}
 	// A transient, system-caused refusal: the snapshot guard could not
 	// preserve a file this write would have replaced. 503, not mapDriverErr's

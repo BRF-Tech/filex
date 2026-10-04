@@ -7,13 +7,18 @@
 // in a diff instead of a silent one. Deleting a line here is allowed; it has
 // to be done on purpose, with the incident that justified the gate in mind.
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { toWslPath } from '../../../scripts/lib/go-build.mjs';
+import { findBash, shq, slash } from '../../../scripts/release/engine.mjs';
 import plan from '../../../scripts/release/plan.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
+const bash = findBash();
 const p = plan({ repo: REPO, version: '9.9.9', tag: 'v9.9.9' });
 const names = (list: Array<{ name: string }>) => list.map((g) => g.name);
 
@@ -121,6 +126,81 @@ describe("this repository's release plan", () => {
     const fixture = gate.script.indexOf('build-wasm-fixture.sh');
     expect(fixture, gate.script).toBeGreaterThanOrEqual(0);
     expect(gate.script.indexOf('go test')).toBeGreaterThan(fixture);
+  });
+
+  // ⚠⚠ v0.50.0 pretag (lesson #960, #139): the fixture gate ran in a WSL
+  // mirror of the whole repository and refreshed only the mirror's echo.wasm.
+  // The Windows checkout's copy, the one the Playwright gate installs,
+  // predated the echo change spec 192 tested; 192 failed after an hour of
+  // chain. The gate builds in the Go module (under WSL its mirror on WSL's own
+  // disk, never Go on /mnt) with the CHECKOUT's script, which writes the
+  // module back (the next test runs that script).
+  it('the echo.wasm gate builds in the Go module and refreshes the checkout before Playwright installs from it', () => {
+    type GoGate = { name: string; script: string; cmd: (c: object, toolchain?: string) => string[] };
+    const gates = p.pretag as GoGate[];
+    const i = gates.findIndex((g) => g.name === 'go: echo.wasm fixture');
+    expect(i, 'the pretag chain has no "go: echo.wasm fixture" gate').toBeGreaterThanOrEqual(0);
+    const gate = gates[i];
+    const builds = /FILEX_BACKEND_DIR="\$PWD" bash "\$FILEX_CHECKOUT\/scripts\/build-wasm-fixture\.sh"/;
+    expect(gate.script, "the gate does not run the checkout's script in the module it is in, so the checkout keeps its old echo.wasm").toMatch(builds);
+    expect(i, 'the fixture is built after the Playwright gate that installs it').toBeLessThan(gates.findIndex((g) => g.name.startsWith('e2e: Playwright')));
+
+    const ctx = { repo: REPO, bash: 'bash' };
+    const wsl = gate.cmd(ctx, 'wsl');
+    const sh = wsl[wsl.length - 1];
+    expect(wsl.slice(0, 2)).toEqual(['wsl', '-e']);
+    // ~/wt/<repository>/backend (a tree without .git mirrors as ~/wt/backend).
+    expect(sh, 'under WSL the gate runs in the mirror of the Go module').toMatch(/&& cd "\$HOME\/wt\/(?:[^"/]+\/)?backend" &&/);
+    expect(sh, 'never Go on /mnt').not.toMatch(/cd ["']?\/mnt\//);
+    expect(sh, 'the checkout, as WSL reaches it').toContain(`FILEX_CHECKOUT=${shq(toWslPath(REPO))}`);
+    expect(sh).toMatch(builds);
+
+    const native = gate.cmd(ctx, 'native');
+    expect(native[native.length - 1]).toContain(`FILEX_CHECKOUT=${shq(slash(REPO))} && cd ${shq(slash(path.join(REPO, 'backend')))} && `);
+  });
+
+  it.runIf(!!bash)('the fixture script builds in the module it is given and writes the module back into its own checkout', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-echo-fixture-'));
+    try {
+      const rel = path.join('internal', 'wasmplugin', 'testdata', 'echo', 'echo.wasm');
+      const checkout = path.join(dir, 'checkout');
+      const mirror = path.join(dir, 'mirror', 'backend');
+      const script = path.join(checkout, 'scripts', 'build-wasm-fixture.sh');
+      fs.mkdirSync(path.dirname(script), { recursive: true });
+      fs.copyFileSync(path.join(REPO, 'scripts', 'build-wasm-fixture.sh'), script);
+      for (const b of [path.join(checkout, 'backend'), mirror]) fs.mkdirSync(path.dirname(path.join(b, rel)), { recursive: true });
+      // A stand-in `go` that writes where it was asked to build, and from where.
+      const bin = path.join(dir, 'bin');
+      fs.mkdirSync(bin);
+      fs.writeFileSync(
+        path.join(bin, 'go'),
+        '#!/usr/bin/env bash\nout=""\nwhile [ $# -gt 0 ]; do if [ "$1" = -o ]; then out="$2"; fi; shift; done\nprintf "built in %s\\n" "$PWD" > "$out"\n',
+      );
+      fs.chmodSync(path.join(bin, 'go'), 0o755);
+      // One PATH key: Windows spells it Path, and a second spelling is a coin toss.
+      const base: NodeJS.ProcessEnv = { ...process.env };
+      const pathKey = Object.keys(base).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+      const searchPath = base[pathKey];
+      delete base[pathKey];
+      const run = (env: Record<string, string>) =>
+        spawnSync(bash!, [slash(script)], { encoding: 'utf8', env: { ...base, PATH: `${bin}${path.delimiter}${searchPath}`, ...env } });
+
+      // As the release's WSL gate runs it: Go in the mirror, the module back in the checkout.
+      let r = run({ FILEX_BACKEND_DIR: slash(mirror) });
+      expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+      expect(fs.existsSync(path.join(mirror, rel)), 'the module was not built in the module dir it was given').toBe(true);
+      const built = fs.readFileSync(path.join(mirror, rel), 'utf8');
+      expect(built).toContain('/mirror/backend');
+      expect(fs.existsSync(path.join(checkout, 'backend', rel)), 'the checkout did not get the module').toBe(true);
+      expect(fs.readFileSync(path.join(checkout, 'backend', rel), 'utf8'), 'the checkout holds another module').toBe(built);
+
+      // Run as it always was: in its own checkout, nothing to copy over itself.
+      r = run({ FILEX_BACKEND_DIR: '' });
+      expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+      expect(fs.readFileSync(path.join(checkout, 'backend', rel), 'utf8')).toContain('/checkout/backend');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('tags the Go module under the directory it lives in (backend/vX.Y.Z)', () => {

@@ -486,6 +486,19 @@ func (f *fs) rename(r *sftp.Request, overwrite bool) error {
 			return os.ErrExist
 		}
 	}
+	// Who may encrypt (internal/e2epolicy): a rename onto a key file's or a
+	// `.fxe`'s name is asked as an upload of the file there would be (a
+	// posix-rename onto a file replaces it, onto nothing or a folder it
+	// creates one), unless it is free: a folder, a `.fxe` that stays a
+	// `.fxe`, a key file that stays its own folder's
+	// (protoperm.RenameEncryptionAllowed). A rule that could not be decided
+	// is SSH_FX_FAILURE, not a refusal.
+	switch protoperm.RenameEncryptionAllowed(f.ctx, f.srv.cfg.E2EPolicy, drv, src.Storage, src.Rel, dst.Rel) {
+	case protoperm.EncryptionRefused:
+		return sftp.ErrSSHFxPermissionDenied
+	case protoperm.EncryptionUndecided:
+		return protoperm.ErrEncryptionUndecided
+	}
 	if err := mover.Move(f.ctx, src.Rel, dst.Rel); err != nil {
 		return mapStorageErr(err)
 	}

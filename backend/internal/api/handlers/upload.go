@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/perm"
@@ -44,6 +45,9 @@ type Upload struct {
 	StorageResolver func(int64) (storage.Driver, error)
 	Thumbs          *thumb.Pipeline
 	ACL             *acl.Resolver
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go): Init asks it before
+	// a multipart upload creates a key file or a `.fxe`. nil = not wired.
+	E2EPolicy *e2epolicy.Service
 }
 
 // AttachACL wires the RBAC resolver so chunked uploads require ≥editor on the
@@ -98,7 +102,9 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 	// strip the prefix so the target is storage-relative. Previously Init hard-
 	// required storage_id and used the qualified path verbatim, so every SFC
 	// init 400'd "missing fields" and always fell back to the legacy upload.
-	adapter, rel := splitAdapterPath(req.Path)
+	// confinedPath: a confined caller's empty path is its root, as
+	// confine.Middleware reads one in a JSON body it can see.
+	adapter, rel := splitAdapterPath(confinedPath(r.Context(), req.Path))
 	storageID := req.StorageID
 	if storageID == 0 && adapter != "" {
 		if st, err := u.Store.GetStorageByName(r.Context(), adapter); err == nil && st != nil {
@@ -122,6 +128,16 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 	}
 	if pathHasDotDot(target) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
+		return
+	}
+	// The token's `root:`, on the TARGET as it will be written. The middleware
+	// confines `path` (in a body labelled JSON), but not the storage a
+	// non-zero `storage_id` picks over it, nor `filename`, which path.Join has
+	// already folded into the target (`../disari/x.bin` beside a confined
+	// `path`), nor a body sent under another Content-Type
+	// (GHSA-8gvc-6w52-6c7j).
+	if !rootAllows(r.Context(), u.Store, storageID, target) {
+		refuseOutsideRoot(w)
 		return
 	}
 	if gate(w, r, u.ACL, storageID, writegate.Writes(target)) {
@@ -177,6 +193,14 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 		if !v.WritePerm(w, r) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		}
+		return
+	}
+	// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go) —
+	// asked here, where the upload begins, and not again at Finalize. Whether
+	// the upload creates it is the rule's own look (a FILE there), not
+	// upNeed's: a folder with the name answers the Stat above, and on an
+	// object store the parts are assembled beside it.
+	if refuseE2EWriteAt(w, r, u.E2EPolicy, drv, u.Store, storageID, target) {
 		return
 	}
 

@@ -215,8 +215,9 @@ test.describe('Viewer audit — per-extension UI mount', () => {
         // immediately ready.
         await expect(page.locator('.fe-preview')).toBeVisible({ timeout: 10_000 });
 
-        // Per-ext mount contract.
-        await expectViewerForExt(page, f.ext);
+        // Per-ext mount contract. 0.51 - a .csv opens in ONLYOFFICE where
+        // the document server answers (the read-only table otherwise).
+        await expectViewerForExt(page, f.ext === 'csv' && CAPS.onlyofficeReachable ? 'csv@onlyoffice' : f.ext);
 
         // Failures of the lazy viewer chunks would show up here.
         const collected = sink.collect();

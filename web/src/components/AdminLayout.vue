@@ -4,30 +4,33 @@ import { RouterView, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useAuthStore } from '@/stores/auth';
-import Sidebar from './Sidebar.vue';
+import NavDrawer from './NavDrawer.vue';
 import TopNav from './TopNav.vue';
 import Breadcrumbs from './Breadcrumbs.vue';
 import PendingOpsTray from './PendingOpsTray.vue';
 
-/* Below `lg` (1024px, the Tailwind breakpoint the sidebar's `lg:translate-x-0`
-   uses) the sidebar is a DRAWER over the page, with a backdrop. It must start
-   closed there: `ref(true)` opened it on top of every admin page a phone
-   visited, and the backdrop then swallowed the first tap (2026-09-19, caught
-   by cypress/e2e/41-users-crud at 700px). On a wide screen the ref is
-   irrelevant to layout — the column is always shown — so `true` keeps the
-   desktop exactly as it was. */
+/* The menu (GitHub #82, 0.51.0): from `lg` (1024px) up it is the top bar's
+   mega menu (TopNav → AdminNav `bar`); below it, a DRAWER over the page with
+   a backdrop (NavDrawer → AdminNav `list`). Only one of the two is mounted,
+   so a page link exists once in the document and a screen reader is not
+   offered the same menu twice.
+   ⚠ The drawer starts CLOSED: an open one on top of every admin page a phone
+   visited had its backdrop swallow the first tap (2026-09-19, caught by
+   cypress/e2e/41-users-crud at 700px). */
 const WIDE = '(min-width: 1024px)';
 const wideMq = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(WIDE) : null;
-const sidebarOpen = ref(wideMq ? wideMq.matches : true);
+const wide = ref(wideMq ? wideMq.matches : true);
+const drawerOpen = ref(false);
 const route = useRoute();
 // Choosing a page from the drawer closes it — the page is what was asked for.
 watch(() => route.fullPath, () => {
-  if (wideMq && !wideMq.matches) sidebarOpen.value = false;
+  drawerOpen.value = false;
 });
-// Crossing the breakpoint: a drawer left open must not stay open when the
-// window is narrowed (it would cover the page); widening restores the column.
+// Crossing the breakpoint swaps the menus; a drawer left open must not
+// reappear open the next time the window is narrowed.
 function onWideChange(ev: MediaQueryListEvent) {
-  sidebarOpen.value = ev.matches;
+  wide.value = ev.matches;
+  drawerOpen.value = false;
 }
 onMounted(() => wideMq?.addEventListener('change', onWideChange));
 onBeforeUnmount(() => wideMq?.removeEventListener('change', onWideChange));
@@ -40,8 +43,8 @@ const caps = useCapabilitiesStore();
 const auth = useAuthStore();
 const { t } = useI18n();
 
-function toggleSidebar() {
-  sidebarOpen.value = !sidebarOpen.value;
+function toggleDrawer() {
+  drawerOpen.value = !drawerOpen.value;
 }
 </script>
 
@@ -50,20 +53,26 @@ function toggleSidebar() {
        `--fe-bg` cards, as in the explorer), not Tailwind's zinc pair: an
        operator theme paints the admin pages' ground too (#74). -->
   <div class="min-h-screen bg-[var(--fe-bg-elev)] text-[var(--fe-text)] flex">
-    <!-- Mobile backdrop when sidebar open -->
-    <div
-      v-if="sidebarOpen"
-      class="fixed inset-0 z-30 bg-zinc-950/40 backdrop-blur-sm lg:hidden"
-      @click="sidebarOpen = false"
-    />
+    <template v-if="!wide">
+      <!-- The drawer's backdrop: a tap on the page closes the menu. -->
+      <div
+        v-if="drawerOpen"
+        class="fixed inset-0 z-30 bg-zinc-950/40 backdrop-blur-sm"
+        data-testid="nav-drawer-backdrop"
+        @click="drawerOpen = false"
+      />
+      <NavDrawer
+        :open="drawerOpen"
+        @close="drawerOpen = false"
+      />
+    </template>
 
-    <Sidebar
-      :open="sidebarOpen"
-      @close="sidebarOpen = false"
-    />
-
-    <div class="flex min-w-0 flex-1 flex-col lg:ps-64">
-      <TopNav @toggle-sidebar="toggleSidebar" />
+    <div class="flex min-w-0 flex-1 flex-col">
+      <TopNav
+        :wide="wide"
+        :drawer-open="drawerOpen"
+        @toggle-drawer="toggleDrawer"
+      />
 
       <main class="flex-1 px-4 py-4 sm:px-6 lg:px-8">
         <div class="mx-auto max-w-7xl">

@@ -18,6 +18,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -255,6 +256,19 @@ func (f *fs) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	}
 	if _, ok := drv.(storage.Writer); !ok {
 		return nil, sftp.ErrSSHFxOpUnsupported
+	}
+	// Who may encrypt (internal/e2epolicy): an upload that CREATES an
+	// encrypted folder's key file or a `.fxe` — no file there, a folder with
+	// the name included (protoperm.EncryptionAllowed). Asked here, at the
+	// open, once — Close only commits — and after the storage said it takes
+	// writes: under the approval policy the question spends the approval. A
+	// rule that could not be decided is SSH_FX_FAILURE (a plain error), not a
+	// refusal.
+	switch protoperm.EncryptionAllowed(f.ctx, f.srv.cfg.E2EPolicy, drv, t.Storage, t.Rel) {
+	case protoperm.EncryptionRefused:
+		return nil, sftp.ErrSSHFxPermissionDenied
+	case protoperm.EncryptionUndecided:
+		return nil, protoperm.ErrEncryptionUndecided
 	}
 	spool, err := os.CreateTemp(f.srv.cfg.SpoolDir, "filex-sftp-*")
 	if err != nil {

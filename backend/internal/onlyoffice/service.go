@@ -20,6 +20,7 @@
 package onlyoffice
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/md5"
@@ -98,6 +99,21 @@ type Service struct {
 	// conversion each (offer.go). Lazily built, like probeReg.
 	offerOnce sync.Once
 	offerReg  *offerRegistry
+
+	// refusedMu/refused count, per document, the saves the callback refused
+	// (callback_csv.go). The count is part of the next editing session's key:
+	// measured on Docs 9.4, an editor opened with the key of a session whose
+	// save was refused never finishes loading, and the file is unchanged, so
+	// its key would be the same.
+	refusedMu sync.Mutex
+	refused   map[int64]int
+
+	// openersMu/openers record, per editing session (the document key), who
+	// was handed an EDIT config for it and when (callback_identity.go). The
+	// callback's editors are held to it before a save is written beside a
+	// document in their name.
+	openersMu sync.Mutex
+	openers   map[string]map[int64]time.Time
 
 	// Sync is the shared post-write gate every other write surface in filex
 	// goes through: it upserts the node row, re-indexes the document,
@@ -222,12 +238,30 @@ type EditorConfig struct {
 	Config            map[string]any `json:"config"`
 }
 
+// ConfigOption adds to an editor config what only the caller knows.
+type ConfigOption func(*configExtras)
+
+type configExtras struct {
+	head []byte
+}
+
+// WithHead hands over the first bytes of the document (CSVSniffBytes is
+// plenty): for a CSV they say its delimiter and encoding, which the config
+// passes on so ONLYOFFICE opens it without asking (csv.go).
+func WithHead(head []byte) ConfigOption {
+	return func(x *configExtras) { x.head = head }
+}
+
 // BuildConfigForNode resolves the node, presigns the fetch URL, and signs
 // the JSON descriptor with HS256. `mode` selects "edit" or "view"; any
 // value other than "edit" is treated as read-only and toggles the
 // permissions block so OnlyOffice renders the document with toolbars
 // disabled.
-func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user *model.User, lang, mode string) (*EditorConfig, error) {
+func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user *model.User, lang, mode string, opts ...ConfigOption) (*EditorConfig, error) {
+	var extras configExtras
+	for _, o := range opts {
+		o(&extras)
+	}
 	docURL, secret := s.settings(ctx)
 	if docURL == "" || secret == "" {
 		return nil, errors.New("onlyoffice: not configured")
@@ -249,6 +283,9 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 		mtime = node.BackendMtime.Unix()
 	}
 	keyInput := fmt.Sprintf("%d|%s|%d|%d", node.ID, node.PathHash, mtime, node.Size)
+	if n := s.refusals(node.ID); n > 0 {
+		keyInput += "|refused-" + strconv.Itoa(n)
+	}
 	hash := md5.Sum([]byte(keyInput))
 	key := hex.EncodeToString(hash[:])
 
@@ -269,20 +306,29 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 		effectiveMode = "view"
 	}
 	canEdit := effectiveMode == "edit"
-	body := map[string]any{
-		"document": map[string]any{
-			"key":      key,
-			"title":    node.Name,
-			"url":      fetchURL,
-			"fileType": fileType,
-			"permissions": map[string]any{
-				"edit":     canEdit,
-				"download": true,
-				"print":    true,
-				"comment":  canEdit,
-				"review":   canEdit,
-			},
+	document := map[string]any{
+		"key":      key,
+		"title":    node.Name,
+		"url":      fetchURL,
+		"fileType": fileType,
+		"permissions": map[string]any{
+			"edit":     canEdit,
+			"download": true,
+			"print":    true,
+			"comment":  canEdit,
+			"review":   canEdit,
 		},
+	}
+	// A CSV opens without ONLYOFFICE's "Choose CSV options" dialog: its
+	// encoding and delimiter, read from its first bytes, go in the config
+	// (csv.go). A file that is not UTF-8 gets none, and the dialog asks.
+	if fileType == "csv" && extras.head != nil {
+		if o := SniffCSV(extras.head).OpenOptions(); o != nil {
+			document["options"] = o
+		}
+	}
+	body := map[string]any{
+		"document":     document,
 		"documentType": docType,
 		"editorConfig": map[string]any{
 			"callbackUrl": callbackURL,
@@ -303,6 +349,9 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 	// From here on a fetch for this document belongs to this opening, which is
 	// what the editor's "Download failed" diagnosis compares against.
 	s.noteOpened(node.ID)
+	if canEdit && user != nil {
+		s.noteOpener(key, user.ID)
+	}
 
 	return &EditorConfig{
 		DocumentServerURL: docURL,
@@ -377,6 +426,14 @@ type CallbackPayload struct {
 	Status int    `json:"status"`
 	URL    string `json:"url"`
 	Token  string `json:"token,omitempty"`
+	// FileType is the type of the document at URL ("csv", "xlsx", ...). The
+	// server saves in the document's own type by default
+	// (`assemblyFormatAsOrigin`), in OOXML when that is off (filex 0.51,
+	// callback_csv.go).
+	FileType string `json:"filetype,omitempty"`
+	// Users are the editors of the session: the user ids the editor config
+	// named, filex account ids.
+	Users []string `json:"users,omitempty"`
 }
 
 // Status codes per OnlyOffice callback spec.
@@ -418,8 +475,15 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		}
 	}
 	if tok != "" {
-		if _, err := verifyHS256(tok, secret); err != nil {
+		claims, err := verifyHS256(tok, secret)
+		if err != nil {
 			return nil, fmt.Errorf("token: %w", err)
+		}
+		// The editors as the SIGNED payload names them, not the body: a body
+		// can be changed beside a token it was not built from
+		// (callback_identity.go).
+		if users, ok := claimUsers(claims); ok {
+			p.Users = users
 		}
 	} else if secret != "" {
 		// ⚠⚠ With a secret configured, an UNSIGNED callback is refused. It
@@ -500,6 +564,38 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		return map[string]any{"error": 1, "message": "fetch saved doc http " + strconv.Itoa(resp.StatusCode)}, nil
 	}
 
+	// What is written, and how long it is: the document server's bytes as
+	// they come, except for a CSV (filex 0.51, callback_csv.go), which is
+	// only ever written as CSV text in the file's own dialect, and a save in
+	// another format than the file's (callback_format.go), which is written
+	// beside the file and never over it.
+	var saved io.Reader = resp.Body
+	savedSize := resp.ContentLength
+	want, got := docExt(node.Name), strings.ToLower(strings.TrimSpace(p.FileType))
+	switch {
+	case want == "csv":
+		data, err := s.csvSave(r.Context(), drv, node, resp.Body, got)
+		if nw, ok := asNotWritten(err); ok {
+			s.refuseSave(r.Context(), node, s.sessionEditors(keyOf(p), p.Users), got, nw)
+			return map[string]any{"error": 1, "message": "the saved document is not a CSV"}, nil
+		}
+		if err != nil {
+			return map[string]any{"error": 1, "message": "fetch saved doc"}, nil
+		}
+		saved, savedSize = bytes.NewReader(data), int64(len(data))
+	case got != "" && got != want:
+		if !besideTypes[got] {
+			s.refuseSave(r.Context(), node, s.sessionEditors(keyOf(p), p.Users), got, notWritten(refusedOtherType, srvtextVars("format", formatName(got), "ext", want)))
+			return map[string]any{"error": 1, "message": "the saved document is not in a format filex keeps"}, nil
+		}
+		answer, err := s.saveBeside(r.Context(), drv, writer, node, resp.Body, resp.ContentLength, got, keyOf(p), p.Users)
+		if nw, ok := asNotWritten(err); ok {
+			s.refuseSave(r.Context(), node, s.sessionEditors(keyOf(p), p.Users), got, nw)
+			return map[string]any{"error": 1, "message": "the saved document is not what it says it is"}, nil
+		}
+		return answer, nil
+	}
+
 	// Saving back onto a name that has since become a folder would leave `X`
 	// and `X/…` side by side on an object store (storage.ErrKindConflict).
 	if err := storage.EnsureFileTarget(r.Context(), drv, node.Path); err != nil {
@@ -523,7 +619,7 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 			slog.String("err", err.Error()))
 		return map[string]any{"error": 1, "message": "could not preserve the existing file"}, nil
 	}
-	if err := writer.Write(r.Context(), node.Path, resp.Body, resp.ContentLength); err != nil {
+	if err := writer.Write(r.Context(), node.Path, saved, savedSize); err != nil {
 		return map[string]any{"error": 1, "message": "write back: " + err.Error()}, nil
 	}
 

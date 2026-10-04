@@ -190,7 +190,7 @@ There are two, and both run against a throwaway instance this repo starts for
 them - never against a live host, never with a secret:
 
 ```bash
-bash scripts/build-wasm-fixture.sh   # once: the app-plugin fixture 95-app-plugins installs (skips without it)
+bash scripts/build-wasm-fixture.sh   # the echo app the app-plugin specs install; again after its sources change (a stale one fails them)
 node e2e/run.mjs local      # Playwright - e2e/tests/*.spec.ts
 node e2e/run.mjs cypress    # Cypress   - web/cypress/e2e/*.cy.ts
 ```
@@ -437,6 +437,16 @@ serviceGate.ts`); "is this person an administrator who could fix it" is the
 server's answer (`capabilities.caller_admin`), never a role guessed in the
 browser.
 
+The one exception is a switch that waits for a **tenant's own setting**, not
+for a service of the instance: the two encryption request switches in the
+settings dialog (`e2e.request_created`, `e2e.request_decided`) wait for the
+tenant's encryption policy, which the tenant's own administrators set. There
+the person who could fix it - and who a new request is sent to - is an
+administrator *account*: the role the host knows (`host.isAdmin`), because
+`caller_admin` is the supertenant's alone on a multi-tenant install and would
+leave a tenant's own administrator out, and the server publishes nothing
+finer (`eventFixableBy` in `packages/core/src/lib/webhookEvents.ts`).
+
 #### Words: one term per concept
 
 A thing on screen has **one name**, in every language filex ships, on every
@@ -476,6 +486,7 @@ reading two names assumes two things.
 | What a permission check answered, beside each permission on a person's page | Allowed / Denied | İzin var / İzin yok | Allow / Deny - those are the buttons that set an exception |
 | A ready-made set of ticks (Standard user, Read-only, Upload-only, Guest) | preset | hazır ayar | template, şablon |
 | One file or folder opened to a person (Share → People), and the admin page listing them all | grant; the page is **Folder access** | yetki; the page is **Klasör erişimi** | permission, izin - since 0.49 those are a role's words |
+| Whoever runs a multi-tenant filex: the supertenant's administrators, who set each tenant's ceiling | platform operator | platform işletmecisi | service provider, hizmet veren, hizmet sağlayıcı, platform operatörü, platform yöneticisi |
 
 **Spelling is American English.** color, license, favorite, center, gray,
 behavior, organize, analyze, catalog, defense, customize - never colour,
@@ -653,6 +664,17 @@ that converts nothing. The scene refuses to take the picture while anything on i
 says an engine is missing. To rehearse a scene without replacing its pictures:
 `SHOTS_DRY_RUN=1 node e2e/shots/apps.mjs` walks to every picture and writes
 none.
+
+**The ONLYOFFICE scene needs a real document server.** `csvoffice.mjs` (0.51)
+photographs ONLYOFFICE's own spreadsheet, which only a Document Server can
+draw, so it is declared by calling `documentServer()` (e2e/shots/scene.mjs) and
+needs all three of `SHOTS_ONLYOFFICE_URL` (where filex and the browser reach
+the document server), `SHOTS_ONLYOFFICE_JWT` (its secret) and
+`SHOTS_ONLYOFFICE_CALLBACK_HOST` (the host name the document server reaches
+this machine by: the scene's filex listens on every address, because the
+document server downloads the file from it). Without them `pnpm shots` stops
+before it builds anything and says which is missing; in CI, and with
+`--without-apps`, the scene is left out exactly like the app scenes.
 
 ---
 
@@ -969,6 +991,38 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    > is produced by `scripts/export-public.sh`, and the signed tag is made
    > there, on the commit that is actually published.
 
+   > ⚠ **An export that refuses half-way leaves that checkout half rebuilt.**
+   > `scripts/export-public.sh` checks the tree after it has rewritten it, so
+   > a refusal (a private name, a server address, a dead link, a missing
+   > workflow script) leaves modified, deleted and untracked files behind: at
+   > 0.50 it was 795, 8 and 726 (2026-10-03). Put the checkout back before you
+   > fix the source and run the export again - and not with `git stash`, which
+   > keeps the half-rewritten tree around to be applied somewhere later.
+   >
+   > The `grep` below is the proof that every untracked file is one the export
+   > copied in from the private tree; the export refuses to start on a checkout
+   > with changes, so nothing else can be. If it prints a line, stop: that
+   > file is not the export's, and deleting it loses somebody's work.
+
+   ```bash
+   cd /path/to/filex-export
+   git reset -q          # unstage, in case it got as far as `git add -A`
+   git -c core.quotepath=off ls-files --others --exclude-standard > /tmp/left-over
+   git -C /path/to/private/checkout -c core.quotepath=off ls-tree -r --name-only HEAD > /tmp/private-tree
+   grep -vxF -f /tmp/private-tree /tmp/left-over      # expect: nothing
+   tr '\n' '\0' < /tmp/left-over | xargs -0 rm -f
+   git checkout -- .
+   git status --short    # expect: nothing
+   ```
+
+   > What the export refuses is looked for only in the files it publishes -
+   > the tracked ones and the untracked ones the checkout does not ignore - so
+   > ignored build output can no longer stop it. (At 0.50 it was the previous
+   > release's UI in `backend/embed/web`, which the release copies the new UI
+   > into only after the export; the export now empties both embed
+   > directories.) `bash scripts/export-public.sh --scan-only <checkout>` runs
+   > just those checks on a checkout and changes nothing.
+
    > ⚠⚠ **That checkout refuses a push that could publish the private history.**
    > On 2026-08-27 a `git push … main --tags` from the *private* repository
    > sent 47 of its release tags to GitHub: `main` was refused (unrelated
@@ -993,9 +1047,13 @@ pnpm release 0.45.0 --status    # where the recorded run got to
    >   rule stops at 26 characters, which is not even half of the routable
    >   `.01.` form); credentials written as `${VAR:-value}` shell defaults; the
    >   private forge path; host names and addresses under the project's own
-   >   domain other than the two contact addresses; the server addresses and
-   >   the withheld files that `scripts/export-public.sh` itself lists; and
-   >   handover notes anywhere in the tree.
+   >   domain other than the two contact addresses; the server addresses, the
+   >   names (people, tenants, customers, the project's own machines) and the
+   >   withheld files that `scripts/export-public.sh` itself lists; and
+   >   handover notes anywhere in the tree. The names are looked for in what
+   >   the commits change, with the export's own exceptions (`CHANGELOG.md`,
+   >   the release notes, the SQL migrations, the workflows), never in a
+   >   commit's author or message.
    >
    > Pull-request branches (anything under `refs/heads/` except `main`) are
    > rebased, so they may be force-pushed and deleted; they still pass the

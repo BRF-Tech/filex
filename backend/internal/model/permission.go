@@ -153,3 +153,9 @@ const SettingPermissionViewerDefaults = "permissions.viewer_defaults"
 // SettingPermissionAppDefaults holds the built-in roles' decisions about app
 // permissions (perm/app.go): {"user": {"app.sign.request": "deny"}, …}.
 const SettingPermissionAppDefaults = "permissions.app_defaults"
+
+// SettingPermissionCatalogue is the settings key holding the permission
+// catalogue this install last started with: a JSON array of keys, written by
+// perm.UpgradeCatalogue. Absent means v0.49.0's, the release before it was
+// recorded.
+const SettingPermissionCatalogue = "permissions.catalogue"

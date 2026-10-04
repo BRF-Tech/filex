@@ -1,6 +1,6 @@
 # --- Worktrees and scratch copies (maintainers, 2026-09-29) ---
 # Every worktree and every temporary copy of this repository lives HERE, not
-# as a sibling folder at the drive root (G:/filex-wt-*, G:/filex-sdk-049 …):
+# as a sibling folder next to the checkout (../filex-wt-*, ../filex-sdk-049 …):
 #   git worktree add .claude/worktrees/<name> -b <branch>
 # Git and every tool of this repo ignore it; scripts/wt-clean.sh finds it.
 /.claude/worktrees/

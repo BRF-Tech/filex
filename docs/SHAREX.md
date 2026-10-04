@@ -29,8 +29,8 @@ JSON. Ready-to-import ShareX configs live in [`docs/sharex/`](sharex/):
 The endpoint authenticates with a filex API token (the same kind AI agents and
 the MCP server use).
 
-1. Open the filex admin UI and go to **API / MCP** (left sidebar → *Access* →
-   **API / MCP**, at `/admin/api-mcp`).
+1. Open the filex admin UI and go to **API / MCP** (the admin menu → *People &
+   security* → *Security* → **API / MCP**, at `/admin/api-mcp`).
 2. Click **New token**, give it a label (e.g. `ShareX`), and select the
    **`write`** scope. That is the only scope the uploader needs - `write` covers
    both storing the file and minting its share link. The account the token

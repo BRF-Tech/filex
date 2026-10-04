@@ -23,8 +23,9 @@
  *      three, and three results land beside them — none beside the fourth.
  *
  * The fixture is backend/internal/wasmplugin/testdata/echo (built by
- * scripts/build-wasm-fixture.sh); the spec skips without it unless
- * FILEX_REQUIRE_WASM_FIXTURE=1 makes that a failure.
+ * scripts/build-wasm-fixture.sh, read through helpers/echoFixture); the spec
+ * skips without it unless FILEX_REQUIRE_WASM_FIXTURE=1 makes that a failure,
+ * and fails on a module older than its sources.
  *
  * It runs right before 95 (the other echo spec), and nothing depends on that:
  * 95 follows the job ITS click queued (an id above every row the list held
@@ -33,27 +34,13 @@
  * guarantee a spec may lean on (web/tests/quality/e2eSpecNumbers.test.ts).
  */
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName, waitForOp } from '../helpers/seed';
-import { guardFixture, installThroughWizard, type AppFixture, type AppManifest } from '../helpers/appPlugin';
+import { guardFixture, installThroughWizard } from '../helpers/appPlugin';
+import { echoFixture } from '../helpers/echoFixture';
 import { removeApp } from '../helpers/surface';
 
-const FIXTURE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../backend/internal/wasmplugin/testdata/echo');
-const WASM = resolve(FIXTURE_DIR, 'echo.wasm');
-const MANIFEST = resolve(FIXTURE_DIR, 'manifest.json');
-const PRESENT = existsSync(WASM);
-const ECHO: AppFixture = {
-  name: 'echo',
-  present: PRESENT,
-  wasm: WASM,
-  manifestPath: MANIFEST,
-  manifest: PRESENT ? (JSON.parse(readFileSync(MANIFEST, 'utf8')) as AppManifest) : undefined,
-  languages: ['en', 'tr'],
-  skipReason: `echo.wasm not built: bash scripts/build-wasm-fixture.sh (${WASM})`,
-};
+const ECHO = echoFixture();
 
 const STORAGE = `e2e-pick-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;

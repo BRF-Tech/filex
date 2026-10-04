@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/loginguard"
 	"github.com/brf-tech/filex/backend/internal/mailer"
+	"github.com/brf-tech/filex/backend/internal/model"
 )
 
 // Settings handles /api/admin/settings.
@@ -175,6 +176,32 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Value = norm
 	}
+	/* e2e policy — who may encrypt on a single-tenant install (the answer
+	   e2epolicy.PolicyFor reads): the setting PATCH /api/admin/e2e holds,
+	   through a second door, so changed the way that door changes it.
+	   - A person's change: /api/ai/admin and the admin_settings_* MCP tools
+	     reach this handler with an API key on the context.
+	   - One of the four. The rule reads a value it does not know as
+	     `permitted`, so a typo stored here would open encryption to everybody
+	     who holds files.encrypt without anybody having chosen that.
+	   - Recorded as the policy's change (setE2EPolicy: e2e_policy.update,
+	     before and after), and that row is the request's only one. */
+	if key == model.SettingE2EPolicy {
+		if !e2eSessionOnly(w, r, "changing who may encrypt") {
+			return
+		}
+		if !model.ValidE2EPolicy(req.Value) {
+			writeInvalidE2EPolicy(w)
+			return
+		}
+		if err := setE2EPolicy(r, h.Store, nil, req.Value); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		auth.SkipAuditRow(r.Context())
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
 	if err := h.Store.UpsertSetting(r.Context(), key, req.Value); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -258,6 +285,28 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		/* e2e policy — a person's change, and one of the four: refused here,
+		   before anything in the batch is written, for the reasons Set gives. */
+		if k == model.SettingE2EPolicy {
+			if !e2eSessionOnly(w, r, "changing who may encrypt") {
+				return
+			}
+			if val, _ := stringifyValue(v); !model.ValidE2EPolicy(val) {
+				writeInvalidE2EPolicy(w)
+				return
+			}
+		}
+	}
+	/* e2e policy — written the way Set writes it (setE2EPolicy), and first,
+	   so a failure there stops the batch before anything else in it is
+	   written. */
+	policy := raw[model.SettingE2EPolicy]
+	if policy != nil {
+		val, _ := stringifyValue(policy)
+		if err := setE2EPolicy(r, h.Store, nil, val); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	written := map[string]string{}
 	onlyLogin := true
@@ -267,8 +316,9 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	defer func() { auditLoginSettings(r.Context(), written, onlyLogin) }()
+	others := false
 	for k, v := range raw {
-		if k == "" || v == nil {
+		if k == "" || v == nil || k == model.SettingE2EPolicy {
 			continue
 		}
 		val, _ := stringifyValue(v)
@@ -299,6 +349,12 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		h.reloadLogin(k)
 		written[k] = val
+		others = true
+	}
+	// A batch that changed nothing but the policy is recorded by the policy's
+	// own row; one that changed other settings too keeps its settings row.
+	if policy != nil && !others {
+		auth.SkipAuditRow(r.Context())
 	}
 	m, err := h.Store.ListSettings(r.Context())
 	if err != nil {

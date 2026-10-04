@@ -37,6 +37,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/e2e/fxewatch"
 	"github.com/brf-tech/filex/backend/internal/e2e/keyfilewatch"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/external"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/filecache"
@@ -156,6 +157,19 @@ type Deps struct {
 	// ACL resolves per-user/per-item grants (RBAC feature). Constructed in
 	// BuildRouter from Store when nil.
 	ACL *acl.Resolver
+	// E2EPolicy is who may encrypt (internal/e2epolicy): the service
+	// provider's ceiling, the tenant's policy, files.encrypt and the
+	// approvals, asked by every door that can create an encrypted folder's
+	// key file or a `.fxe`. ONE service: the handlers and the S3 and WebDAV
+	// endpoints get it here, and internal/server hands the SAME one to the
+	// SFTP, FTPS and NFS listeners after BuildRouter. Constructed in
+	// BuildRouter from Store and ACL when nil.
+	E2EPolicy *e2epolicy.Service
+	// E2ERequests keeps the approval policy's encryption requests
+	// (internal/e2epolicy requests.go): the explorer leaves them, the panel
+	// decides them. Constructed in BuildRouter from E2EPolicy and Notify when
+	// nil; internal/server runs its hourly expiry after BuildRouter.
+	E2ERequests *e2epolicy.Requests
 	// ProtocolAuth is the one door every non-HTTP protocol resolves its caller
 	// through (WebDAV today; S3, SFTP, FTPS, NFS and FUSE next). ONE instance is
 	// shared on purpose: a resolver per protocol would mean a credential cache
@@ -230,6 +244,22 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
 	}
+	// Who may encrypt: one service behind every door that can create an
+	// encrypted folder's key file or a `.fxe` (see Deps.E2EPolicy). Built here
+	// when nil, like ACL, so a Deps assembled by hand — tests, embedders — is
+	// never left without the rule.
+	if d.E2EPolicy == nil {
+		d.E2EPolicy = e2epolicy.New(e2epolicy.Options{
+			Store: d.Store, ACL: d.ACL, MultiTenant: d.Cfg.MultiTenant,
+			// Whether a folder is new and whether a request's path is there
+			// are asked of the storage too, not only of the catalogue.
+			Drivers: d.StorageResolver,
+			// An approval spent at a create door is one audit row,
+			// e2e_request.use, naming the approval and the folder it was
+			// spent on (e2epolicy requests.go UseRecorder).
+			OnUse: e2epolicy.UseRecorder(d.Store),
+		})
+	}
 	// Permission-rule settings the session layer enforces (Require 2FA).
 	auth.SetPermissionStore(d.Store)
 
@@ -294,6 +324,7 @@ func BuildRouter(d *Deps) http.Handler {
 		Store:       d.Store,
 		Auth:        d.ProtocolAuth,
 		ACL:         d.ACL,
+		E2EPolicy:   d.E2EPolicy,
 		Resolver:    d.StorageResolver,
 		Body:        d.Body,
 		Quota:       d.Quota,
@@ -382,6 +413,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// Existing user-facing handlers.
 	mh := handlers.NewManager(d.Store, d.StorageResolver)
 	mh.AttachACL(d.ACL)
+	mh.E2EPolicy = d.E2EPolicy
 	mh.ThumbSigner = thumbSigner
 	if d.ThumbRefresh != nil {
 		mh.ThumbRefresh = d.ThumbRefresh
@@ -414,6 +446,7 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
 	uh.AttachACL(d.ACL)
+	uh.E2EPolicy = d.E2EPolicy
 	// Staged uploads — the driver-agnostic resumable path (docs/UPLOADS.md).
 	// It is handed the manager so the committed bytes fire the same post-write
 	// hooks (search index, thumbnail, writehook, realtime) as vfUpload rather
@@ -480,6 +513,7 @@ func BuildRouter(d *Deps) http.Handler {
 	ah.AttachArchiveEngine(archiveEngine)
 	ah.AttachOps(d.Ops)
 	ah.AttachACL(d.ACL)
+	ah.E2EPolicy = d.E2EPolicy
 	ah.AttachBody(d.Body)
 	// ⚠ Without these two, Extract and Add put bytes on the storage and told
 	// nobody: no node row, no search document, no realtime frame.
@@ -526,6 +560,7 @@ func BuildRouter(d *Deps) http.Handler {
 	uploadTickets := handlers.NewUploadTicketStore()
 	tuh := handlers.NewTicketUpload(d.Store, d.StorageResolver, uploadTickets)
 	tuh.AttachACL(d.ACL)
+	tuh.AttachE2EPolicy(d.E2EPolicy)
 	tuh.AttachThumbs(d.Thumbs)
 	tuh.AttachSearchIndex(d.Index)
 	tuh.AttachStaged(suh)
@@ -536,9 +571,12 @@ func BuildRouter(d *Deps) http.Handler {
 	dh.AttachLocale(d.Cfg.DefaultLocale)
 	oh := handlers.NewOps(d.Ops, d.Store)
 	oh.AttachACL(d.ACL)
+	oh.E2EPolicy = d.E2EPolicy
+	oh.StorageResolver = d.StorageResolver
 	apH := handlers.NewAppPlugins(d.AppPlugins, d.Store, d.ACL, d.Ops, d.StorageResolver, d.Index, d.Thumbs)
 	apH.Assoc = d.Assoc
 	apH.Quota = d.Quota
+	apH.E2EPolicy = d.E2EPolicy
 	// Plugin install requests (internal/pluginreq): ONE service behind the
 	// panel's /api/admin/plugin-requests and the admin MCP tools.
 	pluginRequests := d.PluginRequests
@@ -546,6 +584,14 @@ func BuildRouter(d *Deps) http.Handler {
 		pluginRequests = pluginreq.New(pluginreq.Options{
 			Store: d.Store, Apps: d.AppPlugins, Plugins: d.Plugins, Notify: d.Notify,
 			TTL: time.Duration(d.Cfg.PluginRequestTTLDays) * 24 * time.Hour,
+		})
+	}
+	// Encryption requests (internal/e2epolicy requests.go): ONE service
+	// behind the explorer's /api/files/e2e/requests and the panel's
+	// /api/admin/e2e/requests. internal/server runs its hourly expiry.
+	if d.E2ERequests == nil {
+		d.E2ERequests = e2epolicy.NewRequests(e2epolicy.RequestsOptions{
+			Store: d.Store, Policy: d.E2EPolicy, Notify: d.Notify,
 		})
 	}
 	// A plugin job runs on the queue with no browser in scope, so the origin
@@ -621,6 +667,9 @@ func BuildRouter(d *Deps) http.Handler {
 		}
 	}
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
+	// Who may encrypt here (`e2e_policy`, a signed-in caller's): the tenant
+	// ceiling and the policy, internal/e2epolicy.
+	ch.E2EPolicy = d.E2EPolicy
 	// ⚠ Only a non-nil mailer: a nil *mailer.Service stored in the interface
 	// would make the field say "not ready" on a build that never had mail
 	// wired, which is a different fact from "the operator has not set it up".
@@ -753,6 +802,7 @@ func BuildRouter(d *Deps) http.Handler {
 	}
 	saveTextH := handlers.NewSaveText(d.Store, d.StorageResolver)
 	saveTextH.AttachACL(d.ACL)
+	saveTextH.E2EPolicy = d.E2EPolicy
 	saveTextH.AttachSearchIndex(d.Index)
 	if d.Thumbs != nil {
 		saveTextH.AttachThumbs(d.Thumbs)
@@ -1573,6 +1623,16 @@ func BuildRouter(d *Deps) http.Handler {
 			// `write`; dropping versions or trash entries also asks `delete`
 			// (E2E.Cleanup).
 			r.With(write).Post("/e2e/cleanup", e2eH.Cleanup)
+			// Who may encrypt (internal/e2epolicy): under the approval policy a
+			// person leaves a request, which an administrator of their tenant
+			// decides. Leaving one asks `write`: it is the first step of a
+			// write, not a question.
+			e2ePolH := handlers.NewE2EPolicyFiles(d.Store, d.E2EPolicy, d.E2ERequests)
+			r.Get("/e2e/requests", e2ePolH.MyRequests)
+			r.With(write).Post("/e2e/requests", e2ePolH.CreateRequest)
+			// The explorer's question before it offers "New encrypted folder",
+			// "Encrypt…" or a file's encryption: changes nothing, so `read`.
+			r.Post("/e2e/allowed", e2ePolH.Allowed)
 
 			// Quota — current user's usage + limit.
 			r.Get("/quota/me", quotaH.Me)
@@ -1959,6 +2019,25 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Delete("/{id}/storages/{storageID}", provH.UnlinkStorage)
 				})
 
+				// Who may encrypt (internal/e2epolicy, handlers/e2e_policy_admin.go):
+				// the policy of the tenant the caller administers and — for the
+				// supertenant alone — every tenant's ceiling. Writes are a
+				// person's; both gates are inside the handler, the reasoning of
+				// supertenant.go.
+				e2eAdmH := handlers.NewE2EPolicyAdmin(d.Store, d.E2EPolicy, d.Cfg.MultiTenant)
+				e2eAdmH.Requests = d.E2ERequests
+				r.Route("/e2e", func(r chi.Router) {
+					r.Get("/", e2eAdmH.Get)
+					r.Patch("/", e2eAdmH.Patch)
+					r.Get("/tenants", e2eAdmH.Tenants)
+					r.Patch("/tenants/{id}", e2eAdmH.PatchTenant)
+					// The approval policy's requests: a tenant administrator's
+					// own tenant's (the handler filters), decided by a person.
+					r.Get("/requests", e2eAdmH.ListRequests)
+					r.Post("/requests/{id}/approve", e2eAdmH.ApproveRequest)
+					r.Post("/requests/{id}/reject", e2eAdmH.RejectRequest)
+				})
+
 				// AI / MCP / FilexClient bearer tokens. POST returns the
 				// plaintext token ONCE; only its sha256 hash is stored.
 				aiTokensH := handlers.NewAITokens(d.Store, d.ProtocolAuth)
@@ -2086,6 +2165,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// storage sync walks the folder. Nil index is a no-op.
 	aiH.AttachSearchIndex(d.Index)
 	aiH.AttachACL(d.ACL)
+	aiH.AttachE2EPolicy(d.E2EPolicy)
 	aiH.AttachThumbs(d.Thumbs)
 	aiH.AttachStaged(suh)
 	aiH.AttachBody(d.Body)
@@ -2146,6 +2226,7 @@ func BuildRouter(d *Deps) http.Handler {
 	aiMCP := handlers.NewAIMCP(d.Store, d.StorageResolver, aiAdmin, d.Share, d.Cfg.PublicURL)
 	aiMCP.AttachTenants(tenants)
 	aiMCP.AttachACL(d.ACL)
+	aiMCP.AttachE2EPolicy(d.E2EPolicy)
 	aiMCP.AttachThumbs(d.Thumbs)
 	aiMCP.AttachSearchIndex(d.Index)
 	aiMCP.AttachStaged(suh)
@@ -2252,6 +2333,7 @@ func BuildRouter(d *Deps) http.Handler {
 	sxUploadH := handlers.NewShareX(d.Store, d.StorageResolver, d.Share, d.Cfg.PublicURL)
 	sxUploadH.AttachTenants(tenants)
 	sxUploadH.AttachACL(d.ACL)
+	sxUploadH.AttachE2EPolicy(d.E2EPolicy)
 	sxUploadH.AttachThumbs(d.Thumbs)
 	sxUploadH.AttachSearchIndex(d.Index)
 	sxUploadH.AttachStaged(suh)
@@ -2268,7 +2350,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// client then needs /s3 in its endpoint URL and cannot use virtual-hosted
 	// addressing — which is why the host route above is the real answer.
 	r.Mount(s3api.Prefix, s3h)
-	r.Mount("/dav", dav.NewHandler(dav.Config{Enabled: d.Cfg.DAV.Enabled, Store: d.Store, Resolver: d.StorageResolver, ACL: d.ACL, Index: d.Index, Thumbs: d.Thumbs, Body: d.Body, Quota: d.Quota, MultiTenant: d.Cfg.MultiTenant, Auth: d.ProtocolAuth, LockDir: filepath.Join(d.Cfg.DataDir, "dav")}))
+	r.Mount("/dav", dav.NewHandler(dav.Config{Enabled: d.Cfg.DAV.Enabled, Store: d.Store, Resolver: d.StorageResolver, ACL: d.ACL, E2EPolicy: d.E2EPolicy, Index: d.Index, Thumbs: d.Thumbs, Body: d.Body, Quota: d.Quota, MultiTenant: d.Cfg.MultiTenant, Auth: d.ProtocolAuth, LockDir: filepath.Join(d.Cfg.DataDir, "dav")}))
 
 	// ────── healthz ──────
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {

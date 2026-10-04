@@ -5,7 +5,7 @@
 // (admin isem o da adminde de ayrı bir menüde signature tablosunu görebiliyor
 // olmalıyım bence)". The panel answers the second half the only way that does
 // not have to be written again for the next plugin: every installed, running
-// plugin that ships a `home` view gets a sidebar row
+// plugin that ships a `home` view gets a menu row
 // (`composables/usePluginHomeApps`), and the row opens that view inside the
 // panel (`views/AppHome.vue` → the package's `PluginPageView`, embedded
 // frame). Nothing in the panel names `sign`; the signing app's request table
@@ -27,14 +27,14 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 
 import { invalidatePluginActions } from '@brftech/filex-core';
 
-import Sidebar from '@/components/Sidebar.vue';
+import AdminNav from '@/components/AdminNav.vue';
 import AppHome from '@/views/AppHome.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
-// The sidebar asks the trash how full it is on mount; irrelevant here and a
+// The menu asks the trash how full it is on mount; irrelevant here and a
 // real request in a test environment that has no server.
 vi.mock('@/api/trash', () => ({
   trashApi: { list: vi.fn(async () => ({ total: 0, entries: [] })) },
@@ -157,6 +157,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/groups', name: 'groups', component: Blank },
       { path: '/grants', name: 'grants', component: Blank },
       { path: '/roles', name: 'roles', component: Blank },
+      { path: '/encryption', name: 'encryption', component: Blank },
       { path: '/auth-providers', name: 'auth-providers', component: Blank },
       { path: '/tenants', name: 'tenants', component: Blank },
       { path: '/my-tenant', name: 'tenant-self', component: Blank },
@@ -165,7 +166,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/settings', name: 'settings', component: Blank },
       { path: '/branding', name: 'branding', component: Blank },
       // tema:v1 — the Appearance screen. ⚠ This stub must carry EVERY
-      // route the real sidebar links to: vue-router throws on an unknown
+      // route the real menu links to: vue-router throws on an unknown
       // name while resolving a <RouterLink>, so one missing entry fails
       // every test in the file for a reason that has nothing to do with
       // what they measure.
@@ -200,9 +201,12 @@ function signIn(role: 'admin' | 'user', plugins = true) {
   caps.data = { ...caps.data, app_plugins: { enabled: plugins } };
 }
 
-async function sidebar(locale: 'en' | 'tr' = 'en') {
-  const w = mount(Sidebar, {
-    props: { open: true },
+/* The admin menu (0.51, GitHub #82: core's MegaMenu in lib/adminNav's
+   grouping), drawn as the phone drawer's list: every section open, so a row
+   is in the document without a click. */
+async function menu(locale: 'en' | 'tr' = 'en') {
+  const w = mount(AdminNav, {
+    props: { mode: 'list' },
     global: { plugins: [await router(), i18n(locale)] },
   });
   await flushPromises();
@@ -223,11 +227,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('admin sidebar — Apps', () => {
+describe('admin menu — Apps', () => {
   it('is absent when no installed plugin ships a home view', async () => {
     vi.stubGlobal('fetch', serve({ actions: [], views: ACTIONS.views.filter((v) => v.placement !== 'home') }));
     signIn('admin');
-    const w = await sidebar();
+    const w = await menu();
     expect(w.find('[data-testid="nav-group-apps"]').exists()).toBe(false);
     // …and no heading is left floating over the absent rows.
     expect(w.text()).not.toContain('Apps');
@@ -235,14 +239,14 @@ describe('admin sidebar — Apps', () => {
 
   it('makes no plugin call at all while the host cannot run plugins', async () => {
     signIn('admin', false);
-    const w = await sidebar();
+    const w = await menu();
     expect(asked.filter((u) => u.includes('/plugins/'))).toEqual([]);
     expect(w.find('[data-testid="nav-group-apps"]').exists()).toBe(false);
   });
 
   it('lists one row per home view — inspector and modal views stay out', async () => {
     signIn('admin');
-    const w = await sidebar();
+    const w = await menu();
     const group = w.find('[data-testid="nav-group-apps"]');
     expect(group.exists()).toBe(true);
     expect(group.find('p').text()).toBe('Apps');
@@ -253,27 +257,27 @@ describe('admin sidebar — Apps', () => {
     expect(rows[1].attributes('href')).toBe('/admin/apps/convert/home/queue');
     // The manifest's icon name is drawn from the core icon library, never
     // from markup a plugin supplied.
-    expect(rows[0].find('.nav-appicon svg').exists()).toBe(true);
+    expect(rows[0].find('.fx-mega__glyph svg').exists()).toBe(true);
   });
 
   // ⚠ Every app row shares ONE route name and differs only in its params, so
-  // a sidebar that compares names alone lights up every app in the list the
+  // a menu that compares names alone lights up every app in the list the
   // moment any one of them is open.
   it('marks only the app you are standing in', async () => {
     signIn('admin');
-    const w = mount(Sidebar, {
-      props: { open: true },
+    const w = mount(AdminNav, {
+      props: { mode: 'list' },
       global: { plugins: [await router('/apps/sign/home/envelopes'), i18n()] },
     });
     await flushPromises();
     const rows = w.find('[data-testid="nav-group-apps"]').findAll('a');
-    expect(rows[0].classes()).toContain('nav-link-active');
-    expect(rows[1].classes()).not.toContain('nav-link-active');
+    expect(rows[0].attributes('aria-current')).toBe('page');
+    expect(rows[1].attributes('aria-current')).toBeUndefined();
   });
 
   it("reads the view's label in the reader's language", async () => {
     signIn('admin');
-    const w = await sidebar('tr');
+    const w = await menu('tr');
     const group = w.find('[data-testid="nav-group-apps"]');
     expect(group.find('p').text()).toBe('Uygulamalar');
     expect(group.findAll('a').map((r) => r.text())).toEqual(['İmzalar', 'Dönüştürmeler']);
@@ -281,7 +285,7 @@ describe('admin sidebar — Apps', () => {
 
   it('shows nothing to an account that is not an administrator', async () => {
     signIn('user');
-    const w = await sidebar();
+    const w = await menu();
     expect(w.find('[data-testid="nav-group-apps"]').exists()).toBe(false);
   });
 });
@@ -298,7 +302,7 @@ describe('admin panel — an app plugin\'s screen', () => {
   it('draws the app\'s own surface inside the panel, with the panel\'s heading', async () => {
     signIn('admin');
     const w = await open();
-    // The heading is the sidebar row's label, so the page is named the same
+    // The heading is the menu row's label, so the page is named the same
     // way in both places.
     expect(w.find('[data-testid="app-home-title"]').text()).toBe('Signatures');
     // The surface itself is the package's, asked for on the right view…
@@ -332,7 +336,7 @@ describe('admin panel — an app plugin\'s screen', () => {
 // Tenants (docs/TENANT-ADMIN.md) is the platform operator's page on a
 // multi-tenant install: a tenant's administrator would read 403 there, and a
 // single-tenant install has one tenant, its own.
-describe('admin sidebar - Tenants', () => {
+describe('admin menu - Tenants', () => {
   function caps(realm: boolean, callerAdmin: boolean) {
     const c = useCapabilitiesStore();
     c.data = { ...c.data, realm: realm ? { enabled: true, locked_realm: null } : undefined, caller_admin: callerAdmin };
@@ -341,23 +345,41 @@ describe('admin sidebar - Tenants', () => {
   it('is absent on a single-tenant install', async () => {
     signIn('admin');
     caps(false, true);
-    const w = await sidebar();
+    const w = await menu();
     expect(w.find('[data-testid="nav-tenants"]').exists()).toBe(false);
   });
 
   it('is absent for an administrator of a tenant', async () => {
     signIn('admin');
     caps(true, false);
-    const w = await sidebar();
+    const w = await menu();
     expect(w.find('[data-testid="nav-tenants"]').exists()).toBe(false);
   });
 
   it('is there for the platform operator of a multi-tenant install', async () => {
     signIn('admin');
     caps(true, true);
-    const w = await sidebar();
+    const w = await menu();
     const row = w.get('[data-testid="nav-tenants"]');
     expect(row.text()).toBe(en.nav.tenants);
     expect(row.attributes('href')).toBe('/admin/tenants');
+  });
+});
+
+describe('admin menu — Encryption', () => {
+  it('is among the security pages, for an administrator (a tenant’s administrator included)', async () => {
+    signIn('admin');
+    const w = await menu();
+    const link = w.find('[data-testid="nav-encryption"]');
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toBe('Encryption');
+    expect(link.attributes('href')).toBe('/admin/encryption');
+    expect(w.find('[data-testid="nav-group-security"]').find('[data-testid="nav-encryption"]').exists()).toBe(true);
+  });
+
+  it('reads in the reader’s language', async () => {
+    signIn('admin');
+    const w = await menu('tr');
+    expect(w.find('[data-testid="nav-encryption"]').text()).toBe('Şifreleme');
   });
 });

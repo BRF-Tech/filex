@@ -15,10 +15,13 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/trash"
 )
 
 // Ops handles async copy/move/delete tasks.
@@ -30,6 +33,17 @@ type Ops struct {
 	Service *ops.Service
 	Store   db.Store // for path → storage_id resolution in the per-verb endpoints
 	ACL     *acl.Resolver
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go): a move under a name
+	// of the caller's choosing that lands on a key file's or a `.fxe`'s name
+	// asks it (refuseE2E), unless it is free: a folder, a `.fxe` that stays a
+	// `.fxe`, a key file that stays its own folder's. A COPY that makes a new
+	// encrypted item where it lands asks it too, whatever its name: a `.fxe`,
+	// a key file, a folder that holds either (refuseE2ECopy). nil: not wired,
+	// allowed.
+	E2EPolicy *e2epolicy.Service
+	// StorageResolver is how refuseE2E tells a file from a folder at a
+	// source. nil: every source counts as a file.
+	StorageResolver func(int64) (storage.Driver, error)
 }
 
 // NewOps constructs an Ops handler.
@@ -124,6 +138,21 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	if destID := req.DestStorageID; destID != 0 && !ownsStorage(w, r, destID, "storage") {
 		return
 	}
+	// ⚠⚠ The checks below ask about the storage-relative form of each path
+	// (bareRel: an `<adapter>://` prefix dropped), but the queue is handed the
+	// path as it was sent, and a driver reads `x/y://kutu/a` as the folder
+	// `x/y:` and below it. A `dest` of `baska/alt://kutu/` was judged as `kutu`
+	// (inside a `root:` token's folder, and where the caller holds a grant)
+	// and written to `baska/alt:/kutu/` (GHSA-8gvc-6w52-6c7j). The paths of
+	// this body are storage-relative (`storage_id` names the storage), so one
+	// the checks and the worker would read differently is refused: a `://`
+	// anywhere, or a `..` segment (`..\` too, which a Windows host folds).
+	for _, p := range append(append([]string{}, req.Sources...), req.Dest) {
+		if strings.Contains(p, "://") || pathHasDotDot(p) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path: " + p, "code": "BAD_PATH"})
+			return
+		}
+	}
 	// The storage-relative form of every path the op names, read once for the
 	// checks below.
 	destID := req.DestStorageID
@@ -173,6 +202,7 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	/* wiring:e2 — same boundary rule for the unified endpoint. */
+	ctx := r.Context()
 	if req.Kind != ops.OpDelete {
 		if lk, ok := o.Store.(e2e.NodeByPathLookup); ok {
 			if err := e2e.GuardTransfer(r.Context(), lk, req.StorageID, rels, destID, drel); err != nil {
@@ -180,9 +210,13 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var done bool
+		if ctx, done = o.refuseE2E(w, r, req.Kind, req.StorageID, rels, destID, req.Dest); done {
+			return
+		}
 	}
 
-	op, err := o.Service.SubmitTo(r.Context(), req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest)
+	op, err := o.Service.SubmitTo(ctx, req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest)
 	if answerGate(w, err) {
 		return
 	}
@@ -276,6 +310,13 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 			raw = raw[idx+3:]
 		}
 		raw = strings.TrimLeft(raw, "/") // drop leading slashes
+		// The sources are refused a `..` segment (resolveBatch); the target
+		// the same way, `..\` included: the root check reads `\` as part of a
+		// name and a Windows host's driver as a separator.
+		if pathHasDotDot(raw) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad target path"})
+			return
+		}
 		if raw == "" {
 			// Storage root — drop sources at the root with their own
 			// basename.
@@ -364,6 +405,7 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 	 * Copy and move are server-side byte operations and the server holds no
 	 * key, so it can neither encrypt on the way in nor decrypt on the way
 	 * out. The only honest answer is no. See internal/e2e/guard.go. */
+	ctx := r.Context()
 	if kind != "delete" {
 		if lk, ok := o.Store.(e2e.NodeByPathLookup); ok {
 			if err := e2e.GuardTransfer(r.Context(), lk, storageID, sources, destStorageID, strings.Trim(dest, "/")); err != nil {
@@ -371,9 +413,13 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 				return
 			}
 		}
+		var done bool
+		if ctx, done = o.refuseE2E(w, r, kind, storageID, sources, destStorageID, dest); done {
+			return
+		}
 	}
 
-	op, err := o.Service.SubmitTo(r.Context(), kind, storageID, destStorageID, sources, dest)
+	op, err := o.Service.SubmitTo(ctx, kind, storageID, destStorageID, sources, dest)
 	if answerGate(w, err) {
 		return
 	}
@@ -382,6 +428,117 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"op": op})
+}
+
+// refuseE2E is who may encrypt (e2e_policy_gate.go) at a queued copy or move,
+// and answers the request when the rule says no. A copy is refuseE2ECopy's.
+// For a move, a destination without a trailing slash is the path every
+// source becomes (joinIntoDir's literal form): a source landing on a key
+// file's or a `.fxe`'s name there is a new encryption unless it carries what
+// is encrypted already (e2epolicy.RelocationEncrypts). A source moved INTO a
+// folder keeps its own name, and is not asked.
+//
+// Asked for every source before anything is queued, as the transfer guard is:
+// one refusal refuses the batch. The worker runs as nobody, so this is the
+// only moment there is a person to judge — and a source let through because it
+// was a folder is not settled: ctx tells the queue which ones are
+// (ops.WithEncryptionSettled), and the worker fails any other that is a file
+// by the time it runs. done: it answered the request.
+func (o *Ops) refuseE2E(w http.ResponseWriter, r *http.Request, kind string, storageID int64, sources []string, destStorageID int64, dest string) (ctx context.Context, done bool) {
+	if kind == ops.OpCopy {
+		return o.refuseE2ECopy(w, r, storageID, sources, destStorageID, dest)
+	}
+	ctx = r.Context()
+	if dest == "" || strings.HasSuffix(dest, "/") {
+		return ctx, false
+	}
+	var srcDrv storage.Driver
+	if o.StorageResolver != nil {
+		if d, err := o.StorageResolver(storageID); err == nil {
+			srcDrv = d
+		}
+	}
+	if destStorageID == 0 {
+		destStorageID = storageID
+	}
+	var settled []string
+	for _, src := range sources {
+		done, ok := refuseE2ERenameAt(w, r, o.E2EPolicy, o.Store, srcDrv, destStorageID, src, bareRel(dest), destStorageID == storageID)
+		if done {
+			return ctx, true
+		}
+		if ok {
+			settled = append(settled, src)
+		}
+	}
+	return ops.WithEncryptionSettled(ctx, settled), false
+}
+
+// refuseE2ECopy is who may encrypt at a queued COPY (operator decision
+// 2026-10-03): a copy that makes a new encrypted item where it lands is asked
+// as that encryption, whatever name it lands under - a `.fxe` or a key file,
+// or a plain file given either name (by the name it lands under), and a
+// folder that holds a key file or a `.fxe` anywhere below it (a new encrypted
+// folder at its destination). e2epolicy.Service.CheckCopy decides; a move or
+// a rename is refuseE2E's, and stays free for what is encrypted already.
+//
+// A source copied INTO a folder is asked under its own name there: the queue
+// may land it beside a taken name (`…-copy`), which keeps a `.fxe`'s
+// extension and is a new folder all the same. Under the approval policy one
+// approval is spent per source that needs one, before anything is queued; a
+// refusal refuses the batch. The FILE sources asked and allowed, and the ones
+// nothing needed asking about, are settled for the worker
+// (ops.WithEncryptionSettled); a folder never is, so a file that takes its
+// place before the job runs is refused there. done: it answered the request.
+func (o *Ops) refuseE2ECopy(w http.ResponseWriter, r *http.Request, storageID int64, sources []string, destStorageID int64, dest string) (ctx context.Context, done bool) {
+	ctx = r.Context()
+	svc := o.E2EPolicy
+	if svc == nil || dest == "" {
+		return ctx, false
+	}
+	if destStorageID == 0 {
+		destStorageID = storageID
+	}
+	var srcDrv storage.Driver
+	if o.StorageResolver != nil {
+		if d, err := o.StorageResolver(storageID); err == nil {
+			srcDrv = d
+		}
+	}
+	into := strings.HasSuffix(dest, "/")
+	var (
+		settled []string
+		dstSt   *model.Storage
+	)
+	u := auth.UserFrom(ctx)
+	for _, src := range sources {
+		dst := bareRel(dest)
+		if into {
+			dst = strings.Trim(path.Join(dst, path.Base("/"+strings.Trim(src, "/"))), "/")
+		}
+		isDir, err := svc.SourceIsFolder(ctx, storageID, srcDrv, src)
+		if err != nil {
+			return ctx, answerE2E(w, r, &model.Storage{ID: destStorageID}, err)
+		}
+		if !isDir && !e2epolicy.IsEncryptionName(dst) {
+			settled = append(settled, src)
+			continue
+		}
+		if dstSt == nil {
+			if dstSt, err = o.Store.GetStorage(ctx, destStorageID); err != nil {
+				return ctx, answerE2E(w, r, &model.Storage{ID: destStorageID}, err)
+			}
+		}
+		if answerE2E(w, r, dstSt, svc.CheckCopy(ctx, u, dstSt, dst, storageID, src, isDir)) {
+			return ctx, true
+		}
+		// A folder was judged as a folder: one a file takes the place of
+		// before the job runs is the worker's to refuse (it is not settled).
+		if !isDir {
+			settled = append(settled, src)
+		}
+	}
+	return ops.WithEncryptionSettled(ctx, settled), false
 }
 
 // badTransferName says what is wrong with a caller-chosen transfer name, or ""
@@ -543,6 +700,9 @@ func (o *Ops) List(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := make([]opListRow, 0, len(list))
 	for _, op := range list {
+		if !opInCallerRoot(r.Context(), o.Store, op) {
+			continue
+		}
 		rows = append(rows, newOpListRow(op))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ops": rows})
@@ -588,6 +748,96 @@ func opsViewer(r *http.Request) ops.Viewer {
 		}
 	}
 	return v
+}
+
+// sees reports whether the caller may follow (list, read, cancel) op: the
+// queue's own rule (opsViewer) and, for a caller confined to a folder, every
+// path the row names inside that folder (opInCallerRoot).
+func (o *Ops) sees(r *http.Request, op *ops.Op) bool {
+	return opsViewer(r).Sees(op) && opInCallerRoot(r.Context(), o.Store, op)
+}
+
+// opInCallerRoot reports whether every path op names lies inside the caller's
+// `root:` (callerRoot). Inert for an unconfined caller.
+//
+// ⚠ opsViewer narrows a confined caller to the rows its ACCOUNT queued, and
+// one account commonly stands behind many `root:` tokens - the documented way
+// to embed filex is one service account and a token per project
+// (docs/INTEGRATION.md). Every project's token was handed every other
+// project's operations, paths spelled out, and could cancel them
+// (GHSA-8gvc-6w52-6c7j). A row is placed by what its kind names: paths for the
+// file operations, the trash entry for a restore, the staged upload for an
+// upload commit. What cannot be placed is outside the root, except a finished
+// upload commit whose session is gone: it names nothing but an upload id.
+func opInCallerRoot(ctx context.Context, store db.Store, op *ops.Op) bool {
+	root, rooted := callerRoot(ctx)
+	if !rooted {
+		return true
+	}
+	if op == nil {
+		return false
+	}
+	names := map[int64]string{}
+	in := func(storageID int64, p string) bool {
+		name, rel := splitAdapterPath(p)
+		if name == "" {
+			n, ok := names[storageID]
+			if !ok {
+				n = rootStorageName(ctx, store, storageID)
+				names[storageID] = n
+			}
+			name = n
+		}
+		return root.Within(name, rel)
+	}
+	destID := op.DestStorageID
+	if destID == 0 {
+		destID = op.StorageID
+	}
+	switch op.Kind {
+	case ops.OpCopy, ops.OpMove, ops.OpDelete, ops.OpRename, ops.OpArchiveCreate, ops.OpArchiveExtract, ops.OpPluginAction:
+		for _, s := range op.Sources {
+			if !in(op.StorageID, s) {
+				return false
+			}
+		}
+		// A delete names no destination, and an app's action names its job.
+		if op.Kind != ops.OpDelete && op.Kind != ops.OpPluginAction && op.Dest != "" && !in(destID, op.Dest) {
+			return false
+		}
+		return true
+	case ops.OpRestore:
+		for _, s := range op.Sources {
+			id, err := strconv.ParseInt(s, 10, 64)
+			if err != nil {
+				return false
+			}
+			n, err := store.GetNode(ctx, id)
+			if err != nil || n == nil {
+				return false
+			}
+			orig, known := trash.OriginalPath(n)
+			if !known || !in(n.StorageID, orig) {
+				return false
+			}
+		}
+		return true
+	case ops.OpUploadCommit:
+		for _, s := range op.Sources {
+			row, err := store.GetStagedUpload(ctx, s)
+			if err != nil || row == nil {
+				if op.Status == ops.StatusPending || op.Status == ops.StatusRunning {
+					return false
+				}
+				continue
+			}
+			if !in(row.StorageID, row.StorageKey) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // listSourcesPreview is how many of an op's sources one LIST row carries.
@@ -678,7 +928,7 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 	// The person who queued it, or an administrator: opsViewer already narrows
 	// everybody else to their own rows. A row that names nobody (written before
 	// actor_id existed) is an administrator's to stop.
-	if !opsViewer(r).Sees(op) {
+	if !o.sees(r, op) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return
 	}
@@ -730,7 +980,7 @@ func (o *Ops) Status(w http.ResponseWriter, r *http.Request) {
 	// An op is in reach if EITHER end is — a cross-storage copy belongs to both
 	// sides — and a trash empty is its tenant's (ops.Viewer); below an
 	// administrator, only the caller's own row is (opsViewer).
-	if !opsViewer(r).Sees(op) {
+	if !o.sees(r, op) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown op"})
 		return
 	}
@@ -773,6 +1023,15 @@ func opDestPerm(kind string) perm.Perm {
 // opAllow checks one path of an op: the per-user permission p when set (its
 // level included), otherwise the plain ≥editor level. It writes the refusal.
 func (o *Ops) opAllow(w http.ResponseWriter, r *http.Request, storageID int64, rel string, p perm.Perm, legacyMsg string) bool {
+	// The token's `root:` first. Every source and every destination of the
+	// three per-verb doors and of POST /ops is asked here, so this holds them
+	// to the root however the body was sent: confine.Middleware rewrites the
+	// per-verb `source`/`target` only in a body labelled JSON, and the same
+	// body as text/plain reached the queue untouched (GHSA-8gvc-6w52-6c7j).
+	if !rootAllows(r.Context(), o.Store, storageID, rel) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error() + ": " + rel})
+		return false
+	}
 	// A queued copy, move or delete of an entry the storage could not answer
 	// for, or into one, is refused before it is queued (issue #104).
 	if refuseUnavailableID(w, r, o.Store, storageID, rel) {

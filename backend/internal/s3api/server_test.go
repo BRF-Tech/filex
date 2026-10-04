@@ -15,6 +15,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/identitystore"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -72,6 +73,13 @@ func (hz *harness) rootOf(t *testing.T, st *model.Storage) string {
 
 func newHarness(t *testing.T, multiTenant bool) *harness {
 	t.Helper()
+	return newHarnessCfg(t, multiTenant, nil)
+}
+
+// newHarnessCfg is newHarness with a say in the handler's Config before it is
+// built: no staging area, or a rule over a store that fails, say.
+func newHarnessCfg(t *testing.T, multiTenant bool, tweak func(*s3api.Config)) *harness {
+	t.Helper()
 	_, raw := testutil.NewTestDB(t)
 	var store db.Store = identitystore.New(raw)
 	if multiTenant {
@@ -90,11 +98,12 @@ func newHarness(t *testing.T, multiTenant bool) *harness {
 
 	stagingRoot := t.TempDir()
 	hz := &harness{res: res, store: store, at: time.Now().UTC(), roots: map[int64]string{}, staging: stagingRoot}
-	hz.h = s3api.NewHandler(s3api.Config{
+	cfg := s3api.Config{
 		Enabled:     true,
 		Store:       store,
 		Auth:        res,
 		ACL:         acl.New(store),
+		E2EPolicy:   e2epolicy.New(e2epolicy.Options{Store: store, ACL: acl.New(store), MultiTenant: multiTenant}),
 		MultiTenant: multiTenant,
 		Domain:      "s3.filex.test",
 		// A real staging area, so multipart measures the product's own parts
@@ -133,7 +142,11 @@ func newHarness(t *testing.T, multiTenant bool) *harness {
 			}
 			return drv, nil
 		},
-	})
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	hz.h = s3api.NewHandler(cfg)
 	return hz
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/davlock"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -55,6 +56,13 @@ func newHarness(t *testing.T) *harness {
 // wiring rather than through a second harness that drifts from this one.
 func newHarnessStore(t *testing.T, wrap func(db.Store) db.Store) *harness {
 	t.Helper()
+	return newHarnessWith(t, wrap, nil)
+}
+
+// newHarnessWith is newHarnessStore with a say in the handler's Config too,
+// before it is built.
+func newHarnessWith(t *testing.T, wrap func(db.Store) db.Store, tweak func(*Config)) *harness {
+	t.Helper()
 	_, raw := dbtest.NewTestDB(t)
 	store := wrap(raw)
 	adminEmail, adminPass := dbtest.SeedAdmin(t, store)
@@ -86,12 +94,17 @@ func newHarnessStore(t *testing.T, wrap func(db.Store) db.Store) *harness {
 		return d, nil
 	}
 
-	h := NewHandler(Config{
-		Enabled:  true,
-		Store:    store,
-		Resolver: resolver,
-		ACL:      acl.New(store),
-	})
+	cfg := Config{
+		Enabled:   true,
+		Store:     store,
+		Resolver:  resolver,
+		ACL:       acl.New(store),
+		E2EPolicy: e2epolicy.New(e2epolicy.Options{Store: store, ACL: acl.New(store)}),
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	h := NewHandler(cfg)
 	mux := http.NewServeMux()
 	mux.Handle(Prefix+"/", h)
 	mux.Handle(Prefix, h)

@@ -18,6 +18,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -88,6 +89,12 @@ type Manager struct {
 	// Ops runs a folder rename asked with `queued=1` as a job of the queue
 	// (vfRename). nil renames inside the request, as it always did.
 	Ops *ops.Service
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go). The doors on this
+	// handler that CREATE a file — upload, New document, a draft's save, and
+	// through it the resumable upload and the public file request — ask it
+	// before an encrypted folder's key file or a `.fxe` comes into being.
+	// nil = the rule is not wired (a handler built by hand in a test).
+	E2EPolicy *e2epolicy.Service
 }
 
 // AttachOps wires the queue a rename asked with `queued=1` runs on.
@@ -180,7 +187,17 @@ func (h *Manager) aclSetByID(ctx context.Context, storageID int64) (*acl.Set, er
 
 // allowed reports whether the caller has at least `need` on rel within s.
 // Unwired ACL (tests) allows; a load error denies.
+//
+// ⚠ A path outside the token's `root:` is denied here whatever the ACL says
+// (rootAllowsIn, inert unconfined). allowed and require are where every
+// explorer verb asks about a path - the base dir, each item of a move or a
+// delete, a rename's new name, each uploaded file, a download - so this is the
+// one check that holds them all to the root however the path reached the
+// handler (GHSA-8gvc-6w52-6c7j: a body confine.Middleware did not read).
 func (h *Manager) allowed(ctx context.Context, s *model.Storage, rel string, need acl.Level) bool {
+	if !rootAllowsIn(ctx, s, rel) {
+		return false
+	}
 	if h.ACL == nil {
 		return true
 	}
@@ -195,6 +212,12 @@ func (h *Manager) allowed(ctx context.Context, s *model.Storage, rel string, nee
 // the level p needs on rel AND p itself, writing the refusal (legacyMsg when
 // the path is the reason, the permission refusal otherwise).
 func (h *Manager) require(w http.ResponseWriter, r *http.Request, s *model.Storage, rel string, p perm.Perm, legacyMsg string) bool {
+	// The token's `root:` first, as in allowed: outside it nothing else is
+	// asked (and nothing about the entry, not even "unavailable", is told).
+	if !rootAllowsIn(r.Context(), s, rel) {
+		refuseOutsideRoot(w)
+		return false
+	}
 	// An entry the storage could not answer for, or anything inside one
 	// (issue #104): every verb that asks for a permission on a path asks
 	// here first, whatever the permission. 409 ENTRY_UNAVAILABLE.
@@ -368,7 +391,10 @@ func (h *Manager) List(w http.ResponseWriter, r *http.Request) {
 // sync worker keeps the cache fresh.
 func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action string) {
 	q := r.URL.Query()
-	pathStr := q.Get("path")
+	// confinedPath: a confined caller that names no `?path=` (the middleware
+	// rewrites only one that is there) lists its root, not the top of the
+	// first storage (GHSA-8gvc-6w52-6c7j).
+	pathStr := confinedPath(r.Context(), q.Get("path"))
 
 	storages, err := h.Store.ListEnabledStorages(r.Context())
 	if err != nil {
@@ -470,6 +496,13 @@ func (h *Manager) listVuefinder(w http.ResponseWriter, r *http.Request, action s
 	}
 	if current == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown adapter: " + adapter})
+		return
+	}
+	// The listing, search and change feed of a folder outside the token's
+	// root are refused here; a preview or download is also refused in
+	// streamBody (allowed/require).
+	if !rootAllowsIn(r.Context(), current, rel) {
+		refuseOutsideRoot(w)
 		return
 	}
 	// Into an entry the storage could not answer for (issue #104): no

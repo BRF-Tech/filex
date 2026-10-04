@@ -243,6 +243,10 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 	   would fetch ciphertext (and a save callback would clobber it). Sniff
 	   the 'filexe2e' magic before building a config. Read errors fall
 	   through — the fetch path will surface them as before. */
+	// filex 0.51: the same first bytes say how a CSV is written (its
+	// delimiter and encoding), which the config hands ONLYOFFICE so it opens
+	// the file without asking (onlyoffice/csv.go). Read further for a CSV.
+	var head []byte
 	if node != nil && h.StorageResolver != nil {
 		if drv, derr := h.StorageResolver(node.StorageID); derr == nil {
 			src, serr := h.Body.Resolve(r.Context(), drv, node.StorageID, node.Path, node)
@@ -251,10 +255,15 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if rc, rerr := src.Open(r.Context()); rerr == nil {
-				head := make([]byte, len(e2e.MagicPrefix))
-				n, _ := io.ReadFull(rc, head)
+				want := len(e2e.MagicPrefix)
+				if strings.EqualFold(path.Ext(node.Name), ".csv") {
+					want = onlyoffice.CSVSniffBytes
+				}
+				buf := make([]byte, want)
+				n, _ := io.ReadFull(rc, buf)
 				_ = rc.Close()
-				if n == len(head) && e2e.HasEncryptedPrefix(head) /* wiring:e2 fxe — a .fxe too */ {
+				head = buf[:n]
+				if n >= len(e2e.MagicPrefix) && e2e.HasEncryptedPrefix(head[:len(e2e.MagicPrefix)]) /* wiring:e2 fxe — a .fxe too */ {
 					writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "file is e2e-encrypted"})
 					return
 				}
@@ -262,7 +271,7 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	/* /wiring:e2 */
-	cfg, err := h.Service.BuildConfigForNode(r.Context(), node, user, lang, mode)
+	cfg, err := h.Service.BuildConfigForNode(r.Context(), node, user, lang, mode, onlyoffice.WithHead(head))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

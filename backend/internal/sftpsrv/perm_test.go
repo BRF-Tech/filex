@@ -5,6 +5,7 @@ package sftpsrv_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,8 +13,11 @@ import (
 
 	"github.com/pkg/sftp"
 
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
+	"github.com/brf-tech/filex/backend/internal/sftpsrv"
+	"github.com/brf-tech/filex/backend/internal/testutil/dbtest"
 )
 
 // deny gives u exactly these overrides (and nothing else).
@@ -269,5 +273,272 @@ func TestPerm_SFTPPathConditionedRule(t *testing.T) {
 	}
 	if err := cl.Remove("/main/Work/draft.txt"); err != nil {
 		t.Fatalf("outside the path: %v", err)
+	}
+}
+
+// Who may encrypt (internal/e2epolicy) over SFTP. With the policy off, an
+// upload that would CREATE an encrypted folder's key file or a `.fxe` is
+// refused at the open and nothing lands; rewriting a key file that is there —
+// a password change — and an ordinary file still work.
+func TestPerm_SFTPEncryptionPolicy(t *testing.T) {
+	hz := newHarness(t)
+	hz.user(t, "p@example.com")
+	st := hz.storage(t, "main")
+	hz.writeFile(t, st, "Kasa/.filex-e2e.json", []byte(`{"v":2}`))
+	hz.writeFile(t, st, "Acik/notes.txt", []byte("plain"))
+	if err := hz.store.UpsertSetting(context.Background(), model.SettingE2EPolicy, model.E2EPolicyOff); err != nil {
+		t.Fatal(err)
+	}
+	cl := hz.mustDial(t, "p@example.com", testPassword)
+	root := hz.rootOf(t, st)
+
+	for _, rel := range []string{"Acik/.filex-e2e.json", "Acik/rapor.pdf.fxe"} {
+		if err := writeAll(cl, "/main/"+rel, "x"); err == nil {
+			t.Fatalf("%s was created with encryption off", rel)
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("%s landed", rel)
+		}
+	}
+	if err := writeAll(cl, "/main/Kasa/.filex-e2e.json", `{"v":2,"rewritten":true}`); err != nil {
+		t.Fatalf("rewriting a key file that is there was refused: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "Kasa", ".filex-e2e.json")); string(got) != `{"v":2,"rewritten":true}` {
+		t.Fatalf("key file = %q", got)
+	}
+	if err := writeAll(cl, "/main/Acik/plain.txt", "fine"); err != nil {
+		t.Fatalf("an ordinary file: %v", err)
+	}
+}
+
+// A folder named like an encryption is not the file. An upload onto a folder
+// with a key file's or a `.fxe`'s name creates that file — an object store
+// keeps it beside the folder — so the rule is asked at the open and, with the
+// policy off, refuses there: permission denied at the open, not the driver's
+// failure at the close (a local folder cannot be written over).
+func TestPerm_SFTPAFolderWithTheNameIsNotTheFile(t *testing.T) {
+	hz := newHarness(t)
+	hz.user(t, "p@example.com")
+	st := hz.storage(t, "main")
+	root := hz.rootOf(t, st)
+	rels := []string{"Acik/.filex-e2e.json", "Acik/x.fxe"}
+	for _, rel := range rels {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := hz.store.UpsertSetting(context.Background(), model.SettingE2EPolicy, model.E2EPolicyOff); err != nil {
+		t.Fatal(err)
+	}
+	cl := hz.mustDial(t, "p@example.com", testPassword)
+
+	for _, rel := range rels {
+		f, err := cl.Create("/main/" + rel)
+		if err == nil {
+			_ = f.Close()
+			t.Fatalf("%s: an upload onto a folder with the name was opened", rel)
+		}
+		if !errors.Is(err, os.ErrPermission) {
+			t.Fatalf("%s: %v, want the rule's permission denied at the open", rel, err)
+		}
+		if fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil || !fi.IsDir() {
+			t.Fatalf("%s is no longer the folder: %v", rel, err)
+		}
+	}
+}
+
+// A rule that cannot be decided is the server's failure, not a refusal. With
+// the policy unreadable (the store fails), the upload of a `.fxe` is refused
+// at the open as SSH_FX_FAILURE — not PERMISSION_DENIED, which a client and an
+// operator read as the policy doing its job — and nothing lands.
+func TestPerm_SFTPUndecidedEncryptionIsAServerFailure(t *testing.T) {
+	hz := newHarnessCfg(t, func(c *sftpsrv.Config) {
+		c.E2EPolicy = e2epolicy.New(e2epolicy.Options{Store: dbtest.SettingFails(c.Store, model.SettingE2EPolicy, errors.New("database is locked"))})
+	})
+	hz.user(t, "p@example.com")
+	st := hz.storage(t, "main")
+	cl := hz.mustDial(t, "p@example.com", testPassword)
+
+	f, err := cl.Create("/main/yeni.fxe")
+	if err == nil {
+		_ = f.Close()
+		t.Fatal("an upload of a .fxe was opened with the rule undecidable")
+	}
+	var se *sftp.StatusError
+	if !errors.As(err, &se) || se.FxCode() != sftp.ErrSSHFxFailure {
+		t.Fatalf("%v, want SSH_FX_FAILURE", err)
+	}
+	if _, err := os.Stat(filepath.Join(hz.rootOf(t, st), "yeni.fxe")); !os.IsNotExist(err) {
+		t.Fatal("yeni.fxe landed")
+	}
+	if err := writeAll(cl, "/main/notlar.txt", "plain"); err != nil {
+		t.Fatalf("an ordinary file: %v", err)
+	}
+}
+
+// A server built without the router's rule still asks one: New builds it from
+// its store. Nil used to mean "not wired, allow", so losing the line in
+// internal/server that hands the rule over switched it off for SFTP under
+// every policy, and nothing said so.
+func TestPerm_SFTPAsksTheRuleWhenNobodyWiredIt(t *testing.T) {
+	hz := newHarnessCfg(t, func(c *sftpsrv.Config) { c.E2EPolicy = nil })
+	hz.user(t, "p@example.com")
+	st := hz.storage(t, "main")
+	if err := hz.store.UpsertSetting(context.Background(), model.SettingE2EPolicy, model.E2EPolicyOff); err != nil {
+		t.Fatal(err)
+	}
+	cl := hz.mustDial(t, "p@example.com", testPassword)
+	if err := writeAll(cl, "/main/yeni.fxe", "x"); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("a .fxe with the policy off and no rule handed over: %v, want permission denied", err)
+	}
+	if _, err := os.Stat(filepath.Join(hz.rootOf(t, st), "yeni.fxe")); !os.IsNotExist(err) {
+		t.Fatal("yeni.fxe landed")
+	}
+}
+
+// Who may encrypt lets through what it should, and spends an approval once.
+// Under the default policy (permitted) a plain member uploads a `.fxe`: an
+// upgrade changes nobody's access. Under the approval policy one approval for
+// a folder lets exactly one key file be made there: the request turns used,
+// the next key file — one folder down, which the same approval would have
+// covered — is refused, and rewriting the key file that is there is not asked
+// at all (were it asked, nothing is left to spend).
+func TestPerm_SFTPEncryptionPolicyLetsThePermittedThrough(t *testing.T) {
+	hz := newHarness(t)
+	u := hz.user(t, "p@example.com")
+	st := hz.storage(t, "main")
+	root := hz.rootOf(t, st)
+	if err := os.MkdirAll(filepath.Join(root, "Acik", "Alt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cl := hz.mustDial(t, "p@example.com", testPassword)
+	if err := writeAll(cl, "/main/Acik/izinli.fxe", "x"); err != nil {
+		t.Fatalf("a .fxe under the default policy: %v", err)
+	}
+
+	if err := hz.store.UpsertSetting(context.Background(), model.SettingE2EPolicy, model.E2EPolicyApproval); err != nil {
+		t.Fatal(err)
+	}
+	r := dbtest.ApproveE2E(t, hz.store, u.ID, st.ID, "Acik", model.E2ERequestFolder)
+	if err := writeAll(cl, "/main/Acik/.filex-e2e.json", `{"v":2}`); err != nil {
+		t.Fatalf("the approved key file: %v", err)
+	}
+	if got := dbtest.E2EStatus(t, hz.store, r.ID); got != model.E2ERequestUsed {
+		t.Fatalf("the approval was not spent (%s)", got)
+	}
+	if err := writeAll(cl, "/main/Acik/Alt/.filex-e2e.json", `{"v":2}`); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("a second key file on one approval: %v, want permission denied", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "Acik", "Alt", ".filex-e2e.json")); !os.IsNotExist(err) {
+		t.Fatal("the second key file landed")
+	}
+	if err := writeAll(cl, "/main/Acik/.filex-e2e.json", `{"v":2,"rewritten":true}`); err != nil {
+		t.Fatalf("rewriting the key file that is there: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "Acik", ".filex-e2e.json")); string(got) != `{"v":2,"rewritten":true}` {
+		t.Fatalf("key file = %q", got)
+	}
+}
+
+// renameCase is one rename a protocol test asks for, inside the storage.
+type renameCase struct{ from, to string }
+
+// layRenames writes what the rename tests need: plain files, a `.fxe` and an
+// encrypted folder made before the policy was switched off, a folder to give
+// a key file's name, and an empty folder for a key file to be moved into.
+func (hz *harness) layRenames(t *testing.T, st *model.Storage) string {
+	t.Helper()
+	for rel, body := range map[string]string{
+		"Acik/izinli.bin": "plain", "Acik/notlar.txt": "plain", "Acik/rapor.bin": "plain", "Acik/m.json": "{}",
+		"Acik/a.fxe": "cipher", "Acik/c.fxe": "cipher", "Acik/Dosyalar/not.txt": "plain", "Acik/ek.bin": "plain",
+		"Acik/yedek.bin": "plain", "Acik/eski.fxe": "cipher", "Kasa/.filex-e2e.json": `{"v":2}`,
+	} {
+		hz.writeFile(t, st, rel, []byte(body))
+	}
+	root := hz.rootOf(t, st)
+	if err := os.MkdirAll(filepath.Join(root, "Klasör"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// Who may encrypt at a rename (operator decision 2026-09-30). Giving a plain
+// file a key file's or a `.fxe`'s name encrypts as surely as creating one, so
+// a rename that does it is asked as a write of the file there would be. Under
+// the default policy a plain member's goes through; with the policy off it is
+// refused — permission denied, and nothing moves. So is a `.fxe` given a key
+// file's name, and a key file moved into another folder (operator decision
+// 2026-10-03): each encrypts a folder nobody was asked about. A `.fxe` that
+// stays a `.fxe` is free, a folder with any name is not a key file, a file
+// moved into an encrypted folder keeps its plain name, and a posix-rename onto
+// a `.fxe` that is there replaces it unasked, as any overwrite is.
+func TestPerm_SFTPRenameOntoAnEncryptionName(t *testing.T) {
+	hz := newHarness(t)
+	hz.user(t, "p@example.com")
+	st := hz.storage(t, "main")
+	root := hz.layRenames(t, st)
+	at := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
+	cl := hz.mustDial(t, "p@example.com", testPassword)
+	if err := cl.Rename("/main/Acik/izinli.bin", "/main/Acik/izinli.fxe"); err != nil {
+		t.Fatalf("a .fxe by rename under the default policy: %v", err)
+	}
+	if err := hz.store.UpsertSetting(context.Background(), model.SettingE2EPolicy, model.E2EPolicyOff); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []renameCase{
+		{"Acik/rapor.bin", "Acik/rapor.bin.fxe"}, {"Acik/m.json", "Klasör/.filex-e2e.json"},
+		{"Acik/c.fxe", "Acik/.filex-e2e.json"}, {"Kasa/.filex-e2e.json", "Klasör/.filex-e2e.json"},
+	} {
+		if err := cl.Rename("/main/"+c.from, "/main/"+c.to); !errors.Is(err, os.ErrPermission) {
+			t.Errorf("%s → %s with encryption off: %v, want permission denied", c.from, c.to, err)
+		}
+		if _, err := os.Stat(at(c.from)); err != nil {
+			t.Errorf("%s moved: %v", c.from, err)
+		}
+		if _, err := os.Stat(at(c.to)); !os.IsNotExist(err) {
+			t.Errorf("%s landed", c.to)
+		}
+	}
+	for _, c := range []renameCase{
+		{"Acik/notlar.txt", "Acik/notlar-2.txt"}, {"Acik/a.fxe", "Acik/b.fxe"},
+		{"Acik/ek.bin", "Kasa/ek.bin"}, {"Acik/Dosyalar", "Acik/.filex-e2e.json"},
+	} {
+		if err := cl.Rename("/main/"+c.from, "/main/"+c.to); err != nil {
+			t.Errorf("%s → %s: %v", c.from, c.to, err)
+		}
+		if _, err := os.Stat(at(c.to)); err != nil {
+			t.Errorf("%s did not arrive: %v", c.to, err)
+		}
+	}
+	if fi, err := os.Stat(at("Acik/.filex-e2e.json")); err != nil || !fi.IsDir() {
+		t.Errorf("Acik/.filex-e2e.json is not the folder: %v", err)
+	}
+	if err := cl.PosixRename("/main/Acik/yedek.bin", "/main/Acik/eski.fxe"); err != nil {
+		t.Fatalf("posix-rename onto a .fxe that is there: %v", err)
+	}
+	if got, _ := os.ReadFile(at("Acik/eski.fxe")); string(got) != "plain" {
+		t.Fatalf("eski.fxe = %q, want it replaced", got)
+	}
+}
+
+// A rule that cannot be decided is the server's failure at a rename too:
+// SSH_FX_FAILURE, not PERMISSION_DENIED, and nothing moves.
+func TestPerm_SFTPUndecidedRenameIsAServerFailure(t *testing.T) {
+	hz := newHarnessCfg(t, func(c *sftpsrv.Config) {
+		c.E2EPolicy = e2epolicy.New(e2epolicy.Options{Store: dbtest.SettingFails(c.Store, model.SettingE2EPolicy, errors.New("database is locked"))})
+	})
+	hz.user(t, "p@example.com")
+	st := hz.storage(t, "main")
+	hz.writeFile(t, st, "rapor.bin", []byte("plain"))
+	cl := hz.mustDial(t, "p@example.com", testPassword)
+
+	err := cl.Rename("/main/rapor.bin", "/main/rapor.bin.fxe")
+	var se *sftp.StatusError
+	if !errors.As(err, &se) || se.FxCode() != sftp.ErrSSHFxFailure {
+		t.Fatalf("%v, want SSH_FX_FAILURE", err)
+	}
+	if _, err := os.Stat(filepath.Join(hz.rootOf(t, st), "rapor.bin")); err != nil {
+		t.Fatalf("rapor.bin moved: %v", err)
 	}
 }

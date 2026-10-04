@@ -475,6 +475,19 @@ async function headers(withBody: boolean): Promise<Record<string, string>> {
   return { ...h, ...extra };
 }
 
+/**
+ * `headers`, without waiting: the page is closing and there is no later turn
+ * to resolve a promise in. A host whose token is a function that answers
+ * asynchronously (the desktop app) gets cookies-only here; its window is not
+ * a browser tab that closes under a pending write.
+ */
+function headersNow(withBody: boolean): Record<string, string> {
+  const h: Record<string, string> = { Accept: 'application/json' };
+  if (withBody) h['Content-Type'] = 'application/json';
+  const extra = cfg.headers ? cfg.headers() : {};
+  return extra && typeof (extra as Promise<unknown>).then !== 'function' ? { ...h, ...(extra as Record<string, string>) } : h;
+}
+
 /** Only the keys this client knows, only as strings — a server that grows another is ignored, not obeyed. */
 function sanitize(raw: unknown): UiPrefs {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -551,7 +564,7 @@ let pending: UiPrefs = {};
 let timer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> | null = null;
 
-async function flush(): Promise<void> {
+async function flush(leaving = false): Promise<void> {
   timer = null;
   const changed = pending;
   pending = {};
@@ -566,12 +579,17 @@ async function flush(): Promise<void> {
   const body = { prefs: doc };
   const doFetch = cfg.fetchImpl ?? (typeof fetch === 'function' ? fetch : null);
   if (!doFetch) return;
+  const payload = JSON.stringify(body);
   try {
     await doFetch(url(), {
       method: 'PUT',
-      headers: await headers(true),
+      headers: leaving ? headersNow(true) : await headers(true),
       credentials: 'same-origin',
-      body: JSON.stringify(body),
+      body: payload,
+      // ⚠ Sent while the page is going away: `keepalive` is what lets the
+      // request outlive it. Browsers reject a keepalive body over 64 KB
+      // outright, so the flag goes only on documents that fit.
+      ...(leaving && payload.length < 60000 ? { keepalive: true } : {}),
     });
   } catch {
     /* the change is already on screen and in the mirror; a failed write
@@ -636,6 +654,29 @@ export async function flushPrefs(): Promise<void> {
     inFlight = flush();
   }
   await inFlight;
+}
+
+/**
+ * The page is being hidden or closed: send what is still inside the debounce
+ * window NOW, with `keepalive`. Without this a choice made in the last 400 ms
+ * (an app's `state.set`, a palette) never left the browser, and the next
+ * open read the account's older answer.
+ *
+ * ⚠ The timer is cleared by `flush` itself, so the debounce cannot send the
+ * same document a second time; with nothing pending this sends nothing.
+ */
+export function flushPrefsOnHide(): void {
+  if (timer === null) return;
+  clearTimeout(timer);
+  inFlight = flush(true);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPrefsOnHide);
+  // The event is fired AT the document.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPrefsOnHide();
+  });
 }
 
 /** Testing seam: forget the session's state. */

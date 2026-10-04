@@ -14,6 +14,7 @@ import (
 	billy "github.com/go-git/go-billy/v5"
 
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -67,6 +68,21 @@ func (f *fs) OpenFile(name string, flag int, _ os.FileMode) (billy.File, error) 
 	if write {
 		if _, ok := drv.(storage.Writer); !ok {
 			return nil, billy.ErrNotSupported
+		}
+		// Who may encrypt (internal/e2epolicy): the CREATE of an encrypted
+		// folder's key file or a `.fxe` — no file there, a folder with the
+		// name included (protoperm.EncryptionAllowed). Asked after the storage
+		// said it takes writes: under the approval policy the question spends
+		// the approval. The WRITEs that follow it find the file there (the
+		// CREATE's close committed it) and are not asked. A rule that could
+		// not be decided is not a refusal here either, but go-nfs answers
+		// every error of a CREATE as NFS3ERR_ACCES: only the log line tells
+		// the two apart.
+		switch protoperm.EncryptionAllowed(f.ctx, f.srv.cfg.E2EPolicy, drv, t.Storage, t.Rel) {
+		case protoperm.EncryptionRefused:
+			return nil, os.ErrPermission
+		case protoperm.EncryptionUndecided:
+			return nil, protoperm.ErrEncryptionUndecided
 		}
 	}
 

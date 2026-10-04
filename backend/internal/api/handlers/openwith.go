@@ -3,7 +3,7 @@
 // Endpoints (0.50, docs/APP-PLUGINS.md → Default apps):
 //
 //	GET    /api/me/open-with         (auth) → {"choices": {ext: handler}}
-//	PUT    /api/me/open-with/{ext}   (auth) ← {"handler": "builtin" | "app:<app>/<view>"} → {"choices": …}
+//	PUT    /api/me/open-with/{ext}   (auth) ← {"handler": "builtin" | "onlyoffice" | "app:<app>/<view>"} → {"choices": …}
 //	DELETE /api/me/open-with/{ext}   (auth) → {"choices": …}
 //	DELETE /api/me/open-with         (auth) → {"choices": {}}
 //
@@ -66,17 +66,29 @@ type OpenWith struct {
 // NewOpenWith constructs the handler.
 func NewOpenWith(store db.Store) *OpenWith { return &OpenWith{Store: store} }
 
-// validOpenChoice reports whether id is a handler the open capability knows:
-// filex's own viewer or an app's interface (`app:<app>/<view>`).
-func validOpenChoice(id string) bool {
-	return id == assoc.Builtin || (strings.Contains(id, "/") && assoc.ValidID(assoc.CapOpen, id))
+// validOpenChoice reports whether id is a handler the open capability knows
+// for the kind ext: filex's own viewer, an app's interface
+// (`app:<app>/<view>`), or - for a kind the document server opens as a choice
+// (assoc.OnlyOfficeOpens: `.csv`, filex 0.51) - ONLYOFFICE (`onlyoffice`).
+//
+// ⚠ The shape only, never "is it there now": a choice of ONLYOFFICE is kept
+// when the administrator switches OnlyOffice off, and the kind opens in the
+// next handler that is on until it is back (lib/appViewer).
+func validOpenChoice(ext, id string) bool {
+	if id == assoc.Builtin {
+		return true
+	}
+	if id == assoc.OnlyOffice {
+		return assoc.OnlyOfficeOpens(ext)
+	}
+	return strings.Contains(id, "/") && assoc.ValidID(assoc.CapOpen, id)
 }
 
 // cleanChoices keeps the well-formed entries of a choices map.
 func cleanChoices(in map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
-		if assoc.ValidExt(k) && validOpenChoice(v) {
+		if assoc.ValidExt(k) && validOpenChoice(k, v) {
 			out[k] = v
 		}
 	}
@@ -263,8 +275,8 @@ func (h *OpenWith) Put(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if !validOpenChoice(body.Handler) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_handler", "message": "a choice is builtin or app:<app>/<view>"})
+	if !validOpenChoice(ext, body.Handler) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_handler", "message": "a choice is builtin, app:<app>/<view>, or onlyoffice for a kind ONLYOFFICE opens (" + strings.Join(assoc.OnlyOfficeOpenKinds(), ", ") + ")"})
 		return
 	}
 	m, err := loadOpenWith(r.Context(), h.Store, u.ID)

@@ -6,12 +6,12 @@
  * the same pack (v0.43.0). A copy per spec is how two of them end up
  * installing different packs and disagreeing about what "Arabic" contains.
  *
- * The LOCAL unpublished pack (`G:/filex-lang-ar`, or FILEX_E2E_LANG_PACK_AR)
- * when it is on this machine — the whole interface, which is what a real
- * reader gets — and otherwise a manifest built here from the repo's fixture,
- * with whatever extra strings the caller asks for. Either way `ar` becomes an
- * OFFERED language the server flags right to left, which is what turns a page
- * around.
+ * The LOCAL unpublished pack (FILEX_E2E_LANG_PACK_AR, or else a sibling
+ * checkout beside this one, `../filex-lang-ar`) when it is on this machine —
+ * the whole interface, which is what a real reader gets — and otherwise a
+ * manifest built here from the repo's fixture, with whatever extra strings the
+ * caller asks for. Either way `ar` becomes an OFFERED language the server
+ * flags right to left, which is what turns a page around.
  *
  * ⚠ Arabic is filex's right-to-left TEST fixture and nothing else: it is not
  * published and not advertised (the maintainer, 2026-09-19), and no screenshot shows
@@ -24,6 +24,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/** The repository root: the sibling checkouts live next to it (app-locations.mjs). */
+const REPO = resolve(HERE, '../..');
 
 export interface LangPack {
   /** The manifest to upload. */
@@ -41,7 +43,7 @@ export interface LangPack {
  * measures one sentence can put exactly that sentence in.
  */
 export function arabicPack(extra: Record<string, string> = {}): LangPack {
-  const local = process.env.FILEX_E2E_LANG_PACK_AR ?? 'G:/filex-lang-ar/filex-app.json';
+  const local = process.env.FILEX_E2E_LANG_PACK_AR ?? resolve(REPO, '../filex-lang-ar/filex-app.json');
   if (existsSync(local)) {
     const manifest = JSON.parse(readFileSync(local, 'utf8'));
     const strings = { ...(manifest.ui_locales?.ar ?? {}) };

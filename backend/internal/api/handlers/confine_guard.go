@@ -44,6 +44,48 @@ func rootAllows(ctx context.Context, store db.Store, storageID int64, rel string
 	return root.Within(rootStorageName(ctx, store, storageID), rel)
 }
 
+// rootAllowsIn is rootAllows for a storage row the caller already holds (no
+// lookup). Inert for an unconfined caller; a nil storage is refused.
+func rootAllowsIn(ctx context.Context, s *model.Storage, rel string) bool {
+	root, confined := confine.RootFrom(ctx)
+	if !confined {
+		return true
+	}
+	if s == nil {
+		return false
+	}
+	return root.Within(s.Name, rel)
+}
+
+// refuseOutsideRoot writes the 403 a path outside the token's root gets (the
+// answer app_ui.go and resolveAdapterDir give).
+func refuseOutsideRoot(w http.ResponseWriter) {
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root"})
+}
+
+// confinedPath reads a client path the way confine.Middleware reads one it
+// can see: for a confined caller an empty path is the confinement root (not
+// the top of a storage) and a path that names no storage is on the confined
+// one. Unconfined callers, and a path outside the root, get raw back
+// unchanged - the latter is then refused by the root check that follows
+// (rootAllows / rootAllowsIn), not quietly moved inside.
+//
+// ⚠⚠ The middleware rewrites only `?path=` and the keys of a body labelled
+// JSON. The same path in a body under another Content-Type, in a multipart
+// field, or not given at all reaches the handler as the client wrote it
+// (GHSA-8gvc-6w52-6c7j), so a handler that resolves a client path reads it
+// through here before it picks a storage.
+func confinedPath(ctx context.Context, raw string) string {
+	root, confined := confine.RootFrom(ctx)
+	if !confined {
+		return raw
+	}
+	if np, err := root.EnforcePath(raw); err == nil {
+		return np
+	}
+	return raw
+}
+
 // callerRoot is the request's confinement root on every mount a handler is
 // reached through: the one confine.Middleware stashed (token `root:` narrowed
 // by `X-Filex-Root`), or — on the /api/ai surfaces, which do not pass through

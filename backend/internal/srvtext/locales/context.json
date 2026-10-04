@@ -19,6 +19,8 @@
     "server.mail.cloud_verify.": "Email (filex cloud sign-up only): the verification token for a new tenant. In the visitor's browser language.",
     "server.mail.app_footer": "Email: the line filex adds under every mail an installed app sends (a signature request, a reminder…). In the language the app wrote the mail in.",
     "server.drop.": "The first line of NOT.txt, the note filex writes beside files uploaded through a file-request link (the uploader's own note follows). Read by the folder's owner, in their language.",
+    "server.e2e.ceiling.": "API refusal on the platform operator's switch that turns encryption on or off for one tenant (Admin panel → Encryption → Tenants, or an API client). One or two sentences. The last part of the key says why: single_tenant - this server is not multi-tenant, so it has no tenant ceiling to switch, and who may encrypt is set by the encryption policy alone.",
+    "server.e2e.not_allowed.": "API refusal when someone tries to create an end-to-end encrypted folder or file (its key file .filex-e2e.json, or a .fxe) and the encryption rules say no - a toast or dialog in the file manager, or an error an API client logs. One sentence. The last part of the key says why: tenant_disabled - the platform operator has switched encryption off for this organization; policy_off - an administrator has turned encryption off; admins_only - only administrators may create encrypted items; permission - the person's role does not include the Encrypt permission here; approval_required - the policy asks for an administrator's approval first, and the person has none for this folder.",
     "server.perm.": "Plugins → Apps → install review and the app's page: what one permission lets the app do. The administrator reads this before trusting the app with their files. Starts with a verb, no final full stop.",
     "server.public.": "The pages a share or file-request link opens in a browser without JavaScript (and a few in any browser: the error pages, the PIN gate, the \"preparing your download\" page). In the visitor's browser language. Plain text - the page escapes it.",
     "server.public.pin_": "Public page: the PIN gate in front of a protected share or file-request link.",
@@ -52,7 +54,8 @@
     "server.update.policy.": "Admin panel → Updates: the name of an update policy (FILEX_UPDATE_POLICY), used as {policy} in server.update.reason.* sentences. Short, lower case.",
     "server.external.": "Admin panel → External services (ONLYOFFICE, draw.io, the converter): why a service's settings were refused.",
     "server.storage.": "Admin panel → Storages (Add storage / edit a storage): why the storage's settings were refused. Shown as the error when saving. File and folder patterns (.git, *.tmp, downloads/incomplete/**) and the example folder names stay as written.",
-    "server.unit.": "A unit after a size - in emails (the size of a shared file) and on the no-JavaScript folder page: \"1,5 MB\". The same units the interface writes (the unit.* keys); a language that writes \"Mo\" or \"Go\" there writes them here too."
+    "server.unit.": "A unit after a size - in emails (the size of a shared file) and on the no-JavaScript folder page: \"1,5 MB\". The same units the interface writes (the unit.* keys); a language that writes \"Mo\" or \"Go\" there writes them here too.",
+    "server.onlyoffice.": "The bell of the people who edited a document in ONLYOFFICE, when the document server's save was written beside the file (in another format) or not written at all. A title, and one or two sentences under it."
   },
   "keys": {
     "server.update.policy.manual": "The stored value of the update policy setting (FILEX_UPDATE_POLICY=manual) said the way a person reads it - filex announces a release and installs nothing. Translate the MEANING (\"announce only\"), not the key’s word \"manual\".",
@@ -61,6 +64,7 @@
     "server.notify.word.locked": "Stands in the bell for the name of an item inside an end-to-end encrypted folder whose names are encrypted, while the reader does not have that folder unlocked - the server only has the scrambled name. Keep the lock emoji; it matches the explorer’s own label for such an item.",
     "server.notify.word.someone": "Used where a person would be named and nobody is: the {who} of an upload whose visitor typed no name - in the bell AND in the owner’s email.",
     "server.notify.word.unnamed": "Used where a file would be named and it has none: the {name} of a notification, and the {name} in a share email’s subject and fact line.",
+    "server.notify.e2e.request_decided.title_rejected": "The same notification when an administrator said no; the title without the suffix is the yes.",
     "server.mail.drop_invite.subject": "Subject line.",
     "server.mail.grant.subject": "Subject line.",
     "server.mail.account.subject": "Subject line.",
@@ -128,7 +132,10 @@
     "repaired": "a number",
     "scope": "a scope (permission) name exactly as the person typed it",
     "char": "the one character that is not allowed, e.g. ş",
-    "policy": "the update policy's name, one of the server.update.policy.* words"
+    "policy": "the update policy's name, one of the server.update.policy.* words",
+    "saved": "the name the edit was saved under, beside the file, e.g. report.docx",
+    "format": "a file format's name in capitals, e.g. DOCX",
+    "why": "one sentence that says why a save was not written (one of the server.onlyoffice.refused_* sentences, already in the reader's language)"
   },
   "key_vars": {
     "server.login.failed_remaining": { "count": "how many wrong attempts the person has left before the lock", "limit": "the number of the failed attempt at which the lock falls, e.g. 5" },
@@ -147,6 +154,10 @@
     "server.notify.app_update_failed.body": { "from": "the app's version that keeps running, e.g. 1.1.0 (not a path)" },
     "server.notify.plugin_requested.title": { "plugin": "the name of the app or storage plugin somebody asked for", "version": "the version asked for, e.g. 1.2.0 (not a filex version)" },
     "server.notify.plugin_requested.body": { "requester": "the name of the person who asked (an API key's account), or the word for \"someone\"", "reason": "the requester's own words: why the plugin is needed" },
+    "server.notify.e2e.request_created.title": { "folder": "the name of the folder somebody asked to encrypt (for a single file: the folder it is in)" },
+    "server.notify.e2e.request_created.body": { "requester": "the name of the person who asked, or the word for \"someone\"", "reason": "the requester's own words: why it needs encrypting" },
+    "server.notify.e2e.request_decided.title": { "folder": "the name of the folder the request was for (for a single file: the folder it is in)" },
+    "server.notify.e2e.request_decided.title_rejected": { "folder": "the name of the folder the request was for (for a single file: the folder it is in)" },
     "server.public.drop_remove_aria": { "name": "the name of a file the visitor picked" },
     "server.public.drop_err_too_large": { "name": "the name of a file the visitor picked" },
     "server.public.drop_err_ext": { "name": "the name of a file the visitor picked" },
@@ -187,6 +198,10 @@
     "server.storage.scan_exclude_everything": { "pattern": "the pattern (one line of the setting) as the administrator typed it" },
     "server.storage.scan_exclude_limit": { "max": "the most patterns one storage may have (200)", "length": "the most characters one pattern may have (512)" },
     "server.auth_provider.legacy_elsewhere_title": { "account": "the login name the person signed in with, e.g. alex (the older account's email)", "account_tenant": "the short name (sub-domain) of the tenant the older account belongs to", "login_tenant": "the short name (sub-domain) of the tenant the sign-in was for" },
-    "server.auth_provider.legacy_elsewhere_body": { "account": "the login name the person signed in with, e.g. alex (the older account's email)", "account_tenant": "the short name (sub-domain) of the tenant the older account belongs to", "login_tenant": "the short name (sub-domain) of the tenant the sign-in was for" }
+    "server.auth_provider.legacy_elsewhere_body": { "account": "the login name the person signed in with, e.g. alex (the older account's email)", "account_tenant": "the short name (sub-domain) of the tenant the older account belongs to", "login_tenant": "the short name (sub-domain) of the tenant the sign-in was for" },
+    "server.onlyoffice.saved_beside_body": { "ext": "the extension of the file that was edited, without the dot, e.g. doc" },
+    "server.onlyoffice.refused_other_type": { "ext": "the extension of the file that was edited, without the dot, e.g. doc" },
+    "server.onlyoffice.refused_too_large": { "mb": "the largest save filex takes, in megabytes, e.g. 256" },
+    "server.onlyoffice.refused_no_create": { "ext": "the extension of the file that was edited, without the dot, e.g. doc" }
   }
 }

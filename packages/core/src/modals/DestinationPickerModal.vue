@@ -19,7 +19,8 @@
  * unwritable one is hidden or greyed, about what sits above a storage root. So
  * this takes its inputs as props and answers with one event, and the rules live
  * in `lib/destinationTree.ts` where they can be tested without a DOM. Anything
- * that needs a folder — Move, Copy, and the new-document flow next — mounts
+ * that needs a folder — Move, Copy, the new-document flow, an app plugin's
+ * `file-chooser` and an app's save-as (AppFrame, `mode="save"`) — mounts
  * this.
  *
  * # Contract
@@ -29,7 +30,7 @@
  *     :storages="['main','s3']"        // drive names; >1 adds a drives level
  *     :start-at="'main://belgeler'"     // where to open (the current folder)
  *     :moving="['main://belgeler/eski']" // folders that may not be the target
- *     mode="move"                        // titles the dialog and its button
+ *     mode="move"                        // move | copy | choose | save: the title and the button
  *     @pick="(wirePath) => …"
  *     @close="show = false"
  *   />
@@ -71,8 +72,19 @@ const props = defineProps<{
    * hidden, because a folder that silently vanishes reads as data loss.
    */
   moving?: string[];
-  /** Titles the dialog and names its confirm button. */
-  mode?: 'move' | 'copy' | 'choose';
+  /**
+   * Titles the dialog and names its confirm button. `save` is an app's
+   * save-as (`file.saveAs`, AppFrame): "Save here".
+   */
+  mode?: 'move' | 'copy' | 'choose' | 'save';
+  /**
+   * The dialog's title, when the caller has a better one than the mode's —
+   * an app's save-as names the app and the file (security review UI-14:
+   * what filex draws for an app says who is asking).
+   */
+  title?: string;
+  /** The explorer's theme, for a dialog drawn outside its root. */
+  theme?: 'light' | 'dark' | 'auto';
   /**
    * What the answer is. `dir` (the default) is the folder you are standing in;
    * `file` lists the files too and the answer is the one you tick — an app
@@ -212,15 +224,18 @@ const reason = computed<string>(() => {
   return '';
 });
 
-const title = computed(() => {
+const dialogTitle = computed(() => {
+  if (props.title) return props.title;
   if (props.mode === 'move') return t('destpicker.title.move');
   if (props.mode === 'copy') return t('destpicker.title.copy');
+  if (props.mode === 'save') return t('destpicker.title.save');
   return pickingFile.value ? t('destpicker.title.choose_file') : t('destpicker.title.choose');
 });
 
 const confirmLabel = computed(() => {
   if (props.mode === 'move') return t('destpicker.confirm.move');
   if (props.mode === 'copy') return t('destpicker.confirm.copy');
+  if (props.mode === 'save') return t('destpicker.confirm.save');
   return pickingFile.value ? t('destpicker.confirm.choose_file') : t('destpicker.confirm.choose');
 });
 
@@ -264,8 +279,10 @@ function choose(): void {
 <template>
   <Modal
     :open="open"
-    :title="title"
+    :title="dialogTitle"
     size="md"
+    :locale="locale"
+    :theme="theme"
     :busy="busy"
     @close="emit('close')"
   >

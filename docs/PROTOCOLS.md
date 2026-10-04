@@ -55,7 +55,7 @@ two works. See [STORAGE.md](STORAGE.md#editing-a-storage-afterwards).
 in the file explorer's navigation panel, on every surface that draws it (the web app, the
 desktop app, any embed) - builds every command from *this* deployment: its host, its port,
 your login, the key or export you just minted. Admins reach the same panel from
-*Connections* in the admin sidebar. This document is the map; that page is the thing you
+*Connections* in the admin menu (*Files & storage*). This document is the map; that page is the thing you
 copy from.
 
 ---

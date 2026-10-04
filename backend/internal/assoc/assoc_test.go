@@ -267,7 +267,9 @@ func TestAssoc_OnlyOfficeFirstForOfficeKinds(t *testing.T) {
 	assert.NotContains(t, ids(s.Chain(ctx, CapOpen, "rapor.docx", "").On), OnlyOffice, "it draws, it does not open")
 
 	assert.True(t, ValidID(CapThumbnail, OnlyOffice))
-	assert.False(t, ValidID(CapOpen, OnlyOffice))
+	// 0.51: also an open handler's shape (a .csv, onlyoffice_open_test.go);
+	// which kinds it opens is OnlyOfficeOpens, and a docx is not one.
+	assert.True(t, ValidID(CapOpen, OnlyOffice))
 	assert.True(t, Handler{ID: OnlyOffice}.IsOnlyOffice())
 	assert.False(t, Handler{ID: OnlyOffice}.IsApp())
 	assert.False(t, Handler{ID: OnlyOffice}.IsBuiltin())

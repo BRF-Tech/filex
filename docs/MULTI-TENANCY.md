@@ -362,7 +362,7 @@ belongs to another tenant is refused before anything is written to it.
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](screenshots/v0.50.0/realm/login-realm-1440.png) | ![A tenant's own sign-in page, its realm filled in](screenshots/v0.50.0/realm/login-realm-locked-1440.png) |
+| ![The platform's sign-in page with an empty Realm field](screenshots/v0.51.0/realm/login-realm-1440.png) | ![A tenant's own sign-in page, its realm filled in](screenshots/v0.51.0/realm/login-realm-locked-1440.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has
@@ -632,6 +632,7 @@ is the honest form of that proof.
 | `/api/admin/app-plugins` | Apps are instance-wide (the table has no tenant column): install one into every tenant's file menu, change its grants and settings, or force-lift the file locks it holds. |
 | `/api/admin/plugin-requests` | An [install request](APP-PLUGINS.md#install-requests) asks for an instance-wide plugin: leaving, reading, approving and rejecting one are the platform operator's, like the plugins themselves. |
 | `PUT /api/admin/roles/builtin` | The built-in User and Viewer roles are one row each, held by every account of every tenant without a custom role: take downloads away from everyone, or put `admin.*` into the User role and make every account on the platform a delegated administrator of its own tenant. Reading stays open - a tenant's admin needs to see what their people start from - and a tenant's own roles are custom roles (`permission_rules.provider_id`). |
+| `/api/admin/e2e/tenants` | Switch another tenant's end-to-end encryption off, or read every tenant's ceiling and policy: whether a tenant may use encryption at all (`providers.e2e_allowed`) is the platform operator's decision. The tenant's own policy and requests (`/api/admin/e2e`, `/api/admin/e2e/requests`) are the tenant administrator's, scoped to their tenant rather than gated; the ceiling above them is the operator's. The write is a person's too: an API key gets `403 session_required`. |
 | `/api/admin/themes` | Themes are instance-wide too: a theme one tenant's admin wrote would paint every other tenant's users. The instance default is the `ui.default_theme` setting, which the per-key classification below already refuses to a tenant admin. |
 | `/api/admin/webhooks`, `/api/admin/notifications/webhook-config` | One target list receives **every tenant's** event stream, so a tenant admin adding a target subscribes to other customers' file paths. Per-tenant targets are a feature - the rows must carry a provider and the emitter must filter by it - not something a gate approximates. Same 503-ordering note as plugins. |
 | `/api/admin/replication-targets`, `/api/admin/replica/*` | Fan every tenant's writes at a backup sink of the caller's choosing. |
@@ -714,6 +715,24 @@ schema change ([§4](#4-data-model)): a tenant's values are kept under
 `tenant.<id>.branding.*` keys in the global `settings` table, and
 `GET /api/public/branding` answers them on the tenant's host. The rest of this
 list is still the instance's. Ties into `FILEX_DEFAULT_LOCALE` (already shipped).
+
+**Encryption.** `providers.e2e_allowed` (the operator's ceiling, default on) and
+`providers.e2e_policy` (`off` | `admins` | `permitted` | `approval`, the tenant
+admin's; default `permitted`) live on the tenant row, and are written one column
+at a time, so the operator's switch and a tenant administrator's save never undo
+each other. A single-tenant install keeps the policy in the `e2e.policy`
+setting, which has no ceiling to answer to. Writing either is a person's, never
+an API key's - the setting too, through the settings API, `/api/ai/admin` or an
+MCP tool - and on a multi-tenant install a tenant administrator is refused the
+setting like any key outside `branding.*`: their policy is
+`PATCH /api/admin/e2e`. An install that turns multi-tenant mode on keeps its
+choice: the first multi-tenant start copies the `e2e.policy` setting to the
+supertenant's row, once (logged and audited; the setting is left alone, and a
+later start copies nothing). Under the `approval` policy a tenant's encryption
+requests are its own administrators' to answer: the platform operator sees
+every tenant's under Admin → Encryption but answers only the platform's own,
+and its bell is not told of another tenant's. See
+[E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt).
 
 ## 13. Deploy (Compose & Helm)
 

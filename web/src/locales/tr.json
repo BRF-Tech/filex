@@ -133,7 +133,7 @@
     "sync": "Senkron çalışmaları",
     "shares": "Paylaşımlar",
     "trash": "Çöp kutusu",
-    "search": "Arama",
+    "search": "Arama indeksi",
     "duplicates": "Yinelenenler",
     "tagged": "Etiketli dosyalar",
     "replica": "Replikasyon",
@@ -159,10 +159,66 @@
     "apps": "Uygulamalar",
     "appearance": "Görünüm",
     "roles": "Roller",
+    "encryption": "Şifreleme",
     "loginSecurity": "Giriş güvenliği",
     "groups": "Gruplar",
     "tenants": "Kiracılar",
-    "myTenant": "Kiracım"
+    "myTenant": "Kiracım",
+    "menu": "Menü",
+    "adminMenu": "Yönetim menüsü",
+    "top": {
+      "files": "Dosyalar ve depolama",
+      "people": "Kişiler ve güvenlik",
+      "system": "Sistem"
+    },
+    "section": {
+      "files": "Dosyalar",
+      "storage": "Depolama",
+      "people": "Kişiler ve erişim",
+      "security": "Güvenlik",
+      "integrations": "Eklentiler ve entegrasyonlar",
+      "customize": "Özelleştirme",
+      "maintenance": "Bakım ve kayıtlar"
+    },
+    "hint": {
+      "dashboard": "Sunucunun durumu bir bakışta",
+      "files": "Dosya yöneticisini açın",
+      "adminFiles": "Bir dosyayı bulun, sürümlerini açın",
+      "shares": "Kişilerin oluşturduğu herkese açık bağlantılar",
+      "trash": "Silinen dosyalar, saklama süresi dolana kadar",
+      "tagged": "Dosyalara etikete göre göz atın",
+      "duplicates": "Aynı boyut ve içerikteki kopyalar",
+      "search": "Arama indeksini inceleyin, yeniden oluşturun",
+      "storages": "filex'in sunduğu depolar",
+      "connections": "Bağlayın ya da S3, SFTP veya uygulamayla erişin",
+      "sync": "Her deponun değişiklik taramaları",
+      "replica": "Dosyaları kurala göre ikinci bir yere kopyalayın",
+      "usage": "Sağlayıcının bildirdiği kullanım ve maliyeti",
+      "users": "Hesaplar ve rolleri",
+      "groups": "Adlandırılmış kişi grupları",
+      "roles": "Adlandırılmış izin kümeleri",
+      "grants": "Kim hangi dosya ya da klasörü açabilir",
+      "tenants": "Platformun tüm kiracıları",
+      "myTenant": "Kiracınızın oturum açma yolları ve alan adları",
+      "authProviders": "Kim, nasıl oturum açabilir",
+      "loginSecurity": "Hatalı parola sınırları ve kilitlenmeler",
+      "encryption": "Uçtan uca şifreleme kuralları ve onaylar",
+      "protection": "Çöp kutusu, sürümler, bağlantı süresi, taslaklar, antivirüs",
+      "apiMcp": "Yapay zekâ ajanları için API anahtarları ve MCP",
+      "plugins": "Depolama eklentileri, uygulamalar, varsayılan uygulamalar",
+      "external": "filex'in bağlandığı editörler ve önizleme servisleri",
+      "webhooks": "Dosya olaylarını başka sistemlere gönderin",
+      "notifications": "Bildirimler ve iletimi",
+      "settings": "Sunucu geneli ayarlar ve e-posta",
+      "branding": "Herkese açık sayfalarda ve oturum açma ekranında ad ve logo",
+      "appearance": "Temalar ve varsayılan görünüm",
+      "archives": "Arşiv oluşturma, açma ve sınırlar",
+      "queue": "Arka plan işleri, ilerleme ve yeniden deneme",
+      "tools": "Bilerek başlattığınız bakım işleri",
+      "audit": "Yönetim panelinde yapılan her değişiklik",
+      "updates": "Yeni sürümler ve güncelleme kuralı",
+      "about": "Sürüm ve derleme bilgisi"
+    }
   },
   "login": {
     "title": "Oturum aç",
@@ -1069,6 +1125,10 @@
       "permissions": "Yerleşik rol",
       "roles": "Rol",
       "permission_rule": "Rol",
+      "e2e": "Şifreleme",
+      "e2e_policy": "Şifreleme politikası",
+      "e2e_tenant": "Kiracı şifrelemesi",
+      "e2e_request": "Şifreleme isteği",
       "login": "Oturum açma",
       "login_security": "Giriş güvenliği",
       "group": "Grup",
@@ -1142,6 +1202,10 @@
       "reject": "reddedildi",
       "expire": "süresi doldu",
       "supersede": "kaynağı değiştiği için kapatıldı",
+      "use": "kullanıldı",
+      "folder_cleanup": "klasör temizlendi",
+      "fxe_header_rewritten": "dosya başlığı yeniden yazıldı",
+      "key_file_rewritten": "anahtar dosyası yeniden yazıldı",
       "unlocked": "kilit açıldı",
       "members_add": "üye eklendi",
       "member_remove": "üye çıkarıldı",
@@ -1156,7 +1220,9 @@
       "insecure_auth_set": "güvensiz sağlayıcı izni değiştirildi",
       "reset": "varsayılana döndürüldü",
       "thumbnail_limits": "küçük resim sınırları değiştirildi",
-      "thumbnail_sent": "küçük resim çizerken dışarıya dosya gönderdi"
+      "thumbnail_sent": "küçük resim çizerken dışarıya dosya gönderdi",
+      "office_saved_beside": "başka biçimde yanına kaydedildi (ONLYOFFICE)",
+      "office_save_refused": "kayıt yazılmadı (ONLYOFFICE)"
     },
     "target": {
       "auth_provider": "Kimlik sağlayıcısı",
@@ -1180,12 +1246,14 @@
       "permissions": "Yerleşik rol",
       "permission_rule": "Rol",
       "plugin_request": "Eklenti isteği",
+      "e2e_policy": "Şifreleme politikası",
       "login": "Oturum açma",
       "login_security": "Giriş güvenliği",
       "group": "Grup",
       "group_grant": "Grubun klasör erişimi",
       "settings": "Ayarlar",
       "providers": "Kiracı",
+      "e2e_request": "Şifreleme isteği",
       "tenant_domain": "Kendi alan adı",
       "file_type": "Dosya türü"
     },
@@ -1692,6 +1760,8 @@
       "comment_added": "Yeni yorum",
       "e2e_escrow_used": "Emanet anahtarı kullanıldı",
       "e2e_password_changed": "Klasör parolası değişti",
+      "e2e_request_created": "Şifreleme isteği",
+      "e2e_request_decided": "Şifreleme isteği yanıtlandı",
       "plugin_notice": "Uygulama bildirimi",
       "update_available": "Güncelleme var",
       "update_applied": "Güncelleme uygulandı",
@@ -1965,6 +2035,8 @@
       "comment_added": "Bir dosyaya veya klasöre yorum eklendi",
       "e2e_escrow_used": "Şifreli klasör parolası yerine emanet anahtarıyla açıldı",
       "e2e_password_changed": "Şifreli bir klasörün parolası değiştirildi ya da kurtarma anahtarıyla sıfırlandı",
+      "e2e_request_created": "Şifreleme isteği - onay politikasında biri bir klasörü ya da dosyayı şifrelemek istedi",
+      "e2e_request_decided": "Şifreleme isteği bir yönetici tarafından onaylandı ya da reddedildi",
       "plugin_notice": "Uygulama bildirimi - kurulu bir uygulama mesaj gönderdi (imza isteği, biten iş, …)"
     },
     "secretSet": "Secret tanımlı",
@@ -1999,7 +2071,8 @@
     "offReason": {
       "antivirus": "Virüs taraması kapalı (Koruma).",
       "escrow": "Şifreli klasörler için emanet anahtarı kurulmamış.",
-      "appPlugins": "Bu sunucuda uygulamalar kapalı."
+      "appPlugins": "Bu sunucuda uygulamalar kapalı.",
+      "e2eApproval": "Yalnız şifreleme politikası onay istediğinde."
     }
   },
   "protection": {
@@ -3134,6 +3207,8 @@
         "comment_added": "Biri bir dosyaya yorum yaptığında",
         "e2e_escrow_used": "Şifreli bir klasör emanet anahtarıyla açıldığında",
         "e2e_password_changed": "Şifreli klasörünüzün parolası değiştiğinde",
+        "e2e_request_created": "Biri bir klasörü ya da dosyayı şifrelemek istediğinde",
+        "e2e_request_decided": "Şifreleme isteğiniz yanıtlandığında",
         "plugin_notice": "Kurulu bir uygulama size mesaj gönderdiğinde"
       }
     },
@@ -3304,6 +3379,10 @@
         "purge": {
           "label": "Kalıcı silme",
           "hint": "Çöp kutusunu boşaltma; çöp kutusu olmayan depolarda silme."
+        },
+        "encrypt": {
+          "label": "Şifreleme",
+          "hint": "Uçtan uca şifreli klasör ya da dosya oluşturma, var olan bir klasörü şifreleme."
         },
         "tag": {
           "label": "Etiketleme",
@@ -3508,7 +3587,7 @@
       "custom": "Özel",
       "editBuiltin": "{role} rolünü düzenle",
       "viewBuiltin": "{role} rolünü görüntüle",
-      "builtinPlatformOwned": "Yerleşik roller platformun tamamınındır ve platform yöneticisi tarafından yönetilir. Kendi izinleriniz için yeni bir rol oluşturun.",
+      "builtinPlatformOwned": "Yerleşik roller platformun tamamınındır ve platform işletmecisi tarafından yönetilir. Kendi izinleriniz için yeni bir rol oluşturun.",
       "builtinSaved": "Rol kaydedildi",
       "viewerCeilingNote": "Bir İzleyici asla dosya ekleyemez, değiştiremez, silemez veya paylaşamaz; bunlar kapalı kalır.",
       "plusGroups": "SSO grupları için başlangıç rolü: {list}",
@@ -3538,6 +3617,100 @@
       "title": "İki adımlı doğrulama gerekli",
       "body": "Yöneticiniz bu hesap için iki adımlı doğrulamayı zorunlu kıldı. Devam etmek için kurun.",
       "action": "Şimdi kur"
+    }
+  },
+  "encryption": {
+    "title": "Şifreleme",
+    "subtitle": "Burada kimin uçtan uca şifreli klasör ve dosya oluşturabileceğini belirleyin; onayınızı bekleyen istekleri yanıtlayın.",
+    "policy": {
+      "title": "Kim şifreleyebilir",
+      "label": "Politika",
+      "scopeTenant": "{tenant} için geçerli.",
+      "scopeInstance": "Sunucunun tamamı için geçerli.",
+      "unavailable": "Platform işletmecisi kuruluşunuz için şifrelemeyi kapatmış. Politikayı yine de seçebilirsiniz; şifreleme yeniden açıldığında geçerli olur.",
+      "saved": "Şifreleme politikası kaydedildi",
+      "options": {
+        "off": "Kapalı - yöneticiler dahil kimse",
+        "admins": "Yalnız yöneticiler",
+        "permitted": "Rolü izin veren herkes",
+        "approval": "Rolü izin veren herkes, yönetici onayıyla"
+      },
+      "hints": {
+        "off": "Kimse yeni şifreli klasör ya da dosya oluşturamaz. Var olanlar çalışmaya devam eder: açılır, içine dosya eklenir, şifreleme kaldırılabilir.",
+        "admins": "Yalnız yöneticiler şifreleyebilir; diğer herkes reddedilir.",
+        "permitted": "O klasörde rolü “Şifreleme” iznini taşıyan herkes (Roller). filex’in bugüne kadarki davranışı budur.",
+        "approval": "Yukarıdaki gibi, ayrıca yönetici olmayan herkesin şifrelemeden önce burada onay alması gerekir. Yöneticilerden onay istenmez. Onay tek bir kişi içindir, bir kez kullanılır ve yalnız istenen şeyi açar: bir klasörü olduğu yerde şifrelemeyi, bir klasörün hemen içinde yeni bir şifreli klasörü ya da bir klasörde yeni bir şifreli dosyayı. Alttaki klasörlere geçmez."
+      }
+    },
+    "requests": {
+      "title": "Şifreleme istekleri",
+      "subtitle": "Onay politikasında kişiler şifrelemeden önce burada izin ister.",
+      "expiresAfter": "Yanıtlanmayan istekler ve kullanılmayan onaylar {count} gün sonra geçersiz olur.",
+      "pendingCount": "{count} bekliyor",
+      "showHistory": "Yanıtlanan istekleri göster",
+      "hideHistory": "Yalnızca bekleyen istekleri göster",
+      "empty": "Bekleyen istek yok.",
+      "emptyHistory": "Henüz istek yok.",
+      "loadFailed": "İstekler yüklenemedi.",
+      "fields": {
+        "path": "Konum",
+        "requester": "İsteyen",
+        "reason": "Gerekçe",
+        "created": "İstendi",
+        "status": "Durum"
+      },
+      "kind": {
+        "folder": "Bu klasör, olduğu yerde şifrelenir",
+        "newFolder": "Bu klasörde yeni bir şifreli klasör",
+        "file": "Bu klasörde yeni bir şifreli dosya"
+      },
+      "status": {
+        "pending": "Bekliyor",
+        "approved": "Onaylandı",
+        "rejected": "Reddedildi",
+        "expired": "Süresi doldu",
+        "used": "Kullanıldı"
+      },
+      "actions": {
+        "approve": "Onayla",
+        "reject": "Reddet…"
+      },
+      "approvedBy": "{who} tarafından onaylandı",
+      "rejectedBy": "{who} tarafından reddedildi",
+      "approve": {
+        "title": "İsteği onayla",
+        "body": "{who} bundan sonra {path} klasörünü olduğu yerde şifreleyebilir. Onay bir kez kullanılabilir; içindeki bir klasör için kullanılamaz.",
+        "bodyNewFolder": "{who} bundan sonra {path} klasörünün hemen içinde yeni bir şifreli klasör oluşturabilir. Onay bir kez kullanılabilir; içinde bir şey olan bir klasör için kullanılamaz.",
+        "bodyFile": "{who} bundan sonra {path} içinde yeni bir şifreli dosya oluşturabilir. Onay bir kez kullanılabilir.",
+        "note": "Not (isteğe bağlı; isteyen kişi görür)",
+        "confirm": "Onayla"
+      },
+      "reject": {
+        "title": "İsteği reddet",
+        "reason": "Neden (isteyen kişi görür)",
+        "required": "Nedenini yazın; isteyen kişiye bildirilir.",
+        "confirm": "Reddet"
+      },
+      "approved": "İstek onaylandı: {who}",
+      "rejected": "İstek reddedildi: {who}",
+      "notPending": "Bu istek artık beklemiyor: yanıtlanmış ya da süresi dolmuş.",
+      "tenantDecides": "Bu isteği kiracının yöneticileri yanıtlar."
+    },
+    "tenants": {
+      "title": "Kiracılar",
+      "subtitle": "Bir kiracıda şifrelemeyi kapatırsanız orada yöneticiler dahil kimse şifreli klasör ya da dosya oluşturamaz. Şifreli olanlar çalışmaya devam eder.",
+      "supertenant": "Platform işletmecisi",
+      "fields": {
+        "name": "Kiracı",
+        "policy": "Politika",
+        "available": "Şifreleme kullanılabilir"
+      },
+      "state": {
+        "on": "Açık",
+        "off": "Kapalı"
+      },
+      "on": "{name} için şifreleme açıldı",
+      "off": "{name} için şifreleme kapatıldı"
     }
   },
   "groups": {
@@ -3601,7 +3774,7 @@
   },
   "tenants": {
     "title": "Kiracılar",
-    "subtitle": "Bu platformun her kiracısı: oturum açma adı (realm), kendi adresi, kişilerinin eriştiği depolar ve hesapları. Kiracıları yalnızca platform operatörü yönetir.",
+    "subtitle": "Bu platformun her kiracısı: oturum açma adı (realm), kendi adresi, kişilerinin eriştiği depolar ve hesapları. Kiracıları yalnızca platform işletmecisi yönetir.",
     "editTitle": "Kiracı",
     "add": "Yeni kiracı",
     "create": "Oluştur",
@@ -3697,7 +3870,7 @@
     "providerAdded": "Sağlayıcı kapalı olarak eklendi: doldurun, deneyin ve açın.",
     "confirmFailed": "Denemesi başarısız oldu. Yine de açılsın mı?",
     "sharedTitle": "Platformun verdikleri",
-    "sharedHint": "Platformun hangi sağlayıcılarının kiracınıza hizmet vereceğine platform operatörü karar verir.",
+    "sharedHint": "Platformun hangi sağlayıcılarının kiracınıza hizmet vereceğine platform işletmecisi karar verir.",
     "domainsTitle": "Adresler ve kendi alan adları",
     "platformAddress": "Kiracınızın platformdaki adresi:",
     "noTenantDomain": "Bu kurulum kiracılara kendi adreslerini vermiyor; bu yüzden bir alan adı onlara yöneltilemez (FILEX_TENANT_DOMAIN).",

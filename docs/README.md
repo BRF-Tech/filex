@@ -10,6 +10,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 
 - [Installation](INSTALLATION.md) - minimal → full Compose → Helm → binary
 - [Configuration](CONFIGURATION.md) - every `FILEX_*` variable + `config.yaml`
+- [Admin panel](ADMIN-PANEL.md) - the administrator's menu: where every page
+  lives (Files & storage, People & security, System), who is offered which
+  page, the keyboard, screen readers and the phone's drawer
 - [Databases](DATABASES.md) - SQLite, PostgreSQL, MySQL/MariaDB: which to pick,
   what each needs, and what "supported" is checked to mean
 - [Releases](RELEASES.md) - every release with a plain-English summary
@@ -138,7 +141,7 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [RBAC, folder access & API tokens](RBAC.md) - account roles, per-storage RBAC, per-item grants
   (**Admin → Folder access**), what an API token's verbs allow on every surface,
   and the acts that need an administrator signed in
-- [Roles & per-user permissions](PERMISSIONS.md) - what an account may do: 28
+- [Roles & per-user permissions](PERMISSIONS.md) - what an account may do: 29
   permissions, built-in and custom roles, per-person exceptions, delegated
   admins, the permissions installed apps declare, public links that follow
   their creator's right to share, per-protocol enforcement
@@ -153,7 +156,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   nothing is in the folder until you save; the three addresses that must work,
   the **Test** that fetches through a document's own door and warns when JWT is
   off, and [what "Download failed" was](ONLYOFFICE.md#failure-editor-shows-download-failed)
-  (the editor says which of its two failures it was)
+  (the editor says which of its two failures it was), and
+  [CSV files](ONLYOFFICE.md#csv-files): a `.csv` opens in ONLYOFFICE's
+  spreadsheet and is saved back as the same kind of CSV (0.51)
 
 ## Features
 
@@ -202,8 +207,10 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   a folder you already have, a single file (`.fxe`), files of any size (the
   streamed format), downloading a decrypted copy, recovery keys, optional
   operator key escrow, `filex decrypt` for taking a folder or a file out,
-  `filex encrypt` for making one on the command line, and exactly what each
-  one can and cannot open
+  `filex encrypt` for making one on the command line, exactly what each
+  one can and cannot open, and [who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt):
+  a tenant's policy, the files.encrypt permission and an administrator's
+  approval, asked for with a reason (0.51)
 - [End-to-end encryption roadmap](E2E-ROADMAP.md) - what is built
   (`filex encrypt` and large files in an in-place conversion since 0.50) and
   the design of the vault level, what is left, with open questions and estimates

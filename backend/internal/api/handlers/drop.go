@@ -302,6 +302,9 @@ var dropRefusalText = map[string]string{
 	"storage_error":       "server.public.drop_err_storage",
 	"storage_unavailable": "server.public.drop_err_storage",
 	"quota_exceeded":      "server.public.drop_err_quota",
+	// A key file or `.fxe` the link creator may not create (refusesE2E): to
+	// the visitor, a file the link does not take.
+	"e2e_not_allowed": "server.public.drop_err_ext_any",
 }
 
 // refuse answers a refused upload: the code a script can branch on, and the
@@ -494,6 +497,11 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	if existing, _ := h.Store.GetNodeByPath(r.Context(), node.StorageID, pathkey.Hash(node.StorageID, normalizeDBPath(subRel))); existing != nil {
 		sub = sub + "-" + randHex6()
 		subRel = path.Join(node.Path, sub)
+	}
+	// Who may encrypt, for the link creator — before the submission folder or
+	// a byte is written (e2e_policy_gate.go).
+	if h.refusesE2E(w, r, sh, st, subRel, files) {
+		return
 	}
 	if _, err := h.Manager.EnsureDir(r.Context(), st, subRel); err != nil {
 		h.failWrite(w, r, err, "mkdir", st, subRel, 0)

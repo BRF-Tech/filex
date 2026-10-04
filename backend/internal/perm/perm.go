@@ -1,4 +1,4 @@
-// Package perm is filex's per-user permission model: 28 named permissions,
+// Package perm is filex's per-user permission model: 29 named permissions,
 // the presets built from them, and the resolver that turns an account's role,
 // the install's defaults, the permission rules that match it and its own
 // overrides into one answer per permission — with where that answer came
@@ -34,7 +34,12 @@ const (
 	FilesMove     Perm = "files.move"   // to another folder
 	FilesDelete   Perm = "files.delete" // to trash
 	FilesPurge    Perm = "files.purge"  // permanent delete, empty trash
-	FilesTag      Perm = "files.tag"
+	// FilesEncrypt is making something end-to-end encrypted: a folder's
+	// first .filex-e2e.json (a new encrypted folder, or the first step of
+	// encrypting one in place) or a new .fxe. It is carved out of
+	// files.create, which the same write needs as well.
+	FilesEncrypt Perm = "files.encrypt"
+	FilesTag     Perm = "files.tag"
 )
 
 // Sharing and features.
@@ -112,6 +117,7 @@ var catalogue = []Def{
 	{Key: FilesMove, Group: GroupFiles, ViewerCapped: true},
 	{Key: FilesDelete, Group: GroupFiles, ViewerCapped: true},
 	{Key: FilesPurge, Group: GroupFiles, ViewerCapped: true},
+	{Key: FilesEncrypt, Group: GroupFiles, ViewerCapped: true},
 	{Key: FilesTag, Group: GroupFiles},
 
 	{Key: ShareLinks, Group: GroupSharing, ViewerCapped: true},
@@ -285,8 +291,9 @@ var Standard = filter(func(d Def) bool { return d.Group != GroupAdmin })
 // sharing.
 var ReadOnly = Standard & viewerCeiling
 
-// UploadOnly can put files in and nothing else — a drop-box account.
-var UploadOnly = Of(FilesCreate, AccountEdit)
+// UploadOnly can put files in — encrypted ones too, as it could before
+// files.encrypt existed — and nothing else: a drop-box account.
+var UploadOnly = Of(FilesCreate, FilesEncrypt, AccountEdit)
 
 // Guest can look and download, and cannot even change its own profile — a
 // shared or demo login.

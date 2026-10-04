@@ -145,51 +145,6 @@
   .divider {
     border-top: 1px solid var(--fe-border-soft);
   }
-
-  .nav-link {
-    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors;
-    color: var(--fe-text-muted);
-  }
-  .nav-link:hover {
-    background: var(--fe-bg-hover);
-    color: var(--fe-text);
-  }
-
-  /* ⚠ `--fe-primary-ink` and not `--fe-primary`: the primary on its own soft
-     tint measures 3.97:1, under the 4.5 bar, and no tint rescues it. The ink
-     token exists for exactly this pairing and every palette names one that
-     clears it (core styles/variables.css). */
-  .nav-link-active,
-  .nav-link-active:hover {
-    background: var(--fe-primary-soft);
-    color: var(--fe-primary-ink);
-  }
-
-  /* A named sidebar section ("Apps"). The explorer's navigation panel labels
-     its groups the same way (`.fe-sidenav__heading`), and the two sidebars
-     should not disagree about what a heading looks like. */
-  .nav-heading {
-    @apply px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide;
-    color: var(--fe-text-muted);
-  }
-
-  /* An app row's icon: inline SVG from the core icon library, which draws on
-     a 24-unit grid with no size of its own. Sized to match the Lucide glyphs
-     beside it (h-4 w-4) and coloured by the row, so an active app row's icon
-     turns with its label. */
-  .nav-appicon {
-    @apply flex items-center justify-center;
-    width: 1rem;
-    height: 1rem;
-    flex: 0 0 auto;
-    color: inherit;
-  }
-  .nav-appicon > svg {
-    width: 1rem;
-    height: 1rem;
-    display: block;
-    color: inherit;
-  }
 }
 
 /* ---------------------------------------------------------------- */

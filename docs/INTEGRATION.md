@@ -378,7 +378,7 @@ Things worth knowing before you write one:
   changelog entry. Target them if you must, and re-check your sheet on every
   upgrade. That includes the admin panel's own chrome, which is built from
   utility classes rather than `--fe-*` tokens: a token-only sheet restyles the
-  file surfaces and leaves the panel's sidebar and buttons alone.
+  file surfaces and leaves the panel's menu and buttons alone.
 - **No anonymous surface wears it.** The sign-in page, share pages, the PIN
   gate and an app's public pages are served to people with no session, and the
   endpoint carrying the sheet refuses them - they cannot download it, let alone
@@ -572,9 +572,15 @@ only cosmetic.** filex enforces confinement on `/api/files` from two sources
    proxy sets `X-Filex-Root: main://projeler/acme` per request. A stray client
    header can only narrow, never escape the token root.
 
-Any request touching a path outside the root → `403`. A root/empty path snaps to
-the confined folder, so listings open there. This covers manager / move / copy /
-delete / upload / download / share / archive / trash.
+Any request touching a path outside the root → `403`, however the path is sent:
+in the query, in a body under any `Content-Type`, in a multipart field. A root,
+empty or absent path snaps to the confined folder, so listings open there. This
+covers manager / move / copy / delete / upload / download / share / archive /
+trash, the operations queue and its listing, the text editor's save, item
+permissions and invitations, comments, encrypted folders and the live socket
+(a ticket's, and one opened with the token itself). A path is inside the root
+only when it is inside with `\` read as a separator too, the same on every
+host (a Windows host's storage reads it as one).
 
 ⚠ The token's **verbs** bound the embed too: a token with `read` alone gives a
 read-only explorer (uploads, renames and moves answer `403 token missing scope:

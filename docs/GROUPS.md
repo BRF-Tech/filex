@@ -25,11 +25,11 @@ administrator makes a group nobody is in one.
 - [Audit](#audit)
 - [Things to know](#things-to-know)
 
-![Admin → Groups: each group's role and priority, its members, folders and SSO links](screenshots/v0.50.0/groups/groups-list-1440.png)
+![Admin → Groups: each group's role and priority, its members, folders and SSO links](screenshots/v0.51.0/groups/groups-list-1440.png)
 
 ## Folder access
 
-![The explorer's sharing panel: a group offered beside people, Owner asked for in the dialog](screenshots/v0.50.0/groups/share-group-1440.png)
+![The explorer's sharing panel: a group offered beside people, Owner asked for in the dialog](screenshots/v0.51.0/groups/share-group-1440.png)
 
 A group's grant counts exactly as the same grant to each member would:
 
@@ -49,7 +49,7 @@ when they reconnect, as for a person's grant.
 
 ## The role
 
-![A person's page: the role they hold through a group, and the groups they are in](screenshots/v0.50.0/groups/user-groups-1440.png)
+![A person's page: the role they hold through a group, and the groups they are in](screenshots/v0.51.0/groups/user-groups-1440.png)
 
 Every person has **one** role ([PERMISSIONS.md](PERMISSIONS.md#custom-roles)).
 Groups only fill it in for someone who has none of their own:
@@ -103,7 +103,7 @@ tenant (`400`), before anything moves.
 
 ## Members and SSO links
 
-![One group's page: its name, role and role priority, SSO links and members](screenshots/v0.50.0/groups/group-page-1440.png)
+![One group's page: its name, role and role priority, SSO links and members](screenshots/v0.51.0/groups/group-page-1440.png)
 
 A membership is either:
 

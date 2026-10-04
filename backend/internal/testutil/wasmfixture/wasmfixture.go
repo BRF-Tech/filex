@@ -11,6 +11,12 @@
 //
 // Stdlib only: internal/testutil imports the API, which imports wasmplugin,
 // so wasmplugin's own tests cannot use it.
+//
+// ⚠⚠ The same rule lives in TypeScript for the e2e specs that install the
+// module (e2e/helpers/echoFixture.ts): on the v0.50.0 pretag spec 192 ran a
+// stale echo.wasm, because the e2e side only asked whether the file existed.
+// Change the two together; web/tests/deploy/echoFixture.test.ts reads the
+// file set below and holds the TypeScript one to it.
 package wasmfixture
 
 import (

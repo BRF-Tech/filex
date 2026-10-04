@@ -33,6 +33,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ADVERTISED_QUERIES, REPO_ABOUT, REPO_HOMEPAGE, SCREENSHOTS } from '../../../scripts/shop-window-data.mjs';
+import { bashArray as exporterArray } from '../helpers/exporterArrays';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 const read = (...p: string[]) => readFileSync(path.join(REPO, ...p), 'utf8');
@@ -425,33 +426,15 @@ describe.skipIf(!sitePresent)('site/ carries nothing that names the private repo
 
 describe.skipIf(!inSource)('the public tree the export builds carries nothing private', () => {
   /**
-   * The `private_files=(…)` / `private_dirs=(…)` lists, read from the script.
-   *
-   * ⚠ Both spellings are in use: `private_files` is one entry per line with
-   * comments between them (whose prose contains brackets), `private_dirs` is a
-   * single line. Closing on "the first `)`" mangles the first, and closing on
-   * "a `)` in column 0" runs the second one past the end of the array and into
-   * the rest of the file — which is how this parser first read 63 private
-   * directories and still looked like it worked.
+   * The `private_files=(…)` / `private_dirs=(…)` lists, read from the script
+   * (helpers/exporterArrays, which says why that is harder than it looks).
    */
   function bashArray(name: string): string[] {
     // Same trap as `published()` above: this runs even when the block is
     // skipped, so in the published tree — which has no exporter — it must
     // return an empty list rather than throw.
     if (!inSource) return [];
-    const open = `${name}=(`;
-    const at = exporter.indexOf(open);
-    if (at < 0) throw new Error(`${EXPORTER} has no ${name}=( … ) array`);
-    const after = exporter.slice(at + open.length);
-    const nl = after.indexOf('\n');
-    const paren = after.indexOf(')');
-    const body =
-      paren >= 0 && (nl < 0 || paren < nl) ? after.slice(0, paren) : after.match(/^([\s\S]*?)\n\)/)![1]!;
-    return body
-      .split('\n')
-      .map((l) => l.replace(/#.*$/, '').trim())
-      .filter(Boolean)
-      .flatMap((l) => l.split(/\s+/));
+    return exporterArray(exporter, name, EXPORTER);
   }
 
   const privateFiles = new Set(bashArray('private_files'));
@@ -530,10 +513,51 @@ describe.skipIf(!inSource)('the public tree the export builds carries nothing pr
     expect(
       hits,
       'a real name in a file the export publishes. Use a placeholder: alice/bob for a person, ' +
-        'acme/globex/initech for a tenant, @example.com for an address.',
+        'acme/globex/initech for a tenant, @example.com for an address, a description ' +
+        '("a DR mirror", "a build host") for one of our machines.',
     ).toEqual([]);
   });
 
+  // A path on a maintainer's workstation (#101, measured in the public tree
+  // after 0.50). The e2e suite looked for the local language packs at a fixed
+  // drive path, and comments named the drive the checkouts live on: useless to
+  // anybody else, and a description of one person's machine in a public
+  // repository. A checkout next to this one is spelled relative to the
+  // repository root (`../filex-sign`, e2e/helpers/app-locations.mjs), which
+  // finds the same file on that machine and on every other. History keeps what
+  // it said when it shipped, the same exceptions as private_names above.
+  //
+  // ⚠ The maintainers' MACHINE names are the other half of the same leak (a
+  // comment once named the DR mirror, another the build host). They are not
+  // spelled here, because this file is published: they belong to the
+  // exporter's private_names, which the test above reads.
+  //
+  // Every spelling of the same place counts: a drive letter with a forward
+  // slash, with a backslash, or with the backslash escaped inside a string
+  // literal, and the WSL view of that drive (`/mnt/<drive>/…`). One shape is
+  // NOT a checkout and is let through: the program itself in a folder named
+  // after it (`filex.exe` directly under `<drive>:\filex`), which is where an
+  // install puts it and what the installer and argv tests are about.
+  const workstationPath =
+    /\b[A-Z]:(?:\/|\\{1,2})(?:filex|mail)(?![\\/]{1,2}filex\.exe\b)|\/mnt\/[a-z]\/(?:filex|mail)/;
+
+  it('no exported file carries a path on a maintainer workstation (a drive or /mnt/<drive> path to a filex or mail checkout)', () => {
+    const hits: string[] = [];
+    for (const f of exported) {
+      if (isHistory(f)) continue;
+      textOf(f)
+        .split('\n')
+        .forEach((line, i) => {
+          if (workstationPath.test(line)) hits.push(`${f}:${i + 1}`);
+        });
+    }
+    expect(
+      hits,
+      'a path to a maintainer checkout in a file the export publishes. Spell a ' +
+        'sibling checkout relative to the repository root (`../filex-lang-es`), with an ' +
+        'environment variable first, and skip when it is not there.',
+    ).toEqual([]);
+  });
 });
 
 // The runbook assertion, deliberately outside the block above: it is about a

@@ -30,6 +30,7 @@ import {
 } from '../../scripts/lib/containers.mjs';
 import { goBuild } from '../../scripts/lib/go-build.mjs';
 import { RUN_MARKER } from '../../scripts/lib/procs.mjs';
+import { documentServerFor } from '../../scripts/lib/shot-scripts.mjs';
 import { APP_LOCATIONS, locateApp } from '../helpers/app-locations.mjs';
 import { SHOTS_LDFLAGS, shotsDir } from './release.mjs';
 
@@ -107,7 +108,14 @@ const OFFICE_ENGINES = new Set(['office', 'libreoffice']);
  * ⚠ `filex serve` takes NO flags: the listen address and the data directory
  * come from the environment, and `--listen` exits with "unknown flag".
  */
-export async function bootInstance({ name, admin, env = {}, engines = [] }) {
+export async function bootInstance({ name, admin, env = {}, engines = [], office = null }) {
+  // A REAL document server (documentServer() below): filex is connected to it
+  // and listens where it can reach filex back. Only on this machine - the
+  // container path has no name the document server could call it by.
+  if (office) {
+    if (engines.length) throw new Error('bootInstance: a real document server and conversion engines in one picture is not supported');
+    return bootOnHost({ name, admin, env, office });
+  }
   // ⚠ 0.50: the office engine (`office`, formerly `libreoffice`) is the
   // ONLYOFFICE Document Server filex is CONNECTED to, not a program a host or
   // the full image carries. The instance is pointed at one - the real one in
@@ -266,13 +274,25 @@ async function bootInContainer({ name, admin, env }) {
   };
 }
 
-async function bootOnHost({ name, admin, env }) {
+async function bootOnHost({ name, admin, env, office = null }) {
   const bin = process.env.FILEX_BIN ?? defaultBin();
   if (!bin) throw new Error('no filex binary — run `pnpm run build:all` or set FILEX_BIN');
   // SHOTS_PORT is what `pnpm shots` hands each script: a port it just proved
   // free. Run by hand, a script finds its own.
   const port = Number(process.env.SHOTS_PORT) || (await freePort());
   const url = `http://127.0.0.1:${port}`;
+  // ⚠ With a real document server, filex listens on every address: the
+  // document server downloads the file from filex and posts the save back, at
+  // the callback host it knows this machine by. The browser still uses
+  // loopback.
+  const officeEnv = office
+    ? {
+        FILEX_LISTEN: `0.0.0.0:${port}`,
+        FILEX_ONLYOFFICE_URL: office.url,
+        FILEX_ONLYOFFICE_JWT: office.jwt,
+        FILEX_ONLYOFFICE_CALLBACK_URL: `http://${office.callbackHost}:${port}`,
+      }
+    : {};
   const data = mkdtempSync(join(tmpdir(), `filex-shots-${name}-`));
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^FILEX_/i.test(k)));
   log(`booting ${bin} on :${port} (${name})`);
@@ -290,6 +310,7 @@ async function bootOnHost({ name, admin, env }) {
       // them should show.
       FILEX_SECRET_KEY: `${name}-shots-key-not-a-real-secret`,
       ...env,
+      ...officeEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -445,6 +466,24 @@ export function findApp(name) {
     );
   }
   return { name, wasm: found.wasm, manifestPath: found.manifestPath, manifest: found.manifest };
+}
+
+/**
+ * The ONLYOFFICE Document Server a picture of ONLYOFFICE's own editor is
+ * taken against - `{ url, jwt, callbackHost }` from SHOTS_ONLYOFFICE_URL,
+ * SHOTS_ONLYOFFICE_JWT and SHOTS_ONLYOFFICE_CALLBACK_HOST - handed to
+ * bootInstance({ office }).
+ *
+ * ⚠ Calling it IS the declaration (scripts/lib/shot-scripts.mjs →
+ * scriptNeeds): `pnpm shots` refuses the scene before anything is built when
+ * no document server is named, and leaves it out in CI. Run by hand without
+ * one, it throws here - a placeholder address would draw "Download failed"
+ * where the spreadsheet should be, and a skipped picture keeps the old one.
+ */
+export function documentServer() {
+  const ds = documentServerFor(process.env);
+  if (!ds.present) throw new Error(`this picture needs an ONLYOFFICE Document Server: ${ds.how}`);
+  return { url: ds.url, jwt: ds.jwt, callbackHost: ds.callbackHost };
 }
 
 /**

@@ -181,9 +181,21 @@ describe('breadcrumbs', () => {
     expect(await crumbs('/sync')).toEqual(['Dashboard', 'Sync runs']);
   });
 
-  it('every other trail is unchanged', async () => {
-    expect(await crumbs('/storages')).toEqual(['Dashboard', 'Storages']);
-    expect(await crumbs('/storages/8')).toEqual(['Dashboard', 'Storages', 'Edit storage']);
+  // 0.51 (GitHub #82): the trail names the menu section a page lives in,
+  // between the dashboard and the page, and a sub-page takes its parent's.
+  it('names the menu section between the dashboard and the page', async () => {
+    expect(await crumbs('/storages')).toEqual(['Dashboard', 'Storage', 'Storages']);
+    expect(await crumbs('/storages/8')).toEqual(['Dashboard', 'Storage', 'Storages', 'Edit storage']);
+  });
+
+  it('the section is words, not a link: a menu heading is not a page', async () => {
+    const w = mount(Breadcrumbs, { global: { plugins: [await router('/storages/8'), i18n()] } });
+    await flushPromises();
+    const section = w.get('[data-testid="crumb-section"]');
+    expect(section.element.tagName).toBe('SPAN');
+    expect(section.text()).toBe('Storage');
+    // …while the parent page before the leaf stays a link.
+    expect(w.findAll('nav a').map((a) => a.text())).toEqual(['Dashboard', 'Storages']);
   });
 });
 

@@ -8,7 +8,10 @@ describe('storages list', () => {
   });
 
   it('shows the page heading', () => {
-    cy.contains(/depolar|storages/i).should('be.visible');
+    // ⚠ In the page (`main`), not the whole document: since 0.51 the admin
+    // menu's panels hold every page name, hidden until a panel opens, and an
+    // unscoped cy.contains() finds that hidden menu entry first.
+    cy.get('main').contains(/depolar|storages/i).should('be.visible');
   });
 
   it('list response stays clean of replica rows', () => {

@@ -230,9 +230,9 @@ of them tickable on a target in **Admin → Webhooks**:
 
 | Event | When |
 |---|---|
-| `file.uploaded` | A write **created** a file that was not there before. |
+| `file.uploaded` | A write **created** a file that was not there before. Since 0.51 also the file an ONLYOFFICE edit was saved as, beside a document in a format the document server does not write (`meta.saved_beside`: the document that was edited; the editors' own words in `meta.title_<lang>` / `meta.body_<lang>`; [ONLYOFFICE.md → A save in another format](ONLYOFFICE.md#a-save-in-another-format)). |
 | `file.updated` | A write **replaced the bytes of a file that already existed** - an editor save, a re-upload over the same name, a WebDAV `PUT`/S3 `PutObject` over an existing key. |
-| `file.upload_failed` | Bytes filex had already acknowledged could not be written to the storage driver. |
+| `file.upload_failed` | Bytes filex had already acknowledged could not be written to the storage driver. Since 0.51 also an ONLYOFFICE save filex did not write: a `.csv` save that was not CSV text, or a save in a format filex does not keep (`meta.origin: "onlyoffice"`, `meta.reason`, the editors' own words in `meta.title_<lang>` / `meta.body_<lang>`; [ONLYOFFICE.md → What a save writes](ONLYOFFICE.md#what-a-save-writes), [A save in another format](ONLYOFFICE.md#a-save-in-another-format)). |
 | `file.deleted` | Permanent removal (trash purge, or a hard delete on a driver without move support). |
 | `file.trashed` | Soft delete - the file was moved into `.filex-trash/` and is restorable. |
 | `file.moved` | A file was moved or renamed. `meta.from` / `meta.to` carry both paths. |
@@ -244,6 +244,8 @@ of them tickable on a target in **Admin → Webhooks**:
 | `comment.added` | Somebody commented on a file or folder. `meta` carries `comment_id` and the first 200 characters of the body. |
 | `e2e.escrow_used` | An encrypted folder - or a single encrypted file (`.fxe`) - was opened with the operator's **escrow key** instead of its owner's passphrase - not the recovery key, which the owner holds. `meta` carries `escrow_kid`, `storage`, `folder` (for a file: `file` and `kind: "file"` instead) and, when the caller was signed in, `actor_email`. |
 | `e2e.password_changed` | An encrypted folder's password was changed - or reset with its **recovery key** (`meta.via = "recovery_key"`, severity `warning`) - in the web UI, which announces it once the new key file is written ([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#changing-the-password)). Sent to the folder's **owner**, who may not be the person who changed it. `meta` carries `storage`, `folder`, `via`, `rekey` (the folder key was replaced too) and, when the caller was signed in, `actor_email`. A single encrypted file's password change is the same event, with `file` and `kind: "file"` in place of `folder`, sent to the file's owner. |
+| `e2e.request_created` | Somebody asked to encrypt a folder or a file under the tenant's `approval` policy ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)). A tenant's request is one broadcast placed on the folder: the tenant's administrators see it, the platform operator's bell does not (they see it under Admin → Encryption), a member never does. The platform's own request (the supertenant's) is addressed to each of the supertenant's administrators instead, the webhook told once. Webhooks get every tenant's. `meta` carries `requester`, `reason`, `request_id`, `storage` and `target_kind` (`folder` \| `new_folder` \| `file`; for a file the node is the folder it goes into). **Once** per request: asking again while it waits tells nobody. |
+| `e2e.request_decided` | An administrator approved or rejected an encryption request. Sent to the person who asked, and to nobody else. `meta` carries `decision` (`approved` \| `rejected`), `decider`, `note`, `request_id`, `storage` and `target_kind`. A request that lapses unanswered tells nobody; the audit log has it (`e2e_request.expire`). |
 | `plugin.notice` | An installed app plugin (see `APP-PLUGINS.md`) sent a message through its `notify_send` host function - a signature request, a finished job. Title/body are the plugin's English wording; `meta` carries `plugin` (the app's install id), `plugin_label_<lang>` (its name as people know it - what a reader prints in front of the message, never the id), `title_<lang>`/`body_<lang>` - one of each per language the app wrote it in (`_en`/`_tr` always, at most 16 more; the reader's own language is used, then its base language, then English), `job` for a queued action, and up to eight small facts the plugin added. The app may address one person instead of the instance feed, and may attach a target: the file plus, optionally, the app screen to open on it (`target.open = {plugin, action|view}`), so a click lands in the signing screen rather than on the notifications page. |
 
 The six **write** events (`file.uploaded`, `file.updated`, `file.upload_failed`,
@@ -356,6 +358,8 @@ otherwise hit:
 | `comment.added` | `file` **or** `dir` | Read from the node row's type - a comment can hang on a folder. |
 | `e2e.escrow_used` | `dir` - the encrypted folder; `file` - a single encrypted file | |
 | `e2e.password_changed` | `dir` - the encrypted folder; `file` - a single encrypted file | |
+| `e2e.request_created` | `dir` - the folder to encrypt (for a file, its folder) | |
+| `e2e.request_decided` | `dir` - the folder to encrypt (for a file, its folder) | |
 | `share.created` | `share` - the token | The event is "a link now exists"; the link is the thing. |
 | `admin_test` · `webhook_test` | `none` | |
 | `update_available` · `update_applied` | `none` | Not about a file. |
@@ -589,7 +593,11 @@ What a bell holds:
   a row about another tenant's storage, a tenant admin gets the broadcasts
   that name a file in their tenant, and a row that names no storage reaches
   only the supertenant's readers (its admins, and - for the admin test and an
-  app's notice that names nothing - its members).
+  app's notice that names nothing - its members). One kind is left out of the
+  supertenant admins' bell although they read every other: a tenant's new
+  encryption request (`e2e.request_created`), which that tenant's
+  administrators decide; the platform operator sees those under Admin →
+  Encryption instead.
 - A broadcast of **routine** file activity (a surface that could not say who
   asked - every queued operation before this rule existed) is in no bell at
   all; it stays in the table and in the admin list below.
@@ -764,9 +772,15 @@ with **no** muted events. `PATCH` replaces the whole preference (send the full
 > switches in the dialog's **What to tell me about** list, one per event - and
 > only for events that can happen on this instance: no virus switch while
 > scanning is off, no escrow switch without an escrow key, no app switch while
-> apps are off. Both screens resend the user's existing list verbatim so
-> opening one cannot clear their mutes. The filtering itself is in force
-> regardless of how the row got written.
+> apps are off, and the two encryption-request switches only where a request
+> can reach the person (under the `approval` policy with the tenant's ceiling
+> on: `e2e.request_created` for an administrator account, `e2e.request_decided`
+> for everyone). They read the person's own tenant, so an administrator whose
+> tenant is under another policy - the platform operator's included - sees them
+> greyed. Both
+> screens resend the user's existing list verbatim so opening one cannot clear
+> their mutes. The filtering itself is in force regardless of how the row got
+> written.
 >
 > Why that matters more than it sounds: this endpoint is open to every account,
 > and until the dialog existed its only screen sat behind the admin gate - so

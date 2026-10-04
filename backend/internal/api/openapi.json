@@ -3499,6 +3499,101 @@
         "x-filex-token-verb": "write"
       }
     },
+    "/api/files/e2e/allowed": {
+      "post": {
+        "operationId": "e2eAllowed",
+        "summary": "Who may start encrypting here: one answer per path (allowed, request or denied), at most 1000 paths",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "`<storage>://<path>`: the folder to make a new encrypted folder in or to encrypt where it is, or the file to encrypt."
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "folder",
+                            "new_folder",
+                            "file"
+                          ],
+                          "description": "Which encryption is asked about: `folder` (the folder itself, where it is), `new_folder` (a new encrypted folder directly inside it) or `file`. Omitted: the kind of what is there. An approval opens only its own kind."
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "items"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`{encrypt, reasons}`: one answer per item, in their order, and the layer that said no (as a 403 `e2e_not_allowed` would; `approval_required` with `request`, empty with `allowed`). It changes nothing: an approval is looked for, never spent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "encrypt": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "allowed",
+                          "request",
+                          "denied"
+                        ]
+                      }
+                    },
+                    "reasons": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "",
+                          "tenant_disabled",
+                          "policy_off",
+                          "admins_only",
+                          "permission",
+                          "approval_required"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilese2eallowed"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
     "/api/files/e2e/cleanup": {
       "post": {
         "operationId": "e2eCleanup",
@@ -3641,6 +3736,137 @@
           "default": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/requests": {
+      "get": {
+        "operationId": "listE2eRequests",
+        "summary": "The caller's own encryption requests, every state, newest first (up to 200)",
+        "tags": [
+          "Encryption"
+        ],
+        "responses": {
+          "200": {
+            "description": "`{requests}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#get-apifilese2erequests"
+        },
+        "x-filex-token-verb": "read"
+      },
+      "post": {
+        "operationId": "createE2eRequest",
+        "summary": "Ask to encrypt a folder, a new folder in it, or one file, under the approval policy",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "`<storage>://<path>`: the folder, or the file to encrypt. It must be there."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "folder",
+                      "new_folder",
+                      "file"
+                    ],
+                    "description": "`folder`: the folder at `path`, encrypted where it is. `new_folder`: one new encrypted folder directly inside it. `file`: the file at `path`. An approval opens only its kind, there."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "Why, for the administrators who decide (cut at 2000 characters)."
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The same request is already waiting: `{request, created: false}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Filed, pending: `{request, created: true}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "created": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`path_missing`: nothing is at the path; or an unknown storage."
+          },
+          "429": {
+            "description": "`too_many_pending`: this person has 20 requests waiting already; one must be answered or lapse first."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilese2erequests"
         },
         "x-filex-token-verb": "write"
       }

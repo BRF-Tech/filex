@@ -16,10 +16,11 @@ import {
   docsPageUrl,
   globMatch,
   hasContent,
-  headingsAdded,
+  headingsOf,
   htmlText,
   manifestNewest,
   newestTag,
+  newHeadings,
   parseFeed,
   privateHostLines,
   readmeImages,
@@ -148,36 +149,72 @@ describe('a vitest report', () => {
 });
 
 describe('what was published', () => {
-  it('takes the headings a release ADDED to documentation pages', () => {
-    const diff = [
-      'diff --git a/docs/STORAGE.md b/docs/STORAGE.md',
-      '--- a/docs/STORAGE.md',
-      '+++ b/docs/STORAGE.md',
-      '@@ -10,0 +11,3 @@',
-      '+## Drift detection: what a replaced file looks like',
-      '+### `mount` with <b>html</b>',
-      '-## A removed heading',
-      '+Some prose, not a heading.',
-      '+++ b/docs/index.md',
-      '+### The [explorer](./EXPLORER.md) **everywhere**',
+  it('takes the headings a release ADDED to a documentation page', () => {
+    const before = ['# Storage', '', '## A removed heading', '', 'Prose.', ''].join('\n');
+    const after = [
+      '# Storage',
+      '',
+      '## Drift detection: what a replaced file looks like',
+      '### `mount` with <b>html</b>',
+      'Some prose, not a heading.',
+      '### The [explorer](./EXPLORER.md) **everywhere**',
+      '##### Too deep to probe',
+      '#hashtag, not a heading',
+      '',
     ].join('\n');
-    expect(headingsAdded(diff)).toEqual([
-      { file: 'docs/STORAGE.md', text: 'Drift detection: what a replaced file looks like' },
-      { file: 'docs/index.md', text: 'The explorer everywhere' },
+    expect(newHeadings(before, after)).toEqual(['Drift detection: what a replaced file looks like', 'The explorer everywhere']);
+  });
+
+  it('does not take a # line inside a code block for a heading (v0.50.0, lesson #964)', () => {
+    // v0.50.0 added this comment to a yaml block in docs/STORAGE.md; the gate
+    // read it from the diff as a heading and called a current site an OLD
+    // snapshot, because the page prints the comment with its backticks.
+    const block = (comment: string[]) =>
+      ['# Storage', '', '## Mount at install time', '', '```yaml', 'storage:', ...comment, '  type: sftp', '```', '', 'Prose.', ''].join('\n');
+    const before = block([]);
+    const after = block(['# an existing SFTP / NAS - any driver via `config`']);
+    expect(headingsOf(after)).toEqual(['Storage', 'Mount at install time']);
+    expect(newHeadings(before, after)).toEqual([]);
+    // the same line outside the block is a heading, and a new one
+    expect(newHeadings(before, `${before}\n# an existing SFTP / NAS - any driver via \`config\`\n`)).toEqual([
+      'an existing SFTP / NAS - any driver via config',
     ]);
   });
 
+  it('knows ~~~ fences, indented fences, longer fences and a fence never closed', () => {
+    const page = (...lines: string[]) => lines.join('\n');
+    expect(headingsOf(page('~~~', '# not a heading', '~~~', '## After tildes'))).toEqual(['After tildes']);
+    expect(headingsOf(page('   ```bash', '# not a heading', '   ```', '## After an indented fence'))).toEqual(['After an indented fence']);
+    // four spaces is an indented code block, not a fence: nothing is opened
+    expect(headingsOf(page('    ```', '## Still a heading'))).toEqual(['Still a heading']);
+    // a fence closes only on the same character, at least as long
+    expect(headingsOf(page('````md', '```yaml', '# not a heading', '```', '# nor this', '````', '## After four'))).toEqual(['After four']);
+    expect(headingsOf(page('~~~', '```', '# not a heading', '~~~', '## After mixed'))).toEqual(['After mixed']);
+    expect(headingsOf(page('```', '# not a heading', '``` not a closing fence', '# nor this', '```', '## After text'))).toEqual(['After text']);
+    // a fence never closed runs to the end of the page
+    expect(headingsOf(page('## Before the fence', '```yaml', '# not a heading', '## not one either'))).toEqual(['Before the fence']);
+    // inline code at the start of a line opens nothing
+    expect(headingsOf(page('```x``` is inline code', '## After inline code'))).toEqual(['After inline code']);
+    // YAML front matter is not the page
+    expect(headingsOf(page('---', '# a front matter comment', 'layout: home', '---', '', '# The Home Page'))).toEqual(['The Home Page']);
+    expect(headingsOf(page('```yaml\r', '# not a heading\r', '```\r', '## After CRLF\r'))).toEqual(['After CRLF']);
+  });
+
+  it('counts a heading that only moved as old, and a second one with the same text as new', () => {
+    const before = '## Alpha section\n\ntext\n\n## Beta section\n';
+    expect(newHeadings(before, '## Beta section\n\n## Alpha section\n\ntext\n')).toEqual([]);
+    expect(newHeadings(before, `${before}\n## Alpha section\n`)).toEqual(['Alpha section']);
+    expect(newHeadings('', '## A new page\n')).toEqual(['A new page']);
+    expect(newHeadings(before, '')).toEqual([]);
+  });
+
   it('leaves a badge out of the heading, because the page renders it as a picture, not text', () => {
-    const diff = [
-      '+++ b/docs/BACKEND.md',
-      '+### `PUT /api/admin/storages/order` ![admin](https://img.shields.io/badge/-admin-red)',
-    ].join('\n');
-    const [probe] = headingsAdded(diff);
+    const [probe] = headingsOf('### `PUT /api/admin/storages/order` ![admin](https://img.shields.io/badge/-admin-red)\n');
     const page = htmlText(
       '<h3 id="put-apiadminstoragesorder-"><code>PUT /api/admin/storages/order</code> <img src="https://img.shields.io/badge/-admin-red" alt="admin"> <a class="header-anchor" href="#put-apiadminstoragesorder-">​</a></h3>',
     );
-    expect(probe.text).toBe('PUT /api/admin/storages/order');
-    expect(page.includes(probe.text)).toBe(true);
+    expect(probe).toBe('PUT /api/admin/storages/order');
+    expect(page.includes(probe)).toBe(true);
   });
 
   it('reads rendered pages as text and maps docs files to site pages', () => {

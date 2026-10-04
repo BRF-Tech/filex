@@ -227,3 +227,34 @@ func TestEmitWritten_EmitsWithoutEnqueueingAScan(t *testing.T) {
 	assert.Equal(t, true, e.Meta["editor"])
 	assert.Empty(t, *scanned, "EmitWritten must not enqueue an antivirus scan")
 }
+
+// The sink an event goes to is the one configured when the event was
+// raised. emit hands the send to a goroutine, and on 0.51's tree that
+// goroutine read the package's sink itself: a Configure right after the
+// write (a test restoring its fakes in Cleanup, as the ONLYOFFICE callback
+// tests do) raced the send - `go test -race ./internal/onlyoffice/` failed
+// TestBeside_OneEditorWhoMayIsEnough - and the event went to the next sink,
+// or to none. Here the sink is swapped straight after each event: every
+// event must still reach the first one, and the second must get nothing.
+func TestEmit_GoesToTheSinkConfiguredWhenItWasRaised(t *testing.T) {
+	t.Cleanup(func() { Configure(nil, nil) })
+	const n = 40
+	first := &fakeSink{ch: make(chan notify.Event, n)}
+	second := &fakeSink{ch: make(chan notify.Event, n)}
+	for i := 0; i < n; i++ {
+		Configure(nil, first)
+		OnFileDeleted(context.Background(), 1, "/a.txt", "a.txt", OriginManager)
+		Configure(nil, second)
+	}
+	for i := 0; i < n; i++ {
+		select {
+		case <-first.ch:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("event %d of %d never reached the sink configured when it was raised", i+1, n)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	second.mu.Lock()
+	defer second.mu.Unlock()
+	assert.Empty(t, second.events, "the sink configured after the events must not receive them")
+}

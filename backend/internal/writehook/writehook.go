@@ -226,6 +226,64 @@ func EmitWritten(ctx context.Context, storageID int64, node *model.Node, origin 
 	}
 }
 
+// EmitWrittenFor is EmitWritten told to the people named rather than to the
+// request's user: one bell row each, the webhook once (with the first). For a
+// write no request user made - the document server's save of a document
+// several people edited (onlyoffice callback_format.go), whose callback names
+// the editors. No names: EmitWritten.
+func EmitWrittenFor(ctx context.Context, storageID int64, node *model.Node, origin string, kind WriteKind, userIDs []int64, meta ...map[string]any) {
+	if len(userIDs) == 0 {
+		EmitWritten(ctx, storageID, node, origin, kind, meta...)
+		return
+	}
+	if node == nil || node.Type == model.NodeTypeDirectory {
+		return
+	}
+	notifyObservers(ctx, storageID, node, origin, kind == Replaced)
+	for i, uid := range userIDs {
+		id := uid
+		emit(ctx, notify.Event{
+			Event:     kind.Event(),
+			Body:      node.Path,
+			Meta:      mergeMeta(origin, meta),
+			Node:      &notify.NodeRef{StorageID: storageID, Path: node.Path, Name: node.Name, Size: node.Size},
+			Target:    notify.FileTarget(node.Path),
+			UserID:    &id,
+			Actor:     &notify.ActorRef{ID: id},
+			NoWebhook: i > 0,
+		})
+	}
+	if afterWrite != nil {
+		afterWrite(ctx, storageID, node, origin, kind == Replaced)
+	}
+}
+
+// OnUploadFailedFor is OnUploadFailed for several people: one bell row each,
+// the webhook once (with the first). title is the row's own title (the
+// webhook and the admin history read it); "" keeps "Upload failed".
+func OnUploadFailedFor(ctx context.Context, storageID int64, userIDs []int64, p, name, origin, title, reason string, meta ...map[string]any) {
+	if title == "" {
+		title = "Upload failed"
+	}
+	for i, uid := range userIDs {
+		m := mergeMeta(origin, meta)
+		m["reason"] = reason
+		id := uid
+		emit(ctx, notify.Event{
+			Event:     notify.EventFileUploadFailed,
+			Severity:  notify.SeverityError,
+			Title:     title,
+			Body:      p,
+			Meta:      m,
+			Node:      &notify.NodeRef{StorageID: storageID, Path: p, Name: name},
+			Target:    notify.ParentDirTarget(p),
+			UserID:    &id,
+			Actor:     &notify.ActorRef{ID: id},
+			NoWebhook: i > 0,
+		})
+	}
+}
+
 // OnUploadFailed emits one `file.upload_failed` event: the bytes did NOT
 // reach the storage driver and the user has to be told.
 //
@@ -341,7 +399,14 @@ func mergeMeta(origin string, extra []map[string]any) map[string]any {
 // + webhook fan-out run in a goroutine on a context detached from the
 // request's cancellation. Errors are logged, never surfaced.
 func emit(ctx context.Context, e notify.Event) {
-	if sink == nil {
+	// ⚠ The sink is read HERE, on the caller's goroutine, and the send below
+	// uses this copy. Read inside the goroutine, it raced every Configure
+	// that came after the write: a test restoring its fakes in Cleanup while
+	// the send was still on its way (-race flagged the ONLYOFFICE callback
+	// tests on 0.51's tree), and the event went to whichever sink was there
+	// by then - the next one, or none.
+	s := sink
+	if s == nil {
 		return
 	}
 	if e.Severity == "" {
@@ -373,7 +438,7 @@ func emit(ctx context.Context, e notify.Event) {
 				slog.Warn("writehook: file event panic", slog.Any("recover", rec))
 			}
 		}()
-		if _, err := sink.Send(c, e); err != nil {
+		if _, err := s.Send(c, e); err != nil {
 			slog.Warn("writehook: file event send",
 				slog.String("event", string(e.Event)),
 				slog.String("err", err.Error()))

@@ -299,6 +299,20 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		userID, name, avatar = user.ID, wsDisplayName(user), user.AvatarURL
+		// ⚠ The token door confines like the ticket door. A `root:` token
+		// (and a trusted proxy's X-Filex-Root) authenticates here directly,
+		// outside /api/files and its confine middleware; the ticket carries
+		// the root (Ticket), this door read none and joined any folder's room
+		// the account could read - its change frames and its presence roster
+		// (GHSA-8gvc-6w52-6c7j).
+		root, hasRoot, cerr := confine.FromRequest(r)
+		if cerr != nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if hasRoot {
+			ticket.ConfineAdapter, ticket.ConfineRel = root.Adapter, root.Rel
+		}
 	}
 
 	// Ticketed connections are cross-origin by design (embedded webcomponent →
@@ -352,11 +366,12 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 	client.Avatar = avatar
 	if ticketed {
 		client.PresenceKey = ticket.PresenceKey
-		if ticket.ConfineAdapter != "" {
-			client.Confined = true
-			client.ConfineAdapter = ticket.ConfineAdapter
-			client.ConfineRel = ticket.ConfineRel
-		}
+	}
+	// The root: the ticket's, or the one the token door read above.
+	if ticket.ConfineAdapter != "" {
+		client.Confined = true
+		client.ConfineAdapter = ticket.ConfineAdapter
+		client.ConfineRel = ticket.ConfineRel
 	}
 	h.Hub.Connect(client)
 	defer h.Hub.Unsubscribe(client)

@@ -488,7 +488,7 @@ answers `404`, as an id that never existed.
 
 | Tool | REST twin | What it does |
 |------|-----------|--------------|
-| `file_copy` | `POST /api/ai/copy` | Copy a file or folder to `dst` - its folder and its name, as `file_move`'s `dst` - within a storage or to another one (the bytes travel through the queue's transfer). **Never overwrites**: a taken name lands beside it (`rapor-copy.txt`). Edit rights on the source, `files.create` in the destination folder. An encrypted file does not leave its folder (`E2E_BOUNDARY`). Queued. |
+| `file_copy` | `POST /api/ai/copy` | Copy a file or folder to `dst` - its folder and its name, as `file_move`'s `dst` - within a storage or to another one (the bytes travel through the queue's transfer). **Never overwrites**: a taken name lands beside it (`rapor-copy.txt`). Edit rights on the source, `files.create` in the destination folder. An encrypted file does not leave its folder (`E2E_BOUNDARY`). A copy of a `.fxe`, or of a folder that holds an encrypted folder or a `.fxe`, is a new encryption where it lands and is asked of the [encryption policy](E2E-ENCRYPTION.md#who-may-encrypt) (`403 e2e_not_allowed` in the result). Queued. |
 | `app_actions` | `GET /api/ai/apps/actions?path=` | The app actions that apply to a file or folder, as the explorer's right-click menu offers them to you: running apps, enabled actions, the administrator's restrictions, the app permissions your account holds, and the action's `applies` rule judged on that very file. |
 | `app_run` | `POST /api/ai/apps/run` | Run one (`plugin`, `action` from `app_actions`) on `paths`, with the explorer's rules (`plugins.run`, your level on each file, the app's own permissions). Without `params`, an action that has a form answers the form (`{surface}`) - its fields are what `params` takes; with `params` (`{}` for an action without a form) the job is queued. An action an app starts itself is not offered here. |
 | `file_convert` | `POST /api/ai/convert` | Convert a file to `target` (`pdf`, `docx`, `xlsx`, `png` …) with the **Convert** app - the explorer's *Convert…*. Needs the app installed by an administrator (`NOT_FOUND` otherwise; `APP_PLUGINS_DISABLED` when apps are off). The result lands beside the file under a free name. Queued. |
@@ -778,9 +778,9 @@ expires after 14 days. The same reads and requests are REST routes under
   function the explorer does, and so do a public link and a revoke.
 - **Administration stays with a person.** An admin-scoped token reads the
   admin surface and manages ordinary accounts, but it cannot install a plugin,
-  make or change an administrator, or hand out an admin-area permission: those
-  answer `403 session_required` and are done by an administrator signed in to
-  the panel.
+  make or change an administrator, hand out an admin-area permission or change
+  who may encrypt: those answer `403 session_required` and are done by an
+  administrator signed in to the panel.
 - **Hashed at rest, shown once, revocable.** Only the sha256 hash is stored; the
   plaintext is displayed a single time; any token can be revoked instantly
   (`DELETE`) or aged out with `expires_in_days`.
@@ -839,6 +839,10 @@ may do. No scope changes that.
   an administrator's role or password or removing an administrator's SSO bind
   (`sso_unlink`), `admin_users_reset_password` on an administrator. Managing accounts that are not administrators works with a
   key ([RBAC.md](RBAC.md#administration-and-plugins-need-a-session)).
+- **Who may encrypt** - changing a tenant's encryption policy or the operator's
+  ceiling, deciding an encryption request, and writing the `e2e.policy` key
+  through `admin_settings_set` or `admin_settings_update`
+  ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)).
 
 ### 403 Forbidden (`permission_denied` / `your account lacks the … permission`)
 The account behind the token lacks a permission for this

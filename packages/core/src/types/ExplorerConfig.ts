@@ -101,6 +101,9 @@ export interface EndpointMap {
   e2eEscrowUsed: string | null;
   e2ePasswordChanged: string | null;
   e2eCleanup: string | null;
+  /* wiring:e2 policy — may this account encrypt here, and asking for it. */
+  e2eAllowed: string | null;
+  e2eRequests: string | null;
   /* App plugins (docs/APP-PLUGINS-API.md). Templates carry `{plugin}`,
    * `{action}`, `{view}` and `{id}` placeholders, filled at call time. */
   pluginActions: string | null;
@@ -282,6 +285,12 @@ export interface ExplorerConfig {
   e2ePasswordChanged?: string;
   /** wiring:e2 convert — drop the plaintext filex holds after a folder is encrypted in place. */
   e2eCleanup?: string;
+  /** wiring:e2 policy — `POST { items: [{ path }] } → { encrypt: ['allowed' | 'request' | 'denied', …] }`:
+   *  may this account start encrypting at each path (default `/api/files/e2e/allowed`). */
+  e2eAllowed?: string;
+  /** wiring:e2 policy — `POST { path, kind, reason }`: ask an administrator to
+   *  allow one encryption (default `/api/files/e2e/requests`). */
+  e2eRequests?: string;
 
   /**
    * Public share base URL.

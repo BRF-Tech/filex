@@ -24,6 +24,7 @@
  * Pure types plus one transport; no Vue.
  */
 import type { EventPossibility } from './webhookEvents';
+import type { ExternalServiceStatus } from '../types/FileNode';
 import type { PluginActionsResponse } from '../types/Plugins';
 
 /** The signed-in person, as the dialog reads and writes it. */
@@ -53,11 +54,17 @@ export interface SettingsNotificationPrefs {
   muted_events: string[];
 }
 
-/** What the server says it can do — the fields the dialog reads. */
-export interface SettingsCapabilities extends EventPossibility {
+/** What the server says it can do — the fields the dialog reads. ⚠ Not
+ *  `account_admin`: that one is the account's role, which the host gives as
+ *  `isAdmin`, and the server publishes nothing of the kind. */
+export interface SettingsCapabilities extends Omit<EventPossibility, 'account_admin'> {
   version?: string;
   caller_admin?: boolean;
   demo_mode?: boolean;
+  /** 0.51 - the document server (Default apps: whether a choice of ONLYOFFICE
+   *  for a .csv is available, lib/serviceGate onlyOfficeUsable). */
+  onlyoffice_url?: string | null;
+  external?: { onlyoffice?: ExternalServiceStatus };
 }
 
 /** The account's own endpoints — every one of them open to every signed-in
@@ -87,6 +94,11 @@ export interface UserSettingsHost {
   /** The language on screen — any offered code, a language pack's included. */
   readonly locale: string;
   readonly user: SettingsUser | null;
+  /** The account's role is administrator — of its tenant, of the supertenant or
+   *  of a single-tenant install. ⚠ Not `capabilities.caller_admin`, which is
+   *  the narrower "may set the INSTANCE up" (the supertenant's alone on a
+   *  multi-tenant install). It draws the account's badge, and decides who is
+   *  offered the switch for a new encryption request (lib/webhookEvents). */
   readonly isAdmin: boolean;
   /** The demo account: nothing it changes may be saved. */
   readonly demoReadOnly: boolean;

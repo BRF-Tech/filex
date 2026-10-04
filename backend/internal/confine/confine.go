@@ -51,18 +51,44 @@ const scopePrefix = "root:"
 // split parses "<adapter>://<rel>" (or a bare "<rel>") into its parts with the
 // rel cleaned of surrounding slashes and any traversal collapsed.
 func split(raw string) (adapter, rel string) {
+	adapter, rel = splitRaw(raw)
+	return adapter, cleanRel(rel)
+}
+
+// splitRaw is split without the cleaning: the rel as the client wrote it.
+func splitRaw(raw string) (adapter, rel string) {
 	raw = strings.TrimSpace(raw)
 	if i := strings.Index(raw, "://"); i >= 0 {
-		adapter = raw[:i]
-		rel = raw[i+3:]
-	} else {
-		rel = raw
+		return raw[:i], raw[i+3:]
 	}
+	return "", raw
+}
+
+func cleanRel(rel string) string {
 	rel = strings.Trim(path.Clean("/"+rel), "/")
 	if rel == "." {
 		rel = ""
 	}
-	return adapter, rel
+	return rel
+}
+
+// heldBothWays reports whether the client path p, on adapter, is inside r
+// when a backslash in it is read as a separator too.
+//
+// ⚠⚠ The checks in this package clean a path the POSIX way, where `\` is part
+// of a name; a storage on a Windows host reads it as a separator (the local
+// driver folds the host's own separators before it resolves). So
+// `kutu/x\..\..\disari` was inside a root of `kutu` to every check here and
+// `disari` to the driver that served it (GHSA-8gvc-6w52-6c7j). Folding alone
+// would be wrong the other way: on Linux `kutu\gizli` is a sibling of `kutu`,
+// not inside it. Both readings must therefore be inside - the same answer on
+// every host, whatever its separator.
+func (r Root) heldBothWays(adapter, p string) bool {
+	_, rel := splitRaw(p)
+	if !strings.ContainsRune(rel, '\\') {
+		return true
+	}
+	return r.contains(Root{Adapter: adapter, Rel: cleanRel(strings.ReplaceAll(rel, `\`, "/"))})
 }
 
 // parseRoot turns "<adapter>://<rel>" into a Root, or ok=false if empty.
@@ -129,7 +155,7 @@ func FromRequest(r *http.Request) (Root, bool, error) {
 		}
 		return Root{}, false, nil
 	}
-	if haveToken && !tokenRoot.contains(hdrRoot) {
+	if haveToken && (!tokenRoot.contains(hdrRoot) || !tokenRoot.heldBothWays(hdrRoot.Adapter, hdr)) {
 		// Header tried to escape the token ceiling → reject the whole request.
 		return tokenRoot, true, ErrOutOfRoot
 	}
@@ -171,7 +197,7 @@ func (r Root) enforce(p string) (string, error) {
 		rel = r.Rel
 	}
 	target := Root{Adapter: a, Rel: rel}
-	if !r.contains(target) {
+	if !r.contains(target) || !r.heldBothWays(a, p) {
 		return "", ErrOutOfRoot
 	}
 	if rel == "" {
@@ -292,7 +318,7 @@ func (r Root) holds(p string) bool {
 	if a == "" {
 		a = r.Adapter
 	}
-	return r.contains(Root{Adapter: a, Rel: rel})
+	return r.contains(Root{Adapter: a, Rel: rel}) && r.heldBothWays(a, p)
 }
 
 // oneOf answers which of keys k is, compared the way encoding/json compares
@@ -318,8 +344,13 @@ func confineBody(root Root, body []byte) ([]byte, error) {
 		return body, nil
 	}
 	var m map[string]any
-	if json.Unmarshal(body, &m) != nil {
-		return body, nil // not a JSON object — nothing to confine here
+	// Read it the way the handlers do — json.Decoder, which takes the FIRST
+	// JSON value and ignores anything after it. json.Unmarshal rejects a tail,
+	// so it left `{…} trailing` untouched while the handler read the object and
+	// used its (unconfined) path. Decoding only the first object and
+	// re-marshalling it drops the tail, which the handler would have ignored.
+	if json.NewDecoder(bytes.NewReader(body)).Decode(&m) != nil {
+		return body, nil // first value is not a JSON object — nothing to confine here
 	}
 	itemKeys := func(km map[string]string) []string {
 		out := make([]string, 0, len(km))
@@ -446,5 +477,5 @@ func RootFrom(ctx context.Context) (Root, bool) {
 // the root for the given adapter name.
 func (r Root) Within(adapter, rel string) bool {
 	_, c := split(adapter + "://" + rel)
-	return r.contains(Root{Adapter: adapter, Rel: c})
+	return r.contains(Root{Adapter: adapter, Rel: c}) && r.heldBothWays(adapter, adapter+"://"+rel)
 }

@@ -302,3 +302,28 @@ func TestReadOnlyPluginRefusesWritesOverNFS(t *testing.T) {
 		t.Fatalf("read-only plugin was written to; tree: %v", p.Paths())
 	}
 }
+
+// A write the storage cannot take is refused before who may encrypt is asked.
+// Under the approval policy the question spends the approval, and a request
+// the storage refuses anyway must not; with the policy off, as here, asking
+// first would answer a permission error where the truth is "this storage does
+// not take writes".
+func TestReadOnlyPluginRefusesAnEncryptedCreateBeforeTheRuleIsAsked(t *testing.T) {
+	caps := testplugin.FullCaps()
+	caps.Write, caps.Delete = false, false
+	f, p := newPluginFSWithCaps(t, caps)
+	if err := f.srv.cfg.Store.UpsertSetting(context.Background(), model.SettingE2EPolicy, model.E2EPolicyOff); err != nil {
+		t.Fatal(err)
+	}
+	h, err := f.Create("/yeni.fxe")
+	if err == nil {
+		_ = h.Close()
+		t.Fatalf("Create on a read-only plugin succeeded; tree: %v", p.Paths())
+	}
+	if !errors.Is(err, billy.ErrNotSupported) {
+		t.Fatalf("Create error = %v, want the storage's own refusal (not supported), before the rule", err)
+	}
+	if p.Exists("yeni.fxe") {
+		t.Fatalf("read-only plugin was written to; tree: %v", p.Paths())
+	}
+}

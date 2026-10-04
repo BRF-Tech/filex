@@ -465,6 +465,16 @@ const routes: RouteRecordRaw[] = [
       // The page's first address; kept so old links and bookmarks land.
       { path: 'permissions', redirect: { name: 'roles' } },
       {
+        // Who may encrypt (backend internal/e2epolicy): the tenant's policy,
+        // the requests waiting for an approval and — for the platform
+        // operator — every tenant's ceiling. No `adminPerm`: a delegated
+        // admin.* holder is not the tenant's administrator.
+        path: 'encryption',
+        name: 'encryption',
+        component: () => import('@/views/Encryption.vue'),
+        meta: { breadcrumb: 'nav.encryption' },
+      },
+      {
         path: 'grants',
         name: 'grants',
         component: () => import('@/views/AdminGrants.vue'),

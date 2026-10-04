@@ -201,14 +201,22 @@ func (h *Comments) Delete(w http.ResponseWriter, r *http.Request) {
 	// multi-tenant install than on a single-tenant one. This asks only the
 	// tenancy question; author-or-admin stays the authorization rule it has
 	// always been, in both modes.
-	if scope, confined := confinedScope(r.Context()); confined {
+	//
+	// ⚠ And the token's `root:` the same way (GHSA-8gvc-6w52-6c7j): a comment
+	// is reached by its own id, which confine.Middleware never sees, so a
+	// confined token deleted comments on files outside its folder (any
+	// comment, when the account behind it is an administrator). Same 404.
+	scope, confined := confinedScope(r.Context())
+	root, rooted := callerRoot(r.Context())
+	if confined || rooted {
 		c, cerr := h.Store.GetNodeComment(r.Context(), id)
 		if cerr != nil || c == nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
 		n, nerr := h.Store.GetNode(r.Context(), c.NodeID)
-		if nerr != nil || n == nil || !scope.CanAccessStorage(n.StorageID) {
+		if nerr != nil || n == nil || (confined && !scope.CanAccessStorage(n.StorageID)) ||
+			(rooted && !root.Within(rootStorageName(r.Context(), h.Store, n.StorageID), n.Path)) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}

@@ -215,6 +215,10 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if e.NoWebhook {
+		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "sent to the webhooks with another row of the same event")
+		return id, nil
+	}
 	s.dispatch(id, e)
 	return id, nil
 }

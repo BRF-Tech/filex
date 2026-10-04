@@ -15,7 +15,7 @@
 #   headless JRE it needed were ~420 MB of the compressed image and ~1.1 GB on
 #   disk: this recipe with them put back measured 642 MB / 1633 MiB, without
 #   them 225 MB / 550 MiB (the gzip and the size of the image's filesystem,
-#   alpine:3.24, brkgpu, 2026-10-02).
+#   alpine:3.24, a Linux build host, 2026-10-02).
 #
 # ⚠ Since v0.43.0 the binary engines (ffmpeg, ImageMagick, Ghostscript,
 #   poppler, rsvg) also gate APP actions and the converter, and they are probed

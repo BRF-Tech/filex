@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { nativeGo, wslGo, wslMirrorCd } from '../lib/go-build.mjs';
+import { nativeGo, toWslPath, wslGo, wslMirrorCd } from '../lib/go-build.mjs';
 import { docker, dockerArgv, run, shq, slash } from './engine.mjs';
 import { desktopFeeds, docsSite, readmePictures, runningRelease, snapChannel, updateManifest, windowsFeedArches } from './verify.mjs';
 
@@ -31,23 +31,37 @@ function goToolchain() {
  * A Go gate in `dirOf(ctx)`. Under WSL, GOFLAGS=-buildvcs=false: a worktree's
  * `.git` file names a Windows path WSL's git cannot follow, and `go build`
  * stamps VCS info by default (lesson #450).
+ *
+ * Under WSL the gate runs in a MIRROR of the Go module on WSL's own disk
+ * (wslMirrorCd), not in the checkout. `$FILEX_CHECKOUT` is the release
+ * checkout as the gate's shell reaches it (natively the checkout itself,
+ * under WSL its /mnt path): a script is read from it, or one built file
+ * written back into it. Go never runs on it.
+ *
+ * `toolchain` is this machine's; the plan's test names one to read both.
  */
 function goGate(name, dirOf, script) {
   return {
     name,
     // The shell it runs, readable by the plan's own test.
     script,
-    cmd: (c) => {
+    cmd: (c, toolchain = goToolchain()) => {
       const dir = dirOf(c);
-      const t = goToolchain();
-      if (t === 'native') return [c.bash, '-c', `cd ${shq(slash(dir))} && ${script}`];
-      if (t === 'wsl') {
-        return ['wsl', '-e', 'bash', '-lc', `${wslMirrorCd(dir)} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false && ${script}`];
+      if (toolchain === 'native') return [c.bash, '-c', `export FILEX_CHECKOUT=${shq(slash(c.repo))} && cd ${shq(slash(dir))} && ${script}`];
+      if (toolchain === 'wsl') {
+        return ['wsl', '-e', 'bash', '-lc', `${wslMirrorCd(dir)} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false FILEX_CHECKOUT=${shq(toWslPath(c.repo))} && ${script}`];
       }
       return ['node', '-e', 'console.error("no Go toolchain: go is not on PATH, and WSL has none either"); process.exit(1)'];
     },
   };
 }
+
+/**
+ * Builds echo.wasm in the Go module the gate is in (under WSL: its mirror),
+ * with the checkout's script. The script copies the module back into the
+ * checkout when it was built elsewhere (scripts/build-wasm-fixture.sh).
+ */
+const ECHO_FIXTURE = 'FILEX_BACKEND_DIR="$PWD" bash "$FILEX_CHECKOUT/scripts/build-wasm-fixture.sh"';
 
 // The workflow guards read the PUBLIC workflows, which exist only in the
 // export checkout; without them they SKIP and the file still reads green.
@@ -276,19 +290,27 @@ export default function plan({ repo, version, tag }) {
       // 2026-09-14: a binary with a 16-hour-old UI passed every API check.
       { name: 'the binary serves the UI just built, byte for byte', cmd: ['node', 'scripts/check-embed.mjs', '--binary', bin] },
       // Without the fixture the app-plugin Go tests skip in silence.
-      goGate('go: echo.wasm fixture', (c) => c.repo, 'bash scripts/build-wasm-fixture.sh'),
+      // ⚠⚠ In the Go module, and back into the CHECKOUT: the Playwright gate
+      // below installs the checkout's echo.wasm, and on Windows Go builds in a
+      // WSL mirror. On the v0.50.0 pretag this gate refreshed only its mirror (it
+      // ran in a mirror of the whole repository); the checkout's copy predated
+      // the echo change spec 192 tested, and 192 failed after an hour of
+      // chain (lesson #960, #139). The module dir also keeps the private
+      // pretag's mirror module-only, like the export's (#141).
+      goGate('go: echo.wasm fixture', (c) => path.join(c.repo, 'backend'), ECHO_FIXTURE),
       // ⚠ The fixture AGAIN, in this gate's own mirror. Each Go gate rsyncs
       // its module with --delete, so the Windows checkout's gitignored
       // echo.wasm - as old as whoever last built it there - came back over the
       // one the gate above had just built. After a change to the echo app's
       // main.go it is older than main.go, and every app-plugin test refuses to
       // run on it (the v0.48.0 pretag: 50-odd "echo.wasm is older than
-      // main.go" failures). Building it here is a no-op when it is current.
+      // main.go" failures). The gate above now writes the module back into
+      // the checkout as well; building here keeps this gate right on its own.
       // -timeout 30m: go test's own default is 10m PER PACKAGE, and handlers
       // (~5 min alone) ran beside wasmplugin on a busy workstation and crossed it
       // (v0.49.0 release run, 2026-09-29: "test timed out after 10m0s" with
       // no test hung). A hung test still fails, only later.
-      goGate('go: vet + test', (c) => path.join(c.repo, 'backend'), 'bash ../scripts/build-wasm-fixture.sh >/dev/null && go vet ./... && go test -timeout 30m ./...'),
+      goGate('go: vet + test', (c) => path.join(c.repo, 'backend'), `${ECHO_FIXTURE} >/dev/null && go vet ./... && go test -timeout 30m ./...`),
       // A migration that only works on sqlite bricks the first boot after an
       // upgrade for everyone else; the parity tests SKIP without a DSN.
       { name: 'go: migrations on sqlite, postgres AND mysql', cmd: ['node', 'scripts/release/gates/engines.mjs'] },

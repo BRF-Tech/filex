@@ -8,10 +8,12 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/protoperm"
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/staging"
@@ -38,6 +40,12 @@ type Config struct {
 	Auth *protocolauth.Resolver
 	// ACL resolves per-user grants.
 	ACL *acl.Resolver
+	// E2EPolicy is who may encrypt (internal/e2epolicy): a write that CREATES
+	// an encrypted folder's key file or a `.fxe` asks it
+	// (protoperm.EncryptionAllowed). The router's own, handed over like ACL.
+	// nil: NewHandler builds one over Store (protoperm.EncryptionPolicy), so a
+	// lost wiring line never switches the rule off.
+	E2EPolicy *e2epolicy.Service
 	// Resolver returns the live driver for a storage id.
 	Resolver func(int64) (storage.Driver, error)
 	// Staging holds in-flight multipart parts — the SAME area the browser's
@@ -84,6 +92,9 @@ type Handler struct {
 
 // NewHandler builds the handler.
 func NewHandler(cfg Config) *Handler {
+	// Who may encrypt: the router's rule, or one built over this handler's
+	// own store — never none (protoperm.EncryptionPolicy).
+	cfg.E2EPolicy = protoperm.EncryptionPolicy(cfg.E2EPolicy, cfg.Store, cfg.ACL, cfg.MultiTenant)
 	return &Handler{
 		cfg:    cfg,
 		auth:   NewAuthenticator(cfg.Auth),

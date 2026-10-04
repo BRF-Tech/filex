@@ -62,6 +62,45 @@ func (c *Client) E2EEscrowKey(ctx context.Context) (string, error) {
 	return caps.Escrow.PublicKey, nil
 }
 
+// E2EAllowed asks the server whether this account may start encrypting at
+// remote, as kind: "folder" (encrypt the folder where it is), "new_folder"
+// (make a new encrypted folder in it) or "file". answer is "allowed",
+// "request" (an administrator's approval is needed first) or "denied";
+// reason names the layer that said no (tenant_disabled, policy_off,
+// admins_only, permission, approval_required). A server older than the
+// encryption policy has no such question (404) and answers "allowed": every
+// write it takes is asked on its own anyway.
+func (c *Client) E2EAllowed(ctx context.Context, remote, kind string) (answer, reason string, err error) {
+	rp, err := ParseRemotePath(remote)
+	if err != nil {
+		return "", "", err
+	}
+	raw, err := c.postJSON(ctx, "/api/files/e2e/allowed", map[string]any{
+		"items": []map[string]string{{"path": rp.String(), "kind": kind}},
+	})
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
+		return "allowed", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var out struct {
+		Encrypt []string `json:"encrypt"`
+		Reasons []string `json:"reasons"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", "", fmt.Errorf("parse the encryption answer: %w", err)
+	}
+	if len(out.Encrypt) != 1 {
+		return "", "", fmt.Errorf("the server answered %d encryption answers for one question", len(out.Encrypt))
+	}
+	if len(out.Reasons) == 1 {
+		reason = out.Reasons[0]
+	}
+	return out.Encrypt[0], reason, nil
+}
+
 // E2ECleanupResult is what POST /api/files/e2e/cleanup removed.
 type E2ECleanupResult struct {
 	VersionsDeleted   int `json:"versions_deleted"`

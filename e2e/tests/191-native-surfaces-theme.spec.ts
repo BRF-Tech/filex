@@ -53,6 +53,11 @@ test.describe('#74 - the admin shell wears the theme', () => {
       await expect
         .poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fe-font').trim()))
         .toMatch(/monospace/);
+      // ⚠ The token is on the root before the app mounts (the first-paint
+      // mirror sets it), so the poll above can pass while the admin layout is
+      // not in the page yet: its ground then reads as ''. Wait for the one
+      // layout to be there (e2e 198's `settled`) before measuring it.
+      await expect(page.getByTestId('mega-menu')).toHaveCount(1, { timeout: 20_000 });
 
       // The face: the panel's own text, not only the explorer's.
       const face = await page.evaluate(() => getComputedStyle(document.body).fontFamily);

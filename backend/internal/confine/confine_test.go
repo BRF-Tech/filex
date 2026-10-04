@@ -103,6 +103,24 @@ func TestMiddleware_BodyConfinement(t *testing.T) {
 	h.ServeHTTP(rec, mkReq(`{"source":["main://projeler/EVIL/a.txt"],"target":"main://projeler/acme"}`))
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.Empty(t, seen, "handler must not run for an out-of-root request")
+
+	// A tail after the object is read the way the handler reads it: the handler's
+	// json.Decoder takes the first value and ignores the rest, so the middleware
+	// must confine that first value — not leave the body untouched because the
+	// whole of it is not one JSON value.
+	seen = ""
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, mkReq(`{"source":["main://projeler/EVIL/a.txt"],"target":"main://projeler/acme"} and a tail`))
+	require.Equal(t, http.StatusForbidden, rec.Code, "an out-of-root path with a tail after the object must still be refused")
+	require.Empty(t, seen, "handler must not run for an out-of-root request")
+
+	// The in-root case with a tail still passes, and the body the handler reads
+	// is the clean first object.
+	seen = ""
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, mkReq(`{"source":["main://projeler/acme/a.txt"]} trailing`))
+	require.Equal(t, 200, rec.Code)
+	require.Contains(t, seen, "projeler/acme/a.txt")
 }
 
 // The app doors and the selection archive name their files in a `paths`

@@ -161,6 +161,8 @@ watch(
         placement="inspector"
         :ui="view.ui"
         :files="appFiles"
+        :storages="storages"
+        :start-at="path"
         :locale="locale"
         :theme="theme"
         :title="label"

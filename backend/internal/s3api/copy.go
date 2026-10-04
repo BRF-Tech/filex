@@ -167,6 +167,14 @@ func (h *Handler) copyObject(w http.ResponseWriter, r *http.Request, p *protocol
 		})
 		return
 	}
+	// A copy is a new file on this protocol (spec, clarification 2): onto a
+	// key file's or a `.fxe`'s name where there is none, it is a new
+	// encryption. Asked only now, when every check that would refuse the copy
+	// anyway — the source is there, readable, a file — has passed: under the
+	// approval policy the question spends the approval.
+	if h.refusesEncryption(w, r, dstSt, dstKey) {
+		return
+	}
 
 	if u := auth.UserFrom(ctx); u != nil && h.cfg.Quota != nil {
 		// A copy is a second physical object: it costs quota even though the

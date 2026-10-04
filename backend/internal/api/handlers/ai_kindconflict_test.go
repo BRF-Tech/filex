@@ -13,7 +13,7 @@ import (
 // this never showed locally; on an object store the write SUCCEEDS and leaves
 // `X` and `X/…` living side by side.
 //
-// What that cost (2026-08-06, brkip DR mirror): the mirror could never settle
+// What that cost (2026-08-06, a DR mirror): the mirror could never settle
 // the prefix, so `mc mirror` re-copied it every run — 2760 syncs in 24h, 1016
 // versions of one PNG, a 43 MiB folder occupying 45 GB, disk at 96%. Quieter
 // and worse: the colliding object made everything beneath it unlistable, so 314

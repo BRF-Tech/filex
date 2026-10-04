@@ -304,9 +304,9 @@ export function isolateLtrRuns(text: string): string {
  * the text that carries machine runs: a path, a URL, a command, a token
  * syntax.
  *
- * Measured in the Arabic admin panel (v0.43.0 pack round, `G:/filex-lang-ar`):
- * `server.token.scope_unknown` names the syntax `root:<storage>://<folder>`,
- * and the closing `>` — a neutral between the Latin run and the Arabic after
+ * Measured in the Arabic admin panel (v0.43.0 pack round, the local Arabic
+ * test pack): `server.token.scope_unknown` names the syntax
+ * `root:<storage>://<folder>`, and the closing `>` — a neutral between the Latin run and the Arabic after
  * it — resolved to the paragraph's direction, jumped to the FAR LEFT of the
  * run and mirrored into `<`, so the line read `…<root:<storage>://<folder`.
  * The same sentence drawn from the catalogue was correct, which is what makes

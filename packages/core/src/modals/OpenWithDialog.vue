@@ -11,7 +11,7 @@
  */
 import { computed, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
-import type { OpenHandler } from '../lib/appViewer';
+import { isOfficeHandler, type OpenHandler } from '../lib/appViewer';
 import { useLocale } from '../composables/useLocale';
 import { labelOf as pluginLabelOf } from '../lib/pluginLabel';
 import Modal from './Modal.vue';
@@ -53,8 +53,10 @@ watch(
   { immediate: true },
 );
 
-/** A handler as the person reads it: the app's view by its label, filex's own by name. */
+/** A handler as the person reads it: the app's view by its label, filex's own
+ *  and ONLYOFFICE (0.51, a .csv) by name. */
 function handlerLabel(h: OpenHandler): string {
+  if (isOfficeHandler(h)) return t('openWith.onlyoffice');
   if (!h.view) return t('openWith.builtin');
   return pluginLabelOf(h.view.label, props.locale) || h.view.plugin;
 }

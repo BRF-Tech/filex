@@ -47,7 +47,7 @@ app runtime is on and at least one app is installed.)
 | **From a URL** | Downloaded, checked against a **required** SHA256 (and the signature, when required) **before anything is executed**, then as above. The URL must point at a **public** host: private, loopback and link-local targets are refused, after DNS and on every redirect (at most five), so a plugin URL cannot become a probe of the server's own network; a redirect from `https://` to plain `http://` is refused too. Apps are downloaded by the same client ([APP-PLUGINS.md → Install one](APP-PLUGINS.md#install-one)); for development, `FILEX_PLUGIN_LOOPBACK_SOURCES=1` opens this machine to it ([CONFIGURATION.md](CONFIGURATION.md#storage-plugins)). | Unattended installs, scripted setups. |
 | **Remote service** | Nothing is launched: filex connects to an address you give it with a bearer token you give it. **Remote = TLS**: `https://` anywhere; plain `http://` only when the address is on the private network (loopback, link-local, RFC 1918, ULA), because the token and every storage credential travel on that connection. | A sidecar container, a plugin on another host, or a plugin you are developing. |
 
-![The Plugins page with the example plugin running](screenshots/v0.50.0/admin-plugins.png)
+![The Plugins page with the example plugin running](screenshots/v0.51.0/admin-plugins.png)
 
 > ⚠ **A plugin runs with filex's own privileges** and is handed the credentials
 > of every storage created on it. Install only plugins you trust - the same

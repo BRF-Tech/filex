@@ -4,6 +4,8 @@ import { useRoute, RouterLink } from 'vue-router';
 import { ChevronRight } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 
+import { adminNavPages, adminNavSectionOf } from '@/lib/adminNav';
+
 const route = useRoute();
 const { t } = useI18n();
 
@@ -15,7 +17,12 @@ interface Crumb {
 }
 
 /**
- * Dashboard › parent › this page — with no step named twice.
+ * Dashboard › section › parent › this page — with no step named twice.
+ *
+ * The SECTION is where the page lives in the menu (lib/adminNav, GitHub #82):
+ * "Dashboard › People & access › Users". It is words, not a link - a section
+ * is a heading in a menu panel, not a page anybody could be taken to (owner's
+ * choice, 2026-10-03). A sub-page takes its parent's section.
  *
  * ⚠ The trail always starts at the dashboard, and the dashboard's own leaf is
  * the dashboard, so standing on it read "Dashboard › Dashboard" (v0.41.0
@@ -26,9 +33,13 @@ interface Crumb {
 const crumbs = computed<Crumb[]>(() => {
   const out: Crumb[] = [{ label: t('nav.dashboard'), name: 'dashboard', to: { name: 'dashboard' } }];
   const parent = route.meta?.parent as string | undefined;
+  const placed = adminNavSectionOf(parent ?? String(route.name ?? ''));
+  if (placed) out.push({ label: t(placed.section.label), name: `section:${placed.section.id}` });
   if (parent) {
-    // Best-effort label: nav.<parent> if it exists, else the route name itself.
-    const key = `nav.${parent}`;
+    // The parent's label is the menu's label for it (`admin-files` is "File
+    // history", not `nav.admin-files`); nav.<parent> for a parent the menu
+    // does not carry, else the route name itself.
+    const key = adminNavPages().find((p) => p.route === parent)?.label ?? `nav.${parent}`;
     out.push({ label: t(key, parent), name: parent, to: { name: parent } });
   }
   if (route.meta?.breadcrumb) {
@@ -54,6 +65,7 @@ const single = computed(() => crumbs.value.length <= 1);
       <span
         v-else
         :class="i === crumbs.length - 1 ? 'font-medium text-zinc-700 dark:text-zinc-300' : ''"
+        :data-testid="c.name.startsWith('section:') ? 'crumb-section' : undefined"
       >
         {{ c.label }}
       </span>

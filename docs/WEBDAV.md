@@ -102,7 +102,7 @@ Notes:
 >
 > - the file explorer's navigation panel → **How to connect** - the same entry
 >   on every surface that draws the panel, for every signed-in user;
-> - admins also reach it from **Connections** in the admin sidebar.
+> - admins also reach it from **Connections** in the admin menu (*Files & storage*).
 >
 > Both routes render the same component from `@brftech/filex-core`, so they
 > cannot drift apart from each other - but they *can* drift from this file.

@@ -24,6 +24,10 @@ const props = defineProps<{
   label: string;
   files: AppFrameFile[];
   userName?: string;
+  /** Storage names an app's save-as may span, and where it opens without a
+   *  file (AppFrame `storages` / `startAt`). */
+  storages?: string[];
+  startAt?: string;
 }>();
 
 const emit = defineEmits<{
@@ -63,6 +67,8 @@ async function close() {
         :placement="placement"
         :ui="ui"
         :files="files"
+        :storages="storages"
+        :start-at="startAt"
         :locale="locale"
         :theme="theme"
         :user-name="userName"

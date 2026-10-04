@@ -106,6 +106,9 @@ import Users from '@/views/Users.vue';
 import Webhooks from '@/views/Webhooks.vue';
 import ApiMcp from '@/views/ApiMcp.vue';
 import { useToastStore } from '@/stores/toast';
+import { useAuthStore } from '@/stores/auth';
+import { useCapabilitiesStore } from '@/stores/capabilities';
+import type { User } from '@/api/types';
 import { teardownDom, unmountAll } from '../helpers/teardown';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
@@ -306,6 +309,64 @@ describe('New webhook', () => {
     // Save with its own bubble, in its own language, and save() never runs
     // (RC re-test, 2026-09-21).
     expect(w.find('form').attributes('novalidate')).toBeDefined();
+  });
+
+  // The screen keeps every event tickable — an operator may subscribe ahead of
+  // switching a service on — and says beside the box what the event needs
+  // (core lib/webhookEvents eventOffReason). The two encryption request events
+  // exist only under the approval policy.
+  //
+  // The screen is admin-only (the router's `requiresAdmin`, with no `adminPerm`
+  // on this page), so the account viewing it is an administrator — of a
+  // tenant, of the supertenant, or of a single-tenant install. What the server
+  // says of the CALLER (`caller_admin`) is the supertenant's alone on a
+  // multi-tenant install and must not decide the note for the others.
+  describe('beside the encryption request events', () => {
+    const REQUEST_EVENTS = ['e2e.request_created', 'e2e.request_decided'];
+    const ADMIN = {
+      id: 1, email: 'admin@example.com', username: 'admin', display_name: 'Admin', role: 'admin',
+      created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
+    } as User;
+
+    /** Sign the administrator in, and say what the server says of them. */
+    function asAdmin(callerAdmin: boolean, policy?: { available: boolean; policy: string }) {
+      useAuthStore().user = ADMIN;
+      const caps = useCapabilitiesStore();
+      caps.data = { ...caps.data, caller_admin: callerAdmin, ...(policy ? { e2e_policy: policy } : {}) };
+    }
+    const note = (w: VueWrapper, ev: string) => w.find(`[data-testid="webhook-event-${ev}"]`).text();
+
+    it.each(['en', 'tr'] as const)('says that they need the approval policy (%s)', async (locale) => {
+      asAdmin(true, { available: true, policy: 'permitted' });
+      const w = await open(locale);
+      const bundle = locale === 'en' ? en : tr;
+      expect(bundle.webhooks.offReason.e2eApproval, `${locale}.json has the sentence`).toBeTruthy();
+      for (const ev of REQUEST_EVENTS) {
+        const row = w.find(`[data-testid="webhook-event-${ev}"]`);
+        expect(row.exists(), `${ev} is listed`).toBe(true);
+        expect(row.text(), ev).toContain(bundle.webhooks.offReason.e2eApproval);
+        // …and still tickable: the operator may subscribe ahead.
+        expect(row.find('input').attributes('disabled'), ev).toBeUndefined();
+      }
+    });
+
+    it.each([
+      ['the supertenant', true],
+      ['a tenant’s own administrator', false],
+    ] as const)('says nothing once the policy asks for approval — %s', async (_who, callerAdmin) => {
+      asAdmin(callerAdmin, { available: true, policy: 'approval' });
+      const w = await open();
+      for (const ev of REQUEST_EVENTS) expect(note(w, ev), ev).not.toContain(en.webhooks.offReason.e2eApproval);
+    });
+
+    it.each([
+      ['the operator has switched encryption off', { available: false, policy: 'approval' }],
+      ['the server says nothing of a policy', undefined],
+    ] as const)('still says it while %s', async (_state, policy) => {
+      asAdmin(false, policy);
+      const w = await open();
+      for (const ev of REQUEST_EVENTS) expect(note(w, ev), ev).toContain(en.webhooks.offReason.e2eApproval);
+    });
   });
 
   it('an empty save sends nothing and names both boxes, in the dialog', async () => {

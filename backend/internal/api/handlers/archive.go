@@ -19,6 +19,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -63,6 +64,10 @@ type Archive struct {
 	// MultiTenant decides whether a link's redeem is held to the tenant host
 	// it was minted on and to its owner's tenant scope.
 	MultiTenant bool
+	// E2EPolicy is who may encrypt (e2e_policy_gate.go): extraction skips a
+	// member that would create a key file or a `.fxe`, and add and create
+	// refuse a new archive under such a name. nil = not wired.
+	E2EPolicy *e2epolicy.Service
 }
 
 // AttachSearchIndex / AttachThumbs wire the two optional halves of the
@@ -629,6 +634,18 @@ func (l *landing) file(name string, size int64, open func() (io.ReadCloser, erro
 		return nil
 	}
 	existed := storage.Exists(l.ctx, l.drv, target)
+	// A member that would CREATE an encrypted folder's key file or a `.fxe`
+	// is skipped like one of filex's own names (e2e_policy_gate.go). The
+	// worker restored the person who asked on ctx, so it is judged as theirs,
+	// in the request and in the queued job alike.
+	// Neither line names the member: its name can say as much as its contents.
+	// An undecided rule was logged where it was asked (e2epolicy.DoorError).
+	if eerr := checkE2EWrite(l.ctx, l.a.E2EPolicy, l.drv, auth.UserFrom(l.ctx), l.st, target); eerr != nil {
+		if !isE2EUndecided(eerr) {
+			slog.Warn("archive: skipped a member the encryption rule refused", slog.String("why", eerr.Error()))
+		}
+		return nil
+	}
 	if l.parents && l.mkdirer != nil {
 		parent := path.Dir(target)
 		_ = l.mkdirer.Mkdir(l.ctx, parent)
@@ -815,6 +832,14 @@ func (a *Archive) Add(w http.ResponseWriter, r *http.Request) {
 		if !v.WritePerm(w, r) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		}
+		return
+	}
+	// A new archive under a key file's or a `.fxe`'s name is a new encryption
+	// by name (e2e_policy_gate.go); adding to one that is there is not.
+	// "There" is the rule's own look — a FILE at the path — not addNeed's
+	// "an archive could be read": on some storages a folder reads (a WebDAV
+	// server listing a collection on GET).
+	if refuseE2EWriteAt(w, r, a.E2EPolicy, drv, a.Store, req.StorageID, req.Path) {
 		return
 	}
 

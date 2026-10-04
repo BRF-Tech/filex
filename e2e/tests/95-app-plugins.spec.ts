@@ -3,8 +3,9 @@
  *
  * The fixture is the same `echo` module the Go suite runs against
  * (backend/internal/wasmplugin/testdata/echo, built by
- * scripts/build-wasm-fixture.sh). The spec skips when it has not been built —
- * on CI it is built before the browsers start.
+ * scripts/build-wasm-fixture.sh, read through helpers/echoFixture). The spec
+ * skips when it has not been built (on CI it is built before the browsers
+ * start), and fails on a module older than its sources.
  *
  * What is measured, in one walk:
  *   1. Admin → Plugins → Apps → Install (files): the wizard stops at the
@@ -28,18 +29,15 @@
  *      and the retired `/api/p/*` prefix still 301s to it.
  */
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { loginAs, apiLogin } from '../helpers/auth';
 import { underBase } from '../helpers/base';
 import { seedLocalStorage, dropStorageByName, waitForOp } from '../helpers/seed';
-import { APP_INSTALL_ALLOWANCE_MS } from '../helpers/appPlugin';
+import { APP_INSTALL_ALLOWANCE_MS, guardFixture } from '../helpers/appPlugin';
+import { echoFixture } from '../helpers/echoFixture';
 
-const FIXTURE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../backend/internal/wasmplugin/testdata/echo');
-const WASM = resolve(FIXTURE_DIR, 'echo.wasm');
-const MANIFEST = resolve(FIXTURE_DIR, 'manifest.json');
-const HAVE_FIXTURE = existsSync(WASM);
+const ECHO = echoFixture();
+const WASM = ECHO.wasm;
+const MANIFEST = ECHO.manifestPath;
 
 const STORAGE = `e2e-apps-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -103,7 +101,7 @@ test.describe('App plugins — install, run, output, public page', () => {
   // One walk in order: the menu and the page need the app the first test
   // installs, so these must not be spread across workers.
   test.describe.configure({ mode: 'serial' });
-  test.skip(!HAVE_FIXTURE, `echo.wasm not built: bash scripts/build-wasm-fixture.sh (${WASM})`);
+  guardFixture(ECHO, test.skip);
 
   test.beforeAll(async ({ request }) => {
     await dropStorageByName(request, STORAGE);
@@ -156,7 +154,7 @@ test.describe('App plugins — install, run, output, public page', () => {
     await page.getByTestId('app-plugin-review').click();
 
     // The review lists every permission the manifest asks for.
-    const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')) as { permissions: string[] };
+    const manifest = ECHO.manifest!;
     const rows = page.getByTestId('app-plugin-permissions');
     await expect(rows).toBeVisible();
     for (const perm of manifest.permissions) {

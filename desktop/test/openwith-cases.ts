@@ -86,7 +86,7 @@ export const CASES: Case[] = [
     name: "a dev run's project path and Chromium's own switches are not documents",
     async run(impl) {
       const got = impl.classifyArgv(
-        ['electron.exe', 'G:\\filex\\desktop', '--user-data-dir=C:\\tmp\\p', '--lang=en-US', 'C:\\Belgeler\\a b.docx'],
+        ['electron.exe', 'C:\\src\\filex\\desktop', '--user-data-dir=C:\\tmp\\p', '--lang=en-US', 'C:\\Belgeler\\a b.docx'],
         { defaultApp: true },
       );
       assert.deepEqual(got.files, ['C:\\Belgeler\\a b.docx']);

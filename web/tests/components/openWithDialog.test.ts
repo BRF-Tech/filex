@@ -91,13 +91,15 @@ describe('the explorer’s file menu', () => {
   it('offers the handlers that are on, and "Choose an app…", only when there is more than one', () => {
     const rows = src.slice(src.indexOf('function openWithRows'), src.indexOf('/* ── "Choose an app…"'));
     expect(rows).toMatch(/const \{ on \} = openHandlersOf\(sel\[0\]\);/);
-    expect(rows).toMatch(/if \(on\.length < 2\) return \[\];/);
+    // 0.51: an administrator also sees "Open with ONLYOFFICE" greyed for a
+    // .csv while ONLYOFFICE is not there (csvInOffice.test.ts).
+    expect(rows).toMatch(/if \(on\.length < 2 && missing\.length === 0\) return \[\];/);
     expect(rows).toMatch(/key: 'open-with-choose'/);
   });
 
   it('opens a file with the person’s choice, the administrator’s order and the Open with pick - one rule', () => {
     expect(src).toMatch(
-      /pickAppViewer\(pluginViewList\.value, previewTarget\.value, previewAppChoice\.value, pluginOpenRules\.value, personalOpenChoice\(previewTarget\.value\)\)/,
+      /pickOpenHandler\(\s*pluginViewList\.value,\s*previewTarget\.value,\s*previewAppChoice\.value,\s*pluginOpenRules\.value,\s*personalOpenChoice\(previewTarget\.value\),\s*openOpts\.value,\s*\)/,
     );
     expect(src).toMatch(/<OpenWithDialog[\s\S]*?@open="openWithChosen"/);
     const chosen = src.slice(src.indexOf('function openWithChosen'), src.indexOf('const stopFollowingOpenWith'));

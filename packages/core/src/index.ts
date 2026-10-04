@@ -171,6 +171,21 @@ export {
   type AccountPerson,
   type ExplorerMenuRow,
 } from './lib/accountMenu';
+/* 0.51 (GitHub #82) - the mega menu: top entries, each a panel of named
+ * sections of pages. The admin panel's navigation draws it; the host passes
+ * the entries it lets the reader open and does the navigating. */
+export { default as MegaMenu } from './components/MegaMenu.vue';
+export {
+  entryIsCurrent,
+  isLinkEntry,
+  isPlainClick,
+  pruneMegaMenu,
+  stepAlongBar,
+  stepFocus,
+  type MegaMenuEntry,
+  type MegaMenuItem,
+  type MegaMenuSection,
+} from './lib/megaMenu';
 export { default as RecentlyOpened } from './components/RecentlyOpened.vue';
 // belge:n1 — the "New document" picker. Exported because the entry belongs
 // on every surface, not just the admin app: a host that draws its own
@@ -217,8 +232,13 @@ export {
   appViewersFor,
   viewerViews,
   BUILTIN_VIEWER,
+  // 0.51 - ONLYOFFICE as a handler of the kinds it opens as a choice (.csv).
+  ONLYOFFICE_VIEWER,
+  OFFICE_OPEN_KINDS,
+  officeOpensKind,
+  isOfficeHandler,
 } from './lib/appViewer';
-export type { OpenHandler, OpenHandlers } from './lib/appViewer';
+export type { OpenHandler, OpenHandlers, OpenHandlerOptions } from './lib/appViewer';
 // 0.50 - the person's "always open this kind with this app" (lib/openWith).
 export {
   openWithChoice,
@@ -460,7 +480,7 @@ export {
   statusWords,
 } from './lib/errorWords';
 export type { JobErrorCode, RequestFailure, SaidFailure } from './lib/errorWords';
-export { gateOnService } from './lib/serviceGate';
+export { gateOnService, onlyOfficeUsable } from './lib/serviceGate';
 export type { AppLock, LockedRefusal, LockWordsHost } from './lib/appLock';
 /* issue #34 — a symlink the server will NOT follow: what it is, why it will
    not open, and the rule that every surface refuses it out loud. */
@@ -561,6 +581,9 @@ export type {
   ArchiveEntry,
   ViewMode,
   ClipboardState,
+  E2eAnswer,
+  E2eRequestDto,
+  E2eRequestKind,
 } from './types/FileNode';
 export { isExternalUsable } from './types/FileNode';
 

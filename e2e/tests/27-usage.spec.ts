@@ -11,7 +11,7 @@ import { loginAs } from '../helpers/auth';
  * spent nothing" and "nothing is set up" look identical as a zero.
  */
 test.describe('Usage & cost', () => {
-  test('the page is reachable from the sidebar and its strings resolve', async ({ page }) => {
+  test('the page is reachable from the admin menu and its strings resolve', async ({ page }) => {
     await loginAs(page);
     await page.goto('/admin/usage');
 
@@ -22,8 +22,13 @@ test.describe('Usage & cost', () => {
     const body = await page.locator('body').innerText();
     expect(body).not.toMatch(/\busage\.[a-z]+\./i);
 
-    // The sidebar entry exists, which is what makes the page findable at all.
-    await expect(page.locator('a', { hasText: /usage/i }).first()).toBeVisible();
+    // The menu entry exists, which is what makes the page findable at all.
+    // ⚠ Since 0.51 it is in the mega menu's Files & storage panel, hidden until
+    // the panel opens: open it, once one menu is left after the cross-fade.
+    await expect(page.getByTestId('mega-menu')).toHaveCount(1, { timeout: 10_000 });
+    await page.getByTestId('nav-top-files').click();
+    await expect(page.getByTestId('nav-usage')).toBeVisible();
+    await expect(page.getByTestId('nav-usage')).toContainText(/usage/i);
   });
 
   test('an unconfigured instance is told so, not shown a zero', async ({ page }) => {

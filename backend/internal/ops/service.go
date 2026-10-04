@@ -196,6 +196,11 @@ type Service struct {
 	jobsMu  sync.Mutex
 	jobs    map[int64]queuedJob
 
+	// settled is, per queued rename, move or copy, the sources its handler
+	// settled with the encryption rule (encryption.go), by op id.
+	settledMu sync.Mutex
+	settled   map[int64]map[string]bool
+
 	// live holds the byte counters of running cross-storage ops (progress.go).
 	live sync.Map
 
@@ -375,6 +380,7 @@ func (s *Service) Cancel(ctx context.Context, id int64) (bool, error) {
 		if queued.cleanup != nil {
 			queued.cleanup()
 		}
+		s.forgetSettled(id)
 		return true, nil
 	}
 	if v, ok := s.cancels.Load(id); ok {
@@ -584,7 +590,22 @@ func (s *Service) SubmitTo(ctx context.Context, kind string, storageID, destStor
 		destStorageID = storageID
 	}
 	srcJSON, _ := json.Marshal(sources)
+	settled, told := settledFrom(ctx)
+	if told {
+		// Held across the insert, as SubmitJob holds jobsMu: the worker reads
+		// what it was told under this lock, so it cannot reach the row first.
+		s.settledMu.Lock()
+	}
 	id, err := s.insertOp(ctx, kind, storageID, destStorageID, string(srcJSON), dest, len(sources))
+	if told {
+		if err == nil {
+			if s.settled == nil {
+				s.settled = make(map[int64]map[string]bool)
+			}
+			s.settled[id] = settled
+		}
+		s.settledMu.Unlock()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ops: insert: %w", err)
 	}
@@ -987,6 +1008,7 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		s.executeJob(ctx, op)
 		return
 	}
+	defer s.forgetSettled(op.ID)
 	if s.storageResolver == nil {
 		s.fail(ctx, op, "no storage resolver")
 		return
@@ -1293,6 +1315,9 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 			return terr
 		}
 	case OpMove:
+		if err := s.refuseUnsettledEncryption(ctx, drv, op, src, joinIntoDir(op.Dest, src)); err != nil {
+			return err
+		}
 		if s.isCross(op) {
 			return s.crossTransfer(ctx, drv, dstDrv, op, src, true)
 		}
@@ -1324,6 +1349,9 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		}
 		return nil
 	case OpCopy:
+		if err := s.refuseUnsettledEncryption(ctx, drv, op, src, joinIntoDir(op.Dest, src)); err != nil {
+			return err
+		}
 		if s.isCross(op) {
 			return s.crossTransfer(ctx, drv, dstDrv, op, src, false)
 		}

@@ -10,6 +10,7 @@
 // These tests pin the two halves of the fix: the sentence comes from the
 // reader's catalogue, and no metadata shape can put a placeholder, a dangling
 // dash or a raw event id back in front of a person.
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -18,6 +19,7 @@ import {
   renderNotification,
   type NotificationLike,
 } from '@brftech/filex-core/src/lib/notificationText';
+import { loadNotifyTables } from '../../../scripts/lib/i18n-catalogue.mjs';
 
 /** A row shaped the way the server really stores a file event. */
 const uploaded: NotificationLike = {
@@ -540,5 +542,96 @@ describe('a row inside an encrypted folder (meta.e2e_root)', () => {
       strings: { 'server.notify.word.locked': '🔒 Verschlüsseltes Element' },
     });
     expect(t.title).toBe('New file: 🔒 Verschlüsseltes Element');
+  });
+});
+
+// wiring:e2 policy — somebody asked to encrypt under the approval policy, and
+// the answer. `target_kind`, never `kind`: `meta.kind === 'file'` is what picks
+// the escrow and password events' file wording above.
+describe('an encryption request and its answer', () => {
+  const node = { path: 'Muhasebe/Maaşlar', name: 'Maaşlar' };
+  const created: NotificationLike = {
+    event: 'e2e.request_created',
+    title: 'e2e.request_created',
+    meta: { node, requester: 'Ayşe', reason: 'Bordro dosyaları', request_id: 7, target_kind: 'folder' },
+  };
+  const decided = (decision: string, note = ''): NotificationLike => ({
+    event: 'e2e.request_decided',
+    title: 'e2e.request_decided',
+    meta: { node, decision, note, request_id: 7, target_kind: 'file' },
+  });
+
+  it('names the folder, who asked and why, in both languages', () => {
+    expect(renderNotification(created, 'en')).toEqual({ title: 'Encryption request: Maaşlar', body: 'Ayşe: Bordro dosyaları' });
+    expect(renderNotification(created, 'tr')).toEqual({ title: 'Şifreleme isteği: Maaşlar', body: 'Ayşe: Bordro dosyaları' });
+  });
+
+  it('says a yes and a no as two different sentences — never the wire word', () => {
+    expect(renderNotification(decided('approved'), 'en')).toEqual({ title: 'Encryption request approved: Maaşlar', body: '' });
+    expect(renderNotification(decided('rejected', 'Not   for\npayroll'), 'tr')).toEqual({
+      title: 'Şifreleme isteği reddedildi: Maaşlar',
+      body: 'Not for payroll',
+    });
+    expect(renderNotification(decided('rejected'), 'tr').title).not.toContain('rejected');
+  });
+
+  it('a language pack translates the no with its own _rejected key, and never says its yes for a no', () => {
+    const yes = { 'server.notify.e2e.request_decided.title': 'Verschlüsselung genehmigt: {folder}' };
+    const both = { ...yes, 'server.notify.e2e.request_decided.title_rejected': 'Verschlüsselung abgelehnt: {folder}' };
+    expect(renderNotification(decided('rejected'), 'en', { strings: both, lang: 'de' }).title).toBe('Verschlüsselung abgelehnt: Maaşlar');
+    expect(renderNotification(decided('approved'), 'en', { strings: both, lang: 'de' }).title).toBe('Verschlüsselung genehmigt: Maaşlar');
+    expect(renderNotification(decided('rejected'), 'en', { strings: yes, lang: 'de' }).title).toBe('Encryption request rejected: Maaşlar');
+  });
+
+  // The server's own rows for a request at the TOP of a storage (e2epolicy
+  // announce): no path at all — `node.path` is '' and `node.name` the storage's
+  // — and the requester's words, or the decider's note, in the body. The path
+  // chain must never take that body for the folder.
+  it('names the storage for a request at its top — never the words in the body', () => {
+    const top = { storage_id: 1, path: '', name: 'Dosyalar' };
+    const created: NotificationLike = {
+      event: 'e2e.request_created',
+      title: 'Encryption request: Dosyalar',
+      body: 'Ayşe: Rapor müşteri verisi içeriyor',
+      meta: {
+        node: top,
+        reason: 'Rapor müşteri verisi içeriyor',
+        request_id: 2,
+        requester: 'Ayşe',
+        storage: 'Dosyalar',
+        target: { kind: 'dir', storage: 'Dosyalar' },
+        target_kind: 'file',
+      },
+      target: { kind: 'dir', storage: 'Dosyalar' },
+    };
+    expect(renderNotification(created, 'en')).toEqual({
+      title: 'Encryption request: Dosyalar',
+      body: 'Ayşe: Rapor müşteri verisi içeriyor',
+    });
+    expect(renderNotification(created, 'tr').title).toBe('Şifreleme isteği: Dosyalar');
+    for (const [decision, title] of [
+      ['approved', 'Encryption request approved: Dosyalar'],
+      ['rejected', 'Encryption request rejected: Dosyalar'],
+    ] as const) {
+      // With a note the body says it; without one the body is empty — and the
+      // title still names the storage.
+      for (const note of ['Tamam, başlayın', '']) {
+        const answer: NotificationLike = {
+          event: 'e2e.request_decided',
+          title: 'Encryption request',
+          body: note,
+          meta: { node: top, decision, note, decider: 'Yönetici', request_id: 2, storage: 'Dosyalar', target_kind: 'file' },
+        };
+        expect(renderNotification(answer, 'en')).toEqual({ title, body: note });
+      }
+    }
+  });
+
+  it('the catalogue exports the no as a key of its own', () => {
+    const t = loadNotifyTables(path.resolve(__dirname, '../../../packages/core/src/lib/notificationText.ts'));
+    expect(t.en['server.notify.e2e.request_decided.title_rejected']).toBe('Encryption request rejected: {folder}');
+    expect(t.tr['server.notify.e2e.request_decided.title_rejected']).toBe('Şifreleme isteği reddedildi: {folder}');
+    // `{note}` alone is nothing to translate; the renderer falls back to it.
+    expect(t.en['server.notify.e2e.request_decided.body']).toBeUndefined();
   });
 });

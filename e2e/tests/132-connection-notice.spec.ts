@@ -83,8 +83,18 @@ test.describe('A connection that drops is one notice, not one per request', () =
     // never a reload. Every screen fires its own reads and the bell keeps
     // polling underneath at the product's own 15 s cadence, unchanged.
     /* ⚠ Panel routes only. `nav-explore` leaves AdminLayout for the drive's
-       full-bleed shell, and the walk would lose the navigation it is using. */
-    for (const testid of ['nav-users', 'nav-shares', 'nav-storages', 'nav-settings', 'nav-dashboard']) {
+       full-bleed shell, and the walk would lose the navigation it is using.
+       Since 0.51 (GitHub #82) a page sits in a mega-menu panel: its entry is
+       opened first, the way a person would (the dashboard is a plain link). */
+    const walk: Array<[entry: string | null, testid: string]> = [
+      ['people', 'nav-users'],
+      ['files', 'nav-shares'],
+      ['files', 'nav-storages'],
+      ['system', 'nav-settings'],
+      [null, 'nav-dashboard'],
+    ];
+    for (const [entry, testid] of walk) {
+      if (entry) await page.getByTestId(`nav-top-${entry}`).click({ timeout: 5_000 }).catch(() => undefined);
       const link = page.getByTestId(testid);
       if (await link.count()) await link.first().click({ timeout: 5_000 }).catch(() => undefined);
       await page.waitForTimeout(1_500);

@@ -129,7 +129,11 @@ a `.fxe`'s new password) are exported too
 as are the draft helpers
 ([API.md → Composables](https://github.com/BRF-Tech/filex/blob/main/docs/API.md#composables-advanced))
 and `markdownToSafeHtml`, the sanitised Markdown the explorer's preview draws
-(nothing in it runs).
+(nothing in it runs). Since 0.51 the admin panel's mega menu is exported as
+`MegaMenu` with its helpers (`pruneMegaMenu`, `entryIsCurrent`, the
+`MegaMenuEntry` types): the host passes the entries it lets the reader open
+and does the navigating itself
+([ADMIN-PANEL.md](https://github.com/BRF-Tech/filex/blob/main/docs/ADMIN-PANEL.md)).
 
 If your own UI names a keyboard shortcut, render `shortcutHint('<action>')`
 rather than the key itself: the user may remap any action from the shortcut
