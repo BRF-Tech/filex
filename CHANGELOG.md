@@ -29,31 +29,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **The README reads top to bottom as a short page, with the detail one click away.**
-  `README.md` is titled `filex` and opens with the repository's description,
-  three buttons (live demo, quick start, documentation), the picture and six
-  cards in place of one long paragraph. *Why filex* is a tour of eight parts -
-  the explorer, storage and protocols, sharing and protection, people and
-  access, desktop app & CLI, embedding, apps, AI agents - each a line that
-  says what it is for, up to four bullets, one picture and a block that opens
-  on a click and holds the text that stood there before, unchanged, with its
-  screenshots as a gallery of thumbnails, each over its caption. A new
-  section, *Coming from Nextcloud, Dropbox, Google Drive or File Browser*,
-  sets out in one table what each of them is and what filex is beside it,
+  `README.md` is titled `filex` and opens with a three-line description of
+  what filex is, three buttons (live demo, quick start, documentation), the
+  picture and six cards in place of one long paragraph. *Why filex* is a tour
+  of eight parts - the explorer, storage and protocols, sharing and
+  protection, people and access, desktop app & CLI, embedding, apps, AI
+  agents - each a line that says what it is for, up to four bullets, one
+  picture and a block that opens on a click and holds the text that stood
+  there before with its screenshots as a gallery, each over its caption. A new
+  section, *Coming from Nextcloud, Dropbox or Google Drive*, sets out in one
+  table what each of them and File Browser is and what filex is beside it,
   then what filex does not have: no calendar, contacts, mail or chat, no
   Android or iOS app, no placeholder files, no office editor of its own. *Try
   it now* and *Quick start - binary* are one *Quick start*; the documentation
-  index moved above *Features*, which leads with a thirteen-row table and
-  keeps its 55 entries in a block that opens on a click. *Development* sits
-  under a new *Contributing* section. Sections are first-level headings and
-  the parts of the tour second-level, with a line of air before each. No
-  picture and no link target was dropped: the container and live demo badges
-  became a link and a button, and the CI badge moved to *Contributing*. About
-  2,700 words are in view where 13,900 were. The five translations are left
-  whole at the commit they name
+  index, folded by topic, moved above *Features*, which leads with a
+  thirteen-row table and keeps its 55 entries in a block that opens on a
+  click. *Development* sits under a new *Contributing* section. Sections are
+  first-level headings and the parts of the tour second-level, with a line of
+  air before each. No picture and no link target was dropped: the container
+  and live demo badges became a link and a button, and the CI badge moved to
+  *Contributing*. About 2,500 words are in view where 13,900 were. The five
+  translations are left whole at the commit they name
   ([CONTRIBUTING.md → Docs](docs/CONTRIBUTING.md#docs)), and step 1 of the
   release process says where a new surface goes in this layout, so the page
   does not grow back into a wall
   ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+  Contributed by Berk Başarır
+  ([#87](https://github.com/BRF-Tech/filex/pull/87)).
 
 ### Fixed
 

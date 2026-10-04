@@ -745,7 +745,7 @@ pnpm release 0.45.0 --resume --only deploy   # once the tags are out: the deploy
    the block under its part, the one that opens on a click; the part itself
    stays a line, at most four bullets and one picture, so a new surface
    replaces words there or stays out of it. The opening is not a list of what
-   shipped either: the repository's description, the buttons and six cards. Read the
+   shipped either: the three-line description, the buttons and six cards. Read the
    comparison table against today as well: what it says another product is,
    and every "no" it says of filex. The README is the page most readers see
    and the one nobody remembers to touch: a feature documented only under

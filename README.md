@@ -30,7 +30,7 @@ SSO/LDAP, multi-tenant, encrypted folders, embeddable web component, desktop app
 
 **🗂️ Every storage, one tree**
 
-Local disks, S3, SFTP, WebDAV, FTP and SMB side by side, served back as S3, SFTP, FTPS, NFSv3 and WebDAV.
+Mount what you already have side by side, and copy or cut in one storage and paste in another. Point `rclone`, `restic`, WinSCP or FileZilla at the same tree.
 
 [Storage and protocols →](#storage-and-protocols)
 
@@ -57,7 +57,7 @@ OIDC, LDAP / Active Directory or the Windows and Linux accounts of the server. R
 </td>
 <td width="50%" valign="top">
 
-**💻 A desktop app, live**
+**💻 A desktop app with live folder sync**
 
 Windows, Linux and macOS (Apple Silicon): an edit on either side arrives in about a second.
 
@@ -87,7 +87,9 @@ Sandboxed apps - e-Signature, Convert, draw.io - and a built-in MCP server an ag
 </tr>
 </table>
 
-<p align="center"><a href="#quick-start">Quick start</a> · <a href="#why-filex">Why filex</a> · <a href="#coming-from-nextcloud-dropbox-google-drive-or-file-browser">Coming from another tool</a> · <a href="#self-host-with-compose-or-helm">Self-host</a> · <a href="#documentation">Documentation</a> · <a href="#features">Features</a></p>
+<p align="center"><a href="#why-filex">Why filex</a> · <a href="#coming-from-nextcloud-dropbox-or-google-drive">Coming from another tool</a> · <a href="#self-host-with-compose-or-helm">Self-host</a> · <a href="#features">Features</a></p>
+
+<br>
 
 # Quick start
 
@@ -127,9 +129,9 @@ set `PUID`/`PGID` to run it as yourself
 <details>
 <summary><b>No Docker? Run the binary</b></summary>
 
-Download the binary for your platform from the
-[latest release](https://github.com/BRF-Tech/filex/releases/latest) and run it
-([docs/INSTALLATION.md](docs/INSTALLATION.md#binary)):
+Download the archive for your platform from the
+[latest release](https://github.com/BRF-Tech/filex/releases/latest), extract it and run the
+binary ([docs/INSTALLATION.md](docs/INSTALLATION.md#binary)):
 
 ```bash
 # Download from https://github.com/BRF-Tech/filex/releases
@@ -157,15 +159,16 @@ Download the binary for your platform from the
 
 For a real deployment there are Compose stacks and a Helm chart:
 [Self-host with Compose or Helm](#self-host-with-compose-or-helm). The image is on
-[GitHub Packages](https://github.com/BRF-Tech/filex/pkgs/container/filex). Prefer a window
-over a browser tab? There is a [desktop app](#desktop-app--cli).
+[GitHub Packages](https://github.com/BRF-Tech/filex/pkgs/container/filex).
 
 <br>
 
 # Why filex
 
 Most self-hosted file managers are either **too small** (a directory listing with uploads)
-or **too big** (a groupware suite you deploy for the file tab). filex aims at the gap:
+or **too big** (a groupware suite you deploy for the file tab). filex aims at the gap. The
+tour below has eight parts: each opens with the short version, and the long one is folded
+under it.
 
 <br>
 
@@ -173,15 +176,13 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 **A file manager people already know how to use.**
 
-- Hand someone a `user` or `viewer` account and `…/drive`, and they get the file manager
-  itself: their storages, uploads, sharing, search, the editor. `…/admin` is the operator's
-  door to the same app.
 - A navigation panel with **Home · My files · Shared with me · My shares · Recent · Starred ·
-  Drafts · Trash**, list, grid and gallery views, tabs, tags and a ⌘K palette.
+  Drafts · Trash**; list, grid and gallery views; tabs, tags and a ⌘K palette.
 - Presence avatars and file changes arrive live, over WebSocket.
-- Compose a theme in your own colours, make it the default, and the sign-in page and every
-  public link wear it too. English and Turkish are built in, other languages install as
-  packs, and the interface turns right to left for the languages that read that way.
+- Compose a theme in your own colours and make it the default: the sign-in page and every
+  public link use it too.
+- English and Turkish are built in, other languages install as packs, and the interface turns
+  right to left for the languages that read that way.
 
 <p align="center"><img src="docs/screenshots/v0.51.0/driveshell/driveshell-hero-1440.png" alt="The filex shell" width="860"></p>
 
@@ -227,44 +228,46 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The filex shell](docs/screenshots/v0.51.0/driveshell/driveshell-hero-1440.png)
 
 <sub>The shell - what everybody lands on</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Searching a folder](docs/screenshots/v0.51.0/driveshell/driveshell-search-1440.png)
 
 <sub>Searching this folder; `⌘K` / `Ctrl K` hands the query to the palette</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![Navigation panel](docs/screenshots/v0.51.0/sidenav/sidenav-expanded-1440.png)
 
 <sub>Navigation panel - Home, Shared with me, My shares, Recent, Starred, Trash, and the storages you can reach</sub>
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Collapsed to a rail](docs/screenshots/v0.51.0/sidenav/sidenav-rail-1440.png)
 
 <sub>Collapsed to the icon rail</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![Personal and team tags](docs/screenshots/v0.51.0/tags/tags-kinds-1440.png)
 
 <sub>Tags - your own, or your team's; a tag opens every file carrying it, from every folder they live in</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The trash view](docs/screenshots/v0.51.0/sidenav/view-trash-1440.png)
 
@@ -273,44 +276,46 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The bell with its unread badge, open](docs/screenshots/v0.51.0/signing/bell-badge-1440.png)
 
 <sub>The bell - the unread count on it, every row going where it says</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The full notification list over the explorer](docs/screenshots/v0.51.0/signing/notifications-list-1440.png)
 
 <sub>All of your notifications, inside the explorer - for everybody, not only administrators</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![The theme editor](docs/screenshots/v0.51.0/appearance/theme-editor-1440.png)
 
 <sub>Appearance - compose a theme in your own colours, previewed as you type</sub>
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The explorer wearing the operator's theme](docs/screenshots/v0.51.0/appearance/themed-explorer-1440.png)
 
 <sub>Made the default, it is what everybody's explorer wears…</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![The sign-in page wearing the operator's theme](docs/screenshots/v0.51.0/appearance/themed-signin-1440.png)
 
 <sub>…and the sign-in page, before anybody has signed in</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![A symlink that leaves the storage, badged](docs/screenshots/v0.51.0/symlinks/symlink-badge-1440.png)
 
@@ -319,14 +324,14 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![A semicolon CSV open in ONLYOFFICE's spreadsheet](docs/screenshots/v0.51.0/csvoffice/csv-view-1440.png)
 
 <sub>A `.csv` opens in ONLYOFFICE's spreadsheet when one is connected - a look first, and no delimiter dialog: the file's own separator is passed along ([CSV files](docs/ONLYOFFICE.md#csv-files))</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The CSV in ONLYOFFICE's editor, with the note on what a save keeps](docs/screenshots/v0.51.0/csvoffice/csv-edit-1440.png)
 
@@ -346,17 +351,17 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 - Mount local disks, S3, FTP, SFTP, WebDAV and SMB/NAS shares side by side, and copy or cut
   in one and paste in another.
-- Reach the same tree as **S3**, **SFTP**, **FTPS**, **NFSv3** and **WebDAV**, with the same
-  permissions, the same trash and the same quota as the web UI: point `rclone`, `restic`,
-  `aws s3`, WinSCP or FileZilla at it.
+- Reach the same tree as **S3**, **SFTP**, **FTPS**, **NFSv3** and **WebDAV**: point `rclone`,
+  `restic`, `aws s3`, WinSCP or FileZilla at it. The permissions, the trash and the quota are
+  the web UI's.
 - `filex mount` attaches a remote server over ordinary HTTPS: a folder on Linux, a drive
-  letter on Windows.
-- A storage filex does not ship is a plugin you install from the admin panel.
+  letter on Windows (macOS is not supported).
+- For a storage filex does not ship, install a plugin from the admin panel.
 
 <p align="center"><img src="docs/screenshots/v0.51.0/sidenav/connect-1440.png" alt="How to connect" width="860"></p>
 
 <details>
-<summary><b>More about storage and protocols</b> - both directions, the connection guides, API keys, storage plugins</summary>
+<summary><b>More about storage and protocols</b> - the protocols both ways, and screenshots of the connection guides, API keys and a storage plugin</summary>
 
 - **Speaks the protocols both ways** - filex can *connect to* local disks, S3, FTP, SFTP,
   WebDAV and SMB/NAS shares, and it can *be reached as* **S3**, **SFTP**, **FTPS**,
@@ -369,30 +374,30 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![How to connect](docs/screenshots/v0.51.0/sidenav/connect-1440.png)
 
 <sub>How to connect - the guides, built from *your* deployment</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![API keys](docs/screenshots/v0.51.0/sidenav/apikeys-minted-1440.png)
 
 <sub>API keys - mint your own, in the explorer or in an embed (a person's session or token; an embed proxied with one shared *app* token does not get this entry)</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![Connection guide](docs/screenshots/v0.51.0/connections-guide.png)
 
 <sub>Reaching filex from anything - S3, SFTP, FTPS, NFS, WebDAV. Every command is built from *your* deployment</sub>
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Plugins](docs/screenshots/v0.51.0/admin-plugins.png)
 
@@ -408,12 +413,12 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 ## Sharing and protection
 
-**Share with a link you can limit and revoke. Delete and overwrite without losing anything.**
+**Share with a link you can limit and revoke. Take back a wrong delete or a wrong overwrite.**
 
 - Public links with a PIN, an expiry and a download limit, and file requests for what should
-  come in. **My shares** lists every link you created: copy it, read its PIN back, revoke it.
-- Share a folder with a person or a group, and it appears under **Shared with me** - no mount
-  instructions.
+  come in. **My shares** lists every link you created, to copy or to revoke.
+- Share a folder with a person or a group and it appears under their **Shared with me**. The
+  storage needs **Per-item access control (RBAC)** switched on, which it is not by default.
 - Deletes are reversible within a retention window and writes keep snapshots, both inside the
   storage you already mounted.
 - End-to-end encrypted folders: encrypted in the browser, and the server never receives a
@@ -422,48 +427,50 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 <p align="center"><img src="docs/screenshots/v0.51.0/public-share.png" alt="A public share link, as its recipient sees it" width="860"></p>
 
 <details>
-<summary><b>More about sharing and protection</b> - what the recipient sees, My shares, who may encrypt</summary>
+<summary><b>Screenshots of sharing and protection</b> - the Share dialog, what the recipient sees, My shares, who may encrypt</summary>
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Share modal](docs/screenshots/v0.51.0/share-modal.png)
 
 <sub>Sharing - PIN, expiry, download limit, one-line `curl`</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Markdown viewer](docs/screenshots/v0.51.0/viewer-markdown.png)
 
 <sub>Markdown viewer</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![A public share link, as its recipient sees it](docs/screenshots/v0.51.0/public-share.png)
 
 <sub>…and what the person at the other end opens. filex has ONE outward-facing screen - a shared file, a folder, a file request, an app's signing page and the PIN in front of any of them are all this page, in your instance's name</sub>
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![My shares with a row's Actions menu open](docs/screenshots/v0.51.0/signing/my-shares-1440.png)
 
 <sub>My shares - the links you created, and their PINs when you need to pass one on</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![Admin → Shares, a row's Actions menu open](docs/screenshots/v0.51.0/signing/admin-table-actions-1440.png)
 
 <sub>Every admin table - one pinned **Actions** menu per row, the same menu the explorer's ⋮ opens</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Admin → Encryption: the approval policy and three requests waiting](docs/screenshots/v0.51.0/encryption/admin-encryption-1440.png)
 
@@ -472,7 +479,7 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Requesting an encrypted folder from the New folder dialog](docs/screenshots/v0.51.0/encryption/request-new-folder.png)
 
@@ -492,10 +499,10 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 - Sign in with a local password, OIDC, LDAP / Active Directory, an authenticating proxy, or
   the Windows or Linux account of the machine filex runs on.
-- Everyone has one role - Administrator, User, Viewer or one of your own - made of 29 named
+- Everyone has one role - Administrator, User, Viewer or one of your own - built from named
   permissions. Groups carry folder access and a role, and per-person exceptions beat the role.
-- Wrong passwords are counted per account and per address, on the web form, WebDAV, FTPS and
-  SFTP alike.
+- Guessing a password is slow: wrong passwords are counted per account and per address, on
+  the web form, WebDAV, FTPS and SFTP alike.
 - Multi-tenant by design: each tenant has its own sign-in providers, its own domain and
   certificate, and runs itself.
 
@@ -554,44 +561,46 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Admin → Roles: the built-in roles and two custom ones](docs/screenshots/v0.51.0/roles/roles-list-1440.png)
 
 <sub>Roles - Administrator, User, Viewer and roles of your own: who holds each, what it allows, where it differs by folder, its limits ([docs/PERMISSIONS.md](docs/PERMISSIONS.md))</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Admin → Groups](docs/screenshots/v0.51.0/groups/groups-list-1440.png)
 
 <sub>Groups - named sets of people with folder access and a role; members by hand or kept in step with the groups a sign-in carries ([docs/GROUPS.md](docs/GROUPS.md))</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![Sharing a folder with a group](docs/screenshots/v0.51.0/groups/share-group-1440.png)
 
 <sub>Sharing a folder with a group, beside people - Owner is asked for in the dialog, not granted by a click</sub>
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Admin → Sign-in security](docs/screenshots/v0.51.0/loginsecurity/login-security-1440.png)
 
 <sub>Sign-in security - the attempt limit, allowed addresses, trusted proxies, the locks and the sign-in trail ([sign-in attempt limits](docs/CONFIGURATION.md#sign-in-attempt-limits))</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![The sign-in form on a locked account](docs/screenshots/v0.51.0/loginsecurity/login-locked-1440.png)
 
 <sub>…and what a locked account's sign-in form says, counting the lock down on its button</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Admin dashboard](docs/screenshots/v0.51.0/admin-dashboard.png)
 
@@ -600,14 +609,14 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Demo landing](docs/screenshots/v0.51.0/demo-landing.png)
 
 <sub>Demo landing</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The People & security panel of the admin menu, open over Admin → Users](docs/screenshots/v0.51.0/megamenu/people-panel-1440.png)
 
@@ -627,8 +636,8 @@ or **too big** (a groupware suite you deploy for the file tab). filex aims at th
 
 - A Windows, Linux and macOS (Apple Silicon) app: the same explorer in a window, with several
   accounts or tenants side by side.
-- Right-click a folder → **Keep on this computer** and it follows the server in both
-  directions, in about a second. Everything else stays online-only in the window.
+- Right-click a folder → **Keep on this computer** and it stays in step with the server in
+  both directions, in about a second. Everything else stays online-only in the window.
 - It signs in through your browser, so SSO and MFA behave as they do on the web, and it opens
   Office documents from your own disk in the editor your server runs.
 - Headless machines get the same engine: `filex sync` and `filex client`.
@@ -770,8 +779,9 @@ See [docs/CLI.md](docs/CLI.md) and [docs/SYNC.md](docs/SYNC.md).
 **A real file manager inside your own product.**
 
 The same UI ships as a Vue 3 component, a React component and a framework-agnostic
-`<filex-explorer>` web component, backed by your own filex server and locked to a per-tenant
-folder:
+`<filex-explorer>` web component, backed by your own filex server. A confined token locks it
+to a per-tenant folder, and the backend enforces that, not the widget. The web component
+takes two lines:
 
 ```html
 <script type="module" src="https://cdn.jsdelivr.net/npm/@brftech/filex/dist/filex.js"></script>
@@ -848,14 +858,14 @@ that proxies with a key, the desktop app and the installed web app need nothing
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Shared with me](docs/screenshots/v0.51.0/sidenav/view-shared-1440.png)
 
 <sub>Shared with me - folders other people granted you, no mount instructions</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Embedded web component](docs/screenshots/v0.51.0/sidenav/embed-webcomponent-1440.png)
 
@@ -880,7 +890,7 @@ it asks for, and nothing updates itself. Four ship as public repositories:
 | App | What it adds |
 |---|---|
 | [e-Signature](https://github.com/BRF-Tech/filex-sign) | Sign a PDF, or ask others to: people on this filex sign inside it, anybody else by a private link, behind a PIN by default |
-| [Convert](https://github.com/BRF-Tech/filex-convert) | Images, video, audio, documents, e-books, archives, data, subtitles and fonts |
+| [Convert](https://github.com/BRF-Tech/filex-convert) | **Convert…** on any file or selection: images, video, audio, documents, e-books, archives, data, subtitles and fonts |
 | [filextext](https://github.com/BRF-Tech/filextext-app) | An end-to-end encrypted text workspace in a single `.fxtxt` file |
 | [draw.io](https://github.com/BRF-Tech/filex-drawio) | The draw.io diagram editor, on `.drawio` and `.dio` files |
 
@@ -900,8 +910,7 @@ A language pack is an app too: Spanish, German and French ship as examples.
   network by filex's own policy. Nothing updates itself: a new version waits for an
   administrator, and the previous one is a click away. Four ship as public
   repositories - **e-Signature**, **Convert**, **filextext** (an end-to-end encrypted
-  text workspace) and **draw.io** - and you install one from its GitHub address
-  ([Apps](#apps)).
+  text workspace) and **draw.io** - and you install one from its GitHub address.
 
 A **storage plugin** teaches filex a backend it has never heard of. An **app**
 teaches it a *thing to do with files* - sign them, convert them, send them to
@@ -1008,44 +1017,46 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Defining the boxes of a signature request](docs/screenshots/v0.51.0/signing/sign-define-1440.png)
 
 <sub>Define the boxes - name each one and say whose it is; the document comes next</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Placing the boxes on the document](docs/screenshots/v0.51.0/signing/sign-place-1440.png)
 
 <sub>Place them - choose a box, tap the page where it goes</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![The outside signer's PIN gate](docs/screenshots/v0.51.0/signing/sign-outside-pin-1440.png)
 
 <sub>The partner's link - filex's one public screen, in your instance's name, behind a PIN</sub>
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The outside signer filling in their boxes](docs/screenshots/v0.51.0/signing/sign-outside-fill-1440.png)
 
 <sub>…and what it opens: only their own boxes - here a name typed in the face the requester chose (drawn and uploaded are the other two)</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![The document locked, its Signatures panel open](docs/screenshots/v0.51.0/signing/sign-status-1440.png)
 
 <sub>While it is out - the document frozen for everybody, who has signed in its details</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The install wizard's permission review](docs/screenshots/v0.51.0/apps/apps-install-review-1440.png)
 
@@ -1054,44 +1065,46 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![An installed app's detail](docs/screenshots/v0.51.0/apps/apps-detail-1440.png)
 
 <sub>An installed app - where it came from, its fingerprint, and every permission it holds in plain words (its settings and its actions follow, further down the page)</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![The converter's wizard](docs/screenshots/v0.51.0/apps/convert-wizard-1440.png)
 
 <sub>The converter, another app - every target under its category, three steps</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![The install review of an app with its own interface](docs/screenshots/v0.51.0/apps/app-interface-review-1440.png)
 
 <sub>An app that brings its own interface - the review shows the package's fingerprint, every address outside it (a live one is a permission, in yellow) and what a browser cannot promise</sub>
 
 </td>
-</tr>
-<tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![An app's own interface open as a file's viewer](docs/screenshots/v0.51.0/apps/app-interface-viewer-1440.png)
 
 <sub>…and that interface open on its own file type, where filex's preview would be. It reads and saves the file through filex, in a sandboxed frame (a small example app, written for these pictures)</sub>
 
 </td>
-<td width="33%" valign="top">
+</tr>
+<tr>
+<td width="50%" valign="top">
 
 ![The Apps list, a language pack among the apps](docs/screenshots/v0.51.0/langpack/apps-list-1440.png)
 
 <sub>Every app on the instance, and a **language pack** among them - a manifest with nothing that runs, which says how much of this filex it translates and leaves with it</sub>
 
 </td>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Plugins → Default apps](docs/screenshots/v0.51.0/defaultapps/default-apps-1440.png)
 
@@ -1100,7 +1113,7 @@ screen is drawn by filex, and the link the partner gets is an ordinary share.
 </td>
 </tr>
 <tr>
-<td width="33%" valign="top">
+<td width="50%" valign="top">
 
 ![Folders drawn with their newest files](docs/screenshots/v0.51.0/thumbnails/folders-grid-1440.png)
 
@@ -1131,7 +1144,7 @@ claude mcp add filex --transport http https://files.example.com/api/ai/mcp \
 ```
 
 <details>
-<summary><b>More about AI agents and MCP</b> - what an agent can do, key ceilings, encrypted folders, upload tickets</summary>
+<summary><b>More about AI agents and MCP</b> - what an agent can do, what a key can never hand out, encrypted folders, upload tickets</summary>
 
 - **AI-agent-native** - a REST surface (`/api/ai`) bounded by an API key's permissions, plus a native
   **MCP server** (`/api/ai/mcp`); `/api/ai` and `/api/files` are described in an
@@ -1186,16 +1199,16 @@ credentials**, so even an agent with no filex token can finish the transfer with
 
 <br>
 
-# Coming from Nextcloud, Dropbox, Google Drive or File Browser
+# Coming from Nextcloud, Dropbox or Google Drive
 
 filex is a file manager, not a groupware suite. What that means next to four things you may
-be coming from:
+be coming from (File Browser among them):
 
-| Coming from | What it is | With filex |
-|---|---|---|
-| **Nextcloud** | A collaboration platform you host yourself or get from a provider: files, and around them calendar, contacts, mail, chat, video calls and an online office, as a PHP application behind a web server with a database | The files part on its own: one Go binary with SQLite inside (PostgreSQL or MySQL when you want them), a desktop app with live folder sync, share links, Office documents in the ONLYOFFICE you connect, SSO and LDAP. No calendar, contacts, mail, chat or video calls |
-| **Dropbox**, **Google Drive** | Hosted services: your files live on the provider's servers, under its quota and its terms | Your own server and the storage you already have - a disk, a NAS share, an S3 bucket - with the everyday things in place: a web UI, share links with a PIN and an expiry, file requests, a desktop app that keeps the folders you choose in step, trash and version history |
-| **File Browser** | One binary that puts a web UI over one directory you point it at, with user accounts (each with its own scope and permission switches), allow and deny rules per path, and share links with a password and an expiry. Its repository is archived, and its [README](https://github.com/filebrowser/filebrowser) says there will be no further releases, bug fixes or security fixes | The same one-command start, then several storages side by side, roles and groups on top of per-folder access, OIDC single sign-on and LDAP built in, trash and versions, full-text search, and the same tree reachable as S3, SFTP, FTPS, NFS and WebDAV |
+| Coming from | With filex |
+|---|---|
+| **Nextcloud**<br>A collaboration platform you host yourself or get from a provider: files, and around them calendar, contacts, mail, chat, video calls and an online office. A PHP application behind a web server, with a database. | The files part on its own.<br>One Go binary with SQLite inside (PostgreSQL or MySQL when you want them).<br>A desktop app with live folder sync, share links, SSO and LDAP.<br>Office documents in the ONLYOFFICE you connect.<br>No calendar, contacts, mail, chat or video calls. |
+| **Dropbox**, **Google Drive**<br>Hosted services: your files live on the provider's servers, under its quota and its terms. | Your own server and the storage you already have: a disk, a NAS share, an S3 bucket.<br>The everyday things in place: a web UI, share links with a PIN and an expiry, file requests, trash and version history.<br>A desktop app that keeps the folders you choose in step. |
+| **File Browser**<br>One binary that puts a web UI over one directory you point it at, with user accounts (each with its own scope and permission switches), allow and deny rules per path, and share links with a password and an expiry. Its repository is archived, and its [README](https://github.com/filebrowser/filebrowser) says there will be no further releases, bug fixes or security fixes. | The same one-command start.<br>Several storages side by side.<br>Roles and groups on top of per-folder access; OIDC single sign-on and LDAP built in.<br>Trash and versions, full-text search.<br>The same tree reachable as S3, SFTP, FTPS, NFSv3 and WebDAV. |
 
 **What filex does not have**, whichever of these you come from:
 
@@ -1229,12 +1242,6 @@ be coming from:
 
 # Self-host with Compose or Helm
 
-- **Boringly deployable** - one binary or one container, on a host of its own or under a
-  sub-path of one you share; SQLite by default, Postgres/MySQL
-  when you want them; every driver switched by env vars. All three engines are
-  migrated, compared against each other and written to by CI on every change,
-  because "supported" used to mean "compiles" ([docs/DATABASES.md](docs/DATABASES.md)).
-
 The `docker run` above is enough to try filex out. For a real deployment,
 ready-made stacks live in [`deploy/`](deploy/):
 
@@ -1257,11 +1264,21 @@ filex runs at the root of a host of its own or under a path of one it shares
 that passes the full path - Caddy, nginx and Helm examples in
 [docs/DEPLOYMENT.md → Serving filex under a sub-path](docs/DEPLOYMENT.md#serving-filex-under-a-sub-path).
 
+- **Boringly deployable** - one binary or one container, on a host of its own or under a
+  sub-path of one you share; SQLite by default, Postgres/MySQL
+  when you want them; every driver switched by env vars. All three engines are
+  migrated, compared against each other and written to by CI on every change,
+  because "supported" used to mean "compiles" ([docs/DATABASES.md](docs/DATABASES.md)).
+
 <br>
 
 # Documentation
 
-The guides below are also published as a site at [docs.filex.sh](https://docs.filex.sh).
+The guides are published as a site at [docs.filex.sh](https://docs.filex.sh), and the
+[full documentation index](docs/README.md) lists every page.
+
+<details>
+<summary><b>All guides by topic</b> - getting started, clients, protocols, apps, languages, storage and access, data and features, operating and extending</summary>
 
 **Getting started** - [Installation](docs/INSTALLATION.md) ·
 [Configuration](docs/CONFIGURATION.md) · [Admin panel](docs/ADMIN-PANEL.md) ·
@@ -1313,7 +1330,7 @@ The guides below are also published as a site at [docs.filex.sh](https://docs.fi
 [CSV in ONLYOFFICE](docs/ONLYOFFICE.md#csv-files) ·
 [Requests from other origins](docs/CONFIGURATION.md#requests-from-other-origins)
 
-[Full documentation index](docs/README.md)
+</details>
 
 <br>
 
