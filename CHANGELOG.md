@@ -84,11 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   filter; a person's page and a group's member list show the source too. The
   Groups page says whether a group's members are added by hand or come from
   SSO or LDAP, and filters by it.
-- **Add user makes a local account** - people from LDAP or SSO arrive at
-  sign-in or with directory sync. The dialog suggests the username and
-  display name from the e-mail, says what the role gives, sets a password
-  (generate, show, copy) or sends an invitation, adds the account to groups
-  made here, and has **Create and add another**.
+- **Add user, clearer** - people of an LDAP directory arrive at sign-in or
+  with directory sync. The dialog suggests the username and display name
+  from the e-mail, says what the role gives, and offers three ways in: set a
+  password (generate, show, copy), send an invitation, or no password (an
+  SSO account made ahead of its first sign-in, or API keys only). It adds the
+  account to groups made here, and has **Create and add another**.
 - **Identity providers, one tab per kind.** The page is a set of summary
   cards, one tab per kind of sign-in (LDAP first, Windows and PAM too); a
   card opens the provider's own page - for LDAP its settings in sections
