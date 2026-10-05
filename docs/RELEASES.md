@@ -34,8 +34,6 @@ docker pull ghcr.io/brf-tech/filex:full-v0.52.0
 
 LDAP and Active Directory groups reach filex: a filex group can name directory groups and follows them at every sign-in, a directory sync opens accounts, brings the directory's groups in and can switch off people the directory no longer lists, and a group can make its members administrators - contributed by @manjotsc (#90). Apps can now come from a store: a store such as filex Apps (apps.filex.sh) sends you to your own filex with an install link, which opens the same permission review, holds the app to the store's pins and installs nothing until you press Install. A store is trusted once, after you compare its key fingerprints, and a paid app's license is the store's: checked every day, and an app whose license does not hold is held, never removed. A CSV saved from ONLYOFFICE keeps the cells nobody changed (#88), asking what is below a folder no longer reads the whole storage (#89) and the README is a short page with the detail one click away (#87), all contributed by @berkbasarir; following his report (#86), Admin > Roles points out a role an older version's page may have saved without Encrypt, with one click to give it back. The Snap runs inside the snap's strict confinement and needs no snap connect step. Security: an app is now held to a folder-confined API token's folder, and the token learns nothing about what lies outside it.
 
-> Desktop installers, npm packages and store channels follow shortly (GitHub Actions incident).
-
 ## What changed
 
 ### Added
@@ -239,7 +237,7 @@ entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-
 - **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
 - **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
 
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.52.0) · `ghcr.io/brf-tech/filex:slim-v0.52.0`
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.52.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.52.0`
 
 ## v0.51.0
 
