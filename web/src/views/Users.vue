@@ -59,7 +59,10 @@ const newUsername = ref('');
 /** How the new account signs in: a password typed or generated here, or an
  *  invitation that e-mails a first one. (People of an LDAP directory or an
  *  SSO provider are not added here: they arrive by sign-in and sync.) */
-const newAccess = ref<'password' | 'invite'>('password');
+// How the new account signs in: its own password, an emailed invitation, or
+// none here - an SSO account made ahead of its first sign-in, or one that
+// only uses API keys (issue #25).
+const newAccess = ref<'password' | 'invite' | 'none'>('password');
 const showPassword = ref(false);
 /** Hand-made groups to put the new account in. */
 const newGroups = ref<number[]>([]);
@@ -743,7 +746,7 @@ function onRowAction(key: string, row: User) {
           <legend class="text-sm font-medium">{{ t('users.add.signIn') }}</legend>
           <div class="inline-flex rounded-lg border border-[var(--fe-border)] p-0.5" role="radiogroup">
             <button
-              v-for="opt in (['password', 'invite'] as const)"
+              v-for="opt in (['password', 'invite', 'none'] as const)"
               :key="opt"
               type="button"
               role="radio"
@@ -774,6 +777,7 @@ function onRowAction(key: string, row: User) {
             </Button>
           </div>
           <p v-show="newAccess === 'invite'" class="text-xs text-zinc-500" data-testid="user-create-invite-hint">{{ t('users.add.inviteHint') }}</p>
+          <p v-show="newAccess === 'none'" class="text-xs text-zinc-500" data-testid="user-create-none-hint">{{ t('users.add.noneHint') }}</p>
         </fieldset>
 
         <div v-if="handGroups.length" class="space-y-1">

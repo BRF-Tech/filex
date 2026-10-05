@@ -169,6 +169,23 @@ describe('Add user: a local account', () => {
     expect(w.find('dialog').attributes('open'), 'the dialog closed').toBeUndefined();
   });
 
+  // Issue #25: an SSO account made ahead of its first sign-in, or one that
+  // only uses API keys, has no password here - the dialog's third way in.
+  it('makes an account with no password when asked to', async () => {
+    usersApi.create.mockResolvedValue({ id: 9, email: 'sso@corp.example' });
+    const w = await openAdd();
+    await w.find('input[name="new-user-email"]').setValue('sso@corp.example');
+    await byTestId(w, 'user-create-access-none').trigger('click');
+    expect(w.find('input[name="new-user-password"]').isVisible()).toBe(false);
+    expect(byTestId(w, 'user-create-none-hint').text()).toBe(en.users.add.noneHint);
+    await byTestId(w, 'user-create').trigger('click');
+    await flushPromises();
+    const call = usersApi.create.mock.calls[0][0];
+    expect(call.email).toBe('sso@corp.example');
+    expect(call.password).toBeUndefined();
+    expect(call.send_invite).toBeUndefined();
+  });
+
   it('says what the picked role gives', async () => {
     const w = await openAdd();
     expect(byTestId(w, 'user-create-role-hint').text()).toBe(en.users.add.roleHint.viewer);

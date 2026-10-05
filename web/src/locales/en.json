@@ -554,13 +554,14 @@
     "groupRoleStill": "Saved, but the role “{role}” from the group “{group}” still applies.",
     "allGroups": "All groups",
     "add": {
-      "intro": "A local account, signing in with its own password. People of an LDAP directory or an SSO provider are not added here: they appear when they sign in, or when their directory syncs.",
+      "intro": "An account made here: with its own password, an invitation, or none - for an SSO account made ahead of its first sign-in. People of an LDAP directory are not added here: they appear when they sign in, or when their directory syncs.",
       "username": "Username",
       "usernameHint": "For SFTP and FTP; filled in from the email.",
       "signIn": "How they sign in",
       "access": {
         "password": "Set a password",
-        "invite": "Send an invitation"
+        "invite": "Send an invitation",
+        "none": "No password"
       },
       "generate": "Generate",
       "show": "Show the password",
@@ -582,7 +583,8 @@
         "user": "Works with files: upload, change, share - as the User role allows.",
         "viewer": "Read-only: browse and download.",
         "custom": "A custom role - its permissions are on the Roles page."
-      }
+      },
+      "noneHint": "They sign in through SSO, or use API keys. A password can be set later from their page."
     },
     "adminByGroup": "Administrator through a group. To change their role, take them out of that group (or its LDAP / SSO group)."
   },

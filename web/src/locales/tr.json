@@ -554,13 +554,14 @@
     "groupRoleStill": "Kaydedildi, ancak “{group}” grubundan gelen “{role}” rolü geçerli olmaya devam ediyor.",
     "allGroups": "Tüm gruplar",
     "add": {
-      "intro": "Kendi parolasıyla oturum açan yerel bir hesap. Bir LDAP dizininin ya da SSO sağlayıcısının kişileri buradan eklenmez: oturum açtıklarında ya da dizinleri eşitlendiğinde görünürler.",
+      "intro": "Burada oluşturulan hesap: kendi parolasıyla, bir davetle ya da parolasız - ilk oturumundan önce açılan bir SSO hesabı için. LDAP dizinindeki kişiler burada eklenmez: oturum açtıklarında ya da dizinleri eşitlendiğinde görünürler.",
       "username": "Kullanıcı adı",
       "usernameHint": "SFTP ve FTP için; e-postadan doldurulur.",
       "signIn": "Nasıl oturum açar",
       "access": {
         "password": "Parola belirle",
-        "invite": "Davet gönder"
+        "invite": "Davet gönder",
+        "none": "Parola yok"
       },
       "generate": "Oluştur",
       "show": "Parolayı göster",
@@ -582,7 +583,8 @@
         "user": "Dosyalarla çalışır: yükler, değiştirir, paylaşır - Kullanıcı rolünün izin verdiği kadar.",
         "viewer": "Salt okunur: göz atar ve indirir.",
         "custom": "Özel bir rol - izinleri Roller sayfasında."
-      }
+      },
+      "noneHint": "SSO ile oturum açarlar ya da API anahtarı kullanırlar. Parola daha sonra kişinin sayfasından belirlenebilir."
     },
     "adminByGroup": "Bir grup aracılığıyla yönetici. Rolünü değiştirmek için kişiyi o gruptan (veya LDAP / SSO grubundan) çıkarın."
   },

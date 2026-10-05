@@ -79,6 +79,9 @@ describe('users: reset password from the list (issue #25)', () => {
     cy.visit('/admin/users');
     cy.contains('button', /add|new|ekle|yeni/i).filter(':visible').first().click();
     dialog().find('input[type="email"]').type(email);
+    // No password: the dialog's third way in (an SSO account made ahead of
+    // its first sign-in); the other two set a password or send an invitation.
+    dialog().find('[data-testid="user-create-access-none"]').click();
     // Submitted with Enter, the way a keyboard does it. ⚠ Not by the button's
     // TEXT: the form carries a hidden `sr-only` submit (for exactly this Enter)
     // that also says "Create", and a text match found that one — covered, so
