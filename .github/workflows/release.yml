@@ -14,6 +14,7 @@ name: Release
 #                           │            │     ├─ desktop-arm64-check (install +
 #                           │            │     │   open on real arm64 machines
 #                           │            │     │   and Linux x64, sandbox
+#                           │            │     │   or snap confinement
 #                           │            │     │   checked, screenshots)
 #                           │            │     └─ aur (PKGBUILD push)
 #                           │            └─ cli-smoke (CLI + server on arm64)
@@ -1141,8 +1142,9 @@ jobs:
       # The x64 Linux packages, for the same check on an x64 Ubuntu 24.04
       # machine (desktop-arm64-check, linux-x64 row). Since 0.50 every Linux
       # build starts through a launcher that refuses to run without Chromium's
-      # sandbox, so the x64 .deb, AppImage and snap are opened as carefully as
-      # the arm64 ones.
+      # sandbox (outside the snap, which relies on its confinement since 0.52),
+      # so the x64 .deb, AppImage and snap are opened as carefully as the
+      # arm64 ones.
       - name: Keep the x64 Linux packages for the check
         if: matrix.label == 'linux'
         uses: actions/upload-artifact@v4
@@ -1342,11 +1344,14 @@ jobs:
           fi
           command -v snapcraft >/dev/null || sudo snap install snapcraft --classic
           snapcraft whoami
-          # ⚠ Since 0.50 the snap asks for `browser-support` with
-          # `allow-sandbox: true` (Chromium's sandbox inside the snap). The
-          # Store reviews that by hand: the revision is uploaded and waits for
-          # the review before it reaches stable. That is expected, not a failed
-          # release; the run says so and carries on. Any other failure fails.
+          # ⚠ 0.50 and 0.51 asked for `browser-support` with
+          # `allow-sandbox: true`, which the Store reviews by hand: their
+          # revisions waited in manual review and never reached stable. Since
+          # 0.52 the snap asks for nothing of the kind (it runs with
+          # --no-sandbox under strict confinement), so the automatic review
+          # should pass. Should the Store still hold a revision for a manual
+          # review, the upload is done and the release is not failed: the run
+          # says so and carries on. Any other failure fails.
           set +e
           out=$(snapcraft upload --release=stable "$snap" 2>&1)
           rc=$?
@@ -1354,7 +1359,7 @@ jobs:
           printf '%s\n' "$out"
           if [ "$rc" -ne 0 ]; then
             if printf '%s' "$out" | grep -qi 'manual review'; then
-              msg="$(basename "$snap") is uploaded and waits for the Snap Store's manual review (allow-sandbox); it reaches stable once the review passes."
+              msg="$(basename "$snap") is uploaded and waits for the Snap Store's manual review; it reaches stable once the review passes. Since 0.52 the snap asks for nothing the Store reviews by hand: read the reason the Store gives."
               echo "::warning title=Snap Store: manual review::$msg"
               echo "### Snap Store: waiting for manual review" >> "$GITHUB_STEP_SUMMARY"
               echo "$msg" >> "$GITHUB_STEP_SUMMARY"
@@ -1376,13 +1381,17 @@ jobs:
   # are looked at before a release is called good.
   #
   # ⚠⚠ Linux, since 0.50: a window is not enough. The 0.49 AppImage and snap
-  # opened windows with Chromium's sandbox OFF (--no-sandbox), so on Linux
-  # every opening is checked for the sandbox (--expect-sandbox: each renderer
-  # in its own PID namespace, no --no-sandbox anywhere), and the two cases that
-  # cannot build it on Ubuntu 24.04 are checked to REFUSE with the launcher's
-  # message (--expect-refusal): the AppImage before its AppArmor profile, the
-  # snap before `snap connect filex-app:browser-sandbox`. The same on an x64
-  # machine (linux-x64), since the launcher is in every Linux package.
+  # opened windows with Chromium's sandbox OFF (--no-sandbox), so the .deb and
+  # the AppImage are checked for the sandbox (--expect-sandbox: each renderer
+  # in its own PID namespace, no --no-sandbox anywhere), and the AppImage
+  # before its AppArmor profile is checked to REFUSE with the launcher's
+  # message (--expect-refusal). The snap (since 0.52) runs with --no-sandbox
+  # under strict confinement: the Store grants `allow-sandbox` to trusted
+  # publishers only and reviewed the 0.50 and 0.51 revisions by hand, so the
+  # snap no longer asks for it, and the check is that it does not and that
+  # every process of the app runs under the snap's AppArmor profile in
+  # enforce mode with a seccomp filter (--expect-snap-confinement). The same
+  # on an x64 machine (linux-x64), since the launcher is in every Linux package.
   desktop-arm64-check:
     name: Desktop packages on a real ${{ matrix.label }} machine
     needs: [plan, desktop]
@@ -1408,7 +1417,7 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: pkg
-      - name: .deb, AppImage and snap on Linux, sandboxed
+      - name: .deb, AppImage and snap on Linux, sandboxed or confined
         if: startsWith(matrix.label, 'linux')
         shell: bash
         env:
@@ -1470,16 +1479,17 @@ jobs:
           look --exe "$img" --arg --filex-desktop-entry --out "shots/$LABEL-appimage-entry.png" --port 9336 --expect-sandbox
           unset APPIMAGE_EXTRACT_AND_RUN
 
-          # snap: a --dangerous install connects nothing the Store has not
-          # granted, so the browser-sandbox plug starts disconnected: the
-          # launcher must refuse and name the command. Connected, sandboxed.
+          # snap: Chromium's sandbox is off in it on purpose (the launcher
+          # starts it with --no-sandbox), and the wall is snapd's strict
+          # confinement. A --dangerous install is confined like a Store one.
+          # The snap must not ask for allow-sandbox (the Store reviews that by
+          # hand), and every process of the app must run under its profile.
           if [ -f "pkg/filex-desktop-$SNAP.snap" ]; then
             sudo snap install --dangerous "pkg/filex-desktop-$SNAP.snap"
             snap list filex-app
             snap connections filex-app | grep browser
-            refuses --exe /snap/bin/filex-app --port 9337 --timeout 150
-            sudo snap connect filex-app:browser-sandbox
-            look --exe /snap/bin/filex-app --out "shots/$LABEL-snap.png" --port 9338 --timeout 150 --expect-sandbox
+            if grep -q 'allow-sandbox' /snap/filex-app/current/meta/snap.yaml; then echo "the snap asks for allow-sandbox, which the Snap Store reviews by hand" >&2; exit 1; fi
+            look --exe /snap/bin/filex-app --out "shots/$LABEL-snap.png" --port 9338 --timeout 150 --expect-snap-confinement
           else
             echo "::warning title=snap::no $SNAP snap was built"
           fi

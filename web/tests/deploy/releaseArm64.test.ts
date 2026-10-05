@@ -212,10 +212,16 @@ describe('the release ships arm64', () => {
 
   // 0.50: the 0.49 AppImage and snap opened windows with Chromium's sandbox
   // off, and the release check accepted them (it even retried the AppImage
-  // with --no-sandbox). Now every Linux package, x64 and arm64, is opened with
-  // the sandbox checked, and the two cases that cannot build it on Ubuntu
-  // 24.04 must refuse with the launcher's message.
-  it.runIf(!!DIR)('opens every Linux package with the sandbox on, and checks the two refusals', () => {
+  // with --no-sandbox). Now the .deb and the AppImage, x64 and arm64, are
+  // opened with the sandbox checked, and the AppImage without its AppArmor
+  // profile must refuse with the launcher's message.
+  //
+  // 0.52: the snap no longer asks for `allow-sandbox` (trusted publishers
+  // only, reviewed by hand: the 0.50 and 0.51 revisions never left manual
+  // review). It runs with --no-sandbox under strict confinement, and that is
+  // what is checked: every process of the app under the snap's AppArmor
+  // profile in enforce mode, with a seccomp filter.
+  it.runIf(!!DIR)("opens the .deb and the AppImage sandboxed, the AppImage's refusal, the snap confined", () => {
     const release = code('release.yml');
     const check = job(release, 'desktop-arm64-check');
     expect(check).toMatch(/os: ubuntu-24\.04, label: linux-x64, artifact: desktop-x64-linux/);
@@ -223,22 +229,30 @@ describe('the release ships arm64', () => {
     expect(cond(keep)).toBe("matrix.label == 'linux'");
     expect(keep).toMatch(/name: desktop-x64-linux/);
     for (const f of ['x86_64.AppImage', 'amd64.deb', 'amd64.snap']) expect(keep).toContain(`desktop/release/*${f}`);
-    const linux = step(release, '.deb, AppImage and snap on Linux, sandboxed');
+    const linux = step(release, '.deb, AppImage and snap on Linux, sandboxed or confined');
     expect(cond(linux)).toBe("startsWith(matrix.label, 'linux')");
-    // Never --no-sandbox: not as a retry, not as an argument. The one line
-    // that names it checks the AppImage's menu entry does NOT carry it.
+    // Never --no-sandbox from the check itself: not as a retry, not as an
+    // argument. The one line that names it checks the AppImage's menu entry
+    // does NOT carry it (the snap adds its own, inside the package).
     const mentions = check.split('\n').filter((l) => l.includes('--no-sandbox'));
     expect(mentions.map((l) => l.trim())).toEqual([
       `if grep -q -- '--no-sandbox' "$RUNNER_TEMP"/squashfs-root/*.desktop; then echo "the AppImage's menu entry turns the sandbox off" >&2; exit 1; fi`,
     ]);
-    // Every opening is checked for the sandbox: the .deb, the AppImage (twice:
-    // as itself and as its own menu entry), the snap.
+    // The .deb and the AppImage (twice: as itself and as its own menu entry)
+    // are checked for the sandbox; the snap for its confinement.
     const opens = [...linux.matchAll(/^\s*look --exe .*$/gm)].map((m) => m[0]);
     expect(opens).toHaveLength(4);
-    for (const o of opens) expect(o).toMatch(/--expect-sandbox$/);
-    // The refusals run with no display, so no dialog waits for a click.
+    const snapOpens = opens.filter((o) => o.includes('/snap/bin/filex-app'));
+    expect(snapOpens).toHaveLength(1);
+    expect(snapOpens[0]).toMatch(/--expect-snap-confinement$/);
+    for (const o of opens.filter((x) => !snapOpens.includes(x))) expect(o).toMatch(/--expect-sandbox$/);
+    // The snap asks the Store for nothing it reviews by hand, and nobody
+    // connects a sandbox plug for it.
+    expect(linux).toContain(`if grep -q 'allow-sandbox' /snap/filex-app/current/meta/snap.yaml; then echo "the snap asks for allow-sandbox, which the Snap Store reviews by hand" >&2; exit 1; fi`);
+    expect(linux).not.toMatch(/snap connect(?!ions)|browser-sandbox|refuses --exe \/snap/);
+    // The refusal runs with no display, so no dialog waits for a click.
     expect(linux).toMatch(/refuses\(\) \{ env -u DISPLAY -u WAYLAND_DISPLAY node "\$CI_SCRIPTS"\/desktop-look\.mjs "\$@" --expect-refusal; \}/);
-    const order = ['refuses --exe "$img"', 'apparmor_parser -r /etc/apparmor.d/filex-appimage', 'look --exe "$img" --out', 'refuses --exe /snap/bin/filex-app', 'snap connect filex-app:browser-sandbox', 'look --exe /snap/bin/filex-app'];
+    const order = ['refuses --exe "$img"', 'apparmor_parser -r /etc/apparmor.d/filex-appimage', 'look --exe "$img" --out', "grep -q 'allow-sandbox' /snap/filex-app/current/meta/snap.yaml", 'look --exe /snap/bin/filex-app'];
     const at = order.map((o) => linux.indexOf(o));
     for (const [i, a] of at.entries()) expect(a, order[i]).toBeGreaterThan(0);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
@@ -250,7 +264,7 @@ describe('the release ships arm64', () => {
   });
 
   it.runIf(!!DIR)('installs the AppArmor profile docs/DESKTOP.md gives, word for word', () => {
-    const linux = step(code('release.yml'), '.deb, AppImage and snap on Linux, sandboxed');
+    const linux = step(code('release.yml'), '.deb, AppImage and snap on Linux, sandboxed or confined');
     const profile = (text: string) => /profile filex-appimage [^\n]+\{\n\s*userns,\n\s*include if exists <local\/filex-appimage>\n\s*\}/.exec(text)?.[0].replace(/^\s+/gm, '');
     const desktop = fs.readFileSync(path.join(REPO, 'docs', 'DESKTOP.md'), 'utf8');
     const launcher = fs.readFileSync(path.join(REPO, 'desktop', 'build', 'linux', 'launcher.sh'), 'utf8').replace(/^\s*"\s*|"\s*\\?$/gm, '');
@@ -264,6 +278,9 @@ describe('the release ships arm64', () => {
     expect(s).toMatch(/out=\$\(snapcraft upload --release=stable "\$snap" 2>&1\)/);
     expect(s).toMatch(/grep -qi 'manual review'/);
     expect(s).toMatch(/::warning title=Snap Store: manual review::/);
+    // Since 0.52 the snap asks for no allow-sandbox: a review is no longer
+    // the expected outcome, and the message does not say it is.
+    expect(s).not.toMatch(/allow-sandbox/);
     // Anything else still fails the step.
     expect(s).toMatch(/exit "\$rc"/);
   });
@@ -539,6 +556,54 @@ releaseDate: '2026-09-28T10:05:00.000Z'
       fs.rmSync(tmp, { recursive: true, force: true });
       fs.mkdirSync(tmp);
       expect(inNode<string[]>('desktop-look.mjs', `return m.sandboxProblems(m.appProcesses(${JSON.stringify(tmp)}));`)).toEqual([
+        'no browser process of filex-app-bin found',
+        'no renderer process found',
+      ]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(!!DIR)("tells an app confined by its snap from one that is not, from /proc", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'look-snap-'));
+    try {
+      const proc = (pid: number, argv: string[], label: string | null, seccomp: string, joined = false) => {
+        const dir = path.join(tmp, String(pid));
+        fs.mkdirSync(path.join(dir, 'attr', 'apparmor'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'cmdline'), joined ? argv.join(' ') + '\0' : argv.join('\0') + '\0');
+        fs.writeFileSync(path.join(dir, 'status'), `Name:\tx\nNSpid:\t${pid}\nSeccomp:\t${seccomp}\n`);
+        // The kernel ends the label with a newline.
+        if (label !== null) fs.writeFileSync(path.join(dir, 'attr', 'apparmor', 'current'), `${label}\n`);
+      };
+      const bin = '/snap/filex-app/x1/filex-app-bin';
+      const own = 'snap.filex-app.filex-app (enforce)';
+      proc(30, [bin, '--no-sandbox', '--remote-debugging-port=9337'], own, '2');
+      proc(31, [bin, '--type=zygote', '--no-sandbox'], own, '2');
+      proc(32, [bin, '--type=renderer', '--no-sandbox'], own, '2', true);
+      proc(33, ['/usr/bin/other'], 'unconfined', '0');
+      const confined = inNode<{ types: string[]; problems: string[] }>(
+        'desktop-look.mjs',
+        `const ps = m.appProcesses(${JSON.stringify(tmp)}); return { types: ps.map((p) => p.type).sort(), problems: m.confinementProblems(ps) };`,
+      );
+      expect(confined.types).toEqual(['browser', 'renderer', 'zygote']);
+      expect(confined.problems).toEqual([]);
+      // Complain mode (a --devmode install), no profile at all, another
+      // snap's profile, no seccomp filter: each is named.
+      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.mkdirSync(tmp);
+      proc(40, [bin, '--no-sandbox'], 'snap.filex-app.filex-app (complain)', '2');
+      proc(41, [bin, '--type=renderer', '--no-sandbox'], null, '2', true);
+      proc(42, [bin, '--type=gpu-process'], 'snap.other.other (enforce)', '2');
+      proc(43, [bin, '--type=utility'], own, '0');
+      const loose = inNode<string[]>('desktop-look.mjs', `return m.confinementProblems(m.appProcesses(${JSON.stringify(tmp)}));`).join('\n');
+      expect(loose).toMatch(/pid 40 \(browser\) runs under AppArmor label "snap\.filex-app\.filex-app \(complain\)"/);
+      expect(loose).toMatch(/pid 41 \(renderer\) runs under AppArmor label "none"/);
+      expect(loose).toMatch(/pid 42 \(gpu-process\) runs under AppArmor label "snap\.other\.other \(enforce\)"/);
+      expect(loose).toMatch(/pid 43 \(utility\) has no seccomp filter \(Seccomp: 0\)/);
+      // Nothing of the app at all.
+      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.mkdirSync(tmp);
+      expect(inNode<string[]>('desktop-look.mjs', `return m.confinementProblems(m.appProcesses(${JSON.stringify(tmp)}));`)).toEqual([
         'no browser process of filex-app-bin found',
         'no renderer process found',
       ]);
