@@ -647,6 +647,10 @@ func BuildRouter(d *Deps) http.Handler {
 	// sees (docs/ONLYOFFICE.md, "What a save does").
 	if d.OnlyOffice != nil {
 		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice).WithResolver(d.StorageResolver))
+		// The callback reads the file a save is about to replace through the
+		// resolver the fetch endpoint above serves it from: a saved CSV is
+		// compared with the bytes the editor was given (onlyoffice/csv_keep.go).
+		d.OnlyOffice.AttachBody(d.Body)
 	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	th.AttachACL(d.ACL)

@@ -439,9 +439,11 @@ with its default (`assemblyFormatAsOrigin: true`), the callback's file is a
 CSV (`filetype: "csv"`), but written ONLYOFFICE's way whatever the file was:
 comma-separated, a UTF-8 byte order mark in front, `\n` line ends. filex puts
 the file's own way back before it writes it - its delimiter, its byte order
-mark or none, its `\r\n` or `\n` - and leaves every value as ONLYOFFICE
-wrote it. A semicolon file stays a semicolon file. A file that was not UTF-8
-is saved as UTF-8, with a byte order mark so that a reader knows.
+mark or none, its `\r\n` or `\n` - and the text of every cell nobody changed
+([Cells nobody changed keep their text](#cells-nobody-changed-keep-their-text);
+0.51.0 left every value as ONLYOFFICE wrote it). A semicolon file stays a
+semicolon file. A file that was not UTF-8 is saved as UTF-8, with a byte order
+mark so that a reader knows.
 
 ⚠⚠ A `.csv` is only ever written as CSV text:
 
@@ -449,8 +451,9 @@ is saved as UTF-8, with a byte order mark so that a reader knows.
   as **XLSX** (`filetype: "xlsx"`, measured). filex converts it back to CSV
   through the Document Server's own conversion service (the file is offered
   to it for that one conversion, as an app's office conversion is: UTF-8,
-  then the file's own delimiter as above) and writes that. Before 0.51 the
-  XLSX bytes were written under the `.csv` name.
+  then the file's own delimiter and its unchanged cells as above; what the
+  conversion writes for a number or a date was not measured) and writes that.
+  Before 0.51 the XLSX bytes were written under the `.csv` name.
 - Anything else - another type, bytes that are a zip or an old Excel workbook
   whatever the callback says, a conversion that fails, a save over 256 MiB -
   is **not written**. The file stays as it was; the log says
@@ -466,6 +469,105 @@ is saved as UTF-8, with a byte order mark so that a reader knows.
 A CSV is the one kind converted back and written in place. Any other kind
 saved in another format is written beside the file and never over it: see
 [A save in another format](#a-save-in-another-format).
+
+### Cells nobody changed keep their text
+
+ONLYOFFICE reads a CSV the way a spreadsheet does: a cell that looks like a
+number or a date becomes one, and a save writes every cell back as the
+spreadsheet shows it, edited or not. Measured on 0.51.0 with Docs 9.4.0, one
+cell edited in a semicolon file, the editor in English - in cells nobody had
+touched `05320000001` came back as `5320000001`, `007` as `7`, `000` as `0`
+and `01.02.2026` as `1/2/2026` (`15.03.2026` stayed: ONLYOFFICE read the month
+first, and 15 is no month), and every data row gained an empty cell at its
+end. 0.51.0 wrote that.
+
+filex now reads the file the save is about to replace, lines its rows up with
+the rows ONLYOFFICE saved, and writes the file's own text back wherever the
+saved text is the same value written ONLYOFFICE's way:
+
+- **A row in which nothing changed** is written byte for byte as it was - its
+  quotes, a delimiter at its end and its own line end included - wherever it
+  stands now: a sort moves rows and changes none of them.
+- **In a row somebody edited**, the cells they did not edit keep their text.
+- **A row added** in ONLYOFFICE is written as ONLYOFFICE saved it, without the
+  empty cells ONLYOFFICE pads a row with beyond the file's own width. **A row
+  deleted** there is gone.
+- **Empty lines at the end of the file** stay (ONLYOFFICE never writes them)
+  unless a row was added under the last row, where they stood. An empty row
+  in the middle stays as the file wrote it, a line of delimiters or a bare
+  line end. A first line `sep=;` stays, and the file ends with a line end if
+  and only if it did.
+
+"The same value written ONLYOFFICE's way" is one of the following and nothing
+else. It is one way only: `7` is what ONLYOFFICE writes for `007`, so the file
+keeps `007`; `007` is never what it writes for `7`.
+
+- **A whole number** without its leading zeros (measured: `007` and `7`,
+  `05320000001` and `5320000001`), its `+`, or the spaces in front of it and
+  one after it (read from ONLYOFFICE's sources, not measured). Also one
+  written with an exponent or as hexadecimal (`1e3` and `1000`, `0x10` and
+  `16`), and one too long for a spreadsheet's number, below 2^63:
+  `9007199254740993` comes back as `9007199254740992`, a longer one as
+  `1.2345678901234568e+17` (sources).
+- **A number with a decimal point**, which ONLYOFFICE keeps to six decimals:
+  `03.50` and `3.50`, `0.1234567` and `0.1234570` (sources). Never a decimal
+  comma: `3,5` is text to ONLYOFFICE and comes back as it was (measured).
+- **A date with a four-digit year**, when ONLYOFFICE saved the same three
+  numbers in the same order: `01.02.2026` and `1/2/2026` (measured); also with
+  `.` or `-` between them, the day and the month both without leading zeros
+  or both with two digits (sources). Another order is another date, and the
+  person's.
+- **`true` and `false`**, saved as `TRUE` and `FALSE` (sources).
+- **Text**: a `\r\n` inside a cell saved as `\n`, a tab inside a cell (gone,
+  unless the file is tab-separated), and a text longer than 32767 characters,
+  which ONLYOFFICE cuts there (sources).
+
+⚠ What is still written as ONLYOFFICE writes it:
+
+- **The cell you edit.** Type `007` into a cell and the file gets `7`.
+- **A change that is only another way of writing the same value** cannot be
+  made in ONLYOFFICE. It shows `007` as `7` already and saves the same text
+  whether or not somebody retyped it, so filex cannot tell the two apart and
+  the file keeps `007`. Edit the file as text for that.
+- **A time, a percent, a date written year first (`2026-02-01`) or with a
+  two-digit year, a date with a time, a formula, a whole number from 2^63
+  up.** ONLYOFFICE writes them its own way (its sources say `08:05:30` as
+  `8:05` and `=1+1` as `2`) and filex has no measured rule for them yet, so
+  they are compared as text and ONLYOFFICE's value is written.
+- **A file that is not UTF-8** (ONLYOFFICE asked for its encoding when it
+  opened): its text cannot be compared with what ONLYOFFICE saved, so its
+  first save is written as in 0.51.0, in UTF-8 with a byte order mark. From
+  then on it is a UTF-8 file and its cells are kept.
+- **A file over 64 MiB or two million rows, or with a row of more than 16384
+  cells** (as many columns as an ONLYOFFICE sheet has): written as in 0.51.0.
+- **A column added, removed or moved**: the cells from that column on are
+  written as ONLYOFFICE saved them, in every row. The cells before it keep
+  their text only while they are more than half of the row's filled cells;
+  otherwise the whole row is ONLYOFFICE's. A last column that was removed
+  leaves an empty cell at the end of each row.
+- **A row filex cannot tell from a new one**: a row in which half of the cells
+  or more were changed at once, a row that was edited and also moved (edited,
+  then the list sorted), and every one of several rows that differ only in
+  how a value is written (`A;007` and `A;7`) when one of them was deleted or
+  another added.
+- **A row typed to read like another row of the file** (`5` typed where
+  another row says `05`) is written as typed while the rows around it stand
+  where they stood. When rows were added, deleted or moved there in the same
+  save, or that other row was itself changed, filex cannot tell which of the
+  rows that now read the same is the file's: the first of them in the save
+  gets the file's text, `05`.
+
+A save is never refused, and never held back, over any of this. When the cells
+of a file cannot be kept at all it is written as in 0.51.0 - the file's
+delimiter, byte order mark and line ends, ONLYOFFICE's values - and the log
+says `onlyoffice callback: CSV cells not kept` with the reason (`not_utf8`,
+`too_large`, `too_many_records`, `too_many_fields`, `unreadable`). Two reasons
+are filex's own failure and are logged as a warning, worth a report:
+`check_failed` when what filex was about to write did not read back as the
+save, and `panic` when its comparison failed (the line then carries what
+failed and where; never a cell's text). The file is compared as it is on the
+storage when the save arrives, and the revision the save replaces stays in the
+file's history ([What a save does](#what-a-save-does)).
 
 ### What a CSV cannot keep
 

@@ -63,6 +63,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#85](https://github.com/BRF-Tech/filex/pull/85)); the Turkish wording was
   added on top.
 
+- **A CSV saved from ONLYOFFICE keeps the cells nobody changed**
+  ([ONLYOFFICE.md → Cells nobody changed keep their text](docs/ONLYOFFICE.md#cells-nobody-changed-keep-their-text)).
+  ONLYOFFICE reads a CSV as a spreadsheet and writes every cell back as it
+  shows it, and 0.51.0 put only the delimiter, the byte order mark and the line
+  ends back. Measured on 0.51.0 with Docs 9.4.0, one cell edited in a semicolon
+  file: in cells nobody touched `05320000001` became `5320000001`, `007` became
+  `7`, `01.02.2026` became `1/2/2026`, and every data row gained an empty cell
+  at its end.
+  - filex now reads the file the save replaces, lines its rows up with the
+    saved ones and writes the file's own text back where the saved text is the
+    same value written ONLYOFFICE's way. A row nobody changed is written byte
+    for byte as it was, also after a sort; in an edited row the other cells
+    keep their text; rows added or deleted in ONLYOFFICE are added and deleted;
+    empty lines at the end of the file (unless rows were added there), and its
+    final line end or none, stay.
+  - Still as ONLYOFFICE writes it: the cell you edit (`007` typed into a cell
+    is saved as `7`); a time, a percent, a date written year first, a date
+    with a time and a formula; a file that is not UTF-8, on its first save; a
+    file over 64 MiB or two million rows, or with a row of more than 16384
+    cells; the cells from a column that was added, removed or moved on, in
+    every row. A change that is only another way of writing a value
+    (`007` to `7`) cannot be made in ONLYOFFICE: it saves the same text either
+    way, and the file keeps `007`.
+  - A save is never refused over this: when the cells cannot be kept it is
+    written as in 0.51.0, and the log says
+    `onlyoffice callback: CSV cells not kept` with the reason.
+
 ## [0.51.0] - 2026-10-04
 
 ### Added

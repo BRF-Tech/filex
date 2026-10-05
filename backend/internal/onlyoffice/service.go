@@ -42,6 +42,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -115,6 +116,13 @@ type Service struct {
 	openersMu sync.Mutex
 	openers   map[string]map[int64]time.Time
 
+	// Body resolves where a document's bytes are: the driver, or filex's
+	// staging area while a staged upload is still transferring. It is the
+	// resolver the fetch endpoint serves the document server from, so the
+	// callback compares a saved CSV with the bytes the editor was given
+	// (callback_csv.go csvOriginal). Nil-safe: it then answers the driver.
+	Body *filebody.Resolver
+
 	// Sync is the shared post-write gate every other write surface in filex
 	// goes through: it upserts the node row, re-indexes the document,
 	// dispatches a thumbnail, tells open explorers, emits the canonical
@@ -126,6 +134,10 @@ type Service struct {
 	// the re-index is skipped. Wire it with AttachSync at boot.
 	Sync *protocolsync.Syncer
 }
+
+// AttachBody wires the byte-source resolver, the one the fetch endpoint reads
+// a document through.
+func (s *Service) AttachBody(b *filebody.Resolver) { s.Body = b }
 
 // AttachSync wires the post-write gate. ⚠ Without it an edited document keeps
 // its PRE-EDIT text in content search, because nothing else ever revisits a
