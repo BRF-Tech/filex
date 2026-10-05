@@ -80,11 +80,30 @@ name: Release
 #       (v0.52.0: GitHub Actions was down at the tag, every other channel was
 #       published from a PC, and macOS needs a Mac to build on.)
 #
+#   gh workflow run release.yml -R BRF-Tech/filex -f tag=v0.52.0 -f only=snap-arm64 [-f publish=true]
+#       The Linux arm64 snap alone, for a release that shipped without it:
+#       the linux-arm64 row of a full run (ubuntu-24.04-arm, snapcraft in
+#       LXD), built from THAT tag, but without the row's own build: no
+#       AppImage, .deb or .rpm. The Release has those already, and the winget
+#       pull request and the update feeds pin its files by hash, so this run
+#       never builds them again. With publish=true the snap goes to the Snap
+#       Store (the same step and channel as a full run) and
+#       filex-desktop-arm64.snap, named and nothing else, to the Release
+#       (--clobber: a re-run after a failed Store upload replaces its own).
+#       No latest*.yml, no binaries, images, npm, winget, Store, cask or AUR,
+#       no CLI smoke test and no desktop-arm64-check (it installs the .deb
+#       and the AppImage this run does not build). The app and the CLI
+#       inside the snap are still checked to be arm64. Without publish, a dry
+#       run of exactly that, the snap kept as a run artifact. With it,
+#       `verify` asks of THAT tag's commit what it asks for only=arm64.
+#       (v0.52.0: the release was published from a PC, and snapcraft cannot
+#       cross-build an arm64 snap.)
+#
 # A FULL release publishes from its tag push and nothing else: `plan` refuses
-# publish=true without only=arm64 or only=macos (goreleaser cannot recreate a
-# Release, and a half-rerun release is how v0.34.0's tag had to be moved). And
-# the tag push publishes only a commit that passed ci.yml and a dry run first
-# (`verify`).
+# publish=true without only=arm64, only=macos or only=snap-arm64 (goreleaser
+# cannot recreate a Release, and a half-rerun release is how v0.34.0's tag had
+# to be moved). And the tag push publishes only a commit that passed ci.yml
+# and a dry run first (`verify`).
 #
 # ⚠ In a run on a tag the workflow file comes from the branch it was started
 # on and the code from the tag. The tag's tree has the tag's
@@ -97,8 +116,9 @@ name: Release
 # that commit, which the release tool waits for before a tag and `verify`
 # looks for on a tag run. "dry run arm64 v1.2.3 <commit>" and "publish arm64
 # v1.2.3 <commit>" are the ARM-only runs, "dry run macos v1.2.3 <commit>" and
-# "publish macos v1.2.3 <commit>" the macOS-only ones; a tag push is
-# "Release v1.2.3".
+# "publish macos v1.2.3 <commit>" the macOS-only ones, "dry run snap-arm64
+# v1.2.3 <commit>" and "publish snap-arm64 v1.2.3 <commit>" the arm64 snap
+# alone; a tag push is "Release v1.2.3".
 # scripts/release/checks.mjs (dryRunTitle) spells the same name.
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('{0} {1} {2}{3}', inputs.publish && 'publish' || 'dry run', inputs.only, inputs.tag && format('{0} ', inputs.tag) || '', github.sha) || format('Release {0}', github.ref_name) }}
 
@@ -112,9 +132,9 @@ on:
         type: string
         default: ""
       only:
-        description: "all: every package. arm64: only the ARM packages (needs a tag). macos: only the macOS desktop packages (needs a tag)."
+        description: "all: every package. arm64: only the ARM packages (needs a tag). macos: only the macOS desktop packages (needs a tag). snap-arm64: only the Linux arm64 snap, to the Snap Store (needs a tag)."
         type: choice
-        options: [all, arm64, macos]
+        options: [all, arm64, macos, snap-arm64]
         default: all
       publish:
         description: "Attach to the tag's Release and send to the stores. Off: build, test and keep artifacts only."
@@ -148,9 +168,11 @@ jobs:
   #   ref      what to check out (the tag, or this commit)
   #   version  1.2.3 (a branch: desktop/package.json's)
   #   stamp    what the images and binaries report (the tag, or v<version>-dryrun)
-  #   publish  true on a tag push, or when asked for (only=arm64, only=macos)
-  #   full     false when only the ARM or only the macOS packages are built
-  #   only     all, arm64 or macos (a tag push: all)
+  #   publish  true on a tag push, or when asked for (only=arm64, only=macos,
+  #            only=snap-arm64)
+  #   full     false when only the ARM packages, the macOS packages or the
+  #            arm64 snap are built
+  #   only     all, arm64, macos or snap-arm64 (a tag push: all)
   #   desktop  the desktop matrix
   plan:
     name: Plan
@@ -199,8 +221,11 @@ jobs:
           if [ "$only" = macos ] && [ -z "$tag" ]; then
             echo "::error::only=macos adds to a release: give its tag (-f tag=v1.2.3)"; exit 1
           fi
+          if [ "$only" = snap-arm64 ] && [ -z "$tag" ]; then
+            echo "::error::only=snap-arm64 adds to a release: give its tag (-f tag=v1.2.3)"; exit 1
+          fi
           if [ "$EVENT" != push ] && [ "$publish" = true ]; then
-            [ "$only" = macos ] || [ "$only" = arm64 ] || { echo "::error::a full release publishes from its tag push only. To add the ARM packages to $tag, run with only=arm64; the macOS packages, with only=macos."; exit 1; }
+            [ "$only" = snap-arm64 ] || [ "$only" = macos ] || [ "$only" = arm64 ] || { echo "::error::a full release publishes from its tag push only. To add the ARM packages to $tag, run with only=arm64; the macOS packages, with only=macos; the arm64 snap alone, with only=snap-arm64."; exit 1; }
             gh release view "$tag" -R "$GITHUB_REPOSITORY" --json tagName >/dev/null || { echo "::error::$tag has no GitHub Release to add to"; exit 1; }
           fi
           # The desktop rows. `script` is the package.json script for the
@@ -235,6 +260,14 @@ jobs:
           # release is what that release would have had.
           if [ "$only" = macos ]; then
             desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label == "macos")]}')
+          fi
+          # only=snap-arm64: the linux-arm64 row of the full matrix, without
+          # its `script`. That script (dist:linux) makes the AppImage, .deb and
+          # .rpm, which the Release has and which are pinned by hash; desktop
+          # builds the app and the CLI itself for this row and packs the snap
+          # alone.
+          if [ "$only" = snap-arm64 ]; then
+            desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label == "linux-arm64") | .script = ""]}')
           fi
           {
             echo "tag=$tag"
@@ -282,8 +315,9 @@ jobs:
   # still builds everything again from the tag; it does not reuse the dry
   # run's artifacts.
   #
-  # A run that adds the ARM packages to a release (only=arm64), or its macOS
-  # packages (only=macos), builds THAT tag's code: `test` is skipped, and
+  # A run that adds the ARM packages to a release (only=arm64), its macOS
+  # packages (only=macos) or its arm64 snap (only=snap-arm64), builds THAT
+  # tag's code: `test` is skipped, and
   # with publish=true `verify` asks of the tag's commit exactly what it asks
   # on a tag push. Without publish it publishes nothing and `verify` lets it
   # through. So every job that publishes anything waits for `verify`, a
@@ -303,8 +337,8 @@ jobs:
     name: Verify
     needs: [plan, test]
     # !cancelled(), not the implicit success(): on a tag push, and in a run
-    # that adds the ARM or the macOS packages, `test` is skipped and this must
-    # run anyway. It decides for itself, closed.
+    # that adds packages to a release (only=arm64, macos, snap-arm64), `test`
+    # is skipped and this must run anyway. It decides for itself, closed.
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -545,12 +579,12 @@ jobs:
   #
   # Published binaries come from the Release (what users download), a dry
   # run's from the artifact `binaries` kept. Not in a run that adds only the
-  # macOS desktop packages (only=macos): it builds no CLI and adds none to
-  # the Release.
+  # macOS desktop packages (only=macos) or only the arm64 snap
+  # (only=snap-arm64): neither adds a CLI to the Release.
   cli-smoke:
     name: CLI + server (${{ matrix.label }})
     needs: [plan, binaries]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
     strategy:
       fail-fast: false
       matrix:
@@ -870,8 +904,8 @@ jobs:
   # and an 87 MB .deb, then attached neither. It does NOT wait for `docker`:
   # the images are not an input to the installers, and waiting for them cost
   # every release ~25 minutes of idle (v0.20.2 measurement in the header).
-  # (When only the ARM or only the macOS packages are added to an existing
-  # release, `binaries` does not run and is not waited for: the Release
+  # (When packages are added to an existing release - only=arm64, macos or
+  # snap-arm64 - `binaries` does not run and is not waited for: the Release
   # exists. `verify` is waited for in every run: it is what lets a publishing
   # run publish.)
   #
@@ -972,15 +1006,16 @@ jobs:
           npm version "$VER" --no-git-tag-version --allow-same-version
           node -e "console.log('desktop version =', require('./package.json').version)"
       # `dist:linux` builds an .rpm as well (desktop/electron-builder.yml), and
-      # fpm hands that to rpmbuild, which ubuntu-latest does not ship.
+      # fpm hands that to rpmbuild, which ubuntu-latest does not ship. (A row
+      # with no `script`, only=snap-arm64's, builds no .rpm or .deb.)
       - name: rpmbuild for the .rpm
-        if: startsWith(matrix.label, 'linux')
+        if: startsWith(matrix.label, 'linux') && matrix.script != ''
         run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
       # ⚠ electron-builder's own fpm (for the .deb and .rpm) is an x86-64
       # bundle with its own Ruby: on arm64 it cannot start. USE_SYSTEM_FPM
       # makes it call this one.
       - name: fpm for the arm64 .deb and .rpm
-        if: matrix.label == 'linux-arm64'
+        if: matrix.label == 'linux-arm64' && matrix.script != ''
         run: |
           set -euo pipefail
           sudo apt-get install -y -qq ruby ruby-dev build-essential
@@ -996,6 +1031,19 @@ jobs:
           # CSC_KEY_PASSWORD secrets) when a real Developer ID lands.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm --filter ./desktop run ${{ matrix.script }}
+      # only=snap-arm64: the row has no `script` (see plan), so nothing above
+      # made the AppImage, .deb or .rpm, whose Release copies are pinned by
+      # hash. The app and its CLI are built as dist:linux builds them (on this
+      # arm64 runner the CLI is arm64, checked below), and "Build snap" packs
+      # the snap alone from them.
+      - name: Build the app and the CLI for the snap alone
+        if: env.ONLY == 'snap-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop
+          pnpm run build
+          node scripts/fetch-cli.mjs --platform linux
       # The x64 feed, set aside before the arm64 build writes its own
       # latest.yml over it (joined below).
       - name: Set the x64 Windows feed aside
@@ -1231,7 +1279,7 @@ jobs:
         run: |
           echo "::warning title=Microsoft Store::Not submitted — MSSTORE_* secrets or the MSSTORE_PRODUCT_ID variable are not set. Upload the msix-${TAG} artifact in Partner Center by hand."
       - name: Attach to the release
-        if: matrix.label != 'store' && env.PUBLISH == 'true'
+        if: matrix.label != 'store' && env.PUBLISH == 'true' && env.ONLY != 'snap-arm64'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1248,6 +1296,23 @@ jobs:
           fi
           printf 'uploading: %s\n' "${files[@]}"
           gh release upload "${TAG}" "${files[@]}" --clobber
+      # only=snap-arm64: the one file, by name - never the glob above, which
+      # would take whatever else is in desktop/release (a latest*.yml, say)
+      # over a Release whose AppImage, .deb, .rpm, installers and feeds are
+      # pinned by hash in the winget pull request and the update feeds. The
+      # snap is pinned nowhere (snaps update from the Store). --clobber: a
+      # re-run after a failed Store upload replaces its own earlier file
+      # instead of stopping here, before the Store.
+      - name: Attach the arm64 snap to the release
+        if: env.ONLY == 'snap-arm64' && env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          snap=desktop/release/filex-desktop-arm64.snap
+          [ -f "$snap" ] || { echo "no $snap to attach" >&2; exit 1; }
+          gh release upload "${TAG}" "$snap" --clobber
       # ── winget + Homebrew (the desktop app; the CLI goes through goreleaser) ──
       # desktop/scripts/pkg-manifests.mjs writes both, hashing the files this
       # job just built and pointing at the VERSIONED release URL. The winget
@@ -1363,7 +1428,8 @@ jobs:
       # the CLI's name. Straight to `stable`: the snap
       # is the same build the .deb is, and the Store's own review runs first.
       # Each Linux row uploads its own architecture's revision to the same
-      # channel: amd64 from `linux`, arm64 from `linux-arm64`.
+      # channel: amd64 from `linux`, arm64 from `linux-arm64` (with
+      # only=snap-arm64, that one alone).
       - name: Upload to the Snap Store
         if: startsWith(matrix.label, 'linux') && env.PUBLISH == 'true'
         shell: bash
@@ -1432,13 +1498,14 @@ jobs:
   # enforce mode with a seccomp filter (--expect-snap-confinement). The same
   # on an x64 machine (linux-x64), since the launcher is in every Linux package.
   #
-  # Not in a run that adds only the macOS packages (only=macos): it builds
-  # none of the packages checked here, and each row would fail for want of
-  # its artifact.
+  # Not in a run that adds only the macOS packages (only=macos) or only the
+  # arm64 snap (only=snap-arm64): neither builds the .deb, the AppImage or the
+  # Windows installers checked here, and each row would fail for want of its
+  # artifact.
   desktop-arm64-check:
     name: Desktop packages on a real ${{ matrix.label }} machine
     needs: [plan, desktop]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.desktop.result != 'skipped' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.desktop.result != 'skipped' }}
     strategy:
       fail-fast: false
       matrix:
