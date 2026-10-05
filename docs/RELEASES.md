@@ -19,14 +19,227 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.51.0, 4 October 2026
-Who may encrypt is now an organisation's decision, contributed by @berkbasarir (#83): the tenant policy (Off, Administrators only, Permitted, or Approval), a new files.encrypt permission and, on multi-tenant installs, a ceiling the platform operator sets per tenant must all say yes. Under Approval people ask with a reason and an administrator approves once, on the new Admin > Encryption page. With ONLYOFFICE configured a .csv opens in its spreadsheet editor and keeps its own delimiter, byte order mark and line ends when it is saved (#81), and an office file in an older format is saved beside the document with the right extension instead of getting newer-format bytes under its old name. The admin panel's navigation is a mega menu: three panels of grouped pages, each two clicks away at the address it always had (#82). An upgrade changes nobody's access: roles and exceptions that could create files can also encrypt. Security: a folder-confined API token is now held to its folder however a request is sent; upgrade if you rely on root: scopes.
+::: tip Latest - v0.52.0, 5 October 2026
+LDAP and Active Directory groups reach filex: a filex group can name directory groups and follows them at every sign-in, a directory sync opens accounts, brings the directory's groups in and can switch off people the directory no longer lists, and a group can make its members administrators - contributed by @manjotsc (#90). Apps can now come from a store: a store such as filex Apps (apps.filex.sh) sends you to your own filex with an install link, which opens the same permission review, holds the app to the store's pins and installs nothing until you press Install. A store is trusted once, after you compare its key fingerprints, and a paid app's license is the store's: checked every day, and an app whose license does not hold is held, never removed. A CSV saved from ONLYOFFICE keeps the cells nobody changed (#88), asking what is below a folder no longer reads the whole storage (#89) and the README is a short page with the detail one click away (#87), all contributed by @berkbasarir; following his report (#86), Admin > Roles points out a role an older version's page may have saved without Encrypt, with one click to give it back. The Snap runs inside the snap's strict confinement and needs no snap connect step. Security: an app is now held to a folder-confined API token's folder, and the token learns nothing about what lies outside it.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.51.0
-docker pull ghcr.io/brf-tech/filex:full-v0.51.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.52.0
+docker pull ghcr.io/brf-tech/filex:full-v0.52.0
 ```
+
+## v0.52.0
+
+<span class="filex-release-date">5 October 2026</span>
+
+LDAP and Active Directory groups reach filex: a filex group can name directory groups and follows them at every sign-in, a directory sync opens accounts, brings the directory's groups in and can switch off people the directory no longer lists, and a group can make its members administrators - contributed by @manjotsc (#90). Apps can now come from a store: a store such as filex Apps (apps.filex.sh) sends you to your own filex with an install link, which opens the same permission review, holds the app to the store's pins and installs nothing until you press Install. A store is trusted once, after you compare its key fingerprints, and a paid app's license is the store's: checked every day, and an app whose license does not hold is held, never removed. A CSV saved from ONLYOFFICE keeps the cells nobody changed (#88), asking what is below a folder no longer reads the whole storage (#89) and the README is a short page with the detail one click away (#87), all contributed by @berkbasarir; following his report (#86), Admin > Roles points out a role an older version's page may have saved without Encrypt, with one click to give it back. The Snap runs inside the snap's strict confinement and needs no snap connect step. Security: an app is now held to a folder-confined API token's folder, and the token learns nothing about what lies outside it.
+
+> Desktop installers, npm packages and store channels follow shortly (GitHub Actions incident).
+
+## What changed
+
+### Added
+
+- **The README in five more languages** - Turkish, German, Spanish, French and
+  Simplified Chinese (`README.tr.md`, `README.de.md`, `README.es.md`,
+  `README.fr.md`, `README.zh-CN.md`), each linked from a language line under
+  the badges of all six. An interface label is written as filex's interface
+  shows it in that language - the built-in Turkish catalogue, the German,
+  Spanish and French language packs - so a reader finds on screen what the page
+  named; there is no Chinese interface yet, so the Chinese page keeps the
+  English label and glosses it. Code blocks, commands, link targets and
+  screenshots are the English README's, unchanged. Each translation names the
+  commit it was made from and says that the English text holds where the two
+  differ; the German, Spanish, French and Chinese pages are machine
+  translations awaiting review by a native speaker, and say so.
+  `scripts/check-links.mjs` and `scripts/check-doc-anchors.mjs` read
+  the translations too, so a renamed docs heading names the link to fix in each
+  of them ([CONTRIBUTING.md](./CONTRIBUTING.md#docs)). Contributed by Berk
+  Başarır ([#84](https://github.com/BRF-Tech/filex/pull/84)).
+- **Installing from an app store, and paid apps.** An app store's **Install**
+  opens an install link on your filex (`/admin/store-install#store=…&intent=…`)
+  that lands on the same install review a repository gets, filled in from the
+  store and marked *From store &lt;origin&gt;*; the administrator still decides.
+  Before the review opens, filex checks that it trusts the store - the first
+  link asks an administrator to compare the store's key fingerprints and trust
+  it (trust on first use; or `FILEX_APP_STORE_URLS` + `FILEX_APP_STORE_KEYS`),
+  and a store whose keys change is asked about again - that the link is signed
+  by one of the store's `index` keys (ed25519 over the sha256 of the canonical
+  JSON, the module-signature rule), current and not used here before, and
+  that the repository serves exactly the manifest, module, interface and
+  permissions the store approved; **Install** reads and checks it all again.
+  A link is made for one filex (`filex_origin`, signed) and names the commit
+  the store reviewed, which is what filex reads. A store link installs or
+  upgrades - from the same store and repository only - never downgrades, and
+  the store is told how the link ended. A **paid app**'s license is issued and kept by the store:
+  filex keeps the key sealed with `FILEX_SECRET_KEY` (shown by its prefix only,
+  never in an answer, a log or the audit log), asks the store at the install
+  and every day, and HOLDS the app - installed, nothing removed, nothing run,
+  state *Unlicensed* - when the store says revoked, expired, invalid, out of
+  seats or for another app, or once the grace the store signed has ended
+  without an answer; turning the server's clock back does not stretch a grace.
+  Admin → Apps gets *Trusted stores* and, on a paid app's page, *License*
+  (status, licensee, seats, dates, key, **Verify now**); a band on every admin
+  page names a held app. An app reads its own license's status and dates with
+  `fx.license.get()` (`@brftech/filex-app-ui`). `FILEX_APP_GITHUB_RAW_BASE`
+  points GitHub installs at a mirror. Migration 00081. ([APP-PLUGINS.md →
+  Installing from a store](./APP-PLUGINS.md#installing-from-a-store),
+  [APP-PLUGINS-API.md → The store contract](./APP-PLUGINS-API.md#the-store-contract-0520))
+- **LDAP groups** ([docs/LDAP.md → Groups](./LDAP.md#groups), migration
+  00084). A group can name LDAP / Active Directory groups, by DN or by name,
+  beside its SSO groups: every sign-in to the web UI reads the person's
+  directory groups (`group_attr`, or a search with `group_filter`) and joins
+  and leaves the linked groups as the directory says. A failed group read
+  never refuses a sign-in or takes anybody out of a group; the file protocols
+  never move memberships. New settings: `group_filter`, `group_base_dn`
+  (`FILEX_LDAP_GROUP_*`), also on Admin → Identity providers. Contributed by
+  Manjot Singh ([#90](https://github.com/BRF-Tech/filex/pull/90)), with the
+  directory sync, several directories, permanent ids, administrators through
+  a group, Users, Groups, Add user and Identity providers entries below. The
+  tenant boundary and partial-answer rules of directory sync, and the
+  session gate on its doors, were added on top of it before the release.
+- **LDAP directory sync** ([docs/LDAP.md → Directory sync](./LDAP.md#directory-sync)).
+  Admin → Identity providers → an LDAP provider → **Sync now**, and every
+  `sync_interval` on its own: filex reads every person the directory lists,
+  opens the accounts nobody has signed in to yet (as their first sign-in
+  would: the first sign-in rule decides) and brings everyone's LDAP-linked
+  group memberships in step; accounts the directory stopped listing lose
+  them, and are switched off with `sync_disable_missing`. A search that finds
+  nobody changes nothing. It also brings **every directory group in as a
+  filex group** (`sync_groups`, on by default; `sync_group_filter` picks
+  which), followed by its permanent id (or, with none, its DN): renamed
+  with it, and flagged *Removed from LDAP* - never deleted - when it is
+  gone. Which groups exist
+  is managed on the directory. Each LDAP provider syncs its own directory,
+  accounts and groups. New settings `sync_interval`, `sync_filter`,
+  `sync_disable_missing`, `sync_groups`, `sync_group_filter`
+  (`FILEX_LDAP_SYNC_*`). A run in which an account could not be looked up
+  counts nobody as no longer listed, and a person whose entry lost its
+  e-mail is still listed by their permanent id; a `group_filter` that names
+  people by their sign-in name (`%u`) leaves memberships to the sign-in. On a
+  multi-tenant install sync reaches only the accounts the directory already
+  holds and those of its own tenant - another account at the same address
+  waits for its person's sign-in in their realm - and a tenant's own
+  directory opens its groups in that tenant. **Sync now** needs an
+  administrator signed in to the panel, not an API key.
+- **Each LDAP directory keeps to its own** ([docs/LDAP.md → Several directories](./LDAP.md#several-directories),
+  migration 00084). An account belongs to the LDAP provider that made it -
+  another never signs it in - and `email_domains` limits a directory to its
+  own addresses; the Users page makes no local account at an address a
+  directory of that account's tenant owns. An account from before 0.52 with no password here and no
+  SSO identity is taken by the first directory that signs it in, as any
+  directory could sign it in before; one with a password here is the main
+  directory's alone.
+- **LDAP: switched off there, switched off here** ([docs/LDAP.md → Directory sync](./LDAP.md#directory-sync),
+  migration 00085). Directory sync switches off the account of a person the
+  directory has switched off - Active Directory's "account disabled",
+  389-ds's `nsAccountLock`, an OpenLDAP password-policy lock with no end -
+  administrators included (never the last one), so their sessions, API keys
+  and SFTP keys stop with their password. An account with a password of its
+  own here is left on, and the report says so. An account sync switched off (this
+  way or with `sync_disable_missing`) comes back on when the directory lets
+  the person back in; one switched off or on by hand stays as the
+  administrator left it. The Users list and a person's page say **Disabled
+  by LDAP**.
+- **LDAP: people known by their permanent id** ([docs/LDAP.md → Who is who](./LDAP.md#who-is-who),
+  migration 00085). A sign-in or sync finds a person by `entryUUID` /
+  `objectGUID` before their e-mail: someone whose address changes in the
+  directory keeps their account and files, and its e-mail follows; an
+  address the directory gives to someone new no longer signs them in to the
+  previous owner's account - sign-in is refused and sync lists the problem.
+- **A group can make its members administrators** ([docs/GROUPS.md → Administrators](./GROUPS.md#administrators),
+  migration 00086). A group's role can be **Administrator (full access)**:
+  linked to an LDAP or SSO group, the directory decides who administers
+  filex, so the local administrator from setup can go. Its LDAP links are
+  full DNs and count only for people of the group's own directory. Leaving
+  the group gives back the earlier level; the last administrator of a tenant
+  is never demoted; an administrator made by hand is never demoted by a
+  group. Only a signed-in full administrator sets one up or changes who is
+  in it.
+- **Where people come from.** The Users page has a **Source** column -
+  Local, SSO, LDAP or Proxy - and a **Groups** column (two groups a row,
+  those that give a role or folder access first, then "+N") with a group
+  filter; a person's page and a group's member list show the source too. The
+  Groups page says whether a group's members are added by hand or come from
+  SSO or LDAP, and filters by it.
+- **Add user, clearer** - people of an LDAP directory arrive at sign-in or
+  with directory sync. The dialog suggests the username and display name
+  from the e-mail, says what the role gives, and offers three ways in: set a
+  password (generate, show, copy), send an invitation, or no password (an
+  SSO account made ahead of its first sign-in, or API keys only). It adds the
+  account to groups made here, and has **Create and add another**.
+- **Identity providers, one tab per kind.** The page is a set of summary
+  cards, one tab per kind of sign-in (LDAP first, Windows and PAM too); a
+  card opens the provider's own page - for LDAP its settings in sections
+  (Connection, People, Groups, Directory sync) and its sync.
+
+### Changed
+
+- **The Snap runs without Chromium's own sandbox again, inside the snap's
+  strict confinement.** 0.50 and 0.51 asked the Snap Store for
+  `browser-support` with `allow-sandbox: true` so that Chromium could build its
+  sandbox inside the snap. Snapcraft grants that to trusted publishers only,
+  never connects it by itself and reviews it by hand: those revisions waited
+  in manual review, the stable channel stayed on 0.49, and the newer snap did
+  not open until `sudo snap connect filex-app:browser-sandbox` was run. The
+  snap now asks for no such permission, as Snapcraft advises for Electron
+  apps: the app starts with `--no-sandbox`, and snapd's AppArmor profile,
+  seccomp filter and namespaces confine it as a whole. For you: no
+  `snap connect` step, and snap updates reach the stable channel by themselves
+  again. What it costs: the confinement keeps the app away from the rest of
+  the system, but unlike Chromium's sandbox it does not wall the pages the app
+  shows off from the app itself. The `.deb`, the `.rpm` and the AppImage keep
+  Chromium's sandbox, and the launcher still refuses to start them without it.
+  The release checks the snap's confinement now, where it checked the sandbox
+  ([DESKTOP.md](./DESKTOP.md#the-snap-and-the-sandbox)).
+
+- **A release is tagged only after GitHub has tested its commit (#76).** `pnpm release` pushes both `main` branches untagged, starts a dry run of `release.yml` on the export commit and waits until it and CI have passed there; only then are the tags made, and the tag run's new `verify` job publishes nothing without those two runs on its commit. A red run spends no version number, a resume never goes back past a pushed tag, and `--resume --only deploy` re-reads the deploy on the tagged commits ([CONTRIBUTING.md → Release process](./CONTRIBUTING.md#release-process)).
+- Nothing changes on upgrade: migrations 00084 to 00086 add the LDAP group
+  table, empty, a label saying where each account comes from (an account
+  with an OIDC subject is SSO, one with a password here Local; one with
+  neither has no label yet and takes the label, and for LDAP the directory,
+  of its next sign-in),
+  the permanent id column and the administrator switch, off.
+- The Roles page's introduction says one role per person.
+
+- **The README reads top to bottom as a short page, with the detail one click away.**
+  `README.md` is titled `filex` and opens with a three-line description of
+  what filex is, three buttons (live demo, quick start, documentation), the
+  picture and six cards in place of one long paragraph. *Why filex* is a tour
+  of eight parts - the explorer, storage and protocols, sharing and
+  protection, people and access, desktop app & CLI, embedding, apps, AI
+  agents - each a line that says what it is for, up to four bullets, one
+  picture and a block that opens on a click and holds the text that stood
+  there before with its screenshots as a gallery, each over its caption. A new
+  section, *Coming from Nextcloud, Dropbox or Google Drive*, sets out in one
+  table what each of them and File Browser is and what filex is beside it,
+  then what filex does not have: no calendar, contacts, mail or chat, no
+  Android or iOS app, no placeholder files, no office editor of its own. *Try
+  it now* and *Quick start - binary* are one *Quick start*; the documentation
+  index, folded by topic, moved above *Features*, which leads with a
+  thirteen-row table and keeps its 55 entries in a block that opens on a
+  click. *Development* sits under a new *Contributing* section. Sections are
+  first-level headings and the parts of the tour second-level, with a line of
+  air before each. No picture and no link target was dropped: the container
+  and live demo badges became a link and a button, and the CI badge moved to
+  *Contributing*. About 2,500 words are in view where 13,900 were. The five
+  translations are left whole at the commit they name
+  ([CONTRIBUTING.md → Docs](./CONTRIBUTING.md#docs)), and step 1 of the
+  release process says where a new surface goes in this layout, so the page
+  does not grow back into a wall
+  ([CONTRIBUTING.md → Release process](./CONTRIBUTING.md#release-process)).
+  Contributed by Berk Başarır
+  ([#87](https://github.com/BRF-Tech/filex/pull/87)).
+
+**This release has more to it than fits on one page.** The rest of the
+entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0520---2026-10-05).
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.52.0) · `ghcr.io/brf-tech/filex:slim-v0.52.0`
 
 ## v0.51.0
 
@@ -90,13 +303,20 @@ Who may encrypt is now an organisation's decision, contributed by @berkbasarir (
   `permissions.catalogue` setting, so a permission added later is merged once and
   never again; the setting only ever grows, so a version started after a later
   one does not make the later one's permissions new again.
-- ⚠ **Rolling back to a version without `files.encrypt`** (0.49 or older): the
-  older Roles and People pages cannot save a role or a person's exceptions the
-  upgrade gave `files.encrypt` to (`400`, an unknown permission) until the
-  server is upgraded again. Upgrading again does not give `files.encrypt` back
-  where an administrator took it away in between, nor to a role saved on the
-  older version: it was merged once, at the first upgrade
-  ([PERMISSIONS.md](./PERMISSIONS.md)).
+- ⚠ **Rolling back to a version without `files.encrypt`** (0.50 or older): the
+  older Roles and People pages cannot save a custom role's list or a person's
+  exceptions the upgrade gave `files.encrypt` to (`400`, an unknown permission)
+  until the server is upgraded again. Two saves go through without a word and
+  leave `files.encrypt` out: the built-in User role (the older page does not
+  show the permission and writes the list back without it) and a custom role's
+  folder part when the role's own list does not hold `files.encrypt`; applying
+  a preset to a custom role on the older page does the same. Upgrading again
+  does not give it back to those, nor where an administrator took it away in
+  between: it was merged once, at the first upgrade. After upgrading again,
+  check that the User role and those folder parts still allow encrypting
+  ([PERMISSIONS.md](./PERMISSIONS.md)). The release after 0.51.0 points them
+  out on Admin → Roles, with one click to give `files.encrypt` back or to
+  dismiss it as on purpose.
 - A refused encryption in the explorer is said in words (the server's reason)
   instead of "could not create the encrypted folder", and a folder made before
   its key file was refused is listed at once.
@@ -2829,236 +3049,13 @@ Upgrade notes that matter: with an OIDC admin group configured, the admin role n
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.1) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.1`
 
-## v0.41.0
-
-<span class="filex-release-date">14 September 2026</span>
-
-The explorer has one face now, on every surface. It is rebuilt around the end-user shell a contributor designed on top of filex (#14): a top bar with one search field and + New, a panel with Home, Shared with me, Recent, Starred and Trash, a filter row, a selection bar and a details panel with Activity. The admin app, the desktop app and every embed draw the same layout, and the split pane is the same pane twice. Built on it: a listing that behaves like a table, per-folder view memory kept per person on the server, date headings, an owner on every file, archive download of a selection, Move to and Copy to across storages, New document, thumbnails you can read, and a notification bell for every account.
-
-Upgrade notes that matter: sign-in with SSO alone (FILEX_AUTH_DRIVERS=oidc) works now, and the administrator created at installation keeps a password recovery sign-in for the day the identity provider is down. A cancelled request can no longer lock a SQLite server into refusing every sign-in until a restart. A move or a restore no longer overwrites the file that holds the name. MySQL needs 8.0.17 or MariaDB 11.4, and migration 00041 rebuilds the nodes table there. Tokens are now limited to their own scopes on the admin routes - review scoped tokens minted on administrator accounts.
-
-## What changed
-
-> ⚠ **0.40.0 was never finished.** Its npm packages and git tag were published,
-> but the container images, the binaries, the desktop builds and the GitHub
-> Release were not - so the app-store manifests that pinned `v0.40.0` pointed
-> at an image that does not exist. This release is the first complete one after
-> 0.39.1, it carries everything listed under 0.40.0 below except the **Drive**
-> theme (removed here - see *Changed*), and it moves every pin to itself.
-
-### Added
-
-- **A new face for the whole product.** The explorer was rebuilt around the
-  end-user shell [@alfatm](https://github.com/alfatm) designed on top of filex
-  and put up for review in #14 - measured screen by screen and adopted as
-  filex's own look rather than offered as a theme. One layout for the operator
-  and the end user alike, in the admin app, the desktop app and every embed:
-  a full-width top bar with the product mark, one search field, a **+ New**
-  menu, a 192px navigation panel with **Home · Shared with me · Recent ·
-  Starred · Trash**, the storages and the connection guides, a breadcrumb row
-  with the view switcher, a **Type · People · Modified · Size** filter row with
-  a sort control, a selection bar that replaces the filter row while anything is
-  ticked, and an info panel split into **Details** and **Activity**. The palette,
-  metrics, type scale and control heights are `--fe-*` tokens, so a theme or a
-  host page restyles all of it without forking a stylesheet. The tab strip, the
-  split pane, the gallery view, the palettes and the keyboard editor - filex's
-  own additions - are kept.
-
-- **Home is a view inside the explorer**, not a page beside it: your storages,
-  what you opened last and what you starred, under the same panel and header as
-  the files. It is where everybody lands, administrators included; an operator
-  who prefers the dashboard picks it under **User settings → Preferences →
-  Start page**.
-
-- **User settings**, one dialog behind the avatar: profile and photo, language,
-  time zone (a search field with the offset and local time on each row), start
-  page, light/dark and palette, density, per-folder view memory, notification
-  switches, password and two-factor. Language and theme moved here from the
-  header, so no preference has two controls.
-
-- **A listing that behaves like a table.** Resize a column, hide one, drag one
-  to a new place; the table scrolls sideways when the columns outgrow the pane,
-  with the actions column pinned right, instead of dropping a column. Name is an
-  ordinary column you can narrow. **The grid and the list obey the same sort** -
-  it used to be private state inside the list, so switching views reordered the
-  rows under you.
-
-- **Per-folder view memory** - optional, from user settings. The view mode and
-  sort of each folder you set up, stored **per person on the server**
-  (`GET/PUT /api/files/manager/view-prefs`, migration `00039`), so it follows you
-  to another machine and never leaks to anyone else looking at the same folder.
-  Capped and least-recently-used. An embed turns it off with
-  `rememberFolderView: false`.
-
-- **Who owns a file.** Every node records its owner and its last writer
-  (migration `00038`); the list has an **Owner** column and the filter row a
-  **People** filter; quota counts against the owner. A storage scan no longer
-  attributes a whole bucket to whoever pressed *Scan now*. Search hits carry the
-  storage name and the owner too, which lifts the old single-storage limit on
-  content search in the advanced search dialog.
-
-- **Download a selection as one archive.** Pick several files and folders and
-  Download streams a ZIP built on the fly (`POST /api/files/archive/download`
-  mints a single-use ticket, `GET /z/<token>` streams it): nothing is written
-  into your storage, nothing is buffered in the tab, and a 700 MB archive costs
-  the server under a megabyte. Every member is re-checked against the caller's
-  own permissions on the server.
-
-- **Move to / Copy to**, with a folder chooser that spans every storage, lists a
-  read-only folder as read-only, and refuses a destination you cannot write to -
-  and the server refuses it regardless of what the dialog offered.
-
-- **New document** under **+ New**: a Word, Excel, PowerPoint or OpenDocument
-  file, or any text or code format - name it, choose where it goes, and it opens
-  in the editor that handles it. The Office templates are minimal valid
-  documents compiled into the binary (verified by LibreOffice and by
-  OnlyOffice's own converter), so this works on the slim image; a type this
-  deployment could not then open is not offered, and the dialog says why.
-
-- **Thumbnails you can read.** A PDF shows its first page, top-anchored so the
-  title is in the card; a video its first frame that is not black; an Office
-  document its rendered first page; a text, code or CSV file fills the card with
-  its own content. A server missing ffmpeg, ghostscript or LibreOffice now says
-  so in its log at boot instead of quietly drawing coloured rectangles.
-
-- **Date headings in every view.** A listing sorted by Modified groups itself
-  under **Today · Yesterday · This Week · This Month · *September 2026*** - in
-  the list, the grid and the gallery. The ladder lives in one module
-  (`packages/core/src/lib/dateGroups.ts`) and all three views read it.
-  - ⚠ A heading is drawn **only when it is true**. Any other sort key draws
-    none, and neither does a search's ranked answer.
-  - ⚠ "This Week" is the six days before yesterday, not a calendar week.
-  - In the grid the date headings **replace** "Files" rather than stacking on
-    it; "Folders" stays as one run at the top.
-  - The boundary between today and yesterday is midnight in the **viewer's**
-    chosen time zone, not the browser's.
-
-- **Tags you can follow.** A tag chip in the details panel opens the tag view:
-  everything carrying that tag, folders as well as files, across storages, with
-  the ordinary filter row and sort on top.
-
-- **A notification bell in the top bar**, for every account. Non-admins were
-  raised browser notifications but had no way to open the list, mark one read
-  or follow one to what it was about.
-
-- **The desktop-app offer is a chip in the corner** of the app, not a card over
-  the file listing, with a permanent home under User settings. "Do not show this
-  again" is remembered against the account, not the browser.
-
-- **Browser notifications**, and a notification opens the thing it is about.
-
-- **The split pane is one pane component rendered twice**, so the right-hand
-  pane has the same breadcrumb, filter row, sort, view switcher and selection
-  bar as the left - it used to be a separate, thinner implementation.
-
-- **Time zones resolve the same way everywhere.** One ordered list decides the
-  zone every date is printed in: **the viewer's own pick → the host page's
-  `config.timeZone` → the account behind the token → the device.** The account
-  tier applies only to a person's token; an `app` token shared by many visitors
-  never imposes one account's zone on all of them. An embed gains a **Time zone**
-  row in its `⋯` menu, stored in the browser, because it has no settings dialog;
-  the web app and an embed use the same picker and the same resolver, so the two
-  can no longer disagree. New: `config.timeZone`, and a `time-zone` attribute on
-  `<filex-explorer>`.
-
-- **Operator custom CSS.** A stylesheet pasted under *Settings* is served with
-  the branding payload and applied last on every browser surface, the sign-in
-  page included, so an installation can override the `--fe-*` tokens without
-  forking anything. It is capped at 64 KB, stored as one global row (in
-  multi-tenant mode only the supertenant may set it), and injected as the text
-  of a single `<style>` element, never parsed as HTML. See
-  [docs/INTEGRATION.md](./INTEGRATION.md#operator-custom-css).
-
-- **Home tells everyone how full a storage is**, not only an administrator:
-  `GET /api/files/quota/storages` answers the same figure the admin storage list
-  carries, for the storages the caller may see and nothing about the others.
-
-- **Recovery sign-in for SSO-only installations.** With no `local` driver
-  enabled, the administrator filex created at installation can still sign in
-  with its password - and no other account can - so an identity provider that
-  is down, a client secret that expired or a broken realm no longer locks out
-  the one person who can fix it. The login page offers it behind an
-  *Administrator recovery sign-in* link; two-factor still applies and every
-  such sign-in is logged at WARN. On by default, `FILEX_AUTH_RECOVERY_LOGIN=false`
-  turns it off. Installations from before this release get the account worked
-  out once at startup: the oldest administrator that has a local password. See
-  [docs/SSO.md](./SSO.md#the-identity-provider-is-down-and-nobody-can-sign-in).
-
-- **Brand config for embeds**: `config.brand` (`name`, `markUrl`). A host
-  cannot fill any slot in `<filex-explorer>` - Vue projects light DOM only
-  through a shadow root and the element deliberately has none - so this is how
-  an embed puts its mark in the corner.
-
-- **A duplicate-code gate** (`scripts/dup-scan.mjs`, run by the web test suite):
-  near-duplicate fragments, the same concept implemented outside its one home,
-  and listing surfaces that build their own chrome. The rule and how to answer it
-  are in `docs/CONTRIBUTING.md`.
-
-### Changed
-
-- ⚠⚠ **`uiProfile: 'drive'` is removed.** It shipped as a third profile in
-  0.32.0 and became an alias of `'simple'` during this cycle; there are now two
-  profiles, `'standard'` and `'simple'`, and no alias of either.
-
-  **If you pass `'drive'`, pass `'simple'` instead.** An unrecognised value -
-  a typo, or this retired name - resolves to `'standard'` (the documented
-  default) and logs one console line naming it. That direction is deliberate:
-  mapping the retired name onto `'simple'` would be the alias again under
-  another name, and it would also mean a plain typo silently REDUCED somebody's
-  UI, which looks like features going missing and points at nothing. The
-  argument is written out in `packages/core/src/lib/uiProfile.ts`.
-
-- ⚠ **The Drive theme added in 0.40.0 is removed.** Its palette became the
-  product's stock palette, so the theme had nothing left to change.
-
-- **The product colour is blue** (`#2f6ceb` light, `#5b8cff` dark) - the mark,
-  the favicon and PWA icon, the admin panel, the desktop app, the public share
-  page and the project site all moved off indigo together.
-
-- **Byte sizes are decimal everywhere** (1 KB = 1000 B). The explorer used 1024
-  and the admin panel 1000, so the same file read `1.43 MB` in one and `1.5 MB`
-  in the other; a quota typed as 10 GB read back as 9.31 GB in the side panel.
-  Turkish gets its own decimal separator.
-
-- **The sign-in page follows the operating system's light/dark setting and the
-  browser's language**; both are chosen in user settings once you are in.
-
-- **`/admin/profile` opens user settings.** The profile page is gone - every
-  field it had lives in the user settings dialog, which a non-admin can open
-  too. The address keeps working, because the startup banner and
-  `<data>/.first-run.txt` on existing installs still point a new operator at it.
-
-- **"Copy node id" left the right-click menu** and the selection bar; the id is
-  in the details panel, beside Path and ETag, one click to copy.
-
-- **`@brftech/filex-react` needs no stylesheet import** - the look is injected
-  by the bundle. A bundler build needs the optional viewer packages
-  externalized; see `docs/INTEGRATION.md`.
-
-- ⚠ **MySQL needs 8.0.17 or newer, MariaDB 11.4 or newer.** Migration `00041`
-  compares file names byte for byte with `utf8mb4_0900_bin`, which MySQL added
-  in 8.0.17, and it rebuilds the `nodes` table - on a large catalogue that takes
-  as long as an `ALTER TABLE` of that table takes on your server. The previous
-  documentation promised MariaDB 10.5.2; MariaDB 10.x never got past migration
-  `00001`. Measured versions are listed in
-  [docs/DATABASES.md](./DATABASES.md#supported-versions).
-
-**This release has more to it than fits on one page.** The rest of the
-entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0410---2026-09-14).
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.0) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.0`
-
 ## Earlier releases
 
-The 112 releases before v0.41.0, in brief. Full notes are on GitHub.
+The 113 releases before v0.41.1, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.41.0](https://github.com/BRF-Tech/filex/releases/tag/v0.41.0) | 14 September 2026 | The explorer has one face now, on every surface. It is rebuilt around the end-user shell a contributor designed on top of filex (#14): a top bar with one search field and + New, a panel with Home, Shared with me, Recent, Starred… |
 | [v0.39.1](https://github.com/BRF-Tech/filex/releases/tag/v0.39.1) | 12 September 2026 | The quick-look key legend is a small pill again. Pressing Space over a file opens the preview with a legend at the bottom edge; in the web UI it was drawn as a giant rounded shape across the whole window, on top of the file being… |
 | [v0.39.0](https://github.com/BRF-Tech/filex/releases/tag/v0.39.0) | 12 September 2026 | Two things a storage was missing. First, an address that does not move: a storage's name is the first path segment on WebDAV, SFTP, NFS and the S3-compatible API, so renaming one silently re-addressed it and every mount written… |
 | [v0.38.2](https://github.com/BRF-Tech/filex/releases/tag/v0.38.2) | 12 September 2026 | Editing a storage now takes effect on the running process. Creating one started its syncer and deleting one stopped it, but editing one did neither: the row was written and the save reported as successful while the syncer and… |
@@ -3174,4 +3171,4 @@ The 112 releases before v0.41.0, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-04 from 132 published releases.</small>
+<small>Last refreshed 2026-10-05 from 133 published releases.</small>
