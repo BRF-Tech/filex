@@ -180,6 +180,25 @@ export interface PermissionRule {
 
 export type PermissionRuleInput = Omit<PermissionRule, 'id' | 'created_by' | 'created_at' | 'updated_at'>;
 
+/**
+ * A saved role that allows a permission but not the one carved out of it -
+ * adding files (`from`, files.create) but not encrypting (`key`,
+ * files.encrypt) - as a save on a version without files.encrypt leaves it
+ * (backend perm/gaps.go). Nothing gives it back by itself: Roles shows each
+ * with one click to give `key` back and one to say it was on purpose.
+ */
+export interface PermGap {
+  /** "builtin:user:files.encrypt" or "role:12:files.encrypt". */
+  id: string;
+  key: PermKey;
+  from: PermKey;
+  /** The built-in role whose list it is; absent for a custom role. */
+  role?: BuiltinRole;
+  /** The custom role whose folder part it is. */
+  rule_id?: number;
+  rule_name?: string;
+}
+
 export const RolesApi = {
   async catalogue(): Promise<PermCatalogue> {
     const { data } = await api.get<PermCatalogue>('/admin/roles/catalogue');
@@ -200,8 +219,9 @@ export const RolesApi = {
     permissions: PermKey[],
     role: BuiltinRole = 'user',
     apps?: Record<string, PermEffect>,
+    shown?: PermKey[],
   ): Promise<BuiltinRoleAnswer> {
-    const body = apps ? { permissions, apps } : { permissions };
+    const body = { permissions, ...(apps ? { apps } : {}), ...(shown ? { shown } : {}) };
     const { data } = await api.put<BuiltinRoleAnswer>('/admin/roles/builtin', body, { params: { role } });
     return data;
   },
@@ -254,14 +274,35 @@ export const RolesApi = {
     };
   },
 
-  async createRule(rule: PermissionRuleInput): Promise<PermissionRule> {
-    const { data } = await api.post<PermissionRule>('/admin/roles', rule);
+  /** `shown`: the permissions the editor showed (lib/foreignPermissions
+   *  shownPerms), so that leaving one of them out reads as a decision. */
+  async createRule(rule: PermissionRuleInput, shown?: PermKey[]): Promise<PermissionRule> {
+    const { data } = await api.post<PermissionRule>('/admin/roles', shown ? { ...rule, shown } : rule);
     return data;
   },
 
-  async updateRule(id: number, rule: PermissionRuleInput): Promise<PermissionRule> {
-    const { data } = await api.put<PermissionRule>(`/admin/roles/${id}`, rule);
+  async updateRule(id: number, rule: PermissionRuleInput, shown?: PermKey[]): Promise<PermissionRule> {
+    const { data } = await api.put<PermissionRule>(`/admin/roles/${id}`, shown ? { ...rule, shown } : rule);
     return data;
+  },
+
+  /** The roles the caller may edit that allow adding files but not
+   *  encrypting, and nobody said were on purpose (PermGap). */
+  async gaps(): Promise<PermGap[]> {
+    const { data } = await api.get<{ gaps?: PermGap[] }>('/admin/roles/gaps');
+    return data.gaps ?? [];
+  },
+
+  /** Gives the role the permission it lacks; answers the gaps left. */
+  async restoreGap(id: string): Promise<PermGap[]> {
+    const { data } = await api.post<{ gaps?: PermGap[] }>('/admin/roles/gaps/restore', { id });
+    return data.gaps ?? [];
+  },
+
+  /** Marks the gap as on purpose: not shown again while it stays that way. */
+  async dismissGap(id: string): Promise<PermGap[]> {
+    const { data } = await api.post<{ gaps?: PermGap[] }>('/admin/roles/gaps/dismiss', { id });
+    return data.gaps ?? [];
   },
 
   /** What a custom role being edited comes to before it is saved: the

@@ -203,9 +203,10 @@ mac:
 #   - linux-launcher.cjs (Linux): `filex-app` becomes the launcher
 #     (build/linux/launcher.sh) and the Electron binary `filex-app-bin` beside
 #     it. The launcher checks that Chromium's sandbox can be built and, when it
-#     cannot (an AppImage on Ubuntu 23.10+ with no AppArmor profile, a snap
-#     whose browser-sandbox plug is not connected), says what to do and exits.
-#     It never starts the app without the sandbox.
+#     cannot (an AppImage on Ubuntu 23.10+ with no AppArmor profile), says
+#     what to do and exits. Outside a snap it never starts the app without the
+#     sandbox; in the snap it starts it with --no-sandbox, under the snap's
+#     strict confinement (see `snap:` below).
 #   - adhoc-sign.cjs (macOS): unsigned builds get a deep ad-hoc re-seal (see
 #     the script for why a half-signed bundle reads as MALWARE to macOS 26
 #     while an ad-hoc-sealed one gets the "Open Anyway" path). No-op when a
@@ -389,19 +390,18 @@ snap:
     - password-manager-service
     # Folders under /media, /run/media and /mnt. Also manual until granted.
     - removable-media
-    # ⚠⚠ Chromium's sandbox, inside the snap. Without a browser-support plug
-    # that has `allow-sandbox: true`, electron-builder starts the app with
-    # `--no-sandbox` and leaves chrome-sandbox out of the package (snap.js
-    # isBrowserSandboxAllowed; measured in the 0.49.0 snap's command.sh): snapd
-    # confined the app, but the pages it shows ran unsandboxed. With this plug
-    # snapd lets the app build the user-namespace sandbox. The Snap Store
-    # reviews `allow-sandbox` by hand and does not connect it by itself until
-    # it grants that; until then `sudo snap connect filex-app:browser-sandbox`,
-    # which the launcher prints when the plug is missing. The name is the one
-    # build/linux/launcher.sh prints (test/linux-launcher.test.ts).
-    - browser-sandbox:
-        interface: browser-support
-        allow-sandbox: true
+    # ⚠⚠ NO `browser-support` plug with `allow-sandbox: true` (removed in
+    # 0.52). 0.50 and 0.51 asked for one so Chromium could build its own
+    # sandbox inside the snap. Snapcraft limits allow-sandbox to trusted
+    # publishers, never auto-connects it, and reviews it by hand: those
+    # revisions sat in "Manual review pending" and the stable channel stayed
+    # on 0.49. Without it electron-builder starts the app with --no-sandbox
+    # and leaves chrome-sandbox out of the package (snap.js
+    # isBrowserSandboxAllowed), and build/linux/launcher.sh adds --no-sandbox
+    # in a snap as well: the wall is the snap's strict confinement (AppArmor,
+    # seccomp, namespaces), Snapcraft's advice for Electron apps. The plain
+    # browser-support of `default` stays. test/linux-launcher.test.ts and
+    # test/linux-desktop-entry.test.ts keep these three plugs and no more.
   # Same fixed-name rule as every other artifact (see artifactName above).
   artifactName: ${productName}-desktop-${arch}.${ext}
 

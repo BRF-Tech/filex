@@ -476,8 +476,16 @@ the page can never lock the instance out. See
 | `FILEX_LDAP_AUTO_CREATE` | `false` stops the directory from opening an account at a person's first sign-in (only existing accounts sign in). Default `true`. See [LDAP.md](LDAP.md#the-first-sign-in-rule-who-gets-an-account). |
 | `FILEX_LDAP_ALLOWED_GROUPS` | Comma list: only members of one of these groups get an account on their first sign-in. |
 | `FILEX_LDAP_SHOW_REFUSAL_REASON` | `true` tells a person whose directory password was right why the first sign-in rule still refuses them (403 with a reason code). Default `false`: the wrong-password answer, so the form never confirms a directory password ([why](LDAP.md#the-first-sign-in-rule-who-gets-an-account)). The same switch is `show_refusal_reason` on every LDAP, PAM and Windows provider of the Identity providers page. |
-| `FILEX_LDAP_GROUP_ATTR` | Entry attribute listing a person's groups. Default `memberOf`. Unset, groups are read only once `FILEX_LDAP_ALLOWED_GROUPS` is set; set it to feed [groups](GROUPS.md#members-and-sso-links) and starting roles without restricting who gets an account. |
+| `FILEX_LDAP_GROUP_ATTR` | Entry attribute listing a person's groups. Default `memberOf`. Unset, groups are read only once `FILEX_LDAP_ALLOWED_GROUPS` is set; set it to feed [groups](GROUPS.md#members-and-sso-links) and starting roles without restricting who gets an account. It is also where a browser sign-in and directory sync read a person's groups for filex groups linked to LDAP groups ([LDAP.md → Groups](LDAP.md#groups)). |
 | `FILEX_OS_LOGIN_EMAIL_TOKEN` | What follows the `@` of an account known only by a login name (`alex` → `alex@local`; in a tenant's realm on a multi-tenant install `alex@acme.local`). Default `local`. **Set once at installation and never change it** - a later change makes a second account of the same person. The environment or `config.yaml` (`auth.login_email_token`) only - no page or API changes it - and a value that is not a DNS-like label (`a-z`, `0-9`, `.`, `-`) stops the server at start. It applies to the operating-system providers too ([OS-LOGIN.md](OS-LOGIN.md#the-e-mail-token---choose-it-once)). See [LDAP.md](LDAP.md#e-mail-address-for-an-account-that-has-only-a-login-name). |
+| `FILEX_LDAP_GROUP_FILTER` | Find a person's groups for the LDAP links by a search instead: `%s` is their DN, `%u` the name they signed in with, e.g. `(member=%s)` |
+| `FILEX_LDAP_GROUP_BASE_DN` | Where that search runs (default: the base DN) |
+| `FILEX_LDAP_SYNC_INTERVAL` | Run directory sync on its own this often (e.g. `6h`, at least `5m`); unset = only from **Sync now**. See [LDAP.md → Directory sync](LDAP.md#directory-sync) |
+| `FILEX_LDAP_SYNC_FILTER` | The search listing every person for directory sync (default: the user filter with `*`) |
+| `FILEX_LDAP_SYNC_DISABLE_MISSING` | `true` to switch off accounts the directory made once it no longer lists them |
+| `FILEX_LDAP_SYNC_GROUPS` | `false` to stop directory sync bringing every directory group in as a filex group (on by default) |
+| `FILEX_LDAP_SYNC_GROUP_FILTER` | Which directory groups sync brings in (default: every group) |
+| `FILEX_LDAP_EMAIL_DOMAINS` | Only these e-mail domains (comma-separated) sign in through this directory or get an account from it. See [LDAP.md → Several directories](LDAP.md#several-directories) |
 
 > `FILEX_LDAP_USER_FILTER` may contain the placeholder more than once - every
 > `%s` is filled with the same escaped identifier, so the usual AD filter that
@@ -524,9 +532,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](screenshots/v0.51.0/loginsecurity/login-remaining-1440.png)
+![The sign-in form after a wrong password: how many tries are left](screenshots/v0.52.0/loginsecurity/login-remaining-1440.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](screenshots/v0.51.0/loginsecurity/login-locked-1440.png)
+![The sign-in form on a locked account: the lock counted down on its button](screenshots/v0.52.0/loginsecurity/login-locked-1440.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -596,7 +604,7 @@ a minute. A database read that fails keeps the last value known (the default whe
 there is none). A `login.*` key written through the generic settings API reaches
 the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](screenshots/v0.51.0/loginsecurity/login-security-1440.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](screenshots/v0.52.0/loginsecurity/login-security-1440.png)
 
 | Key | Default | Range |
 |---|---|---|
@@ -752,7 +760,7 @@ Drivers that live outside the binary - see [PLUGINS.md](PLUGINS.md).
 | `FILEX_PLUGIN_CONFORMANCE` | `enforce` | `enforce` · `warn` · `off`. filex **probes every capability a plugin declares** - at install against the plugin's own throwaway area, and again when a storage on it is saved, against that real configuration. `enforce` refuses a plugin that fails its own claims and refuses to save a storage on it. `warn` registers it anyway and keeps the report - for somebody *writing* a plugin, never for a shared instance: the cost of a broken claim is paid by the user, who meets an operation the UI offered and reads the failure as filex being broken. `off` skips both gates. Anything unrecognised falls back to `enforce`. |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | - | Comma-separated ed25519 **public** keys (hex or standard base64) allowed to sign a plugin. Set any key and an unsigned or badly signed binary is refused at install *and* at upgrade, the signature is kept beside the binary (`<binary>.sig`) and **verified again at every start** - a plugin installed before the keys were set is refused at its next start until it is reinstalled with a signature - and the admin API reports `requires_signature: true` so the UI asks for the signature up front. Left empty, no signature is asked for and the recorded sha256 is all an install carries. See [PLUGINS.md → Signed plugins](PLUGINS.md#signed-plugins). |
 | `FILEX_PLUGIN_MAX_INFLIGHT` | `10` | Concurrent operations allowed **per plugin**. A caller that waits 5 s for a slot is refused rather than queued, and counted as `outcome="busy"` in [the metrics](METRICS.md#storage-plugins) - a sizing signal, not a bug. Raise it for a fast local plugin, lower it to keep a slow remote one from occupying the server. `0` or nonsense keeps the default. |
-| `FILEX_PLUGIN_LOOPBACK_SOURCES` | `0` | ⚠ **Development and tests only - never on a server.** `1` lets plugin and app **downloads** reach this machine (`127.0.0.0/8`, `::1`) and nothing else that is private: a storage plugin from a URL or a source, an app's manifest, module and interface bundle, an install request, the update check. By default every one of them reaches public addresses only (see below). The end-to-end tests set it, because they serve plugin sources from a small server on 127.0.0.1. With it on, a manifest that names a loopback address makes filex send GET requests to its own services, so the server says so in its log at start. An app's own requests (`http_request`, `asset_fetch`) never follow it. YAML: `plugin_loopback_sources`. |
+| `FILEX_PLUGIN_LOOPBACK_SOURCES` | `0` | ⚠ **Development and tests only - never on a server.** `1` lets plugin and app **downloads** reach this machine (`127.0.0.0/8`, `::1`) and nothing else that is private: a storage plugin from a URL or a source, an app's manifest, module and interface bundle, an install request, the update check, an app store (its keys, its install links, a license check). By default every one of them reaches public addresses only (see below). The end-to-end tests set it, because they serve plugin sources from a small server on 127.0.0.1. With it on, a manifest that names a loopback address makes filex send GET requests to its own services, so the server says so in its log at start. An app's own requests (`http_request`, `asset_fetch`) never follow it. YAML: `plugin_loopback_sources`. |
 | `FILEX_APP_PLUGINS_DISABLED` | `0`, **`1` in demo mode** | Turns the [app plugin](APP-PLUGINS.md) runtime off: nothing under `<data-dir>/app-plugins` is loaded, the file menu shows no app rows, the admin tab explains why. Demo mode moves the default to `1` for the same reason as storage plugins; `FILEX_APP_PLUGINS_DISABLED=0` turns them back on deliberately. |
 | `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file ceiling on what one app job may read. |
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file ceiling on what one app job may produce. |
@@ -760,8 +768,29 @@ Drivers that live outside the binary - see [PLUGINS.md](PLUGINS.md).
 | `FILEX_APP_UI_ORIGIN` | - | Serves apps' own interfaces from an [origin of their own](APP-PLUGINS.md#an-origin-of-their-own), e.g. `https://apps.example-usercontent.com` (a scheme and a host; another registrable domain than filex's). The proxy sends that host to filex too; filex answers only the interface route there and refuses it on its own host. Empty (the default): interfaces are served from filex's origin, opaque by sandbox. A value that is not an origin, or filex's own, stops the server. YAML: `app_ui_origin`. |
 | `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest [interface package](APP-PLUGINS.md#an-apps-own-interface) (the app's `ui` zip) an install accepts; the files inside it are capped too (512 MiB unpacked, 20 000 files, 64 MiB per file). |
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every installed app's source (its GitHub repository or address) for a newer version the running filex can run, and **tells the administrators** - it installs nothing: every newer version waits for an administrator's approval ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). The same switch covers the storage plugins' [update sources](PLUGINS.md#updates-from-a-source). `0` = no request leaves the server for it - what an air-gapped install wants; **Check for updates** on the Apps tab still asks when pressed. A demo never checks. The time of the last check is stored, so a restart neither skips a day nor checks at every boot. YAML: `app_plugin_update_check`. |
-| `FILEX_SECRET_KEY` | - | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). |
+| `FILEX_APP_STORE_URLS` | - | Comma-separated app store **origins** (`https://store.example`, no path) trusted by configuration: their install links and license answers are accepted without an administrator approving the store first, signed with the keys in `FILEX_APP_STORE_KEYS` and no others. Set, it is an **allow list** (0.52.0): any other store is refused (`403 store_not_allowed`), not even trusted on first use. Unset, a store is trusted only by an administrator who compared its key fingerprints on its first install link ([APP-PLUGINS.md → Trusted stores](APP-PLUGINS.md#trusted-stores)). A configured store has no remove button in the panel. YAML: `app_store_urls`. |
+| `FILEX_APP_STORE_KEYS` | - | Comma-separated ed25519 **public** keys (hex or standard base64) of the stores in `FILEX_APP_STORE_URLS`, each optionally prefixed with the one use it may sign for: `index:<key>` (install links) or `license:<key>` (license answers); a bare key may sign either. filex reads the store's `/v1/keys.json` for the key ids and accepts a key only when its material is listed here; a key the store publishes that is not here is refused (`store_key_not_configured`), never put to an administrator. Ignored (with a log line) when `FILEX_APP_STORE_URLS` names no store. Not the same setting as `FILEX_PLUGIN_TRUSTED_KEYS`, which checks modules. YAML: `app_store_keys`. |
+| `FILEX_APP_GITHUB_RAW_BASE` | `https://raw.githubusercontent.com` | Where a GitHub install (and a [store link](APP-PLUGINS.md#installing-from-a-store), which names a GitHub repository) reads a repository's files: `<base>/<owner>/<name>/<ref>/filex-app.json`. A mirror of GitHub's raw host for an install that cannot reach it, or the end-to-end tests' fake GitHub. The download guard applies to it like to every address: a loopback mirror needs `FILEX_PLUGIN_LOOPBACK_SOURCES`, a private one is refused. YAML: `app_github_raw_base`. |
+| `FILEX_SECRET_KEY` | - | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). It seals a [paid app's license key](APP-PLUGINS.md#paid-apps) too: without it a paid app cannot be given a key (`license_key_invalid`), and changing it leaves the stored keys unreadable (enter them again). |
 | `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](APP-PLUGINS.md#install-requests) - what an API key leaves instead of installing an app or a storage plugin - waits for an administrator before it expires. Checked hourly and whenever the requests are read. YAML: `plugin_request_ttl_days`. |
+
+**App stores: `FILEX_APP_STORE_URLS` is an allow list** (0.52.0). Set, it
+is the whole list of app stores this filex takes install links and license
+answers from: any other store is refused (`403 store_not_allowed`) before
+anything is read from it - its keys, its links, its license checks - and no
+administrator can trust it on first use. A store an administrator trusted
+before the list was set is refused (and no longer listed) too, and a list
+whose entries all fail to parse admits no store at all - so does a value that
+names none (`FILEX_APP_STORE_URLS=" , "`): any value given is the list. Unset
+(not in the environment, or empty), a store is
+trusted by an administrator who compares its key fingerprints on its first
+link, as before. A store link also names the filex it was made for
+(`filex_origin`): filex holds it to the origin of [`FILEX_PUBLIC_URL`](#public-url), or -
+unset - to the origin the request arrived at, so set `FILEX_PUBLIC_URL` when
+a proxy in front of filex rewrites the host. A paid app's grace (the store
+unreachable) loses an hour at every start after an unclean stop - a crash, a
+kill, a power cut - and nothing at a clean one
+([APP-PLUGINS.md → Paid apps](APP-PLUGINS.md#paid-apps)).
 
 Installed binaries live in `<data-dir>/plugins/<name>/` (with the detached
 signature beside each as `<binary>.sig`, when one was supplied), and a plugin's
@@ -1495,6 +1524,14 @@ auth:
     allowed_groups: ""
     group_attr: ""                 # memberOf when empty; read once allowed_groups is set
     show_refusal_reason: false     # tell a refused first sign-in why (confirms the password)
+    group_filter: ""               # LDAP links: find a person's groups by a search, e.g. "(member=%s)"
+    group_base_dn: ""              # where that search runs (default base_dn)
+    sync_interval: ""              # directory sync on its own, e.g. 6h (off by default)
+    sync_filter: ""                # who sync lists (default: user_filter with *)
+    sync_disable_missing: false    # switch off accounts the directory stopped listing
+    sync_groups: true              # bring every directory group in as a filex group
+    sync_group_filter: ""          # which ones (default: every group)
+    email_domains: ""              # only these e-mail domains sign in through it
   header_proxy:                    # trust an auth proxy - also FILEX_HEADER_*
     email_header: X-Auth-Email
     group_header: X-Auth-Roles

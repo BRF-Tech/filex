@@ -292,6 +292,13 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	// /roles/builtin is matched before the /roles/{id} prefix below.
 	case method == http.MethodPut && p == "/api/admin/roles/builtin":
 		return "permissions.defaults_set", "permissions", ""
+	// A role given back the permission a save on an older version took
+	// away, or marked as lacking it on purpose (handlers/permission_gaps.go).
+	// The target is the gap: "builtin:user:files.encrypt", "role:12:…".
+	case method == http.MethodPost && p == "/api/admin/roles/gaps/restore":
+		return "permission_gap.restore", "permission_gap", ""
+	case method == http.MethodPost && p == "/api/admin/roles/gaps/dismiss":
+		return "permission_gap.dismiss", "permission_gap", ""
 	case method == http.MethodPost && (p == "/api/admin/roles" || p == "/api/admin/roles/"):
 		return "permission_rule.create", "permission_rule", ""
 	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/roles/") && id != "":
@@ -320,6 +327,8 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "group.members_add", "group", id
 	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/groups/") && strings.Contains(p, "/members/"):
 		return "group.member_remove", "group", id
+	case method == http.MethodPost && strings.HasPrefix(p, "/api/admin/groups/") && strings.HasSuffix(p, "/detach"):
+		return "group.detach", "group", id
 	case method == http.MethodPost && (p == "/api/admin/groups" || p == "/api/admin/groups/"):
 		return "group.create", "group", ""
 	case method == http.MethodPut && strings.HasPrefix(p, "/api/admin/groups/") && id != "":
@@ -445,6 +454,10 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "external.update", "external", name
 	case method == http.MethodPost && strings.HasSuffix(p, "/test") && strings.HasPrefix(p, "/api/admin/external/"):
 		return "external.test", "external", name
+	case method == http.MethodPost && (p == "/api/admin/auth-providers" || p == "/api/admin/auth-providers/"):
+		return "auth_provider.create", "auth_provider", ""
+	case method == http.MethodDelete && strings.HasPrefix(p, "/api/admin/auth-providers/") && name != "" && !strings.Contains(strings.TrimPrefix(p, "/api/admin/auth-providers/"), "/"):
+		return "auth_provider.delete", "auth_provider", name
 	case method == http.MethodPatch && strings.HasPrefix(p, "/api/admin/auth-providers/") && name != "":
 		return "auth_provider.update", "auth_provider", name
 	case method == http.MethodPost && strings.TrimSuffix(p, "/") == "/api/admin/auth-providers":
@@ -455,6 +468,8 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "auth_provider.delete", "auth_provider", name
 	case method == http.MethodPost && strings.HasSuffix(p, "/test") && strings.HasPrefix(p, "/api/admin/auth-providers/"):
 		return "auth_provider.test", "auth_provider", name
+	case method == http.MethodPost && strings.HasSuffix(p, "/sync") && strings.HasPrefix(p, "/api/admin/auth-providers/"):
+		return "auth_provider.sync", "auth_provider", name
 
 	// ── a tenant running itself (handlers/tenant_self.go) ──
 	// Its own providers are filed with the platform's (auth_provider.*), the

@@ -401,7 +401,7 @@ func init() {
 				}
 				return answer, nil
 			},
-			"listing": func(*wire.ActionRunInput) (*wire.ActionRunOutput, error) {
+			"listing": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
 				items, err := pluginkit.StateList("runs", 50)
 				if err != nil {
 					return nil, err
@@ -410,7 +410,19 @@ func init() {
 				for _, it := range items {
 					parts = append(parts, it.Path+"="+it.Value)
 				}
-				return &wire.ActionRunOutput{OK: true, Message: wire.Text{"en": strings.Join(parts, ","), "tr": strings.Join(parts, ",")}}, nil
+				msg := strings.Join(parts, ",")
+				// params.lock / params.unlock: a file the app NAMES by path
+				// rather than by ref - what the host accepts only for a file
+				// this call was handed or the app keeps state on, and only
+				// inside the root of the token that queued the job.
+				if p, _ := in.Params["lock"].(string); p != "" {
+					_, err := pluginkit.FileLockPath(p, 1, "probe")
+					msg += "|lock=" + hostCode(err)
+				}
+				if p, _ := in.Params["unlock"].(string); p != "" {
+					msg += "|unlock=" + hostCode(pluginkit.FileUnlockPath(p))
+				}
+				return &wire.ActionRunOutput{OK: true, Message: wire.Text{"en": msg, "tr": msg}}, nil
 			},
 			"asset": func(in *wire.ActionRunInput) (*wire.ActionRunOutput, error) {
 				str := func(k string) string { v, _ := in.Params[k].(string); return v }
@@ -711,6 +723,11 @@ func init() {
 				_, err := pluginkit.WriteOutput("x.txt", []byte("x"))
 				return nil, err
 			},
+			// state_list: what the host tells an interface's call about the
+			// files this app keeps `runs` on.
+			"state_list": func(*wire.UICallInput) (any, error) {
+				return map[string]any{"paths": listedRuns()}, nil
+			},
 		},
 		Views: map[string]pluginkit.ViewFunc{
 			"stall": func(*wire.ViewEventInput) (*wire.Surface, error) {
@@ -796,11 +813,22 @@ func init() {
 				if in.Context.Home != "" {
 					first += " home=" + in.Context.Home
 				}
-				return &wire.Surface{
+				// Opened at the section "state_list" (a home page's
+				// `?section=`): what state_list tells THIS screen call.
+				if sec, _ := in.Data["section"].(string); sec == "state_list" {
+					first += " listed=" + strings.Join(listedRuns(), ",")
+				}
+				s := &wire.Surface{
 					Title:   wire.Text{"en": "Hello", "tr": "Hello"},
 					Nodes:   []wire.Node{{Type: "text", Props: map[string]any{"text": map[string]string{"en": "hi " + in.Event + first}}}},
 					Actions: []wire.SurfaceAction{{ID: "submit", Label: wire.Text{"en": "Submit", "tr": "Submit"}, Primary: true}},
-				}, nil
+				}
+				// data.open: a screen that sends its person to a file, which
+				// the host keeps only for a file they could open themselves.
+				if p, _ := in.Data["open"].(string); p != "" {
+					s.Open = &wire.OpenRequest{Path: p}
+				}
+				return s, nil
 			},
 		},
 	})
@@ -899,6 +927,31 @@ func thumbnail(in *wire.ThumbnailInput) (*wire.ThumbnailOutput, error) {
 		return nil, err
 	}
 	return &wire.ThumbnailOutput{Image: buf.Bytes()}, nil
+}
+
+// listedRuns is every file state_list names for the key `runs` (the counter
+// `upper` keeps), adapter-qualified; on a refusal, the host's code.
+func listedRuns() []string {
+	items, err := pluginkit.StateList("runs", 50)
+	if err != nil {
+		return []string{"error=" + hostCode(err)}
+	}
+	paths := make([]string, 0, len(items))
+	for _, it := range items {
+		paths = append(paths, it.Path)
+	}
+	return paths
+}
+
+// hostCode is "ok", or the code a host function refused with.
+func hostCode(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	if he, ok := err.(*pluginkit.HostError); ok {
+		return he.Code
+	}
+	return err.Error()
 }
 
 // pngHeader is a PNG signature and an IHDR chunk claiming w x h pixels -

@@ -35,6 +35,7 @@ import {
   type Theme,
   type ToastParams,
   type DownloadResult,
+  type LicenseInfo,
 } from './protocol';
 
 export * from './protocol';
@@ -104,6 +105,14 @@ export interface FilexApp {
   state: {
     get<T = unknown>(key: string): Promise<T | undefined>;
     set(key: string, value: unknown): Promise<void>;
+  };
+  /**
+   * The app's license (filex 0.52.0; a paid app installed from a store):
+   * `{status: "free"}` for a free app, `{status: "valid", valid_until,
+   * updates_until}` for a licensed one. Never the key, never the licensee.
+   */
+  license: {
+    get(): Promise<LicenseInfo>;
   };
   /** Listen to filex. Returns the unsubscribe. */
   on(event: HostEvent, handler: (data: unknown) => void): () => void;
@@ -333,6 +342,11 @@ function bridge(port: MessagePort, opts: ConnectOptions): FilexApp {
       },
       set(key: string, value: unknown) {
         return request<void>('state.set', { key, value });
+      },
+    },
+    license: {
+      get() {
+        return request<LicenseInfo>('license.get');
       },
     },
     on(event, handler) {

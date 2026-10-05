@@ -110,6 +110,18 @@ func (b *Box) Enabled() bool { return b != nil && b.aead != nil }
 // which is what stops the column from revealing that two accounts share a
 // secret.
 func (b *Box) Seal(plaintext string) (string, error) {
+	return b.seal(plaintext, nil)
+}
+
+// SealFor seals a secret bound to where it is kept (aad, the additional
+// authenticated data: a table and a row, say). It opens only with OpenFor and
+// the same aad: a value copied into another row - by somebody who can write
+// the database but does not have the key - does not open there.
+func (b *Box) SealFor(plaintext, aad string) (string, error) {
+	return b.seal(plaintext, []byte(aad))
+}
+
+func (b *Box) seal(plaintext string, aad []byte) (string, error) {
 	if !b.Enabled() {
 		return "", ErrNoKey
 	}
@@ -117,7 +129,7 @@ func (b *Box) Seal(plaintext string) (string, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", fmt.Errorf("secretbox: nonce: %w", err)
 	}
-	sealed := b.aead.Seal(nonce, nonce, []byte(plaintext), nil)
+	sealed := b.aead.Seal(nonce, nonce, []byte(plaintext), aad)
 	return prefix + base64.RawStdEncoding.EncodeToString(sealed), nil
 }
 
@@ -127,6 +139,17 @@ func (b *Box) Seal(plaintext string) (string, error) {
 // legacy plaintext next to encrypted rows during a migration, and it is safe
 // precisely because the prefix is explicit: nothing is ever guessed.
 func (b *Box) Open(stored string) (string, error) {
+	return b.open(stored, nil)
+}
+
+// OpenFor opens a value SealFor sealed with the same aad; any other aad (or a
+// value sealed by Seal) is ErrCorrupt. A value without the prefix is
+// returned as-is, as by Open.
+func (b *Box) OpenFor(stored, aad string) (string, error) {
+	return b.open(stored, []byte(aad))
+}
+
+func (b *Box) open(stored string, aad []byte) (string, error) {
 	if !strings.HasPrefix(stored, prefix) {
 		return stored, nil
 	}
@@ -144,7 +167,7 @@ func (b *Box) Open(stored string) (string, error) {
 	if len(raw) < n {
 		return "", ErrCorrupt
 	}
-	out, err := b.aead.Open(nil, raw[:n], raw[n:], nil)
+	out, err := b.aead.Open(nil, raw[:n], raw[n:], aad)
 	if err != nil {
 		return "", ErrCorrupt
 	}

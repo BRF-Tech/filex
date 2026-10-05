@@ -368,8 +368,8 @@ one and all on one storage. `note` goes to the app's log ring.
 handed it earlier and the app recorded (the rows `state_list` returns). Any
 other path refuses the item (the reason is on the wake-up row), and an item
 whose state is gone by its due time is `skipped`, not run. The host's own
-parameter names (`__output`, `page_token_hash`, `share_id`) are dropped from
-an item's `params`.
+parameter names (`__output`, `__root`, `page_token_hash`, `share_id`) are
+dropped from an item's `params`.
 
 ### Manifest
 
@@ -760,6 +760,308 @@ redirect hop (at most five), and never a redirect from `https://` to plain
 only, and those are reachable only with `FILEX_PLUGIN_LOOPBACK_SOURCES=1`
 (development and tests, [CONFIGURATION.md](CONFIGURATION.md#storage-plugins)).
 
+## The store contract (0.52.0)
+
+What filex reads from an **app store** and what it sends back
+([APP-PLUGINS.md → Installing from a store](APP-PLUGINS.md#installing-from-a-store)).
+A store is named by its origin (`https://host[:port]`, no path; plain `http`
+only for this machine with `FILEX_PLUGIN_LOOPBACK_SOURCES`), and every
+request below goes through a guarded client: public addresses only, judged
+after DNS, **no redirect followed** (a `3xx` is `store_bad_answer`), small
+size ceilings (64 KiB for `keys.json`, 256 KiB for an answer), a 30-second
+budget.
+
+### The install link
+
+```
+<filex origin>/admin/store-install#store=<encodeURIComponent(store origin)>&intent=<token>
+```
+
+In the fragment, so the token never reaches filex's server in a request
+line. The admin panel takes it off the address bar before the router runs
+and hands it to `POST /api/admin/app-plugins/store-intent`. A token is
+8-512 characters of `A-Z a-z 0-9 . _ ~ -`; anything else is refused before
+the store is asked.
+
+### Signed answers
+
+```json
+{"payload": {...}, "key_id": "idx-2026-1", "signature": "<hex>"}
+```
+
+`signature` = ed25519 over the **lower-case hex sha256 text** of the payload's
+**canonical JSON** - the rule `plugin.VerifyDetached` applies to a module's
+detached signature (hex or standard base64 accepted). Canonical JSON:
+
+- object keys sorted (by their UTF-8 bytes; every key of the contract is
+  ASCII), at every depth;
+- no whitespace;
+- strings as `JSON.stringify` writes them: UTF-8 as itself (`<`, `>`, `&`,
+  U+2028 included), `"` and `\` escaped, `\b \f \n \r \t` by name, the other
+  control characters as `\u00xx` in lower-case hex;
+- numbers as the store wrote them (write integers);
+- a payload with a duplicated key is refused, not resolved.
+
+The payload may arrive in any key order and indented: filex canonicalises
+what it received before it verifies.
+
+**Which key.** The key named by `key_id` must be one filex trusts this store
+with, of the use the answer needs, and `active`: an install link is signed
+with an `index` key, a license answer with a `license` key. Only that key is
+tried - a signature by another trusted key, even of the right use, under a
+wrong `key_id` is refused.
+
+### `GET <store>/v1/keys.json`
+
+```json
+{"keys": [{"id": "idx-2026-1", "use": "index", "ed25519": "<hex or base64, 32 bytes>", "status": "active"}]}
+```
+
+`use`: `index` | `license` | `artifact` (`artifact` keys are not this
+contract's; a module's signature is `FILEX_PLUGIN_TRUSTED_KEYS`). `status`:
+`active` (signs), `next` (published before it signs), `retired` (signs
+nothing). A key `id` is 1-64 characters of `A-Z a-z 0-9 . _ -` (it is shown
+beside the fingerprint on the trust question, so no spaces, markup or
+direction marks); an answer's `key_id` is held to the same rule. A list with
+a key id twice, an id outside that alphabet, an unknown use or a key that
+does not parse is refused whole.
+
+**Trust on first use.** A store that is not trusted answers the link with
+`409 store_trust_required` and its `index` and `license` keys that are not
+retired - `{id, use, status, fingerprint}`, fingerprint = lower-hex sha256 of
+the 32 raw key bytes - and `fingerprints`, the list
+`<use>:<id>:<fingerprint>` an approval names back. `POST /stores` trusts
+the store with the keys it publishes NOW only when they are exactly those
+(`409 store_key_changed` otherwise). From then on, before every link, filex
+reads `keys.json` again: a key that is not pinned (a new id, or new material
+under a pinned id) answers `409 store_key_changed` with `previous_keys`; a
+pinned key the store retired or no longer lists is dropped and a status that
+moved (`next` → `active`) is taken, silently. A configured store
+(`FILEX_APP_STORE_URLS`) is trusted with the published keys whose material
+`FILEX_APP_STORE_KEYS` lists, and nothing else (`403 store_key_not_configured`);
+with `FILEX_APP_STORE_URLS` set, no other store is trusted at all (`403
+store_not_allowed`).
+
+### `GET <store>/v1/install/{token}` - the intent
+
+`200` and a signed payload (`index` key):
+
+| Field | |
+|---|---|
+| `store` | the store's origin: must be the origin the link named |
+| `token_id` | the store's id of the link; filex refuses it a second time once it has finished |
+| `app`, `kind`, `version` | the app's manifest name, `app` or `language_pack`, the release |
+| `filex_origin` | the filex the link was made for, as an origin (required; another filex refuses the link, `intent_wrong_instance`) |
+| `repo`, `ref`, `commit` | `owner/name` on GitHub, the release tag, the commit the store reviewed (required: the full lower-case object id) |
+| `manifest_sha256`, `wasm_sha256`, `ui_sha256` | the pins, lower-case hex; `manifest_sha256` required |
+| `permissions` | the manifest's declared permissions (the ones filex derives from an interface - `ui…`, `ui-net:`, `ui-viewer:`, `ui-new:`, `thumbnail:` - are ignored on both sides) |
+| `filex_range` | informational; the manifest's own range is what filex checks |
+| `paid`, `license_key` | a paid app, and the key the store issued for this install (optional) |
+| `expires_at` | RFC 3339; refused once passed, and refused when more than seven days away |
+
+`404` = the store does not know the link (`intent_unknown`), `410` = used or
+expired there (`intent_gone`).
+
+filex then reads the repository at `commit` as a GitHub install does
+(`<FILEX_APP_GITHUB_RAW_BASE>/<repo>/<commit>/filex-app.json`, the module and
+the bundle its manifest names; `{tag}` in an address stays `ref`, and
+`<repo>/<ref>/filex-app.json` must be the same bytes) and refuses (`409 intent_pin_mismatch`,
+`detail.mismatches: [{field, link, source}]`) unless the manifest's sha256,
+its name, version and kind, its `wasm.sha256`, its `ui.bundle.sha256` and its
+declared permissions are the link's; the module's bytes are held to
+`wasm.sha256` by the install itself. An app of the same name installed at
+the same or a newer version refuses the link (`409 intent_version_rollback`);
+an older one is upgraded - when it came from the same store and repository
+(`409 store_source_changed` otherwise).
+
+### `POST <store>/v1/install/{token}/complete`
+
+```json
+{"instance_id": "fx-0123456789abcdef0123456789abcdef", "result": "installed"}
+```
+
+`result`: `installed` | `cancelled`. Sent once, when the administrator
+installs or closes the review. Any `2xx` is taken; a failure is logged and
+changes nothing here. `instance_id` is this installation's opaque id: random,
+made once, kept in the database - not derived from anything about the server
+or its people.
+
+### `POST <store>/v1/licenses/verify`
+
+```json
+{"key": "FXL-…", "app": "sign", "instance_id": "fx-…", "filex_version": "0.52.0"}
+```
+
+`200` and a signed payload (`license` key):
+
+| Field | |
+|---|---|
+| `result` | `valid` · `invalid` · `revoked` · `expired` · `seats_exhausted` · `wrong_app` |
+| `app` | the app the answer is about (must be the app asked about, except for `wrong_app`) |
+| `licensee`, `seats`, `seats_used`, `valid_until`, `updates_until` | what the panel shows (optional); an app reads the two dates only |
+| `instance_id` | must be this installation's |
+| `checked_at` | the store's time of the answer; an answer older than the last one taken, or more than a day from filex's clock, is refused |
+| `next_check_by` | when filex asks again at the latest (and at most a day after the last answer); counted at most 2 days after `checked_at` |
+| `grace_until` | how long a `valid` answer holds while the store cannot be asked (not before `checked_at`); counted at most 30 days after it |
+
+Any other status, an unreachable store or an answer that does not verify is
+a failed check: the last answers stand, the grace decides, filex tries again
+an hour later. When filex asks: at the install, a minute after start, then
+when `next_check_by` comes (or a day after the last answer, whichever is
+first), and on **Verify now**.
+
+**Status filex reports** (`GET …/{id}/license` `status`; the app reads the
+same): `valid`; `grace` (valid, the last check failed or is overdue, before
+`grace_until`); the store's own `invalid` / `revoked` / `expired` /
+`seats_exhausted` / `wrong_app`; `grace_expired`; `missing` (no key);
+`unverified` (a key the store has not confirmed yet); `free` (not a paid
+app). Under every status but `valid`, `grace` and `free` the app is held:
+state `unlicensed`, nothing of it runs, nothing is removed.
+
+**Time.** `grace_until` and `valid_until` are judged against the later of
+the wall clock and the proven time: the latest accepted `checked_at` of the
+license's store plus the time filex has run since, on the monotonic clock,
+kept in the database at every check and every hourly round and carried on
+after a restart (downtime is not counted; a start after an unclean stop adds
+an hour to the proven time, i.e. the grace ends an hour sooner, and the
+store's next answer takes the hour back). The proven time only moves forward - a store answer older
+than it moves nothing - and never takes the wall clock in. A clock turned back
+does not stretch a grace; a clock turned forward ends it early for as long as
+it is ahead.
+
+### Test vectors
+
+`backend/internal/appstore/testdata/vectors.json`, produced by Node's crypto
+with no filex code (`make-vectors.mjs` beside it) and checked by filex's own
+`VerifyDetached` in `appstore` tests: an install intent signed with an `index`
+key and a license answer signed with a `license` key whose strings carry
+`<`, `>`, `&`, U+2028, a tab, a newline, U+0007 and a backslash. A store that
+produces the same `canonical`, `sha256_hex` and `signature_hex` from the
+same seed and payload is compatible. The intent vector:
+
+| | |
+|---|---|
+| seed (hex) | `81f4b219ac7ba9cbfc5681eb48f6bac66dccc79763a11d8b685dd15c616ff67b` (sha256 of `filex app store test vector: index key`) |
+| public key | `35eaad1b9722f764f09945e6ae3e37b490a5a7e4401f891468ab8c2c2aa4ca3e` |
+| fingerprint | `65fe07f1926197fce30fed9c84be691b60d7c30c0b8d6df077364e2a32466b24` |
+| `key_id` | `idx-2026-1` |
+| canonical | `{"app":"sign","commit":"214e9e8a0c7d4b5e9f1a2b3c4d5e6f708192a3b4","expires_at":"2026-10-04T18:30:00Z","filex_range":">=0.52.0","kind":"app","license_key":"FXL-7Q2M-K9P4-ZZ31","manifest_sha256":"1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0","paid":true,"permissions":["files:read","files:write","http:freetsa.org"],"ref":"v0.3.0","repo":"BRF-Tech/filex-sign","store":"https://fapps.brfd.app","token_id":"tok_01HZX3","version":"0.3.0","wasm_sha256":"6a3d2e590000000000000000000000000000000000000000000000000000beef"}` |
+| sha256 (hex) | `537a73864cdeccdede19206316fc00ee0629b920f971d522e06f6c53755e0a33` |
+| signature (hex) | `85e00077995aba433383ed9649be4d82bebb618b4bc3e137670292d17b46d35ce12fb2cb9a66db23761fc9962ed84bbbcd3a93c3dc798e10168fb1b70f464e09` |
+
+### filex's side: `/api/admin/app-plugins/…`
+
+Every route needs the platform operator's administrator **signed in to the
+panel** (`403 session_required` for an API key of any kind - admin-scoped,
+`root:`-confined, an app token - on the reads too; `403 supertenant_only`
+for a tenant administrator), and every state change passes the cross-site
+request guard. A store or license route never writes the generic audit row:
+its own rows are `app_store.trust`, `app_store.untrust`, `app_store.install`,
+`app_store.cancel`, `app_plugin.license_set`, `app_plugin.license_held`,
+`app_plugin.license_released` (a key appears by its prefix only).
+
+| Route | Body → answer |
+|---|---|
+| `GET /stores` | → `{stores: [{origin, source: admin/config, keys: [{id, use, status, fingerprint}], approved_by_name?, approved_at?}]}` |
+| `POST /stores` | `{store, fingerprints}` → the trusted store; `409 store_key_changed` when the store's keys are not the ones named; refused for a configured store and on a demo |
+| `DELETE /stores?store=<origin>` | → `204`; `404` when it was not trusted |
+| `POST /store-intent` | `{store, token}` → `{handle, store, store_trust, intent: {store, token_id, app, kind, version, repo, ref, commit, paid, license_key_prefix?, expires_at}, review: <the install dry run>, upgrade_of?: {id, version, store, repo, source_url}}`; or `409 store_trust_required` / `store_key_changed` with `detail: {store, keys, fingerprints, previous_keys?}` and nothing read from the link |
+| `POST /store-intent/install` | `{handle, permissions, associations?, license_key?}` → `201 {plugin, license?, association_errors?}`. The repository is read and the pins checked again; a paid app is held from before the install until the store answers `valid`; `license_key` empty = the link's own |
+| `POST /store-intent/cancel` | `{handle}` → `204`; the store is told `cancelled` |
+| `GET /licenses` | → `{licenses: [<license>]}`, every paid app |
+| `GET /{id}/license` | → `{app, required, status, held, store, key_prefix, licensee?, seats?, seats_used?, valid_until?, updates_until?, checked_at?, next_check_by?, grace_until?, last_attempt_at?, last_error_code?, last_error?, store_trusted}`; a free app: `{required: false, status: "free"}` |
+| `PUT /{id}/license` | `{key}` → the license, checked at once (a new key starts from no answer) |
+| `POST /{id}/license/verify` | → the license, checked now |
+
+A `handle` is the administrator's who read the link, lives an hour at most
+(or until the link expires) and is not the link's token. Codes:
+`store_invalid` (400), `store_trust_required` / `store_key_changed` /
+`intent_used` / `intent_pin_mismatch` / `intent_version_rollback` /
+`store_source_changed` (409), `store_key_not_configured` /
+`store_not_allowed` (403), `intent_wrong_instance` (400), `intent_unknown` / `intent_session_unknown`
+(404), `intent_gone` / `intent_expired` (410), `store_unreachable` /
+`store_bad_answer` / `store_signature_invalid` (502), `intent_invalid` /
+`license_key_invalid` (400), and the install's own codes (`incompatible`,
+`name_taken`, …).
+
+### The app reads its license
+
+`GET /api/files/plugins/license/{plugin}` (`plugins.run`), and the bridge's
+`license.get` (`fx.license.get()` in `@brftech/filex-app-ui`):
+
+```json
+{"status": "valid", "valid_until": "2027-10-04T00:00:00Z", "updates_until": "2027-04-04T00:00:00Z"}
+```
+
+`{"status": "free"}` for a free app. Never the key, the licensee or the
+store: who holds the license is the administrator's to read, on the app's
+License section, and the bridge passes these three fields only. A held
+app's interface is not served at all, so an interface reads `valid`, `grace`
+or `free` in practice; the other statuses are there for completeness. filex
+0.51.0 and older answer `unknown_method`.
+
+### What the 0.52.0 security review tightened
+
+The store contract, as filex holds a store to it since the review of the
+store install:
+
+- **The intent.** `filex_origin` is required: the filex the link was made
+  for, as an origin (`https://files.example.com`, no path). filex lower-cases
+  the scheme and the host, drops the default port and compares it with the
+  origin of [`FILEX_PUBLIC_URL`](CONFIGURATION.md#public-url), or - unset - with the origin the request
+  arrived at (`400 intent_wrong_instance`, `detail: {filex_origin,
+  this_filex}`; missing or with a path: `400 intent_invalid`). A configured
+  `FILEX_PUBLIC_URL` that does not parse as an http(s) origin refuses every
+  link (`400 intent_wrong_instance`, `detail: {public_url_invalid: true}`) -
+  it never falls back to the request. The check stops a link used on the
+  wrong filex by mistake or by luring another filex's administrator; it does
+  not hold against the receiving filex's own administrator, who controls
+  `Host` and `X-Forwarded-Proto` when no public URL is set. `commit` (the
+  full lower-case object id, 40 or 64 hex digits) and `manifest_sha256` are
+  required too (`400 intent_invalid`).
+- **The repository is read at `commit`**:
+  `<FILEX_APP_GITHUB_RAW_BASE>/<repo>/<commit>/filex-app.json` and every file
+  the manifest names relative to the repository; `{tag}` in an address still
+  stands for `ref`, and the app keeps following `ref`. The tag must still
+  serve the same manifest bytes (`<repo>/<ref>/filex-app.json`), else `409
+  intent_pin_mismatch` with the field `commit`. filex does not call GitHub's
+  API.
+- **An installed app keeps its source.** A link for an installed app's name
+  from another store, or another repository, is refused: `409
+  store_source_changed`, `detail: {installed: {store, repo, version,
+  source_url}, link: {store, repo, version}}`. An app installed from its
+  repository directly (no store) is upgraded by a free link for the same
+  repository; a paid link for it is refused the same way (`installed.store`
+  empty): a store does not take an app nobody bought from it under its
+  license. `POST /store-intent`'s `upgrade_of` is `{id, version, store,
+  repo, source_url}`.
+- **One review installs once**: `POST /store-intent/install` takes the review
+  (a second install of the same `handle` answers `404 intent_session_unknown`;
+  a failed install puts it back), and installs of one app name run one at a
+  time.
+- **No redirect.** `keys.json`, the intent, `complete` and `licenses/verify`
+  are asked without following a redirect: a `3xx` is `store_bad_answer`. The
+  app's own files (the manifest, the module, the interface bundle, a release
+  asset) are downloaded as before - redirects followed, nothing sent but the
+  `GET`.
+- **License answers.** `checked_at` must be within 24 hours of filex's wall
+  clock (else the answer is not taken: `store_bad_answer`); `grace_until` is
+  clipped to `checked_at` + 30 days and `next_check_by` to `checked_at` + 2
+  days. The proven time is the store's own: one store's answer moves the time
+  of its own licenses only. A start after a run that did not stop cleanly
+  moves every store's proven time on by an hour - the grace of every license
+  in it ends an hour sooner - (debt the store's next answer
+  takes back, down to its `checked_at`); the loop keeps the time on a clean
+  shutdown and that start owes nothing.
+- **The key.** filex asks whether the store is trusted (and, with
+  `FILEX_APP_STORE_URLS` set, listed: `403 store_not_allowed`) before it
+  sends a key. A license moved to another store drops the first store's key
+  and answers. A key is sealed with the additional data
+  `appstore:license:<app>`.
+- **What the app reads.** `GET /api/files/plugins/license/{plugin}` and
+  `license.get` answer `{status, valid_until?, updates_until?}`: no
+  `licensee`.
+
 ## The thumbnail call (`thumbnail`) - 0.50
 
 The manifest's `thumbnails` block and what the call may do are in
@@ -825,7 +1127,7 @@ is absent or out of range), an empty `key` meaning every key this plugin
 keeps. It answers the one question the per-file store could not: *which files
 am I keeping this on?* Without it a home screen was empty until somebody
 navigated to a document, because a plugin only ever sees the file it was
-opened on. Three properties are the whole of it, and each one is deliberate:
+opened on. Four properties are the whole of it, and each one is deliberate:
 
 - a **deleted** file is not in the answer - the state row is joined back to a
   live node, so a document that was removed stops appearing in the list that
@@ -846,6 +1148,20 @@ opened on. Three properties are the whole of it, and each one is deliberate:
     exception: that is a stranger who found a link, and they are told nothing.
     The host keys this on the call the host itself began, never on "there is no
     actor".
+- every row lies inside the folder of a **`root:` token** the call was made
+  with (0.52.0): a screen's request, an interface's `call`, or the request that
+  queued the job - the door records the root on the job (the host parameter
+  `__root`), and the job is held to it when it runs. A link such a job opens
+  records the root too (`shares.app_root`, migration 00082), and the job a
+  visitor's submit queues on it is held to it. One account commonly stands
+  behind many such tokens, so the person's permissions alone would tell each
+  project about the others' files.
+
+`limit` counts the files the caller is TOLD about: the rows are read a page at
+a time, in one order, until that many have passed the person's permissions and
+the token's root, or the rows run out (at most 5,000 rows read for one call).
+Up to 0.51.0 the limit was applied before that narrowing, so a caller whose
+files sorted after ones it may not see was told about fewer, often none.
 
 Outbound (M3, shipped): `users_lookup {q}` → `{users: [{user_id, email, name}]}`
 (users:lookup; tenant-scoped, ≤ 20) · `notify_send {title: Text, body: Text,
@@ -1035,7 +1351,9 @@ is refused as `invalid`). ⚠ A `path` must name one of the job's inputs or a
 file this app keeps state on - the same rule for a notice's `target.path` and
 a page link's document - and anything else is `permission_denied` with one
 sentence whether or not the file exists or is locked; an app may always lift
-its OWN lock by path. The person the job runs for must also hold **editor** on
+its OWN lock by path. For a job queued with a `root:` token, both hold only
+inside that token's folder (0.52.0): outside it the answer is the same
+`permission_denied`, the app's own lock included. The person the job runs for must also hold **editor** on
 the file (this app's own lock is waived); a job with nobody behind it (the
 wake-up's) may lock only its own inputs. A lock freezes one
 file for EVERYONE - owner and administrators included - until the plugin
@@ -2018,6 +2336,7 @@ driver's words.
 | `engine.call` | `{method, params}` → the module's answer | a module with a `ui_call` export |
 | `job.submit` | `{action, params?}` → `{op}` - one of the app's actions on the opened files, through the ordinary submit checks. **The person's call**, like `clipboard.write` | a module |
 | `state.get` / `state.set` | `{key}` → value / `{key, value}` - this person's small store for this app (JSON, 8 KiB a value, 16 KiB an app), kept in the account's preferences | - |
+| `license.get` | → `{status, valid_until?, updates_until?}` - the app's license ([The app reads its license](#the-app-reads-its-license)); `{status: "free"}` for a free app (0.52.0) | - |
 
 There is no `fetch`, no storage and no cookie in the frame: an interface that
 needs to keep something asks `state.set`; one that needs data from elsewhere

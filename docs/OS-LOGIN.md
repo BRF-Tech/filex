@@ -246,7 +246,7 @@ once.
 
 ### Switching it on
 
-![The Windows card on Admin → Identity providers: its test run with a test account, step by step](screenshots/v0.51.0/authproviders/auth-provider-windows-1440.png)
+![The Windows account page under Admin → Identity providers, on a Linux server: Test now stops at the step that failed, and Save and apply asks for a test account first](screenshots/v0.52.0/authproviders/auth-provider-windows-1440.png)
 
 **Admin → Identity providers → Windows account → Test now** signs a real account
 in. Give it an account of this machine (or the domain) and its password in the
@@ -403,7 +403,7 @@ person was never shown.
 
 ### Set it up
 
-![The Linux (PAM) card: switched on after a test that signed a real account in](screenshots/v0.51.0/authproviders/auth-provider-pam-1440.png)
+![The Linux account (PAM) page, saved switched on with a test account on a server without pamtester: each step of the test, the failed one with the command that fixes it, and the provider left off](screenshots/v0.52.0/authproviders/auth-provider-pam-1440.png)
 
 The provider will not switch on until every step below is true, and **Test now**
 says which one is not, with the command that fixes it.

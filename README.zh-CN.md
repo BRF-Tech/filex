@@ -67,7 +67,7 @@ docker run -p 5212:5212 \
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; 43 MB slim / 511 MB w/ thumbnails)       │
+│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -338,7 +338,7 @@ sudo snap install filex-app                 # the same snap as the badge above
 
 Store 版本（*filex File Manager*）是唯一经过代码签名的 Windows 版本（由 Microsoft 签名），并由 Store 负责更新。winget 包（`BRFTech.filex-app`）随每个发行版提交，正在等待 winget 审核人员的首次审核，所以 `winget install` 目前还找不到它。安装程序、便携版 `.exe`、AppImage、`.deb`、`.rpm` 和 `.dmg` 都附在[最新发行版](https://github.com/BRF-Tech/filex/releases/latest)上，尚未经过代码签名，所以运行 Windows 安装程序时会出现 SmartScreen 提示。详见 [docs/DESKTOP.md](docs/DESKTOP.md)。单独安装 CLI：`brew install brf-tech/filex/filex`（[docs/CLI.md](docs/CLI.md)；它的 winget 包 `BRFTech.filex` 也在同一轮审核中）。
 
-在 Linux 上，应用绝不会脱离 Chromium 的沙箱运行。`.deb` 和 `.rpm` 什么都不需要；在 Ubuntu 23.10 及更高版本上，AppImage 需要一个一次性设置的 AppArmor 配置文件，Snap 则需要执行 `sudo snap connect filex-app:browser-sandbox`，直到 Snap Store 自行完成这个连接为止；两种情况下应用都会明确说明并给出操作步骤（[docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)）。
+在 Linux 上，`.deb`、`.rpm` 和 AppImage 绝不会脱离 Chromium 的沙箱运行。`.deb` 和 `.rpm` 什么都不需要；在 Ubuntu 23.10 及更高版本上，AppImage 需要一个一次性设置的 AppArmor 配置文件，应用会明确说明并给出操作步骤（[docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)）。Snap 不使用 Chromium 的沙箱运行，而是运行在 snap 的严格隔离（strict confinement）之中，同样什么都不需要（[docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)）。
 
 **ARM (arm64)**：提供以下内容（每个发行版都会构建这些产物，并在发布前先在 arm64 机器上运行）：
 
@@ -455,7 +455,7 @@ API 密钥的权限按动词划分（`read`、`write`、`delete`，另有 `mcp` 
 - **用量与费用**：filex 不自行计量你的服务商账单；它读取服务商本来就会生成的报告，把报告规范化，再用一张你可以编辑的表格计价。Backblaze B2 的每日 CSV 通过 filex 已经在用的同一套 S3 API 读取，所以没有新的依赖，也没有新的凭据类型。免费额度是独立的字段，而不是公式里的常量；页面把服务商账户级的那一行与各存储桶的行分开：把它们相加会把同一批事务算两遍，多出来的数目恰好小到没人察觉（[docs/USAGE.md](docs/USAGE.md)）。
 - **审计日志**：每一次变更都有记录，带有执行者、集成身份和元数据。
 - **CLI 客户端**：同一个二进制文件无需任何服务器端插件就能连接远程服务器（`filex client`、`filex sync`）：跨存储复制和移动、回收站、版本、标签、应用操作、压缩包和你的链接，每个服务器任务都会一直跟踪到结束；`filex client login --realm` 登录到某个租户，`filex encrypt` 创建加密文件夹，已保存的会话只会发送到保存它时所用的那个地址（[docs/CLI.md](docs/CLI.md)）。
-- **自动更新**：补丁版本自行安装，次要版本则发出通知，可一键升级；对于由包管理器管理的实例（Homebrew、winget、Snap、操作系统发行版的软件包）或容器，filex 会告知有新的发行版以及获取新发行版的命令，管理页面会明确说明它只做通知（[docs/UPDATES.md](docs/UPDATES.md)）。
+- **自动更新**：次要版本会发出通知，可一键升级；补丁版本在您允许后才会自行安装（`AUTO_UPGRADE=true`；默认情况下 filex 只检查并通知您）；对于由包管理器管理的实例（Homebrew、winget、Snap、操作系统发行版的软件包）或容器，filex 会告知有新的发行版以及获取新发行版的命令，管理页面会明确说明它只做通知（[docs/UPDATES.md](docs/UPDATES.md)）。
 - **单一二进制文件**：goreleaser 矩阵：linux/macOS/Windows × amd64/arm64。CGO=0，modernc.org/sqlite。
 - **i18n**：英语 + 土耳其语开箱即用，**公开链接也包括在内**：共享链接、PIN 验证页、文件请求页面或应用的签署界面都以访客的语言呈现，公开页面的外壳会**提供一个选择器**，因为陌生人浏览器的语言只是一种猜测，而正在读合同的人应当能够改正它。不用 JS 的简单页面先看 `?lang=`，再看 `Accept-Language`，最后用服务器默认值。**服务器写出的文字来自同一份字符串表**（邮件、通知用语、不用 JavaScript 的页面和安装时的权限审核），每段文字面向的仍是它一直以来的读者，每个键各自回退到英语；占位符与英语不一致的译文，运行时不会采用，所以邮件绝不会丢失其中的链接或 PIN。
 - **语言包**：其他任何语言都是一个**没有任何可运行内容的应用**：一份字符串清单，和其他任何应用一样从 GitHub 仓库、上传的文件或 URL 安装，列在 **Plugins → Apps**（插件 > 应用）下，并标出它对当前运行版本的覆盖率（*Español - 97% translated · the rest shows in English*，意思是“西班牙语，已翻译百分之九十七，其余以英语显示”）。它的语言会加入每一个选择器（设置对话框、管理面板的顶栏、公开共享页面），并把资源管理器、管理面板和公开页面一并翻译。复数形式遵循 **CLDR 类别**，所以 `zero`、`one`、`two`、`few`、`many` 和 `other` 当中，自己的语言有哪些，语言包就写哪些。西班牙语、德语和法语作为示例提供，一个模板仓库加上 `scripts/i18n-export.mjs` / `i18n-validate.mjs` 会带着译者从导出一路走到安装。校验器要求语言包遵守内置语言所遵守的规则，其中包括：文本想用长破折号的地方，一律用普通连字符（[编写一个](docs/PLUGIN-KIT.md#writing-a-language-pack)）。

@@ -289,3 +289,26 @@ func TestSearchAutoRebuildKillSwitch(t *testing.T) {
 		t.Fatal("FILEX_SEARCH_AUTO_REBUILD=true must switch it back on")
 	}
 }
+
+// FILEX_APP_STORE_URLS given any value is an allow list - also " , ", which
+// names no store and so admits none; unset, it is not (store review, second
+// round, Y6).
+func TestAppStoreURLsSetEvenWhenItNamesNoStore(t *testing.T) {
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AppStoreURLsSet {
+		t.Fatal("unset by default")
+	}
+	for v, n := range map[string]int{" , ": 0, ",": 0, "   ": 0, "https://a.example, https://b.example": 2} {
+		t.Setenv("FILEX_APP_STORE_URLS", v)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.AppStoreURLsSet || len(cfg.AppStoreURLs) != n {
+			t.Fatalf("%q: set=%v entries=%v, want set with %d", v, cfg.AppStoreURLsSet, cfg.AppStoreURLs, n)
+		}
+	}
+}

@@ -490,14 +490,16 @@
   },
   "users": {
     "title": "Users",
-    "subtitle": "Local accounts and OIDC mappings",
+    "subtitle": "Local, SSO and LDAP accounts - the Source column says which",
     "addNew": "Add user",
-    "newTitle": "Add user",
+    "newTitle": "Add a local account",
     "editTitle": "Edit user",
     "fields": {
       "displayName": "Display name",
       "lastLogin": "Last sign-in",
-      "sendInvite": "Send invitation email"
+      "sendInvite": "Send invitation email",
+      "source": "Source",
+      "groups": "Groups"
     },
     "roles": {
       "admin": "Administrator",
@@ -518,14 +520,17 @@
     "status": {
       "disabled": "Disabled",
       "pending": "Waiting for approval",
-      "pendingTitle": "Opened switched off by an SSO sign-in whose identity provider did not confirm the email address. Switch the account on to approve it."
+      "pendingTitle": "Opened switched off by an SSO sign-in whose identity provider did not confirm the email address. Switch the account on to approve it.",
+      "directory": "Disabled by LDAP",
+      "directoryTitle": "Disabled or no longer listed in the LDAP directory. Directory sync enables the account again when the directory does."
     },
     "account": {
       "pendingAbout": "This account was opened switched off by an SSO sign-in: the identity provider did not confirm that the email address is verified. Switching it on approves it.",
       "disabledAbout": "This account is switched off: it cannot sign in.",
       "approve": "Approve and switch on",
       "enable": "Switch on",
-      "enabledOk": "Account switched on"
+      "enabledOk": "Account switched on",
+      "directoryAbout": "Disabled by LDAP directory sync: the person is disabled in the directory, or no longer listed there. Their sessions, API keys and SFTP keys do not work. Sync enables the account again when the directory does; enabling it here keeps it on until an administrator or the directory switches it off again."
     },
     "sso": {
       "title": "SSO identity",
@@ -546,7 +551,41 @@
     },
     "viaGroup": "through {group}",
     "groupRoleConfirm": "{name} has the role “{role}” through the group “{group}”. A built-in role picked here does not replace it: give them a custom role, or take them out of the group. Save anyway?",
-    "groupRoleStill": "Saved, but the role “{role}” from the group “{group}” still applies."
+    "groupRoleStill": "Saved, but the role “{role}” from the group “{group}” still applies.",
+    "allGroups": "All groups",
+    "add": {
+      "intro": "An account made here: with its own password, an invitation, or none - for an SSO account made ahead of its first sign-in. People of an LDAP directory are not added here: they appear when they sign in, or when their directory syncs.",
+      "username": "Username",
+      "usernameHint": "For SFTP and FTP; filled in from the email.",
+      "signIn": "How they sign in",
+      "access": {
+        "password": "Set a password",
+        "invite": "Send an invitation",
+        "none": "No password"
+      },
+      "generate": "Generate",
+      "show": "Show the password",
+      "hide": "Hide the password",
+      "passwordNeeded": "Type a password, generate one, or send an invitation instead.",
+      "inviteHint": "filex makes a first password and emails it with the address to sign in at. If no email can be sent, you get the password here to pass on.",
+      "groups": "Add to groups",
+      "groupNotSet": "The account was made, but not added to {group}: {error}",
+      "invitedOk": "Invitation sent to {email}",
+      "notEmailed": "The account {email} was made, but no email could be sent. Pass this first password on to them:",
+      "shownOnce": "It is shown only now. They can change it after signing in.",
+      "addAnother": "Add another",
+      "createAnother": "Create and add another",
+      "createAnyway": "Make a local account anyway",
+      "openDirectory": "Sync {directory}",
+      "roleHint": {
+        "admin": "Everything, including this admin area.",
+        "user": "Works with files: upload, change, share - as the User role allows.",
+        "viewer": "Read-only: browse and download.",
+        "custom": "A custom role - its permissions are on the Roles page."
+      },
+      "noneHint": "They sign in through SSO, or use API keys. A password can be set later from their page."
+    },
+    "adminByGroup": "Administrator through a group. To change their role, take them out of that group (or its LDAP / SSO group)."
   },
   "profile": {
     "saved": "Profile saved",
@@ -755,10 +794,19 @@
       "auto_provision": "Auto-provision users",
       "ca_file": "CA certificate file",
       "protocol_login": "Accept directory passwords on WebDAV, SFTP, FTPS, S3 and NFS",
+      "sync_interval": "Directory sync every",
+      "sync_filter": "Directory sync filter",
+      "sync_disable_missing": "Switch off accounts the directory no longer lists",
+      "sync_groups": "Bring in every directory group as a filex group",
+      "sync_group_filter": "Groups to bring in (filter; empty = all)",
+      "label": "Name",
+      "email_domains": "Email domains",
       "auto_create": "Open an account at the first sign-in",
       "allowed_groups": "Only members of these groups (comma list)",
       "domain": "Default domain (CORP or corp.example; empty = this machine)",
       "group_attr": "Group attribute",
+      "group_filter": "Group search filter",
+      "group_base_dn": "Group search base DN",
       "pamtester_path": "pamtester path",
       "service": "PAM service (its file in /etc/pam.d)",
       "use_sudo": "Run pamtester through sudo (switch it off only if filex runs as root)",
@@ -776,7 +824,17 @@
       "email_domain": "With corp.example, the account alex signs in as alex{'@'}corp.example. Empty: the address this installation chose for operating-system accounts. Choose it before the first sign-in.",
       "ca_pem": "The private CA the directory's certificate is signed by, pasted as it is. Empty: the system's trusted roots.",
       "show_refusal_reason": "Off by default. On, a person whose password was right but who still may not sign in here (no account is opened at a first sign-in, or they are in no allowed group) is told why. The sign-in form then also tells anybody who is guessing that a password is right - a password that may open other services that use the same accounts.",
-      "trust_email": "Off by default. Off, an address the provider does not mark verified (email_verified) opens no existing account that is not yet bound to an SSO identity, and a new account for it is opened switched off until an administrator approves it. Turn it on only for a provider whose addresses all belong to the people who hold them: anybody who can set an address there can then sign in to the account with that address."
+      "trust_email": "Off by default. Off, an address the provider does not mark verified (email_verified) opens no existing account that is not yet bound to an SSO identity, and a new account for it is opened switched off until an administrator approves it. Turn it on only for a provider whose addresses all belong to the people who hold them: anybody who can set an address there can then sign in to the account with that address.",
+      "user_filter": "Finds the person signing in. Every %s is the name they typed.",
+      "group_attr": "The attribute on a person that lists their groups. Active Directory and lldap: memberOf.",
+      "group_filter": "Only when people don’t carry their groups: finds them by a search instead. %s is the person’s DN, %u the name they signed in with - e.g. (member=%s).",
+      "group_base_dn": "Where groups are searched for. Empty: the base DN.",
+      "sync_interval": "How often sync runs on its own - e.g. 6h, at least 5m. Empty: only when you press Sync now.",
+      "sync_filter": "Who sync lists. Empty: the user filter with * - everyone who can sign in.",
+      "sync_disable_missing": "Accounts the directory made are switched off once it no longer lists them. Never an administrator or an account made here.",
+      "sync_groups": "Every directory group becomes a filex group, kept in step. Which groups exist is managed on the directory.",
+      "sync_group_filter": "Which directory groups to bring in. Empty: all of them - e.g. (&(objectClass=groupOfNames)(cn=dept-*)).",
+      "email_domains": "Only these domains may sign in through it or get an account from it (e.g. partner.com). Empty: any."
     },
     "upgradeHints": {
       "trust_email": "The upgrade switched this on so that this provider works as it did before. Switch it off if the provider sends email_verified."
@@ -826,7 +884,8 @@
       "no_password": "the test account has no password",
       "no_group_source": "set the role/group claim (OIDC), the group attribute (LDAP) or the roles header, so there is something to read groups from",
       "public": "a client without a secret can only be checked when somebody signs in",
-      "unclear": "the provider’s answer ({status}) does not say either way"
+      "unclear": "the provider’s answer ({status}) does not say either way",
+      "no_people": "check the base DN and the user filter"
     },
     "checks": {
       "required": {
@@ -902,6 +961,24 @@
       "secret": {
         "fail": "A secret stored for this provider cannot be opened - {env} may have changed. Type it again."
       },
+      "people": {
+        "ok": "{n} person found with {filter}; {mail} with an email ({attr}). | {n} people found with {filter}; {mail} with an email ({attr}).",
+        "fail": "Nobody with an email ({attr}) found with {filter}: {reason}."
+      },
+      "groups": {
+        "ok": "{n} of {of} person lists their groups in {attr}. | {n} of {of} people list their groups in {attr}.",
+        "unchecked": "Nobody lists groups in {attr}. If your directory has groups, set a group search filter."
+      },
+      "groups_search": {
+        "ok": "The group search finds {n} group for {who}. | The group search finds {n} groups for {who}.",
+        "fail": "The group search {filter} failed: {reason}.",
+        "unchecked": "The group search {filter} finds no groups for {who}."
+      },
+      "sync_groups": {
+        "ok": "Directory sync would bring in {n} group. | Directory sync would bring in {n} groups.",
+        "fail": "The search for groups to bring in ({filter}) failed: {reason}.",
+        "unchecked": "No group matches {filter}: directory sync would bring none in."
+      },
       "config": {
         "ok": "The settings are well-formed.",
         "fail": "The configuration is not valid: {detail}"
@@ -942,7 +1019,6 @@
     "passwordOff": "Password sign-in is off on this server. Only the environment can turn it on ({env}).",
     "recoveryOn": "The installation administrator can still sign in with a password, for recovery ({env}).",
     "recoveryOff": "Recovery sign-in for the installation administrator is off ({env} is false).",
-    "apiTokenAlways": "API keys are always accepted; they are issued on the API / MCP page.",
     "noSecretKey": "{env} is not set on this server, so a client secret or bind password cannot be stored here: secrets are only ever kept sealed.",
     "envReadOnly": "Configured by the environment: {from}. Change it there and restart filex - this page cannot override it.",
     "shadowed": "A configuration saved on this page under the same name is kept, but not used while the environment defines this provider.",
@@ -962,6 +1038,66 @@
       "builtin": "Built in"
     },
     "technicalDetailIs": "Technical detail: {detail}",
+    "sync": {
+      "title": "Directory sync",
+      "every": "Runs on its own every {every}, and when you press Sync now.",
+      "manualOnly": "Runs when you press Sync now. Set “Directory sync every” (e.g. 6h) to run it on its own.",
+      "now": "Sync now",
+      "running": "Syncing…",
+      "never": "Not run yet. People appear here at their first sign-in until it does.",
+      "lastManual": "Last run {when}, started by hand",
+      "lastScheduled": "Last run {when}, on schedule",
+      "found": "{n} person in the directory | {n} people in the directory",
+      "created": "{n} new account | {n} new accounts",
+      "updated": "{n} person’s groups changed | {n} people’s groups changed",
+      "skipped": "{n} skipped | {n} skipped",
+      "missing": "{n} no longer listed | {n} no longer listed",
+      "disabled": "{n} switched off | {n} switched off",
+      "enabled": "{n} back on | {n} back on",
+      "emailsChanged": "{n} email changed | {n} emails changed",
+      "problems": "{n} problem | {n} problems",
+      "groupsFound": "{n} group in the directory | {n} groups in the directory",
+      "groupsCreated": "{n} new group | {n} new groups",
+      "groupsRenamed": "{n} renamed | {n} renamed",
+      "groupsRestored": "{n} back in the directory | {n} back in the directory",
+      "groupsRemoved": "{n} removed from the directory | {n} removed from the directory",
+      "groupsByHand": "{n} already linked by hand | {n} already linked by hand"
+    },
+    "sections": {
+      "connection": "Connection",
+      "people": "People",
+      "groups": "Groups",
+      "sync": "Directory sync"
+    },
+    "defaultIs": "{value} (default)",
+    "tabs": {
+      "ldap": "LDAP",
+      "local": "Local",
+      "oidc": "OIDC",
+      "proxy-header": "Reverse-proxy header",
+      "windows": "Windows",
+      "pam": "Linux (PAM)"
+    },
+    "editTitle": "Provider",
+    "notFound": "There is no such sign-in provider. It may have been removed.",
+    "syncNeedsRunning": "Switch the directory on and save it to sync it.",
+    "editSections": {
+      "settings": "Settings",
+      "sync": "Sync"
+    },
+    "card": {
+      "domains": "Email domains: {list}",
+      "anyDomain": "Any email domain",
+      "client": "Client: {id}",
+      "proxies": "Trusted proxies: {list}",
+      "local": "Email and password, checked here",
+      "localOff": "Password sign-in is off",
+      "synced": "Synced {when}",
+      "neverSynced": "Not synced yet",
+      "every": "every {every}",
+      "manualOnly": "on request only",
+      "tenants": "{n} tenant | {n} tenants"
+    },
     "add": "Add a provider",
     "addTitle": "Another sign-in provider",
     "addHint": "A second provider of a kind: another directory, or an SSO for some tenants only. It is made switched off: fill it in on its card, test it and switch it on there.",
@@ -987,7 +1123,8 @@
     "platformTenant": "The platform's own tenant",
     "lockoutConfirm": "This takes away a tenant's last way in. Go on?",
     "review": "Every sign-in provider is now bound to the tenants it serves. The upgrade bound every provider to every tenant that existed, so nothing changed for anyone: review the bindings below and remove the tenants a provider should not serve.",
-    "reviewDone": "Reviewed"
+    "reviewDone": "Reviewed",
+    "noneOfKind": "None of this kind yet. Add a provider makes one."
   },
   "grants": {
     "title": "Folder access",
@@ -1075,6 +1212,7 @@
     "noResults": "No matching events",
     "phrase": "{resource}: {verb}",
     "resource": {
+      "permission_gap": "Missing permission",
       "archives": "Archive settings",
       "ai_file": "File (AI)",
       "ai_share": "Share link (AI)",
@@ -1139,9 +1277,11 @@
       "tenant": "Tenant",
       "tenant_domain": "Own domain",
       "file_association": "Default apps",
-      "file_types": "Default apps"
+      "file_types": "Default apps",
+      "app_store": "App store"
     },
     "verb": {
+      "dismiss": "dismissed",
       "action": "changed",
       "archive_add": "added to archive",
       "archive_create": "archive created",
@@ -1209,6 +1349,8 @@
       "unlocked": "lock lifted",
       "members_add": "members added",
       "member_remove": "member removed",
+      "sync": "directory synced",
+      "detach": "kept as a filex group",
       "repair": "repaired",
       "settings_update": "limits changed",
       "storage_link": "storage linked",
@@ -1222,9 +1364,17 @@
       "thumbnail_limits": "thumbnail limits changed",
       "thumbnail_sent": "sent a file out while drawing a thumbnail",
       "office_saved_beside": "saved beside, in another format (ONLYOFFICE)",
-      "office_save_refused": "save not written (ONLYOFFICE)"
+      "office_save_refused": "save not written (ONLYOFFICE)",
+      "trust": "trusted",
+      "untrust": "no longer trusted",
+      "install": "installed",
+      "cancel": "cancelled",
+      "license_set": "license key set",
+      "license_held": "held by its license",
+      "license_released": "license holds again"
     },
     "target": {
+      "permission_gap": "Missing permission",
       "auth_provider": "Sign-in provider",
       "external": "External service",
       "comment": "Comment",
@@ -1255,7 +1405,8 @@
       "providers": "Tenant",
       "e2e_request": "Encryption request",
       "tenant_domain": "Own domain",
-      "file_type": "File type"
+      "file_type": "File type",
+      "app_store": "Store"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "What",
@@ -1786,7 +1937,8 @@
       "admin_test": "Test notification",
       "webhook_test": "Webhook test",
       "tenant_domain_suspended": "Own domain stopped working",
-      "tenant_domain_restored": "Own domain works again"
+      "tenant_domain_restored": "Own domain works again",
+      "permission_gaps": "Role may have lost a permission"
     },
     "scopeEveryone": "Everyone",
     "webhookStatus": {
@@ -2728,7 +2880,8 @@
       "running": "Running",
       "disabled": "Off",
       "refused": "Refused",
-      "failed": "Failed"
+      "failed": "Failed",
+      "unlicensed": "Unlicensed"
     },
     "source": {
       "upload": "Uploaded",
@@ -3349,7 +3502,7 @@
   },
   "permissions": {
     "title": "Roles",
-    "subtitle": "A role is a named set of permissions. Everyone has exactly one role: Administrator (everything, locked), User, Viewer, or a custom role, picked on the person’s own page - or, when they have none of their own, given by a group they are in. A person’s own exceptions beat their role.",
+    "subtitle": "A role is a named set of permissions. Everyone has exactly one - a built-in or a custom role, their own or given by a group they are in.",
     "items": {
       "files": {
         "download": {
@@ -3578,13 +3731,10 @@
       "deleted": "Role deleted",
       "summaryAllow": "Allows: {list}",
       "summaryDeny": "Denies: {list}",
-      "summaryLimits": "Limits: {list}",
       "members": "{count} member | {count} members",
       "locked": "Everything, always - cannot be changed",
-      "builtin": "Built-in",
       "builtinSummary": "Its permissions are set from the row’s actions",
       "membersColumn": "People",
-      "custom": "Custom",
       "editBuiltin": "Edit the {role} role",
       "viewBuiltin": "View the {role} role",
       "builtinPlatformOwned": "The built-in roles belong to the whole platform and its operator manages them. For permissions of your own, create a role.",
@@ -3607,10 +3757,27 @@
       "translationsCount": "{count} language | {count} languages",
       "nameIn": "Role name ({language})",
       "descriptionIn": "Description ({language})",
-      "groups": "{count} group | {count} groups",
       "deleteMoveGroups": "Groups holding it: {count}. They get the role you pick, or none for User or Viewer.",
-      "viaGroups": "{count} member through a group | {count} members through groups",
-      "startingRoleLegacy": "This only sets the role of a new account, once, at its first sign-in. For membership that follows the identity provider at every sign-in, link a group to the SSO group instead (Admin → Groups) and give the group this role."
+      "startingRoleLegacy": "This only sets the role of a new account, once, at its first sign-in. For membership that follows the identity provider at every sign-in, link a group to the SSO group instead (Admin → Groups) and give the group this role.",
+      "allThroughGroups": "all through {count} group | all through {count} groups",
+      "someThroughGroups": "{n} through {count} group | {n} through {count} groups",
+      "givenByGroups": "given by {count} group | given by {count} groups",
+      "allPermissions": "All permissions - cannot be changed",
+      "alwaysOn": "Always on",
+      "statusColumn": "Status",
+      "limitsBadge": "{count} limit | {count} limits",
+      "builtinHeading": "Built-in roles",
+      "customHeading": "Custom roles"
+    },
+    "gaps": {
+      "title": "{count} role may have lost a permission | {count} roles may have lost a permission",
+      "why": "It may have been dropped while the server ran an older version (0.50 or older) for a while; if it was taken away on purpose, dismiss this.",
+      "builtin": "{role}: “{from}” is allowed, “{key}” is not.",
+      "folders": "{role}, in its folders: “{from}” is allowed, “{key}” is not.",
+      "restore": "Give back “{permission}”",
+      "dismiss": "Dismiss, it was on purpose",
+      "restored": "“{permission}” given back to {role}.",
+      "dismissed": "{role}: dismissed as on purpose."
     },
     "customBadge": "Exceptions",
     "twoFactor": {
@@ -3715,7 +3882,7 @@
   },
   "groups": {
     "title": "Groups",
-    "subtitle": "Named sets of people. Share a folder with a group like with a person, and give a group a role: everyone in it without a role of their own gets it. People join by hand here, or through an SSO group their sign-in carries.",
+    "subtitle": "Named sets of people. Share a folder with a group like with a person, and give a group a role: everyone in it without a role of their own gets it. People join by hand here, or through an SSO or LDAP group their sign-in carries.",
     "editTitle": "Group",
     "add": "New group",
     "create": "Create",
@@ -3738,7 +3905,12 @@
       "ssoAdminOnly": "Only an administrator can link a group to SSO groups.",
       "priority": "Role priority",
       "priorityHint": "For someone in several groups that give a role: the group with the highest priority decides (equal: the older group). A switched-off role is skipped for the next one.",
-      "priorityAdminOnly": "Only an administrator can change which group’s role wins."
+      "priorityAdminOnly": "Only an administrator can change which group’s role wins.",
+      "ldap": "LDAP groups",
+      "ldapHint": "One per line: the group’s DN (cn=finance,ou=groups,dc=example,dc=com) or its name (finance), in any case. People whose LDAP sign-in shows the group join it, and leave it when it stops.",
+      "ldapAdminOnly": "Only an administrator can link a group to LDAP groups.",
+      "adminRole": "Administrator (full access)",
+      "adminHint": "Everyone in the group is an administrator of filex. Linked to an LDAP group - named by its full DN, and counting only for people of that group’s own directory - the directory decides who: people who leave it lose administrator again (never the last administrator)."
     },
     "membersTitle": "Members",
     "addMember": "Add a person by name or email…",
@@ -3770,7 +3942,59 @@
       "removeConfirm": "Remove {name} from “{group}”?",
       "roleFromGroup": "With no role of their own, they have the role “{role}” through the group “{group}”."
     },
-    "prioritySummary": "priority {n}"
+    "prioritySummary": "priority {n}",
+    "ldapSummary": "LDAP: {list}",
+    "removeLdapConfirm": "{name} is in this group through LDAP. Remove them now? They join again at their next sign-in if the directory still puts them in it.",
+    "count": "{n} of {total}",
+    "kind": {
+      "all": "All sources",
+      "local": "Local",
+      "sso": "SSO",
+      "ldap": "LDAP",
+      "synced": "Synced from LDAP",
+      "removed": "Removed from LDAP"
+    },
+    "directory": {
+      "synced": "Brought in by directory sync from the LDAP group “{name}”. Its members and its LDAP link follow the directory; its folders, role and priority are yours to set here. Which LDAP groups exist is managed on the directory.",
+      "linkHint": "Kept by directory sync on this group’s directory group.",
+      "removed": "Removed from LDAP",
+      "removedHint": "Its LDAP group no longer exists: its LDAP members were taken out. Open it to delete it or keep it as a filex group.",
+      "removedBody": "The LDAP group “{name}” no longer exists in the directory, so its LDAP members were taken out of this group. Its folders, role and anyone added by hand are still here. Delete the group, or keep it as a filex group that no longer follows the directory. If the directory lists that same group again (for example after a filter change), this group follows it again; a group made anew there comes in as a new group.",
+      "keep": "Keep as a filex group",
+      "kept": "This group no longer follows the directory.",
+      "deleteNote": "While the LDAP group exists, the next directory sync makes this group again - without its folders or role. To leave it out, remove it on the directory or narrow “Groups to bring in”."
+    },
+    "card": {
+      "fromMain": "Synced from the LDAP directory",
+      "fromDirectory": "Synced from the {name} directory",
+      "byHand": "Members added by hand"
+    },
+    "ssoSummary": "SSO: {list}",
+    "kindColumn": "Members from",
+    "originColumn": "Linked to"
+  },
+  "sources": {
+    "local": "Local",
+    "manual": "Added",
+    "sso": "SSO",
+    "ldap": "LDAP",
+    "proxy": "Proxy",
+    "accountHint": {
+      "local": "Made in filex: on this page, by an invitation or at setup.",
+      "sso": "Made by a sign-in through the SSO identity provider.",
+      "ldap": "Made by a sign-in through LDAP / Active Directory.",
+      "proxy": "Made by a sign-in through a trusted reverse proxy."
+    },
+    "memberHint": {
+      "manual": "Added to the group by an administrator.",
+      "sso": "In the group through SSO - kept in step with the identity provider at each sign-in.",
+      "ldap": "In the group through LDAP - kept in step with the directory at each sign-in."
+    },
+    "groupHint": {
+      "local": "Members are added by hand only.",
+      "sso": "Linked to SSO groups: members join and leave with the identity provider.",
+      "ldap": "Linked to LDAP groups: members join and leave with the directory."
+    }
   },
   "tenants": {
     "title": "Tenants",
@@ -3923,5 +4147,116 @@
       "certificate_expired": "The certificate has expired.",
       "certificate_needs_secret_key": "A private key is stored sealed, and this installation has no FILEX_SECRET_KEY."
     }
+  },
+  "appStore": {
+    "title": "Install from a store",
+    "subtitle": "An app store sent you here with an install link. You read the review and decide; nothing is installed until you press Install.",
+    "breadcrumb": "Install from a store",
+    "none": "There is no install link waiting. Open the store's Install link again.",
+    "reviewing": "The review of {app} from {store} is open.",
+    "done": "{app} is installed.",
+    "doneUpgrade": "{app} is upgraded to {version}.",
+    "openApp": "Open the app's page",
+    "cancelled": "Nothing was installed. The store was told that the link was cancelled.",
+    "declined": "The store was not trusted and nothing was read from its link.",
+    "trust": {
+      "newTitle": "This store is not trusted yet",
+      "newBody": "filex accepts install links and license answers only from stores an administrator trusts. Before you trust this one, compare its key fingerprints below with the ones the store publishes on its own site.",
+      "changedTitle": "This store's keys changed",
+      "changedBody": "The store now signs with keys that are not the ones it was trusted with. That happens when a store rotates its keys, and also when somebody else answers in its name. Compare the new fingerprints with what the store publishes before you trust it again.",
+      "store": "Store",
+      "keys": "Its keys",
+      "previous": "The keys it was trusted with",
+      "how": "Only the keys listed here will be trusted. A key the store publishes later is asked about again.",
+      "compared": "I compared these fingerprints with what the store publishes and want to trust this store",
+      "approve": "Trust this store",
+      "use": {
+        "index": "Install links",
+        "license": "Licenses"
+      }
+    },
+    "wizard": {
+      "title": "Install {name} from a store",
+      "fromStore": "From store {store}",
+      "paidNote": "This is a paid app. It is held (installed, running nothing) until the store confirms its license, and checked again every day.",
+      "keyFromStore": "The store's link carries a license key ({prefix}). Leave the box empty to use it.",
+      "keyOther": "Another license key (optional)",
+      "held": "The app is installed but held: its license is {status}. Its page says why and takes a new key.",
+      "upgradeFrom": "Installed {from}, from {fromSource} → this link {to}, from {toSource}",
+      "sourceStore": "the store {store} ({repo})",
+      "sourceDirect": "GitHub directly, without a store ({repo})",
+      "sourceOther": "an upload or an address, without a store ({repo})"
+    },
+    "license": {
+      "title": "License",
+      "key": "License key",
+      "status": {
+        "free": "free",
+        "valid": "valid",
+        "grace": "valid (store not reachable)",
+        "grace_expired": "grace ended",
+        "missing": "no key",
+        "unverified": "not confirmed yet",
+        "invalid": "invalid",
+        "revoked": "revoked",
+        "expired": "expired",
+        "seats_exhausted": "no seats left",
+        "wrong_app": "for another app"
+      },
+      "verifyNow": "Verify now",
+      "verified": "The store was asked.",
+      "keySaved": "The key was saved and checked.",
+      "heldNote": "The app is held: its license is {status}. It stays installed with its settings and records, and runs nothing until the license holds again.",
+      "graceNote": "The store could not be asked. The last valid answer holds until {until}.",
+      "storeUntrusted": "{store} is no longer trusted here, so the license cannot be checked. Open an install link from that store to trust it again.",
+      "licensee": "Licensed to",
+      "seats": "Seats",
+      "seatsOf": "{used} of {total} in use",
+      "validUntil": "Valid until",
+      "updatesUntil": "Updates until",
+      "checkedAt": "Last checked",
+      "nextCheck": "Next check by",
+      "store": "Store",
+      "lastError": "Last check",
+      "changeKey": "Replace the key",
+      "enterKey": "Enter the license key"
+    },
+    "stores": {
+      "title": "Trusted stores",
+      "intro": "Install links and license answers are accepted only from these stores, signed with these keys. A store is trusted from its own install link.",
+      "empty": "No store is trusted yet.",
+      "configured": "Configured (FILEX_APP_STORE_URLS)",
+      "trustedBy": "Trusted by {who} on {when}",
+      "remove": "Stop trusting",
+      "confirmRemove": "Stop trusting {store}? Its install links will be refused, and the licenses it issued cannot be checked any more."
+    },
+    "band": {
+      "heldTitle": "A paid app is held because its license does not hold",
+      "graceTitle": "The store could not be asked about a paid app's license; it runs on its grace"
+    },
+    "err": {
+      "store_invalid": "That is not a store address filex talks to: a store is reached over https at a public address.",
+      "store_not_allowed": "This server does not allow this store: FILEX_APP_STORE_URLS is set, so install links and licenses are taken only from the stores it lists (none, when it is empty), and no other store is trusted, not even on first use. The operator adds the store there.",
+      "store_key_not_configured": "This store is configured on the server (FILEX_APP_STORE_URLS), but it signed with a key FILEX_APP_STORE_KEYS does not list. The operator adds the key.",
+      "store_unreachable": "The store could not be reached. Try the link again in a moment.",
+      "store_bad_answer": "The store answered something filex does not take: an answer it cannot read, a redirect (a store's API is asked without following one), or a time more than a day away from this server's clock - check the server's clock.",
+      "store_signature_invalid": "The link's signature does not verify against the keys this store was trusted with. Nothing was installed.",
+      "intent_unknown": "The store does not know this install link.",
+      "intent_gone": "This install link was used already, or it has expired. Press Install in the store again.",
+      "intent_expired": "This install link has expired. Press Install in the store again.",
+      "intent_used": "This install link was already used on this filex.",
+      "intent_invalid": "The install link is not one filex can act on: something a link must carry is missing or malformed (the filex it was made for, the commit, the manifest's hash). Press Install in the store again; if it happens again, the store's links need fixing.",
+      "intent_pin_mismatch": "What the app's repository serves is not what the store approved ({fields}). Nothing was installed.",
+      "intent_pin_mismatch_commit": "The release's tag no longer serves what the commit the store approved serves: the repository moved it ({fields}). Nothing was installed.",
+      "intent_wrong_instance": "This install link was made for another filex ({link}); this one is {here}. Press Install in the store again and give it this filex's address.",
+      "intent_wrong_instance_public_url": "This filex's FILEX_PUBLIC_URL is not an address store links can be held to (an http or https address with a host, and no user name, query or fragment), so no store link is taken until the operator fixes it.",
+      "store_source_changed": "The installed version ({version}) came from {installed}; this link comes from {link}. A store link never moves an app to another store or repository, nor its license key. Remove the installed app first (that deletes its settings and what it kept), then open the link again.",
+      "store_source_changed_direct": "The installed version ({version}) was installed straight from its repository ({repo}), not from a store. The paid link of {store} does not take an installed app under its license: to move to the store's paid version, remove the installed app first (that deletes its settings and what it kept), then open the link again.",
+      "intent_version_rollback": "{installed} is installed; the link is for {link}, which is not newer. A store link installs or upgrades, never goes back.",
+      "intent_session_unknown": "This review is no longer open: it was installed or closed already, or it timed out. Open the store's install link again.",
+      "license_key_invalid": "That license key cannot be used: 4 to 512 characters, no spaces (and the server needs FILEX_SECRET_KEY to keep it)."
+    },
+    "malformed": "This address is not a store's install link filex can read. Open the store's Install link again.",
+    "framed": "A store's install link cannot be used inside a frame. Open it in its own browser tab."
   }
 }

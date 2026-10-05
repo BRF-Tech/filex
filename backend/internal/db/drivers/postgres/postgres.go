@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -84,6 +83,14 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	// Rows deleted where they stood (issue #74), written once in internal/db.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// What is at and below a folder (00083), written once in internal/db.
+	// nodes.path has the database's collation here, so the byte range a
+	// subtree is has to be asked for in "C"; and the index holds the first
+	// 512 characters of path, not path, so that expression - the migration's
+	// own - is what the range enters it by.
+	s.NodesUnderSQL = &db.NodesUnderSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime, Columns: nodeColumnList,
+		Scan: func(r db.RowScanner) (*model.Node, error) { return scanNode(r) },
+		Path: `path COLLATE "C"`, Key: func(of string) string { return `left(` + of + `, 512) COLLATE "C"` }}
 	// Plugin install requests (00070), written once in internal/db.
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// Sign-in attempt counters (00072), written once in internal/db.
@@ -100,6 +107,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.OIDCIdentitySQL = &db.OIDCIdentitySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, GetUser: s.GetUser}
 	// Encryption requests (00080), written once in internal/db.
 	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// The app store's state (00081), written once in internal/db.
+	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	return s
 }
 
@@ -124,8 +133,13 @@ type Store struct {
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
 	// node_unavailable_sql.go, migration 00078).
 	*db.NodeUnavailableSQL
+	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,
+	// HasLiveNodesUnder (internal/db nodes_under_sql.go, migration 00083).
+	*db.NodesUnderSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
+	// The app store's state (internal/db app_store_sql.go, migration 00081).
+	*db.AppStoreSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
 	// The group methods (internal/db group_sql.go, migration 00074).
@@ -419,58 +433,6 @@ func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trash
 		` FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL`+
 		` AND (path=$2 OR path=$3 OR path LIKE $4 OR path LIKE $5) ORDER BY id`,
 		storageID, slashed, bare, slashed+"/%", bare+"/%")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-// treeSpellings returns the two spellings a row's path can carry for dir —
-// "/a/b" and "a/b" — or ok=false for the storage root, which is never a
-// subtree.
-func treeSpellings(dir string) (slashed, bare string, ok bool) {
-	bare = strings.Trim(path.Clean("/"+strings.Trim(dir, "/")), "/")
-	if bare == "" || bare == "." {
-		return "", "", false
-	}
-	return "/" + bare, bare, true
-}
-
-// belowClause matches every row strictly below a directory, in both
-// spellings, exactly; its placeholders start at $n and take the four
-// arguments belowArgs returns. See the SQLite store for why the bound is a
-// rune count and why this is not LIKE.
-func belowClause(n int) string {
-	return fmt.Sprintf(`(SUBSTR(path,1,$%d)=$%d OR SUBSTR(path,1,$%d)=$%d)`, n, n+1, n+2, n+3)
-}
-
-func belowArgs(slashed, bare string) []any {
-	return []any{
-		utf8.RuneCountInString(slashed + "/"), slashed + "/",
-		utf8.RuneCountInString(bare + "/"), bare + "/",
-	}
-}
-
-func (s *Store) ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	q := `SELECT ` + nodeColumns() + ` FROM nodes WHERE storage_id=$1 AND (path=$2 OR path=$3 OR ` + belowClause(4) + `)`
-	if !includeDeleted {
-		q += ` AND deleted_at IS NULL`
-	}
-	args := append([]any{storageID, slashed, bare}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, q+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -960,41 +922,6 @@ func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time
 	return out, rows.Err()
 }
 
-func (s *Store) ListStaleNodesUnder(ctx context.Context, storageID int64, dir string, before time.Time) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	args := append([]any{storageID, before}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, `SELECT `+nodeColumns()+
-		` FROM nodes WHERE storage_id=$1 AND seen_at < $2 AND deleted_at IS NULL AND `+belowClause(3), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return 0, nil
-	}
-	var n int64
-	args := append([]any{storageID}, belowArgs(slashed, bare)...)
-	err := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL AND `+belowClause(2), args...).Scan(&n)
-	return n, err
-}
-
 func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64, error) {
 	var n int64
 	err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE storage_id=$1 AND deleted_at IS NULL`, storageID).Scan(&n)
@@ -1132,7 +1059,8 @@ const userCols = `id, email, COALESCE(display_name,''), COALESCE(password_hash,'
 	`COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,FALSE), ` +
 	`COALESCE(totp_recovery_codes_json::text,'[]'), locale, timezone, created_at, updated_at, last_login_at, ` +
 	`provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,TRUE), ` +
-	`COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,'')`
+	`COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,''), ` +
+	`COALESCE(auth_source,'local'), COALESCE(auth_directory,''), COALESCE(directory_id,''), COALESCE(admin_by_group,FALSE)`
 
 func (s *Store) CreateUser(ctx context.Context, email, hash, role, locale, tz string) (*model.User, error) {
 	// New users default to the always-present "default" provider (the
@@ -1154,6 +1082,53 @@ func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, o
 	}
 	// A group of the tenant they left no longer holds them (migration 00074).
 	return s.DropForeignMemberships(ctx, userID, providerID)
+}
+
+// SetUserAuthDirectory records which LDAP directory made an account.
+func (s *Store) SetUserAuthDirectory(ctx context.Context, userID int64, directory string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_directory=$1, updated_at=NOW() WHERE id=$2`, directory, userID)
+	return err
+}
+
+// GetUserByDirectoryID finds the account a directory entry's permanent id is
+// recorded on.
+func (s *Store) GetUserByDirectoryID(ctx context.Context, directoryID string) (*model.User, error) {
+	if directoryID == "" {
+		return nil, sql.ErrNoRows
+	}
+	return scanUser(s.conn(ctx).QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE directory_id=$1`, directoryID))
+}
+
+// SetUserDirectoryID records a directory account's permanent id.
+func (s *Store) SetUserDirectoryID(ctx context.Context, userID int64, directoryID string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET directory_id=$1, updated_at=NOW() WHERE id=$2`, directoryID, userID)
+	return err
+}
+
+// SetUserEnabledByDirectory switches an account on or off for directory sync,
+// recording that the directory made the change (model.DisabledByDirectory).
+func (s *Store) SetUserEnabledByDirectory(ctx context.Context, userID int64, enabled bool) error {
+	if enabled {
+		_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=TRUE, disabled_reason=NULL WHERE id=$1`, userID)
+		return err
+	}
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=FALSE, disabled_reason=$1 WHERE id=$2`, model.DisabledByDirectory, userID)
+	return err
+}
+
+// DeleteSettingsWithPrefix removes every setting whose key starts with prefix.
+func (s *Store) DeleteSettingsWithPrefix(ctx context.Context, prefix string) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM settings WHERE substr(setting_key, 1, $1) = $2`, len(prefix), prefix)
+	return err
+}
+
+// SetUserAuthSource records where an account comes from (migration 00084).
+func (s *Store) SetUserAuthSource(ctx context.Context, userID int64, source string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_source=$1, updated_at=NOW() WHERE id=$2`, source, userID)
+	return err
 }
 
 func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
@@ -1239,7 +1214,13 @@ func (s *Store) UpdateUserLocale(ctx context.Context, id int64, locale, tz strin
 }
 
 func (s *Store) UpdateUserRole(ctx context.Context, id int64, role string) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=$1, updated_at=NOW() WHERE id=$2`, role, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=$1, admin_by_group=FALSE, updated_at=NOW() WHERE id=$2`, role, id)
+	return err
+}
+
+// SetUserAdminByGroup makes the account an administrator through a group.
+func (s *Store) SetUserAdminByGroup(ctx context.Context, id int64) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role='admin', admin_by_group=TRUE, updated_at=NOW() WHERE id=$1`, id)
 	return err
 }
 
@@ -1768,14 +1749,14 @@ func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
 // note on the SQLite twin. ⚠ COALESCE on state_json/files_json: 00046 adds
 // them NULLABLE (MySQL cannot default a TEXT column) and a NULL scanned into a
 // Go string fails inside the driver.
-const shareCols = `id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings, plugin_id, COALESCE(page_id,''), COALESCE(subject,''), COALESCE(state_json,''), COALESCE(files_json,''), pin_fails, locked_until, COALESCE(pin_enc,''), visit_count, COALESCE(purpose_json,'')`
+const shareCols = `id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings, plugin_id, COALESCE(page_id,''), COALESCE(subject,''), COALESCE(state_json,''), COALESCE(files_json,''), pin_fails, locked_until, COALESCE(pin_enc,''), visit_count, COALESCE(purpose_json,''), COALESCE(app_root,'')`
 
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
 	var id int64
 	err := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO shares (node_id, token, pin_hash, pin_enc, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings, plugin_id, page_id, subject, state_json, files_json, purpose_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+		`INSERT INTO shares (node_id, token, pin_hash, pin_enc, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings, plugin_id, page_id, subject, state_json, files_json, purpose_json, app_root) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`,
 		sh.NodeID, sh.Token, sh.PinHash, sh.PinEnc, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, sh.CreatedVia, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings,
-		sh.PluginID, sh.PageID, sh.Subject, sh.StateJSON, sh.FilesJSON, sh.PurposeJSON).Scan(&id)
+		sh.PluginID, sh.PageID, sh.Subject, sh.StateJSON, sh.FilesJSON, sh.PurposeJSON, sh.AppRoot).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -2533,7 +2514,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 	u := &model.User{}
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason); err != nil {
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &u.TOTPEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &u.Enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason, &u.AuthSource, &u.AuthDirectory, &u.DirectoryID, &u.AdminByGroup); err != nil {
 		return nil, err
 	}
 	u.SSOLinked = u.OIDCSubject != "" || u.OIDCIssuer != ""
@@ -2550,7 +2531,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 func scanShare(r rowScanner) (*model.Share, error) {
 	sh := &model.Share{}
 	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedVia, &sh.CreatedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount, &sh.DropSettings,
-		&sh.PluginID, &sh.PageID, &sh.Subject, &sh.StateJSON, &sh.FilesJSON, &sh.PinFails, &sh.LockedUntil, &sh.PinEnc, &sh.VisitCount, &sh.PurposeJSON); err != nil {
+		&sh.PluginID, &sh.PageID, &sh.Subject, &sh.StateJSON, &sh.FilesJSON, &sh.PinFails, &sh.LockedUntil, &sh.PinEnc, &sh.VisitCount, &sh.PurposeJSON, &sh.AppRoot); err != nil {
 		return nil, err
 	}
 	sh.HasPin = sh.PinHash != ""
@@ -5172,9 +5153,12 @@ func (s *Store) DestroyAppPluginSigningKey(ctx context.Context, id string) error
 
 // ── app_plugin_locks / state keys (migration 00045) ────────────────────
 
-func (s *Store) ListAppPluginStateFiles(ctx context.Context, pluginID int64, key string, limit int) ([]*model.AppPluginStateFile, error) {
+func (s *Store) ListAppPluginStateFiles(ctx context.Context, pluginID int64, key string, limit, offset int) ([]*model.AppPluginStateFile, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	// LEFT JOIN, not JOIN: the file may not be indexed yet, and a document
 	// recorded seconds after upload still belongs in the list. A node row
@@ -5189,8 +5173,8 @@ func (s *Store) ListAppPluginStateFiles(ctx context.Context, pluginID int64, key
 		q += ` AND st.key = $2`
 		args = append(args, key)
 	}
-	q += fmt.Sprintf(` ORDER BY st.rel LIMIT $%d`, len(args)+1)
-	args = append(args, limit)
+	q += fmt.Sprintf(` ORDER BY st.rel, st.storage_id, st.key LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	args = append(args, limit, offset)
 	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err

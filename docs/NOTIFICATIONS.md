@@ -179,6 +179,10 @@ user action that produced the event returns immediately.
 - **No destination:** when there is neither a `FILEX_WEBHOOK_URL` nor any
   enabled target matching the event, the row is marked `skipped` (the in-app
   bell row still exists). A malformed URL fails immediately without retrying.
+- **Shutting down:** an event recorded after filex began to stop is not
+  delivered: the row is marked `skipped`, `webhook_error` says `service stopped
+  before delivery`. Deliveries already under way are cancelled, and stopping
+  waits for them to return.
 
 Each notification row tracks this lifecycle in `webhook_status`
 (`pending → sent | failed | skipped`) and `webhook_error`, both visible in the
@@ -194,7 +198,7 @@ each target additionally persists its own last delivery - final HTTP status
 **Canonical events** filex emits itself:
 
 ⚠ Read the **Emitted** column before you build an alert on one of these. Seven
-of the twenty operational alert ids below are declared in
+of the twenty-one operational alert ids below are declared in
 `internal/notify/event.go` and **no code emits them** - the id is accepted by a
 webhook target's allow-list, the target saves, and the event never arrives. A
 subscription that can never fire looks exactly like a subsystem that never has
@@ -215,6 +219,7 @@ a problem, which is the worst way to learn your monitoring was never wired.
 | `ldap_legacy_account_elsewhere` | warning | yes | Multi-tenant: a directory sign-in found the account an older filex opened under the same bare login name in **another** tenant. It is left alone; the person gets the first sign-in rule in their own tenant ([LDAP.md](LDAP.md#accounts-an-older-filex-opened-under-the-bare-name)). **Once** per old account. Only a platform administrator's bell carries it, never a tenant administrator's. Meta: `provider`, `account`, `account_tenant`, `login_tenant`, `title_<lang>`, `body_<lang>`. |
 | `tenant_domain_suspended` | warning | yes | Multi-tenant: a tenant's own domain no longer has its CNAME to the tenant's platform subdomain, so it stopped routing; it is kept and comes back with the record. Told to that tenant's administrators, each in their own bell ([TENANT-ADMIN.md](TENANT-ADMIN.md#bringing-a-domain)). |
 | `tenant_domain_restored` | info | yes | The CNAME of a suspended own domain is back, and the domain routes again. |
+| `permission_gaps` | warning | yes | Saved roles allow adding files but not encrypting, as a save on 0.50 or older leaves them; Admin → Roles lists them with one click to give the permission back ([PERMISSIONS.md → Things to know](PERMISSIONS.md#things-to-know)). **Once** per new one: a broadcast the administrators nobody confines read, and one notification each to a tenant's administrators about that tenant's own roles. Meta: `count`, `title_<lang>`, `body_<lang>`. |
 | `disk_full` | critical | **no** ⚠ | The host disk is out of space. |
 | `update_available` | info | yes | A newer release was published. Fires **once** per release - the announcement is persisted, so a restart loop cannot turn it into a stream. |
 | `update_applied` | info | **no** ⚠ | A self-upgrade replaced the binary. |
@@ -365,6 +370,7 @@ otherwise hit:
 | `update_available` · `update_applied` | `none` | Not about a file. |
 | `auth_provider_down` · `ldap_legacy_account_elsewhere` | `none` | About sign-in, not a file. |
 | `tenant_domain_suspended` · `tenant_domain_restored` | `none` | About a tenant's address, not a file. |
+| `permission_gaps` | `none` | About roles, which Admin → Roles lists. |
 | `app_updated` · `app_update_available` · `app_update_needs_approval` · `app_update_failed` | `none` | About an app, which is managed on the admin Apps tab. |
 | `replica_fail` · `replica_fail_spike` · `replica_reconcile_done` · `replica_status_report` · `primary_read_fail` | **`none` - honestly cannot** | These carry a path and nothing else (`internal/replica/`): a bare path does not name a storage, and guessing which storage it belongs to would send a click into another tenant's folder whenever two storages share a folder name. |
 | `quota_near_full` · `quota_full` · `queue_stuck` · `auth_fail_spike` · `disk_full` | `none` | Declared but **not emitted** by any code - see the Emitted column above. |
@@ -632,7 +638,8 @@ and marking it changes the caller's bell and nobody else's:
 
 ⚠ **Operator alarms reach administrators only.** `update_available`,
 `update_applied`, the four `app_update*` notices, the replica, quota,
-queue, auth and disk alarms and `ldap_legacy_account_elsewhere` are
+queue, auth and disk alarms, `ldap_legacy_account_elsewhere` and
+`permission_gaps` are
 recorded as broadcasts, but a non-administrator's list and unread count leave
 them out - they are about a server that person cannot touch (a plain user's
 bell used to read "filex v0.42.2 is available - this server runs 0.1.0-dev").
@@ -793,8 +800,10 @@ with **no** muted events. `PATCH` replaces the whole preference (send the full
 
 ### The webhook never fires
 Check, in order:
-1. **Any destination at all?** A row shows `webhook_status: skipped` only when
-   `FILEX_WEBHOOK_URL` is empty **and** no enabled target matched the event -
+1. **Any destination at all?** A row shows `webhook_status: skipped` when
+   `FILEX_WEBHOOK_URL` is empty **and** no enabled target matched the event
+   (otherwise `webhook_error` says why: the server was stopping, or the event
+   went out with another row) -
    so check the target's `enabled` flag and its event allow-list too, not just
    the env var. Set the URL (env, or `PATCH …/webhook-config`) or add a target
    in **Admin → Webhooks**.

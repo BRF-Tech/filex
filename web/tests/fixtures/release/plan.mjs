@@ -92,7 +92,14 @@ export default function plan({ version, tag }) {
     pretag: [{ name: 'the fixture test suite', cmd: redWhen('FIXTURE_PRETAG_FAIL') }],
     exportGates: [{ name: 'the fixture export gate', cmd: redWhen('FIXTURE_EXPORT_FAIL') }],
     github: github(),
-    gateWait: { pollMs: 20, timeoutMs: 400, appearMs: 60_000 },
+    // ⚠ The gate gives up waiting by the clock, and one of its polls spawns
+    // git several times (this stand-in reads the public remote's main). On
+    // Windows a `git ls-remote` costs ~200 ms, so a 400 ms limit ran out
+    // during the FIRST poll - the one that starts the dry run - and every
+    // case that expects the gate to finish read "GitHub has not finished"
+    // instead (0.52.0 pretag, 2026-10-05). Long enough for any machine; the
+    // case that wants the wait to run out asks for a short one.
+    gateWait: { pollMs: 20, timeoutMs: Number(env.FIXTURE_GATE_TIMEOUT_MS || 120_000), appearMs: 120_000 },
     published: [{ name: 'the fixture release workflow published', cmd: ['node', '-e', 'process.exit(process.env.FIXTURE_CI_DONE ? 0 : 1)'] }],
     deployChecklist: ['deploy the fixture ({tag})'],
     deployed: [

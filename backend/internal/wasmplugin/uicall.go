@@ -56,6 +56,10 @@ func (r *Registry) UICall(ctx context.Context, plugin, view string, storageID in
 		return nil, err
 	}
 	defer release()
+	// Asked again with the slot held (runJob says why).
+	if c, err = p.running(); err != nil {
+		return nil, err
+	}
 	scope, err := r.screenScope(ctx, p, storageID, rels, actor, locale)
 	if err != nil {
 		return nil, err

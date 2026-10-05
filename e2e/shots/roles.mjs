@@ -19,6 +19,10 @@
 //   folder-access-1440.png  Admin → Folder access (the page that used to be
 //                           called Permissions): every per-folder grant — who,
 //                           which storage, which path, which level
+//   roles-gaps-1280.png     Admin → Roles at 1280 with the warning above the
+//                           table (0.52.0, PR #86): the built-in User role and
+//                           a custom "Drop box" role saved the way 0.50's pages
+//                           wrote them, each with Give back and Dismiss
 //
 // ⚠ No app is installed here, on purpose: this scene runs in CI too. What an
 // app adds to these screens (the Apps group on a role and on a person) is
@@ -223,7 +227,39 @@ async function main() {
     await page.mouse.move(4, 4);
     await sleep(600);
     await shot(page, SET, 'folder-access-1440.png');
-    log('roles, a role editor with its Turkish name, and folder access');
+
+    // 4. A role that may have lost a permission (0.52.0, PR #86). Taken last:
+    // it changes the User role. Both lists are written the way 0.50's pages
+    // wrote them - the User role's list without files.encrypt, a folder part
+    // that allows files.create - through the API without `shown`, as
+    // e2e/tests/203 does, so Admin → Roles points both out.
+    const builtin = await admin.json('/api/admin/roles/builtin');
+    await admin.json('/api/admin/roles/builtin', {
+      method: 'PUT',
+      body: JSON.stringify({ permissions: builtin.permissions.filter((k) => k !== 'files.encrypt') }),
+    });
+    await admin.post('/api/admin/roles', {
+      name: 'Drop box',
+      description: 'Partners leave files in Drop and see nothing else',
+      enabled: true,
+      permissions: ['files.download'],
+      effects: { 'files.create': 'allow' },
+      conditions: { paths: ['Drop'] },
+    });
+    await sleep(1000);
+    await admin.post('/api/notifications/read-all', {});
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(`${inst.url}/admin/roles`);
+    const gaps = page.getByTestId('role-gaps');
+    await gaps.waitFor({ timeout: 20_000 });
+    await page.getByTestId('roles-list').waitFor({ timeout: 15_000 });
+    await mustSay(gaps, 'the warning above the table', [
+      '2 roles may have lost a permission', '0.50', 'User', 'Drop box', 'Give back', 'Dismiss, it was on purpose',
+    ]);
+    await page.mouse.move(4, 4);
+    await sleep(600);
+    await shot(page, SET, 'roles-gaps-1280.png');
+    log('roles, a role editor with its Turkish name, folder access, and the warning about a lost permission');
     await ctx.close();
   } finally {
     await browser.close();

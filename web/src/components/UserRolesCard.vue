@@ -19,6 +19,8 @@
  * and leave the person's app exceptions exactly as they are, for everybody:
  * the app decisions are cleared in their own group ("Reset to defaults").
  * Writing the catalogue's alone used to wipe them silently (0.49 docs review).
+ * The same holds for an exception a later filex wrote that this one does not
+ * know (lib/foreignPermissions): the page cannot show it, so it keeps it.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -36,6 +38,7 @@ import { useToastStore } from '@/stores/toast';
 import { useAuthStore } from '@/stores/auth';
 import { permissionLimitLines } from '@/lib/permissionLimits';
 import { isAppKey, splitOverrides } from '@/lib/appPermissions';
+import { isForeignPerm } from '@/lib/foreignPermissions';
 import { roleName, type NamedRole } from '@/lib/roleName';
 import PermissionGrid from '@/components/PermissionGrid.vue';
 import Button from '@/components/ui/Button.vue';
@@ -78,10 +81,15 @@ const appOverrides = computed({
 const appDefaults = computed<Record<string, boolean>>(() =>
   Object.fromEntries((data.value?.effective.apps ?? []).map((a) => [a.key, a.inherited.allowed])),
 );
-/** What "Clear exceptions" takes away: the catalogue's, never an app's. */
-const clearable = computed(() => Object.keys(overrides.value).filter((k) => !isAppKey(k)));
+/** What "Clear exceptions" takes away: the catalogue's, never an app's, and
+ *  never a later version's this page cannot show (lib/foreignPermissions). */
+const clearable = computed(() =>
+  Object.keys(overrides.value).filter((k) => !isAppKey(k) && !isForeignPerm(k, catalogue.value)),
+);
 function clearExceptions() {
-  overrides.value = { ...appOverrides.value };
+  overrides.value = Object.fromEntries(
+    Object.entries(overrides.value).filter(([k]) => isAppKey(k) || isForeignPerm(k, catalogue.value)),
+  );
 }
 const locked = computed<PermKey[]>(() =>
   props.role === 'viewer' ? (catalogue.value?.permissions ?? []).filter((d) => d.viewer_capped).map((d) => d.key) : [],
@@ -129,8 +137,12 @@ async function save() {
 function applyPreset(name: string) {
   const preset = catalogue.value?.presets.find((p) => p.name === name);
   if (!preset || !catalogue.value) return;
-  // A preset is the catalogue's; the person's app exceptions stay as they are.
-  const next: Record<PermKey, PermEffect> = { ...appOverrides.value };
+  // A preset is the catalogue's; the person's app exceptions stay as they
+  // are, and so does a later version's exception this page cannot show.
+  const cat = catalogue.value;
+  const next: Record<PermKey, PermEffect> = Object.fromEntries(
+    Object.entries(overrides.value).filter(([k]) => isAppKey(k) || isForeignPerm(k, cat)),
+  );
   for (const d of catalogue.value.permissions) {
     if (d.role_only || locked.value.includes(d.key)) continue;
     next[d.key] = preset.permissions.includes(d.key) ? 'allow' : 'deny';

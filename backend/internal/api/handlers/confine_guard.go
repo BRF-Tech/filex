@@ -22,6 +22,7 @@ package handlers
 
 import (
 	"context"
+	"io"
 	"net/http"
 
 	"github.com/brf-tech/filex/backend/internal/confine"
@@ -44,6 +45,20 @@ func rootAllows(ctx context.Context, store db.Store, storageID int64, rel string
 	return root.Within(rootStorageName(ctx, store, storageID), rel)
 }
 
+// rootAllowsNamed is rootAllows for a path that names its storage
+// (`<adapter>://<rel>`) and has not been resolved to a row yet. A door asks it
+// FIRST, before the storage, the folder or the storage's read-only flag: a
+// path outside the root then gets one answer whether or not any of those
+// exist, instead of an answer that tells them apart (filex #155). Inert for an
+// unconfined caller.
+func rootAllowsNamed(ctx context.Context, adapter, rel string) bool {
+	root, confined := callerRoot(ctx)
+	if !confined {
+		return true
+	}
+	return root.Within(adapter, rel)
+}
+
 // rootAllowsIn is rootAllows for a storage row the caller already holds (no
 // lookup). Inert for an unconfined caller; a nil storage is refused.
 func rootAllowsIn(ctx context.Context, s *model.Storage, rel string) bool {
@@ -55,6 +70,32 @@ func rootAllowsIn(ctx context.Context, s *model.Storage, rel string) bool {
 		return false
 	}
 	return root.Within(s.Name, rel)
+}
+
+// confinedBody reads a request body a handler decodes as JSON (at most limit
+// bytes) and, for a caller confined to a folder, holds it to the root exactly
+// as confine.Middleware holds a body labelled JSON, whatever Content-Type the
+// request has. A path outside the root is refused with the middleware's own
+// answer (confine.Refuse): the same 403, byte for byte, as the JSON body gets,
+// before anything is asked about the storage or the path - so neither the
+// shape of the body nor what lies outside the root changes the answer. Where
+// it refused, ok is false and the answer is written.
+func confinedBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return nil, false
+	}
+	root, confined := callerRoot(r.Context())
+	if !confined {
+		return body, true
+	}
+	held, err := confine.HoldBody(root, body)
+	if err != nil {
+		confine.Refuse(w)
+		return nil, false
+	}
+	return held, true
 }
 
 // refuseOutsideRoot writes the 403 a path outside the token's root gets (the
@@ -92,10 +133,7 @@ func confinedPath(ctx context.Context, raw string) string {
 // that middleware — the token's own `root:` scope (confine.RootFromToken, the
 // helper aiOps uses). ok=false for an unconfined caller.
 func callerRoot(ctx context.Context) (confine.Root, bool) {
-	if root, ok := confine.RootFrom(ctx); ok {
-		return root, true
-	}
-	return confine.RootFromToken(ctx)
+	return confine.CallerRoot(ctx)
 }
 
 // rootStorageName resolves a storage id to its adapter name for a confinement

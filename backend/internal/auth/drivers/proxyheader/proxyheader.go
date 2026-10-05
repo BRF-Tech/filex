@@ -244,6 +244,9 @@ func (d *Driver) Authenticate(r *http.Request) (*model.User, error) {
 			user = auth.RecordSignInGroups(ctx, d.store, "proxyheader", user, groups, created)
 		}
 	}
+	// An account from before migration 00084 with no password here is the
+	// proxy's (a no-op once labelled, so cheap on every request).
+	auth.ClaimSource(ctx, d.store, user, model.AuthSourceProxy)
 	_ = d.store.TouchLastLogin(ctx, user.ID)
 	return user, nil
 }

@@ -219,7 +219,7 @@ bir grup çalışması paketi). filex aradaki boşluğu hedefler:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; 43 MB slim / 511 MB w/ thumbnails)       │
+│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -573,12 +573,12 @@ değil; Windows kurulum programında bir SmartScreen uyarısı bekleyin. Ayrınt
 [docs/DESKTOP.md](docs/DESKTOP.md). Yalnızca CLI: `brew install brf-tech/filex/filex`
 ([docs/CLI.md](docs/CLI.md); CLI'nin winget paketi, `BRFTech.filex`, aynı incelemede).
 
-Linux'ta uygulama, Chromium'un yalıtım alanı olmadan asla çalışmaz. `.deb` ve `.rpm`
-paketleri hiçbir şey gerektirmez; Ubuntu 23.10 ve sonrasında AppImage tek seferlik bir
-AppArmor profili ister, Snap ise, Snap Store onu kendiliğinden bağlayana kadar
-`sudo snap connect filex-app:browser-sandbox` komutunu ister - iki durumda da uygulama
-bunu söyler ve atılacak adımı gösterir
-([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)).
+Linux'ta `.deb`, `.rpm` ve AppImage, Chromium'un yalıtım alanı olmadan asla çalışmaz.
+`.deb` ve `.rpm` paketleri hiçbir şey gerektirmez; Ubuntu 23.10 ve sonrasında AppImage
+tek seferlik bir AppArmor profili ister, uygulama da bunu söyler ve atılacak adımı
+gösterir ([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)). Snap ise
+Chromium'un yalıtım alanı olmadan, snap'in katı kısıtlaması içinde çalışır ve o da
+hiçbir şey gerektirmez ([docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)).
 
 **ARM (arm64)** - onun için neler geliyor (her sürümde bunlar derlenir ve yayımlanmadan
 önce arm64 makinelerde çalıştırılır):
@@ -812,7 +812,7 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
 - **Kullanım ve maliyet** - filex sağlayıcınızın faturasını kendisi ölçmez; sağlayıcının zaten yazdığı raporu okur, normalleştirir ve düzenleyebileceğiniz bir tabloyla fiyatlandırır. Backblaze B2'nin günlük CSV'leri, filex'in zaten konuştuğu aynı S3 API'si üzerinden okunur; yani yeni bir bağımlılık da yeni bir kimlik bilgisi türü de yok. Ücretsiz kullanım hakları bir formüldeki sabitler değil, ayrı alanlardır ve sayfa, sağlayıcının hesap düzeyindeki satırını kova (bucket) başına satırlarından ayrı tutar - ikisini toplamak aynı işlemleri iki kez sayar; tam da kimsenin fark etmeyeceği kadar ([docs/USAGE.md](docs/USAGE.md)).
 - **Denetim kaydı** - her değişiklik, onu yapanla, entegrasyon kimliğiyle ve üst verisiyle birlikte kaydedilir.
 - **CLI istemcisi** - aynı ikili dosya, sunucu tarafında eklenti gerekmeden uzak bir sunucuya ulaşır (`filex client`, `filex sync`): depolar arasında kopyalama ve taşıma, çöp kutusu, sürümler, etiketler, uygulama işlemleri, arşivler ve bağlantılarınız, her sunucu işi sonuna kadar izlenerek; `filex client login --realm` komutu bir kiracıda oturum açar, `filex encrypt` komutu şifreli klasörler oluşturur ve kaydedilmiş bir oturum, kaydedildiği adresten başka hiçbir yere gönderilmez ([docs/CLI.md](docs/CLI.md)).
-- **Kendini günceller** - yama sürümleri kendiliğinden kurulur, ara sürümler tek tıkla yükseltme için duyurulur; paket yöneticisine ait bir kuruluma (Homebrew, winget, Snap, bir dağıtım paketi) ya da bir konteynere yeni sürümler ve onları alacak komut bildirilir, yönetim sayfası da yalnızca duyuracağını söyler ([docs/UPDATES.md](docs/UPDATES.md)).
+- **Kendini günceller** - ara sürümler tek tıkla yükseltme için duyurulur, yama sürümleri ise siz izin verince kendiliğinden kurulur (`AUTO_UPGRADE=true`; varsayılan olarak filex yalnızca denetler ve size bildirir); paket yöneticisine ait bir kuruluma (Homebrew, winget, Snap, bir dağıtım paketi) ya da bir konteynere yeni sürümler ve onları alacak komut bildirilir, yönetim sayfası da yalnızca duyuracağını söyler ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Tek ikili dosya** - goreleaser matrisi: linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **i18n** - İngilizce + Türkçe hazır gelir, **herkese açık bağlantılar dâhil**: bir
   paylaşım bağlantısı, bir PIN ekranı, bir dosya isteği sayfası ya da bir uygulamanın

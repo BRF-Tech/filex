@@ -15,7 +15,7 @@ before.
 > the roles are **Admin → Roles**. (Before 0.49 the grants page was called
 > *Permissions*.)
 
-![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](screenshots/v0.51.0/roles/folder-access-1440.png)
+![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](screenshots/v0.52.0/roles/folder-access-1440.png)
 
 > A grant can also be given to a **group** - every member holds it, the
 > highest covering level still wins and the account ceiling still caps it.

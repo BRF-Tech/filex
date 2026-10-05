@@ -38,6 +38,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { syncAndWait } from './fixtures.mjs';
 import { addLocalStorage, bootInstance, client, dismissToasts, documentServer, log, mustSay, newContext, shot, signIn, sleep, uploadTree } from './scene.mjs';
 
 const SET = 'csvoffice';
@@ -125,12 +126,7 @@ async function main() {
     await uploadTree(admin, 'demo://', seed);
     // A first sync to its end: until then the folder carries "This storage's
     // first sync has not finished", which is not what these pictures are about.
-    await admin.post(`/api/admin/storages/${demo.id}/sync`, {});
-    for (let i = 0; i < 120; i++) {
-      const runs = await admin.json(`/api/admin/storages/${demo.id}/sync-runs?limit=3`);
-      if ((runs.entries ?? []).some((r) => r.finished_at)) break;
-      await sleep(250);
-    }
+    await syncAndWait((_token, path, init) => admin.call(path, init), null, demo.id);
     await admin.post('/api/notifications/read-all', {});
 
     const ctx = await newContext(browser, { width: 1440, height: 900 });

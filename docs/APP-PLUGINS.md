@@ -76,11 +76,13 @@ converter (a p2r3/convert side-car behind `FILEX_CONVERT_URL`) was removed.
 | **Upload files** | the `.wasm` module and its `filex-app.json`, plus a detached signature when the instance requires one | Installs what you uploaded; the hash is recorded |
 | **From a URL** | the module's URL, the manifest's URL and the module's SHA-256 | The GitHub path with the two addresses spelled out |
 
-There is no marketplace. An app is a public repository whose root holds
-`filex-app.json`; that address is how it is found, shared and updated -
-installed from a repository or an address, an app **follows it**: filex says
-when a newer version is there, and an administrator approves it
-([Updates](#updates)). Nothing updates itself.
+An app is a public repository whose root holds `filex-app.json`; that
+address is how it is found, shared and updated - installed from a repository
+or an address, an app **follows it**: filex says when a newer version is
+there, and an administrator approves it ([Updates](#updates)). Nothing updates
+itself. An [app store](#installing-from-a-store) is a catalogue that points at
+a release of such a repository, vouches for its bytes and, for a paid app,
+issues its license; it installs nothing either.
 
 ⚠ **An app is downloaded from a public address** (0.50.0). Every download - the
 manifest, the module and the interface bundle it names, for an install, an
@@ -110,7 +112,7 @@ opens this machine (and nothing else) to the downloads -
 5. The wizard ends on *"The app is installed and running."* The app's rows are
    in the file menu from the next time it is opened.
 
-![The install wizard stopped at the permission review](screenshots/v0.51.0/apps/apps-install-review-1440.png)
+![The install wizard stopped at the permission review](screenshots/v0.52.0/apps/apps-install-review-1440.png)
 
 ### The permission review
 
@@ -162,6 +164,250 @@ and an unsigned or badly signed module is refused at install and at upgrade.
 ⚠ A GitHub or URL install made through the wizard carries no detached
 signature, so on such an instance install with **Upload files** and paste the
 signature beside the module.
+
+## Installing from a store
+
+An **app store** is a catalogue of reviewed apps (the reference one is
+[filex Apps](https://apps.filex.sh)). Pressing **Install** on an app there
+asks for this filex's address and opens an **install link** on it:
+
+```
+https://files.example.com/admin/store-install#store=https%3A%2F%2Fapps.filex.sh&intent=<token>
+```
+
+The link only ever opens a **review**. Installing stays this filex's
+administrator's decision, exactly as for a repository typed into the wizard:
+the review is the same one, and nothing is installed until **Install** is
+pressed. What the link adds is that the store vouches for the app - which
+repository, which release, which bytes, which permissions - and that a paid
+app comes with its license.
+
+1. **Sign in.** The page is the admin panel's (`/admin/store-install`). Not
+   signed in - or signed out while the page was open - you go through the
+   sign-in and come back to it, whichever way you sign in (the password
+   form, LDAP or single sign-on): the link waits in that browser tab, and the
+   panel opens the page when an administrator's sign-in ends there. The token
+   travels in the address's *fragment* (after `#`), which a browser never
+   sends to a server; the page takes it off the address bar before anything
+   else runs - a second link opened in a tab already on the page too - and
+   keeps it in that browser tab only, for at most an hour - it is in no
+   history entry, no `?redirect=`, no single sign-on return address and no
+   server log. Somebody who is not an administrator is taken to their own
+   pages, the store is asked nothing and the tab keeps nothing of the link.
+   A fragment that is not exactly a store link is dropped and the page says
+   so: the two keys once each; the store an origin spelled in ASCII letters,
+   digits, dots and hyphens (`https://host[:port]`, no path, no user name -
+   plain `http://` passes the page and the server then takes it only for a
+   store on this machine, with `FILEX_PLUGIN_LOOPBACK_SOURCES=1` in
+   development); the token in the store's alphabet; 4 KiB at most. The page
+   also refuses to work inside a frame, on top of the `frame-ancestors`
+   header.
+2. **Trust the store** - the first time only ([Trusted stores](#trusted-stores)).
+3. **Read the review** - the install review, filled in from the link, marked
+   **From store &lt;origin&gt;**, with the repository and the release it
+   names. A paid app asks for its license key ([Paid apps](#paid-apps)).
+4. **Install**, or close the dialog. Either way the store is told how the link
+   ended (`installed` or `cancelled`), and the link is used up on this filex.
+
+![The install review opened from a store's link, marked From store](screenshots/v0.52.0/store/store-review-1440.png)
+
+### What filex checks before the review opens
+
+Each refusal is said in a sentence on the page, and nothing is installed:
+
+- **The store is trusted**, and the link is signed by one of its `index` keys
+  that filex pinned - not by its license key, not by a key it published later.
+- **The link is current**: not expired (a link lives minutes, at most a week),
+  not used here before (filex keeps every link it finished), and the store
+  still knows it (`410` when it was used or expired there).
+- **The link is for this store** (its `store` field) and names an app and a
+  release on GitHub (`repo`, `ref`).
+- **The repository serves what the store approved.** filex reads the app from
+  the repository at the commit the store approved (the tag must still serve
+  the same manifest) - the same download a GitHub install makes,
+  through the same [guarded client](#install-one) - and holds it to the
+  link's pins: the manifest's SHA-256, the module's and the interface's, the
+  app's name and version, and its declared permissions. A tag moved to other
+  bytes since the store reviewed it, or a release asset swapped, refuses the
+  review (*intent_pin_mismatch*, naming which pin differs).
+- **It installs or upgrades, never goes back.** An app of the same name that
+  is already installed is upgraded when the link names a newer version; the
+  same version or an older one is refused (*intent_version_rollback*) - an old
+  link kept and replayed cannot downgrade an app.
+
+**Install** reads the repository again and checks every pin again: what lands
+is what was reviewed, not what the source serves a minute later.
+
+### Trusted stores
+
+filex takes install links and license answers only from a store it
+**trusts**, and only signed with the keys it trusts that store with. There are
+two ways a store becomes trusted:
+
+- **By an administrator, on first use.** The first link from a store opens a
+  page that says the store is not trusted yet and shows its address and every
+  key it publishes (`<store>/v1/keys.json`) - its use (*Install links*,
+  *Licenses*) and its fingerprint (the SHA-256 of the key, in groups of four).
+  Compare them with what the store publishes on its own site, tick *I compared
+  these fingerprints…* and press **Trust this store**. Nothing from the link
+  is read before that. **Cancel** trusts nothing and tells the store nothing.
+- **By configuration.** [`FILEX_APP_STORE_URLS`](CONFIGURATION.md#storage-plugins)
+  lists stores trusted without asking, and `FILEX_APP_STORE_KEYS` the keys
+  they sign with. Such a store is never put to an administrator: a key it
+  publishes that is not configured is refused (*store_key_not_configured*).
+  Set, the list is the only one: no other store is trusted, not even on
+  first use (*store_not_allowed*).
+
+The keys an administrator saw are the keys trusted. When the store later
+publishes **another key** - a new one, or other material under a known id -
+its next link shows the question again, in red, with the keys it was trusted
+with beside the new ones: a store rotating its keys looks like this, and so
+does somebody else answering in its name. A key the store **retires** or stops
+publishing leaves the trust by itself, and a key published as *next* (before
+it signs) becomes usable when the store makes it active - neither needs
+anybody, because neither widens the trust.
+
+![The first link from a store: its address and its keys' fingerprints](screenshots/v0.52.0/store/store-trust-1440.png)
+
+**Admin → Plugins → Apps → Trusted stores** lists them: where the trust comes
+from (who trusted it and when, or *Configured*) and the key fingerprints.
+**Stop trusting** refuses the store's links from then on; the licenses it
+issued can no longer be checked, and they hold until their grace ends.
+
+![Admin → Plugins → Apps → Trusted stores](screenshots/v0.52.0/store/store-trusted-1440.png)
+
+**The reference store.** [filex Apps](https://apps.filex.sh) publishes these keys
+(`https://apps.filex.sh/v1/keys.json`); the trust question shows the first 32
+characters of each fingerprint, in groups of four:
+
+| Key | Signs | Fingerprint (SHA-256 of the 32-byte key, lower-case hex) |
+|---|---|---|
+| `index-2026-10` | install links | `205cd1302b9a5025776636b189b6ef80c5a72f4128acb802b917434380bc4c88` |
+| `license-2026-10` | license answers | `2807b0749a94944285c293ee82ae46600877925a0815cbc0484a93789e0371b4` |
+| `artifact-2026-10` | app modules - not asked about on the trust question; a module's signature is [`FILEX_PLUGIN_TRUSTED_KEYS`](CONFIGURATION.md#storage-plugins)'s | `94974dbae4cc3106406cbf812a4f33b530030ac244b57b73a8989bb23d4df62e` |
+
+The public keys themselves: `index-2026-10`
+`df18ded0d71e46e2d53cd479526744ebb9c3ddadb854a32879448fa64453636c`,
+`license-2026-10`
+`7cde525fd0e80e14b7d116e02aa4deb10067c711d9d8021147995d402bdb28e1`,
+`artifact-2026-10`
+`3dda5d791aeae607cd92cbef9b2a7d635b7a99bbb2f6cea040557527f72f797c` - the values
+`FILEX_APP_STORE_KEYS` takes (`index:<key>`, `license:<key>`) when the store is
+trusted by configuration.
+
+Trusting a store is its own `POST`, from a signed-in administrator, through
+filex's cross-site request guard: a page elsewhere, a link or an API key
+cannot trust a store for anybody, and no `GET` changes anything.
+
+### Paid apps
+
+A store may sell an app. Its **license** is issued, kept and answered for by
+the store; filex keeps the license key - encrypted with
+[`FILEX_SECRET_KEY`](CONFIGURATION.md#storage-plugins), shown everywhere by its
+first characters only (`FXL-7Q…`), never in an answer, a log or the audit log -
+and asks the store about it:
+
+- **at the install**: the review of a paid app has a *License* box. The store's
+  link usually carries a key (the review shows its prefix; leave the box empty
+  to use it), or type one;
+- **every day** after that (`POST <store>/v1/licenses/verify`, at the latest
+  when the store's `next_check_by` says), and whenever **Verify now** is pressed.
+
+The store's answer is signed with one of its `license` keys and says
+`valid`, `invalid`, `revoked`, `expired`, `seats_exhausted` or `wrong_app`,
+with the licensee, the seats, *valid until*, *updates until* and the grace it
+allows. What filex does with it:
+
+| The store says | The app |
+|---|---|
+| `valid` | runs |
+| `revoked`, `expired`, `invalid`, `seats_exhausted`, `wrong_app` | is **held** |
+| nothing - it cannot be reached, or its answer does not verify | runs on the last valid answer until that answer's `grace_until`, then is **held** |
+
+⚠ While the store cannot be reached, every start of filex after an **unclean
+stop** (a crash, a kill, a power cut) takes **one hour** off the grace; a clean
+stop takes nothing, and the store's next answer gives the hour back. filex
+keeps the time it has run at every check and every hourly round, so a run cut
+short is counted as the hour it may have lasted, never as nothing - that is
+what stops restarts from stretching a grace.
+
+A **held** app stays installed - its settings, its records, its files, its
+version - and runs nothing: its actions leave the file menu, its interface is
+not served, its jobs and its wake-ups are refused, and its state reads
+*Unlicensed*. Nothing is removed by a license. It runs again as soon as the
+license holds (a new key, a renewed license, the store reachable again). Every
+hold and every release is in the audit log (`app_plugin.license_held`,
+`app_plugin.license_released`), and while one lasts a band on every admin page
+names the app; an app running on its grace gets an amber one.
+
+⚠ The grace is the store's, and filex judges it by the later of the server's
+clock and the **proven time**: the latest `checked_at` the license's store
+signed (within a day of the server's clock), plus the time filex has run since, counted on the process's monotonic clock and kept
+across a restart (time the server was off is not counted). Turning the
+server's clock back does not stretch a grace; turning it forward ends the
+grace early - even right after a valid answer - for as long as it is ahead. An
+answer older than the last one taken, or about another installation, is not
+taken.
+
+**Admin → Plugins → Apps → the app → License** shows the status, the licensee,
+the seats in use, *valid until*, *updates until*, when it was last checked
+and when it is next, the store, the key's prefix and the last failed check;
+there you enter a new key and press **Verify now**. An app reads its own
+status with [`fx.license.get()`](APP-PLUGINS-API.md#the-app-reads-its-license).
+
+![An app's License section: valid, licensed to, seats, dates, the key's prefix](screenshots/v0.52.0/store/store-license-1440.png)
+
+![The same app held after the store revoked its license, the band on an admin page](screenshots/v0.52.0/store/store-license-held-1440.png)
+
+### What a store link is held to (0.52.0)
+
+The security review of the store install added these rules. Each refusal is
+said on the page, and nothing is installed:
+
+- **The link is for this filex.** The store signs the filex the link was made
+  for (`filex_origin`). filex compares it - scheme and host in lower case, the
+  default port dropped - with the origin of
+  [`FILEX_PUBLIC_URL`](CONFIGURATION.md#public-url), or with the origin
+  the request arrived at when that is unset. A link made for another filex is
+  refused (*intent_wrong_instance*). That stops a link opened on the wrong
+  filex by mistake, and a link sent to another filex's administrator to get
+  an app installed there; it is no protection against the administrator of
+  the filex that receives the link, who controls the address a request
+  arrives at. Behind a proxy, set `FILEX_PUBLIC_URL`: without it the origin
+  is read from the request's `Host` and `X-Forwarded-Proto`. A
+  `FILEX_PUBLIC_URL` that is not an address refuses every link
+  (*intent_wrong_instance*, saying so) rather than falling back to the
+  request.
+- **The release is the commit the store approved.** The link names the commit
+  and pins the manifest; both are required. filex reads the repository at
+  that commit, not at the tag, and the tag must still serve the same manifest
+  (*intent_pin_mismatch*, field `commit`).
+- **An installed app keeps its source.** A link for an app of the same name
+  that came from another store, or from another repository, is refused
+  (*store_source_changed*); remove the installed app first. The review of an
+  upgrade says where the installed app came from. An app installed from its
+  repository directly (no store) is upgraded by a store's free link for that
+  repository, but a store's **paid** link does not take it under the store's
+  license - the store could hold it at will, and removing it would be the
+  only way out - so that link is refused the same way.
+- **One review installs once.** Pressing **Install** twice installs once; the
+  second press finds the review closed. A failed paid upgrade leaves the
+  license as it was.
+- **A license key goes to its own store only.** filex asks whether the store
+  is still trusted before it sends a key, and a license moved to another
+  store keeps nothing of the first store's - neither its key nor its answers.
+  A key is sealed for its own app: copied into another app's row, it does not
+  open.
+- **A store's time is its own.** A license answer is taken only when its
+  `checked_at` is within a day of this server's clock, and it moves the time
+  of that store's licenses only. Its `grace_until` counts at most 30 days and
+  its `next_check_by` at most 2 days from it. A start after a run that did
+  not stop cleanly counts as an hour of the grace (the store's next answer
+  takes that hour back); a clean shutdown costs nothing.
+- **`FILEX_APP_STORE_URLS`, when set, is an allow list**: no other store is
+  trusted, not even on first use (*store_not_allowed*).
+- **A store's API follows no redirect**, and an app reads its license's
+  status and dates (`fx.license.get()`), not who holds it.
 
 ## Install requests
 
@@ -229,9 +475,9 @@ and install**, or **Reject** with an optional reason the requester can read.
 **Show decided requests** lists the rest: approved, rejected, expired and
 source changed.
 
-![Plugins → Install requests: two requests an agent's API key left](screenshots/v0.51.0/pluginrequests/requests-1440.png)
+![Plugins → Install requests: two requests an agent's API key left](screenshots/v0.52.0/pluginrequests/requests-1440.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](screenshots/v0.51.0/pluginrequests/review.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](screenshots/v0.52.0/pluginrequests/review.png)
 
 ### Leaving one
 
@@ -267,7 +513,7 @@ here, which engines this host has, whether signatures are required, and when
 the apps' sources were last checked for updates; **Check for updates** beside
 **Refresh** asks them now.
 
-![The Apps tab, a language pack among the apps](screenshots/v0.51.0/langpack/apps-list-1440.png)
+![The Apps tab, a language pack among the apps](screenshots/v0.52.0/langpack/apps-list-1440.png)
 
 A **language pack** (below) sits in the same list and is read the same way -
 its row says what it is, and, per language, how much of THIS filex it
@@ -295,7 +541,7 @@ translates.
 **Details** opens the app's own page - `/admin/plugins/apps/<name>`, one
 section per card, **Back** returns to the Apps tab:
 
-![An installed app's details](screenshots/v0.51.0/apps/apps-detail-1440.png)
+![An installed app's details](screenshots/v0.52.0/apps/apps-detail-1440.png)
 
 - **The facts** - name, version, the version kept to go back to, source (for
   a GitHub install, `https://github.com/<repo>@<tag>`), signed or unsigned,
@@ -356,7 +602,7 @@ person, like the permissions filex has itself. A signing app can put
 *Request signatures* behind one: everybody may sign what they were sent, and
 only the roles you choose may send documents round for signature.
 
-![Admin → Roles → the User role: the Apps group, e-Signature's "Request signatures" set to Default (allowed)](screenshots/v0.51.0/apppermissions/role-user.png)
+![Admin → Roles → the User role: the Apps group, e-Signature's "Request signatures" set to Default (allowed)](screenshots/v0.52.0/apppermissions/role-user.png)
 
 - **What the app declares.** Its manifest lists them (`user_permissions`: an
   id, a label and a description in every language the app speaks, and a
@@ -806,11 +1052,11 @@ permission and stops at the review like any other.
 
 | The review of an app with its own interface | Its kind of file in **New document**, under **Apps** |
 |---|---|
-| ![The install review's Interface group](screenshots/v0.51.0/apps/app-interface-review-1440.png) | ![New document offering the app's kind of file](screenshots/v0.51.0/apps/app-new-document-1440.png) |
+| ![The install review's Interface group](screenshots/v0.52.0/apps/app-interface-review-1440.png) | ![New document offering the app's kind of file](screenshots/v0.52.0/apps/app-new-document-1440.png) |
 
 | …and the interface open on its file type, where filex's preview would be (a small example app, written for these pictures) |
 |---|
-| ![An app's own interface open as a file's viewer](screenshots/v0.51.0/apps/app-interface-viewer-1440.png) |
+| ![An app's own interface open as a file's viewer](screenshots/v0.52.0/apps/app-interface-viewer-1440.png) |
 
 ### An origin of their own
 
@@ -887,7 +1133,7 @@ Until an administrator decides otherwise, nothing changes from 0.49:
 
 ### What the administrator decides
 
-![Admin → Plugins → Default apps: every kind something besides filex handles, who opens it and who draws its thumbnails](screenshots/v0.51.0/defaultapps/default-apps-1440.png)
+![Admin → Plugins → Default apps: every kind something besides filex handles, who opens it and who draws its thumbnails](screenshots/v0.52.0/defaultapps/default-apps-1440.png)
 
 **Admin → Plugins → Default apps** lists every kind something other than
 filex handles (`.csv` too while OnlyOffice is configured, 0.51), plus every
@@ -942,7 +1188,7 @@ with every thumbnail handler off gets no thumbnail (`skipped`, `no_handler`).
   choice is kept on the person's **account**, and every later opening of that
   kind uses it.
 
-  ![Choose an app…, with Always use this app](screenshots/v0.51.0/defaultapps/open-with-dialog.png)
+  ![Choose an app…, with Always use this app](screenshots/v0.52.0/defaultapps/open-with-dialog.png)
 
 - **One choice for the whole account.** The browser, the desktop app and an
   explorer embedded in another product read and write the same record: a
@@ -1059,7 +1305,7 @@ some other way (an old bookmark) says this and offers no button.
    purpose: what is being asked of whom is one decision, where it goes is
    the next. Every signer needs at least one signature box.
 
-   ![Defining the boxes](screenshots/v0.51.0/signing/sign-define-1440.png)
+   ![Defining the boxes](screenshots/v0.52.0/signing/sign-define-1440.png)
 
 4. **Place them** - the document, and the boxes that still need a place.
    Choose one, then tap the page where it goes, or drag to size it as you
@@ -1067,7 +1313,7 @@ some other way (an old bookmark) says this and offers no button.
    again, copied to another page or deleted. The step cannot be left while a
    box has nowhere to go.
 
-   ![Placing the boxes on the document](screenshots/v0.51.0/signing/sign-place-1440.png)
+   ![Placing the boxes on the document](screenshots/v0.52.0/signing/sign-place-1440.png)
 
 5. **Time** - *How long do they have?* How many days the links are valid
    (14 by default, at most 90 - both pulled down to the instance's maximum
@@ -1138,7 +1384,7 @@ during which even the right PIN is refused.
 
 | The partner's link, behind its PIN | …and what it opens: only their own boxes |
 |---|---|
-| ![The outside signer's PIN gate](screenshots/v0.51.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.51.0/signing/sign-outside-fill-1440.png) |
+| ![The outside signer's PIN gate](screenshots/v0.52.0/signing/sign-outside-pin-1440.png) | ![The outside signer filling in their boxes](screenshots/v0.52.0/signing/sign-outside-fill-1440.png) |
 
 Both kinds of signer then walk the same three steps:
 
@@ -1168,7 +1414,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](screenshots/v0.51.0/signing/sign-status-1440.png)
+  ![The document frozen, its Signatures panel open](screenshots/v0.52.0/signing/sign-status-1440.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1179,7 +1425,7 @@ fingerprint, and the certificate files to keep.
   asked for, only the requester's own links listed, and every read written to
   filex's audit trail.
 
-  ![The Signatures screen's PINs section](screenshots/v0.51.0/signing/sign-pins-1440.png)
+  ![The Signatures screen's PINs section](screenshots/v0.52.0/signing/sign-pins-1440.png)
 - **The bell** tells the requester when an outside signer opened the
   document, when somebody signed or refused, and when everything is done.
 
@@ -1362,7 +1608,7 @@ short wizard in a dialog, with only the steps that have something to ask:
 4. **Review** - what will happen, including the route the conversion takes,
    then **Convert**.
 
-![The converter's wizard](screenshots/v0.51.0/apps/convert-wizard-1440.png)
+![The converter's wizard](screenshots/v0.52.0/apps/convert-wizard-1440.png)
 
 The result lands **beside the input**, as `<name>.<new extension>` (pages and
 frames as `<name>-1.png`, `<name>-2.png`, …); a taken name gets a suffix, and
@@ -1526,7 +1772,9 @@ admin surface refuses installs regardless.
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every app's source for a newer version and **tells the administrators** - it installs nothing: every newer version waits for an approval ([Updates](#updates)). `0` = no request leaves the server for it; **Check for updates** still works. Off on a demo regardless |
 | `FILEX_PLUGIN_TRUSTED_KEYS` | - | Shared with storage plugins: set it and every module must carry a detached ed25519 signature over its sha256 |
 | `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](#install-requests) waits for an administrator before it expires (both kinds of plugin) |
-| `FILEX_SECRET_KEY` | - | Seals secret settings, the signing authority's key and share PINs; without it secret settings and signing answer *unavailable*, and a PIN cannot be read back later. The public-link unlock cookie falls back to a per-process key: it works, but a restart signs visitors out and two instances behind one address do not share it |
+| `FILEX_APP_STORE_URLS` / `FILEX_APP_STORE_KEYS` | - | Stores trusted by configuration, and the keys they sign with ([Trusted stores](#trusted-stores)) |
+| `FILEX_APP_GITHUB_RAW_BASE` | `https://raw.githubusercontent.com` | Where a GitHub install and a store link read a repository's files (a mirror; the guard applies) |
+| `FILEX_SECRET_KEY` | - | Seals secret settings, the signing authority's key, share PINs and paid apps' license keys; without it secret settings and signing answer *unavailable*, and a PIN cannot be read back later. The public-link unlock cookie falls back to a per-process key: it works, but a restart signs visitors out and two instances behind one address do not share it |
 
 Apps need an **amd64 or arm64** host: the WebAssembly compiler has no
 interpreter fallback here, on purpose (an interpreter would take every core
@@ -1587,8 +1835,9 @@ panel can explain).
 ⚠⚠ Install and upgrade (unless `?dry_run=1`), `PATCH`, `rollback`, `DELETE`
 and `PUT /{id}/overrides` need an administrator **signed in to the panel**: an
 API key gets `403 session_required` and is pointed at
-[`/api/admin/plugin-requests`](#install-requests). Everything else here stays
-open to an admin-scoped key.
+[`/api/admin/plugin-requests`](#install-requests). So does every store and
+license route (`/stores`, `/store-intent…`, `/licenses`, `/{id}/license…`),
+the reads included. Everything else here stays open to an admin-scoped key.
 
 | Route | Purpose |
 |---|---|
@@ -1610,6 +1859,10 @@ open to an admin-scoped key.
 | `POST /signing/ca/import` | multipart `cert` + `key` (PEM), or JSON `{cert_pem, key_pem}`: sign with an authority you already have. The current one is retired, never deleted |
 | `GET /shares[?plugin=&active=&limit=&offset=]` | the public links apps opened - the same rows, envelope and tenant filter as `GET /api/admin/shares` |
 | `GET /locks[?storage_id=]` · `DELETE /locks {storage_id, path}` | live file locks apps hold; the DELETE lifts one by force (audited `app_plugin.unlock`) |
+| `GET /stores` · `POST /stores {store, fingerprints}` · `DELETE /stores?store=` | the [trusted stores](#trusted-stores); trusting names the fingerprints the administrator was shown |
+| `POST /store-intent {store, token}` | read a store's install link: its review (`handle`, `intent`, `review`, `upgrade_of`), or `409 store_trust_required` / `store_key_changed` with the store's keys |
+| `POST /store-intent/install {handle, permissions, associations?, license_key?}` · `POST /store-intent/cancel {handle}` | install what the reviewed link names (the repository read and checked again), or end it; the store is told either way |
+| `GET /licenses` · `GET /{id}/license` · `PUT /{id}/license {key}` · `POST /{id}/license/verify` | [paid apps'](#paid-apps) licenses: the status and the facts, never the key |
 
 Which app opens a kind of file, and which draws its thumbnails, is
 `/api/admin/file-types` (`GET`, `PUT /{ext}`, `DELETE /{ext}`; the same

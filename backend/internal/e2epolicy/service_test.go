@@ -154,12 +154,25 @@ func requireRefused(t *testing.T, err error, why e2epolicy.Reason) {
 // errBoom is how a failing store answers: anything but sql.ErrNoRows.
 var errBoom = errors.New("boom")
 
-// failing is the real store with either lookup behind the explorer's answer
-// made to fail, and a count of how often the rule asks.
+// failing is the real store with one of the lookups behind the explorer's
+// answer made to fail, and a count of how often the rule asks.
 type failing struct {
 	db.Store
-	nodeErr, approvalErr     error
-	nodeCalls, approvalCalls int
+	nodeErr, approvalErr, holdsErr                   error
+	nodeCalls, approvalCalls, holdsCalls, countCalls int
+}
+
+func (s *failing) CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error) {
+	s.countCalls++
+	return s.Store.CountLiveNodesUnder(ctx, storageID, dir)
+}
+
+func (s *failing) HasLiveNodesUnder(ctx context.Context, storageID int64, dir string) (bool, error) {
+	s.holdsCalls++
+	if s.holdsErr != nil {
+		return false, s.holdsErr
+	}
+	return s.Store.HasLiveNodesUnder(ctx, storageID, dir)
 }
 
 func (s *failing) GetNodeByPath(ctx context.Context, storageID int64, pathHash string) (*model.Node, error) {
@@ -607,6 +620,9 @@ func TestAnswers_ALookupThatFailsDenies(t *testing.T) {
 	}{
 		{"the node lookup", func(s *failing) { s.nodeErr = errBoom }, func(s *failing) int { return s.nodeCalls }},
 		{"the approval lookup", func(s *failing) { s.approvalErr = errBoom }, func(s *failing) int { return s.approvalCalls }},
+		// Whether the folder holds anything decides which approval counts: a
+		// catalogue that cannot say is not an empty folder.
+		{"what the folder holds", func(s *failing) { s.holdsErr = errBoom }, func(s *failing) int { return s.holdsCalls }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			one := &failing{Store: f.store}

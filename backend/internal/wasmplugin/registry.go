@@ -22,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
+	"github.com/brf-tech/filex/backend/internal/keylock"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/netguard"
 	"github.com/brf-tech/filex/backend/internal/plugin"
@@ -69,7 +70,12 @@ type Options struct {
 	// (FILEX_PLUGIN_LOOPBACK_SOURCES): development and the end-to-end tests
 	// serve app sources from a loopback server. Never the private network.
 	LoopbackSources bool
-	Log             *slog.Logger
+	// GitHubRawBase is where a repository's files are read from for a GitHub
+	// install (FILEX_APP_GITHUB_RAW_BASE): "" is https://raw.githubusercontent.com.
+	// A mirror of it (an air-gapped install's), or the end-to-end tests' fake
+	// GitHub. The download guard applies to it like to every other address.
+	GitHubRawBase string
+	Log           *slog.Logger
 	// StorageResolver opens the driver a job reads from and writes to.
 	StorageResolver func(int64) (storage.Driver, error)
 	// Limits (bytes). Zero → defaults below.
@@ -104,6 +110,11 @@ const (
 	StateDisabled = "disabled"
 	StateRefused  = "refused"
 	StateFailed   = "failed"
+	// StateUnlicensed is a paid app whose license does not hold (revoked,
+	// expired, never confirmed, its grace ended): loaded, not removed, and
+	// running nothing until the license holds again (license_hold.go,
+	// internal/appstore). It overlays "running" only.
+	StateUnlicensed = "unlicensed"
 )
 
 // Installed is one plugin's live entry.
@@ -123,8 +134,11 @@ type Installed struct {
 	prev     *prevState
 	state    string
 	stateErr string
-	logs     *logRing
-	sem      chan struct{}
+	// hold is why the app's license keeps it from running ("" = it does
+	// not); see StateUnlicensed.
+	hold string
+	logs *logRing
+	sem  chan struct{}
 	// calls bounds the plugin's concurrent screen calls (Options.PerPluginCalls).
 	calls    chan struct{}
 	mailRate rateWindow
@@ -160,10 +174,15 @@ func (p *Installed) HasModule() bool {
 	return p.Row.WasmPath != ""
 }
 
-// State returns the live state and its error.
+// State returns the live state and its error. A running app whose license
+// does not hold is StateUnlicensed, with the license's reason: every caller
+// that runs an app asks for StateRunning, so a held app runs nothing.
 func (p *Installed) State() (string, string) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if p.state == StateRunning && p.hold != "" {
+		return StateUnlicensed, p.hold
+	}
 	return p.state, p.stateErr
 }
 
@@ -188,6 +207,11 @@ type Registry struct {
 	mu     sync.RWMutex
 	byID   map[int64]*Installed
 	byName map[string]*Installed
+	// holds are the license holds by app name (license_hold.go): kept here
+	// and not only on the entry, because an upgrade replaces the entry.
+	holds map[string]string
+	// installLocks serialise Install per app name.
+	installLocks keylock.Map
 
 	sink OutputSink
 	// queue is where scheduled work is handed to the ops worker (schedule.go).
@@ -545,9 +569,13 @@ func (r *Registry) upgradeLegacyOverrides(ctx context.Context, p *Installed) {
 
 func (r *Registry) put(p *Installed) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	// ⚠ The hold goes on BEFORE the entry is published, under the lock
+	// SetLicenseHold takes: set after it, a hold set in between was
+	// overwritten with the one read before (license_hold.go, Y5).
+	p.setHold(r.holds[p.Row.Name])
 	r.byID[p.Row.ID] = p
 	r.byName[p.Row.Name] = p
-	r.mu.Unlock()
 }
 
 func (r *Registry) drop(p *Installed) {
@@ -769,9 +797,18 @@ func (r *Registry) All() []*Installed {
 }
 
 // running returns the compiled module or a typed error.
+//
+// ⚠⚠ Every way the module runs passes here - a screen and its events
+// (ViewEvent), a queued job (runJob, possibly queued before a hold), a
+// wake-up, an interface call, a public page, a thumbnail - so a license hold
+// is refused HERE, once, and not only in State(): a caller that skips State()
+// still cannot run a held app.
 func (p *Installed) running() (*Compiled, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if p.hold != "" {
+		return nil, &CallError{Code: CodeUnsupported, Message: "plugin is not running: " + p.hold}
+	}
 	if p.compiled == nil {
 		msg := "plugin is not running"
 		if p.Manifest != nil && p.Manifest.IsLanguagePack() {
@@ -1406,6 +1443,13 @@ func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *Dry
 	// list showed and every later install refused as "name_taken" until a
 	// restart. Nothing below may be cut half-way by a closed tab.
 	ctx = context.WithoutCancel(ctx)
+	// ⚠⚠ One install of a name at a time. Two at once (two administrators, a
+	// store link and a repository install) both found the name free, both
+	// wrote <Dir>/<name>, the second row was refused by the unique name - and
+	// that loser's clean-up below removed the directory the WINNER's row
+	// points at. Under the lock the second one finds the name taken.
+	unlock := r.installLocks.Lock(st.m.Name)
+	defer unlock()
 	if _, taken := r.ByName(st.m.Name); taken {
 		return nil, nil, installErr(ErrCodeNameTaken, "a plugin named "+st.m.Name+" is already installed")
 	}
@@ -1433,7 +1477,10 @@ func (r *Registry) Install(ctx context.Context, in *InstallInput) (*Status, *Dry
 	}
 	r.put(p)
 	r.compile(ctx, p)
-	if state, serr := p.State(); state != StateRunning {
+	// ⚠ The module's own state, not State(): a paid app is installed HELD
+	// until its license is confirmed (license_hold.go), and a hold is not a
+	// module that failed to describe itself.
+	if state, serr := p.loadState(); state != StateRunning {
 		// A module that does not describe itself as the manifest says is not
 		// installed half-way: files and row go, the error is the answer.
 		r.drop(p)
@@ -1536,7 +1583,7 @@ func (r *Registry) Upgrade(ctx context.Context, id int64, in *InstallInput) (*St
 	// left a module that did not describe itself as its manifest says, to be
 	// found the day somebody switched it back on (and the update check now
 	// upgrades apps that are off, too).
-	if state, serr := np.State(); state != StateRunning {
+	if state, serr := np.loadState(); state != StateRunning {
 		*p.Row = oldRow
 		_ = os.RemoveAll(dir)
 		_ = os.Rename(backup, dir)

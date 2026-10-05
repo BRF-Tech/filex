@@ -468,7 +468,12 @@ func invalid(format string, a ...any) error {
 
 // ValidateEffects checks an overrides or rule effects map: known keys, not
 // role-only, allow/deny only.
-func ValidateEffects(m map[string]string) error {
+func ValidateEffects(m map[string]string) error { return validateEffects(m, nil) }
+
+// validateEffects is ValidateEffects where a key this version does not know
+// passes when kept says it may (a later version's key the map held already,
+// ValidateEffectsEdit).
+func validateEffects(m map[string]string, kept func(string) bool) error {
 	for _, k := range sortedStrings(m) {
 		// An app permission (perm/app.go) is not in the catalogue; it is
 		// valid by its shape, and a key whose app is gone is never asked.
@@ -480,6 +485,9 @@ func ValidateEffects(m map[string]string) error {
 		}
 		d, ok := Lookup(Perm(k))
 		if !ok {
+			if kept != nil && kept(k) {
+				continue
+			}
 			return invalid("unknown permission %q", k)
 		}
 		if d.RoleOnly {
@@ -501,9 +509,18 @@ const MaxRuleNameLen = 100
 func NormalizeRule(r *model.PermissionRule) error { return NormalizeRuleEdit(r, nil) }
 
 // NormalizeRuleEdit is NormalizeRule for a new version of prev (nil for a new
-// role): the only difference is that a language prev's translations already
-// carry stays acceptable (normalizeRuleTexts).
+// role). Two things differ: a language prev's translations already carry
+// stays acceptable (normalizeRuleTexts), and a permission prev holds that this
+// version does not know - a later version's - is kept as prev has it, in the
+// role's own list and in its folder part, whether the request sends it back or
+// leaves it out (foreign.go). A folder part taken away takes those with it.
 func NormalizeRuleEdit(r, prev *model.PermissionRule) error {
+	var keepList []string
+	var keepEffects map[string]string
+	if prev != nil {
+		keepList = ForeignKeys(prev.Permissions)
+		keepEffects = ForeignEffects(prev.Effects)
+	}
 	r.Name = strings.TrimSpace(r.Name)
 	if r.Name == "" {
 		return invalid("rule name is required")
@@ -523,13 +540,16 @@ func NormalizeRuleEdit(r, prev *model.PermissionRule) error {
 	for _, k := range r.Permissions {
 		d, ok := Lookup(Perm(k))
 		if !ok {
+			if containsString(keepList, k) {
+				continue // put back below, where prev had it
+			}
 			return invalid("unknown permission %q", k)
 		}
 		if d.RoleOnly {
 			return invalid("%q follows the account role and cannot be set", k)
 		}
 	}
-	r.Permissions = FromStrings(r.Permissions).Strings()
+	r.Permissions = append(FromStrings(r.Permissions).Strings(), keepList...)
 	// Targets only name SSO groups — the role a new account starts with when
 	// its first sign-in carries one. A person is given a role on their own
 	// page (one per person), never through the role's targets.
@@ -554,9 +574,12 @@ func NormalizeRuleEdit(r, prev *model.PermissionRule) error {
 	if r.Effects == nil {
 		r.Effects = map[string]string{}
 	}
-	if err := ValidateEffects(r.Effects); err != nil {
+	if err := ValidateEffectsEdit(r.Effects, keepEffects); err != nil {
 		return err
 	}
+	// The later version's folder keys are put back as prev has them, once
+	// the folder part is known to stay (below).
+	r.Effects = WithoutForeign(r.Effects)
 	if len(r.Effects) > 0 && r.Conditions.Empty() {
 		return invalid("Allow and Deny are only for some folders: pick the folders, or set the permission in the role's own list")
 	}
@@ -589,5 +612,11 @@ func NormalizeRuleEdit(r, prev *model.PermissionRule) error {
 	}
 	s.BlockedExtensions = exts
 
-	return normalizeConditions(r)
+	if err := normalizeConditions(r); err != nil {
+		return err
+	}
+	if !r.Conditions.Empty() {
+		r.Effects = KeepForeignEffects(r.Effects, keepEffects)
+	}
+	return nil
 }

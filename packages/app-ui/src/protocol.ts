@@ -50,7 +50,9 @@ export type Method =
   | 'engine.call'
   | 'job.submit'
   | 'state.get'
-  | 'state.set';
+  | 'state.set'
+  /** 0.52.0: what the app's license says (a paid app from a store), `LicenseInfo`. */
+  | 'license.get';
 
 export const METHODS: readonly Method[] = [
   'session.get',
@@ -68,6 +70,7 @@ export const METHODS: readonly Method[] = [
   'job.submit',
   'state.get',
   'state.set',
+  'license.get',
 ];
 
 /** What the host tells the app, unasked. */
@@ -272,6 +275,29 @@ export interface ConfirmParams {
   confirm?: string;
   cancel?: string;
   danger?: boolean;
+}
+
+/**
+ * `license.get` (filex 0.52.0): what the app's license says. A paid app is
+ * installed from a store, which issues its license and is asked about it every
+ * day; filex keeps the key and never hands it to the app. `status`:
+ *
+ *   - `free`: not a paid app;
+ *   - `valid`: the store said valid at its last check;
+ *   - `grace`: valid, but the store could not be asked since - it holds until
+ *     the grace the store signed ends;
+ *   - anything else (`revoked`, `expired`, `invalid`, `seats_exhausted`,
+ *     `wrong_app`, `grace_expired`, `missing`, `unverified`): the app is held
+ *     and its interface is not served, so an app rarely reads one of these.
+ *
+ * `valid_until` / `updates_until` are there for a valid license (dates as
+ * RFC 3339). Who holds the license is not the app's to read. filex 0.51.0
+ * and older answer `unknown_method`.
+ */
+export interface LicenseInfo {
+  status: string;
+  valid_until?: string;
+  updates_until?: string;
 }
 
 /** `engine.call`: the app's own module, `ui_call` export. */

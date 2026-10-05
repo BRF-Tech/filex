@@ -137,6 +137,31 @@ export function formatDuration(seconds: number, locale = 'en'): string {
         : seconds < 86400
           ? [seconds / 3600, 'hour']
           : [seconds / 86400, 'day'];
+  return unitText(value, unit, locale);
+}
+
+/**
+ * How often something runs, as it was set: in the largest unit the interval
+ * is a whole number of ("6 hr", "90 min" / "6 sa.", "90 dk."). formatDuration
+ * rounds to the largest unit that fits, which would print a 1h30m schedule as
+ * "2 hr". The directory sync's "every 6h" printed English letters under every
+ * language until it used this.
+ */
+export function formatInterval(seconds: number, locale = 'en'): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '-';
+  const s = Math.round(seconds);
+  const [value, unit] =
+    s % 86400 === 0
+      ? [s / 86400, 'day']
+      : s % 3600 === 0
+        ? [s / 3600, 'hour']
+        : s % 60 === 0
+          ? [s / 60, 'minute']
+          : [s, 'second'];
+  return unitText(value, unit, locale);
+}
+
+function unitText(value: number, unit: string, locale: string): string {
   return new Intl.NumberFormat(localeTag(locale), {
     style: 'unit',
     unit,

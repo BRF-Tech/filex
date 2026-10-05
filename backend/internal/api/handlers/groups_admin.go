@@ -77,12 +77,14 @@ type groupWire struct {
 }
 
 type groupMemberWire struct {
-	UserID  int64  `json:"user_id"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Role    string `json:"role"`
-	Source  string `json:"source"`
-	AddedAt string `json:"added_at"`
+	UserID int64  `json:"user_id"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Source string `json:"source"`
+	// AuthSource is where the account comes from (model.AuthSource*).
+	AuthSource string `json:"auth_source"`
+	AddedAt    string `json:"added_at"`
 }
 
 type groupGrantWire struct {
@@ -99,6 +101,9 @@ type groupReq struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	RoleID      *int64 `json:"role_id"`
+	// GivesAdmin makes the members administrators instead of giving a role
+	// (migration 00086). Absent keeps the group's (off for a new one).
+	GivesAdmin *bool `json:"gives_admin"`
 	// Priority decides whose role a member in several groups gets: the
 	// highest first. Absent keeps the group's (0 for a new one).
 	Priority *int              `json:"priority"`
@@ -148,6 +153,62 @@ func (h *GroupsAdmin) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
 }
 
+// Memberships answers every person's groups the caller may see, keyed by
+// user id — the Users list's Groups column in one call instead of one per
+// row. Each carries the membership's source (added, SSO, LDAP).
+func (h *GroupsAdmin) Memberships(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	groups, err := h.Store.ListGroups(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	members, err := h.Store.ListAllGroupMembers(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	grants, err := h.Store.ListAllGroupFileGrants(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	withFolders := map[int64]bool{}
+	for _, gr := range grants {
+		withFolders[gr.GroupID] = true
+	}
+	byID := map[int64]*model.Group{}
+	for _, g := range groups {
+		if visibleGroup(ctx, g) {
+			byID[g.ID] = g
+		}
+	}
+	// InUse: the group gives its members a role or folder access — the
+	// groups that change what the person can do, listed first.
+	type row struct {
+		ID     int64  `json:"id"`
+		Name   string `json:"name"`
+		Source string `json:"source"`
+		InUse  bool   `json:"in_use,omitempty"`
+	}
+	out := map[string][]row{}
+	for _, m := range members {
+		if g := byID[m.GroupID]; g != nil {
+			k := strconv.FormatInt(m.UserID, 10)
+			out[k] = append(out[k], row{ID: g.ID, Name: g.Name, Source: m.Source, InUse: g.RoleID != nil || withFolders[g.ID]})
+		}
+	}
+	for _, rows := range out {
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].InUse != rows[j].InUse {
+				return rows[i].InUse
+			}
+			return rows[i].Name < rows[j].Name
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"memberships": out})
+}
+
 // groupByID loads a group the caller may see, answering 404 otherwise.
 func (h *GroupsAdmin) groupByID(w http.ResponseWriter, r *http.Request) *model.Group {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -189,7 +250,7 @@ func (h *GroupsAdmin) writeGroup(w http.ResponseWriter, r *http.Request, status 
 		}
 		members = append(members, groupMemberWire{
 			UserID: u.ID, Email: u.Email, Name: u.Label(), Role: u.Role,
-			Source: m.Source, AddedAt: m.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			Source: m.Source, AuthSource: u.AuthSource, AddedAt: m.AddedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	sort.SliceStable(members, func(i, j int) bool { return members[i].Name < members[j].Name })
@@ -236,6 +297,25 @@ func (h *GroupsAdmin) groupFromRequest(w http.ResponseWriter, r *http.Request, e
 		g.Priority = *req.Priority
 	} else if existing != nil {
 		g.Priority = existing.Priority
+	}
+	if req.GivesAdmin != nil {
+		g.GivesAdmin = *req.GivesAdmin
+	} else if existing != nil {
+		g.GivesAdmin = existing.GivesAdmin
+	}
+	if g.GivesAdmin && g.RoleID != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a group that makes its members administrators gives no other role"})
+		return nil
+	}
+	if g.GivesAdmin {
+		// By name, any directory's group of that name would make
+		// administrators (group.adminLinkCounts).
+		for _, l := range g.Links {
+			if l.Kind == model.GroupLinkLDAP && !group.IsLDAPDN(l.Value) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a group that makes its members administrators names its LDAP group by its full DN (cn=…,ou=…,dc=…), not by name: " + l.Value})
+				return nil
+			}
+		}
 	}
 	if err := group.Normalize(g); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -297,6 +377,22 @@ func (h *GroupsAdmin) groupFromRequest(w http.ResponseWriter, r *http.Request, e
 		reaches := roleChanged || g.Priority != priorityOf(existing) || !sameLinks(g.Links, linksOf(existing))
 		if reaches && allowsAdministration(rule.Permissions, rule.Effects) &&
 			!adminCredentialBySession(w, r, "Giving a group a role with administration rights") {
+			return nil
+		}
+	}
+
+	// Administrator through a group: only a full administrator makes a
+	// group give it, or changes anything about a group that does — who it
+	// reaches is who administers filex. Making it reach anyone new (turning
+	// it on, new links) asks for a signed-in session, as promoting one
+	// person does.
+	if g.GivesAdmin || (existing != nil && existing.GivesAdmin) {
+		if !callerIsFullAdmin(ctx) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "only an administrator can change a group that makes its members administrators"})
+			return nil
+		}
+		reaches := existing == nil || !existing.GivesAdmin || !sameLinks(g.Links, existing.Links)
+		if g.GivesAdmin && reaches && !adminCredentialBySession(w, r, "Making a group's members administrators") {
 			return nil
 		}
 	}
@@ -366,9 +462,26 @@ func (h *GroupsAdmin) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	// A group directory sync brought in: its LDAP link is the directory's
+	// (sync keeps it on the directory group's current DN) — what the body
+	// says about LDAP links is not taken.
+	if existing.Synced() {
+		links := []model.GroupLink{}
+		for _, l := range g.Links {
+			if l.Kind != model.GroupLinkLDAP {
+				links = append(links, l)
+			}
+		}
+		for _, l := range existing.Links {
+			if l.Kind == model.GroupLinkLDAP {
+				links = append(links, l)
+			}
+		}
+		g.Links = links
+	}
 	// Which role the group gives — and so which of their groups decides —
 	// is the caller's own role if they are in it.
-	if !sameID(g.RoleID, existing.RoleID) || g.Priority != existing.Priority {
+	if !sameID(g.RoleID, existing.RoleID) || g.Priority != existing.Priority || g.GivesAdmin != existing.GivesAdmin {
 		if h.refuseOwnGroup(w, r, existing) {
 			return
 		}
@@ -395,7 +508,7 @@ func (h *GroupsAdmin) Update(w http.ResponseWriter, r *http.Request) {
 	if !sameLinks(g.Links, existing.Links) && !h.syncLinks(w, r) {
 		return
 	}
-	if !sameID(g.RoleID, existing.RoleID) || g.Priority != existing.Priority {
+	if !sameID(g.RoleID, existing.RoleID) || g.Priority != existing.Priority || g.GivesAdmin != existing.GivesAdmin {
 		// The members' role — and with it their level underneath — follows.
 		if !h.syncMembers(w, r, g.ID) {
 			return
@@ -421,6 +534,10 @@ func (h *GroupsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if g.GivesAdmin && !callerIsFullAdmin(ctx) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only an administrator can delete a group that makes its members administrators"})
+		return
+	}
 	if h.refuseOwnGroup(w, r, g) {
 		return
 	}
@@ -445,6 +562,56 @@ func (h *GroupsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	perm.Invalidate()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Detach keeps a group whose directory group is gone as an ordinary filex
+// group: it is no longer the directory's, its dead LDAP link goes, and its
+// folders, role and hand-added members stay. Only for a group flagged
+// removed — one the directory still has is the directory's, and which
+// directory groups exist is managed on the directory. An administrator's:
+// links are.
+//
+//	POST /api/admin/groups/{id}/detach
+func (h *GroupsAdmin) Detach(w http.ResponseWriter, r *http.Request) {
+	g := h.groupByID(w, r)
+	if g == nil {
+		return
+	}
+	if !callerIsFullAdmin(r.Context()) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only an administrator can change where a group comes from"})
+		return
+	}
+	if !sessionOnly(w, r, "Keeping a removed directory group as a filex group needs an administrator signed in to the admin panel; an API key cannot do it.", nil) {
+		return
+	}
+	if g.DirectoryID == "" || g.DirectoryState != model.GroupDirectoryRemoved {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "only a group whose directory group was removed can be kept as a filex group"})
+		return
+	}
+	ctx := r.Context()
+	auditGroup(ctx, "group", g)
+	auth.SetAuditTarget(ctx, strconv.FormatInt(g.ID, 10), g.Name)
+	links := []model.GroupLink{}
+	for _, l := range g.Links {
+		if l.Kind != model.GroupLinkLDAP {
+			links = append(links, l)
+		}
+	}
+	g.Links = links
+	if err := h.Store.UpdateGroup(ctx, g); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := h.Store.SetGroupDirectory(ctx, g.ID, "", "", ""); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	fresh, err := h.Store.GetGroup(ctx, g.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.writeGroup(w, r, http.StatusOK, fresh)
 }
 
 // ── members ────────────────────────────────────────────────────────────────
@@ -475,6 +642,9 @@ func (h *GroupsAdmin) AddMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	// Joining gives each of them the group's role (if they have none of
 	// their own) — as good as giving it to them on their page.
+	if g.GivesAdmin && !adminCredentialBySession(w, r, "Adding people to a group that makes its members administrators") {
+		return
+	}
 	if g.RoleID != nil {
 		rule, err := h.Store.GetPermissionRule(ctx, *g.RoleID)
 		if err == nil && rule != nil && refuseRoleBeyondCaller(w, r, h.ACL, rule) {
@@ -559,6 +729,10 @@ func (h *GroupsAdmin) memberAllowed(w http.ResponseWriter, r *http.Request, g *m
 	}
 	if callerIsFullAdmin(ctx) {
 		return true
+	}
+	if g.GivesAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only an administrator can change who is in a group that makes its members administrators"})
+		return false
 	}
 	if caller := auth.UserFrom(ctx); caller != nil && caller.ID == uid {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you cannot change which groups you are in"})
@@ -692,13 +866,13 @@ func (h *GroupsAdmin) syncMembers(w http.ResponseWriter, r *http.Request, groupI
 	return true
 }
 
-// syncLinks re-applies the SSO-linked memberships of every account the
+// syncLinks re-applies the SSO- and LDAP-linked memberships of every account the
 // caller's tenant has, from the groups each one's last sign-in carried — so
-// a changed link takes effect now (group.SyncStoredSSO).
+// a changed link takes effect now (group.SyncStored).
 func (h *GroupsAdmin) syncLinks(w http.ResponseWriter, r *http.Request) bool {
 	users, err := h.Store.ListUsers(r.Context())
 	if err == nil {
-		err = group.SyncStoredSSO(r.Context(), h.Store, users)
+		err = group.SyncStored(r.Context(), h.Store, users)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -754,9 +928,10 @@ func (h *GroupsAdmin) UserGroups(w http.ResponseWriter, r *http.Request) {
 
 func auditGroup(ctx context.Context, key string, g *model.Group) {
 	auth.AddAuditDetail(ctx, key, map[string]any{
-		"name":    g.Name,
-		"role_id": g.RoleID,
-		"links":   g.Links,
+		"name":        g.Name,
+		"role_id":     g.RoleID,
+		"gives_admin": g.GivesAdmin,
+		"links":       g.Links,
 	})
 }
 

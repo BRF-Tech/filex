@@ -113,7 +113,7 @@ export interface AppPluginManifest {
   thumbnails?: { applies: PluginApplies };
 }
 
-export type AppPluginState = 'running' | 'disabled' | 'refused' | 'failed' | string;
+export type AppPluginState = 'running' | 'disabled' | 'refused' | 'failed' | 'unlicensed' | string;
 
 /**
  * `app` — a module that runs; `language_pack` — languages for filex itself

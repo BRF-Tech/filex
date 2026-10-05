@@ -97,6 +97,9 @@ type CreateOpts struct {
 	// PurposeJSON is what the app says this link IS (wire.PagePurpose,
 	// migration 00052) — how a list of links names it.
 	PurposeJSON string
+	// AppRoot is the `root:` of the token whose job opens the link
+	// (migration 00082, model.Share.AppRoot); "" for none.
+	AppRoot string
 
 	// Token is the link's token when the caller ALREADY MINTED one and has
 	// handed it out. Empty — every other caller — mints a fresh one here.
@@ -235,6 +238,7 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 		StateJSON:    opts.StateJSON,
 		FilesJSON:    opts.FilesJSON,
 		PurposeJSON:  opts.PurposeJSON,
+		AppRoot:      opts.AppRoot,
 	}
 	return s.store.CreateShare(ctx, sh)
 }

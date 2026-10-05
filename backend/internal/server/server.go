@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/antivirus"
 	"github.com/brf-tech/filex/backend/internal/api"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/appstore"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
@@ -44,11 +45,13 @@ import (
 	"github.com/brf-tech/filex/backend/internal/mailer"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/netguard"
 	"github.com/brf-tech/filex/backend/internal/nfssrv"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/perm"
+	"github.com/brf-tech/filex/backend/internal/permgap"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/pluginreq"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
@@ -377,6 +380,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		return nil, fmt.Errorf("auth: %w", err)
 	}
 	authLive.Start(ctx)
+	// Directory sync on each provider's interval (sync_interval; off unless
+	// set) — docs/LDAP.md → Directory sync.
+	go authLive.RunDirectorySync(ctx)
 	authSet := authLive.Current()
 	recoveryLogin := authSet.Recovery()
 	if recoveryLogin {
@@ -595,6 +601,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			// HTTP is left nil on purpose: the registry's own client is the
 			// guarded one (netguard.DownloadClient).
 			LoopbackSources: cfg.PluginLoopbackSources,
+			GitHubRawBase:   cfg.AppGitHubRawBase,
 			MaxInputBytes:   int64(cfg.AppPluginMaxInputMB) << 20,
 			MaxOutputBytes:  int64(cfg.AppPluginMaxOutputMB) << 20,
 			MaxWasmBytes:    int64(cfg.AppPluginMaxWasmMB) << 20,
@@ -632,6 +639,31 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	srvtext.SetDefault(cfg.DefaultLocale)
 	if appPlugins != nil {
 		srvtext.SetPacks(appPlugins)
+	}
+
+	// The app store side (internal/appstore): trusted stores, install links,
+	// paid apps' licenses. Only with the app runtime. A paid app's hold is
+	// applied here, before the router serves anything.
+	var appStore *appstore.Service
+	if appPlugins != nil {
+		storeBox, berr := secretbox.New(cfg.SecretKey)
+		if berr != nil {
+			slog.Warn("app-store: secret key unusable; license keys cannot be kept", slog.Any("err", berr))
+		}
+		appStore = appstore.New(appstore.Options{
+			Store:           store,
+			Client:          appstore.NewClient(netguard.Policy{Loopback: cfg.PluginLoopbackSources}, "filex/"+version.String()),
+			Box:             storeBox,
+			Loopback:        cfg.PluginLoopbackSources,
+			ConfigStores:    cfg.AppStoreURLs,
+			ConfigStoresSet: cfg.AppStoreURLsSet,
+			ConfigKeys:      cfg.AppStoreKeys,
+			FilexVersion:    version.String(),
+			Holder:          appPlugins,
+			Log:             slog.Default(),
+		})
+		appStore.Start(ctx)
+		go appStore.Run(ctx)
 	}
 
 	// Default apps (internal/assoc): which handler opens a kind of file and
@@ -949,6 +981,12 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			_, _ = srvObj.notify.Send(context.WithoutCancel(ctx),
 				notify.LegacyAccountElsewhere(e.Driver, e.Account, e.AccountTenant, e.LoginTenant))
 		})
+		// Saved roles that allow adding files but not encrypting - what a save
+		// on 0.50 or older leaves behind, and nothing tells from a choice
+		// (perm/gaps.go) - are told to the administrators once, here for the
+		// ones an older version left (internal/permgap). Admin -> Roles lists
+		// them with one click to give the permission back.
+		permgap.Announce(ctx, store, srvObj.notify)
 	}
 
 	/* koru:k2 av */
@@ -1323,6 +1361,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		Plugins:                  pluginMgr,
 		AppPlugins:               appPlugins,
 		AppPluginsDisabledReason: appPluginsReason,
+		AppStore:                 appStore,
 		Assoc:                    assocSvc,
 		Embed:                    embedFS,
 		LocalAuth:                localDrv,
@@ -2110,6 +2149,16 @@ func envAuthEntries(ctx context.Context, cfg config.Config, store db.Store, logi
 				"email_attr":    cfg.Auth.LDAP.EmailAttr,
 				"start_tls":     cfg.Auth.LDAP.StartTLS,
 				"ca_file":       cfg.Auth.LDAP.CAFile,
+				// LDAP links, directory sync and the directory's e-mail
+				// domains (docs/LDAP.md).
+				"group_filter":         cfg.Auth.LDAP.GroupFilter,
+				"group_base_dn":        cfg.Auth.LDAP.GroupBaseDN,
+				"sync_interval":        cfg.Auth.LDAP.SyncInterval,
+				"sync_filter":          cfg.Auth.LDAP.SyncFilter,
+				"sync_disable_missing": cfg.Auth.LDAP.SyncDisableMissing,
+				"sync_groups":          cfg.Auth.LDAP.SyncGroups,
+				"sync_group_filter":    cfg.Auth.LDAP.SyncGroupFilter,
+				"email_domains":        cfg.Auth.LDAP.EmailDomains,
 				// Tenant homing for just-in-time accounts. Without these the
 				// driver falls back to db.CreateUser's hard-coded `default`
 				// provider, which is the confine-exempt supertenant.

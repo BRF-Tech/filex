@@ -405,6 +405,10 @@ func (d *Driver) HandleCallback(w http.ResponseWriter, r *http.Request) (*model.
 	if !scope.owns(user) {
 		return nil, "", fmt.Errorf("oidc: account %d is not in tenant %d, the one this sign-in is for", user.ID, scope.ProviderID)
 	}
+	// Where the account comes from, for the Users page (migration 00084):
+	// one this sign-in made, or one with no password here that predates the
+	// label, is SSO's.
+	auth.ClaimSource(ctx, d.store, user, model.AuthSourceSSO)
 	if created && !id.verified {
 		return nil, "", d.holdForApproval(ctx, user, groups)
 	}

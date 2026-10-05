@@ -10,6 +10,7 @@ import "time"
 const (
 	GroupSourceManual = "manual"
 	GroupSourceSSO    = "sso"
+	GroupSourceLDAP   = "ldap"
 )
 
 // GroupLinkSSO links a group to a value of the SSO provider's role claim
@@ -17,9 +18,15 @@ const (
 // Compared exactly.
 const GroupLinkSSO = "sso"
 
+// GroupLinkLDAP links a group to an LDAP / Active Directory group, named by
+// its distinguished name (cn=finance,ou=groups,dc=example,dc=com) or its
+// common name alone (finance). Compared without case, and a DN without the
+// spaces around its commas and equals signs (group.LDAPValue).
+const GroupLinkLDAP = "ldap"
+
 // GroupLink names a group of an outside directory whose people are members
-// of a filex group. Kind is the directory (GroupLinkSSO), Value its group's
-// name there.
+// of a filex group. Kind is the directory (GroupLinkSSO, GroupLinkLDAP),
+// Value its group's name there.
 type GroupLink struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
@@ -36,13 +43,34 @@ type Group struct {
 	Description string `json:"description"`
 	ProviderID  *int64 `json:"provider_id,omitempty"`
 	RoleID      *int64 `json:"role_id"`
+	// GivesAdmin: the group makes its members administrators — the
+	// built-in Administrator role, full access — instead of giving a role
+	// (migration 00086). RoleID is then nil.
+	GivesAdmin bool `json:"gives_admin"`
 	// Priority orders the groups a member's role can come from: the
 	// highest first, then the lowest id (perm.EffectiveRole).
-	Priority  int         `json:"priority"`
-	Links     []GroupLink `json:"links"`
-	CreatedBy *int64      `json:"created_by,omitempty"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	Priority int         `json:"priority"`
+	Links    []GroupLink `json:"links"`
+	// A group directory sync brought in (migration 00084): DirectoryID is
+	// the directory group's permanent id ("ldap:…"), DirectoryName the name
+	// it last had there, DirectoryState "" while the directory has it and
+	// GroupDirectoryRemoved once it does not. All empty for every other
+	// group.
+	DirectoryID    string    `json:"directory_id,omitempty"`
+	DirectoryName  string    `json:"directory_name,omitempty"`
+	DirectoryState string    `json:"directory_state,omitempty"`
+	CreatedBy      *int64    `json:"created_by,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// GroupDirectoryRemoved is a synced group whose directory group is gone.
+const GroupDirectoryRemoved = "removed"
+
+// Synced reports whether directory sync brought this group in and the
+// directory still has it — its LDAP link is then the directory's.
+func (g *Group) Synced() bool {
+	return g != nil && g.DirectoryID != "" && g.DirectoryState != GroupDirectoryRemoved
 }
 
 // GroupMember is one row of user_group_members.

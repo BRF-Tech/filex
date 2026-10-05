@@ -6,8 +6,9 @@
 // the app by that name - /usr/bin/filex-app and the menu entry of the .deb and
 // the .rpm, the AppImage's AppRun, the snap's command.sh - goes through the
 // launcher first. The launcher checks that Chromium's sandbox can be built and,
-// when it cannot, says what to do and exits; it never starts the app without
-// it (see the file).
+// when it cannot, says what to do and exits; outside a snap it never starts the
+// app without it. In the snap it starts the app with --no-sandbox, under the
+// snap's strict confinement (since 0.52; see the file).
 //
 // Every Linux target is made from this one directory, so one hook covers the
 // four of them; Windows and macOS packs are left alone.

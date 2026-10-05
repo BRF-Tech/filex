@@ -234,7 +234,7 @@ Datei-Tabs installiert). filex zielt auf die Lücke dazwischen:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; 43 MB slim / 511 MB w/ thumbnails)       │
+│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -602,11 +602,12 @@ Details: [docs/DESKTOP.md](docs/DESKTOP.md). Die CLI allein:
 `brew install brf-tech/filex/filex` ([docs/CLI.md](docs/CLI.md); ihr winget-Paket,
 `BRFTech.filex`, ist in derselben Prüfung).
 
-Unter Linux läuft die App nie ohne die Chromium-Sandbox. `.deb` und `.rpm` brauchen
-nichts; ab Ubuntu 23.10 braucht ein AppImage einmalig ein AppArmor-Profil, und das Snap
-braucht `sudo snap connect filex-app:browser-sandbox`, bis der Snap Store die Verbindung
-von selbst herstellt - in beiden Fällen sagt die App das und zeigt den Schritt an
-([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)).
+Unter Linux laufen `.deb`, `.rpm` und AppImage nie ohne die Chromium-Sandbox. `.deb`
+und `.rpm` brauchen nichts; ab Ubuntu 23.10 braucht ein AppImage einmalig ein
+AppArmor-Profil, und die App sagt das und zeigt den Schritt an
+([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)). Das Snap läuft ohne die
+Chromium-Sandbox, innerhalb der strikten Snap-Isolierung, und braucht ebenfalls nichts
+([docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)).
 
 **ARM (arm64)** - was dafür ausgeliefert wird (jedes Release baut all das und führt es vor
 der Veröffentlichung auf arm64-Rechnern aus):
@@ -854,7 +855,7 @@ Speicher-Backend: [docs/PLUGINS.md](docs/PLUGINS.md).
 - **Nutzung & Kosten** - filex misst nicht selbst, was Ihr Anbieter abrechnet; es liest den Bericht, den der Anbieter schon schreibt, normalisiert ihn und bepreist ihn anhand einer Tabelle, die Sie bearbeiten können. Die täglichen CSV-Dateien von Backblaze B2 werden über dieselbe S3-API gelesen, die filex schon spricht, also keine neue Abhängigkeit und keine neue Art von Zugangsdaten. Freikontingente sind eigene Felder und keine Konstanten in einer Formel, und die Seite hält die Zeile des Anbieters auf Kontoebene von dessen Zeilen pro Bucket getrennt - wer sie addiert, zählt dieselben Transaktionen doppelt, um genau den Betrag, der niemandem auffällt ([docs/USAGE.md](docs/USAGE.md)).
 - **Audit-Protokoll** - jede Änderung mit Akteur, Identität der Integration und Metadaten aufgezeichnet.
 - **CLI-Client** - Dieselbe Binärdatei erreicht einen entfernten Server (`filex client`, `filex sync`) ohne serverseitiges Plug-in: Kopieren und Verschieben über Speicher hinweg, der Papierkorb, Versionen, Tags, App-Aktionen, Archive und Ihre Links, jeder Serverauftrag bis zum Ende verfolgt; `filex client login --realm` meldet sich bei einem Mandanten an, `filex encrypt` erstellt verschlüsselte Ordner, und eine gespeicherte Sitzung wird immer nur an die Adresse gesendet, mit der sie gespeichert wurde ([docs/CLI.md](docs/CLI.md)).
-- **Aktualisiert sich selbst** - Patch-Versionen installieren sich selbst, Nebenversionen werden zur Aktualisierung mit einem Klick angekündigt; eine Installation, die einem Paketmanager gehört (Homebrew, winget, Snap, ein Distributionspaket), oder ein Container wird über neue Releases und den Befehl informiert, mit dem man sie einspielt, und die Seite im Adminbereich sagt, dass nur angekündigt wird ([docs/UPDATES.md](docs/UPDATES.md)).
+- **Aktualisiert sich selbst** - Nebenversionen werden zur Aktualisierung mit einem Klick angekündigt, und Patch-Versionen installieren sich selbst, sobald Sie es erlauben (`AUTO_UPGRADE=true`; ab Werk prüft filex nur und sagt Ihnen Bescheid); eine Installation, die einem Paketmanager gehört (Homebrew, winget, Snap, ein Distributionspaket), oder ein Container wird über neue Releases und den Befehl informiert, mit dem man sie einspielt, und die Seite im Adminbereich sagt, dass nur angekündigt wird ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Eine einzige Binärdatei** - goreleaser-Matrix: linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **i18n** - Englisch + Türkisch ab Werk, **öffentliche Links inbegriffen**: Ein
   Freigabelink, eine PIN-Abfrage, die Seite einer Dateianforderung oder der

@@ -237,7 +237,7 @@ déploie pour son onglet de fichiers). filex vise l’entre-deux :
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; 43 MB slim / 511 MB w/ thumbnails)       │
+│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -602,12 +602,12 @@ d’installation Windows. Détails : [docs/DESKTOP.md](docs/DESKTOP.md). La CLI
 `brew install brf-tech/filex/filex` ([docs/CLI.md](docs/CLI.md) ; son paquet winget,
 `BRFTech.filex`, attend le même examen).
 
-Sous Linux, l’application ne s’exécute jamais sans le bac à sable de Chromium. Le `.deb`
-et le `.rpm` n’ont besoin de rien ; à partir d’Ubuntu 23.10, l’AppImage a besoin d’un
-profil AppArmor à installer une seule fois, et le Snap a besoin de
-`sudo snap connect filex-app:browser-sandbox` jusqu’à ce que le Snap Store le connecte de
-lui-même - dans les deux cas, l’application le dit et montre l’étape
-([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)).
+Sous Linux, le `.deb`, le `.rpm` et l’AppImage ne s’exécutent jamais sans le bac à sable
+de Chromium. Le `.deb` et le `.rpm` n’ont besoin de rien ; à partir d’Ubuntu 23.10,
+l’AppImage a besoin d’un profil AppArmor à installer une seule fois, et l’application le
+dit et montre l’étape ([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)). Le
+Snap s’exécute sans le bac à sable de Chromium, dans le confinement strict du snap, et
+n’a besoin de rien non plus ([docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)).
 
 **ARM (arm64)** - ce qui est livré pour cette architecture (à chaque version, tout cela
 est compilé et exécuté sur des machines arm64 avant publication) :
@@ -866,7 +866,7 @@ de stockage : [docs/PLUGINS.md](docs/PLUGINS.md).
 - **Utilisation et coût** - filex ne mesure pas la facture de votre fournisseur ; il lit le rapport que le fournisseur écrit déjà, le normalise et en calcule le prix d’après un tableau que vous pouvez modifier. Les CSV quotidiens de Backblaze B2 sont lus via la même API S3 que filex parle déjà, donc pas de nouvelle dépendance ni de nouveau type d’identifiant. Les offres gratuites sont des champs à part entière plutôt que des constantes dans une formule, et la page garde la ligne au niveau du compte du fournisseur séparée de ses lignes par bucket - les additionner revient à compter deux fois les mêmes transactions, d’un montant que, justement, personne ne remarque ([docs/USAGE.md](docs/USAGE.md)).
 - **Journal d’audit** - chaque modification enregistrée avec son auteur, l’identité d’intégration et les métadonnées.
 - **Client CLI** - le même binaire accède à un serveur distant (`filex client`, `filex sync`) sans extension côté serveur : la copie et le déplacement entre stockages, la corbeille, les versions, les étiquettes, les actions d’application, les archives et vos liens, chaque tâche du serveur étant suivie jusqu’à son terme ; `filex client login --realm` se connecte à un locataire, `filex encrypt` crée des dossiers chiffrés, et une session enregistrée n’est jamais envoyée qu’à l’adresse avec laquelle elle a été enregistrée ([docs/CLI.md](docs/CLI.md)).
-- **Mise à jour automatique** - les correctifs s’installent tout seuls, les versions mineures sont annoncées pour une mise à jour en un clic ; une installation gérée par un gestionnaire de paquets (Homebrew, winget, Snap, un paquet de distribution), ou un conteneur, se voit signaler les nouvelles versions et la commande pour les obtenir, et la page d’administration dit qu’elle ne fera que les annoncer ([docs/UPDATES.md](docs/UPDATES.md)).
+- **Mise à jour automatique** - les versions mineures sont annoncées pour une mise à jour en un clic, et les correctifs s’installent tout seuls une fois que vous l’autorisez (`AUTO_UPGRADE=true` ; par défaut, filex ne fait que vérifier et vous prévenir) ; une installation gérée par un gestionnaire de paquets (Homebrew, winget, Snap, un paquet de distribution), ou un conteneur, se voit signaler les nouvelles versions et la commande pour les obtenir, et la page d’administration dit qu’elle ne fera que les annoncer ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Binaire unique** - matrice goreleaser : linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **i18n** - anglais + turc de série, **liens publics compris** : un lien de partage,
   un écran de saisie du PIN, une page de demande de fichiers ou l’écran de signature

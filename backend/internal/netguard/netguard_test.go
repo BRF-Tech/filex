@@ -209,3 +209,34 @@ func TestDialContext_RefusesSharedAddressSpace(t *testing.T) {
 		t.Fatalf("dial 100.100.0.2: err = %v, want ErrPrivateTarget", err)
 	}
 }
+
+// APIClient: the same guarded dial, and no redirect followed - a 307 or 308
+// answered to a POST is handed back as it is, the body never re-sent to the
+// host it names.
+func TestAPIClient_FollowsNoRedirect(t *testing.T) {
+	var targetHits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHits.Add(1)
+	}))
+	defer target.Close()
+	for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+"/elsewhere", status)
+		}))
+		resp, err := Policy{Loopback: true}.APIClient(10*time.Second).Post(api.URL+"/v1/x", "application/json", strings.NewReader(`{"key":"secret"}`))
+		api.Close()
+		if err != nil {
+			t.Fatalf("%d: %v", status, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != status {
+			t.Fatalf("%d: the redirect was not handed back (status %d)", status, resp.StatusCode)
+		}
+	}
+	if n := targetHits.Load(); n != 0 {
+		t.Fatalf("a redirect was followed (%d requests reached the target)", n)
+	}
+	if _, err := (Policy{}).APIClient(10 * time.Second).Get(target.URL + "/"); !errors.Is(err, ErrPrivateTarget) {
+		t.Fatalf("zero policy, loopback server: err = %v, want ErrPrivateTarget", err)
+	}
+}

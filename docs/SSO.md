@@ -568,12 +568,29 @@ environment alone, and the page's "restart the server" changed nothing.)
 
 What the page does:
 
+- **One tab per kind of sign-in** - **LDAP**, **Local**, **OIDC**,
+  **Reverse-proxy header**, **Windows** and **Linux (PAM)** - each with a dot
+  that is green while one of its providers runs; the tab is kept in the
+  address (`?tab=oidc`). API keys are not here: they are always accepted, and
+  issued on the **API / MCP** page. **Add a provider** makes another of a
+  kind (a second directory, an SSO for some tenants only), switched off, and
+  opens its page.
+- **Each provider is a card** saying whether it runs and what it reaches -
+  an LDAP directory's server, base DN, e-mail domains, its last sync, its
+  schedule and **Sync now**. A card opens the provider's own page
+  (`/admin/auth-providers/<slug>`): **Settings** (the whole form - for LDAP in
+  sections: Connection, People, Groups, Directory sync - or the environment's
+  read-only view, with Test now and Save and apply, the tenants it serves and,
+  for one made with Add a provider, Delete) and, for a directory, **Sync** (its
+  schedule and last report).
 - **OIDC, LDAP, the proxy header, Windows and Linux (PAM)** can be configured and switched on here.
   A save is applied at once - no restart - through exactly the code the
   environment's configuration goes through, and the login page offers a
   provider the moment it runs.
 - **Every save runs the real test first** ("Test now": connect, bind, read the
-  base DN; fetch the discovery document, check the issuer and ask the token
+  base DN, then count the people the user filter finds, whether their groups
+  can be read, and how many groups directory sync would bring in - up to 1000
+  of each; fetch the discovery document, check the issuer and ask the token
   endpoint about the client). Switching a provider **on** while its test fails
   needs a confirmation that names the steps that failed; a provider saved
   **off** saves whatever its test says. The exception is an

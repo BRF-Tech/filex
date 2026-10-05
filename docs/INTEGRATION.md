@@ -577,8 +577,16 @@ in the query, in a body under any `Content-Type`, in a multipart field. A root,
 empty or absent path snaps to the confined folder, so listings open there. This
 covers manager / move / copy / delete / upload / download / share / archive /
 trash, the operations queue and its listing, the text editor's save, item
-permissions and invitations, comments, encrypted folders and the live socket
-(a ticket's, and one opened with the token itself). A path is inside the root
+permissions and invitations, comments, encrypted folders, the live socket
+(a ticket's, and one opened with the token itself) and apps: the files an app
+runs on, what its screens and jobs are told about the files it keeps state on
+(`state_list`), the files a job may name by path (a lock, a notice, a page
+link), a folder chosen for an app's result, an app's home page (only on the
+root's own storage), and the job a visitor starts on a link the token's job
+opened (the link records the root). Outside the root a folder or a storage
+answers the same `403` whether or not it exists, and the operations queue
+answers it byte for byte as the JSON body is answered, whatever the
+`Content-Type`. A path is inside the root
 only when it is inside with `\` read as a separator too, the same on every
 host (a Windows host's storage reads it as one).
 

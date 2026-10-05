@@ -22,6 +22,7 @@ import { RolesApi, type BuiltinRole, type PermCatalogue, type PermEffect, type P
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { builtinAppDefaults } from '@/lib/appPermissions';
+import { shownPerms } from '@/lib/foreignPermissions';
 import PermissionGrid from '@/components/PermissionGrid.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Button from '@/components/ui/Button.vue';
@@ -77,7 +78,9 @@ async function save() {
   try {
     // Every app decision goes with it: a choice put back to Default is a key
     // left out, and {} returns them all to the apps' defaults.
-    await RolesApi.putDefaults(set.value, props.role, apps.value);
+    // The catalogue it showed goes with it: a permission left off here is a
+    // decision, not one an older version dropped (backend perm.NoteGapsSaved).
+    await RolesApi.putDefaults(set.value, props.role, apps.value, shownPerms(props.catalogue));
     toast.success(t('permissions.rules.builtinSaved'));
     emit('saved');
     emit('update:modelValue', false);

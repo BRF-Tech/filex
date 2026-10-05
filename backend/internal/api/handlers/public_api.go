@@ -690,6 +690,13 @@ func (h *PublicAPI) enqueueAsCreator(w http.ResponseWriter, r *http.Request, sh 
 	// ⚠ The share's ID, not its token: the parameters travel into a queue row
 	// an administrator can read, and the token is the link itself.
 	params["share_id"] = sh.ID
+	// ⚠⚠ The root of the job that opened the link (model.Share.AppRoot). The
+	// job runs as the creator, and a creator who opened the link through a
+	// `root:` token's job was held to that root; without the stamp the
+	// visitor's job was not, and the app's follow-up work was told about
+	// every file it keeps state on (0.52.0). A link opened with no root
+	// stamps nothing.
+	wasmplugin.StampJobRoot(params, sh.AppRoot)
 	// ⭐ WHICH VISITOR is acting. The plugin minted this link and kept
 	// sha256(token) beside the one person it was sent to; the same hash comes
 	// back here, so the job can bind the submission to that person and refuse

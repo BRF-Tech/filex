@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { UsersApi, type UserCreateRequest, type UserListParams, type UserUpdateRequest } from '@/api/users';
+import { UsersApi, type CreatedUser, type UserCreateRequest, type UserListParams, type UserUpdateRequest } from '@/api/users';
 import type { PaginatedResponse, User } from '@/api/types';
 import { extractError } from '@/api/client';
 import { t } from '@/i18n';
@@ -24,9 +24,11 @@ export const useUsersStore = defineStore('users', () => {
     }
   }
 
-  async function create(payload: UserCreateRequest): Promise<User> {
+  async function create(payload: UserCreateRequest): Promise<CreatedUser> {
     const u = await UsersApi.create(payload);
-    page.value = { ...page.value, items: [u, ...page.value.items], total: page.value.total + 1 };
+    // The list keeps the account, not how it was invited (its first password).
+    const { invite: _invite, ...user } = u;
+    page.value = { ...page.value, items: [user, ...page.value.items], total: page.value.total + 1 };
     return u;
   }
 

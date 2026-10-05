@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
@@ -127,6 +128,34 @@ type Scope struct {
 	thumb bool
 	// sent are the hosts a thumbnail call reached, for its audit row.
 	sent []string
+	// root is the confinement of the API token the call was made with
+	// (`root:<adapter>://<rel>`, narrowed by X-Filex-Root), rooted=false when
+	// there is none. A screen reads it off its request (screenScope), a job off
+	// the stamp its door wrote on the job row (rootParamKey); the wake-up, a
+	// public page and a thumbnail have none.
+	//
+	// ⚠⚠ What a call is TOLD about files it was not handed (state_list) and
+	// what it may NAME by path (handedPath: a lock, a notice, a page link) is
+	// held to it. The inputs were held to it at the door; these are not inputs,
+	// and until 0.52.0 a `root:` token's screen and jobs were told about, and
+	// could lock, a file the app keeps state on anywhere (filex #154).
+	root   confine.Root
+	rooted bool
+}
+
+// inRoot reports whether rel on the storage called storageName lies inside
+// the root of the token this call was made with; true for an unconfined call.
+// A storage whose name is unknown ("") is outside every root.
+func (s *Scope) inRoot(storageName, rel string) bool {
+	if !s.rooted {
+		return true
+	}
+	return storageName != "" && s.root.Within(storageName, strings.Trim(rel, "/"))
+}
+
+// confineTo holds the call to root (see Scope.root).
+func (s *Scope) confineTo(root confine.Root) {
+	s.root, s.rooted = root, true
 }
 
 func newScope(plugin *Installed, reg *Registry, jobID string, storageID int64, drv storage.Driver, actor *model.User, locale string, writable bool) (*Scope, error) {

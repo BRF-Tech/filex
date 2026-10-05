@@ -121,7 +121,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 ## Authentication & access
 
 - [SSO (OIDC)](SSO.md) - sign in with Keycloak / Auth0 / Authentik / Okta / …
-- [LDAP & reverse-proxy auth](LDAP.md) - Active Directory / LDAP, header auth
+- [LDAP & reverse-proxy auth](LDAP.md) - Active Directory / LDAP, groups and directory sync, several
+  directories, header auth
 - [Sign in with an operating-system account](OS-LOGIN.md) - Windows (local or domain) and Linux PAM,
   the first-sign-in rule, the e-mail token, and how the provider is tested
 - [Sign-in attempt limits](CONFIGURATION.md#sign-in-attempt-limits) - wrong
@@ -167,9 +168,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [opening Office documents off your own disk](DESKTOP.md#opening-documents-from-your-computer),
   [a portable Windows copy that installs nothing](DESKTOP.md#portable-windows),
   [the notification bell and your account menu in the window](DESKTOP.md#notifications-and-your-account),
-  and on Linux [Chromium's sandbox, always](DESKTOP.md#appimage-on-recent-ubuntu)
-  (the one-time AppArmor profile an AppImage needs on recent Ubuntu, the snap's
-  `browser-sandbox` connection)
+  and on Linux [Chromium's sandbox](DESKTOP.md#appimage-on-recent-ubuntu)
+  (the one-time AppArmor profile an AppImage needs on recent Ubuntu; the snap
+  relies on [its strict confinement instead](DESKTOP.md#the-snap-and-the-sandbox))
 - [Folder sync](SYNC.md) - how a folder on your PC is kept in step with the server
 - [Uploads](UPLOADS.md) - the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection

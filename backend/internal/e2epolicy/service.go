@@ -455,11 +455,11 @@ func (s *Service) approvalPlaces(ctx context.Context, st *model.Storage, at, kin
 // not new. A catalogue that cannot be read is an error; a storage that cannot
 // be reached or listed answers "not new", never "new".
 func (s *Service) folderIsNew(ctx context.Context, st *model.Storage, dir string) (bool, error) {
-	n, err := s.o.Store.CountLiveNodesUnder(ctx, st.ID, dir)
+	holds, err := s.o.Store.HasLiveNodesUnder(ctx, st.ID, dir)
 	if err != nil {
 		return false, fmt.Errorf("e2epolicy: what the folder holds: %w", err)
 	}
-	if n > 0 {
+	if holds {
 		return false, nil
 	}
 	if s.o.Drivers == nil {

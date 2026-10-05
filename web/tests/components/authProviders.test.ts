@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
+import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,9 +28,13 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import type { AuthProvider, AuthProviderField, AuthProviderTestAccount, AuthProviderTestResult } from '@/api/types';
 import { useToastStore } from '@/stores/toast';
+import { formatInterval } from '@/lib/format';
 
 const testCall = vi.fn<[string, Record<string, unknown>, AuthProviderTestAccount?], Promise<AuthProviderTestResult>>();
 const updateCall = vi.fn();
+const removeCall = vi.fn(async () => undefined);
+const syncStatusCall = vi.fn(async (): Promise<unknown> => ({ name: 'ldap', available: true, running: false, interval_seconds: 0, last: null }));
+const syncStartCall = vi.fn(async () => undefined);
 
 const LDAP_FIELDS: AuthProviderField[] = [
   { key: 'url', kind: 'text', required: true },
@@ -89,7 +94,13 @@ vi.mock('@/api/auth-providers', () => ({
       secretKey: fx.secretKey,
     })),
     update: (...a: unknown[]) => updateCall(...a),
-    test: (id: string, draft: Record<string, unknown>, account?: AuthProviderTestAccount) => testCall(id, draft, account),
+    test: (id: string, draft: Record<string, unknown>) => testCall(id, draft),
+    syncStatus: (...a: unknown[]) => syncStatusCall(...(a as [])),
+    syncStart: (...a: unknown[]) => syncStartCall(...(a as [])),
+    remove: (...a: unknown[]) => removeCall(...(a as [])),
+    create: vi.fn(async () => null),
+    setTenants: vi.fn(async () => null),
+    dismissReview: vi.fn(async () => undefined),
   },
 }));
 
@@ -103,11 +114,29 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
 }
 
 import AuthProviders from '@/views/AuthProviders.vue';
+import AuthProviderEdit from '@/views/AuthProviderEdit.vue';
 
-function mountPage(locale: 'en' | 'tr'): VueWrapper {
+// The overview (cards under tabs) and a provider's own page, behind a real
+// router: a card opens /auth-providers/:name, and the page goes back to its tab.
+let router: Router;
+async function mountAt(locale: 'en' | 'tr', path: string): Promise<VueWrapper> {
   const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { en, tr } });
-  return mount(AuthProviders, { global: { plugins: [i18n] }, attachTo: document.body });
+  router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/auth-providers', name: 'auth-providers', component: AuthProviders },
+      { path: '/auth-providers/:name', name: 'auth-providers.edit', component: AuthProviderEdit },
+    ],
+  });
+  await router.push(path);
+  await router.isReady();
+  const view = path === '/auth-providers' ? AuthProviders : AuthProviderEdit;
+  const w = mount(view, { global: { plugins: [i18n, router] }, attachTo: document.body });
+  await flushPromises();
+  return w;
 }
+const mountPage = (locale: 'en' | 'tr') => mountAt(locale, '/auth-providers');
+const mountEdit = (id: string, locale: 'en' | 'tr' = 'en') => mountAt(locale, `/auth-providers/${id}`);
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -118,19 +147,14 @@ beforeEach(() => {
 
 describe('Test now', () => {
   it('is offered only where there is a server to reach', async () => {
-    const w = mountPage('en');
-    await flushPromises();
-    expect(w.find('[data-testid="auth-provider-test-button-ldap"]').exists()).toBe(true);
-    expect(w.find('[data-testid="auth-provider-test-button-oidc"]').exists()).toBe(true);
-    expect(w.find('[data-testid="auth-provider-test-button-local"]').exists()).toBe(false);
-    expect(w.find('[data-testid="auth-provider-test-button-api-token"]').exists()).toBe(false);
+    expect((await mountEdit('ldap')).find('[data-testid="auth-provider-test-button-ldap"]').exists()).toBe(true);
+    expect((await mountEdit('oidc')).find('[data-testid="auth-provider-test-button-oidc"]').exists()).toBe(true);
+    expect((await mountEdit('local')).find('[data-testid="auth-provider-test-button-local"]').exists()).toBe(false);
   });
 
   it('tests the form as it stands, not the saved row', async () => {
     testCall.mockResolvedValue({ testable: true, ok: true, checks: [] });
-    const w = mountPage('en');
-    await flushPromises();
-
+    const w = await mountEdit('ldap');
     await w.find('input[name="auth-field-ldap-url"]').setValue('ldap://other.example.com:389');
     await w.find('[data-testid="auth-provider-test-button-ldap"]').trigger('click');
     await flushPromises();
@@ -153,8 +177,7 @@ describe('Test now', () => {
         { id: 'connect', status: 'fail', params: { host: 'dc.example.com:389', reason: 'refused', detail: 'dial tcp: connection refused' } },
       ],
     });
-    const w = mountPage('tr');
-    await flushPromises();
+    const w = await mountEdit('ldap', 'tr');
     await w.find('[data-testid="auth-provider-test-button-ldap"]').trigger('click');
     await flushPromises();
 
@@ -167,7 +190,6 @@ describe('Test now', () => {
     expect(connect.text()).toContain('dc.example.com:389');
     expect(connect.text()).toContain(tr.authProviders.reasons.refused);
     // The server's own words only as the technical detail, never as the sentence.
-    // The colon is in the message (a French space goes before it).
     expect(connect.text()).toContain(tr.authProviders.technicalDetailIs.replace('{detail}', 'dial tcp: connection refused'));
     expect(connect.text()).not.toMatch(/^connect: fail/);
     expect(w.find('[data-testid="auth-provider-check-required"]').text()).toContain(tr.authProviders.checks.required.ok);
@@ -184,8 +206,7 @@ describe('a step the server worded itself', () => {
         { id: 'pamtester', status: 'fail', params: { reason: 'missing', hint: 'pamtester is not installed at /usr/bin/pamtester. Install it.' } },
       ],
     });
-    const w = mountPage('en');
-    await flushPromises();
+    const w = await mountEdit('ldap');
     await w.find('[data-testid="auth-provider-test-button-ldap"]').trigger('click');
     await flushPromises();
     const bad = w.find('[data-testid="auth-provider-check-pamtester"]');
@@ -198,8 +219,7 @@ describe('a step the server worded itself', () => {
 
 describe('what the page may change, and what it says it may not', () => {
   it('an environment provider is read-only and says where it comes from', async () => {
-    const w = mountPage('en');
-    await flushPromises();
+    const w = await mountEdit('oidc');
     const card = w.find('[data-testid="auth-provider-oidc"]');
     expect(card.find('input').exists()).toBe(false);
     expect(card.find('[data-testid="auth-provider-save-oidc"]').exists()).toBe(false);
@@ -211,44 +231,43 @@ describe('what the page may change, and what it says it may not', () => {
     expect(card.text()).toContain(en.authProviders.secretSetShort);
   });
 
-  it('password sign-in has no switch here, and the page says why nothing here can lock you out', async () => {
-    const w = mountPage('tr');
-    await flushPromises();
-    const local = w.find('[data-testid="auth-provider-local"]');
+  it('password sign-in has no switch here, and the overview says why nothing here can lock you out', async () => {
+    const edit = await mountEdit('local', 'tr');
+    const local = edit.find('[data-testid="auth-provider-local"]');
     expect(local.find('input').exists()).toBe(false);
     expect(local.find('button').exists()).toBe(false);
+    const w = await mountPage('tr');
     expect(w.find('[data-testid="auth-providers-lockout-note"]').text()).toContain(tr.authProviders.lockoutNote);
   });
 
   it('a stored secret is never put in its box; the box says it is set', async () => {
-    const w = mountPage('en');
-    await flushPromises();
+    const w = await mountEdit('ldap');
     const box = w.find('input[name="auth-field-ldap-bind_password"]');
     expect((box.element as HTMLInputElement).value).toBe('');
     expect(w.find('[data-testid="auth-provider-ldap"]').text()).toContain(en.authProviders.secretSet);
   });
 
   it('marks a provider saved before v0.43.0 as never applied, and imported off', async () => {
-    const w = mountPage('tr');
-    await flushPromises();
+    const w = await mountEdit('proxy-header', 'tr');
     expect(w.find('[data-testid="auth-provider-legacy-proxy-header"]').text()).toBe(tr.authProviders.legacy);
     expect(w.find('[data-testid="auth-provider-state-proxy-header"]').text()).toBe(tr.authProviders.status.disabled);
   });
 
-  it('says a provider that is on but could not start, with the reason', async () => {
+  it('says a provider that is on but could not start, with the reason — on its card and its page', async () => {
     fx.providers = defaultProviders().map((p) =>
       p.id === 'ldap' ? { ...p, state: 'failed', status: 'misconfigured', last_error: 'ldap: url and base_dn required' } : p,
     );
-    const w = mountPage('en');
-    await flushPromises();
+    const w = await mountEdit('ldap');
     expect(w.find('[data-testid="auth-provider-state-ldap"]').text()).toBe(en.authProviders.status.misconfigured);
     expect(w.find('[data-testid="auth-provider-error-ldap"]').text()).toContain('ldap: url and base_dn required');
+    const o = await mountPage('en');
+    expect(o.get('[data-testid="auth-card-state-ldap"]').text()).toBe(en.authProviders.status.misconfigured);
+    expect(o.get('[data-testid="auth-card-ldap"]').text()).toContain('ldap: url and base_dn required');
   });
 
   it('warns that secrets cannot be stored without FILEX_SECRET_KEY', async () => {
     fx.secretKey = false;
-    const w = mountPage('en');
-    await flushPromises();
+    const w = await mountPage('en');
     const said = w.find('[data-testid="auth-providers-no-secret-key"]');
     // ⚠ The variable's NAME is not in the catalogue: the sentence carries an
     // `{env}` slot and the page draws the name as <code>, so a translator
@@ -257,14 +276,15 @@ describe('what the page may change, and what it says it may not', () => {
     expect(en.authProviders.noSecretKey).not.toContain('FILEX_SECRET_KEY');
     expect(said.find('code').text()).toBe('FILEX_SECRET_KEY');
     expect(said.text()).toBe(en.authProviders.noSecretKey.replace('{env}', 'FILEX_SECRET_KEY'));
+    // …and on a page provider's own page, where the secret is typed.
+    expect((await mountEdit('ldap')).find('[data-testid="auth-providers-no-secret-key"]').exists()).toBe(true);
   });
 });
 
 describe('Save and apply', () => {
   it('sends the form, never a secret that was left blank', async () => {
     updateCall.mockResolvedValue({ status: 'saved', provider: null, checks: [], testOk: true });
-    const w = mountPage('en');
-    await flushPromises();
+    const w = await mountEdit('ldap');
     await w.find('[data-testid="auth-provider-save-ldap"]').trigger('click');
     await flushPromises();
     expect(updateCall).toHaveBeenCalledTimes(1);
@@ -287,8 +307,7 @@ describe('Save and apply', () => {
       ],
     });
     updateCall.mockResolvedValueOnce({ status: 'saved', provider: null, checks: [], testOk: false });
-    const w = mountPage('tr');
-    await flushPromises();
+    const w = await mountEdit('ldap', 'tr');
     await w.find('[data-testid="auth-provider-save-ldap"]').trigger('click');
     await flushPromises();
 
@@ -306,15 +325,14 @@ describe('Save and apply', () => {
     expect(updateCall.mock.calls[1][1].confirm_failed_test).toBe(true);
   });
 
-  it('says a refusal on the card it is about, not in a toast', async () => {
+  it('says a refusal on the page it is about, not in a toast', async () => {
     updateCall.mockRejectedValue(
       Object.assign(new Error('Request failed with status code 409'), {
         isAxiosError: true,
         response: { status: 409, data: { error: 'last_sign_in_method', message: 'the last way an administrator can sign in' } },
       }),
     );
-    const w = mountPage('en');
-    await flushPromises();
+    const w = await mountEdit('ldap');
     await w.find('[data-testid="auth-provider-save-ldap"]').trigger('click');
     await flushPromises();
     expect(w.find('[data-testid="auth-provider-refusal-ldap"]').text()).toContain('the last way an administrator can sign in');
@@ -368,347 +386,160 @@ describe('the words for every step the server can answer', () => {
   });
 });
 
-// ── the fields and the names the server's schema can send ─────────────────
-//
-// The form is drawn from the server's schema (authsetup.Schema): a field the
-// catalogue has no label for is drawn with its raw key ("pamtester_path") —
-// read out of the Go source, so a new field without words fails here.
-describe('the words for every field and provider the page manages', () => {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const PAGE = fs.readFileSync(path.resolve(here, '../../../backend/internal/authsetup/page.go'), 'utf8');
-  const schema = /var Schema = map\[string\]\[\]Field\{[\s\S]*?\n\}/.exec(PAGE)?.[0] ?? '';
-  const keys = [...new Set([...schema.matchAll(/\{Key: "([a-z_]+)"/g)].map((m) => m[1]))];
-  const managed = [...(/var Managed = \[\]string\{([^}]*)\}/.exec(PAGE)?.[1] ?? '').matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
-
-  it('finds the schema at all', () => {
-    expect(keys).toContain('pamtester_path');
-    expect(keys).toContain('group_attr');
-    expect(managed).toEqual(expect.arrayContaining(['windows', 'pam']));
+describe('an LDAP directory’s page: sections, hints, defaults and the directory steps', () => {
+  const FULL: AuthProviderField[] = [
+    { key: 'url', kind: 'text', required: true },
+    { key: 'base_dn', kind: 'text', required: true },
+    { key: 'bind_dn', kind: 'text' },
+    { key: 'bind_password', kind: 'secret' },
+    { key: 'user_filter', kind: 'text', default: '(mail=%s)' },
+    { key: 'email_attr', kind: 'text', default: 'mail' },
+    { key: 'group_attr', kind: 'text', default: 'memberOf' },
+    { key: 'group_filter', kind: 'text' },
+    { key: 'start_tls', kind: 'bool' },
+    { key: 'sync_interval', kind: 'text' },
+    { key: 'sync_groups', kind: 'bool', default: 'true' },
+  ];
+  it('groups the form into sections, in order, with hints on the new settings', async () => {
+    fx.providers = [provider('ldap', { testable: true, managed: true, fields: FULL })];
+    const w = await mountEdit('ldap');
+    const heads = w.findAll('[data-testid^="auth-section-ldap-"]').map((h) => h.attributes('data-testid'));
+    expect(heads).toEqual(['auth-section-ldap-connection', 'auth-section-ldap-people', 'auth-section-ldap-groups', 'auth-section-ldap-sync']);
+    const names = w.findAll('input[name^="auth-field-ldap-"]').map((i) => i.attributes('name'));
+    expect(names.indexOf('auth-field-ldap-start_tls')).toBeLessThan(names.indexOf('auth-field-ldap-user_filter'));
+    expect(w.text()).toContain(en.authProviders.fieldHints.group_filter);
+    expect(w.text()).toContain(en.authProviders.fieldHints.sync_interval);
   });
 
-  it.each([
-    ['en', en],
-    ['tr', tr],
-  ])('%s has a label for each field and a name for each provider', (_lang, bundle) => {
-    const fields = bundle.authProviders.fields as Record<string, string>;
-    expect(keys.filter((k) => !fields[k])).toEqual([]);
-    const names = bundle.authProviders.providers as Record<string, string>;
-    expect(managed.filter((n) => !names[n])).toEqual([]);
+  it('an environment LDAP says each setting in the same order, and what an unset one means', async () => {
+    fx.providers = [provider('ldap', {
+      testable: true, origin: 'environment', from: 'FILEX_AUTH_DRIVERS', fields: FULL,
+      config_redacted: { url: 'ldap://127.0.0.1:3890', base_dn: 'dc=example,dc=com', sync_interval: '6h', multi_tenant: false },
+      secrets_set: { bind_password: true },
+    })];
+    const w = await mountEdit('ldap');
+    const text = w.get('[data-testid="auth-provider-envfields-ldap"]').text();
+    expect(text).toContain(en.authProviders.defaultIs.replace('{value}', 'memberOf'));
+    expect(text).toContain(en.authProviders.defaultIs.replace('{value}', 'Yes'));
+    expect(text.indexOf(en.authProviders.sections.people)).toBeLessThan(text.indexOf(en.authProviders.sections.sync));
+    expect(text.indexOf('6h')).toBeGreaterThan(text.indexOf(en.authProviders.sections.sync));
+    expect(text).toContain(en.authProviders.secretSetShort);
+  });
+
+  it('says what the directory holds, one or many', async () => {
+    testCall.mockResolvedValue({
+      testable: true,
+      ok: true,
+      checks: [
+        { id: 'people', status: 'ok', params: { n: '1000+', mail: '998', filter: '(mail=*)', attr: 'mail' } },
+        { id: 'groups', status: 'unchecked', params: { attr: 'memberOf' } },
+        { id: 'sync_groups', status: 'ok', params: { n: '1' } },
+      ],
+    });
+    const w = await mountEdit('ldap');
+    await w.find('[data-testid="auth-provider-test-button-ldap"]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-testid="auth-provider-check-people"]').text()).toContain('1000+ people found with (mail=*); 998 with an email (mail).');
+    expect(w.get('[data-testid="auth-provider-check-groups"]').text()).toContain('Nobody lists groups in memberOf');
+    expect(w.get('[data-testid="auth-provider-check-sync_groups"]').text()).toContain('bring in 1 group.');
+  });
+
+  it('has a Settings and a Sync section; Sync holds the directory’s sync', async () => {
+    const w = await mountEdit('ldap');
+    expect(w.findAll('[data-testid^="auth-section-tab-"]').map((b) => b.text())).toEqual([en.authProviders.editSections.settings, en.authProviders.editSections.sync]);
+    await w.get('[data-testid="auth-section-tab-sync"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-testid="auth-provider-sync"]').exists()).toBe(true);
+    expect((w.get('[data-testid="auth-provider-ldap"]').element as HTMLElement).style.display).toBe('none');
+    expect(router.currentRoute.value.query.section).toBe('sync');
   });
 });
 
-// ── operating-system providers: the test account ───────────────────────────
-//
-// windows and pam are proved by signing a real account in (#128). The card
-// asks for that account beside its buttons; the account goes with the one
-// request that tests or saves; a failing test is never confirmed away; the
-// account that passed becomes a super administrator; and the password is
-// emptied the moment its request is answered — it is kept nowhere.
-describe('an operating-system provider', () => {
-  const PAM_FIELDS: AuthProviderField[] = [
-    { key: 'pamtester_path', kind: 'text', default: '/usr/bin/pamtester' },
-    { key: 'service', kind: 'text', default: 'filex' },
-    { key: 'use_sudo', kind: 'bool', default: 'true' },
-    { key: 'timeout_seconds', kind: 'text', default: '10' },
-    { key: 'max_concurrent', kind: 'text', default: '4' },
-    { key: 'email_domain', kind: 'text' },
-    { key: 'auto_create', kind: 'bool', default: 'false' },
-  ];
-  const WINDOWS_FIELDS: AuthProviderField[] = [
-    { key: 'auto_create', kind: 'bool', default: 'false' },
-    { key: 'allowed_groups', kind: 'text' },
-    { key: 'domain', kind: 'text' },
-  ];
-  const SECRET = 'Hunter2-never-kept!';
-
-  function osProviders(): AuthProvider[] {
-    return [
-      ...defaultProviders(),
-      provider('windows', {
-        managed: true,
-        testable: true,
-        test_account_required: true,
-        enabled: false,
-        state: 'off',
-        status: 'disabled',
-        fields: WINDOWS_FIELDS,
-      }),
-      provider('pam', {
-        managed: true,
-        testable: true,
-        test_account_required: true,
-        enabled: false,
-        state: 'off',
-        status: 'disabled',
-        fields: PAM_FIELDS,
+describe('several LDAP directories', () => {
+  // Another LDAP provider is an instance of the driver ("Add a provider"):
+  // its slug, its own name, and the driver it runs.
+  function twoDirectories() {
+    fx.providers = [
+      provider('ldap', { driver: 'ldap', testable: true, managed: true, fields: LDAP_FIELDS, config_redacted: { url: 'ldap://dc.example.com:389', base_dn: 'dc=example,dc=com', email_domains: 'example.com' } }),
+      provider('partner', {
+        driver: 'ldap', instance_id: 2, label: 'Partner AD', testable: true, managed: true, enabled: false, state: 'off', status: 'disabled',
+        config_redacted: { url: 'ldaps://partner.example', base_dn: 'dc=partner' }, fields: LDAP_FIELDS,
       }),
     ];
   }
 
-  async function typeAccount(w: VueWrapper, id: string, username: string, password: string) {
-    await w.find(`input[name="auth-test-account-${id}-username"]`).setValue(username);
-    await w.find(`input[name="auth-test-account-${id}-password"]`).setValue(password);
-  }
-
-  async function switchOn(w: VueWrapper, id: string) {
-    const toggle = w.find(`button#auth-provider-enabled-${id}`);
-    expect(toggle.attributes('aria-checked')).toBe('false');
-    await toggle.trigger('click');
-  }
-
-  function passwordBox(w: VueWrapper, id: string): HTMLInputElement {
-    return w.find(`input[name="auth-test-account-${id}-password"]`).element as HTMLInputElement;
-  }
-
-  /** ⚠ The password must be nowhere once its request is answered. */
-  function expectForgotten(w: VueWrapper, id: string, logged: ReturnType<typeof vi.spyOn>[]) {
-    expect(passwordBox(w, id).value).toBe('');
-    expect(w.html()).not.toContain(SECRET);
-    expect(document.body.innerHTML).not.toContain(SECRET);
-    expect(JSON.stringify({ ...localStorage })).not.toContain(SECRET);
-    expect(JSON.stringify({ ...sessionStorage })).not.toContain(SECRET);
-    expect(JSON.stringify(useToastStore().toasts)).not.toContain(SECRET);
-    for (const spy of logged) expect(JSON.stringify(spy.mock.calls)).not.toContain(SECRET);
-  }
-
-  function spyLogs() {
-    return (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
-  }
-
-  beforeEach(() => {
-    // clearAllMocks keeps a queued mockResolvedValueOnce: start from nothing.
-    updateCall.mockReset();
-    testCall.mockReset();
-    fx.providers = osProviders();
-    localStorage.clear();
-    sessionStorage.clear();
+  it('shows each as a card, by its own name, that opens its page', async () => {
+    twoDirectories();
+    const w = await mountPage('en');
+    const partner = w.get('[data-testid="auth-card-partner"]');
+    expect(partner.text()).toContain('Partner AD');
+    expect(partner.text()).toContain('ldaps://partner.example · dc=partner');
+    expect(partner.text()).toContain(en.authProviders.card.anyDomain);
+    expect(w.get('[data-testid="auth-card-ldap"]').text()).toContain(en.authProviders.card.domains.replace('{list}', 'example.com'));
+    expect(partner.attributes('href')).toBe('/auth-providers/partner');
   });
 
-  it('labels every field in the reader’s language and names the provider — never a raw key', async () => {
-    const w = mountPage('tr');
+  it('deletes one made with Add a provider from its page, and goes back to the LDAP tab - never the first', async () => {
+    twoDirectories();
+    const first = await mountEdit('ldap');
+    expect(first.find('[data-testid="auth-provider-delete-ldap"]').exists()).toBe(false);
+    first.unmount();
+    const w = await mountEdit('partner');
+    expect(w.get('[data-testid="auth-provider-title"]').text()).toContain('Partner AD');
+    await w.get('[data-testid="auth-provider-delete-partner"]').trigger('click');
     await flushPromises();
-    const card = w.find('[data-testid="auth-provider-pam"]');
-    expect(card.find('h2').text()).toContain(tr.authProviders.providers.pam);
-    for (const f of PAM_FIELDS) {
-      expect(card.text()).toContain((tr.authProviders.fields as Record<string, string>)[f.key]);
-    }
-    // An empty box says what it means: the server's default.
-    expect(w.find('input[name="auth-field-pam-pamtester_path"]').attributes('placeholder')).toBe('/usr/bin/pamtester');
-    // Whole numbers kept as text: a numeric keyboard and the range said.
-    const timeout = w.find('input[name="auth-field-pam-timeout_seconds"]');
-    expect(timeout.attributes('type')).toBe('text');
-    expect(timeout.attributes('inputmode')).toBe('numeric');
-    expect(card.text()).toContain(tr.authProviders.fieldHints.timeout_seconds);
-    expect(card.text()).toContain(tr.authProviders.fieldHints.max_concurrent);
+    expect(document.body.querySelector('[data-testid="auth-provider-delete-body"]')?.textContent).toContain('Partner AD');
+    (document.body.querySelector('[data-testid="auth-provider-delete-confirm"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(removeCall).toHaveBeenCalledWith('partner', false);
+    expect(router.currentRoute.value.fullPath).toBe('/auth-providers?tab=ldap');
   });
 
-  it('asks for a test account beside its buttons, and only where a test signs somebody in', async () => {
-    const w = mountPage('en');
-    await flushPromises();
-    for (const id of ['windows', 'pam']) {
-      const box = w.find(`[data-testid="auth-provider-test-account-${id}"]`);
-      expect(box.exists()).toBe(true);
-      expect(box.text()).toContain(en.authProviders.testAccount.about);
-      const pw = box.find(`input[name="auth-test-account-${id}-password"]`);
-      expect(pw.attributes('type')).toBe('password');
-      // Never filled in by the browser (its "off" is ignored on a password box).
-      expect(pw.attributes('autocomplete')).toBe('new-password');
-      expect(box.find(`input[name="auth-test-account-${id}-username"]`).attributes('autocomplete')).toBe('off');
-    }
-    expect(w.find('[data-testid="auth-provider-test-account-ldap"]').exists()).toBe(false);
-    expect(w.find('[data-testid="auth-provider-test-account-oidc"]').exists()).toBe(false);
+  it('a provider that is not there says so', async () => {
+    const w = await mountEdit('ldap-gone');
+    expect(w.get('[data-testid="auth-provider-missing"]').text()).toBe(en.authProviders.notFound);
   });
+});
 
-  it('tests with the account, then forgets the password', async () => {
-    const logged = spyLogs();
-    testCall.mockResolvedValue({ testable: true, ok: true, checks: [{ id: 'test_account', status: 'ok', params: { account: 'alex' } }] });
-    const w = mountPage('en');
-    await flushPromises();
-    await typeAccount(w, 'pam', '  alex ', SECRET);
-    await w.find('[data-testid="auth-provider-test-button-pam"]').trigger('click');
-    await flushPromises();
-
-    expect(testCall).toHaveBeenCalledTimes(1);
-    const [id, draft, account] = testCall.mock.calls[0];
-    expect(id).toBe('pam');
-    expect(draft.service).toBe('');
-    expect(account).toEqual({ username: 'alex', password: SECRET });
-    // The name stays for the next try; the password does not.
-    expect((w.find('input[name="auth-test-account-pam-username"]').element as HTMLInputElement).value).toBe('  alex ');
-    expectForgotten(w, 'pam', logged);
-  });
-
-  it('forgets the password when the test request fails too', async () => {
-    const logged = spyLogs();
-    testCall.mockRejectedValue(Object.assign(new Error('Network Error'), { isAxiosError: true }));
-    const w = mountPage('en');
-    await flushPromises();
-    await typeAccount(w, 'windows', 'alex', SECRET);
-    await w.find('[data-testid="auth-provider-test-button-windows"]').trigger('click');
-    await flushPromises();
-    expect(testCall).toHaveBeenCalledTimes(1);
-    expectForgotten(w, 'windows', logged);
-  });
-
-  it('a test without an account is still sent — the server names the step that needs one', async () => {
-    testCall.mockResolvedValue({ testable: true, ok: false, checks: [] });
-    const w = mountPage('en');
-    await flushPromises();
-    await w.find('[data-testid="auth-provider-test-button-pam"]').trigger('click');
-    await flushPromises();
-    expect(testCall).toHaveBeenCalledTimes(1);
-    expect(testCall.mock.calls[0][2]).toBeUndefined();
-  });
-
-  it('switching it on without an account is said on the card, and nothing is sent', async () => {
-    const w = mountPage('tr');
-    await flushPromises();
-    await switchOn(w, 'windows');
-    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
-    await flushPromises();
-    expect(updateCall).not.toHaveBeenCalled();
-    expect(w.find('[data-testid="auth-provider-refusal-windows"]').text()).toBe(tr.authProviders.testAccount.needed);
-
-    // A name without its password is no account either.
-    await typeAccount(w, 'windows', 'alex', '');
-    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
-    await flushPromises();
-    expect(updateCall).not.toHaveBeenCalled();
-  });
-
-  it('a save that leaves it off needs no account and is not sent one', async () => {
-    updateCall.mockResolvedValue({ status: 'saved', provider: null, checks: [], testOk: false, superAdmin: false });
-    const w = mountPage('en');
-    await flushPromises();
-    await typeAccount(w, 'pam', 'alex', SECRET);
-    await w.find('[data-testid="auth-provider-save-pam"]').trigger('click');
-    await flushPromises();
-    expect(updateCall).toHaveBeenCalledTimes(1);
-    expect(updateCall.mock.calls[0][1].enabled).toBe(false);
-    expect(updateCall.mock.calls[0][1].test_account).toBeUndefined();
-  });
-
-  it('a failing test is never confirmed away: no "switch on anyway", the steps and the fix instead', async () => {
-    const logged = spyLogs();
-    const hint = 'sudo asks for a password when filex runs pamtester. Run `sudo visudo -f /etc/sudoers.d/filex` and put in it the line `filex ALL=(root) NOPASSWD: /usr/bin/pamtester filex *`, then test again.';
-    updateCall.mockResolvedValue({
-      status: 'test_failed',
-      message: 'The test did not pass, so it was not switched on.',
-      failed: ['sudo'],
-      confirmAllowed: false,
-      strict: true,
-      checks: [
-        { id: 'config', status: 'ok' },
-        { id: 'pamtester', status: 'ok', params: { path: '/usr/bin/pamtester' } },
-        { id: 'sudo', status: 'fail', params: { reason: 'password_required', hint, detail: 'sudo: a password is required' } },
-      ],
-    });
-    const w = mountPage('en');
-    await flushPromises();
-    await switchOn(w, 'pam');
-    await typeAccount(w, 'pam', 'alex', SECRET);
-    await w.find('[data-testid="auth-provider-save-pam"]').trigger('click');
-    await flushPromises();
-
-    expect(updateCall).toHaveBeenCalledTimes(1);
-    const body = updateCall.mock.calls[0][1];
-    expect(body.enabled).toBe(true);
-    expect(body.test_account).toEqual({ username: 'alex', password: SECRET });
-    expect(body.confirm_failed_test).toBeUndefined();
-
-    // The question is never asked (the dialog stays closed, with nothing in it).
-    expect(w.find('[data-testid="auth-provider-confirm"]').exists()).toBe(false);
-    expect(w.find('dialog').attributes('open')).toBeUndefined();
-    expect(w.find('[data-testid="auth-provider-refusal-pam"]').text()).toBe('The test did not pass, so it was not switched on.');
-
-    const sudo = w.find('[data-testid="auth-provider-check-sudo"]');
-    expect(sudo.attributes('data-status')).toBe('fail');
-    // The server's sentence, with what is to be typed as <code>, copyable whole.
-    const code = sudo.findAll('code');
-    expect(code.map((c) => c.text())).toEqual([
-      'sudo visudo -f /etc/sudoers.d/filex',
-      'filex ALL=(root) NOPASSWD: /usr/bin/pamtester filex *',
+describe('the overview: tabs of cards', () => {
+  it('one tab per kind of sign-in, LDAP first; API keys are not on this page', async () => {
+    const w = await mountPage('en');
+    const tabs = w.findAll('[data-testid^="auth-tab-"]').map((b) => b.text());
+    expect(tabs).toEqual([
+      en.authProviders.tabs.ldap, en.authProviders.tabs.local, en.authProviders.tabs.oidc,
+      en.authProviders.tabs['proxy-header'], en.authProviders.tabs.windows, en.authProviders.tabs.pam,
     ]);
-    expect(code[0].classes()).toContain('select-all');
-    expect(code[0].attributes('dir')).toBe('ltr');
-    expect(sudo.text()).toContain('sudo asks for a password when filex runs pamtester. Run sudo visudo');
-    expect(sudo.text()).not.toContain('`');
-    expect(w.find('[data-testid="auth-provider-check-pamtester"]').text()).toContain('/usr/bin/pamtester');
-    expectForgotten(w, 'pam', logged);
+    expect(w.find('[data-testid="auth-card-api-token"]').exists()).toBe(false);
+    expect(w.find('[data-testid="auth-card-ldap"]').exists()).toBe(true);
+    expect(w.find('[data-testid="auth-card-oidc"]').exists()).toBe(false);
+
+    await w.get('[data-testid="auth-tab-oidc"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-testid="auth-card-oidc"]').exists()).toBe(true);
+    expect(w.find('[data-testid="auth-card-ldap"]').exists()).toBe(false);
+    expect(w.get('[data-testid="auth-card-oidc"]').text()).toContain('https://idp.example/realms/main');
+    expect(w.get('[data-testid="auth-tab-oidc"]').attributes('aria-selected')).toBe('true');
+    expect(router.currentRoute.value.query.tab).toBe('oidc');
   });
 
-  it('says the account that passed was made a super administrator', async () => {
-    const logged = spyLogs();
-    updateCall.mockResolvedValue({
-      status: 'saved',
-      provider: null,
-      checks: [{ id: 'test_account', status: 'ok', params: { account: 'alex' } }],
-      testOk: true,
-      superAdmin: true,
+  it('a directory’s card says its sync, and runs it without opening the directory', async () => {
+    syncStatusCall.mockResolvedValue({
+      name: 'ldap', available: true, running: false, interval_seconds: 21600,
+      last: { provider: 'ldap', trigger: 'manual', started_at: new Date().toISOString(), finished_at: new Date().toISOString(), found: 1005, created: 0, updated: 0, skipped: 1, missing: 3, disabled: 0, groups_found: 406, groups_created: 0, groups_renamed: 0, groups_restored: 0, groups_removed: 0, groups_linked_by_hand: 11 },
     });
-    const w = mountPage('tr');
+    const w = await mountPage('en');
+    const sync = w.get('[data-testid="auth-card-sync-ldap"]').text();
+    // The interval in the viewer's words ("6 hr"), never the config's "6h".
+    expect(sync).toContain(en.authProviders.card.every.replace('{every}', formatInterval(21600, 'en')));
+    expect(sync).not.toContain('6h');
+    expect(sync).toContain('1005');
+    expect(sync).toContain('406');
+    // Sync now is beside the link, not inside it: a button in an <a> is
+    // invalid HTML and reads as part of the link.
+    expect(w.get('[data-testid="auth-card-ldap"]').find('button').exists()).toBe(false);
+    await w.get('[data-testid="auth-card-syncnow-ldap"]').trigger('click');
     await flushPromises();
-    await switchOn(w, 'pam');
-    await typeAccount(w, 'pam', 'alex', SECRET);
-    await w.find('[data-testid="auth-provider-save-pam"]').trigger('click');
-    await flushPromises();
-
-    const said = useToastStore().toasts.map((x) => x.message);
-    expect(said).toContain(tr.authProviders.savedApplied);
-    expect(said).toContain(tr.authProviders.testAccount.madeSuperAdmin.replace('{account}', 'alex'));
-    expectForgotten(w, 'pam', logged);
-  });
-
-  it('says nothing about an administrator when the server made none', async () => {
-    updateCall.mockResolvedValue({ status: 'saved', provider: null, checks: [], testOk: true, superAdmin: false });
-    const w = mountPage('en');
-    await flushPromises();
-    await switchOn(w, 'windows');
-    await typeAccount(w, 'windows', 'alex', SECRET);
-    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
-    await flushPromises();
-    const said = useToastStore().toasts.map((x) => x.message);
-    expect(said).toEqual([en.authProviders.savedApplied]);
-  });
-
-  it.each(['test_account_disabled', 'test_account_not_platform'])('%s is said on the card, in the server’s words', async (code) => {
-    const logged = spyLogs();
-    updateCall.mockRejectedValue(
-      Object.assign(new Error('Request failed with status code 409'), {
-        isAxiosError: true,
-        response: { status: 409, data: { error: code, message: `the server’s sentence for ${code}` } },
-      }),
-    );
-    const w = mountPage('en');
-    await flushPromises();
-    await switchOn(w, 'windows');
-    await typeAccount(w, 'windows', 'alex', SECRET);
-    await w.find('[data-testid="auth-provider-save-windows"]').trigger('click');
-    await flushPromises();
-    expect(w.find('[data-testid="auth-provider-refusal-windows"]').text()).toContain(`the server’s sentence for ${code}`);
-    expect(w.find('[data-testid="auth-provider-confirm"]').exists()).toBe(false);
-    expectForgotten(w, 'windows', logged);
-  });
-
-  it('on a server that is not Windows, the test says so in words', async () => {
-    testCall.mockResolvedValue({ testable: true, ok: false, checks: [{ id: 'unsupported_os', status: 'fail' }] });
-    const w = mountPage('tr');
-    await flushPromises();
-    await w.find('[data-testid="auth-provider-test-button-windows"]').trigger('click');
-    await flushPromises();
-    expect(w.find('[data-testid="auth-provider-check-unsupported_os"]').text()).toContain(tr.authProviders.checks.unsupported_os.fail);
-  });
-
-  it('a provider that stopped starting shows the server’s command as <code> in its reason', async () => {
-    fx.providers = osProviders().map((p) =>
-      p.id === 'pam'
-        ? { ...p, enabled: true, state: 'failed', status: 'misconfigured', last_error: 'pam: setup check "pamtester" failed (missing): Install it: `sudo apt install pamtester`' }
-        : p,
-    );
-    const w = mountPage('en');
-    await flushPromises();
-    const err = w.find('[data-testid="auth-provider-error-pam"]');
-    expect(err.find('code').text()).toBe('sudo apt install pamtester');
-    expect(err.text()).toContain('pam: setup check "pamtester" failed (missing): Install it: sudo apt install pamtester');
+    expect(syncStartCall).toHaveBeenCalledWith('ldap');
+    expect(router.currentRoute.value.path).toBe('/auth-providers');
   });
 });

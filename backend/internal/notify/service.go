@@ -132,6 +132,7 @@ func New(store db.Store, cfg Config) Service {
 		stopCh:       make(chan struct{}),
 		targetStatus: make(map[int64]TargetDeliveryStatus),
 	}
+	s.idle = sync.NewCond(&s.inflightMu)
 	s.SetWebhook(cfg.WebhookURL, cfg.WebhookToken)
 	return s
 }
@@ -147,7 +148,17 @@ type service struct {
 	backoffs   []time.Duration
 	stopOnce   sync.Once
 	stopCh     chan struct{}
-	inflightWG sync.WaitGroup
+
+	// The deliveries in flight, counted under inflightMu - not a
+	// WaitGroup: a delivery is started by whichever goroutine sends (a write
+	// hook may still be emitting while the server shuts down), and a
+	// WaitGroup's Add from zero must not run concurrently with its Wait.
+	// Once stopped is set no delivery starts (dispatch), so Stop's wait
+	// ends. idle is signalled when inflight drops to zero.
+	inflightMu sync.Mutex
+	idle       *sync.Cond
+	inflight   int
+	stopped    bool
 
 	// targetStatus caches the last delivery outcome per webhook target
 	// id (guarded by tsMu). Feeds the admin list's "last status" column.
@@ -407,9 +418,13 @@ func (s *service) dispatch(id int64, e Event) {
 		return
 	}
 
-	s.inflightWG.Add(1)
+	if !s.beginDelivery() {
+		// Stopped: the row is kept, nothing is sent after shutdown began.
+		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "service stopped before delivery")
+		return
+	}
 	go func() {
-		defer s.inflightWG.Done()
+		defer s.endDelivery()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		go func() {
@@ -916,11 +931,47 @@ func (s *service) WebhookConfig() (string, bool) {
 	return s.webhookURL, s.bearer != ""
 }
 
+// beginDelivery counts one more delivery in flight, unless the service is
+// stopped (then nothing starts and it answers false).
+func (s *service) beginDelivery() bool {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if s.stopped {
+		return false
+	}
+	s.inflight++
+	return true
+}
+
+// endDelivery counts one delivery done and wakes the waiters at zero.
+func (s *service) endDelivery() {
+	s.inflightMu.Lock()
+	s.inflight--
+	if s.inflight == 0 {
+		s.idle.Broadcast()
+	}
+	s.inflightMu.Unlock()
+}
+
+// waitIdle blocks until no delivery is in flight.
+func (s *service) waitIdle() {
+	s.inflightMu.Lock()
+	for s.inflight > 0 {
+		s.idle.Wait()
+	}
+	s.inflightMu.Unlock()
+}
+
 func (s *service) Wait() {
-	s.inflightWG.Wait()
+	s.waitIdle()
 }
 
 func (s *service) Stop() {
-	s.stopOnce.Do(func() { close(s.stopCh) })
-	s.inflightWG.Wait()
+	s.stopOnce.Do(func() {
+		s.inflightMu.Lock()
+		s.stopped = true
+		s.inflightMu.Unlock()
+		close(s.stopCh)
+	})
+	s.waitIdle()
 }

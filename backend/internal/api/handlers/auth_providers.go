@@ -233,6 +233,10 @@ func (h *AuthProviders) views(r *http.Request) ([]providerView, error) {
 				v.SecretsSet[k] = true
 			}
 			v.SetByUpgrade = env.SetByUpgrade
+			// The fields too — read-only here — so the page shows the
+			// environment's settings in the same order and sections as a
+			// page provider's, with what an unset one means.
+			v.Fields = authsetup.Schema[authsetup.Canonical(n)]
 			if s := stored[n]; s != nil && s.Exists {
 				v.Shadowed = true
 			}
@@ -1039,11 +1043,80 @@ func (h *AuthProviders) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	auth.SetAuditTarget(ctx, strconv.FormatInt(t.row.ID, 10), t.slug)
 	auth.AddAuditDetail(ctx, "driver", t.driver)
+	// Its directory sync report goes with it. The accounts and groups it
+	// made stay: nobody's files go with a provider.
+	if t.driver == "ldap" {
+		_ = h.Store.DeleteSettingsWithPrefix(ctx, authsetup.SyncKeyPrefix(t.slug))
+	}
 	if err := h.Live.Reload(ctx); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload: " + err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// SyncStatus answers an LDAP instance's directory sync: whether it can run
+// (a running LDAP provider), whether it is running now, its interval and the
+// last run's report (docs/LDAP.md → Directory sync).
+//
+//	GET /api/admin/auth-providers/{name}/sync
+func (h *AuthProviders) SyncStatus(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, authProvidersAreInstanceWide) {
+		return
+	}
+	name := authsetup.Canonical(chi.URLParam(r, "name"))
+	out := map[string]any{"name": name, "available": false, "running": false, "interval_seconds": 0, "last": nil}
+	if h.Live != nil {
+		out["available"] = h.Live.CanSync(name)
+		out["running"] = h.Live.Syncing(name)
+		if iv := h.Live.SyncInterval(name); iv > 0 {
+			out["interval_seconds"] = int(iv.Seconds())
+		}
+		if last, _ := h.Live.LastSync(r.Context(), name); last != nil {
+			out["last"] = last
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// SyncStart starts an LDAP instance's directory sync and answers 202 at once
+// — a directory of thousands takes longer than a request should; the page
+// polls SyncStatus. 404 when the provider cannot sync, 409 while a run is
+// going.
+//
+//	POST /api/admin/auth-providers/{name}/sync
+func (h *AuthProviders) SyncStart(w http.ResponseWriter, r *http.Request) {
+	if !requireSupertenant(w, r, authProvidersAreInstanceWide) {
+		return
+	}
+	// A run opens accounts, switches them off and moves group memberships -
+	// through a group that gives Administrator, administrators too. A person
+	// signed in to the panel starts it, not an API key.
+	if !sessionOnly(w, r, "Starting a directory sync needs an administrator signed in to the admin panel; an API key cannot do it.", nil) {
+		return
+	}
+	if h.DemoMode {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "demo_read_only"})
+		return
+	}
+	name := authsetup.Canonical(chi.URLParam(r, "name"))
+	if h.Live == nil || !h.Live.CanSync(name) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": authsetup.ErrNoDirectorySync.Error()})
+		return
+	}
+	auth.SetAuditTarget(r.Context(), name, name)
+	if err := h.Live.StartSync(r.Context(), name, "manual"); err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, authsetup.ErrSyncRunning):
+			status = http.StatusConflict
+		case errors.Is(err, authsetup.ErrNoDirectorySync):
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"name": name, "running": true})
 }
 
 // SetTenants says which tenants sign in through an instance (PUT

@@ -473,6 +473,33 @@ func RootFrom(ctx context.Context) (Root, bool) {
 	return v, ok
 }
 
+// CallerRoot is the confinement root of the call on ctx: the one Middleware
+// stashed (a token's `root:` narrowed by X-Filex-Root) or, where a request
+// did not pass through Middleware (the /api/ai surfaces), the token's own
+// `root:` scope (RootFromToken). ok=false for an unconfined caller.
+func CallerRoot(ctx context.Context) (Root, bool) {
+	if root, ok := RootFrom(ctx); ok {
+		return root, true
+	}
+	return RootFromToken(ctx)
+}
+
+// String is the root spelled `<adapter>://<rel>`, which ParseRoot reads back
+// as the same root.
+func (r Root) String() string { return r.Adapter + "://" + r.Rel }
+
+// HoldBody holds a request body a handler reads as JSON to the root exactly as
+// Middleware holds one labelled JSON: the same keys, rewritten or checked the
+// same way, refused with ErrOutOfRoot. A handler that decodes its body
+// whatever the Content-Type calls it, so a text/plain body (or one with no
+// Content-Type) is read as the JSON one would be - and a body Middleware has
+// already rewritten passes through unchanged.
+func HoldBody(r Root, body []byte) ([]byte, error) { return confineBody(r, body) }
+
+// Refuse writes Middleware's own answer to a path outside the root, so a
+// handler that refuses one answers byte for byte what a JSON body is answered.
+func Refuse(w http.ResponseWriter) { forbid(w, ErrOutOfRoot) }
+
 // Within reports whether a storage-relative path (no adapter prefix) is inside
 // the root for the given adapter name.
 func (r Root) Within(adapter, rel string) bool {

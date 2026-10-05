@@ -41,6 +41,7 @@ import Toggle from '@/components/ui/Toggle.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import AppPluginInstallWizard from './AppPluginInstallWizard.vue';
+import AppStoresPanel from './AppStoresPanel.vue';
 import AppPluginLanguages from './AppPluginLanguages.vue';
 import { loadOfferedLocales } from '@/i18n';
 
@@ -100,12 +101,12 @@ function labelFor(p: AppPlugin): string {
 
 function stateTone(state: AppPluginState): 'emerald' | 'amber' | 'rose' | 'zinc' {
   if (state === 'running') return 'emerald';
-  if (state === 'failed' || state === 'refused') return 'rose';
+  if (state === 'failed' || state === 'refused' || state === 'unlicensed') return 'rose';
   return 'zinc';
 }
 
 function stateLabel(state: AppPluginState): string {
-  const known = ['running', 'disabled', 'refused', 'failed'];
+  const known = ['running', 'disabled', 'refused', 'failed', 'unlicensed'];
   return known.includes(state) ? t(`appPlugins.state.${state}`) : state;
 }
 
@@ -569,6 +570,9 @@ function onRowAction(key: string, row: AppPlugin) {
         </template>
       </DataTable>
     </template>
+
+    <!-- The stores this filex takes install links from (0.52.0). -->
+    <AppStoresPanel v-if="runtime?.enabled" />
 
     <AppPluginInstallWizard
       :model-value="wizardOpen || !!upgradeOf || !!updateOf"

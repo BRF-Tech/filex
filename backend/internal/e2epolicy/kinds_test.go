@@ -95,6 +95,28 @@ func TestApproval_AnEmptyFolderIsANewOne(t *testing.T) {
 	require.NoError(t, f.svc.CheckCreate(ctx, f.ada, f.st, "Muhasebe/Bos/.filex-e2e.json"))
 }
 
+// Whether a folder is new is a yes or a no, and it is asked for every folder
+// of a request - one when the explorer opens a menu on a folder, up to 1000
+// from an API caller: the rule asks the store whether anything is below, which
+// the first row answers, and never for how many - which is every row of the
+// folder.
+func TestApproval_WhetherAFolderIsNewIsNotACount(t *testing.T) {
+	f := newFix(t, true)
+	f.policy(t, true, model.E2EPolicyApproval)
+	ctx := context.Background()
+	f.dir(t, "Muhasebe")
+	f.dir(t, "Muhasebe/Bos")
+	f.file(t, "Muhasebe/Ekip/bordro.pdf")
+	f.approve(t, f.ada, "Muhasebe", "new_folder", f.now.Add(e2epolicy.ApprovalTTL))
+
+	view := &failing{Store: f.store}
+	got := f.serviceOn(view).AnswersFor(ctx, f.ada, f.st, []string{"Muhasebe/Bos", "Muhasebe/Ekip", "Muhasebe/Yok"})
+	assert.Equal(t, []e2epolicy.Answer{e2epolicy.AnswerAllowed, e2epolicy.AnswerRequest, e2epolicy.AnswerAllowed}, got,
+		"an empty folder and one that is not there yet are new; one that holds a file is not")
+	assert.Equal(t, 3, view.holdsCalls, "one question per folder")
+	assert.Zero(t, view.countCalls, "and no count of what is below any of them")
+}
+
 // The explorer's answer is the door's: for each approval and each place, the
 // menu says "allowed" exactly when the create door lets the encryption
 // through. Before the kinds were separate the explorer looked only at the

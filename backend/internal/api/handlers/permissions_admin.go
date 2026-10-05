@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -34,6 +35,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/group"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
@@ -46,6 +48,10 @@ type PermissionsAdmin struct {
 	// AppPermissions lists the installed apps' user permissions
 	// (wasmplugin.Registry.UserPermissions); nil when apps are off.
 	AppPermissions func() []wasmplugin.UserPermRow
+	// Notify tells administrators about a role a save left without a
+	// permission carved out of one it allows (permission_gaps.go); nil when
+	// notifications are off.
+	Notify notify.Service
 }
 
 // NewPermissionsAdmin constructs the handler.
@@ -172,6 +178,11 @@ type permDefaultsWire struct {
 	// (app.<app>.<id> → allow | deny, perm/app.go). Absent leaves them as
 	// they are; {} clears them back to each app's default.
 	Apps map[string]string `json:"apps,omitempty"`
+	// Shown are the permissions the editor showed the administrator: a list
+	// the save leaves without one of them is a decision, not a gap to point
+	// out (perm.NoteGapsSaved). The role editors send the catalogue; a
+	// client that sends nothing has its gaps pointed out.
+	Shown []string `json:"shown,omitempty"`
 }
 
 // builtinRole reads ?role= — the built-in role whose permissions a defaults
@@ -222,14 +233,22 @@ func (h *PermissionsAdmin) PutDefaults(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json: want {\"permissions\":[…]}"})
 		return
 	}
+	role := builtinRole(r)
+	// A permission a later version stored in the list may come back in the
+	// request - it is kept whether it does or not (perm.SaveRoleBase). A key
+	// the list never held is refused.
+	kept, err := perm.StoredForeign(r.Context(), h.Store, role)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	for _, k := range req.Permissions {
-		if !perm.Known(perm.Perm(k)) {
+		if !perm.Known(perm.Perm(k)) && !slices.Contains(kept, k) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown permission " + strconv.Quote(k)})
 			return
 		}
 	}
 	s := perm.FromStrings(req.Permissions)
-	role := builtinRole(r)
 	// Both halves are checked before either is written: a bad app decision
 	// must not leave the permission list saved and the answer a 400. And a
 	// request that is wrong is wrong whoever sends it — 400 before the
@@ -254,9 +273,13 @@ func (h *PermissionsAdmin) PutDefaults(w http.ResponseWriter, r *http.Request) {
 	}
 	auth.AddAuditDetail(r.Context(), "role", role)
 	auth.AddAuditDetail(r.Context(), "after", s.Strings())
+	gapsBefore, _ := perm.BuiltinRoleGaps(r.Context(), h.Store, role)
 	if err := perm.SaveRoleBase(r.Context(), h.Store, role, s); err != nil {
 		writePermInvalid(w, err)
 		return
+	}
+	if gapsAfter, err := perm.BuiltinRoleGaps(r.Context(), h.Store, role); err == nil {
+		h.noteGapsSaved(r.Context(), gapsBefore, gapsAfter, req.Shown)
 	}
 	apps := map[string]string{}
 	if req.Apps != nil {
@@ -352,18 +375,27 @@ func (h *PermissionsAdmin) ListRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"rules": out, "assignments": assignments, "group_assignments": groupAssignments, "builtin_members": builtin})
 }
 
+// ruleRequest is a role body, and the permissions the editor showed the
+// administrator (permDefaultsWire.Shown).
+type ruleRequest struct {
+	model.PermissionRule
+	Shown []string `json:"shown,omitempty"`
+}
+
 // ruleFromRequest decodes, normalises and checks a rule body against the
 // caller's tenant; prev is the role it replaces (nil for a new one). It
-// writes the refusal and returns nil when invalid.
-func (h *PermissionsAdmin) ruleFromRequest(w http.ResponseWriter, r *http.Request, prev *model.PermissionRule) *model.PermissionRule {
-	var rule model.PermissionRule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+// writes the refusal and returns nil when invalid; shown is what the editor
+// showed (ruleRequest).
+func (h *PermissionsAdmin) ruleFromRequest(w http.ResponseWriter, r *http.Request, prev *model.PermissionRule) (*model.PermissionRule, []string) {
+	var req ruleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
-		return nil
+		return nil, nil
 	}
+	rule := req.PermissionRule
 	if err := perm.NormalizeRuleEdit(&rule, prev); err != nil {
 		writePermInvalid(w, err)
-		return nil
+		return nil, nil
 	}
 	ctx := r.Context()
 	// A tenant administrator's rule is its tenant's, whatever the body says.
@@ -373,7 +405,7 @@ func (h *PermissionsAdmin) ruleFromRequest(w http.ResponseWriter, r *http.Reques
 	} else if rule.ProviderID != nil {
 		if p, err := h.Store.GetProvider(ctx, *rule.ProviderID); err != nil || p == nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown provider_id"})
-			return nil
+			return nil, nil
 		}
 	}
 	// A storage condition must name a storage the caller's tenant has.
@@ -381,10 +413,10 @@ func (h *PermissionsAdmin) ruleFromRequest(w http.ResponseWriter, r *http.Reques
 		st, err := h.Store.GetStorage(ctx, id)
 		if err != nil || st == nil || !scopeOf(ctx).CanAccessStorage(id) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown storage in conditions: " + strconv.FormatInt(id, 10)})
-			return nil
+			return nil, nil
 		}
 	}
-	return &rule
+	return &rule, req.Shown
 }
 
 // CreateRule adds a rule. names / descriptions are the role in other
@@ -392,7 +424,7 @@ func (h *PermissionsAdmin) ruleFromRequest(w http.ResponseWriter, r *http.Reques
 //
 //	POST /api/admin/roles {name, description, names, descriptions, enabled, permissions, targets, effects, settings, conditions}
 func (h *PermissionsAdmin) CreateRule(w http.ResponseWriter, r *http.Request) {
-	rule := h.ruleFromRequest(w, r, nil)
+	rule, shown := h.ruleFromRequest(w, r, nil)
 	if rule == nil {
 		return
 	}
@@ -411,6 +443,7 @@ func (h *PermissionsAdmin) CreateRule(w http.ResponseWriter, r *http.Request) {
 	perm.Invalidate()
 	auditRule(r.Context(), "rule", created)
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(created.ID, 10), created.Name)
+	h.noteGapsSaved(r.Context(), nil, ruleGapsOf(created), shown)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -437,7 +470,7 @@ func (h *PermissionsAdmin) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	if existing == nil {
 		return
 	}
-	rule := h.ruleFromRequest(w, r, existing)
+	rule, shown := h.ruleFromRequest(w, r, existing)
 	if rule == nil {
 		return
 	}
@@ -484,6 +517,7 @@ func (h *PermissionsAdmin) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	h.noteGapsSaved(r.Context(), ruleGapsOf(existing), ruleGapsOf(updated), shown)
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -581,6 +615,9 @@ func (h *PermissionsAdmin) DeleteRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	perm.Invalidate()
+	// Its gaps went with it: the record of what administrators were told
+	// forgets them, so a later role given the same id is told afresh.
+	h.announceGaps(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -653,10 +690,20 @@ func (h *PermissionsAdmin) PutUserPermissions(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json: want {\"overrides\":{…}}"})
 		return
 	}
-	if err := perm.ValidateEffects(req.Overrides); err != nil {
+	// A permission a later version wrote that this one does not know may be
+	// sent back but is not this version's to change: it is set aside here and
+	// put back as stored (perm/foreign.go). A key the person never had is
+	// refused.
+	stored, err := h.Store.GetUserPermissionOverrides(r.Context(), target.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := perm.ValidateEffectsEdit(req.Overrides, stored); err != nil {
 		writePermInvalid(w, err)
 		return
 	}
+	req.Overrides = perm.WithoutForeign(req.Overrides)
 	// Allowing an admin-area permission makes the account a delegated
 	// administrator: a session only, like creating an administrator (#120).
 	if allowsAdministration(nil, req.Overrides) && !adminCredentialBySession(w, r, "Granting administration rights to an account") {
@@ -707,10 +754,9 @@ func (h *PermissionsAdmin) PutUserPermissions(w http.ResponseWriter, r *http.Req
 		id := u.ID
 		by = &id
 	}
+	req.Overrides = perm.KeepForeignEffects(req.Overrides, stored)
 	// The audit row says exactly what changed on whom.
-	if before, err := h.Store.GetUserPermissionOverrides(r.Context(), target.ID); err == nil {
-		auth.AddAuditDetail(r.Context(), "before", before)
-	}
+	auth.AddAuditDetail(r.Context(), "before", stored)
 	auth.AddAuditDetail(r.Context(), "after", req.Overrides)
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(target.ID, 10), target.Email)
 	if err := h.Store.SetUserPermissionOverrides(r.Context(), target.ID, req.Overrides, by); err != nil {
@@ -776,12 +822,13 @@ func (h *PermissionsAdmin) ListOverrides(w http.ResponseWriter, r *http.Request)
 // the role's own; its translations ride along only when it has some.
 func auditRule(ctx context.Context, key string, r *model.PermissionRule) {
 	detail := map[string]any{
-		"name":       r.Name,
-		"enabled":    r.Enabled,
-		"targets":    r.Targets,
-		"effects":    r.Effects,
-		"settings":   r.Settings,
-		"conditions": r.Conditions,
+		"name":        r.Name,
+		"enabled":     r.Enabled,
+		"permissions": r.Permissions,
+		"targets":     r.Targets,
+		"effects":     r.Effects,
+		"settings":    r.Settings,
+		"conditions":  r.Conditions,
 	}
 	if len(r.Names) > 0 {
 		detail["names"] = r.Names
@@ -969,6 +1016,12 @@ func (h *PermissionsAdmin) PutUserRoles(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A group makes them an administrator (migration 00086): it would at
+	// once again. Who is in that group decides.
+	if target.AdminByGroup && newRole != "" && newRole != target.Role {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "this person is an administrator through a group; take them out of the group (or its LDAP / SSO group) instead"})
+		return
+	}
 	// Judged by the result as well: a built-in role, or no custom role, can
 	// hand out what a restrictive custom role took away (refuseGain).
 	var nextRoleID int64

@@ -147,7 +147,7 @@ features:
     linkText: Tenant self-service
   - icon: 🏢
     title: LDAP / Active Directory
-    details: Directory accounts sign in on the same password form as local ones - and with the same password on WebDAV, SFTP and FTPS. Private CA supported; local login stays first, so your break-glass account works while the directory is down. An entry with no e-mail gets an address of the form name@local, and an account an older filex opened under the bare name is adopted, not doubled.
+    details: Directory accounts sign in on the same password form as local ones - and with the same password on WebDAV, SFTP and FTPS. Directory sync opens accounts for everyone in the directory, keeps groups and memberships in step and disables whoever the directory disables; people are known by their permanent directory id, and a directory group can make its members administrators. Private CA supported; local login stays first, so your break-glass account works while the directory is down. An entry with no e-mail gets an address of the form name@local, and an account an older filex opened under the bare name is adopted, not doubled.
     link: /LDAP
     linkText: LDAP docs
   - icon: ⚡

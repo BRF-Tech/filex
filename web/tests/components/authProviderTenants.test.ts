@@ -1,13 +1,14 @@
 // Admin → Identity providers on a multi-tenant install (docs/TENANT-ADMIN.md):
-//   · each provider card says which tenants sign in through it, and saving the
-//     ticks sends exactly that list;
+//   · a provider's own page says which tenants sign in through it, and saving
+//     the ticks sends exactly that list;
 //   · a tenant's own provider shows its owner and offers no ticks;
 //   · the upgrade's "every provider bound to every tenant" is said until the
 //     operator has looked;
 //   · "Add a provider" makes another instance of a kind, switched off;
 //   · a provider made that way is deleted, a kind's first one is not.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 
@@ -20,6 +21,7 @@ const api = vi.hoisted(() => ({
   create: vi.fn(async () => null),
   remove: vi.fn(async () => undefined),
   dismissReview: vi.fn(async () => undefined),
+  syncStatus: vi.fn(async () => ({ name: 'ldap', available: true, running: false, interval_seconds: 0, last: null })),
   update: vi.fn(),
   test: vi.fn(),
 }));
@@ -54,6 +56,7 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
 }
 
 import AuthProviders from '@/views/AuthProviders.vue';
+import AuthProviderEdit from '@/views/AuthProviderEdit.vue';
 
 function p(id: string, extra: Partial<AuthProvider> = {}): AuthProvider {
   return {
@@ -74,9 +77,20 @@ function p(id: string, extra: Partial<AuthProvider> = {}): AuthProvider {
   } as AuthProvider;
 }
 
-function mountPage(locale: 'en' | 'tr' = 'en'): VueWrapper {
+/** The overview, or - with a slug - that provider's own page. */
+async function mountPage(slug = '', locale: 'en' | 'tr' = 'en') {
   const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages: { en, tr } });
-  return mount(AuthProviders, { global: { plugins: [i18n] }, attachTo: document.body });
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/auth-providers', name: 'auth-providers', component: AuthProviders },
+      { path: '/auth-providers/:name', name: 'auth-providers.edit', component: AuthProviderEdit },
+    ],
+  });
+  await router.push(slug ? `/auth-providers/${slug}` : '/auth-providers');
+  await router.isReady();
+  const w = mount(slug ? AuthProviderEdit : AuthProviders, { global: { plugins: [i18n, router] }, attachTo: document.body });
+  return { w, router };
 }
 
 beforeEach(() => {
@@ -92,7 +106,7 @@ beforeEach(() => {
 
 describe('Identity providers - tenants', () => {
   it('ticks the tenants a provider serves and saves exactly those', async () => {
-    const w = mountPage();
+    const { w } = await mountPage('ldap');
     await flushPromises();
     const box = w.get('[data-testid="auth-provider-tenants-ldap"]');
     const inputs = box.findAll('input[type="checkbox"]');
@@ -105,22 +119,29 @@ describe('Identity providers - tenants', () => {
     await box.get('[data-testid="auth-provider-tenants-save-ldap"]').trigger('click');
     await flushPromises();
     expect(api.setTenants).toHaveBeenCalledWith('ldap', [1, 3], false);
-    w.unmount();
   });
 
   it('shows a tenant’s own provider with its owner and no ticks', async () => {
-    const w = mountPage();
+    const { w } = await mountPage('acme-oidc');
     await flushPromises();
     const box = w.get('[data-testid="auth-provider-tenants-acme-oidc"]');
     expect(box.text()).toContain('Acme');
     expect(box.findAll('input[type="checkbox"]')).toHaveLength(0);
-    // The kind's name and the instance's own on its card.
-    expect(w.get('[data-testid="auth-provider-corp-sso"]').text()).toContain('Corp SSO');
-    w.unmount();
+  });
+
+  it('names an instance by its own name, on its card and on its page', async () => {
+    const list = await mountPage();
+    await flushPromises();
+    await list.w.get('[data-testid="auth-tab-oidc"]').trigger('click');
+    expect(list.w.get('[data-testid="auth-card-corp-sso"]').text()).toContain('Corp SSO');
+    list.w.unmount();
+    const { w } = await mountPage('corp-sso');
+    await flushPromises();
+    expect(w.get('[data-testid="auth-provider-title"]').text()).toContain('Corp SSO');
   });
 
   it('says the upgrade bound everything until the operator has looked', async () => {
-    const w = mountPage('tr');
+    const { w } = await mountPage('', 'tr');
     await flushPromises();
     const note = w.get('[data-testid="auth-providers-review"]');
     expect(note.text()).toContain('gözden geçirin');
@@ -128,11 +149,11 @@ describe('Identity providers - tenants', () => {
     await flushPromises();
     expect(api.dismissReview).toHaveBeenCalledTimes(1);
     expect(w.find('[data-testid="auth-providers-review"]').exists()).toBe(false);
-    w.unmount();
   });
 
-  it('adds another provider of a kind, switched off', async () => {
-    const w = mountPage();
+  it('adds another provider of a kind, switched off, and opens its page', async () => {
+    api.create.mockResolvedValueOnce(p('partner-sso', { driver: 'oidc', instance_id: 13 }) as never);
+    const { w, router } = await mountPage();
     await flushPromises();
     await w.get('[data-testid="auth-provider-add"]').trigger('click');
     await flushPromises();
@@ -146,17 +167,24 @@ describe('Identity providers - tenants', () => {
     (document.querySelector('[data-testid="auth-provider-add-create"]') as HTMLButtonElement).click();
     await flushPromises();
     expect(api.create).toHaveBeenCalledWith({ driver: 'oidc', slug: undefined, label: 'Partner SSO', enabled: false });
-    w.unmount();
+    expect(router.currentRoute.value.name).toBe('auth-providers.edit');
+    expect(router.currentRoute.value.params.name).toBe('partner-sso');
   });
 
   it('deletes a provider made that way, never a kind’s first', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const w = mountPage();
+    const first = await mountPage('ldap');
     await flushPromises();
-    expect(w.find('[data-testid="auth-provider-delete-ldap"]').exists()).toBe(false);
+    expect(first.w.find('[data-testid="auth-provider-delete-ldap"]').exists()).toBe(false);
+    first.w.unmount();
+
+    const { w, router } = await mountPage('corp-sso');
+    await flushPromises();
     await w.get('[data-testid="auth-provider-delete-corp-sso"]').trigger('click');
     await flushPromises();
+    (document.querySelector('[data-testid="auth-provider-delete-confirm"]') as HTMLButtonElement).click();
+    await flushPromises();
     expect(api.remove).toHaveBeenCalledWith('corp-sso', false);
-    w.unmount();
+    expect(router.currentRoute.value.name).toBe('auth-providers');
+    expect(router.currentRoute.value.query.tab).toBe('oidc');
   });
 });

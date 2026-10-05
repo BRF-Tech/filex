@@ -434,4 +434,20 @@ export const SCREENSHOTS = [
     file: `${SHOTS_ROOT_REL}/csvoffice/csv-edit-1440.png`,
     depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv.go'],
   },
+  // ── v0.52.0: installing from a store, a paid app's license (e2e/shots/store.mjs) ──
+  {
+    // The install review opened from a store's link, marked From store.
+    file: `${SHOTS_ROOT_REL}/store/store-review-1440.png`,
+    depicts: ['web/src/components/plugins/AppPluginInstallWizard.vue', 'web/src/views/StoreInstall.vue'],
+  },
+  {
+    // The first link from a store: its address and its keys' fingerprints.
+    file: `${SHOTS_ROOT_REL}/store/store-trust-1440.png`,
+    depicts: ['web/src/views/StoreInstall.vue'],
+  },
+  {
+    // A license the store revoked: the app held, the band on an admin page.
+    file: `${SHOTS_ROOT_REL}/store/store-license-held-1440.png`,
+    depicts: ['web/src/components/AppLicenseAlert.vue', 'web/src/components/plugins/AppPluginsTab.vue'],
+  },
 ];

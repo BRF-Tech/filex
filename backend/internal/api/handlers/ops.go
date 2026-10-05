@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -68,6 +69,10 @@ type errsString string
 
 func (e errsString) Error() string { return string(e) }
 
+// opsBodyLimit is how much of a queue request's body is read: the limit the
+// confinement middleware reads a JSON body to.
+const opsBodyLimit = 8 << 20
+
 // opsRequest is the body of POST /api/files/ops.
 type opsRequest struct {
 	Kind      string `json:"kind"` // copy, move, delete (clientKinds)
@@ -96,8 +101,18 @@ var clientKinds = map[string]bool{ops.OpCopy: true, ops.OpMove: true, ops.OpDele
 
 // Submit queues a new op and returns the opID.
 func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
+	// ⚠⚠ A `root:` token's paths are held to its root FIRST, the way the
+	// confinement middleware holds a JSON body, whatever this body's
+	// Content-Type: a text/plain body reached the checks below as written,
+	// and they answered `..` 400 BAD_PATH, a read-only storage 403 READ_ONLY
+	// and the root's refusal with the path appended - a different answer for
+	// each shape and for what lay outside the folder (0.52.0).
+	body, ok := confinedBody(w, r, opsBodyLimit)
+	if !ok {
+		return
+	}
 	var req opsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
@@ -172,14 +187,20 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	// paths `sources` and `dest`, beside a bare `storage_id` — so a confined
 	// caller could queue a copy, move or delete of anything in the storage
 	// (lesson #543).
-	for i, rel := range rels {
+	//
+	// The middleware's reading (confinedBody, above) places a bare path on the
+	// root's own storage; this one places it on the storage `storage_id`
+	// names, which is where the queue writes. Both answer alike: one refusal,
+	// whether or not that storage exists (rootAllows fails closed on an id it
+	// cannot resolve) and before its read-only flag is read.
+	for _, rel := range rels {
 		if !rootAllows(r.Context(), o.Store, req.StorageID, rel) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error() + ": " + req.Sources[i]})
+			confine.Refuse(w)
 			return
 		}
 	}
 	if writesDest && !rootAllows(r.Context(), o.Store, destID, drel) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error() + " (dest)"})
+		confine.Refuse(w)
 		return
 	}
 	if o.refuseReadOnly(w, r, req.Kind, req.StorageID, destID) {
@@ -257,8 +278,19 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ops queue unavailable"})
 		return
 	}
+	// A `root:` token's `source`, `target` and `sourceDir` are held to its root
+	// first, as the middleware holds them in a JSON body - rewritten into the
+	// root's qualified form, or refused with its answer - whatever this
+	// body's Content-Type. Read as written, a text/plain body's path outside
+	// the root met the storage lookup (400 unknown adapter), the sources' lock
+	// and name gate, the read-only flag (403 READ_ONLY, the storage named)
+	// and only then the root (0.52.0).
+	body, ok := confinedBody(w, r, opsBodyLimit)
+	if !ok {
+		return
+	}
 	var req perVerbReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
@@ -1029,7 +1061,7 @@ func (o *Ops) opAllow(w http.ResponseWriter, r *http.Request, storageID int64, r
 	// per-verb `source`/`target` only in a body labelled JSON, and the same
 	// body as text/plain reached the queue untouched (GHSA-8gvc-6w52-6c7j).
 	if !rootAllows(r.Context(), o.Store, storageID, rel) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": confine.ErrOutOfRoot.Error() + ": " + rel})
+		confine.Refuse(w)
 		return false
 	}
 	// A queued copy, move or delete of an entry the storage could not answer

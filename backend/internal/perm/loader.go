@@ -284,20 +284,14 @@ func LoadDefaults(ctx context.Context, store db.Store) (Set, error) {
 }
 
 // SaveDefaults stores the install's defaults for role=user. Role-only
-// permissions are refused rather than silently dropped.
+// permissions are refused rather than silently dropped. A key the stored list
+// holds that this version does not know - a later version's - is kept
+// (foreign.go).
 func SaveDefaults(ctx context.Context, store db.Store, s Set) error {
 	if s.Has(AdminFull) {
 		return invalid("%q follows the account role and cannot be a default", AdminFull)
 	}
-	b, err := json.Marshal(s.Strings())
-	if err != nil {
-		return err
-	}
-	if err := store.UpsertSetting(ctx, model.SettingPermissionDefaults, string(b)); err != nil {
-		return err
-	}
-	Invalidate()
-	return nil
+	return saveBuiltinList(ctx, store, model.RoleUser, s)
 }
 
 // LoadRoleBase returns the editable base of a built-in role: the defaults for
@@ -346,26 +340,13 @@ func ValidateRoleBase(role string, s Set) error {
 
 // SaveRoleBase stores the base of a built-in role. A viewer's is refused if it
 // names a permission a viewer can never hold, rather than silently trimmed.
+// A key the stored list holds that this version does not know is kept: the
+// page cannot show it, so the save cannot have taken it away (foreign.go).
 func SaveRoleBase(ctx context.Context, store db.Store, role string, s Set) error {
 	if err := ValidateRoleBase(role, s); err != nil {
 		return err
 	}
-	switch role {
-	case model.RoleUser:
-		return SaveDefaults(ctx, store, s)
-	case model.RoleViewer:
-		b, err := json.Marshal(s.Strings())
-		if err != nil {
-			return err
-		}
-		if err := store.UpsertSetting(ctx, model.SettingPermissionViewerDefaults, string(b)); err != nil {
-			return err
-		}
-		Invalidate()
-		return nil
-	default:
-		return invalid("role %q has no editable permissions", role)
-	}
+	return saveBuiltinList(ctx, store, role, s)
 }
 
 // ViewerCeiling is every permission a viewer account can ever hold.

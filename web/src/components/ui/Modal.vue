@@ -60,7 +60,31 @@ function onBackdropClick(ev: MouseEvent) {
   if (ev.target === dialog.value) close();
 }
 
+let unmounted = false;
+
+/**
+ * The <dialog> closed by itself, not through this component (its own close()
+ * and the watch above go through modelValue first). ⚠ A browser does that on
+ * a SECOND Escape even when `cancel` was prevented: without a click between
+ * the two, the second one's cancel cannot be prevented (the close-watcher
+ * rule against a page that traps its reader; Chromium). A dialog that must
+ * stay (`preventClose` - an install on its way, a key being made) is opened
+ * again; any other one tells its owner it closed, so `modelValue` never says
+ * open over a closed dialog.
+ */
+function onNativeClose() {
+  const el = dialog.value;
+  if (unmounted || !el || !props.modelValue || el.open) return;
+  if (props.preventClose) {
+    if (el.isConnected) el.showModal();
+    return;
+  }
+  emit('update:modelValue', false);
+  emit('close');
+}
+
 onBeforeUnmount(() => {
+  unmounted = true;
   if (dialog.value?.open) dialog.value.close();
 });
 
@@ -77,6 +101,7 @@ const sizeClass = {
     ref="dialog"
     class="m-0 w-full rounded-lg bg-transparent p-0 backdrop:bg-zinc-950/60 backdrop:backdrop-blur-sm"
     @cancel="onCancel"
+    @close="onNativeClose"
     @click="onBackdropClick"
   >
     <div

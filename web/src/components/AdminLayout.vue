@@ -8,6 +8,7 @@ import NavDrawer from './NavDrawer.vue';
 import TopNav from './TopNav.vue';
 import Breadcrumbs from './Breadcrumbs.vue';
 import PendingOpsTray from './PendingOpsTray.vue';
+import AppLicenseAlert from './AppLicenseAlert.vue';
 
 /* The menu (GitHub #82, 0.51.0): from `lg` (1024px) up it is the top bar's
    mega menu (TopNav → AdminNav `bar`); below it, a DRAWER over the page with
@@ -95,6 +96,9 @@ function toggleDrawer() {
               class="underline"
             >{{ t('instance.publicUrlDocs') }}</a>
           </p>
+          <!-- A paid app whose license does not hold (0.52.0): said on every
+               admin page, to the administrator who can act on it. -->
+          <AppLicenseAlert v-if="auth.isAdmin && !caps.demoReadOnly && caps.data.app_plugins?.enabled && caps.data.caller_admin" />
           <Breadcrumbs class="mb-3" />
           <RouterView v-slot="{ Component }">
             <transition

@@ -35,6 +35,7 @@ with a `<script src>`: it defines `window.FilexAppUI.connect`.
 | `fx.call(method, params)` | ask the app's own module (`ui_call`) |
 | `fx.submit(action, params)` | queue one of the app's actions on the opened files - like `copy`, from a click, or filex asks |
 | `fx.state.get(key)` / `fx.state.set(key, value)` | a small store for this app and this person |
+| `fx.license.get()` | the app's license, for a paid app installed from a store (filex 0.52.0): `{status: 'free'}`, or `{status: 'valid', valid_until, updates_until}` - never the key, never the licensee |
 | `fx.on('theme' \| 'locale' \| 'file.changed' \| 'close.request' \| 'app.updated', fn)` | listen to filex |
 
 `connect()` paints filex's colours (`--fe-*` custom properties), `lang`, `dir`

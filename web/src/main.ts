@@ -3,6 +3,7 @@ import { createPinia } from 'pinia';
 
 import App from './App.vue';
 import router from './router';
+import { dropStoreFragment } from './lib/storeLink';
 import { i18n, applyStoredLocale } from './i18n';
 import { applyStoredTheme } from './lib/theme';
 import { applyPalette } from './lib/palette';
@@ -164,6 +165,11 @@ installAxiosInterceptors({
     const current = router.currentRoute.value;
     let redirect = current.fullPath;
     if (!current.hash && window.location.hash) redirect += window.location.hash;
+    // ⚠ Never a store link's token: it waits in this tab (lib/storeLink) and
+    // the store page reads it after the sign-in. In `?redirect=` it would be
+    // in the sign-in address, its history entry and an SSO's return address
+    // (store fe review #2).
+    redirect = dropStoreFragment(redirect);
     router.push(
       redirect && redirect !== '/'
         ? { name: 'login', query: { redirect } }

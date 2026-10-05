@@ -4,6 +4,7 @@ import { useAuthStore } from '@/stores/auth';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 import { applyDocumentTitle } from '@/lib/documentTitle';
 import { startRouteName } from '@/lib/startPage';
+import { captureStoreFragment, captureStoreLink, dropStoreFragment, hasStoreLink, isStoreInstallPath, takeStoreLink } from '@/lib/storeLink';
 
 import AdminLayout from '@/components/AdminLayout.vue';
 
@@ -443,6 +444,12 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'tenants.editTitle', parent: 'tenants' },
       },
       {
+        path: 'auth-providers/:name',
+        name: 'auth-providers.edit',
+        component: () => import('@/views/AuthProviderEdit.vue'),
+        meta: { breadcrumb: 'authProviders.editTitle', parent: 'auth-providers' },
+      },
+      {
         path: 'api-mcp',
         name: 'api-mcp',
         component: () => import('@/views/ApiMcp.vue'),
@@ -590,6 +597,15 @@ const routes: RouteRecordRaw[] = [
         // `/plugins/apps/:name`, and no top-level route starts with
         // `/plugins`; `/apps/:plugin/:view` (the new-tab page view) and
         // `apps/:plugin/home/:view` below are different paths.
+        // A store's install link (lib/storeLink.ts takes its fragment off
+        // the address bar before this route is matched): the store's trust
+        // question, then the install review filled in from the store.
+        path: 'store-install',
+        name: 'store-install',
+        component: () => import('@/views/StoreInstall.vue'),
+        meta: { breadcrumb: 'appStore.breadcrumb', parent: 'plugins' },
+      },
+      {
         path: 'plugins/apps/:name',
         name: 'plugins.app',
         component: () => import('@/views/AppPluginPage.vue'),
@@ -652,6 +668,14 @@ const routes: RouteRecordRaw[] = [
   },
 ];
 
+// A store's install link carries its token in the fragment
+// (lib/storeLink.ts): off the address bar BEFORE the history below is made.
+// ⚠ Not later, in main.ts: createWebHistory reads the address when it is
+// created and the first navigation writes it back with history.replaceState,
+// so a fragment removed after this line comes back (measured in Chromium,
+// Firefox and WebKit, e2e 202).
+captureStoreLink();
+
 const router = createRouter({
   // Whichever prefix served this document, under the base path the server
   // published (lib/appBase in the core). Vite's build `base` stays '/admin/' —
@@ -670,6 +694,21 @@ router.beforeEach(async (to) => {
   // matched, the axios interceptor's push to /login — a form the visitor
   // cannot use). See App.vue, which skips its own boot fetches the same way.
   if (onPublicPageBase()) return true;
+
+  // ⚠⚠ A store's install link opened in a tab that is ALREADY on the store
+  // page is a same-document fragment navigation: no page load, so the capture
+  // above never ran, and vue-router has just written the token back into the
+  // address and a new history entry (store fe review #2, all three engines).
+  // Take it here, first - before a sign-in redirect could carry it in
+  // `?redirect=` - and drop it from the address by replacing that entry; the
+  // page reads the link (lib/storeLink storeLinkArrivals).
+  if (to.name === 'store-install') {
+    const raw = isStoreInstallPath(window.location.pathname) && window.location.hash ? window.location.hash : to.hash;
+    if (raw) {
+      captureStoreFragment(raw);
+      return { name: 'store-install', query: to.query, replace: true };
+    }
+  }
 
   const auth = useAuthStore();
 
@@ -710,8 +749,39 @@ router.beforeEach(async (to) => {
     // start-page preference below never sees a front-door navigation, and on
     // the /drive/ base a non-admin was being sent back to an admin-only route
     // to be bounced off it. Measured 2026-09-12 — `?redirect=/dashboard`.
-    const from = to.redirectedFrom?.fullPath ?? to.fullPath;
-    return { name: 'login', query: { redirect: from } };
+    //
+    // ⚠ A chain that BEGAN at the sign-in page hands on that page's own
+    // `?redirect=`, never the sign-in address itself. A 401 sends the panel to
+    // /login while the session it still believes in bounces it off to the
+    // start page; the session found over on the way, this branch named
+    // `/login?redirect=/store-install` as the place to come back to - a
+    // sign-in that came back to the sign-in form (measured in Firefox and
+    // WebKit, e2e 202, a store link opened with the session gone).
+    const first = to.redirectedFrom;
+    if (first?.name === 'login') {
+      const asked = typeof first.query.redirect === 'string' ? dropStoreFragment(first.query.redirect) : '';
+      return asked ? { name: 'login', query: { redirect: asked } } : { name: 'login' };
+    }
+    const from = first?.fullPath ?? to.fullPath;
+    // Never a store link's token in a sign-in address (lib/storeLink).
+    return { name: 'login', query: { redirect: dropStoreFragment(from) } };
+  }
+
+  // A store link waiting in this tab is an administrator's alone (the store
+  // routes are): anybody else signed in keeps nothing of it - it would come
+  // back to life if an administrator signed in later in the same tab (store
+  // fe review #3). Dropped here, before any page or door is chosen.
+  if (!auth.isAdmin && hasStoreLink()) takeStoreLink();
+
+  // An administrator who signed in with a store link waiting in this tab
+  // comes back to it, whichever way the sign-in went (store fe review #5).
+  // The password and LDAP form's `?redirect=` names the page already; an SSO
+  // sign-in lands on the panel's front door, because the server takes no
+  // return address from the browser - so the rule is here, for every kind,
+  // not in the sign-in form. ⚠ Above the start page below: the front door's
+  // default destination is not where this administrator was going.
+  if (auth.isAdmin && to.name !== 'store-install' && hasStoreLink()) {
+    return { name: 'store-install', replace: true };
   }
 
   // ── Start page ──────────────────────────────────────────────────────────
@@ -734,7 +804,11 @@ router.beforeEach(async (to) => {
   // a preference that hijacked explicit URLs would be a trap, not a default.
   // The query string is carried over so deep links through `/` (`?storage=…`)
   // survive the re-aim.
-  if (to.redirectedFrom?.path === '/') {
+  // ⚠ Not a navigation the store-link rule above re-aimed: it keeps the front
+  // door as `redirectedFrom`, and re-aiming it at the start page again would
+  // bounce between the two forever (measured: storeLinkRouter.test.ts ran out
+  // of memory).
+  if (to.redirectedFrom?.path === '/' && to.name !== 'store-install') {
     // ⚠ The door comes first, and only then the room. A non-admin who opened
     // the OPERATOR's prefix belongs on the end-user one — GitHub #14 is about
     // exactly that URL telling an ordinary user they are in an admin tool. The

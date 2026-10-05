@@ -95,11 +95,17 @@ type Store interface {
 	// without one, because drivers differ on that.
 	ListLiveNodesInTrash(ctx context.Context, storageID int64, trashPrefix string) ([]*model.Node, error)
 	// ListNodesUnder returns the row at dir and every row below it, in both
-	// path spellings drivers produce ("/a/b" and "a/b"); includeDeleted adds
-	// soft-deleted rows. The match is EXACT: names compare byte for byte, and
-	// the prefix bound is counted in characters, so a folder whose name is not
-	// ASCII matches as reliably as one that is. The storage root ("" or "/")
-	// is never a subtree and returns nothing.
+	// path spellings drivers produce ("/a/b" and "a/b"), in id order;
+	// includeDeleted adds soft-deleted rows. The match is EXACT: names compare
+	// byte for byte, so a folder of another case, a sibling that only starts
+	// with its name and a `%` or `_` read as a wildcard never match, and a
+	// folder whose name is not ASCII matches as reliably as one that is. The
+	// storage root ("" or "/") is never a subtree and returns nothing.
+	//
+	// "Below dir" is a byte range of path that an index answers (migration
+	// 00083, NodesUnderSQL), here and in the three questions further down
+	// that are matched the same way: what they cost follows the folder's
+	// rows, not the storage's.
 	ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error)
 	ListNodesByParent(ctx context.Context, storageID int64, parentID *int64) ([]*model.Node, error)
 	// AggNodes returns a lightweight {id, parent_id, is_dir, size} row for every
@@ -147,6 +153,12 @@ type Store interface {
 	// CountLiveNodesUnder counts the live rows strictly below dir — the
 	// baseline a folder rescan's 70% guard compares what it saw against.
 	CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error)
+	// HasLiveNodesUnder reports whether a live row sits strictly below dir,
+	// matched exactly as ListNodesUnder matches - what tells a new folder
+	// from one that holds something. It is CountLiveNodesUnder > 0 for a
+	// caller that does not need the number, answered by the first row found.
+	// The storage root is never a subtree: false.
+	HasLiveNodesUnder(ctx context.Context, storageID int64, dir string) (bool, error)
 	CountNodesByStorage(ctx context.Context, storageID int64) (int64, error)
 
 	// Replication targets — separate entity. Storages.replica_target_id
@@ -245,6 +257,26 @@ type Store interface {
 	ClearUserOIDCIdentity(ctx context.Context, userID int64) (bool, error)
 	SetProviderOIDCTrustEmail(ctx context.Context, providerID int64, trust bool) error
 	SetUserDisabledReason(ctx context.Context, userID int64, reason string) error
+	// SetUserAuthSource records where an account comes from (migration 00084):
+	// model.AuthSourceLocal, SSO, LDAP or Proxy.
+	SetUserAuthSource(ctx context.Context, userID int64, source string) error
+	// SetUserAuthDirectory records which LDAP directory made an account
+	// (its provider slug: "ldap", "ldap-2"…; migration 00084).
+	SetUserAuthDirectory(ctx context.Context, userID int64, directory string) error
+	// GetUserByDirectoryID finds the account a directory entry's permanent id
+	// was recorded on (model.User.DirectoryID; migration 00085).
+	GetUserByDirectoryID(ctx context.Context, directoryID string) (*model.User, error)
+	// SetUserDirectoryID records a directory account's permanent id.
+	SetUserDirectoryID(ctx context.Context, userID int64, directoryID string) error
+	// SetUserEnabledByDirectory is SetUserEnabled for directory sync: switched
+	// off, the account's disabled_reason says the directory did it
+	// (model.DisabledByDirectory), so sync may undo it; switched on, the
+	// reason is cleared.
+	SetUserEnabledByDirectory(ctx context.Context, userID int64, enabled bool) error
+	// SetUserAdminByGroup makes an account an administrator because a group
+	// gives its members Administrator (model.User.AdminByGroup). Every
+	// UpdateUserRole clears the mark.
+	SetUserAdminByGroup(ctx context.Context, userID int64) error
 	ListUsersByProvider(ctx context.Context, providerID int64) ([]*model.User, error)
 	ListUsers(ctx context.Context) ([]*model.User, error)
 	CountUsers(ctx context.Context) (int64, error)
@@ -421,7 +453,10 @@ type Store interface {
 	// ListAppPluginStateFiles returns the files this plugin keeps the given
 	// state key on — the key joined back to the node rows, so a file that
 	// was deleted is simply not in the answer. An empty key lists every key.
-	ListAppPluginStateFiles(ctx context.Context, pluginID int64, key string, limit int) ([]*model.AppPluginStateFile, error)
+	// Rows come in one fixed order (path, storage, key) and offset skips that
+	// many of them, so a caller that narrows the rows further (state_list:
+	// the person's ACL, a token's root) can read on until it has enough.
+	ListAppPluginStateFiles(ctx context.Context, pluginID int64, key string, limit, offset int) ([]*model.AppPluginStateFile, error)
 	// ListAppPluginStateKeys returns, per path hash, the "<plugin name>:<key>"
 	// pairs kept on those files — what a listing shows so the menu can offer
 	// state-aware actions (applies.state). Values are never returned.
@@ -529,6 +564,12 @@ type Store interface {
 	GetUserGroupLevel(ctx context.Context, userID int64) (string, bool, error)
 	SetUserGroupLevel(ctx context.Context, userID int64, level string) error
 	DeleteUserGroupLevel(ctx context.Context, userID int64) error
+	// The groups of a person's latest LDAP sign-in (migration 00084), for
+	// re-applying a changed LDAP link without waiting for them to sign in.
+	ListUserLDAPGroups(ctx context.Context, userID int64) ([]string, error)
+	// Where a group directory sync brought in comes from (migration 00084).
+	SetGroupDirectory(ctx context.Context, id int64, directoryID, name, state string) error
+	SetUserLDAPGroups(ctx context.Context, userID int64, groups []string) error
 
 	// A group's folder grants (group_file_grants). Rows come back as
 	// model.FileGrant with GroupID set and UserID zero.
@@ -656,6 +697,9 @@ type Store interface {
 	// Settings
 	GetSetting(ctx context.Context, key string) (string, error)
 	UpsertSetting(ctx context.Context, key, value string) error
+	// DeleteSettingsWithPrefix removes every setting whose key starts with
+	// prefix — a removed LDAP directory's rows ("auth.ldap-partner.").
+	DeleteSettingsWithPrefix(ctx context.Context, prefix string) error
 	ListSettings(ctx context.Context) (map[string]string, error)
 
 	// External services
@@ -997,6 +1041,17 @@ type Store interface {
 	// UpdatePluginRequest writes the decision fields; with onlyIfPending only
 	// while the stored row is still pending (ok = it was written).
 	UpdatePluginRequest(ctx context.Context, r *model.PluginRequest, onlyIfPending bool) (bool, error)
+
+	// The app store's state (migration 00081, internal/appstore): the
+	// installation's id, the stores an administrator trusted, the paid apps'
+	// licenses (the key sealed), the install links already used. Opaque rows,
+	// a key and a JSON value; written once for every engine (AppStoreSQL).
+	GetAppStoreState(ctx context.Context, key string) (string, bool, error)
+	PutAppStoreState(ctx context.Context, key, value string) error
+	// DeleteAppStoreState: ok = there was a row.
+	DeleteAppStoreState(ctx context.Context, key string) (bool, error)
+	// ListAppStoreState: every row whose key starts with prefix.
+	ListAppStoreState(ctx context.Context, prefix string) (map[string]string, error)
 
 	// File associations (migration 00077, internal/assoc): the administrator's
 	// rule per kind of file and capability, and each app's thumbnail limits.

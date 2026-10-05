@@ -6,8 +6,17 @@ export interface UserCreateRequest {
   display_name: string;
   password?: string;
   role: UserRole;
+  /** The login name (SFTP, FTP…); empty: derived from the address. */
+  username?: string;
+  /** Make a first password and e-mail it; `password` is then ignored. */
   send_invite?: boolean;
+  /** Make it although an LDAP directory owns the address. */
+  allow_directory_email?: boolean;
 }
+
+/** A new account and — invited — whether the letter went out, or its first
+ *  password, shown once, when no mail could be sent. */
+export type CreatedUser = User & { invite?: { emailed: boolean; temp_password?: string } };
 
 export interface UserUpdateRequest {
   display_name?: string;
@@ -57,8 +66,8 @@ export const UsersApi = {
     return data;
   },
 
-  async create(payload: UserCreateRequest): Promise<User> {
-    const { data } = await api.post<User>('/admin/users', payload);
+  async create(payload: UserCreateRequest): Promise<CreatedUser> {
+    const { data } = await api.post<CreatedUser>('/admin/users', payload);
     return data;
   },
 

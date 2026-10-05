@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 
@@ -95,6 +94,11 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// Rows deleted where they stood (issue #74), the same way.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB}
+	// What is at and below a folder (00083), the same way; seen_at is
+	// compared as text on both engines this file serves, and path byte for
+	// byte.
+	s.NodesUnderSQL = &db.NodesUnderSQL{Pool: sqlDB, Time: db.CatalogueTime, Columns: nodeColumnList,
+		Scan: func(r db.RowScanner) (*model.Node, error) { return scanNode(r) }}
 	// Plugin install requests (00070), the same way; timestamps in
 	// CURRENT_TIMESTAMP's spelling, as both engines this file serves compare
 	// them as text.
@@ -112,6 +116,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// Encryption requests (00080), the same way and with the same timestamp
 	// spelling.
 	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// The app store's state (00081), the same way.
+	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	return s
 }
 
@@ -135,8 +141,13 @@ type Store struct {
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
 	// node_unavailable_sql.go, migration 00078).
 	*db.NodeUnavailableSQL
+	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,
+	// HasLiveNodesUnder (internal/db nodes_under_sql.go, migration 00083).
+	*db.NodesUnderSQL
 	// The plugin install requests (internal/db plugin_requests_sql.go).
 	*db.PluginRequestSQL
+	// The app store's state (internal/db app_store_sql.go, migration 00081).
+	*db.AppStoreSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
 	// The group methods (internal/db group_sql.go, migration 00074).
@@ -500,60 +511,6 @@ func (s *Store) ListLiveNodesInTrash(ctx context.Context, storageID int64, trash
 		` FROM nodes WHERE storage_id=? AND deleted_at IS NULL`+
 		` AND (path=? OR path=? OR path LIKE ? OR path LIKE ?) ORDER BY id`,
 		storageID, slashed, bare, slashed+"/%", bare+"/%")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-// treeSpellings returns the two spellings a row's path can carry for dir —
-// "/a/b" and "a/b" — or ok=false for the storage root, which is never a
-// subtree.
-func treeSpellings(dir string) (slashed, bare string, ok bool) {
-	bare = strings.Trim(path.Clean("/"+strings.Trim(dir, "/")), "/")
-	if bare == "" || bare == "." {
-		return "", "", false
-	}
-	return "/" + bare, bare, true
-}
-
-// belowClause matches every row strictly below a directory, in both
-// spellings, exactly. Its four arguments come from belowArgs.
-//
-// ⚠ SUBSTR counts CHARACTERS on SQLite, MySQL and PostgreSQL alike, so the
-// bound is the prefix's rune count, never len(): a byte count overshoots a
-// prefix with a single non-ASCII letter in it and the comparison then matches
-// nothing at all. LIKE is not used on purpose: it is case-insensitive on
-// SQLite and treats `_` and `%` in a folder name as wildcards.
-const belowClause = `(SUBSTR(path,1,?)=? OR SUBSTR(path,1,?)=?)`
-
-func belowArgs(slashed, bare string) []any {
-	return []any{
-		utf8.RuneCountInString(slashed + "/"), slashed + "/",
-		utf8.RuneCountInString(bare + "/"), bare + "/",
-	}
-}
-
-func (s *Store) ListNodesUnder(ctx context.Context, storageID int64, dir string, includeDeleted bool) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	q := nodeSelectColumns() + ` FROM nodes WHERE storage_id=? AND (path=? OR path=? OR ` + belowClause + `)`
-	if !includeDeleted {
-		q += ` AND deleted_at IS NULL`
-	}
-	args := append([]any{storageID, slashed, bare}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, q+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1095,43 +1052,6 @@ func (s *Store) ListStaleNodes(ctx context.Context, storageID int64, before time
 	return out, rows.Err()
 }
 
-func (s *Store) ListStaleNodesUnder(ctx context.Context, storageID int64, dir string, before time.Time) ([]*model.Node, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return nil, nil
-	}
-	// The same CURRENT_TIMESTAMP wire format ListStaleNodes explains.
-	beforeStr := before.UTC().Format("2006-01-02 15:04:05")
-	args := append([]any{storageID, beforeStr}, belowArgs(slashed, bare)...)
-	rows, err := s.conn(ctx).QueryContext(ctx, nodeSelectColumns()+
-		` FROM nodes WHERE storage_id=? AND seen_at < ? AND deleted_at IS NULL AND `+belowClause, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*model.Node
-	for rows.Next() {
-		n, err := scanNode(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) CountLiveNodesUnder(ctx context.Context, storageID int64, dir string) (int64, error) {
-	slashed, bare, ok := treeSpellings(dir)
-	if !ok {
-		return 0, nil
-	}
-	var n int64
-	args := append([]any{storageID}, belowArgs(slashed, bare)...)
-	err := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE storage_id=? AND deleted_at IS NULL AND `+belowClause, args...).Scan(&n)
-	return n, err
-}
-
 func (s *Store) CountNodesByStorage(ctx context.Context, storageID int64) (int64, error) {
 	var n int64
 	err := s.conn(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes WHERE storage_id=? AND deleted_at IS NULL`, storageID).Scan(&n)
@@ -1347,6 +1267,53 @@ func (s *Store) SetUserProvider(ctx context.Context, userID, providerID int64, o
 	return s.DropForeignMemberships(ctx, userID, providerID)
 }
 
+// SetUserAuthDirectory records which LDAP directory made an account.
+func (s *Store) SetUserAuthDirectory(ctx context.Context, userID int64, directory string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_directory=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, directory, userID)
+	return err
+}
+
+// GetUserByDirectoryID finds the account a directory entry's permanent id is
+// recorded on.
+func (s *Store) GetUserByDirectoryID(ctx context.Context, directoryID string) (*model.User, error) {
+	if directoryID == "" {
+		return nil, sql.ErrNoRows
+	}
+	return scanUser(s.conn(ctx).QueryRowContext(ctx, userSelect()+` FROM users WHERE directory_id=?`, directoryID))
+}
+
+// SetUserDirectoryID records a directory account's permanent id.
+func (s *Store) SetUserDirectoryID(ctx context.Context, userID int64, directoryID string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET directory_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, directoryID, userID)
+	return err
+}
+
+// SetUserEnabledByDirectory switches an account on or off for directory sync,
+// recording that the directory made the change (model.DisabledByDirectory).
+func (s *Store) SetUserEnabledByDirectory(ctx context.Context, userID int64, enabled bool) error {
+	if enabled {
+		_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=1, disabled_reason=NULL WHERE id=?`, userID)
+		return err
+	}
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET enabled=0, disabled_reason=? WHERE id=?`, model.DisabledByDirectory, userID)
+	return err
+}
+
+// DeleteSettingsWithPrefix removes every setting whose key starts with prefix.
+func (s *Store) DeleteSettingsWithPrefix(ctx context.Context, prefix string) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `DELETE FROM settings WHERE substr(setting_key, 1, ?) = ?`, len(prefix), prefix)
+	return err
+}
+
+// SetUserAuthSource records where an account comes from (migration 00084).
+func (s *Store) SetUserAuthSource(ctx context.Context, userID int64, source string) error {
+	_, err := s.conn(ctx).ExecContext(ctx,
+		`UPDATE users SET auth_source=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, source, userID)
+	return err
+}
+
 // GetUserByProviderEmail looks a user up within a single provider (tenant), the
 // multi-tenant analogue of GetUserByEmail. Returns (nil, nil) if absent.
 func (s *Store) GetUserByProviderEmail(ctx context.Context, providerID int64, email string) (*model.User, error) {
@@ -1481,7 +1448,13 @@ func (s *Store) UpdateUserLocale(ctx context.Context, id int64, locale, tz strin
 }
 
 func (s *Store) UpdateUserRole(ctx context.Context, id int64, role string) error {
-	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, role, id)
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role=?, admin_by_group=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`, role, id)
+	return err
+}
+
+// SetUserAdminByGroup makes the account an administrator through a group.
+func (s *Store) SetUserAdminByGroup(ctx context.Context, id int64) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE users SET role='admin', admin_by_group=1, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
 	return err
 }
 
@@ -2070,13 +2043,13 @@ func (s *Store) DeleteFileGrant(ctx context.Context, id int64) error {
 // ⚠ COALESCE on every nullable text column: 00046 adds state_json/files_json
 // as NULLABLE (MySQL cannot default a TEXT column), and scanning NULL into a
 // Go string fails inside the driver rather than anywhere that could explain it.
-const shareCols = `id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings, plugin_id, COALESCE(page_id,''), COALESCE(subject,''), COALESCE(state_json,''), COALESCE(files_json,''), pin_fails, locked_until, COALESCE(pin_enc,''), visit_count, COALESCE(purpose_json,'')`
+const shareCols = `id, node_id, token, COALESCE(pin_hash,''), expires_at, max_downloads, download_count, created_by, COALESCE(created_via,''), created_at, COALESCE(kind,'download'), max_uploads, upload_count, drop_settings, plugin_id, COALESCE(page_id,''), COALESCE(subject,''), COALESCE(state_json,''), COALESCE(files_json,''), pin_fails, locked_until, COALESCE(pin_enc,''), visit_count, COALESCE(purpose_json,''), COALESCE(app_root,'')`
 
 func (s *Store) CreateShare(ctx context.Context, sh *model.Share) (*model.Share, error) {
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO shares (node_id, token, pin_hash, pin_enc, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings, plugin_id, page_id, subject, state_json, files_json, purpose_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO shares (node_id, token, pin_hash, pin_enc, expires_at, max_downloads, created_by, created_via, kind, max_uploads, drop_settings, plugin_id, page_id, subject, state_json, files_json, purpose_json, app_root) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		sh.NodeID, sh.Token, sh.PinHash, sh.PinEnc, sh.ExpiresAt, sh.MaxDownloads, sh.CreatedBy, sh.CreatedVia, shareKind(sh.Kind), sh.MaxUploads, sh.DropSettings,
-		sh.PluginID, sh.PageID, sh.Subject, sh.StateJSON, sh.FilesJSON, sh.PurposeJSON)
+		sh.PluginID, sh.PageID, sh.Subject, sh.StateJSON, sh.FilesJSON, sh.PurposeJSON, sh.AppRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -3121,7 +3094,7 @@ func scanStorage(r rowScanner) (*model.Storage, error) {
 }
 
 func userSelect() string {
-	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1), COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,'')`
+	return `SELECT id, email, COALESCE(display_name,''), COALESCE(password_hash,''), role, COALESCE(totp_secret,''), COALESCE(totp_pending_secret,''), COALESCE(totp_enabled,0), COALESCE(totp_recovery_codes_json,'[]'), locale, timezone, created_at, updated_at, last_login_at, provider_id, COALESCE(oidc_subject,''), COALESCE(quota_bytes,0), COALESCE(usage_bytes,0), COALESCE(enabled,1), COALESCE(avatar_url,''), COALESCE(username,''), COALESCE(oidc_issuer,''), COALESCE(disabled_reason,''), COALESCE(auth_source,'local'), COALESCE(auth_directory,''), COALESCE(directory_id,''), COALESCE(admin_by_group,0)`
 }
 
 func scanUser(r rowScanner) (*model.User, error) {
@@ -3129,13 +3102,14 @@ func scanUser(r rowScanner) (*model.User, error) {
 	var totpEnabled int
 	var recoveryJSON string
 	var providerID sql.NullInt64
-	var enabled int
-	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason); err != nil {
+	var enabled, adminByGroup int
+	if err := r.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.TOTPSecret, &u.TOTPPendingSecret, &totpEnabled, &recoveryJSON, &u.Locale, &u.Timezone, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &providerID, &u.OIDCSubject, &u.QuotaBytes, &u.UsageBytes, &enabled, &u.AvatarURL, &u.Username, &u.OIDCIssuer, &u.DisabledReason, &u.AuthSource, &u.AuthDirectory, &u.DirectoryID, &adminByGroup); err != nil {
 		return nil, err
 	}
 	u.TOTPEnabled = totpEnabled == 1
 	u.Enabled = enabled == 1
 	u.SSOLinked = u.OIDCSubject != "" || u.OIDCIssuer != ""
+	u.AdminByGroup = adminByGroup == 1
 	if recoveryJSON != "" {
 		_ = json.Unmarshal([]byte(recoveryJSON), &u.TOTPRecoveryCodes)
 	}
@@ -3149,7 +3123,7 @@ func scanUser(r rowScanner) (*model.User, error) {
 func scanShare(r rowScanner) (*model.Share, error) {
 	sh := &model.Share{}
 	if err := r.Scan(&sh.ID, &sh.NodeID, &sh.Token, &sh.PinHash, &sh.ExpiresAt, &sh.MaxDownloads, &sh.DownloadCount, &sh.CreatedBy, &sh.CreatedVia, &sh.CreatedAt, &sh.Kind, &sh.MaxUploads, &sh.UploadCount, &sh.DropSettings,
-		&sh.PluginID, &sh.PageID, &sh.Subject, &sh.StateJSON, &sh.FilesJSON, &sh.PinFails, &sh.LockedUntil, &sh.PinEnc, &sh.VisitCount, &sh.PurposeJSON); err != nil {
+		&sh.PluginID, &sh.PageID, &sh.Subject, &sh.StateJSON, &sh.FilesJSON, &sh.PinFails, &sh.LockedUntil, &sh.PinEnc, &sh.VisitCount, &sh.PurposeJSON, &sh.AppRoot); err != nil {
 		return nil, err
 	}
 	sh.HasPin = sh.PinHash != ""
@@ -5565,9 +5539,12 @@ func (s *Store) DestroyAppPluginSigningKey(ctx context.Context, id string) error
 
 // ── app_plugin_locks / state keys (migration 00045) ────────────────────
 
-func (s *Store) ListAppPluginStateFiles(ctx context.Context, pluginID int64, key string, limit int) ([]*model.AppPluginStateFile, error) {
+func (s *Store) ListAppPluginStateFiles(ctx context.Context, pluginID int64, key string, limit, offset int) ([]*model.AppPluginStateFile, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	// LEFT JOIN, not JOIN: the file may not be indexed yet, and a document
 	// recorded seconds after upload still belongs in the list. A node row
@@ -5582,8 +5559,8 @@ func (s *Store) ListAppPluginStateFiles(ctx context.Context, pluginID int64, key
 		q += " AND st.`key` = ?"
 		args = append(args, key)
 	}
-	q += " ORDER BY st.rel LIMIT ?"
-	args = append(args, limit)
+	q += " ORDER BY st.rel, st.storage_id, st.`key` LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 	rows, err := s.conn(ctx).QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err

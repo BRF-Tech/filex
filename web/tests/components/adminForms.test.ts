@@ -27,6 +27,11 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
 const usersCreate = vi.fn();
+// The Users list's Groups column and filter, and the Add user dialog's
+// groups (best effort).
+vi.mock('@/api/groups', () => ({
+  GroupsApi: { list: vi.fn(async () => []), memberships: vi.fn(async () => ({})), forUser: vi.fn(async () => []), addMembers: vi.fn() },
+}));
 vi.mock('@/api/users', () => ({
   UsersApi: {
     list: vi.fn(async () => ({ items: [], total: 0, page: 1, page_size: 25 })),
@@ -212,6 +217,7 @@ describe('Add user', () => {
     expect(submit, 'the form has a submit button of its own').not.toBeNull();
 
     await w.find('input[name="new-user-email"]').setValue('new@example.com');
+    await w.find('input[name="new-user-password"]').setValue('s3cret-pass-1');
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await flushPromises();
     expect(usersCreate).toHaveBeenCalledTimes(1);
@@ -244,6 +250,7 @@ describe('Add user', () => {
     await button(first, 'Add user').trigger('click');
     await flushPromises();
     await first.find('input[name="new-user-email"]').setValue('new@example.com');
+    await first.find('input[name="new-user-password"]').setValue('s3cret-pass-1');
     await button(first, 'Create').trigger('click');
     await flushPromises();
     expect(first.text()).toContain('new@example.com');
@@ -268,6 +275,7 @@ describe('Add user', () => {
     await button(w, 'Add user').trigger('click');
     await flushPromises();
     await w.find('input[name="new-user-email"]').setValue('taken@example.com');
+    await w.find('input[name="new-user-password"]').setValue('s3cret-pass-1');
     await button(w, 'Create').trigger('click');
     await flushPromises();
 

@@ -32,6 +32,19 @@ var githubRepoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 type GitHubInput struct {
 	Repo string `json:"github_repo"`
 	Ref  string `json:"ref"`
+	// Commit (a store link's; never the API's): the manifest and every file
+	// the repository serves are read at this commit, not at the tag, which
+	// may have moved since the store approved it. `{tag}` in an address still
+	// stands for Ref (a release asset is the tag's).
+	Commit string `json:"-"`
+}
+
+var gitCommitRe = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
+// GitHubManifest reads filex-app.json from repo at ref.
+func (r *Registry) GitHubManifest(ctx context.Context, repo, ref string) ([]byte, error) {
+	b, _, err := r.githubManifest(ctx, repo, []string{ref})
+	return b, err
 }
 
 // URLInput is the JSON body of a URL install.
@@ -56,9 +69,21 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 	if ref == "" {
 		refs = []string{"main", "master"}
 	}
+	if in.Commit != "" {
+		if !gitCommitRe.MatchString(in.Commit) || ref == "" {
+			return nil, &InstallError{Code: ErrCodeFetch, Reason: FetchReasonBadRepo, Where: repo, Message: "a commit is a full lower-case git object id, beside the tag it is for"}
+		}
+		refs = []string{in.Commit}
+	}
 	manifest, usedRef, err := r.githubManifest(ctx, repo, refs)
 	if err != nil {
 		return nil, err
+	}
+	// The files are read where the manifest was (the commit, when one is
+	// given); the source the app follows is still the tag.
+	tag := usedRef
+	if in.Commit != "" {
+		tag = ref
 	}
 	m, err := ParseManifest(manifest)
 	if err != nil {
@@ -68,12 +93,12 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 	// repository needs no release and no `wasm` block — a translator pushes a
 	// JSON file and that is the whole distribution.
 	if m.IsLanguagePack() {
-		return &InstallInput{Manifest: manifest, Source: "github", SourceURL: "https://github.com/" + repo + "@" + usedRef}, nil
+		return &InstallInput{Manifest: manifest, Source: "github", SourceURL: "https://github.com/" + repo + "@" + tag}, nil
 	}
 	fromRepo := func(u string) string {
-		u = strings.ReplaceAll(u, "{tag}", usedRef)
+		u = strings.ReplaceAll(u, "{tag}", tag)
 		if !strings.Contains(u, "://") {
-			u = "https://raw.githubusercontent.com/" + repo + "/" + url.PathEscape(usedRef) + "/" + strings.TrimPrefix(u, "/")
+			u = r.githubRaw() + "/" + repo + "/" + url.PathEscape(usedRef) + "/" + strings.TrimPrefix(u, "/")
 		}
 		return u
 	}
@@ -83,7 +108,7 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 	}
 	if (m.Wasm == nil || strings.TrimSpace(m.Wasm.URL) == "") && m.UI != nil && !m.NeedsModule() {
 		// An app that is only an interface: the bundle is the whole download.
-		return &InstallInput{Manifest: manifest, UI: ui, Source: "github", SourceURL: "https://github.com/" + repo + "@" + usedRef}, nil
+		return &InstallInput{Manifest: manifest, UI: ui, Source: "github", SourceURL: "https://github.com/" + repo + "@" + tag}, nil
 	}
 	if m.Wasm == nil || strings.TrimSpace(m.Wasm.URL) == "" {
 		return nil, installErr(ErrCodeManifestInvalid, "the manifest has no wasm.url; a repository install needs a prebuilt module address")
@@ -100,7 +125,7 @@ func (r *Registry) FetchGitHub(ctx context.Context, in GitHubInput) (*InstallInp
 	}
 	return &InstallInput{
 		Manifest: manifest, Wasm: bytes.NewReader(wasm), SHA256: m.Wasm.SHA256, UI: ui,
-		Source: "github", SourceURL: "https://github.com/" + repo + "@" + usedRef,
+		Source: "github", SourceURL: "https://github.com/" + repo + "@" + tag,
 	}, nil
 }
 
@@ -134,7 +159,7 @@ func (r *Registry) fetchUIBundle(ctx context.Context, m *Manifest, resolve func(
 func (r *Registry) githubManifest(ctx context.Context, repo string, refs []string) ([]byte, string, error) {
 	var lastErr error
 	for _, rf := range refs {
-		u := "https://raw.githubusercontent.com/" + repo + "/" + url.PathEscape(rf) + "/filex-app.json"
+		u := r.githubRaw() + "/" + repo + "/" + url.PathEscape(rf) + "/filex-app.json"
 		b, err := r.fetch(ctx, u, wire.MaxManifestBytes)
 		if err == nil {
 			return b, rf, nil
@@ -145,6 +170,15 @@ func (r *Registry) githubManifest(ctx context.Context, repo string, refs []strin
 	ie.Refs = refs
 	ie.Message = "filex-app.json not found in " + repo + ": " + lastErr.Error()
 	return nil, "", ie
+}
+
+// githubRaw is where a repository's files are read from: GitHub's raw host,
+// or the mirror Options.GitHubRawBase names.
+func (r *Registry) githubRaw() string {
+	if b := strings.TrimRight(strings.TrimSpace(r.opts.GitHubRawBase), "/"); b != "" {
+		return b
+	}
+	return "https://raw.githubusercontent.com"
 }
 
 // FetchURL resolves explicit module + manifest addresses.

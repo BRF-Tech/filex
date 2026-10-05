@@ -32,6 +32,11 @@ import (
 // before the key existed, would lose the key there too. Once: afterwards it
 // is a permission like any other, and an administrator who takes it away has
 // taken it away.
+//
+// ⚠ A save on a version without the key takes it away too, without a word,
+// and looks the same: 0.50 did that to files.encrypt (PR #86). The merge does
+// not run again; gaps.go points such lists out instead, and foreign.go keeps a
+// later version's keys through every save on this one.
 
 // inheritOnAdd is, for each key added after v0.49.0 that is carved out of an
 // older one, that older key. "Carved out" means every action the added key
@@ -62,13 +67,14 @@ var v049Catalogue = []Perm{
 var listable = filter(func(d Def) bool { return !d.RoleOnly })
 
 // builtinLists are the settings holding a built-in role's saved list, each
-// with what that role can ever hold.
+// with the role and what that role can ever hold.
 var builtinLists = []struct {
 	key  string
+	role string
 	room Set
 }{
-	{model.SettingPermissionDefaults, listable},
-	{model.SettingPermissionViewerDefaults, viewerCeiling},
+	{model.SettingPermissionDefaults, model.RoleUser, listable},
+	{model.SettingPermissionViewerDefaults, model.RoleViewer, viewerCeiling},
 }
 
 // UpgradeReport is what one UpgradeCatalogue changed.

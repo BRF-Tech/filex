@@ -7,6 +7,7 @@ import {
   formatDate,
   formatRelative,
   formatDuration,
+  formatInterval,
   formatPercent,
   truncate,
 } from '@/lib/format';
@@ -130,6 +131,24 @@ describe('formatDuration', () => {
   it('returns em-dash for negative', () => {
     expect(formatDuration(-1)).toBe('-');
     expect(formatDuration(Number.NaN)).toBe('-');
+  });
+});
+
+describe('formatInterval', () => {
+  // ⚠ The directory sync's card printed its schedule as "6h" / "1h30m" in
+  // every language. A schedule is said in the largest unit it is a whole
+  // number of, so 90 minutes stays 90 minutes (formatDuration says "2 hr").
+  it("says a schedule as it was set, in the viewer's language", () => {
+    expect(formatInterval(21600, 'en')).toBe('6 hr');
+    expect(formatInterval(5400, 'en')).toBe('90 min');
+    expect(formatInterval(86400, 'en')).toBe('1 day');
+    expect(formatInterval(45, 'en')).toBe('45 sec');
+    expect(formatInterval(21600, 'tr')).not.toMatch(/h$/);
+  });
+
+  it('says nothing for no schedule', () => {
+    expect(formatInterval(0)).toBe('-');
+    expect(formatInterval(Number.NaN)).toBe('-');
   });
 });
 

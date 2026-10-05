@@ -50,7 +50,7 @@ func (h *AppPlugins) UICall(w http.ResponseWriter, r *http.Request) {
 	if len(req.Paths) > 0 {
 		sid, resolved, err := h.resolvePaths(r.Context(), 0, req.Paths)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writePathsRefused(w, err)
 			return
 		}
 		if !ownsStorage(w, r, sid, "storage") {

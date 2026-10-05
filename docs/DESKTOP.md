@@ -35,7 +35,7 @@ The desktop app is **`filex-app`** in every one of them; plain `filex` is the
 
 | Platform | Command | Notes |
 |---|---|---|
-| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build above, for x64 and arm64 (snapd picks the one for the machine). The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). Since 0.50 the pages run in Chromium's sandbox inside the snap too; until the Snap Store connects that by itself: `sudo snap connect filex-app:browser-sandbox` ([the snap and the sandbox](#the-snap-and-the-sandbox)). |
+| Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build above, for x64 and arm64 (snapd picks the one for the machine). The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). Inside the snap the app runs without Chromium's own sandbox and relies on the snap's strict confinement; there is nothing to connect for it ([the snap and the sandbox](#the-snap-and-the-sandbox)). |
 | macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex); `brew upgrade` keeps it current (the Mac app does not update itself). The first launch is blocked once, as below: the app is not signed with a Developer ID. |
 | Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) - *filex File Manager* | **The one Windows build that is code-signed**: Microsoft signs it, so there is no SmartScreen prompt, and the Store installs and updates it. On a machine that also has the installer below, both read the same accounts and folders; Settings says so. |
 | Windows 10/11 | `winget install BRFTech.filex-app` - **not installable yet** | The same per-user installer as the download below, updating itself the same way. Every release submits it, and the package is still waiting for its first review by the winget moderators: until that is approved, `winget` does not find it. |
@@ -149,7 +149,8 @@ so on Ubuntu it is the simpler choice.
 
 **Without the profile the app says so itself** (since 0.50). The first thing
 every Linux build runs is a small launcher (`filex-app`, the Electron binary
-beside it is `filex-app-bin`) that checks the sandbox can be built. When it
+beside it is `filex-app-bin`) that checks the sandbox can be built (except in
+the snap: [the snap and the sandbox](#the-snap-and-the-sandbox)). When it
 cannot, the launcher shows these steps, in a window where zenity or kdialog is
 installed and in the terminal in any case, and exits with code 78; the app does
 not open. Up to 0.49 the AppImage simply did not appear, and the reason was
@@ -165,32 +166,42 @@ needs the profile above like any other.
 > ⚠ Starting the app with `--no-sandbox` yourself also opens it, and is not a
 > fix: it switches the sandbox off, so a page that got the better of the viewer
 > would run with your account's access to your files and to the tokens the app
-> holds. The launcher passes a `--no-sandbox` you typed through and never adds
-> one. Use the profile, or the `.deb`.
+> holds. The launcher passes a `--no-sandbox` you typed through and, outside
+> the snap, never adds one. Use the profile, or the `.deb`.
 
 ### The snap and the sandbox
 
-Up to 0.49 the snap started the app with `--no-sandbox`: snapd confined the
-app as a whole, but the pages it shows ran without Chromium's sandbox. Since
-0.50 the snap asks snapd for the sandbox (a `browser-sandbox` plug:
-`browser-support` with `allow-sandbox: true`), and the pages run in it as they
-do in the `.deb`.
+The snap starts the app with Chromium's own sandbox switched off
+(`--no-sandbox`) and relies on snapd's strict confinement instead: an AppArmor
+profile, a seccomp filter and a mount namespace of its own around the whole
+app. There is nothing to connect for it, and the launcher does not check
+anything in the snap.
 
-The Snap Store reviews that permission by hand and connects it by itself only
-once it has granted it, so a new release of the snap can wait for that review
-before it reaches the stable channel. Where the plug is not connected, the
-launcher says so and shows the one command that connects it:
+What that means: the confinement keeps the app, all of it, away from the rest
+of the system, but it does not wall the pages the app shows off from the app
+itself. A page that got the better of the viewer would have what the app has
+inside the snap: the files in your home folder that the `home` interface
+reaches, the network, and the tokens the app holds. In the `.deb`, the `.rpm`
+and the AppImage each page also runs in Chromium's sandbox, with none of that.
+If the difference matters on your machine, install the `.deb` or the `.rpm`.
 
-```bash
-sudo snap connect filex-app:browser-sandbox
-```
+Why: Chromium's sandbox inside a snap needs `browser-support` with
+`allow-sandbox: true`, which Snapcraft limits to trusted publishers, never
+connects by itself, and reviews by hand. 0.50 and 0.51 asked for it (as a
+`browser-sandbox` plug, with `sudo snap connect filex-app:browser-sandbox` to
+connect it); their revisions waited in the Snap Store's manual review and the
+stable channel stayed on 0.49. Since 0.52 the snap asks for no such permission,
+as Snapcraft advises for Electron apps, and its updates reach the stable channel
+again by themselves. A `browser-sandbox` connection made by hand goes away with
+the plug; there is nothing to undo.
 
-Measured on Ubuntu 26.04 (x64) with the 0.50 packages: the `.deb` (and the
-`.rpm` on Fedora 42), the AppImage with the profile and the snap with the plug
-connected opened with every renderer in its own PID namespace; the AppImage
-without the profile and the snap without the connection refused with these
-steps. Every release checks the same on x64 and arm64 Ubuntu 24.04 machines
-before it publishes.
+Every release installs the snap on x64 and arm64 Ubuntu 24.04 machines before
+it publishes and checks that it asks for no `allow-sandbox` and that every
+process of the app runs under the snap's AppArmor profile, in enforce mode,
+with a seccomp filter. Measured on Ubuntu 26.04 (x64) with a snap built this
+way: `browser-support` connected by itself, nothing was left to connect for
+the app to open, and its browser, zygote, renderer, GPU and utility processes
+all ran as `snap.filex-app.filex-app (enforce)` with a seccomp filter.
 
 ## Signing in
 

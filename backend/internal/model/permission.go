@@ -159,3 +159,13 @@ const SettingPermissionAppDefaults = "permissions.app_defaults"
 // perm.UpgradeCatalogue. Absent means v0.49.0's, the release before it was
 // recorded.
 const SettingPermissionCatalogue = "permissions.catalogue"
+
+// SettingPermissionGapsDismissed holds the permission gaps (perm/gaps.go) an
+// administrator said were on purpose: a JSON array of gap ids
+// ("builtin:user:files.encrypt", "role:12:files.encrypt"). A gap that closes
+// leaves the list; one that opens again is shown again.
+const SettingPermissionGapsDismissed = "permissions.gaps_dismissed"
+
+// SettingPermissionGapsNotified holds the permission gaps administrators were
+// last told of in the bell: a JSON array of gap ids. A gap not in it is new.
+const SettingPermissionGapsNotified = "permissions.gaps_notified"

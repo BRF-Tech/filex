@@ -164,7 +164,7 @@ tenant is given only to that tenant's accounts; one held outside its tenant
 by no role, so picking a custom role for one makes them stop being an
 administrator (never the last one) - one save, one server call.
 
-![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](screenshots/v0.51.0/roles/role-editor-1440.png)
+![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](screenshots/v0.52.0/roles/role-editor-1440.png)
 
 A role has:
 
@@ -385,7 +385,7 @@ the 29, per role and per person; the app's manifest declares them
   `overrides` map is replaced on `PUT`, so a client that writes the 29 must
   send the `app.*` keys it read back with them, or they are cleared.
 
-![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](screenshots/v0.51.0/apppermissions/person-exceptions.png)
+![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](screenshots/v0.52.0/apppermissions/person-exceptions.png)
 
 ## Public links follow their creator
 
@@ -451,7 +451,9 @@ An **API key** is held to its own verbs on each of these doors as well -
 | `GET` / `PUT /api/admin/users/{id}/exceptions` | `admin.users` | exceptions + effective (with `effective.apps`, [App permissions](#app-permissions)) / `{"overrides":{"files.delete":"deny","app.sign.request":"deny"}}` - `{}` clears. The whole map is replaced. Allowing an `admin.*` permission needs a session; changing an `app.*` key needs an administrator |
 | `GET` / `PUT /api/admin/users/{id}/roles` | `admin.users` | a person's one role, set in one call: `{"role_id":3}` (a custom role - also sets the level underneath), `{"role_id":null}`, or `{"role":"viewer"}` (a built-in role; ends their own custom one - a group's role still applies, [GROUPS.md](GROUPS.md#api)). An administrator given a custom role stops being one - never the last administrator (`409`) |
 | `GET /api/admin/roles/builtin[?role=viewer]` | `admin.users` | a built-in role's permissions, its `preset`, and `apps`: its decisions about app permissions |
-| `PUT /api/admin/roles/builtin[?role=viewer]` | admin (multi-tenant: the supertenant's) | `{"permissions":[…], "apps":{"app.sign.request":"deny"}}` - `apps` absent leaves those decisions as they are, `{}` hands every one back to the app's default. A list with an `admin.*` permission needs a session. A tenant's admin gets `403 supertenant_only` |
+| `PUT /api/admin/roles/builtin[?role=viewer]` | admin (multi-tenant: the supertenant's) | `{"permissions":[…], "apps":{"app.sign.request":"deny"}, "shown":[…]}` - `apps` absent leaves those decisions as they are, `{}` hands every one back to the app's default. `shown` (optional): the permissions the editor showed, so a list left without one of them is not pointed out as one an older version saved. A key the stored list holds that this version does not know is kept. A list with an `admin.*` permission needs a session. A tenant's admin gets `403 supertenant_only` |
+| `GET /api/admin/roles/gaps` | admin | the roles the caller may edit that may have lost a permission (*Things to know*): `{"gaps":[{"id":"builtin:user:files.encrypt","key":"files.encrypt","from":"files.create","role":"user"}, {"id":"role:12:files.encrypt","key":"files.encrypt","from":"files.create","rule_id":12,"rule_name":"Drop box"}]}` - those nobody dismissed |
+| `POST /api/admin/roles/gaps/restore` · `POST /api/admin/roles/gaps/dismiss` | admin (a built-in role's: the supertenant's) | `{"id":"builtin:user:files.encrypt"}` → the gaps left. Restore adds the key to the list, or an Allow of it to the folder part; dismiss changes nothing in the role. `404 gap_gone` when it is not there for the caller any more |
 | `GET /api/admin/roles` | `admin.users` | the custom roles, and `assignments`: user id → the role they hold |
 | `POST /api/admin/roles` | admin | create a custom role, with its `names` / `descriptions` in other languages (one that allows an `admin.*` permission needs a session) |
 | `POST /api/admin/roles/preview` | admin | what a role being edited comes to before it is saved: `{"permissions":[…], "effects":{…}, "conditions":{…}}` → `{"holder_role":"user"}` - the built-in role its people would be on (*The level underneath*, above). Nothing is checked or stored; the role editor asks it for each app permission's *Default* |
@@ -480,7 +482,10 @@ folders in `conditions` and is refused without them. `targets` only name SSO
 groups (the starting role); any other target is refused - a person is given
 a role on their own page or through a group. `settings.apps` is the role's decisions about app
 permissions (`allow` / `deny` per `app.<app>.<id>` key); a key it does not name
-falls through to the built-in role, then the app's default.
+falls through to the built-in role, then the app's default. `shown` (optional,
+not stored) is what the editor showed, as for the built-in roles above. A key
+the stored role holds that this version does not know - a later version's -
+is kept in `permissions` and `effects` whether the body sends it back or not.
 
 `names` and `descriptions` map an interface language - `en`, `tr`, or the code
 of an installed language pack, lower case - to the role's name and
@@ -544,8 +549,10 @@ answers for all of them alike: `403 {"error":"e2e_not_allowed","reason":"permiss
 | `user.permissions_set` | `before` / `after` exceptions |
 | `user.roles_set` | `before` / `after` custom role id (or null) |
 | `permissions.defaults_set` | the built-in `role`, `before` / `after`, and `apps` when its app decisions were changed |
-| `permission_rule.create` / `.delete` | the custom role |
-| `permission_rule.update` | `before` / `after` |
+| `permission_rule.create` / `.delete` | the custom role, its own `permissions` among it |
+| `permission_rule.update` | `before` / `after`, each with the role's own `permissions` |
+| `permission_gap.restore` | the gap (target `builtin:user:files.encrypt` or `role:<id>:files.encrypt`), `key`, `from`, the built-in `role` or the `rule_id`, and `before` / `after` (the list, or the custom role) |
+| `permission_gap.dismiss` | the gap, `key`, `from`, and the built-in `role` or the `rule_id` |
 
 ## Things to know
 
@@ -583,11 +590,46 @@ answers for all of them alike: `403 {"error":"e2e_not_allowed","reason":"permiss
   setting only ever grows: a version started on a catalogue a later version
   recorded leaves it as it is, so that upgrading again does not take the later
   version's own permissions for new and hand them out a second time.
-- **Rolling back to a version without `files.encrypt`** (0.49 or older): the
+- **Rolling back to a version without `files.encrypt`** (0.50 or older): the
   older version does not know the permission, and every saved role and
   person's exceptions the upgrade gave it to keeps it. The older Roles and
-  People pages cannot save those (`400`, an unknown permission
-  `files.encrypt`) until the server is upgraded again. Upgrading again does
-  not give `files.encrypt` back where an administrator took it away in
-  between, nor to a role saved on the older version: the permission was
-  merged once, at the first upgrade.
+  People pages cannot save a custom role's list or a person's exceptions that
+  hold it (`400`, an unknown permission `files.encrypt`) until the server is
+  upgraded again. Two saves go through without a word and leave it out: the
+  built-in **User** role (the older page does not show the permission and
+  writes the list back without it) and a custom role's folder part whose own
+  list does not hold `files.encrypt` (the older editor keeps only the folder
+  permissions it knows); applying a preset to a custom role on the older page
+  replaces its list the same way. Upgrading again does not give `files.encrypt`
+  back to those, nor where an administrator took it away in between: it was
+  merged once, at the first upgrade, and nothing stored tells the two apart.
+- **A role that may have lost a permission** is pointed out, from 0.52.0
+  on. Admin → Roles shows, above the table, the built-in User role
+  when it allows `files.create` but not `files.encrypt`, and every custom role
+  whose folder part allows `files.create`, does not decide `files.encrypt`, and
+  whose own list does not hold it. Each has **Give back "Encrypt"** (the key
+  added to the list, or an Allow of it to the folder part; nothing else
+  changes) and **Dismiss, it was on purpose** (not shown again while it stays
+  that way; given back and lost again, it is shown again); both are in the
+  audit log. Nothing is given back by itself. The administrators are told once
+  in the bell (`permission_gaps`, [NOTIFICATIONS.md](NOTIFICATIONS.md)): at a
+  start that finds one nobody was told of, and after a save that leaves one. A
+  save from the role editors, which show *Encrypt*, is a decision and is not
+  pointed out: they send the permissions they showed (`shown`), and a save
+  through the API without it is pointed out like one from an older page. Who
+  sees and answers one is who may edit the list - the built-in role the
+  platform operator, a custom role also its tenant's administrators. A custom
+  role's own list is not looked at: the older pages refused to save one that
+  held `files.encrypt`, and "may add files, may not encrypt" is a role made on
+  purpose.
+
+  ![Admin → Roles pointing out the User role and a custom role that may have lost Encrypt](screenshots/v0.52.0/roles/roles-gaps-1280.png)
+- **A permission a later version stored is kept.** A role or a person's
+  exceptions saved by a newer filex may hold a key this version does not know.
+  The pages cannot show it, so they cannot have taken it away: every save - a
+  built-in role, a custom role's list and its folder part, a person's
+  exceptions, a preset, **Clear exceptions** - keeps it as stored, and a
+  request may send it back. A key that was never stored is still refused
+  (`400`). Going back to this version from a later one leaves that version's
+  permissions where they were for when it runs again. A folder part taken away
+  takes them with it.

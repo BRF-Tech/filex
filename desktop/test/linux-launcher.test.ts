@@ -13,9 +13,17 @@
 //   - the snap's command.sh ended in `--no-sandbox`, and chrome-sandbox was not
 //     in the package.
 // The launcher (build/linux/launcher.sh) checks for the sandbox first and, when
-// it cannot be built, says what to do and exits 78; it never adds
-// --no-sandbox. The AppImage entry carries a harmless switch instead, and the
-// snap asks for `browser-support` with `allow-sandbox`.
+// it cannot be built, says what to do and exits 78; outside a snap it never
+// adds --no-sandbox. The AppImage entry carries a harmless switch instead.
+//
+// The snap (0.52): 0.50 and 0.51 asked for `browser-support` with
+// `allow-sandbox: true` and refused to start until that plug was connected.
+// The Snap Store grants allow-sandbox to trusted publishers only and reviews
+// it by hand: the 0.50 and 0.51 revisions sat in "Manual review pending" and
+// stable stayed on 0.49. Snapcraft's advice for Electron is --no-sandbox under
+// strict confinement (AppArmor + seccomp + namespaces around the whole app),
+// so inside a snap the launcher starts the app with --no-sandbox and asks
+// snapd nothing; the snap asks for no allow-sandbox.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -77,13 +85,16 @@ test("the AppImage's own desktop entry no longer turns the sandbox off", () => {
   assert.doesNotMatch(code(YML), /--no-sandbox/);
 });
 
-test('the snap asks for the sandbox, under the plug name the launcher prints', () => {
-  const snap = yamlBlock('snap');
-  const m = /^ {4}- ([a-z-]+):\n {8}interface: browser-support\n {8}allow-sandbox: true$/m.exec(snap);
-  assert.ok(m, 'snap.plugs has no browser-support plug with allow-sandbox: true');
-  assert.equal(m[1], 'browser-sandbox');
-  assert.ok(LAUNCHER.includes(':browser-sandbox"'), 'the launcher prints another plug name');
-  assert.ok(LAUNCHER.includes('${SNAP_INSTANCE_NAME:-${SNAP_NAME:-filex-app}}'));
+test('the snap asks for no allow-sandbox, and the launcher asks snapd nothing', () => {
+  // ⚠ allow-sandbox is for trusted publishers only and is reviewed by hand:
+  // with it the 0.50 and 0.51 revisions never left "Manual review pending".
+  const snap = code(yamlBlock('snap'));
+  assert.doesNotMatch(snap, /allow-sandbox/);
+  assert.doesNotMatch(snap, /browser-sandbox/);
+  // A browser-support plug of our own would be the same request under
+  // another name; electron-builder's `default` already carries the plain one.
+  assert.doesNotMatch(snap, /interface: browser-support/);
+  assert.doesNotMatch(code(LAUNCHER), /snapctl|browser-sandbox|snap connect/);
   assert.equal(STORE_IDS.snap, LINUX_APP_NAME);
 });
 
@@ -97,15 +108,22 @@ test('the launcher is a POSIX sh script with LF line ends', () => {
   assert.doesNotMatch(code(LAUNCHER), /\[\[|^\s*function\s|\$\{[A-Za-z_]+\/\/|^\s*local\s/m, 'bash-only syntax in a /bin/sh script');
 });
 
-test('the launcher never starts the app without its sandbox on its own', () => {
+test('the launcher adds --no-sandbox in a snap and nowhere else', () => {
   const lines = code(LAUNCHER).split('\n');
-  // Every start is the binary with exactly the arguments it was given.
+  // Every other start is the binary with exactly the arguments it was given.
   const execs = lines.filter((l) => /\bexec\b/.test(l));
   assert.ok(execs.length >= 4);
-  for (const l of execs) assert.match(l, /exec "\$bin" "\$@"$/, l);
-  // --no-sandbox appears once, as a comparison: the person's own switch.
+  const own = execs.filter((l) => !/exec "\$bin" "\$@"$/.test(l));
+  assert.deepEqual(own.map((l) => l.trim()), ['[ "$kind" = snap ] && exec "$bin" --no-sandbox "$@"']);
+  // --no-sandbox appears twice: the person's own switch (or the one the
+  // snap's command.sh appends), compared; and the snap's start.
   const mentions = lines.filter((l) => l.includes('--no-sandbox'));
-  assert.deepEqual(mentions.map((l) => l.trim()), ['[ "$a" = "--no-sandbox" ] && exec "$bin" "$@"']);
+  assert.deepEqual(mentions.map((l) => l.trim()), [
+    '[ "$a" = "--no-sandbox" ] && exec "$bin" "$@"',
+    '[ "$kind" = snap ] && exec "$bin" --no-sandbox "$@"',
+  ]);
+  // `kind` is snap only for a launcher that lives inside $SNAP.
+  assert.match(LAUNCHER, /if \[ -n "\$\{SNAP:-\}" \]; then\n\s+case "\$self" in "\$SNAP"\/\*\) kind=snap ;; esac\nfi/);
   // The refusal ends the script, with its own code.
   assert.match(LAUNCHER, /\nexit 78\n$/);
 });
@@ -113,7 +131,7 @@ test('the launcher never starts the app without its sandbox on its own', () => {
 test('the launcher points at the docs headings that exist', () => {
   const desktop = fs.readFileSync(path.join(ROOT, '..', 'docs', 'DESKTOP.md'), 'utf8');
   const anchors = [...LAUNCHER.matchAll(/docs\.filex\.sh\/DESKTOP#([a-z0-9-]+)/g)].map((m) => m[1]);
-  assert.ok(anchors.length >= 2);
+  assert.ok(anchors.length >= 1);
   const slug = (h: string) => h.toLowerCase().replace(/[^a-z0-9 -]/g, '').trim().replace(/\s+/g, '-');
   const headings = [...desktop.matchAll(/^#{2,4} (.+)$/gm)].map((m) => slug(m[1]));
   for (const a of anchors) assert.ok(headings.includes(a), `docs/DESKTOP.md has no heading for #${a}`);
@@ -216,10 +234,12 @@ function stage(opts: { unshare: 'yes' | 'no' | 'absent'; snapctl?: { code: numbe
     fs.writeFileSync(path.join(stubs, 'unshare'), `#!/bin/sh\nexit ${opts.unshare === 'yes' ? 0 : 1}\n`, { mode: 0o755 });
   }
   if (opts.snapctl) {
+    // Answers as 0.50's launcher expected, and notes that it was asked.
     const say = opts.snapctl.says ? `echo '${opts.snapctl.says}' >&2\n` : '';
+    const asked = path.join(dir, 'snapctl-asked').split(path.sep).join('/');
     fs.writeFileSync(
       path.join(stubs, 'snapctl'),
-      `#!/bin/sh\n[ "$1 $2" = "is-connected browser-sandbox" ] || exit 9\n${say}exit ${opts.snapctl.code}\n`,
+      `#!/bin/sh\necho "$*" >> "${asked}"\n[ "$1 $2" = "is-connected browser-sandbox" ] || exit 9\n${say}exit ${opts.snapctl.code}\n`,
       { mode: 0o755 },
     );
   }
@@ -291,41 +311,58 @@ test('the launcher, run', { skip: SH ? false : 'no POSIX sh on this machine (set
   const snapDir = (exe: string) =>
     spawnSync(SH!, ['-c', 'readlink -f "$1"', 'sh', path.dirname(exe).split(path.sep).join('/')], { encoding: 'utf8' }).stdout.trim();
 
-  await t.test('a snap whose browser-sandbox plug is not connected is told the snap connect command', () => {
-    // `unshare` would say yes here: inside a snap it is snapd that is asked.
-    const s = stage({ unshare: 'yes', snapctl: { code: 1 } });
+  await t.test("a snap starts with --no-sandbox under the snap's confinement, and snapd is not asked", () => {
+    // The case 0.50 and 0.51 refused with exit 78: the old browser-sandbox
+    // plug not connected (snapctl: exit 1, nothing said). `unshare` says no
+    // too, as it does inside a snap (its AppArmor profile will not run it).
+    const s = stage({ unshare: 'no', snapctl: { code: 1 } });
     try {
-      const r = launch(s, [], { SNAP: snapDir(s.exe), SNAP_NAME: 'filex-app', LANG: 'en_GB.UTF-8' });
-      assert.equal(r.code, 78);
-      assert.equal(r.out, '');
-      assert.match(r.err, /sudo snap connect filex-app:browser-sandbox/);
-      assert.match(r.err, /DESKTOP#the-snap-and-the-sandbox/);
-      assert.doesNotMatch(r.err, /apparmor_parser/);
+      const r = launch(s, ['filex://sign-in?code=1', '/home/ada/My Files/a b.docx', '--hidden'], {
+        SNAP: snapDir(s.exe),
+        SNAP_NAME: 'filex-app',
+        LANG: 'en_GB.UTF-8',
+      });
+      assert.equal(r.code, 0, r.err);
+      // First, so a `--` among the arguments cannot turn it into a file name.
+      assert.equal(r.out.trim(), 'STARTED [--no-sandbox] [filex://sign-in?code=1] [/home/ada/My Files/a b.docx] [--hidden]');
+      assert.equal(r.err, '');
+      assert.ok(!fs.existsSync(path.join(s.dir, 'snapctl-asked')), 'the launcher asked snapctl');
     } finally {
       fs.rmSync(s.dir, { recursive: true, force: true });
     }
   });
 
-  await t.test('a snap with the plug connected starts, whatever unshare would say', () => {
-    // Measured: the snap's AppArmor profile refuses to run /usr/bin/unshare at all.
-    const s = stage({ unshare: 'no', snapctl: { code: 0 } });
+  await t.test("a snap started by its command.sh, which already ends in --no-sandbox, gets it once", () => {
+    const s = stage({ unshare: 'no' });
     try {
-      const r = launch(s, ['--hidden'], { SNAP: snapDir(s.exe), SNAP_NAME: 'filex-app' });
+      const r = launch(s, ['--hidden', '--no-sandbox'], { SNAP: snapDir(s.exe), SNAP_NAME: 'filex-app' });
+      assert.equal(r.code, 0, r.err);
+      assert.equal(r.out.trim(), 'STARTED [--hidden] [--no-sandbox]');
+    } finally {
+      fs.rmSync(s.dir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("SNAP set by somebody else's snap does not make a .deb a snap: the sandbox stays on", () => {
+    // A terminal inside a snap (an editor's) hands its SNAP to what it starts;
+    // the launcher is a snap's only when it lives under $SNAP.
+    const env = { SNAP: '/snap/code/123', SNAP_NAME: 'code', LANG: 'en_US.UTF-8' };
+    const yes = stage({ unshare: 'yes' });
+    try {
+      const r = launch(yes, ['--hidden'], env);
       assert.equal(r.code, 0, r.err);
       assert.equal(r.out.trim(), 'STARTED [--hidden]');
     } finally {
-      fs.rmSync(s.dir, { recursive: true, force: true });
+      fs.rmSync(yes.dir, { recursive: true, force: true });
     }
-  });
-
-  await t.test('a snapd that cannot answer leaves it to Chromium', () => {
-    const s = stage({ unshare: 'no', snapctl: { code: 1, says: 'error: unknown command is-connected' } });
+    const no = stage({ unshare: 'no' });
     try {
-      const r = launch(s, [], { SNAP: snapDir(s.exe), SNAP_NAME: 'filex-app' });
-      assert.equal(r.code, 0, r.err);
-      assert.equal(r.out.trim(), 'STARTED');
+      const r = launch(no, [], env);
+      assert.equal(r.code, 78);
+      assert.equal(r.out, '');
+      assert.match(r.err, /Install the \.deb or the \.rpm/);
     } finally {
-      fs.rmSync(s.dir, { recursive: true, force: true });
+      fs.rmSync(no.dir, { recursive: true, force: true });
     }
   });
 

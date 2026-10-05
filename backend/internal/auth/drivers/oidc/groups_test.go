@@ -36,6 +36,7 @@ func TestSignInRecordsTheGroupsClaim(t *testing.T) {
 	groups, err := store.ListUserSSOGroups(ctx, u.ID)
 	require.NoError(t, err)
 	require.Equal(t, []string{"contractors", "staff"}, groups)
+	require.Equal(t, model.AuthSourceSSO, u.AuthSource, "an account an SSO sign-in made says so on the Users page")
 
 	// Removed from "contractors" at the IdP: gone here at the next sign-in.
 	idp.SetExtraClaims(map[string]any{"groups": []any{"staff"}})

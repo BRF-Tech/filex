@@ -9,8 +9,10 @@
  *     2. its Edit button opens the editor tab in ONLYOFFICE (`app=onlyoffice`),
  *        which says what a save as CSV keeps; a cell changed there and the
  *        tab closed comes back to the storage as the SAME kind of file -
- *        semicolons, CRLF, no byte order mark - with the new value, and never
- *        as XLSX bytes;
+ *        semicolons, CRLF, no byte order mark - with the new value, every
+ *        cell nobody changed as it was (`007`, `05320000001`, `01.02.2026`,
+ *        which ONLYOFFICE writes as `7`, `5320000001`, `1/2/2026`; filex 0.52,
+ *        GitHub #88), and never as XLSX bytes;
  *     3. "Open with" offers ONLYOFFICE and filex's table; "Choose an app…"
  *        names ONLYOFFICE; "Always use" the table is kept on the account and
  *        followed;
@@ -35,8 +37,16 @@ import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } fr
 
 const PREFS = '/api/me/prefs?surface=web';
 const CONFIG = '/api/files/onlyoffice/config';
-const ORIGINAL = 'ad;adet;not\r\nelma;3;"a; b"\r\narmut;5;şeker\r\n';
-const EDITED = 'ad;adet;not\r\nelma;42;"a; b"\r\narmut;5;şeker\r\n';
+// Cells ONLYOFFICE writes another way when nobody touched them: leading
+// zeros, a phone number, a date it reads month first in English.
+const ORIGINAL =
+  'ad;adet;not;kod;tel;tarih\r\n' +
+  'elma;3;"a; b";007;05320000001;01.02.2026\r\n' +
+  'armut;5;şeker;042;05330000002;15.03.2026\r\n';
+const EDITED =
+  'ad;adet;not;kod;tel;tarih\r\n' +
+  'elma;42;"a; b";007;05320000001;01.02.2026\r\n' +
+  'armut;5;şeker;042;05330000002;15.03.2026\r\n';
 
 /** ONLYOFFICE is configured and answering, by the server's own probe. */
 async function documentServer(api: APIRequestContext): Promise<boolean> {

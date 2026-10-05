@@ -128,6 +128,10 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 // owner, syspath.OwnDraft, and CommitVersion holds it to that).
 func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmplugin.Installed, v *wire.View, target string, body io.Reader, size int64, uid int64) {
 	storageID, rels, err := h.resolvePaths(r.Context(), 0, []string{target})
+	if errors.Is(err, errOutsideRoot) {
+		refuseOutsideRoot(w)
+		return
+	}
 	if err != nil || len(rels) != 1 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad path"})
 		return

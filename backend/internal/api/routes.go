@@ -23,6 +23,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/appstore"
 	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
@@ -123,6 +124,9 @@ type Deps struct {
 	// with AppPluginsDisabledReason.
 	AppPlugins               *wasmplugin.Registry
 	AppPluginsDisabledReason string
+	// AppStore is the app store side (internal/appstore): trusted stores,
+	// install links, paid apps' licenses. Nil when the app runtime is off.
+	AppStore *appstore.Service
 	// Assoc keeps which app opens and draws which kind of file
 	// (internal/assoc, Admin → Plugins → Default apps). Nil when app plugins
 	// are off: filex alone opens and draws every kind.
@@ -647,6 +651,10 @@ func BuildRouter(d *Deps) http.Handler {
 	// sees (docs/ONLYOFFICE.md, "What a save does").
 	if d.OnlyOffice != nil {
 		d.OnlyOffice.AttachSync(protocolsync.New(d.Store, d.Index, d.Thumbs, writehook.OriginOnlyOffice).WithResolver(d.StorageResolver))
+		// The callback reads the file a save is about to replace through the
+		// resolver the fetch endpoint above serves it from: a saved CSV is
+		// compared with the bytes the editor was given (onlyoffice/csv_keep.go).
+		d.OnlyOffice.AttachBody(d.Body)
 	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	th.AttachACL(d.ACL)
@@ -686,10 +694,15 @@ func BuildRouter(d *Deps) http.Handler {
 	stg.DemoMode = d.Cfg.Demo.Mode
 	ush := handlers.NewUsers(d.Store)
 	ush.ACL = d.ACL
+	ush.Mailer, ush.Tenants = d.Mailer, tenants
+	if d.AuthLive != nil {
+		ush.DirectoryFor = d.AuthLive.DirectoryFor
+	}
 	permH := handlers.NewPermissionsAdmin(d.Store, d.ACL)
 	if d.AppPlugins != nil {
 		permH.AppPermissions = d.AppPlugins.UserPermissions
 	}
+	permH.Notify = d.Notify
 	groupsH := handlers.NewGroupsAdmin(d.Store, d.ACL)
 	seth := handlers.NewSettings(d.Store)
 	seth.AttachMailer(d.Mailer)
@@ -1454,6 +1467,9 @@ func BuildRouter(d *Deps) http.Handler {
 				// writes the file, so the token needs `write` too.
 				r.With(write, handlers.RequirePermission(d.ACL, perm.PluginsRun)).Put("/ui/{plugin}/{view}/save", apH.UISave)
 				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Post("/ui/{plugin}/{view}/call", apH.UICall)
+				// What an app reads about its own license, fx.license.get()
+				// (handlers/app_store_intent.go).
+				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Get("/license/{plugin}", handlers.NewAppStore(d.AppStore, handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason), d.Cfg.Demo.Mode).AppLicense)
 			})
 
 			// SFC's per-verb async endpoints — translate to ops.Submit.
@@ -1743,9 +1759,11 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(users).Get("/groups/", groupsH.List)
 				r.With(users).Post("/groups", groupsH.Create)
 				r.With(users).Post("/groups/", groupsH.Create)
+				r.With(users).Get("/groups/memberships", groupsH.Memberships)
 				r.With(users).Get("/groups/{id}", groupsH.Get)
 				r.With(users).Put("/groups/{id}", groupsH.Update)
 				r.With(users).Delete("/groups/{id}", groupsH.Delete)
+				r.With(users).Post("/groups/{id}/detach", groupsH.Detach)
 				r.With(users).Post("/groups/{id}/members", groupsH.AddMembers)
 				r.With(users).Delete("/groups/{id}/members/{user_id}", groupsH.RemoveMember)
 				r.With(users).Get("/users/{id}/groups", groupsH.UserGroups)
@@ -1802,6 +1820,13 @@ func BuildRouter(d *Deps) http.Handler {
 				// (handlers/permissions_admin.go). /roles/builtin is a fixed path, so
 				// chi routes it before /roles/{id}.
 				r.Put("/roles/builtin", permH.PutDefaults)
+				// Roles that allow adding files but not encrypting, as a save on
+				// a version without files.encrypt leaves them (perm/gaps.go):
+				// listed, given the permission back, or marked as on purpose.
+				// Fixed paths, routed before /roles/{id}.
+				r.Get("/roles/gaps", permH.ListGaps)
+				r.Post("/roles/gaps/restore", permH.RestoreGap)
+				r.Post("/roles/gaps/dismiss", permH.DismissGap)
 				r.Post("/roles", permH.CreateRule)
 				r.Post("/roles/", permH.CreateRule)
 				// What a role being edited comes to (its people's built-in role),
@@ -1862,7 +1887,19 @@ func BuildRouter(d *Deps) http.Handler {
 						Metadata: map[string]any{"storage_id": storageID, "path": rel}, IP: ip,
 					})
 				}
+				// Installing from a store and paid apps' licenses
+				// (handlers/app_store_intent.go, internal/appstore).
+				apStore := handlers.NewAppStore(d.AppStore, apAdm, d.Cfg.Demo.Mode)
+				// A link's filex_origin is held to this filex's configured
+				// address, or (none) to the origin the request arrived at.
+				if d.Cfg.PublicURLSet {
+					apStore.PublicURL = d.Cfg.PublicURL
+				}
+				if d.AppStore != nil {
+					apAdm.OnRemoved = d.AppStore.Forget
+				}
 				r.Route("/app-plugins", func(r chi.Router) {
+					apStore.MountAdmin(r)
 					r.Get("/", apAdm.List)
 					r.Post("/", apAdm.Install)
 					// Static, so chi matches it before /{id}/upgrade.
@@ -2099,6 +2136,8 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Delete("/{name}", authProvH.Delete)
 					r.Put("/{name}/tenants", authProvH.SetTenants)
 					r.Post("/{name}/test", authProvH.Test)
+					r.Get("/{name}/sync", authProvH.SyncStatus)
+					r.Post("/{name}/sync", authProvH.SyncStart)
 				})
 
 				r.Route("/search", func(r chi.Router) {

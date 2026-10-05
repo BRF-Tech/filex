@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/assoc"
+	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/enginebin"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -492,6 +493,12 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 		return nil, "", ctx.Err()
 	}
 	defer func() { <-p.sem }()
+	// ⚠ Asked again once the slot is ours: a hold (or a switch-off) that
+	// came while the job waited for one must stop it here, and the module
+	// it runs is the one the app has now.
+	if c, err = p.running(); err != nil {
+		return nil, "", err
+	}
 
 	if r.opts.StorageResolver == nil {
 		return nil, "", errors.New("no storage resolver")
@@ -507,6 +514,8 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 	}
 	var params map[string]any
 	_ = json.Unmarshal([]byte(job.ParamsJSON), &params)
+	root, rooted := JobRoot(params)
+	delete(params, rootParamKey)
 	if ov := OutputOverride(params); ov != nil {
 		// The surface's choice for this one job (JobRequest.Output); the
 		// handler validated it at submit and put it under __output.
@@ -528,6 +537,9 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 	}
 	defer scope.Close()
 	scope.storageName, scope.readOnly = r.storageFacts(ctx, job.StorageID)
+	if rooted {
+		scope.confineTo(root)
+	}
 	// What this job will do with what the plugin writes. share_create reads it
 	// to refuse a link against an action that keeps no outputs, which would be
 	// a token nothing ever answers.
@@ -749,14 +761,57 @@ func (r *Registry) outputFolder(ctx context.Context, qualified string) (*model.S
 
 // Parameter names only the HOST writes into a job row: the per-job output a
 // person chose on a screen (outputOverrideKey, which runJob obeys without
-// asking again), and the stamps the public page door adds (which visitor's
-// link acted — an app binds a signature to a signer by it).
+// asking again), the root of the token that queued it (rootParamKey), and the
+// stamps the public page door adds (which visitor's link acted — an app binds
+// a signature to a signer by it).
 const (
 	ParamPageTokenHash = "page_token_hash"
 	ParamShareID       = "share_id"
 )
 
-var hostParamKeys = map[string]bool{outputOverrideKey: true, ParamPageTokenHash: true, ParamShareID: true}
+var hostParamKeys = map[string]bool{outputOverrideKey: true, ParamPageTokenHash: true, ParamShareID: true, rootParamKey: true}
+
+// rootParamKey is where the door that queues a job made with a `root:` token
+// stamps that token's root (SetJobRoot); runJob confines the job's scope to it
+// and hides it from the guest. A job runs on the ops worker, long after the
+// request, so the root has to travel on the row (filex #154).
+const rootParamKey = "__root"
+
+// SetJobRoot stamps a confined caller's root into a job's params.
+func SetJobRoot(params map[string]any, root confine.Root) {
+	StampJobRoot(params, root.String())
+}
+
+// StampJobRoot stamps a root as it was recorded (`<adapter>://<rel>`): the
+// public page door's, whose job carries the root of the job that opened the
+// link (model.Share.AppRoot). An empty spec stamps nothing - a link opened
+// with no root - and one that does not read as a root confines the job to
+// nothing when it runs (JobRoot).
+func StampJobRoot(params map[string]any, spec string) {
+	if spec == "" {
+		return
+	}
+	params[rootParamKey] = spec
+}
+
+// JobRoot reads the root a job's door stamped, ok=false when there is none.
+//
+// ⚠ Fails CLOSED: a stamp that is there but does not read as a root (not a
+// string, no storage named) confines the job to no folder at all rather than
+// to none - the host wrote it, so a stamp that will not parse is a broken row,
+// never an unconfined one.
+func JobRoot(params map[string]any) (confine.Root, bool) {
+	raw, ok := params[rootParamKey]
+	if !ok {
+		return confine.Root{}, false
+	}
+	s, _ := raw.(string)
+	root, ok := confine.ParseRoot(s)
+	if !ok {
+		return confine.Root{}, true
+	}
+	return root, true
+}
 
 // StripHostParams is params without the host's own keys, never nil.
 //
@@ -910,6 +965,11 @@ func (r *Registry) screenScope(ctx context.Context, p *Installed, storageID int6
 		return nil, err
 	}
 	scope.storageName, scope.readOnly = r.storageFacts(ctx, storageID)
+	// The screen is asked on the person's request: a `root:` token's root
+	// holds what it is told and what it names (Scope.root).
+	if root, ok := confine.CallerRoot(ctx); ok {
+		scope.confineTo(root)
+	}
 	for _, rel := range rels {
 		rel = strings.TrimPrefix(rel, "/")
 		var size int64
@@ -942,6 +1002,11 @@ func (r *Registry) ViewEvent(ctx context.Context, plugin, view string, storageID
 		return nil, err
 	}
 	defer release()
+	// Asked again with the slot held: a hold that came while the event
+	// waited for a slot stops it (runJob says why).
+	if c, err = p.running(); err != nil {
+		return nil, err
+	}
 	scope, err := r.screenScope(ctx, p, storageID, rels, actor, locale)
 	if err != nil {
 		return nil, err

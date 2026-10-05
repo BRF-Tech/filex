@@ -362,7 +362,7 @@ belongs to another tenant is refused before anything is written to it.
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](screenshots/v0.51.0/realm/login-realm-1440.png) | ![A tenant's own sign-in page, its realm filled in](screenshots/v0.51.0/realm/login-realm-locked-1440.png) |
+| ![The platform's sign-in page with an empty Realm field](screenshots/v0.52.0/realm/login-realm-1440.png) | ![A tenant's own sign-in page, its realm filled in](screenshots/v0.52.0/realm/login-realm-locked-1440.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has

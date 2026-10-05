@@ -408,11 +408,11 @@ opens in the table).
 
 | | |
 |---|---|
-| ![A semicolon CSV open in ONLYOFFICE's spreadsheet, a look first](screenshots/v0.51.0/csvoffice/csv-view-1440.png) | ![The CSV in the editor tab, with the line on what a save keeps](screenshots/v0.51.0/csvoffice/csv-edit-1440.png) |
+| ![A semicolon CSV open in ONLYOFFICE's spreadsheet, a look first](screenshots/v0.52.0/csvoffice/csv-view-1440.png) | ![The CSV in the editor tab, with the line on what a save keeps](screenshots/v0.52.0/csvoffice/csv-edit-1440.png) |
 | A double click: the spreadsheet, a look first, no "Choose CSV options" question. | **Edit**: the editor tab, and filex's line on what a save as CSV keeps. |
-| ![The file menu: Open with ONLYOFFICE, the built-in viewer, Choose an app…](screenshots/v0.51.0/csvoffice/csv-open-with-menu.png) | ![Choose an app…, ONLYOFFICE and the table](screenshots/v0.51.0/csvoffice/csv-choose-app.png) |
+| ![The file menu: Open with ONLYOFFICE, the built-in viewer, Choose an app…](screenshots/v0.52.0/csvoffice/csv-open-with-menu.png) | ![Choose an app…, ONLYOFFICE and the table](screenshots/v0.52.0/csvoffice/csv-choose-app.png) |
 | The file's menu offers both. | **Choose an app…** can make either the person's default. |
-| ![Default apps: .csv, ONLYOFFICE first, the table second](screenshots/v0.51.0/csvoffice/default-apps-csv-1440.png) | ![ONLYOFFICE switched off: its row greyed, saying where to set it up](screenshots/v0.51.0/csvoffice/csv-menu-no-onlyoffice.png) |
+| ![Default apps: .csv, ONLYOFFICE first, the table second](screenshots/v0.52.0/csvoffice/default-apps-csv-1440.png) | ![ONLYOFFICE switched off: its row greyed, saying where to set it up](screenshots/v0.52.0/csvoffice/csv-menu-no-onlyoffice.png) |
 | *Admin → Plugins → Default apps* lists `.csv` while ONLYOFFICE is connected. | ONLYOFFICE switched off: the table opens the file, and an administrator sees the row greyed. |
 
 ### Opening without the "Choose CSV options" question
@@ -439,9 +439,11 @@ with its default (`assemblyFormatAsOrigin: true`), the callback's file is a
 CSV (`filetype: "csv"`), but written ONLYOFFICE's way whatever the file was:
 comma-separated, a UTF-8 byte order mark in front, `\n` line ends. filex puts
 the file's own way back before it writes it - its delimiter, its byte order
-mark or none, its `\r\n` or `\n` - and leaves every value as ONLYOFFICE
-wrote it. A semicolon file stays a semicolon file. A file that was not UTF-8
-is saved as UTF-8, with a byte order mark so that a reader knows.
+mark or none, its `\r\n` or `\n` - and the text of every cell nobody changed
+([Cells nobody changed keep their text](#cells-nobody-changed-keep-their-text);
+0.51.0 left every value as ONLYOFFICE wrote it). A semicolon file stays a
+semicolon file. A file that was not UTF-8 is saved as UTF-8, with a byte order
+mark so that a reader knows.
 
 ⚠⚠ A `.csv` is only ever written as CSV text:
 
@@ -449,8 +451,9 @@ is saved as UTF-8, with a byte order mark so that a reader knows.
   as **XLSX** (`filetype: "xlsx"`, measured). filex converts it back to CSV
   through the Document Server's own conversion service (the file is offered
   to it for that one conversion, as an app's office conversion is: UTF-8,
-  then the file's own delimiter as above) and writes that. Before 0.51 the
-  XLSX bytes were written under the `.csv` name.
+  then the file's own delimiter and its unchanged cells as above; what the
+  conversion writes for a number or a date was not measured) and writes that.
+  Before 0.51 the XLSX bytes were written under the `.csv` name.
 - Anything else - another type, bytes that are a zip or an old Excel workbook
   whatever the callback says, a conversion that fails, a save over 256 MiB -
   is **not written**. The file stays as it was; the log says
@@ -466,6 +469,138 @@ is saved as UTF-8, with a byte order mark so that a reader knows.
 A CSV is the one kind converted back and written in place. Any other kind
 saved in another format is written beside the file and never over it: see
 [A save in another format](#a-save-in-another-format).
+
+### Cells nobody changed keep their text
+
+ONLYOFFICE reads a CSV the way a spreadsheet does: a cell that looks like a
+number or a date becomes one, and a save writes every cell back as the
+spreadsheet shows it, edited or not. Measured on 0.51.0 with Docs 9.4.0, one
+cell edited in a semicolon file, the editor in English - in cells nobody had
+touched `05320000001` came back as `5320000001`, `007` as `7`, `000` as `0`
+and `01.02.2026` as `1/2/2026` (`15.03.2026` stayed: ONLYOFFICE read the month
+first, and 15 is no month), and every data row gained an empty cell at its
+end. With the editor in Turkish the dates came back as `1.02.2026`. 0.51.0
+wrote that.
+
+filex now reads the file the save is about to replace, lines its rows up with
+the rows ONLYOFFICE saved, and writes the file's own text back wherever the
+saved text is the same value written ONLYOFFICE's way:
+
+- **A row in which nothing changed** is written byte for byte as it was - its
+  quotes, a delimiter at its end and its own line end included - wherever it
+  stands now: a sort moves rows and changes none of them.
+- **In a row somebody edited**, the cells they did not edit keep their text.
+- **A row added** in ONLYOFFICE is written as ONLYOFFICE saved it, without the
+  empty cells ONLYOFFICE pads a row with beyond the file's own width. **A row
+  deleted** there is gone.
+- **Empty lines at the end of the file** stay (ONLYOFFICE never writes them)
+  unless a row was added under the last row, where they stood. An empty row
+  in the middle stays as the file wrote it, a line of delimiters or a bare
+  line end. A first line `sep=;` stays, and the file ends with a line end if
+  and only if it did.
+
+"The same value written ONLYOFFICE's way" is what Docs 9.4.0 was measured
+writing for a cell nobody touched (the editor in English, Turkish, German and
+French), and nothing else. It is one way only: `7` is what ONLYOFFICE writes
+for `007`, so the file keeps `007`; `007` is never what it writes for `7`.
+
+- **A whole number** without its leading zeros (`007` and `7`, `05320000001`
+  and `5320000001`), its `+` (`+905320000001` and `905320000001`) or the
+  spaces in front of it and one after it (` 42` and `42`); one written as
+  hexadecimal (`0x10` and `16`); and one too long for a spreadsheet's number:
+  `9007199254740993` comes back as `9007199254740992`, `123456789012345678`
+  as `1.2345678901234568e+17`, and every one from 2^63 up, either way, as
+  `-9.2233720368547758e+18` (`12345678901234567890`, a 24-digit account
+  number).
+- **A number with a decimal point**, which ONLYOFFICE keeps to six decimals:
+  `03.50` and `3.50`, `0.1234567` and `0.1234570`, `+1.5` and `1.5`; with
+  nothing before the point, `.5` as `.0` (the value gone) and `-.5` as
+  `-0.5`. Never a decimal comma: `3,5` is text to ONLYOFFICE in every
+  language measured and comes back as it was.
+- **A date with a four-digit year from 1900 on**, written the way the editor's
+  language writes one, with the same three numbers in the same order. In
+  English month/day/year without leading zeros: `01.02.2026`, `01/02/2026`
+  and `1-2-2026` as `1/2/2026`. In Turkish day.month.year, the month in two
+  digits: `01.02.2026`, `1/2/2026` and `1-2-2026` as `1.02.2026`, `15/3/2026`
+  as `15.03.2026`. An ISO date: `2026-02-01` as `2/1/2026` and as
+  `1.02.2026`.
+- **`true` and `false`**, saved as `TRUE` and `FALSE` (`True` comes back as it
+  was).
+- **A tab inside a cell**, which ONLYOFFICE drops (unless the file is
+  tab-separated), and a text longer than 32767 characters, which it cuts
+  there.
+
+⚠ Nothing that only looks like one of these. A date ONLYOFFICE does not read
+as one (`15.03.2026` in English, the 15th month) comes back as it was, and
+what a person types over it is theirs: in the English editor a typed
+`15/3/2026`, `01.02.2026` or `1.2.2026` is saved as typed, and the file gets
+it. That is also why German's `01.02.2026` and French's `01/02/2026` are no
+rule. A line end inside a quoted cell comes back as it was. Every rule is
+pinned by the bytes a Docs 9.4.0 saved
+(`backend/internal/onlyoffice/csv_keep_measured_test.go`).
+
+⚠ What is still written as ONLYOFFICE writes it:
+
+- **The cell you edit.** Type `007` into a cell and the file gets `7`.
+- **A change that is only another way of writing the same value** cannot be
+  made in ONLYOFFICE. It shows `007` as `7` already and saves the same text
+  whether or not somebody retyped it, so filex cannot tell the two apart and
+  the file keeps `007`. Edit the file as text for that.
+- **What ONLYOFFICE changes in a way no rule puts back**, edited or not
+  (measured, every language unless said): a time (`08:05:30` as `8:05`,
+  `00:13` as `0:12`, a minute short), a percent (`12.34%` as `12.3%`), a
+  number with an exponent (`1e3` as `1000.00000`), `5.` as `5`, a date with a
+  time (`2026-02-01T10:30:45Z` as `2/1/2026 10:30`), a two-digit year
+  (`01.02.26` as `1/2/2026`), a year before 1900 (`01.02.1850` as
+  `1/2/3750`), a day that is not in its month (`31.02.2026` as `3.03.2026`
+  in Turkish), a formula (`=1+1` as `2`). Keep such a file out of
+  ONLYOFFICE, or edit it as text.
+- **A date in an editor language other than English and Turkish**, unless
+  that language happens to write it the English or the Turkish way (German
+  writes `15/3/2026` as `15.03.2026`, which is the Turkish way, and it is
+  kept; `1.2.2026` as `01.02.2026`, which is not).
+- **A date typed as text in the way the other language writes one.** The
+  English editor keeps a date typed with dots as text (measured: `01.02.2026`
+  and `1.2.2026` typed are saved as typed). Typed as `1.02.2026` over a cell
+  whose text has the same three numbers in the same order (`1.2.2026`), it is
+  the Turkish way of writing that text, and filex keeps the file's; the same
+  holds the other way round for a date the Turkish editor cannot read
+  (`1/13/2026` typed over `01/13/2026`). Only the spelling is lost: the
+  numbers and their order are the cell's.
+- **A file that is not UTF-8** (ONLYOFFICE asked for its encoding when it
+  opened): its text cannot be compared with what ONLYOFFICE saved, so its
+  first save is written as in 0.51.0, in UTF-8 with a byte order mark. From
+  then on it is a UTF-8 file and its cells are kept.
+- **A file over 64 MiB or two million rows, or with a row of more than 16384
+  cells** (as many columns as an ONLYOFFICE sheet has): written as in 0.51.0.
+- **A column added, removed or moved**: the cells from that column on are
+  written as ONLYOFFICE saved them, in every row. The cells before it keep
+  their text only while they are more than half of the row's filled cells;
+  otherwise the whole row is ONLYOFFICE's. A last column that was removed
+  leaves an empty cell at the end of each row.
+- **A row filex cannot tell from a new one**: a row in which half of the cells
+  or more were changed at once, a row that was edited and also moved (edited,
+  then the list sorted), and every one of several rows that differ only in
+  how a value is written (`A;007` and `A;7`) when one of them was deleted or
+  another added.
+- **A row typed to read like another row of the file** (`5` typed where
+  another row says `05`) is written as typed while the rows around it stand
+  where they stood. When rows were added, deleted or moved there in the same
+  save, or that other row was itself changed, filex cannot tell which of the
+  rows that now read the same is the file's: the first of them in the save
+  gets the file's text, `05`.
+
+A save is never refused, and never held back, over any of this. When the cells
+of a file cannot be kept at all it is written as in 0.51.0 - the file's
+delimiter, byte order mark and line ends, ONLYOFFICE's values - and the log
+says `onlyoffice callback: CSV cells not kept` with the reason (`not_utf8`,
+`too_large`, `too_many_records`, `too_many_fields`, `unreadable`). Two reasons
+are filex's own failure and are logged as a warning, worth a report:
+`check_failed` when what filex was about to write did not read back as the
+save, and `panic` when its comparison failed (the line then carries what
+failed and where; never a cell's text). The file is compared as it is on the
+storage when the save arrives, and the revision the save replaces stays in the
+file's history ([What a save does](#what-a-save-does)).
 
 ### What a CSV cannot keep
 
@@ -605,7 +740,7 @@ field selects the name part only, the way a rename does, so typing replaces
   extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
   one you chose (`test.conf`), stays as it is.
 
-![The New document dialog with a Plain text document named LICENSE](screenshots/v0.51.0/newdoc/newdoc-any-name-1280.png)
+![The New document dialog with a Plain text document named LICENSE](screenshots/v0.52.0/newdoc/newdoc-any-name-1280.png)
 
 The create itself is `POST /api/files/manager?action=newfile` with
 `{path, name, type, exact_name}`, where `type` is one of the `newdoc_types`
@@ -655,11 +790,11 @@ you were in gets nothing until you save it.
 
 | What Create opens - a draft, under the bar that says where Save puts it | Closing a draft that was never saved |
 |---|---|
-| ![The text editor on a new draft, with the draft bar](screenshots/v0.51.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.51.0/newdoc/drafts-close-1280.png) |
+| ![The text editor on a new draft, with the draft bar](screenshots/v0.52.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.52.0/newdoc/drafts-close-1280.png) |
 
 | Save, when a file has taken the name meanwhile | Drafts, in the navigation panel |
 |---|---|
-| ![Save the draft under another name?](screenshots/v0.51.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.51.0/newdoc/drafts-view-1280.png) |
+| ![Save the draft under another name?](screenshots/v0.52.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.52.0/newdoc/drafts-view-1280.png) |
 
 Drafts belong to a person, so a caller that is not one creates the file
 directly, as before: an app token, and an embed confined to one folder by its

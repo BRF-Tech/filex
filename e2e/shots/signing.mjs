@@ -261,23 +261,35 @@ async function main() {
     // thing this scene is about — the file is frozen — so instead: a taller
     // window (the set already has 1000-tall pictures), the panel back at its
     // top, and a measurement that REFUSES the shot if either end is cut.
+    // ⚠ How tall the panel's text runs depends on the face the browser
+    // finds: with DejaVu Sans (what the shots container installs beside the
+    // engines) the Signatures section ended 42px past a 1000px window on
+    // v0.52.0. So the window grows to the section, measured, rather than
+    // being one fixed height that fits one font.
     const view900 = page.viewportSize();
+    const measure = async () => {
+      await page.evaluate(() => document.querySelector('.fe-inspector__scroll')?.scrollTo(0, 0));
+      await page.mouse.move(0, 0);
+      await sleep(800);
+      return page.evaluate(() => {
+        const box = (sel) => {
+          const b = document.querySelector(sel)?.getBoundingClientRect();
+          return b ? { top: Math.round(b.top), bottom: Math.round(b.bottom) } : null;
+        };
+        return {
+          scroll: box('.fe-inspector__scroll'),
+          lock: box('[data-testid="inspector-lock"]'),
+          section: box('[data-testid="inspector-plugin-sign-status"]'),
+          height: window.innerHeight,
+        };
+      });
+    };
     await page.setViewportSize({ width: view900.width, height: 1000 });
-    await page.evaluate(() => document.querySelector('.fe-inspector__scroll')?.scrollTo(0, 0));
-    await page.mouse.move(0, 0);
-    await sleep(800);
-    const framed = await page.evaluate(() => {
-      const box = (sel) => {
-        const b = document.querySelector(sel)?.getBoundingClientRect();
-        return b ? { top: Math.round(b.top), bottom: Math.round(b.bottom) } : null;
-      };
-      return {
-        scroll: box('.fe-inspector__scroll'),
-        lock: box('[data-testid="inspector-lock"]'),
-        section: box('[data-testid="inspector-plugin-sign-status"]'),
-        height: window.innerHeight,
-      };
-    });
+    let framed = await measure();
+    if (framed.section && framed.section.bottom > framed.height - 1) {
+      await page.setViewportSize({ width: view900.width, height: Math.min(1400, framed.section.bottom + 24) });
+      framed = await measure();
+    }
     if (!framed.lock || !framed.scroll || !framed.section) {
       throw new Error(`the inspector did not paint what the picture is of: ${JSON.stringify(framed)}`);
     }

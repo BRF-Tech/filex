@@ -195,7 +195,7 @@ describe('built-in role editor', () => {
     await openApps();
     await click(choice('deny'));
     await click(q('[data-testid="builtin-role-save"]'));
-    expect(roles.putDefaults).toHaveBeenLastCalledWith(['files.download', 'files.delete'], 'user', { [KEY]: 'deny' });
+    expect(roles.putDefaults).toHaveBeenLastCalledWith(['files.download', 'files.delete'], 'user', { [KEY]: 'deny' }, expect.any(Array));
 
     // Saved decisions come back on the next open, and Default removes one.
     roles.getDefaults.mockResolvedValueOnce({ permissions: ['files.download'], preset: '', apps: { [KEY]: 'deny' } });
@@ -205,7 +205,7 @@ describe('built-in role editor', () => {
     expect(choice('deny').getAttribute('aria-checked')).toBe('true');
     await click(choice('inherit'));
     await click(q('[data-testid="builtin-role-save"]'));
-    expect(roles.putDefaults).toHaveBeenLastCalledWith(['files.download'], 'user', {});
+    expect(roles.putDefaults).toHaveBeenLastCalledWith(['files.download'], 'user', {}, expect.any(Array));
   });
 
   it('reads the app in the reader\'s language', async () => {
@@ -273,7 +273,7 @@ describe('custom role editor', () => {
     expect(choice('allow').getAttribute('aria-checked')).toBe('true');
     await click(choice('deny'));
     await click(q('[data-testid="rule-save"]'));
-    expect(roles.updateRule).toHaveBeenLastCalledWith(7, expect.objectContaining({ settings: expect.objectContaining({ apps: { [KEY]: 'deny' } }) }));
+    expect(roles.updateRule).toHaveBeenLastCalledWith(7, expect.objectContaining({ settings: expect.objectContaining({ apps: { [KEY]: 'deny' } }) }), expect.any(Array));
 
     await click(choice('inherit'));
     await click(q('[data-testid="rule-save"]'));
@@ -495,7 +495,7 @@ describe("a person's exceptions", () => {
     await openApps();
     await click(q('[data-testid="perm-apps-reset"]'));
     await click(q('[data-testid="builtin-role-save"]'));
-    expect(roles.putDefaults).toHaveBeenLastCalledWith(['files.download'], 'user', {});
+    expect(roles.putDefaults).toHaveBeenLastCalledWith(['files.download'], 'user', {}, expect.any(Array));
   });
 
   // The owner's call (2026-09-29): an app's Allow / Deny are keys of their

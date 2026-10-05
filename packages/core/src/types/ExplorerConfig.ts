@@ -115,6 +115,8 @@ export interface EndpointMap {
   /** v4 — an app's own interface: its module and its saves. */
   pluginUICall: string | null;
   pluginUISave: string | null;
+  /** 0.52.0 - what an app reads about its own license (`{plugin}`), fx.license.get(). */
+  pluginLicense: string | null;
   /** `POST` cancel of a queued/running ops row — `{id}` placeholder. */
   opsCancel: string | null;
 }
@@ -186,6 +188,8 @@ export interface ExplorerConfig {
   /** An app's own interface: its module (`{plugin}`/`{view}`) and its saves. */
   pluginUICall?: string;
   pluginUISave?: string;
+  /** What an app reads about its own license (`{plugin}`), fx.license.get(). */
+  pluginLicense?: string;
 
   /**
    * App plugins (file-menu rows drawn from WebAssembly plugins).

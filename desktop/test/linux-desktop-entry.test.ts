@@ -148,8 +148,11 @@ test('the snap is strict, keeps its plugs, and never publishes by itself', () =>
   const snap = yamlBlock('snap');
   assert.equal(scalar(snap, 'confinement'), 'strict');
   const plugs = list(snap, 'plugs');
-  // `default` keeps electron-builder's list (home, network, desktop, …).
-  for (const p of ['default', 'password-manager-service', 'removable-media']) assert.ok(plugs.includes(p), p);
+  // `default` keeps electron-builder's list (home, network, desktop, plain
+  // browser-support, …). Exactly these three, as in 0.49: a plug added here
+  // is a Store decision (0.50's browser-sandbox, `allow-sandbox: true`, held
+  // every revision in manual review), so it changes this line too.
+  assert.deepEqual(plugs, ['default', 'password-manager-service', 'removable-media']);
   // Not a GitHub download target: `dist:snap` builds it on its own.
   assert.ok(!list(yamlBlock('linux'), 'target').includes('snap'));
   assert.ok(list(yamlBlock('linux'), 'target').includes('rpm'));

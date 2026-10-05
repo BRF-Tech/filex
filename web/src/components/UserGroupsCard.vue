@@ -16,7 +16,7 @@ import { GroupsApi, type Group, type UserGroup } from '@/api/groups';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import Button from '@/components/ui/Button.vue';
-import Badge from '@/components/ui/Badge.vue';
+import SourceBadge from '@/components/SourceBadge.vue';
 import Select from '@/components/ui/Select.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 
@@ -87,7 +87,9 @@ async function remove(g: UserGroup) {
   const msg =
     g.source === 'sso'
       ? t('groups.removeSsoConfirm', { name: props.userName })
-      : t('groups.userCard.removeConfirm', { name: props.userName, group: g.name });
+      : g.source === 'ldap'
+        ? t('groups.removeLdapConfirm', { name: props.userName })
+        : t('groups.userCard.removeConfirm', { name: props.userName, group: g.name });
   if (!confirm(msg)) return;
   busy.value = true;
   try {
@@ -123,9 +125,7 @@ async function remove(g: UserGroup) {
         </template>
         <template #cell-source="{ row }">
           <div>
-            <Badge :tone="(row as UserGroup).source === 'sso' ? 'sky' : 'zinc'">{{
-              (row as UserGroup).source === 'sso' ? t('groups.source.sso') : t('groups.source.manual')
-            }}</Badge>
+            <SourceBadge :source="(row as UserGroup).source" of="member" />
           </div>
         </template>
       </DataTable>

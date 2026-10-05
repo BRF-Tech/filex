@@ -574,6 +574,14 @@ out of it is fine · `403` no editor permission on
 the source, or on the target folder **in the destination's storage** · `400`
 mixed-adapter *sources* (one batch, one source storage).
 
+A caller confined to a folder (a `root:` token, or `X-Filex-Root`) is answered
+`403 {"error":"path outside confined root"}` for a `source`, a `target` or a
+`sourceDir` outside it, before anything else is asked: the same answer, byte
+for byte, whatever the body's `Content-Type` (JSON, `text/plain`, none) and
+whether the storage, the folder or the file exists or is read-only. Up to
+0.51.0 a body not labelled JSON reached the checks above as written, and an
+unknown storage answered `400`, a read-only one `READ_ONLY` with its name.
+
 ⚠ Before v0.27.0 the destination's `<adapter>://` prefix was dropped and the
 remaining relative path applied to the SOURCE storage, so a cross-storage paste
 answered `202` and wrote the file into the depo it was copied from.
@@ -602,10 +610,14 @@ the per-verb ones only the destination).
 
 A caller confined to a folder (a `root:` token, or `X-Filex-Root`) is held to
 it here as on every other door: a source or a destination outside the root -
-another storage included - answers `403 path outside confined root`. Up to
+another storage included, or a `storage_id` that does not exist - answers
+`403 {"error":"path outside confined root"}`, before `BAD_PATH` and the
+read-only check, the same whatever the body's `Content-Type`. Up to
 v0.46.0 this endpoint was the one that did not: the confinement layer rewrites
 the path fields it knows (`source`, `target`, …), and this body names its
-paths `sources` and `dest` beside a bare `storage_id`.
+paths `sources` and `dest` beside a bare `storage_id`. Up to 0.51.0 a body not
+labelled JSON was answered `400 BAD_PATH` for a path climbing out, and the
+root's refusal named the path.
 
 ⚠ Up to v0.46.0 this endpoint passed the client's `kind` straight to the
 queue (an upload commit or an app's action could be queued here unjudged), and
@@ -2326,7 +2338,11 @@ to the `viewer` views and filex's own viewer
 
 `{"paths": ["docs://reports/nda.pdf"], "params": {…}}` (adapter-qualified,
 one storage; `{"storage_id", "paths"}` is accepted too). Checks, in order:
-storage ownership, ACL ≥ viewer per path (≥ editor when the action writes,
+storage ownership, a `root:` token's folder (asked before the storage is read,
+so outside it a storage that exists and one that does not are the same `403`;
+the job is held to that folder when it runs too - what `state_list` tells it,
+the files it may name by path),
+ACL ≥ viewer per path (≥ editor when the action writes,
 `min_role` raises it; a file locked by THIS app is judged at the level the
 caller would have without the lock), read-only storage → `409 read_only`,
 encrypted folder → `403 encrypted`, the applies rule - state keys included -
@@ -2346,7 +2362,10 @@ The opening surface, then events: `{"paths", "state", "event": "change" |
 checks as run). A queued job may carry `output: {mode, name}`, the screen's
 "new version / new file beside it / this name" choice, which replaces the
 action's manifest output for that job; the required ACL level is computed
-from the effective mode.
+from the effective mode. A screen opened on no file (a home page,
+`?storage_id=` with no path) opens for a `root:` token only on its root's own
+storage; any other `storage_id`, there or not, answers the `403` every app
+door gives a path outside the root (0.52.0).
 
 ### File locks ![user](https://img.shields.io/badge/-user-blue)
 
@@ -2376,6 +2395,14 @@ Administrators list and lift locks at `GET /api/admin/app-plugins/locks` and
 The people-picker's search: `{users: [{user_id, email, name}]}`, tenant-scoped,
 at most 20, empty `q` lists nobody; `403 permission_denied` unless the plugin
 is running and holds `users:lookup`.
+
+### `GET /api/files/plugins/license/{plugin}` ![user](https://img.shields.io/badge/-user-blue)
+
+What an app reads about its own license (0.52.0, `plugins.run`; the bridge's
+`license.get`): `{status, valid_until?, updates_until?}`, `{status: "free"}`
+for an app that is not paid; `404` for no app of that name. Never the key, the
+licensee or the store ([APP-PLUGINS-API.md → The app reads its
+license](APP-PLUGINS-API.md#the-app-reads-its-license)).
 
 A plugin job is cancelled like any other op:
 [`POST /api/files/ops/:id/cancel`](#post-apifilesopsidcancel-) (`409 FINISHED`
@@ -2555,7 +2582,9 @@ model, the limits and every body are in
 | `GET` · `PUT /api/admin/users/{id}/roles` | `admin.users` | the person's one role: `{"role_id": 3}`, `{"role_id": null}` or `{"role": "viewer"}`; the answer also carries `group_role: {role_id, group_id, group_name}` - the role a group gives them when they have none of their own, else `null` |
 | `GET /api/admin/roles` | `admin.users` | the custom roles and who holds which; also `group_assignments` - user id → the role a group gives them |
 | `GET /api/admin/roles/builtin[?role=viewer]` | `admin.users` | `{permissions, preset, apps}` - `apps` is the built-in role's decisions about app permissions |
-| `PUT /api/admin/roles/builtin[?role=viewer]` | admin (multi-tenant: the supertenant's) | `{"permissions": […], "apps": {"app.sign.request": "deny"}}` - `apps` absent keeps them, `{}` hands every one back to the app's default. A tenant's admin gets `403 supertenant_only` |
+| `PUT /api/admin/roles/builtin[?role=viewer]` | admin (multi-tenant: the supertenant's) | `{"permissions": […], "apps": {"app.sign.request": "deny"}, "shown": […]}` - `apps` absent keeps them, `{}` hands every one back to the app's default; `shown` is what the editor showed (perm.NoteGapsSaved). A key the stored list holds that this version does not know is kept. A tenant's admin gets `403 supertenant_only` |
+| `GET /api/admin/roles/gaps` | admin | `{"gaps": [{id, key, from, role \| rule_id, rule_name}]}` - the roles the caller may edit that allow `files.create` but not `files.encrypt` and nobody dismissed (perm/gaps.go) |
+| `POST /api/admin/roles/gaps/restore` · `POST /api/admin/roles/gaps/dismiss` | admin (a built-in role's: the supertenant's) | `{"id": "builtin:user:files.encrypt"}` → the gaps left; restore adds the key (or an Allow of it to the folder part), dismiss records it as on purpose. `404 gap_gone` otherwise |
 | `POST /api/admin/roles` · `PUT` · `DELETE /api/admin/roles/{id}` | admin | a custom role; its `settings.apps` holds its app decisions, `names` / `descriptions` its name and description in other interface languages. `DELETE …?to=user\|viewer\|<id>` moves its people |
 | `POST /api/admin/roles/preview` | admin | `{permissions, effects, conditions}` → `{"holder_role": "user" \| "viewer"}` - the built-in role a role being edited would put its people on; nothing is checked or stored |
 
@@ -2622,12 +2651,15 @@ admin-scoped key where its page says so.
 
 | Routes | What | Described in |
 |---|---|---|
-| `GET` · `POST /api/admin/auth-providers`, `PATCH` · `DELETE …/{name}`, `PUT …/{name}/tenants`, `POST …/{name}/test` | the sign-in providers: list, another instance of a driver, change, delete, the tenants that sign in through one, the test. An OIDC's `config.trust_email` ([SSO.md](SSO.md#trust-this-providers-email-addresses)); a provider's `set_by_upgrade` names the fields whose value the upgrade to 0.50 set | [TENANT-ADMIN.md](TENANT-ADMIN.md#sign-in-providers-bound-to-tenants), [OS-LOGIN.md](OS-LOGIN.md#api), [SSO.md](SSO.md), [LDAP.md](LDAP.md) |
+| `GET` · `POST /api/admin/auth-providers`, `PATCH` · `DELETE …/{name}`, `PUT …/{name}/tenants`, `POST …/{name}/test`, `GET` · `POST …/{name}/sync` | the sign-in providers: list, another instance of a driver, change, delete, the tenants that sign in through one, the test, an LDAP directory sync's state and starting one (`POST` 202, 409 while one runs; an administrator signed in to the panel, an API key is refused - [LDAP.md](LDAP.md#directory-sync)). An OIDC's `config.trust_email` ([SSO.md](SSO.md#trust-this-providers-email-addresses)); a provider's `set_by_upgrade` names the fields whose value the upgrade to 0.50 set | [TENANT-ADMIN.md](TENANT-ADMIN.md#sign-in-providers-bound-to-tenants), [OS-LOGIN.md](OS-LOGIN.md#api), [SSO.md](SSO.md), [LDAP.md](LDAP.md) |
 | `GET /api/admin/tenant`, `POST /api/admin/tenant/auth-providers`, `PATCH` · `DELETE …/auth-providers/{name}`, `POST …/auth-providers/{name}/test`, `POST /api/admin/tenant/domains`, `POST …/domains/{id}/check`, `PUT` · `DELETE …/domains/{id}/certificate`, `DELETE …/domains/{id}`, `PUT /api/admin/tenant/insecure` | a tenant's own screen: its own OIDC and LDAP, its domains and certificates, the operator's insecure switch | [TENANT-ADMIN.md](TENANT-ADMIN.md#the-tenant-screen) |
 | `GET /api/tls/ask`, `GET /api/tls/certificate` | the reverse proxy's questions about the tenants' addresses (`FILEX_TLS_MODE=proxy`); the proxy itself only | [TENANT-ADMIN.md](TENANT-ADMIN.md#tls-an-installation-setting-plus-a-tenants-own-certificate) |
 | `GET /api/auth/methods?realm=` | public: how a sign-in for the address's tenant (or the realm named) may go - the password form, the recovery form, its SSO buttons | [TENANT-ADMIN.md](TENANT-ADMIN.md#the-sign-in-page-per-realm) |
 | `GET` · `POST /api/admin/tools/thumbnails/repair`, `GET …/problems`, `GET …/generators`, `GET` · `PATCH …/settings` | Admin → Tools → Thumbnail repair, the files without a thumbnail, who drew what, folder previews and the SVG limits | [thumbnails.md](thumbnails.md#admin--tools--thumbnail-repair) |
 | `GET /api/admin/plugins/{id}/logs`, `GET /api/admin/app-plugins/{id}/logs` | a storage plugin's log, an app's log | [PLUGINS.md](PLUGINS.md#plugin-log), [APP-PLUGINS.md](APP-PLUGINS.md) |
+| `GET` · `POST /api/admin/app-plugins/stores`, `DELETE …/stores?store=` | the app stores this filex trusts (trust on first use names the key fingerprints shown, or `FILEX_APP_STORE_URLS`); a signed-in platform administrator only, an API key of any kind `403 session_required` | [APP-PLUGINS.md](APP-PLUGINS.md#trusted-stores), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#filexs-side-apiadminapp-plugins) |
+| `POST /api/admin/app-plugins/store-intent`, `POST …/store-intent/install`, `POST …/store-intent/cancel` | a store's install link: its review (or the trust question), the install of what it names, its cancellation; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#installing-from-a-store), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-store-contract-0520) |
+| `GET /api/admin/app-plugins/licenses`, `GET` · `PUT /api/admin/app-plugins/{id}/license`, `POST …/{id}/license/verify` | paid apps' licenses: the status and the facts (never the key), a new key, a check now; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#paid-apps) |
 | `GET` · `PATCH /api/admin/archives`, `POST /api/admin/archives/test` | **Settings → Archives**: the live archive policy, the providers' status, an encrypted round trip (platform operator only) | [ARCHIVES.md](ARCHIVES.md#process-configuration) |
 | `GET /api/files/onlyoffice/diagnose?path=` (or `?id=`) | what filex last answered the document server for a document, and when its editor was last opened - this process only | [ONLYOFFICE.md](ONLYOFFICE.md#failure-editor-shows-download-failed) |
 

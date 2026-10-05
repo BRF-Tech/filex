@@ -52,6 +52,7 @@ import {
   type EngineCallParams,
   type FileInfo,
   type JobSubmitParams,
+  type LicenseInfo,
   type ReadParams,
   type SaveAsParams,
   type SaveParams,
@@ -727,6 +728,20 @@ const handlers = {
   'state.get'(params: unknown) {
     const key = String((params as { key?: unknown } | null)?.key ?? '');
     return appStateGet(props.app, key) ?? null;
+  },
+
+  /**
+   * 0.52.0: what the app's license says (`LicenseInfo`) - the status, and for a
+   * valid license its dates. filex keeps the key and the licensee's name; the
+   * app sees neither (only these three fields cross the bridge, whatever the
+   * server answers). A free app reads `{status: "free"}`.
+   */
+  async 'license.get'() {
+    const r = await props.api.pluginLicense(props.app);
+    const out: LicenseInfo = { status: String(r.status ?? 'free') };
+    if (r.valid_until) out.valid_until = r.valid_until;
+    if (r.updates_until) out.updates_until = r.updates_until;
+    return out;
   },
 
   'state.set'(params: unknown) {

@@ -49,6 +49,7 @@ const { catalogue, accounting, roles, usersApi } = vi.hoisted(() => {
     createRule: vi.fn(async (b: object) => ({ ...b, id: 9 })),
     updateRule: vi.fn(async (id: number, b: object) => ({ ...b, id })),
     deleteRule: vi.fn(async () => undefined),
+    gaps: vi.fn(async () => []),
     forUser: vi.fn(async () => ({
       user_id: 2,
       role: 'user',
@@ -88,7 +89,7 @@ const { catalogue, accounting, roles, usersApi } = vi.hoisted(() => {
 
 vi.mock('@/api/roles', () => ({ RolesApi: roles }));
 vi.mock('@/api/users', () => ({ UsersApi: usersApi }));
-vi.mock('@/api/groups', () => ({ GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []) } }));
+vi.mock('@/api/groups', () => ({ GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []), memberships: vi.fn(async () => ({})) } }));
 vi.mock('@/api/storages', () => ({ StoragesApi: { list: vi.fn(async () => []) } }));
 vi.mock('@/api/quota', () => ({
   quotaApi: {
@@ -190,6 +191,7 @@ describe('Role editor: other languages', () => {
         names: { en: 'Bookkeeping' },
         descriptions: { tr: 'Faturalar ve ödemeler' },
       }),
+      expect.any(Array),
     );
   });
 

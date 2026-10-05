@@ -430,6 +430,12 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 	if req.Purpose != nil {
 		opts.PurposeJSON = jsonOf(req.Purpose)
 	}
+	// A job of a `root:` token records its root on the link: the visitor's
+	// job on it runs later, as the creator, with no token behind it, and is
+	// held to this root instead (model.Share.AppRoot, 0.52.0).
+	if s.rooted {
+		opts.AppRoot = s.root.String()
+	}
 	what := "download link"
 	if req.PageID != "" {
 		what = "public page " + req.PageID
@@ -730,6 +736,10 @@ func (r *Registry) PageEvent(ctx context.Context, sh *model.Share, p *Installed,
 		return nil, err
 	}
 	defer release()
+	// Asked again with the slot held (runJob says why).
+	if c, err = p.running(); err != nil {
+		return nil, err
+	}
 	storageID, rel := r.pageAnchor(ctx, sh)
 	scope, err := newScope(p, r, "", storageID, nil, nil, in.Context.Locale, false)
 	if err != nil {

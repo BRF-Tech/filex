@@ -5726,6 +5726,58 @@
         }
       }
     },
+    "/api/files/plugins/license/{plugin}": {
+      "get": {
+        "operationId": "appLicense",
+        "summary": "What an app reads about its own license (fx.license.get()): the status and, for a valid license, its dates - never the key, the store or the holder",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The app."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`{status, valid_until?, updates_until?}`; `{status: \"free\"}` for a free app.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "valid_until": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updates_until": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No app of that name."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
     "/api/files/plugins/ui/{plugin}/{view}/call": {
       "post": {
         "operationId": "appUiCall",

@@ -1,0 +1,29 @@
+{
+  "produced_by": "node v22.23.2 crypto (independent of filex)",
+  "vectors": [
+    {
+      "name": "install-intent",
+      "key_id": "idx-2026-1",
+      "use": "index",
+      "seed_hex": "81f4b219ac7ba9cbfc5681eb48f6bac66dccc79763a11d8b685dd15c616ff67b",
+      "public_hex": "35eaad1b9722f764f09945e6ae3e37b490a5a7e4401f891468ab8c2c2aa4ca3e",
+      "fingerprint": "65fe07f1926197fce30fed9c84be691b60d7c30c0b8d6df077364e2a32466b24",
+      "envelope": "{\n  \"payload\": {\n    \"token_id\": \"tok_01HZX3\",\n    \"store\": \"https://fapps.brfd.app\",\n    \"app\": \"sign\",\n    \"kind\": \"app\",\n    \"version\": \"0.3.0\",\n    \"repo\": \"BRF-Tech/filex-sign\",\n    \"ref\": \"v0.3.0\",\n    \"commit\": \"214e9e8a0c7d4b5e9f1a2b3c4d5e6f708192a3b4\",\n    \"manifest_sha256\": \"1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0\",\n    \"wasm_sha256\": \"6a3d2e590000000000000000000000000000000000000000000000000000beef\",\n    \"permissions\": [\n      \"files:read\",\n      \"files:write\",\n      \"http:freetsa.org\"\n    ],\n    \"filex_range\": \">=0.52.0\",\n    \"paid\": true,\n    \"license_key\": \"FXL-7Q2M-K9P4-ZZ31\",\n    \"expires_at\": \"2026-10-04T18:30:00Z\"\n  },\n  \"key_id\": \"idx-2026-1\",\n  \"signature\": \"85e00077995aba433383ed9649be4d82bebb618b4bc3e137670292d17b46d35ce12fb2cb9a66db23761fc9962ed84bbbcd3a93c3dc798e10168fb1b70f464e09\"\n}",
+      "canonical": "{\"app\":\"sign\",\"commit\":\"214e9e8a0c7d4b5e9f1a2b3c4d5e6f708192a3b4\",\"expires_at\":\"2026-10-04T18:30:00Z\",\"filex_range\":\">=0.52.0\",\"kind\":\"app\",\"license_key\":\"FXL-7Q2M-K9P4-ZZ31\",\"manifest_sha256\":\"1f0e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0\",\"paid\":true,\"permissions\":[\"files:read\",\"files:write\",\"http:freetsa.org\"],\"ref\":\"v0.3.0\",\"repo\":\"BRF-Tech/filex-sign\",\"store\":\"https://fapps.brfd.app\",\"token_id\":\"tok_01HZX3\",\"version\":\"0.3.0\",\"wasm_sha256\":\"6a3d2e590000000000000000000000000000000000000000000000000000beef\"}",
+      "sha256_hex": "537a73864cdeccdede19206316fc00ee0629b920f971d522e06f6c53755e0a33",
+      "signature_hex": "85e00077995aba433383ed9649be4d82bebb618b4bc3e137670292d17b46d35ce12fb2cb9a66db23761fc9962ed84bbbcd3a93c3dc798e10168fb1b70f464e09"
+    },
+    {
+      "name": "license-answer",
+      "key_id": "lic-2026-1",
+      "use": "license",
+      "seed_hex": "b8318f71c55529e91e186bb135c932cfc6f69decfe1f755819f3a4b0640415c7",
+      "public_hex": "649c702271acf50292c98595c65ddae8939742fd2f954aad21d7fecc699f25d6",
+      "fingerprint": "b38fc76f987d9643af3ae97c08fd4bc415596c3030dd702c8acdd3a97f9af1a1",
+      "envelope": "{\n  \"payload\": {\n    \"result\": \"valid\",\n    \"app\": \"sign\",\n    \"licensee\": \"Şahin & Ortakları <Ltd.>   “quoted”\",\n    \"seats\": 5,\n    \"seats_used\": 2,\n    \"valid_until\": \"2027-10-04T00:00:00Z\",\n    \"updates_until\": \"2027-04-04T00:00:00Z\",\n    \"instance_id\": \"fx-0123456789abcdef0123456789abcdef\",\n    \"checked_at\": \"2026-10-04T15:00:00Z\",\n    \"next_check_by\": \"2026-10-05T15:00:00Z\",\n    \"grace_until\": \"2026-10-18T15:00:00Z\",\n    \"note\": \"tab\\there, newline\\nhere, bell\\u0007, slash / and back\\\\slash\"\n  },\n  \"key_id\": \"lic-2026-1\",\n  \"signature\": \"0c199fd8d8dfa487d305c1ab2a2b2270f53f0f843e02ba0379194116039f9919280a759259856a06f208f04804f61a9b0bf642cd6bf86903b1297c1033a8bd07\"\n}",
+      "canonical": "{\"app\":\"sign\",\"checked_at\":\"2026-10-04T15:00:00Z\",\"grace_until\":\"2026-10-18T15:00:00Z\",\"instance_id\":\"fx-0123456789abcdef0123456789abcdef\",\"licensee\":\"Şahin & Ortakları <Ltd.>   “quoted”\",\"next_check_by\":\"2026-10-05T15:00:00Z\",\"note\":\"tab\\there, newline\\nhere, bell\\u0007, slash / and back\\\\slash\",\"result\":\"valid\",\"seats\":5,\"seats_used\":2,\"updates_until\":\"2027-04-04T00:00:00Z\",\"valid_until\":\"2027-10-04T00:00:00Z\"}",
+      "sha256_hex": "b65d93c71eaf75ac8f3007718a6bb8651b38f995708fb9b35bd928197fd427c3",
+      "signature_hex": "0c199fd8d8dfa487d305c1ab2a2b2270f53f0f843e02ba0379194116039f9919280a759259856a06f208f04804f61a9b0bf642cd6bf86903b1297c1033a8bd07"
+    }
+  ]
+}

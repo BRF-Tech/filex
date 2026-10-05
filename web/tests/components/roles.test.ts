@@ -73,6 +73,9 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
     allOverrides: vi.fn(async () => ({})),
     getDefaults: vi.fn(async () => ({ permissions: ["files.download", "access.desktop"], preset: "", apps: {} })),
     putDefaults: vi.fn(async (permissions: string[]) => ({ permissions, preset: "", apps: {} })),
+    gaps: vi.fn(async () => [] as unknown[]),
+    restoreGap: vi.fn(async () => [] as unknown[]),
+    dismissGap: vi.fn(async () => [] as unknown[]),
     userRole: vi.fn(async () => 7 as number | null),
     userRoleDetail: vi.fn(async () => ({ role_id: 7 as number | null, group_role: null })),
     setUserRole: vi.fn(async (_id: number, r: number | string) => ({
@@ -125,7 +128,7 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
 vi.mock("@/api/roles", () => ({ RolesApi: roles }));
 vi.mock("@/api/users", () => ({ UsersApi: usersApi }));
 vi.mock("@/api/groups", () => ({
-  GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []) },
+  GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []), memberships: vi.fn(async () => ({})) },
 }));
 vi.mock("@/api/storages", () => ({
   StoragesApi: { list: vi.fn(async () => []) },
@@ -304,6 +307,55 @@ describe("Roles page", () => {
   });
 });
 
+// A save on 0.50 or older leaves the User role, or a custom role's folder
+// part, allowing "Add files and folders" but not "Encrypt" (PR #86), and
+// nothing tells that apart from a choice. The page points each out, with one
+// click to give the permission back and one to say it was on purpose.
+describe("Roles that may have lost a permission", () => {
+  const userGap = { id: "builtin:user:files.encrypt", key: "files.encrypt", from: "files.create", role: "user" };
+  const ruleGap = { id: "role:7:files.encrypt", key: "files.encrypt", from: "files.create", rule_id: 7, rule_name: "NoDelete" };
+
+  it("shows nothing when no role lacks one", async () => {
+    await mountAt(Roles);
+    expect(roles.gaps).toHaveBeenCalledOnce();
+    expect(document.body.querySelector('[data-testid="role-gaps"]')).toBeNull();
+  });
+
+  it("names each role, why it may have happened, and gives the permission back in one click", async () => {
+    roles.gaps.mockResolvedValueOnce([userGap, ruleGap]);
+    roles.restoreGap.mockResolvedValueOnce([ruleGap]);
+    await mountAt(Roles);
+
+    const box = q('[data-testid="role-gaps"]');
+    expect(box.textContent).toContain("2 roles may have lost a permission");
+    expect(box.textContent).toContain("0.50 or older");
+    expect(box.textContent).toContain("if it was taken away on purpose, dismiss this");
+    expect(q(`[data-testid="role-gap-${userGap.id}"]`).textContent).toContain(
+      "User: “Add files and folders” is allowed, “Encrypt” is not.",
+    );
+    expect(q(`[data-testid="role-gap-${ruleGap.id}"]`).textContent).toContain(
+      "NoDelete, in its folders: “Add files and folders” is allowed, “Encrypt” is not.",
+    );
+
+    await click(q(`[data-testid="role-gap-restore-${userGap.id}"]`));
+    expect(roles.restoreGap).toHaveBeenCalledWith(userGap.id);
+    expect(document.body.querySelector(`[data-testid="role-gap-${userGap.id}"]`)).toBeNull();
+    expect(q('[data-testid="role-gaps"]').textContent).toContain("1 role may have lost a permission");
+    expect(useToastStore().toasts.map((x) => x.message)).toContain("“Encrypt” given back to User.");
+  });
+
+  it("dismissing one says so and leaves the role as it is", async () => {
+    roles.gaps.mockResolvedValueOnce([ruleGap]);
+    roles.dismissGap.mockResolvedValueOnce([]);
+    await mountAt(Roles);
+    await click(q(`[data-testid="role-gap-dismiss-${ruleGap.id}"]`));
+    expect(roles.dismissGap).toHaveBeenCalledWith(ruleGap.id);
+    expect(roles.restoreGap).not.toHaveBeenCalled();
+    expect(roles.updateRule).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-testid="role-gaps"]')).toBeNull();
+  });
+});
+
 describe("Role editor", () => {
   it("a new role starts from Standard user", async () => {
     await mountAt(RoleEditor, {
@@ -340,6 +392,7 @@ describe("Role editor", () => {
         effects: { "files.delete": "allow" },
         conditions: { paths: ["Scratch"] },
       }),
+      expect.any(Array),
     );
   });
 
@@ -379,7 +432,53 @@ describe("Role editor", () => {
       expect.objectContaining({
         effects: { "files.create": "allow", "files.encrypt": "allow" },
       }),
+      expect.any(Array),
     );
+  });
+});
+
+// A permission a later filex stored is not in this one's catalogue: the
+// editor has no row for it, so it must not drop it (0.50 dropped files.encrypt
+// that way, PR #86).
+describe("Role editor - a later version's permissions", () => {
+  const laterRole = {
+    ...noDelete,
+    id: 11,
+    name: "Later",
+    permissions: ["files.download", "files.from_a_later_version"],
+    effects: { "files.delete": "allow", "share.from_a_later_version": "deny" },
+    conditions: { paths: ["Scratch"] },
+  };
+
+  it("keeps them in its list and in its folder part, and says what it showed", async () => {
+    await mountAt(RoleEditor, {
+      props: { modelValue: true, rule: laterRole, catalogue, storages: [] },
+    });
+    await click(q('[data-testid="rule-save"]'));
+    expect(roles.updateRule).toHaveBeenCalledOnce();
+    const [id, body, shown] = roles.updateRule.mock.calls[0] as unknown as [
+      number,
+      { permissions: string[]; effects: Record<string, string> },
+      string[],
+    ];
+    expect(id).toBe(11);
+    expect(body.permissions).toContain("files.from_a_later_version");
+    expect(body.effects).toEqual({ "files.delete": "allow", "share.from_a_later_version": "deny" });
+    expect(shown).toEqual(["files.download", "files.delete", "access.desktop", "admin.full"]);
+  });
+
+  it("a preset replaces what the editor shows, not what it cannot", async () => {
+    await mountAt(RoleEditor, {
+      props: { modelValue: true, rule: laterRole, catalogue, storages: [] },
+    });
+    const readOnly = Array.from(document.body.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent?.trim() === "Read-only",
+    );
+    expect(readOnly, "the Read-only preset button").toBeTruthy();
+    await click(readOnly!);
+    await click(q('[data-testid="rule-save"]'));
+    const body = roles.updateRule.mock.calls[0][1] as { permissions: string[] };
+    expect(body.permissions).toEqual(["files.download", "files.from_a_later_version"]);
   });
 });
 
@@ -406,6 +505,24 @@ describe("Person card", () => {
     expect(
       q('[data-testid="user-permissions-preset"]').textContent?.trim(),
     ).toBe("NoDelete");
+  });
+
+  it("Clear exceptions leaves a later version's exception it cannot show", async () => {
+    roles.forUser.mockResolvedValue({
+      ...answer("user"),
+      overrides: { "files.delete": "deny", "files.from_a_later_version": "allow" },
+    });
+    roles.setOverrides.mockImplementation(async (_id: number, overrides: Record<string, string>) => ({
+      ...answer("user"),
+      overrides,
+    }));
+    await mountAt(UserRolesCard, {
+      props: { userId: 2, role: "user", customRole: null },
+    });
+    await click(q('[data-testid="user-permissions-clear"]'));
+    await click(q('[data-testid="user-permissions-save"]'));
+    expect(roles.setOverrides).toHaveBeenCalledWith(2, { "files.from_a_later_version": "allow" });
+    expect(q<HTMLButtonElement>('[data-testid="user-permissions-clear"]').disabled).toBe(true);
   });
 
   it("warns that a read-only role cannot be given file changes as exceptions", async () => {
@@ -572,6 +689,7 @@ describe('Add user', () => {
     ) as HTMLSelectElement | undefined;
     expect(roleSelect, 'the Add user role list offers NoDelete').toBeTruthy();
     await choose(roleSelect!, 'custom:7');
+    await click(q('[data-testid="user-create-access-invite"]'));
     await click(q('[data-testid="user-create-submit"]'));
 
     expect(usersApi.create).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@local', role: 'viewer' }));
@@ -579,3 +697,49 @@ describe('Add user', () => {
     w.unmount();
   });
 });
+
+describe("Roles page — the table", () => {
+  it("built-in roles first, then a Custom roles heading; every row says its permissions and status", async () => {
+    roles.getDefaults = vi.fn(async (role: string) => ({ permissions: role === "viewer" ? ["files.download"] : ["files.download", "files.delete"], preset: "" }));
+    await mountAt(Roles);
+    const heads = [...document.body.querySelectorAll(".fe-list__group")].map((h) => h.textContent?.trim());
+    expect(heads).toEqual([en.permissions.rules.builtinHeading, en.permissions.rules.customHeading]);
+
+    expect(q('[data-testid="role-summary-builtin-admin"]').textContent).toContain(en.permissions.rules.allPermissions);
+    expect(q('[data-testid="role-summary-builtin-user"]').textContent).toContain("2 of");
+    expect(q('[data-testid="role-summary-builtin-viewer"]').textContent).toContain("1 of");
+    expect(q('[data-testid="role-enabled-builtin-admin"]').textContent).toContain(en.permissions.rules.alwaysOn);
+    expect(q('[data-testid="role-enabled-builtin-user"]').textContent).toContain(en.permissions.rules.alwaysOn);
+    expect(q('[data-testid="role-enabled-rule-7"]').querySelector('input, button, [role="switch"]')).not.toBeNull();
+  });
+
+  it("says how people hold a role under its count, and its limits as a badge", async () => {
+    roles.listRules.mockResolvedValueOnce({
+      rules: [{ ...noDelete, settings: { share_link_max_days: 7, blocked_extensions: ["exe", "bat"] } }],
+      assignments: {},
+      groupAssignments: { "3": { role_id: 7, group_id: 1, group_name: "Finance" }, "4": { role_id: 7, group_id: 1, group_name: "Finance" } },
+      builtinMembers: { admin: 1, user: 3, viewer: 0 },
+    } as never);
+    const groups = (await import("@/api/groups")).GroupsApi as unknown as { list: ReturnType<typeof vi.fn> };
+    groups.list.mockResolvedValueOnce([{ id: 1, name: "Finance", role_id: 7, links: [], description: "", priority: 0 }]);
+    await mountAt(Roles);
+    const members = q('[data-testid="role-members-rule-7"]').textContent ?? "";
+    expect(members).toContain("2 members");
+    expect(q('[data-testid="role-members-how-rule-7"]').textContent).toContain("all through 1 group");
+    const limits = q('[data-testid="role-limits-rule-7"]');
+    expect(limits.textContent).toContain("2 limits");
+    expect(limits.getAttribute("title")).toContain("exe");
+    // Nobody on Viewer: its count is drawn faint.
+    expect(q('[data-testid="role-members-builtin-viewer"] span').className).toContain("text-zinc-400");
+  });
+
+  it("a row opens its editor", async () => {
+    const w = await mountAt(Roles);
+    const row = [...document.body.querySelectorAll('[role="row"]')].find((r) => r.querySelector('[data-testid="role-name-rule-7"]')) as HTMLElement;
+    row.click();
+    await flushPromises();
+    expect(document.body.querySelector('[data-testid="rule-editor"]')).not.toBeNull();
+    w.unmount();
+  });
+});
+

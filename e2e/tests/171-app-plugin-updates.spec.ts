@@ -41,7 +41,12 @@ import { echoFixture } from '../helpers/echoFixture';
 
 const ECHO = echoFixture();
 
-const PACK = 'lang-e2e-updates';
+// ⚠ The pack's name is this run's own (set in beforeAll). The bell keeps the
+// notices of every earlier run, and the engines of one `node e2e/run.mjs
+// local` share one server: under a fixed name the notices of the engines
+// before were counted again - "one notice for one version" read three in
+// Firefox and four in WebKit (lesson #1084).
+let PACK = 'lang-e2e-updates';
 
 /** What the fake source serves, by path — changed between steps. */
 const served = new Map<string, Buffer>();
@@ -103,7 +108,8 @@ test.describe.serial('App updates — a source followed, a range said', () => {
   const PREFS = '/api/me/prefs?surface=web';
   let prefsBefore: Record<string, unknown> = {};
 
-  test.beforeAll(async ({ playwright, baseURL }) => {
+  test.beforeAll(async ({ playwright, baseURL }, info) => {
+    PACK = `lang-e2e-upd-${info.project.name.replace(/[^a-z]/g, '').slice(0, 8)}-${Date.now().toString(36)}`;
     server = createServer((req, res) => {
       const body = served.get((req.url ?? '').split('?')[0]);
       if (!body) {

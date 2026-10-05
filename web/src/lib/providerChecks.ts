@@ -9,7 +9,7 @@
  */
 import type { AuthProviderCheck } from '@/api/types';
 
-type T = (key: string, values?: Record<string, unknown>) => string;
+type T = (key: string, values?: Record<string, unknown>, plural?: number) => string;
 type TE = (key: string, locale?: string) => boolean;
 
 /** A field's name in words (`authProviders.fields.<key>`), else the key. */
@@ -39,6 +39,8 @@ export function providerCheckText(c: AuthProviderCheck, t: T, te: TE): string {
   // out of the translatable sentence either way.
   params.env = 'FILEX_SECRET_KEY';
   const key = `authProviders.checks.${c.id}.${c.status}`;
-  const text = t(key, params);
+  // A step that counts ("1000+" past the test's cap) picks the plural by it.
+  const n = params.n !== undefined ? parseInt(params.n, 10) : NaN;
+  const text = Number.isNaN(n) ? t(key, params) : t(key, params, n);
   return text === key ? `${c.id}: ${c.status}` : text;
 }

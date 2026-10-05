@@ -307,3 +307,44 @@ func TestIdentityProviders_ATenantAdminIsRefused(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, status, "%s %s", m, strings.TrimSpace(string(raw)))
 	}
 }
+
+// Another LDAP directory is another LDAP provider ("Add a provider"): it
+// takes the LDAP links, e-mail domain and directory sync fields like the
+// first, its sync answers under its own slug, and deleting it takes its last
+// sync report along (docs/LDAP.md → Several directories).
+func TestIdentityProviders_AnotherLDAPDirectory(t *testing.T) {
+	srv, client, store, _, _ := liveServer(t, nil)
+
+	status, raw := doReq(t, client, http.MethodPost, srv.URL+"/api/admin/auth-providers", map[string]any{
+		"driver": "ldap", "slug": "partner", "label": "Partner AD", "enabled": false,
+		"config": map[string]any{
+			"url": "ldaps://partner.invalid", "base_dn": "dc=partner",
+			"email_domains": "partner.example", "group_filter": "(member=%s)",
+			"sync_interval": "6h", "sync_disable_missing": true,
+		},
+	})
+	require.Less(t, status, 300, string(raw))
+
+	_, providers := listProviders(t, client, srv.URL)
+	p := providers["partner"]
+	require.NotNil(t, p, "listed under its slug")
+	assert.Equal(t, "ldap", p["driver"])
+	cfg := p["config_redacted"].(map[string]any)
+	assert.Equal(t, "partner.example", cfg["email_domains"])
+	assert.Equal(t, "(member=%s)", cfg["group_filter"])
+	assert.Equal(t, "6h", cfg["sync_interval"])
+
+	// Off: its sync is not available, under its own slug.
+	status, raw = doReq(t, client, http.MethodGet, srv.URL+"/api/admin/auth-providers/partner/sync", nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	assert.Contains(t, string(raw), `"available":false`)
+	status, _ = doReq(t, client, http.MethodPost, srv.URL+"/api/admin/auth-providers/partner/sync", nil)
+	assert.Equal(t, http.StatusNotFound, status, "a provider that is not running does not sync")
+
+	// Deleting it takes its last sync report along.
+	require.NoError(t, store.UpsertSetting(context.Background(), "authsync.partner.last", `{"found":1}`))
+	status, raw = doReq(t, client, http.MethodDelete, srv.URL+"/api/admin/auth-providers/partner", nil)
+	require.Less(t, status, 300, string(raw))
+	v, _ := store.GetSetting(context.Background(), "authsync.partner.last")
+	assert.Empty(t, v, "its sync report went with it")
+}

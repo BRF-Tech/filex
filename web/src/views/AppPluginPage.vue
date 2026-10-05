@@ -34,6 +34,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import AppPluginDetail from '@/components/plugins/AppPluginDetail.vue';
 import AppPluginLanguages from '@/components/plugins/AppPluginLanguages.vue';
+import AppPluginLicense from '@/components/plugins/AppPluginLicense.vue';
 
 const { t, locale } = useI18n();
 const route = useRoute();
@@ -75,12 +76,12 @@ const title = computed(() => (app.value ? pluginLabelOf(app.value.label, locale.
 
 function stateTone(state: AppPluginState): 'emerald' | 'rose' | 'zinc' {
   if (state === 'running') return 'emerald';
-  if (state === 'failed' || state === 'refused') return 'rose';
+  if (state === 'failed' || state === 'refused' || state === 'unlicensed') return 'rose';
   return 'zinc';
 }
 
 function stateLabel(state: AppPluginState): string {
-  return ['running', 'disabled', 'refused', 'failed'].includes(state) ? t(`appPlugins.state.${state}`) : state;
+  return ['running', 'disabled', 'refused', 'failed', 'unlicensed'].includes(state) ? t(`appPlugins.state.${state}`) : state;
 }
 
 /** Back to the list it was opened from — the Apps tab, not the first tab. */
@@ -132,6 +133,9 @@ function back() {
       <h2 class="text-sm font-semibold">{{ t('appPlugins.lang.heading') }}</h2>
       <AppPluginLanguages :languages="app.languages" />
     </section>
+
+    <!-- A paid app's license (0.52.0): draws nothing for a free app. -->
+    <AppPluginLicense v-if="app && !missing" :plugin-id="app.id" @changed="onChanged" />
 
     <AppPluginDetail v-if="app && !missing" :plugin="app" :engine-names="engineNames" @changed="onChanged" />
   </div>

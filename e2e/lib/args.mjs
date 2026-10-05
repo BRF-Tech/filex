@@ -24,7 +24,7 @@
 export const VALUE_OPTIONS = ['binary', 'port', 'grep', 'grep-invert', 'spec', 'browser', 'url', 'base-path', 'loads', 'close-after'];
 
 /** Options that are on or off. */
-export const BOOLEAN_OPTIONS = ['build', 's3', 'keep', 'headed'];
+export const BOOLEAN_OPTIONS = ['build', 's3', 'keep', 'headed', 'no-public-url'];
 
 /**
  * The `--options` on this command line that the script does not know.

@@ -59,6 +59,9 @@ type AppPluginsAdmin struct {
 	// install review's File types group, the choices made there, and the
 	// rules an app's removal takes it out of. Nil: none of that.
 	Assoc *assoc.Service
+	// OnRemoved is told an app was removed (internal/appstore forgets its
+	// license and lifts its hold). Nil: nobody is.
+	OnRemoved func(ctx context.Context, app string)
 }
 
 // NewAppPluginsAdmin constructs the handler.
@@ -639,6 +642,9 @@ func (h *AppPluginsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 	// Its handlers leave every Default apps rule; the others keep their order.
 	if h.Assoc != nil {
 		_ = h.Assoc.PruneApp(r.Context(), p.Row.Name)
+	}
+	if h.OnRemoved != nil {
+		h.OnRemoved(r.Context(), p.Row.Name)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

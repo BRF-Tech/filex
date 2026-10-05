@@ -282,7 +282,8 @@ const APP_DIR_VARS = new Set([
 // choose a machine to run on; none of them can make a picture go missing,
 // which is what the SHOTS_* filter below is for: a scene that needs a document
 // server and has none is refused or left out before anything is built.
-const SHOTS_PASS = new Set(['SHOTS_VERBOSE', 'SHOTS_ENGINES', 'SHOTS_ENGINES_IMAGE', 'SHOTS_LINUX_BIN', ...DOCUMENT_SERVER_VARS]);
+// SHOTS_STORE_HOST: the name store.mjs serves its store under (https, port 443).
+const SHOTS_PASS = new Set(['SHOTS_VERBOSE', 'SHOTS_ENGINES', 'SHOTS_ENGINES_IMAGE', 'SHOTS_LINUX_BIN', 'SHOTS_STORE_HOST', ...DOCUMENT_SERVER_VARS]);
 
 function scriptEnv(runBin, runTmp, port) {
   const env = {};

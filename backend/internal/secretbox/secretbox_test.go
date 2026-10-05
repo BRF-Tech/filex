@@ -127,3 +127,31 @@ func mustBox(t *testing.T, k string) *Box {
 	}
 	return b
 }
+
+// A value sealed for one place opens only there: another aad, or Open, is
+// ErrCorrupt - and a value sealed by Seal does not open with OpenFor.
+func TestSealFor_OpensOnlyWithItsAAD(t *testing.T) {
+	b, err := New("a-key-from-the-environment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := b.SealFor("FXL-1234", "appstore:license:sign")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := b.OpenFor(sealed, "appstore:license:sign"); err != nil || got != "FXL-1234" {
+		t.Fatalf("its own aad: %q, %v", got, err)
+	}
+	for _, aad := range []string{"appstore:license:seal", ""} {
+		if _, err := b.OpenFor(sealed, aad); !errors.Is(err, ErrCorrupt) {
+			t.Fatalf("aad %q: err = %v, want ErrCorrupt", aad, err)
+		}
+	}
+	if _, err := b.Open(sealed); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("Open (no aad): err = %v, want ErrCorrupt", err)
+	}
+	plain, _ := b.Seal("FXL-1234")
+	if _, err := b.OpenFor(plain, "appstore:license:sign"); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("a Seal value through OpenFor: err = %v, want ErrCorrupt", err)
+	}
+}

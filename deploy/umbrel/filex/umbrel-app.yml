@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.51.0"
+version: "0.52.0"
 releaseNotes: |-
-  filex v0.51.0 - 2026-10-04
-  • Who may encrypt is an organisation's decision
-  • A .csv opens in ONLYOFFICE
-  • The admin panel's navigation is a mega menu
-  • The trail under the bar names the menu section between the dashboard and the page (*Dashboard › People & access › Users*), as words rather than a link.
-  • Auth providers
+  filex v0.52.0 - 2026-10-05
+  • The README in five more languages
+  • Installing from an app store, and paid apps.
+  • LDAP groups
+  • LDAP directory sync
+  • Each LDAP directory keeps to its own
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

@@ -765,11 +765,13 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     const fx = fixture();
     await toLand(fx);
     const exportCommit = landBoth(fx);
-    let r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_DRY: 'in_progress' });
+    // The wait runs out here on purpose: a short limit, nothing else short.
+    const brief = { FIXTURE_GATE_TIMEOUT_MS: '500' };
+    let r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_DRY: 'in_progress', ...brief });
     expect(r.code).toBe(3);
     expect(r.out).toContain('WAITING at gate');
     expect(r.out).toContain('GitHub has not finished');
-    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: '' });
+    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: '', ...brief });
     expect(r.code).toBe(3);
     expect(r.out).toContain('ci.yml: none');
     r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: 'failure' });

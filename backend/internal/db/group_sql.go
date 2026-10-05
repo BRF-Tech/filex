@@ -80,13 +80,13 @@ func (g *GroupSQL) insert(ctx context.Context, ex Querier, stmt string, args ...
 	return res.LastInsertId()
 }
 
-const groupColumns = `id, name, description, provider_id, role_id, priority, links_json, created_by, created_at, updated_at`
+const groupColumns = `id, name, description, provider_id, role_id, gives_admin, priority, links_json, directory_id, directory_name, directory_state, created_by, created_at, updated_at`
 
 func scanGroup(r RowScanner) (*model.Group, error) {
 	g := &model.Group{}
 	var provider, role, createdBy sql.NullInt64
 	var links string
-	if err := r.Scan(&g.ID, &g.Name, &g.Description, &provider, &role, &g.Priority, &links, &createdBy, &g.CreatedAt, &g.UpdatedAt); err != nil {
+	if err := r.Scan(&g.ID, &g.Name, &g.Description, &provider, &role, &g.GivesAdmin, &g.Priority, &links, &g.DirectoryID, &g.DirectoryName, &g.DirectoryState, &createdBy, &g.CreatedAt, &g.UpdatedAt); err != nil {
 		return nil, err
 	}
 	g.ProviderID = nullInt(provider)
@@ -154,8 +154,8 @@ func (g *GroupSQL) CreateGroup(ctx context.Context, gr *model.Group) (*model.Gro
 		tenantKey = *gr.ProviderID
 	}
 	id, err := g.insert(ctx, g.db(ctx),
-		`INSERT INTO user_groups (name, description, provider_id, tenant_key, role_id, priority, links_json, created_by) VALUES (?,?,?,?,?,?,?,?)`,
-		gr.Name, gr.Description, gr.ProviderID, tenantKey, gr.RoleID, gr.Priority, links, gr.CreatedBy)
+		`INSERT INTO user_groups (name, description, provider_id, tenant_key, role_id, gives_admin, priority, links_json, directory_id, directory_name, directory_state, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		gr.Name, gr.Description, gr.ProviderID, tenantKey, gr.RoleID, g.b(gr.GivesAdmin), gr.Priority, links, gr.DirectoryID, gr.DirectoryName, gr.DirectoryState, gr.CreatedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -172,13 +172,24 @@ func (g *GroupSQL) UpdateGroup(ctx context.Context, gr *model.Group) error {
 		return err
 	}
 	if _, err := g.db(ctx).ExecContext(ctx,
-		g.q(`UPDATE user_groups SET name=?, description=?, role_id=?, priority=?, links_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`),
-		gr.Name, gr.Description, gr.RoleID, gr.Priority, links, gr.ID); err != nil {
+		g.q(`UPDATE user_groups SET name=?, description=?, role_id=?, gives_admin=?, priority=?, links_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`),
+		gr.Name, gr.Description, gr.RoleID, g.b(gr.GivesAdmin), gr.Priority, links, gr.ID); err != nil {
 		return err
 	}
 	// RowsAffected is 0 on MySQL for a row that matched but did not change;
 	// ask whether it is there instead.
 	_, err = g.GetGroup(ctx, gr.ID)
+	return err
+}
+
+// SetGroupDirectory records where a group comes from in a directory
+// (directory sync — migration 00084): its permanent id there, the name it
+// had there, and "" or model.GroupDirectoryRemoved. All "" makes it an
+// ordinary filex group.
+func (g *GroupSQL) SetGroupDirectory(ctx context.Context, id int64, directoryID, name, state string) error {
+	_, err := g.db(ctx).ExecContext(ctx,
+		g.q(`UPDATE user_groups SET directory_id=?, directory_name=?, directory_state=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`),
+		directoryID, name, state, id)
 	return err
 }
 
@@ -343,6 +354,20 @@ func (g *GroupSQL) SetUserGroupLevel(ctx context.Context, userID int64, level st
 func (g *GroupSQL) DeleteUserGroupLevel(ctx context.Context, userID int64) error {
 	_, err := g.db(ctx).ExecContext(ctx, g.q(`DELETE FROM user_group_levels WHERE user_id=?`), userID)
 	return err
+}
+
+// ListUserLDAPGroups returns the groups of the account's latest LDAP
+// sign-in (user_ldap_groups, migration 00084), in group.LDAPValue's form.
+func (g *GroupSQL) ListUserLDAPGroups(ctx context.Context, userID int64) ([]string, error) {
+	return CollectStrings(g.db(ctx).QueryContext(ctx, g.q(`SELECT group_name FROM user_ldap_groups WHERE user_id=? ORDER BY group_name`), userID))
+}
+
+// SetUserLDAPGroups replaces them with the groups a sign-in just reported.
+func (g *GroupSQL) SetUserLDAPGroups(ctx context.Context, userID int64, groups []string) error {
+	return ReplaceUserSSOGroups(ctx, g.conn,
+		g.q(`DELETE FROM user_ldap_groups WHERE user_id=?`),
+		g.q(`INSERT INTO user_ldap_groups (user_id, group_name) VALUES (?,?)`),
+		userID, groups)
 }
 
 // ─────────────────── Group folder grants ───────────────────

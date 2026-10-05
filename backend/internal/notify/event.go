@@ -85,7 +85,16 @@ const (
 	// `reason`, and the sentence per language (`title_<lang>`, `body_<lang>`).
 	EventTenantDomainSuspended EventType = "tenant_domain_suspended"
 	EventTenantDomainRestored  EventType = "tenant_domain_restored"
-	EventDiskFull              EventType = "disk_full"
+	// EventPermissionGaps tells administrators that some saved roles allow a
+	// permission but not the one carved out of it - adding files but not
+	// encrypting - as a save on a version without the newer permission
+	// leaves them (perm/gaps.go, internal/permgap). Admin -> Roles lists them
+	// with one click to give the permission back. Once per new gap: a
+	// broadcast to the administrators nobody confines, and one notification
+	// each to a tenant's administrators about the tenant's own roles. Meta
+	// `count`, and the sentence per language (`title_<lang>`, `body_<lang>`).
+	EventPermissionGaps EventType = "permission_gaps"
+	EventDiskFull       EventType = "disk_full"
 	// EventUpdateAvailable fires ONCE per newly published release — the
 	// "already announced" mark is persisted, so a restart loop cannot turn it
 	// into a stream.
@@ -155,7 +164,7 @@ const (
 var operatorEvents = []EventType{
 	EventReplicaFail, EventReplicaFailSpike, EventReplicaReconcileDone, EventReplicaStatusReport,
 	EventPrimaryReadFail, EventQuotaNearFull, EventQuotaFull, EventQueueStuck, EventAuthFailSpike, EventAuthProviderDown,
-	EventLDAPLegacyAccountElsewhere,
+	EventLDAPLegacyAccountElsewhere, EventPermissionGaps,
 	EventDiskFull, EventUpdateAvailable, EventUpdateApplied,
 	EventAppUpdated, EventAppUpdateAvailable, EventAppUpdateNeedsApproval, EventAppUpdateFailed,
 	EventPluginUpdateAvailable, EventPluginRequested,

@@ -10,15 +10,24 @@
 # What it is for: Chromium's sandbox, the wall between the pages the app shows
 # and the account it runs as. Chromium builds it from user namespaces or, where
 # those are not allowed, from the setuid helper `chrome-sandbox` beside the
-# binary (the .deb and the .rpm install it setuid root; an AppImage and a snap
-# cannot). Since Ubuntu 23.10 an unprivileged program may use user namespaces
-# only if an AppArmor profile allows it, so an AppImage with no profile has
-# neither, and Chromium stops before it shows a window, saying why only on a
-# terminal nobody is looking at. This asks the same question first and, when
-# the answer is no, tells the person what to do and exits.
+# binary (the .deb and the .rpm install it setuid root; an AppImage cannot).
+# Since Ubuntu 23.10 an unprivileged program may use user namespaces only if an
+# AppArmor profile allows it, so an AppImage with no profile has neither, and
+# Chromium stops before it shows a window, saying why only on a terminal nobody
+# is looking at. This asks the same question first and, when the answer is no,
+# tells the person what to do and exits.
 #
-# It NEVER starts the app without its sandbox, and adds no --no-sandbox of its
-# own. A --no-sandbox the person typed is passed through: their decision.
+# Outside a snap it NEVER starts the app without its sandbox, and adds no
+# --no-sandbox of its own. A --no-sandbox the person typed is passed through:
+# their decision.
+#
+# Inside the snap (since 0.52) the wall is snapd's strict confinement: an
+# AppArmor profile, a seccomp filter and namespaces around the whole app,
+# renderers included. Chromium's own sandbox would need `browser-support` with
+# `allow-sandbox: true`, which the Snap Store grants to trusted publishers only
+# and reviews by hand (the 0.50 and 0.51 revisions waited there and never
+# reached stable), so the snap does not ask for it and the app starts with
+# --no-sandbox, as Snapcraft advises for Electron apps.
 #
 # POSIX sh on purpose: it runs on every distribution, in the AppImage and
 # inside the snap, before anything of the app's own is loaded.
@@ -33,10 +42,23 @@ if [ ! -x "$bin" ]; then
   exit 127
 fi
 
-# Chromium will not ask for a sandbox at all.
+# Chromium will not ask for a sandbox at all: the person's switch, or the one
+# electron-builder's command.sh appends in the snap.
 for a in "$@"; do
   [ "$a" = "--no-sandbox" ] && exec "$bin" "$@"
 done
+
+# A snap's launcher lives under $SNAP. SNAP alone is not enough: a terminal
+# inside another snap (an editor's) hands its SNAP to whatever it starts.
+kind=other
+if [ -n "${SNAP:-}" ]; then
+  case "$self" in "$SNAP"/*) kind=snap ;; esac
+fi
+[ "$kind" = other ] && [ -n "${APPIMAGE:-}" ] && kind=appimage
+
+# The snap: strict confinement is the wall (see the top). The switch goes
+# first, so a `--` among the arguments cannot turn it into a file name.
+[ "$kind" = snap ] && exec "$bin" --no-sandbox "$@"
 
 # The setuid helper is in place: Chromium uses it where namespaces are refused.
 helper="$here/chrome-sandbox"
@@ -44,37 +66,15 @@ if [ -u "$helper" ] && [ "$(stat -c %u "$helper" 2>/dev/null)" = "0" ]; then
   exec "$bin" "$@"
 fi
 
-kind=other
-if [ -n "${SNAP:-}" ]; then
-  case "$self" in "$SNAP"/*) kind=snap ;; esac
+# Can this process create a user namespace and map itself into it? That is
+# the step Chromium's namespace sandbox takes first (it writes uid_map), and
+# the one AppArmor refuses. Without `unshare` there is nothing to ask:
+# Chromium decides on its own.
+if ! command -v unshare >/dev/null 2>&1; then
+  exec "$bin" "$@"
 fi
-[ "$kind" = other ] && [ -n "${APPIMAGE:-}" ] && kind=appimage
-
-if [ "$kind" = snap ]; then
-  # Inside a snap the question is snapd's: is the plug that lets the app build
-  # the sandbox (browser-support with allow-sandbox, electron-builder.yml)
-  # connected? `unshare` cannot be asked there: the snap's AppArmor profile
-  # does not let it run at all (measured: "Permission denied", exit 126, even
-  # with the plug connected). Only a plain "not connected" (exit 1, nothing
-  # said) stops the app; an older snapd that cannot answer leaves it to Chromium.
-  if command -v snapctl >/dev/null 2>&1; then
-    answer=$(snapctl is-connected browser-sandbox 2>&1)
-    rc=$?
-    [ "$rc" = 1 ] && [ -z "$answer" ] || exec "$bin" "$@"
-  else
-    exec "$bin" "$@"
-  fi
-else
-  # Can this process create a user namespace and map itself into it? That is
-  # the step Chromium's namespace sandbox takes first (it writes uid_map), and
-  # the one AppArmor refuses. Without `unshare` there is nothing to ask:
-  # Chromium decides on its own.
-  if ! command -v unshare >/dev/null 2>&1; then
-    exec "$bin" "$@"
-  fi
-  if unshare -Ur true >/dev/null 2>&1; then
-    exec "$bin" "$@"
-  fi
+if unshare -Ur true >/dev/null 2>&1; then
+  exec "$bin" "$@"
 fi
 
 # ---- the sandbox cannot be built: say what to do, then stop ----------------
@@ -85,7 +85,6 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
 esac
 
 docs="https://docs.filex.sh/DESKTOP#appimage-on-recent-ubuntu"
-[ "$kind" = snap ] && docs="https://docs.filex.sh/DESKTOP#the-snap-and-the-sandbox"
 
 msg=$(mktemp "${TMPDIR:-/tmp}/filex-sandbox.XXXXXX" 2>/dev/null) || msg=""
 say() {
@@ -140,9 +139,6 @@ if [ "$lang" = tr ]; then
       profile_lines
       name_note
       say "Ya da kendi kum havuzu yardımcısını getiren .deb paketini kurun." ;;
-    snap)
-      say "Snap'in kum havuzu bağlantısı kurulu değil. Bir kez şunu çalıştırın, sonra filex'i yeniden açın:" \
-        "" "  sudo snap connect ${SNAP_INSTANCE_NAME:-${SNAP_NAME:-filex-app}}:browser-sandbox" "" ;;
     *)
       say "Bu sistem kullanıcı ad alanlarına izin vermiyor ve chrome-sandbox yardımcısı" \
         "root sahipli, setuid (4755) değil. .deb ya da .rpm paketini kurun; ikisi de" \
@@ -160,9 +156,6 @@ else
       profile_lines
       name_note
       say "Or install the .deb, which brings its own sandbox helper." ;;
-    snap)
-      say "The snap's sandbox connection is not in place. Run this once, then open filex again:" \
-        "" "  sudo snap connect ${SNAP_INSTANCE_NAME:-${SNAP_NAME:-filex-app}}:browser-sandbox" "" ;;
     *)
       say "This system does not allow user namespaces, and the chrome-sandbox helper is not" \
         "owned by root with the setuid bit (4755). Install the .deb or the .rpm: both set" \

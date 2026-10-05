@@ -88,6 +88,13 @@ type Share struct {
 	// a list of links. Not serialized: lists carry the resolved `app`
 	// (db.AppLink) instead.
 	PurposeJSON string `json:"-"`
+	// AppRoot is the `root:` of the token whose app job opened this link
+	// (`<adapter>://<rel>`, migration 00082), "" for a link opened with no
+	// root. A visitor's job on the link runs as its creator with no token
+	// behind it, so this is the root it is held to: the door stamps it on the
+	// job (wasmplugin.StampJobRoot) as the token's own door would have. Never
+	// serialized: it is the host's bookkeeping.
+	AppRoot string `json:"-"`
 
 	// PinFails / LockedUntil are the five-strikes-then-ten-minutes PIN lock,
 	// which from 00046 covers EVERY public link rather than only an app page.

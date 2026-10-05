@@ -256,13 +256,12 @@ template; core24 arrives with electron-builder 26):
   real `~/.filex` is a hidden directory the `home` interface does not reach.
   ⚠ A terminal `filex sync` outside the snap therefore does not see the snap's
   pairings.
-- Three plugs do not connect by themselves: `snap connect
+- Two plugs do not connect by themselves: `snap connect
   filex-app:password-manager-service` (the keyring; until then the sign-in
   window says so - with the command spelled from the snap's own name - and
-  does not start a sign-in), `snap connect filex-app:removable-media`
-  (folders under `/media`, `/run/media`, `/mnt`) and, since 0.50,
-  `snap connect filex-app:browser-sandbox` (Chromium's sandbox; until then the
-  launcher refuses to start the app and prints that command).
+  does not start a sign-in) and `snap connect filex-app:removable-media`
+  (folders under `/media`, `/run/media`, `/mnt`). 0.50 and 0.51 had a third,
+  `browser-sandbox`; it is gone (below).
 - `filex://` and "Open with" come from the desktop entry snapd installs
   (`filex-app_filex-app.desktop`). "Make filex the default" cannot reach the
   desktop from inside the snap, so Settings explains the file manager's *Open
@@ -270,12 +269,18 @@ template; core24 arrives with electron-builder 26):
 - "Start when I sign in" writes
   `~/snap/filex-app/current/.config/autostart/filex-app.desktop` - exactly the
   file snapd's `autostart:` launches, `--hidden` included.
-- Chromium's own sandbox is ON since 0.50: the `browser-sandbox` plug
-  (`browser-support` with `allow-sandbox: true`) lets the app build its
-  user-namespace sandbox inside the confinement. Without such a plug
-  electron-builder starts a snap with `--no-sandbox` and leaves chrome-sandbox
-  out, which is what 0.49 shipped. The Snap Store reviews `allow-sandbox` by
-  hand; the release treats an upload waiting for that review as a warning.
+- Chromium's own sandbox is OFF in the snap, on purpose (since 0.52, as in
+  0.49): the app runs with `--no-sandbox` under the snap's strict confinement
+  (AppArmor, seccomp, its own mount namespace). Electron-builder adds the
+  switch to `command.sh` and leaves chrome-sandbox out when no plug has
+  `allow-sandbox: true`, and the launcher adds it in a snap as well. 0.50 and
+  0.51 asked for that permission (`browser-sandbox`: `browser-support` with
+  `allow-sandbox: true`); Snapcraft limits it to trusted publishers, never
+  auto-connects it and reviews it by hand, so those revisions sat in "Manual
+  review pending" and the stable channel stayed on 0.49. The confinement keeps
+  the app from the rest of the system but does not separate its pages from
+  the app; the .deb and the .rpm keep Chromium's sandbox
+  ([docs/DESKTOP.md](../docs/DESKTOP.md#the-snap-and-the-sandbox)).
 - snapd holds a refresh of a running app back for up to 14 days, and filex
   usually runs in the tray: a snap update lands on quit, or when that runs out.
 
@@ -285,12 +290,16 @@ it: `scripts/linux-launcher.cjs` swaps them in `afterPack` (through
 `scripts/after-pack.cjs`), so the .deb's `/usr/bin/filex-app` and menu entry,
 the AppImage's AppRun and the snap's command.sh all start the launcher. It
 checks that Chromium's sandbox can be built (the setuid `chrome-sandbox` is in
-place, or `unshare -Ur true` works, or in a snap `snapctl is-connected
-browser-sandbox`) and otherwise shows what to do and exits 78; it never adds
-`--no-sandbox`. `process.execPath` is `filex-app-bin`, so the sign-in entry
-names the launcher (`src/login-item.ts`). Tests:
-`test/linux-launcher.test.ts`; the release opens every Linux package with the
-sandbox checked (`desktop-look.mjs --expect-sandbox`, `--expect-refusal`).
+place, or `unshare -Ur true` works) and otherwise shows what to do and exits
+78; outside a snap it never adds `--no-sandbox`. In a snap (its own file
+under `$SNAP`, not merely `SNAP` in the environment) it starts the app with
+`--no-sandbox` first and checks nothing. `process.execPath` is
+`filex-app-bin`, so the sign-in entry names the launcher
+(`src/login-item.ts`). Tests: `test/linux-launcher.test.ts`; the release opens
+the .deb and the AppImage with the sandbox checked (`desktop-look.mjs
+--expect-sandbox`, `--expect-refusal`) and the snap with its confinement
+checked (`--expect-snap-confinement`; public workflow change:
+`packaging/ci/release-snap-confinement.patch`).
 
 **AppImage** installs nothing, so at each start it writes a hidden
 `~/.local/share/applications/filex-appimage.desktop` pointing at itself and
@@ -307,9 +316,9 @@ behind, still claiming the link.)
   export-login --snaps=filex-app --acls=package_access,package_push,package_update,package_release
   --expires=<date> creds.txt` → the file's content as the repository secret
   `SNAPCRAFT_STORE_CREDENTIALS`. Auto-connecting the plugs above is a
-  separate request on the Snapcraft forum (store-requests, a week's vote);
-  `browser-sandbox` (`allow-sandbox: true`) is the one the Store also reviews
-  at upload.
+  separate request on the Snapcraft forum (store-requests, a week's vote).
+  ⚠ Do not add `allow-sandbox: true` back: it is for trusted publishers only,
+  and every upload carrying it waits for a manual review.
 - AUR: an aur.archlinux.org account with its own SSH key → run
   `packaging/aur/update-pkgbuild.sh <version>` (the committed PKGBUILD is a
   template with SKIP checksums until the first `filex-app` release) and push

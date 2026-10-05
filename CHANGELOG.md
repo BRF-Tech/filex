@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-10-05
+
 ### Added
 
 - **The README in five more languages** - Turkish, German, Spanish, French and
@@ -25,12 +27,218 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the translations too, so a renamed docs heading names the link to fix in each
   of them ([CONTRIBUTING.md](docs/CONTRIBUTING.md#docs)). Contributed by Berk
   Başarır ([#84](https://github.com/BRF-Tech/filex/pull/84)).
+- **Installing from an app store, and paid apps.** An app store's **Install**
+  opens an install link on your filex (`/admin/store-install#store=…&intent=…`)
+  that lands on the same install review a repository gets, filled in from the
+  store and marked *From store &lt;origin&gt;*; the administrator still decides.
+  Before the review opens, filex checks that it trusts the store - the first
+  link asks an administrator to compare the store's key fingerprints and trust
+  it (trust on first use; or `FILEX_APP_STORE_URLS` + `FILEX_APP_STORE_KEYS`),
+  and a store whose keys change is asked about again - that the link is signed
+  by one of the store's `index` keys (ed25519 over the sha256 of the canonical
+  JSON, the module-signature rule), current and not used here before, and
+  that the repository serves exactly the manifest, module, interface and
+  permissions the store approved; **Install** reads and checks it all again.
+  A link is made for one filex (`filex_origin`, signed) and names the commit
+  the store reviewed, which is what filex reads. A store link installs or
+  upgrades - from the same store and repository only - never downgrades, and
+  the store is told how the link ended. A **paid app**'s license is issued and kept by the store:
+  filex keeps the key sealed with `FILEX_SECRET_KEY` (shown by its prefix only,
+  never in an answer, a log or the audit log), asks the store at the install
+  and every day, and HOLDS the app - installed, nothing removed, nothing run,
+  state *Unlicensed* - when the store says revoked, expired, invalid, out of
+  seats or for another app, or once the grace the store signed has ended
+  without an answer; turning the server's clock back does not stretch a grace.
+  Admin → Apps gets *Trusted stores* and, on a paid app's page, *License*
+  (status, licensee, seats, dates, key, **Verify now**); a band on every admin
+  page names a held app. An app reads its own license's status and dates with
+  `fx.license.get()` (`@brftech/filex-app-ui`). `FILEX_APP_GITHUB_RAW_BASE`
+  points GitHub installs at a mirror. Migration 00081. ([APP-PLUGINS.md →
+  Installing from a store](docs/APP-PLUGINS.md#installing-from-a-store),
+  [APP-PLUGINS-API.md → The store contract](docs/APP-PLUGINS-API.md#the-store-contract-0520))
+- **LDAP groups** ([docs/LDAP.md → Groups](docs/LDAP.md#groups), migration
+  00084). A group can name LDAP / Active Directory groups, by DN or by name,
+  beside its SSO groups: every sign-in to the web UI reads the person's
+  directory groups (`group_attr`, or a search with `group_filter`) and joins
+  and leaves the linked groups as the directory says. A failed group read
+  never refuses a sign-in or takes anybody out of a group; the file protocols
+  never move memberships. New settings: `group_filter`, `group_base_dn`
+  (`FILEX_LDAP_GROUP_*`), also on Admin → Identity providers. Contributed by
+  Manjot Singh ([#90](https://github.com/BRF-Tech/filex/pull/90)), with the
+  directory sync, several directories, permanent ids, administrators through
+  a group, Users, Groups, Add user and Identity providers entries below. The
+  tenant boundary and partial-answer rules of directory sync, and the
+  session gate on its doors, were added on top of it before the release.
+- **LDAP directory sync** ([docs/LDAP.md → Directory sync](docs/LDAP.md#directory-sync)).
+  Admin → Identity providers → an LDAP provider → **Sync now**, and every
+  `sync_interval` on its own: filex reads every person the directory lists,
+  opens the accounts nobody has signed in to yet (as their first sign-in
+  would: the first sign-in rule decides) and brings everyone's LDAP-linked
+  group memberships in step; accounts the directory stopped listing lose
+  them, and are switched off with `sync_disable_missing`. A search that finds
+  nobody changes nothing. It also brings **every directory group in as a
+  filex group** (`sync_groups`, on by default; `sync_group_filter` picks
+  which), followed by its permanent id (or, with none, its DN): renamed
+  with it, and flagged *Removed from LDAP* - never deleted - when it is
+  gone. Which groups exist
+  is managed on the directory. Each LDAP provider syncs its own directory,
+  accounts and groups. New settings `sync_interval`, `sync_filter`,
+  `sync_disable_missing`, `sync_groups`, `sync_group_filter`
+  (`FILEX_LDAP_SYNC_*`). A run in which an account could not be looked up
+  counts nobody as no longer listed, and a person whose entry lost its
+  e-mail is still listed by their permanent id; a `group_filter` that names
+  people by their sign-in name (`%u`) leaves memberships to the sign-in. On a
+  multi-tenant install sync reaches only the accounts the directory already
+  holds and those of its own tenant - another account at the same address
+  waits for its person's sign-in in their realm - and a tenant's own
+  directory opens its groups in that tenant. **Sync now** needs an
+  administrator signed in to the panel, not an API key.
+- **Each LDAP directory keeps to its own** ([docs/LDAP.md → Several directories](docs/LDAP.md#several-directories),
+  migration 00084). An account belongs to the LDAP provider that made it -
+  another never signs it in - and `email_domains` limits a directory to its
+  own addresses; the Users page makes no local account at an address a
+  directory of that account's tenant owns. An account from before 0.52 with no password here and no
+  SSO identity is taken by the first directory that signs it in, as any
+  directory could sign it in before; one with a password here is the main
+  directory's alone.
+- **LDAP: switched off there, switched off here** ([docs/LDAP.md → Directory sync](docs/LDAP.md#directory-sync),
+  migration 00085). Directory sync switches off the account of a person the
+  directory has switched off - Active Directory's "account disabled",
+  389-ds's `nsAccountLock`, an OpenLDAP password-policy lock with no end -
+  administrators included (never the last one), so their sessions, API keys
+  and SFTP keys stop with their password. An account with a password of its
+  own here is left on, and the report says so. An account sync switched off (this
+  way or with `sync_disable_missing`) comes back on when the directory lets
+  the person back in; one switched off or on by hand stays as the
+  administrator left it. The Users list and a person's page say **Disabled
+  by LDAP**.
+- **LDAP: people known by their permanent id** ([docs/LDAP.md → Who is who](docs/LDAP.md#who-is-who),
+  migration 00085). A sign-in or sync finds a person by `entryUUID` /
+  `objectGUID` before their e-mail: someone whose address changes in the
+  directory keeps their account and files, and its e-mail follows; an
+  address the directory gives to someone new no longer signs them in to the
+  previous owner's account - sign-in is refused and sync lists the problem.
+- **A group can make its members administrators** ([docs/GROUPS.md → Administrators](docs/GROUPS.md#administrators),
+  migration 00086). A group's role can be **Administrator (full access)**:
+  linked to an LDAP or SSO group, the directory decides who administers
+  filex, so the local administrator from setup can go. Its LDAP links are
+  full DNs and count only for people of the group's own directory. Leaving
+  the group gives back the earlier level; the last administrator of a tenant
+  is never demoted; an administrator made by hand is never demoted by a
+  group. Only a signed-in full administrator sets one up or changes who is
+  in it.
+- **Where people come from.** The Users page has a **Source** column -
+  Local, SSO, LDAP or Proxy - and a **Groups** column (two groups a row,
+  those that give a role or folder access first, then "+N") with a group
+  filter; a person's page and a group's member list show the source too. The
+  Groups page says whether a group's members are added by hand or come from
+  SSO or LDAP, and filters by it.
+- **Add user, clearer** - people of an LDAP directory arrive at sign-in or
+  with directory sync. The dialog suggests the username and display name
+  from the e-mail, says what the role gives, and offers three ways in: set a
+  password (generate, show, copy), send an invitation, or no password (an
+  SSO account made ahead of its first sign-in, or API keys only). It adds the
+  account to groups made here, and has **Create and add another**.
+- **Identity providers, one tab per kind.** The page is a set of summary
+  cards, one tab per kind of sign-in (LDAP first, Windows and PAM too); a
+  card opens the provider's own page - for LDAP its settings in sections
+  (Connection, People, Groups, Directory sync) and its sync.
 
 ### Changed
 
+- **The Snap runs without Chromium's own sandbox again, inside the snap's
+  strict confinement.** 0.50 and 0.51 asked the Snap Store for
+  `browser-support` with `allow-sandbox: true` so that Chromium could build its
+  sandbox inside the snap. Snapcraft grants that to trusted publishers only,
+  never connects it by itself and reviews it by hand: those revisions waited
+  in manual review, the stable channel stayed on 0.49, and the newer snap did
+  not open until `sudo snap connect filex-app:browser-sandbox` was run. The
+  snap now asks for no such permission, as Snapcraft advises for Electron
+  apps: the app starts with `--no-sandbox`, and snapd's AppArmor profile,
+  seccomp filter and namespaces confine it as a whole. For you: no
+  `snap connect` step, and snap updates reach the stable channel by themselves
+  again. What it costs: the confinement keeps the app away from the rest of
+  the system, but unlike Chromium's sandbox it does not wall the pages the app
+  shows off from the app itself. The `.deb`, the `.rpm` and the AppImage keep
+  Chromium's sandbox, and the launcher still refuses to start them without it.
+  The release checks the snap's confinement now, where it checked the sandbox
+  ([DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)).
+
 - **A release is tagged only after GitHub has tested its commit (#76).** `pnpm release` pushes both `main` branches untagged, starts a dry run of `release.yml` on the export commit and waits until it and CI have passed there; only then are the tags made, and the tag run's new `verify` job publishes nothing without those two runs on its commit. A red run spends no version number, a resume never goes back past a pushed tag, and `--resume --only deploy` re-reads the deploy on the tagged commits ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+- Nothing changes on upgrade: migrations 00084 to 00086 add the LDAP group
+  table, empty, a label saying where each account comes from (an account
+  with an OIDC subject is SSO, one with a password here Local; one with
+  neither has no label yet and takes the label, and for LDAP the directory,
+  of its next sign-in),
+  the permanent id column and the administrator switch, off.
+- The Roles page's introduction says one role per person.
+
+- **The README reads top to bottom as a short page, with the detail one click away.**
+  `README.md` is titled `filex` and opens with a three-line description of
+  what filex is, three buttons (live demo, quick start, documentation), the
+  picture and six cards in place of one long paragraph. *Why filex* is a tour
+  of eight parts - the explorer, storage and protocols, sharing and
+  protection, people and access, desktop app & CLI, embedding, apps, AI
+  agents - each a line that says what it is for, up to four bullets, one
+  picture and a block that opens on a click and holds the text that stood
+  there before with its screenshots as a gallery, each over its caption. A new
+  section, *Coming from Nextcloud, Dropbox or Google Drive*, sets out in one
+  table what each of them and File Browser is and what filex is beside it,
+  then what filex does not have: no calendar, contacts, mail or chat, no
+  Android or iOS app, no placeholder files, no office editor of its own. *Try
+  it now* and *Quick start - binary* are one *Quick start*; the documentation
+  index, folded by topic, moved above *Features*, which leads with a
+  thirteen-row table and keeps its 55 entries in a block that opens on a
+  click. *Development* sits under a new *Contributing* section. Sections are
+  first-level headings and the parts of the tour second-level, with a line of
+  air before each. No picture and no link target was dropped: the container
+  and live demo badges became a link and a button, and the CI badge moved to
+  *Contributing*. About 2,500 words are in view where 13,900 were. The five
+  translations are left whole at the commit they name
+  ([CONTRIBUTING.md → Docs](docs/CONTRIBUTING.md#docs)), and step 1 of the
+  release process says where a new surface goes in this layout, so the page
+  does not grow back into a wall
+  ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+  Contributed by Berk Başarır
+  ([#87](https://github.com/BRF-Tech/filex/pull/87)).
 
 ### Fixed
+
+- **Asking what is below a folder no longer reads the whole storage.** Nothing
+  indexed `nodes.path`, and "the rows below this folder" was matched with
+  `SUBSTR(path,1,n)=?`, which no index can answer: every such question read
+  the storage's rows. A folder rescan asked, every scan of a storage asked for
+  its `.versions` and `.thumbs` trees, and under the **Approval** policy of
+  0.51 the rule asked for every folder of a `POST /api/files/e2e/allowed` - one
+  when the explorer opens a menu on a folder, up to 1000 from an API caller -
+  for whoever holds `files.encrypt` there and is not an administrator. On a
+  catalogue of 170,245 nodes that was 206-262 ms a folder on SQLite, where the
+  store has one connection and every other request waits behind it (MySQL
+  140-154 ms, PostgreSQL 15-26 ms): four minutes for a thousand folders.
+  Migration `00083` (SQLite, PostgreSQL, MySQL) adds `idx_nodes_storage_path`,
+  "below a folder" is a byte range of `path` that the index answers, and the
+  rule asks whether anything is there instead of counting it: 0.02 ms a folder
+  on SQLite, 0.15 ms on MySQL, 0.4 ms on PostgreSQL, 80 ms for the thousand.
+  Contributed by Berk Başarır ([#89](https://github.com/BRF-Tech/filex/pull/89)).
+  - **The upgrade.** The first start builds the index: 0.2 to 0.3 s and 10 MiB
+    for those 170,245 nodes on SQLite. On PostgreSQL the build blocks writes
+    to `nodes` until it is done (reads go on), and the index holds the first
+    512 characters of a path, as MySQL's does. Cataloguing writes one more
+    index entry a row: on SQLite 12.5 s to 12.8 s for those nodes in path
+    order, 12.7 s to 14.8 s in no order.
+  - **What got slower.** Two things a rescan of a folder that is most of its
+    storage asks: its stale rows on SQLite (0.03 ms to 60 ms for 151,560 rows,
+    260 ms with the rows in no order) and its count on PostgreSQL (14 ms to
+    30 ms).
+  - **The match is what it was** - byte for byte, both path spellings, on
+    every engine - with one correction: on SQLite a folder whose name is not
+    valid UTF-8, or holds a NUL, no longer looks empty. Trashing and restoring
+    a folder, and naming who deleted it, still match with `SUBSTR` and still
+    read the storage's rows.
+  - Measured with
+    `go test -tags measure -run TestMeasureSubtreeQuestions -v ./internal/db`
+    and
+    `-run TestMeasureAListingUnderTheApprovalPolicy -v ./internal/e2epolicy`.
 
 - **One reader of a docs page's headings.** The release gate
   (`scripts/release/checks.mjs`) and the Releases page generator
@@ -62,6 +270,158 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   said *token*, as the Turkish interface does. Contributed by Berk Başarır
   ([#85](https://github.com/BRF-Tech/filex/pull/85)); the Turkish wording was
   added on top.
+
+- **An app's `state_list` returns as many files as it asked for.** The limit
+  was applied to the rows read from the database before the person's
+  permissions (and, now, a token's root) narrowed them, so a caller whose files
+  sorted after ones it may not see was told about fewer, often none. The rows
+  are read a page at a time until the limit is reached or they run out (at
+  most 5,000 rows for one call), in one order on every engine
+  ([APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md)).
+
+- **A role saved on 0.50 or older no longer loses `files.encrypt` unseen.**
+  0.50's built-in User role page read the list without the permission it did
+  not know and wrote it back without it, and its role editor kept only the
+  folder permissions it knew, so a save there on the way back from 0.51.0 took
+  `files.encrypt` away; 0.51.0 had merged it once and did not merge it again.
+  Nothing stored tells such a list from one an administrator chose, so nothing
+  is given back by itself: **Admin → Roles** shows each role that allows *Add
+  files and folders* but not *Encrypt* - the built-in User role, or a custom
+  role's folder part whose own list lacks it - with one click to give
+  *Encrypt* back and one to dismiss it as on purpose, both in the audit log,
+  and the administrators are told once in the bell (`permission_gaps`). A save
+  from the role editors, which show *Encrypt*, is a decision and is not pointed
+  out; a save through the API that does not say what it showed (`shown`) is.
+  And a permission a later version stored is now kept: the built-in roles, a
+  custom role's list and folder part, a person's exceptions, a preset and
+  *Clear exceptions* take it back with every save instead of dropping it or
+  answering `400`, so going back to this version from a later one cannot do
+  the same to the next new permission
+  ([PERMISSIONS.md → Things to know](docs/PERMISSIONS.md#things-to-know)).
+  Reported by Berk Başarır ([#86](https://github.com/BRF-Tech/filex/pull/86)).
+
+- **A custom role's audit row names its own list.** `permission_rule.create`,
+  `.update` and `.delete` recorded the role's name, folder part and limits but
+  not the permissions it allows everywhere, so taking one out of a role's list
+  left no trace of what was taken. They now carry `permissions` (before and
+  after on an update).
+
+- **A CSV saved from ONLYOFFICE keeps the cells nobody changed**
+  ([ONLYOFFICE.md → Cells nobody changed keep their text](docs/ONLYOFFICE.md#cells-nobody-changed-keep-their-text)).
+  ONLYOFFICE reads a CSV as a spreadsheet and writes every cell back as it
+  shows it, and 0.51.0 put only the delimiter, the byte order mark and the line
+  ends back. Measured on 0.51.0 with Docs 9.4.0, one cell edited in a semicolon
+  file: in cells nobody touched `05320000001` became `5320000001`, `007` became
+  `7`, `01.02.2026` became `1/2/2026` (`1.02.2026` with the editor in
+  Turkish), and every data row gained an empty cell at its end.
+  - filex now reads the file the save replaces, lines its rows up with the
+    saved ones and writes the file's own text back where the saved text is the
+    same value written ONLYOFFICE's way. A row nobody changed is written byte
+    for byte as it was, also after a sort; in an edited row the other cells
+    keep their text; rows added or deleted in ONLYOFFICE are added and deleted;
+    empty lines at the end of the file (unless rows were added there), and its
+    final line end or none, stay.
+  - "The same value" is only what a real Docs 9.4.0 was measured writing for a
+    cell nobody touched (the editor in English, Turkish, German and French): a
+    whole number without its leading zeros, `+` or surrounding spaces, a
+    hexadecimal one, one past 2^53, and one from 2^63 up, which ONLYOFFICE
+    writes as `-9.2233720368547758e+18` whatever it was (a 24-digit account
+    number is kept now); a number with a decimal point (`.5`, which comes
+    back as `.0`, too); a date the way the English or the Turkish editor
+    writes one (`1/2/2026`, `1.02.2026`, an ISO `2026-02-01` too); `true` and
+    `false`; a tab in a cell; a text cut at 32767 characters. A date
+    ONLYOFFICE did not read as one is never "the same" as another spelling of
+    it: `15/3/2026` typed over `15.03.2026` in the English editor is saved as
+    typed.
+  - Still as ONLYOFFICE writes it: the cell you edit (`007` typed into a cell
+    is saved as `7`); a time (`00:13` comes back as `0:12`), a percent, a
+    number with an exponent, a date with a time, a two-digit year or a year
+    before 1900, and a formula; a date in an editor language other than English
+    and Turkish; a file that is not UTF-8, on its first save; a file over
+    64 MiB or two million rows, or with a row of more than 16384 cells; the
+    cells from a column that was added, removed or moved on, in every row. A
+    change that is only another way of writing a value (`007` to `7`) cannot
+    be made in ONLYOFFICE: it saves the same text either way, and the file
+    keeps `007`.
+  - A save is never refused over this: when the cells cannot be kept it is
+    written as in 0.51.0, and the log says
+    `onlyoffice callback: CSV cells not kept` with the reason.
+  - Contributed by Berk Başarır ([#88](https://github.com/BRF-Tech/filex/pull/88)). Measuring the rules against a real Docs 9.4.0 in four editor languages (only what it writes is a rule; the Turkish editor's dates, ISO dates, numbers from 2^63 up and `.5` added) and the release gate's fixture with the cells ONLYOFFICE re-renders were added on top of it before the release.
+
+- **A sign-in no longer comes back to the sign-in page.** When a session ended
+  while the panel still believed in it, a 401 sent the panel to the sign-in page,
+  the panel's guard bounced it off to the start page, and once the session was
+  found over on the way the sign-in address named itself as the place to come
+  back to (`/login?redirect=/login?redirect=…`). A sign-in that began at the
+  sign-in page now comes back to that page's own return address.
+
+- **A notification sent while filex shuts down no longer races the
+  shutdown.** The webhook deliveries in flight were counted with a WaitGroup,
+  and a delivery another goroutine started (a write hook still emitting) could
+  begin while stopping waited for them: a data race (`go test -race` caught
+  it). They are counted under a lock now, and once stopping has begun nothing
+  new is delivered: the notification is still recorded, with its webhook
+  status `skipped` ("service stopped before delivery").
+
+### Security
+
+- **An app told a folder-confined API token about files outside its folder, and the token's jobs could act on them.** Found in the review of GHSA-8gvc-6w52-6c7j (0.51.0). An app with the `state` permission keeps small records on the files people run it on, and `state_list` finds those files again: each one's path, name and the app's value for it. The answer was narrowed by the account's permissions and never by the token's `root:`, and the documented embed puts one service account behind many project tokens ([INTEGRATION.md → Multi-tenant root confinement](docs/INTEGRATION.md#4b-multi-tenant-root-confinement-lock-to-a-sub-folder)), so the account may see the whole storage while each token may not. Every release with apps (0.43.0) through 0.51.0 is affected:
+  - a token confined to one folder that opened an app's screen (a home page, a view's events, the app's own interface calling its module) was told about every file the app keeps state on, on every storage, and so was a job the token queued;
+  - such a job could also name one of those files by path: **lock** it (frozen for everyone, administrators included), lift the app's own lock on it, point a notice at it, or open a page link on it;
+  - a screen's link to a file outside the folder was kept (opening it was refused);
+  - a link such a job opened (a signing request, an app's page) is answered later by a visitor, and the job the visitor's submit queues runs as the link's creator with no token behind it: it was held to no root, so the app's follow-up work on that link was told about, and could name, every file it keeps state on.
+  - **Now** an app's call is held to the root of the token it was made with: a screen to its request's, a job to the root the door that queued it records on the job (the host parameter `__root`, which a caller cannot set and the app never sees). A link a job opens records that root (migration `00082`, `shares.app_root`; links from before, or opened with no root, record none and behave as before), and a visitor's job on it is held to it. `state_list` leaves out every file outside it; a path outside it is not a file the call was handed (`permission_denied`, the same sentence whether or not the file exists or is locked); a screen's link outside it is dropped. Unconfined callers, the hourly wake-up, public pages and thumbnails are unchanged.
+- **A folder-confined token could tell which folders and storages exist outside its folder.** Choosing where an app's result goes - **Save as** from an app's interface (`PUT /api/files/plugins/ui/{plugin}/{view}/save?dir=&name=`, 0.48.1) or a job's output folder (0.43.0) - looked the storage up, read its read-only flag and checked the folder before it asked the token's root: outside the folder, one that was not there answered `404` and one that was `403`, a read-only storage `409` and a storage that does not exist `404`. A run, a screen's event and an interface's call answered a storage that does not exist `400` and one that does `403`, and a run naming a `storage_id` `404` and `403`, when the body was sent as `text/plain` or with no `Content-Type` (a JSON body was refused alike by the confinement layer). An app's home page (a screen opened on no file, `?storage_id=`) opened on any storage, and on a storage id that does not exist. The operations queue had the same order for a body not labelled JSON: its per-verb doors (`/api/files/copy`, `/move`, `/delete`) answered an unknown storage `400`, a read-only one `403 READ_ONLY` with the storage's name, and the root's refusal with the path appended; `POST /api/files/ops` answered a path climbing out `400 BAD_PATH`. Through 0.51.0. Now the root is asked before anything about the storage, and everything outside it is the same `403`; the queue answers it byte for byte as the confinement layer answers a JSON body, whatever the `Content-Type`, and a home page opens only on the root's own storage. Inside the root the answers are unchanged.
+
+**The app store install.** What two security reviews of the store install found before it shipped, and
+what it does instead ([APP-PLUGINS.md → What a store link is held
+to](docs/APP-PLUGINS.md#what-a-store-link-is-held-to-0520),
+[APP-PLUGINS-API.md → What the 0.52.0 security review
+tightened](docs/APP-PLUGINS-API.md#what-the-0520-security-review-tightened)):
+
+- **A held app runs nothing.** A paid app held by its license still answered
+  its screens and ran a job queued before the hold; the hold is now refused
+  where every call starts the module.
+- **An installed app keeps its source, and its key stays with its store.** A
+  second trusted store's link could move an app of the same name to another
+  repository and receive the first store's license key. Such a link is
+  refused (`store_source_changed`), the review of an upgrade names where the
+  app came from, a key is sent only to a store still trusted, and a key is
+  sealed for its own app.
+- **A store's time is its own, within a day, and bounded.** One store's
+  future-dated answer could hold every other store's apps, or freeze a
+  license so that a revocation was never taken. An answer more than a day from
+  the server's clock is not taken, the proven time is kept per store, a grace
+  counts at most 30 days and a next check at most 2, and restarts no longer
+  stretch a grace.
+- **One review installs once.** Two installs of one review at the same moment
+  could drop the license row of the app the other installed; the review is
+  taken whole, installs of one app name run one at a time, and a failed
+  install restores only its own license.
+- **`FILEX_APP_STORE_URLS`, when set, is an allow list** (`store_not_allowed`);
+  a store's API follows no redirect; a link is bound to its filex
+  (`intent_wrong_instance`), its commit and its manifest; a store key id is a
+  short ASCII name; an app reads its license's status and dates, not who holds
+  it.
+- **The second round.** A job or a screen that waited for one of the app's
+  slots ran after a hold that came meanwhile; it is stopped once the slot is
+  free. A replayed license answer no longer takes back the hour an unclean
+  restart costs the grace. A store's paid link does not take an app installed
+  straight from its repository under its license (`store_source_changed`).
+  A `FILEX_PUBLIC_URL` that is not an address refuses every link instead of
+  falling back to the request's host, and `FILEX_APP_STORE_URLS` given any
+  value (`" , "` included) is the allow list.
+- **The store install page.** Closing the review while **Install** was on its
+  way told the store `cancelled` and said nothing was installed, over an app
+  that landed or was upgraded a moment later; the review now stays open until
+  the server answers, in every install dialog. A second link opened in a tab
+  already on the page left its token in the address bar and the history and
+  was never read; the router takes it off and the page reads it, and no
+  sign-in address carries a store link. A link opened by somebody who is not
+  an administrator is no longer kept in the tab, any administrator's sign-in
+  (single sign-on included) comes back to a waiting link, the page's path
+  matches in any letter case, and an upgrade's review says where the
+  installed app came from.
 
 ## [0.51.0] - 2026-10-04
 
@@ -119,13 +479,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `permissions.catalogue` setting, so a permission added later is merged once and
   never again; the setting only ever grows, so a version started after a later
   one does not make the later one's permissions new again.
-- ⚠ **Rolling back to a version without `files.encrypt`** (0.49 or older): the
-  older Roles and People pages cannot save a role or a person's exceptions the
-  upgrade gave `files.encrypt` to (`400`, an unknown permission) until the
-  server is upgraded again. Upgrading again does not give `files.encrypt` back
-  where an administrator took it away in between, nor to a role saved on the
-  older version: it was merged once, at the first upgrade
-  ([PERMISSIONS.md](docs/PERMISSIONS.md)).
+- ⚠ **Rolling back to a version without `files.encrypt`** (0.50 or older): the
+  older Roles and People pages cannot save a custom role's list or a person's
+  exceptions the upgrade gave `files.encrypt` to (`400`, an unknown permission)
+  until the server is upgraded again. Two saves go through without a word and
+  leave `files.encrypt` out: the built-in User role (the older page does not
+  show the permission and writes the list back without it) and a custom role's
+  folder part when the role's own list does not hold `files.encrypt`; applying
+  a preset to a custom role on the older page does the same. Upgrading again
+  does not give it back to those, nor where an administrator took it away in
+  between: it was merged once, at the first upgrade. After upgrading again,
+  check that the User role and those folder parts still allow encrypting
+  ([PERMISSIONS.md](docs/PERMISSIONS.md)). The release after 0.51.0 points them
+  out on Admin → Roles, with one click to give `files.encrypt` back or to
+  dismiss it as on purpose.
 - A refused encryption in the explorer is said in words (the server's reason)
   instead of "could not create the encrypted folder", and a folder made before
   its key file was refused is listed at once.

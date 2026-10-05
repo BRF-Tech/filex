@@ -31,6 +31,7 @@ import type { StorageRef } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { HOLDER_PREVIEW_DELAY_MS, builtinAppDefaults } from '@/lib/appPermissions';
+import { foreignPerms, isForeignPerm, shownPerms } from '@/lib/foreignPermissions';
 import PermissionGrid from '@/components/PermissionGrid.vue';
 import RoleNameTranslations from '@/components/RoleNameTranslations.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -174,9 +175,16 @@ const CONDITIONABLE = [
 ];
 
 const presets = computed(() => props.catalogue.presets.filter((p) => p.name !== 'full_admin'));
+// A preset replaces what the editor shows; a later version's permission it
+// cannot show stays (lib/foreignPermissions).
 function applyPreset(name: string) {
   const p = props.catalogue.presets.find((x) => x.name === name);
-  if (p) form.value.permissions = p.permissions.filter((k) => k !== 'admin.full');
+  if (p) {
+    form.value.permissions = [
+      ...p.permissions.filter((k) => k !== 'admin.full'),
+      ...foreignPerms(form.value.permissions, props.catalogue),
+    ];
+  }
 }
 
 /** The SSO groups that start a new account on this role. */
@@ -205,7 +213,12 @@ const blockedExt = computed({
 async function save() {
   const body: PermissionRuleInput = JSON.parse(JSON.stringify(form.value));
   if (hasPlace.value) {
-    body.effects = Object.fromEntries(Object.entries(body.effects).filter(([k]) => CONDITIONABLE.includes(k)));
+    // A later version's folder permission this editor has no row for goes
+    // back as it came (lib/foreignPermissions): 0.50 kept only what it knew
+    // here, and files.encrypt was lost that way.
+    body.effects = Object.fromEntries(
+      Object.entries(body.effects).filter(([k]) => CONDITIONABLE.includes(k) || isForeignPerm(k, props.catalogue)),
+    );
   } else {
     // No folders picked: there is no folder part.
     body.conditions = {};
@@ -215,9 +228,10 @@ async function save() {
   if (!body.settings.share_link_max_days) body.settings.share_link_max_days = null;
   saving.value = true;
   try {
+    const shown = shownPerms(props.catalogue);
     const saved = props.rule
-      ? await RolesApi.updateRule(props.rule.id, body)
-      : await RolesApi.createRule(body);
+      ? await RolesApi.updateRule(props.rule.id, body, shown)
+      : await RolesApi.createRule(body, shown);
     toast.success(t('permissions.rules.saved'));
     emit('saved', saved);
     emit('update:modelValue', false);

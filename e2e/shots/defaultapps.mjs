@@ -42,7 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 import { chromium } from '@playwright/test';
 import { goBuild } from '../../scripts/lib/go-build.mjs';
-import { zipStored } from './fixtures.mjs';
+import { syncAndWait, zipStored } from './fixtures.mjs';
 import { packBoardApp } from './board-app/pack.mjs';
 import { addLocalStorage, bootInstance, client, dismissToasts, log, newContext, shootWhole, shot, signIn, sleep, uploadTree } from './scene.mjs';
 
@@ -137,8 +137,13 @@ async function main() {
     const seed = join(tmp, 'seed');
     mkdirSync(join(seed, 'Documents'), { recursive: true });
     writeFileSync(join(seed, 'Documents', BOARD_FILE), `${JSON.stringify(BOARD, null, 2)}\n`);
-    await addLocalStorage(admin, 'demo', inst.storageRoot('demo'), { onHost: !inst.container });
+    const demo = await addLocalStorage(admin, 'demo', inst.storageRoot('demo'), { onHost: !inst.container });
     await uploadTree(admin, 'demo://', seed);
+    // ⚠ One finished sync: uploads never finish a storage's FIRST sync, and
+    // until it has, every folder here carried "This storage's first sync has
+    // not finished" above its listing - in two of this set's pictures from
+    // v0.50.0 to v0.51.0 (appearance.mjs does the same).
+    await syncAndWait((_token, path, init) => admin.call(path, init), null, demo.id);
     await installVia(admin, { manifest: board.manifestPath, ui: board.uiZip });
 
     const ctx = await newContext(browser, { width: 1440, height: 900 });

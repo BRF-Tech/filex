@@ -56,6 +56,13 @@ const PRESENTATION: Record<string, { placeholder?: string; monospace?: boolean; 
   header_roles: { placeholder: 'X-Auth-Roles', monospace: true },
   admin_role: { placeholder: 'admin' },
   group_attr: { monospace: true },
+  // LDAP links, e-mail domains and directory sync (docs/LDAP.md).
+  email_domains: { placeholder: 'partner.com, partner.co.uk', monospace: true },
+  group_filter: { placeholder: '(member=%s)', monospace: true },
+  group_base_dn: { placeholder: 'ou=groups,dc=example,dc=com', monospace: true },
+  sync_interval: { placeholder: '6h' },
+  sync_filter: { placeholder: '(mail=*)', monospace: true },
+  sync_group_filter: { placeholder: '(&(objectClass=groupOfNames)(cn=dept-*))', monospace: true },
   pamtester_path: { monospace: true },
   service: { monospace: true },
   sudo_path: { monospace: true },

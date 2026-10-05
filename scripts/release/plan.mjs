@@ -106,11 +106,14 @@ const WORKFLOW_GUARDS = [
   // 0.48.1: only the newest winget pull request per package stays open.
   'closes superseded winget pull requests after the new one, for the CLI and the desktop app',
   'closes only older versions of the same package, and nothing when the new pull request is missing',
-  // 0.50: every Linux package opens with Chromium's sandbox on, or refuses.
-  'opens every Linux package with the sandbox on, and checks the two refusals',
+  // 0.50: the .deb and the AppImage open with Chromium's sandbox on, or
+  // refuse. 0.52: the snap opens confined by snapd instead, and asks the
+  // Store for no allow-sandbox (packaging/ci/release-snap-confinement.patch).
+  "opens the .deb and the AppImage sandboxed, the AppImage's refusal, the snap confined",
   'installs the AppArmor profile docs/DESKTOP.md gives, word for word',
   'a snap waiting for the Snap Store review does not fail the release',
   "tells a sandboxed app from one running without it, from /proc",
+  "tells an app confined by its snap from one that is not, from /proc",
 ];
 
 /**

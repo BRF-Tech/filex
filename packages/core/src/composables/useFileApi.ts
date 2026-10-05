@@ -24,6 +24,7 @@
 import type { StorageInfo } from '../lib/catalogCoverage';
 import type { MeasuredDrive } from '../lib/storageLine';
 import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../types/ExplorerConfig';
+import type { LicenseInfo } from '@brftech/filex-app-ui/protocol';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
 import { draftsClient, type DraftDto } from '../lib/drafts';
@@ -338,6 +339,8 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     /* v4 — an app's own interface (AppFrame): its module, and its saves. */
     pluginUICall: derive(config.pluginUICall, '/api/files/plugins/ui/{plugin}/{view}/call'),
     pluginUISave: derive(config.pluginUISave, '/api/files/plugins/ui/{plugin}/{view}/save'),
+    /* 0.52.0 - a paid app's license, as the app itself reads it (fx.license.get()). */
+    pluginLicense: derive(config.pluginLicense, '/api/files/plugins/license/{plugin}'),
   };
 }
 
@@ -1156,6 +1159,16 @@ export function useFileApi(config: ExplorerConfig) {
     return root.replace(/\/$/, '') + (url.startsWith('/') ? url : `/${url}`);
   }
 
+  /**
+   * `GET …/plugins/license/{plugin}` - what an app reads about its own license
+   * (fx.license.get()): `{status, valid_until?, updates_until?}`,
+   * `{status: "free"}` for a free app. Never the key, the licensee or the store.
+   */
+  async function pluginLicense(plugin: string): Promise<LicenseInfo> {
+    if (!endpoints.pluginLicense) throw new Error('pluginLicense endpoint not configured');
+    return jsonFetch<LicenseInfo>(fillTemplate(endpoints.pluginLicense, { plugin }));
+  }
+
   /** `POST …/plugins/ui/{plugin}/{view}/call` — the app's module (`ui_call`). */
   async function pluginUICall(
     plugin: string,
@@ -1742,6 +1755,7 @@ export function useFileApi(config: ExplorerConfig) {
     appUIUrl,
     pluginUICall,
     pluginUISave,
+    pluginLicense,
     fetchResponse,
     createShare,
     listShares,

@@ -99,6 +99,13 @@ describe exactly what is guaranteed:
 - **The paths that broke on MySQL stay fixed** on every engine: quota
   accounting, version pruning, the sync history window, and file names that
   differ only by case, accent or a trailing space.
+- **What is below a folder is one answer on every engine**, and an index
+  answers it (migration `00083`): the rows whose path starts with the folder's,
+  byte for byte, in both stored spellings - never a folder of another case or
+  accent, a sibling that only starts with its name, or a `%` or `_` read as a
+  wildcard. PostgreSQL compares these paths in the `"C"` collation whatever the
+  database's locale, and the check runs in an ICU database as well; the plan
+  of each statement is read on every engine.
 - **A file-name search without the index gives one answer on every engine**:
   every word required, ranked before the limit, and the stored name compared
   through the same normaliser as the query - decomposed names, Turkish

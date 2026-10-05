@@ -40,6 +40,19 @@
  * (`review.compat.ok === false`) and cannot be installed from it; the server
  * refuses it too (`incompatible`).
  *
+ * FROM A STORE (`store` prop, 0.52.0, views/StoreInstall.vue): a store's
+ * install link that passed every check - the store trusted, the link signed,
+ * current and unused, what the repository serves held to the store's pins -
+ * opens the dialog straight on its review, the review the server ran for it.
+ * The same review, with "From store <origin>" on it and, for a paid app, the
+ * license key (the store's own, shown by its prefix only, or one typed
+ * here). Install goes to the store route, which reads the repository again
+ * and holds it to the pins again before it installs; closing the dialog
+ * without installing tells the store the link was cancelled (the page does).
+ * ⚠ While Install is on its way the dialog cannot be closed (no ×, Escape
+ * and the backdrop do nothing), in every mode: what the server answers is
+ * what the dialog then says (`installing`).
+ *
  * An app that opens kinds of file or draws their thumbnails (0.50) gets a
  * "File types" group at an install's review (`review.file_types`): one row
  * per kind and capability, who handles it now, and where this app goes -
@@ -78,6 +91,8 @@ import { formatBytes } from '@/lib/format';
 import { changedPlacements, defaultPlaces } from '@/lib/fileTypes';
 import { useToastStore } from '@/stores/toast';
 import { pluginLabelOf } from '@brftech/filex-core';
+import { AppStoreApi, licenseRuns, storeRefusal, type AppLicense, type StoreReview } from '@/api/appStore';
+import { storeSentence, storeSource } from '@/lib/storeRefusal';
 
 import Button from '@/components/ui/Button.vue';
 import AppPluginFileTypes from './AppPluginFileTypes.vue';
@@ -104,12 +119,20 @@ const props = defineProps<{
   update?: AppPlugin | null;
   /** The installed apps: what "upgrade it instead" switches to, by id. */
   installed?: AppPlugin[];
+  /**
+   * Set → the review of a store's install link: the dialog opens on it and
+   * installs through the store route (views/StoreInstall.vue).
+   */
+  store?: StoreReview | null;
 }>();
 
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void;
   (e: 'installed', plugin: AppPlugin): void;
   (e: 'upgraded', plugin: AppPlugin): void;
+  /** Install (or Upgrade) was pressed and is on its way to the server (true),
+   *  or the server answered (false). */
+  (e: 'installing', v: boolean): void;
 }>();
 
 const { t, locale } = useI18n();
@@ -128,10 +151,23 @@ const manifestUrl = ref('');
 const sha256 = ref('');
 
 const review = ref<AppPluginDryRun | null>(null);
+/** A paid store app's key, typed here ('' = the key the store's link carries). */
+const licenseKey = ref('');
+/** The license the store install ended with (a paid app). */
+const installedLicense = ref<AppLicense | null>(null);
 /** The File types group's choices, by row key (`fileTypeKey`). */
 const places = ref<Record<string, AppPluginPlace>>({});
 const understood = ref(false);
 const busy = ref(false);
+/**
+ * Install (or Upgrade) is on its way to the server. ⚠ The dialog does not
+ * close meanwhile, from any surface: the server finishes what it was asked
+ * either way, so a dialog closed under it said "nothing was installed" (a
+ * store's link: told the store `cancelled`) over an app that landed a moment
+ * later (store fe review #1). The answer - done, or the refusal - is shown
+ * here, and only then can the dialog close.
+ */
+const installing = ref(false);
 const failure = ref('');
 const missing = ref<string[]>([]);
 /**
@@ -142,15 +178,17 @@ const switchedTo = ref<AppPlugin | null>(null);
 
 /** The app being upgraded, whichever way this dialog came to upgrade it. */
 const upgradeTarget = computed<AppPlugin | null>(() => props.update ?? props.upgrade ?? switchedTo.value);
-const isUpgrade = computed(() => !!upgradeTarget.value);
-/** Upgrading from the app's own source: there is no source to fill in. */
-const fromSource = computed(() => !!props.update);
+const isUpgrade = computed(() => !!upgradeTarget.value || !!props.store?.upgrade_of);
+/** Upgrading from the app's own source, or a store's link: there is no source to fill in. */
+const fromSource = computed(() => !!props.update || !!props.store);
 /** Where that source is, as the list row names it. */
 const sourceText = computed(() => props.update?.manifest_url || props.update?.source_url || '');
 const title = computed(() =>
-  isUpgrade.value
-    ? t('appPlugins.wizard.upgradeTitle', { name: upgradeTarget.value?.name ?? '' })
-    : t('appPlugins.wizard.title'),
+  props.store
+    ? t('appStore.wizard.title', { name: props.store.intent.app })
+    : isUpgrade.value
+      ? t('appPlugins.wizard.upgradeTitle', { name: upgradeTarget.value?.name ?? '' })
+      : t('appPlugins.wizard.title'),
 );
 
 function reset() {
@@ -166,6 +204,8 @@ function reset() {
   manifestUrl.value = '';
   sha256.value = '';
   review.value = null;
+  licenseKey.value = '';
+  installedLicense.value = null;
   places.value = {};
   understood.value = false;
   busy.value = false;
@@ -179,6 +219,13 @@ watch(
   (open) => {
     if (!open) return;
     reset();
+    // A store's link: its review is already here (the server ran it).
+    if (props.store) {
+      review.value = props.store.review;
+      places.value = defaultPlaces(props.store.review.file_types);
+      step.value = 'review';
+      return;
+    }
     // Nothing to fill in: straight to the review of what the source has.
     if (props.update) void toReview();
   },
@@ -242,6 +289,11 @@ function buildSource(): AppPluginInstallSource | string {
  * (lib/appPluginRefusal).
  */
 function explain(e: unknown): string {
+  const sref = props.store ? storeRefusal(e) : null;
+  if (sref) {
+    const sentence = storeSentence(sref, t);
+    if (sentence) return sentence;
+  }
   const err = appPluginError(e);
   missing.value = err?.missing ?? [];
   return (err && refusalSentence(err, t)) || extractError(e, t('errors.generic'));
@@ -337,7 +389,20 @@ async function install() {
     return;
   }
   busy.value = true;
+  installing.value = true;
+  emit('installing', true);
   try {
+    if (props.store) {
+      const res = await AppStoreApi.install(props.store.handle, grant.value, placements.value, licenseKey.value.trim());
+      step.value = 'done';
+      installedLicense.value = res.license ?? null;
+      if (res.association_errors?.length) {
+        toast.warn(t('appPlugins.wizard.fileTypes.notSaved', { list: res.association_errors.join('; ') }));
+      }
+      if (props.store.upgrade_of) emit('upgraded', res.plugin);
+      else emit('installed', res.plugin);
+      return;
+    }
     const target = upgradeTarget.value;
     if (target) {
       const p = await AppPluginsApi.upgrade(target.id, src, grant.value, placements.value);
@@ -360,6 +425,8 @@ async function install() {
     failure.value = explain(e);
   } finally {
     busy.value = false;
+    installing.value = false;
+    emit('installing', false);
   }
 }
 
@@ -440,12 +507,27 @@ const signedLine = computed<string>(() => {
   const word = (v: boolean | undefined) => t(v ? 'appPlugins.wizard.diff.isSigned' : 'appPlugins.wizard.diff.isUnsigned');
   return t('appPlugins.wizard.diff.signed', { from: word(u.signed_from), to: word(u.signed_to) });
 });
+/**
+ * A store link's upgrade: where the installed app came from and where this
+ * link comes from, side by side (store fe review #8) - "GitHub directly,
+ * without a store" for an app installed from its repository.
+ */
+const storeUpgradeLine = computed<string>(() => {
+  const was = props.store?.upgrade_of;
+  if (!props.store || !was) return '';
+  return t('appStore.wizard.upgradeFrom', {
+    from: was.version,
+    fromSource: storeSource(was, t),
+    to: props.store.intent.version,
+    toSource: storeSource({ store: props.store.store, repo: props.store.intent.repo }, t),
+  });
+});
 const manifestLabel = computed(() => pluginLabelOf(manifest.value?.label, locale.value) || manifest.value?.name || '');
 const manifestDescription = computed(() => pluginLabelOf(manifest.value?.description, locale.value));
 </script>
 
 <template>
-  <Modal :model-value="modelValue" :title="title" size="lg" @update:model-value="(v: boolean) => !v && close()">
+  <Modal :model-value="modelValue" :title="title" size="lg" :prevent-close="installing" @update:model-value="(v: boolean) => !v && close()">
     <div class="space-y-4" data-testid="app-plugin-wizard">
       <!-- Step strip -->
       <ol class="flex items-center gap-2 text-xs text-zinc-500">
@@ -549,7 +631,16 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           <div class="flex flex-wrap items-baseline gap-2">
             <span class="font-semibold">{{ manifestLabel }}</span>
             <span class="font-mono text-xs text-zinc-500">{{ manifest.name }} · v{{ manifest.version }}</span>
+            <Badge v-if="store" tone="brand" size="xs" data-testid="app-plugin-from-store">
+              {{ t('appStore.wizard.fromStore', { store: store.store }) }}
+            </Badge>
           </div>
+          <p v-if="store" class="mt-1 break-all font-mono text-xs text-zinc-500" data-testid="app-plugin-store-source">
+            {{ store.intent.repo }} @ {{ store.intent.ref }}<template v-if="store.intent.commit"> ({{ store.intent.commit.slice(0, 12) }})</template>
+          </p>
+          <p v-if="storeUpgradeLine" class="mt-1 break-words text-xs text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-store-upgrade-from">
+            {{ storeUpgradeLine }}
+          </p>
           <p v-if="manifestDescription" class="mt-1 text-zinc-600 dark:text-zinc-400">{{ manifestDescription }}</p>
           <p v-if="review.kind === 'language_pack'" class="mt-1 text-zinc-600 dark:text-zinc-400" data-testid="app-plugin-is-language-pack">
             <Badge tone="brand" size="xs">{{ t('appPlugins.kind.languagePack') }}</Badge>
@@ -761,6 +852,28 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           :added="review.upgrade?.added"
         />
 
+        <!-- A paid app from a store: its license key. The store's own key is
+             never sent to this page - its prefix is; a key typed here
+             replaces it. The app is held until the store confirms it. -->
+        <div
+          v-if="store?.intent.paid"
+          class="space-y-2 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800"
+          data-testid="app-plugin-store-license"
+        >
+          <h3 class="text-sm font-semibold">{{ t('appStore.license.title') }}</h3>
+          <p class="text-xs text-zinc-600 dark:text-zinc-400">{{ t('appStore.wizard.paidNote') }}</p>
+          <p v-if="store.intent.license_key_prefix" class="text-xs" data-testid="app-plugin-store-license-prefix">
+            {{ t('appStore.wizard.keyFromStore', { prefix: store.intent.license_key_prefix }) }}
+          </p>
+          <Input
+            v-model="licenseKey"
+            :label="store.intent.license_key_prefix ? t('appStore.wizard.keyOther') : t('appStore.license.key')"
+            monospace
+            autocomplete="off"
+            data-testid="app-plugin-store-license-key"
+          />
+        </div>
+
         <Checkbox v-model="understood" :label="t('appPlugins.wizard.understand')" name="app-plugin-understand" />
 
         <p v-if="failure" class="rounded-lg bg-rose-50 p-3 text-xs text-rose-900 dark:bg-rose-950/40 dark:text-rose-200" role="alert" data-testid="app-plugin-wizard-error">
@@ -785,6 +898,14 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
         <p class="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
           <Check class="h-4 w-4" />
           {{ isUpgrade ? t('appPlugins.wizard.doneUpgrade') : t('appPlugins.wizard.doneInstall') }}
+        </p>
+        <p
+          v-if="installedLicense && !licenseRuns(installedLicense.status)"
+          class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+          role="alert"
+          data-testid="app-plugin-store-held"
+        >
+          {{ t('appStore.wizard.held', { status: t(`appStore.license.status.${installedLicense.status}`) }) }}
         </p>
         <div class="flex justify-end">
           <Button type="button" size="sm" variant="primary" @click="close">{{ t('common.close') }}</Button>

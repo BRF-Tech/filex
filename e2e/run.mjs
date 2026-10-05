@@ -81,6 +81,8 @@ if (!PROFILES.includes(profile)) {
   console.error('    --grep-invert <p> pass through to playwright (leave these OUT)');
   console.error('    --base-path <p>   serve filex under this sub-path (FILEX_BASE_PATH, e.g. /filex)');
   console.error('                      behind a proxy that passes the full path (lib/subpath-proxy.mjs)');
+  console.error('    --no-public-url   start filex without FILEX_PUBLIC_URL (it then reads its own address');
+  console.error('                      from each request - 202-store-install holds a link to that)');
   console.error('');
   console.error('  cypress     hermetic Cypress run against the same kind of instance');
   console.error('    --binary / --build / --port / --keep as above');
@@ -139,6 +141,9 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 const log = (msg) => console.log(`[e2e] ${msg}`);
+
+// The fake GitHub's directory (startServer), for the specs' environment.
+let fakeGitHubDir = '';
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -351,12 +356,36 @@ async function startServer(binary) {
   // deadlock. Handing the child a real fd takes Node out of the path.
   const logFd = fs.openSync(logFile, 'a');
 
+  // A stand-in for GitHub's raw host (e2e/lib/fake-github.mjs): the specs
+  // that install "from GitHub" (202-store-install) publish a repository by
+  // writing files into fakeGitHubDir. Its own process, for the reason the
+  // server's output is a file descriptor (above).
+  const fakeGitHubPort = await freePort();
+  fakeGitHubDir = path.join(dataDir, 'fake-github');
+  fs.mkdirSync(fakeGitHubDir, { recursive: true });
+  const ghLogFd = fs.openSync(path.join(dataDir, 'fake-github.log'), 'a');
+  const gh = spawn(process.execPath, [path.join(E2E_DIR, 'lib', 'fake-github.mjs'), fakeGitHubDir, String(fakeGitHubPort)], {
+    stdio: ['ignore', ghLogFd, ghLogFd],
+  });
+  cleanups.push(() => {
+    gh.kill();
+    try {
+      fs.closeSync(ghLogFd);
+    } catch {
+      /* already gone */
+    }
+  });
+
   const child = spawn(binary, ['serve'], {
     env: {
       ...process.env,
       FILEX_DATA_DIR: dataDir,
       FILEX_LISTEN: `127.0.0.1:${port}`,
-      FILEX_PUBLIC_URL: publicURL,
+      // --no-public-url: filex judges its own address from each request (a
+      // store link's filex_origin, among others) - the case an install
+      // without FILEX_PUBLIC_URL is in. Not with --base-path, whose proxy
+      // needs the public URL.
+      ...(flag('no-public-url') && !BASE_PATH ? {} : { FILEX_PUBLIC_URL: publicURL }),
       ...(BASE_PATH ? { FILEX_BASE_PATH: BASE_PATH } : {}),
       FILEX_ADMIN_EMAIL: ADMIN_EMAIL,
       FILEX_ADMIN_PASSWORD: ADMIN_PASSWORD,
@@ -393,6 +422,8 @@ async function startServer(binary) {
       // THIS machine to them and nothing else. Development and tests only -
       // never set on a server.
       FILEX_PLUGIN_LOOPBACK_SOURCES: '1',
+      // GitHub installs read repositories from the fake GitHub above.
+      FILEX_APP_GITHUB_RAW_BASE: `http://127.0.0.1:${fakeGitHubPort}`,
       // Debug unless the caller chose: the access line is written when an
       // answer FINISHES, and only the debug level also writes each request's
       // arrival with its socket (`http start ... peer=`). Without it a page
@@ -814,6 +845,8 @@ async function main() {
     // server stored (172-e2e-names: `filex decrypt` on a folder the browser
     // encrypted).
     E2E_FILEX_BIN: binary,
+    // Where a spec publishes a repository for a GitHub install (fake-github.mjs).
+    E2E_FAKE_GITHUB_DIR: fakeGitHubDir,
   };
   if (flag('s3')) {
     const s3 = await startS3(apiRoot);

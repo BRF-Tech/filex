@@ -39,6 +39,7 @@ const { groupsApi } = vi.hoisted(() => {
     addMembers: vi.fn(async () => structuredClone(detail)),
     removeMember: vi.fn(async () => ({ ...structuredClone(detail), members: [] })),
     forUser: vi.fn(async () => []),
+    detach: vi.fn(),
   };
   return { groupsApi, detail };
 });
@@ -173,6 +174,7 @@ describe('Group page', () => {
       name: 'Finance',
       description: 'money people',
       role_id: 7,
+      gives_admin: false,
       priority: 2,
       links: [
         { kind: 'other', value: 'cn=finance,ou=groups' },
@@ -196,6 +198,28 @@ describe('Group page', () => {
     expect(w.find('[data-testid="group-priority"]').exists()).toBe(false);
   });
 
+  it('lets an administrator make the members administrators, with no other role or priority', async () => {
+    const { router, plugins } = setup(true);
+    await router.push('/groups/3');
+    const w = mount(GroupEdit, { global: { plugins } });
+    await flushPromises();
+    await w.get('[data-testid="group-role"] select').setValue('admin');
+    expect(w.find('[data-testid="group-priority"]').exists()).toBe(false);
+    expect(w.text()).toContain(en.groups.fields.adminHint);
+    await w.get('[data-testid="group-form"]').trigger('submit');
+    await flushPromises();
+    expect(groupsApi.update.mock.calls[0][1]).toMatchObject({ role_id: null, gives_admin: true });
+  });
+
+  it('does not offer Administrator to a delegated administrator', async () => {
+    const { router, plugins } = setup(false);
+    await router.push('/groups/3');
+    const w = mount(GroupEdit, { global: { plugins } });
+    await flushPromises();
+    const values = w.findAll('[data-testid="group-role"] option').map((o) => o.attributes('value'));
+    expect(values).not.toContain('admin');
+  });
+
   it('leaves the SSO links and the role priority to an administrator', async () => {
     const { router, plugins } = setup(false);
     await router.push('/groups/3');
@@ -208,3 +232,89 @@ describe('Group page', () => {
     expect(w.text()).toContain(en.groups.fields.priorityAdminOnly);
   });
 });
+
+/** The groups the table shows, by their name cell. */
+const rowIds = (w: { findAll: (sel: string) => { attributes: (n: string) => string | undefined }[] }) =>
+  w.findAll('[data-testid^="group-"]').map((a) => a.attributes('data-testid')!).filter((id) => /^group-\d+$/.test(id));
+
+describe('Groups from directory sync', () => {
+  const synced = {
+    id: 9,
+    name: 'dept-legal',
+    description: 'From the directory: cn=dept-legal,ou=groups,dc=example,dc=com',
+    role_id: null,
+    priority: 0,
+    links: [{ kind: 'ldap', value: 'cn=dept-legal,ou=groups,dc=example,dc=com' }],
+    directory_id: 'ldap:u-legal',
+    directory_name: 'dept-legal',
+  };
+  const gone = { ...synced, id: 10, name: 'old-team', directory_id: 'ldap:u-old', directory_name: 'old-team', directory_state: 'removed' };
+
+  it('flags a group whose LDAP group is gone, and filters by where members come from', async () => {
+    groupsApi.list.mockResolvedValueOnce([
+      { ...groupsApi.detail?.group, id: 3, name: 'Finance', description: '', role_id: null, priority: 0, links: [{ kind: 'sso', value: 'finance' }] },
+      synced,
+      gone,
+    ] as never);
+    const { router, plugins } = setup(true);
+    await router.push('/groups');
+    const w = mount(Groups, { global: { plugins } });
+    await flushPromises();
+    expect(w.find('[data-testid="group-removed-10"]').text()).toBe(en.groups.directory.removed);
+    expect(w.find('[data-testid="group-removed-9"]').exists()).toBe(false);
+
+    await w.get('[data-testid="groups-kind"] select').setValue('removed');
+    expect(rowIds(w)).toEqual(['group-10']);
+    await w.get('[data-testid="groups-kind"] select').setValue('synced');
+    expect(rowIds(w)).toEqual(['group-9']);
+    await w.get('[data-testid="groups-kind"] select').setValue('sso');
+    expect(rowIds(w)).toEqual(['group-3']);
+  });
+
+  it('a synced group: says so, leaves its LDAP link to the directory, warns before a delete', async () => {
+    groupsApi.get.mockResolvedValueOnce({ group: synced, members: [], grants: [] } as never);
+    const { router, plugins } = setup(true);
+    await router.push('/groups/9');
+    const w = mount(GroupEdit, { global: { plugins }, attachTo: document.body });
+    await flushPromises();
+    expect(w.find('[data-testid="group-synced"]').text()).toContain('dept-legal');
+    expect(w.get('[data-testid="group-ldap"] textarea').attributes('disabled')).toBeDefined();
+    expect(w.find('[data-testid="group-detach"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('a group whose LDAP group is gone: keep it as a filex group', async () => {
+    groupsApi.get.mockResolvedValueOnce({ group: gone, members: [], grants: [] } as never);
+    groupsApi.detach.mockResolvedValueOnce({ group: { ...gone, links: [], directory_id: undefined, directory_state: undefined }, members: [], grants: [] } as never);
+    const { router, plugins } = setup(true);
+    await router.push('/groups/10');
+    const w = mount(GroupEdit, { global: { plugins } });
+    await flushPromises();
+    expect(w.find('[data-testid="group-directory-removed"]').text()).toContain('old-team');
+    await w.get('[data-testid="group-detach"]').trigger('click');
+    await flushPromises();
+    expect(groupsApi.detach).toHaveBeenCalledWith(10);
+    expect(w.find('[data-testid="group-directory-removed"]').exists()).toBe(false);
+    expect(w.get('[data-testid="group-ldap"] textarea').attributes('disabled')).toBeUndefined();
+  });
+});
+
+describe('what a group row says', () => {
+  it('where its members come from: the groups it is linked to, the directory it follows, or by hand', async () => {
+    groupsApi.list.mockResolvedValueOnce([
+      { id: 1, name: 'Finance', description: 'Invoice approvers', role_id: null, priority: 0, links: [{ kind: 'sso', value: 'finance' }, { kind: 'ldap', value: 'dept-finance' }], member_count: 50, grant_count: 2 },
+      { id: 2, name: 'Contractors', description: '', role_id: null, priority: 0, links: [], member_count: 2, grant_count: 0 },
+      { id: 3, name: 'guests', description: 'From the directory: cn=guests,dc=partner', role_id: null, priority: 0, links: [{ kind: 'ldap', value: 'cn=guests,dc=partner' }], directory_id: 'ldap-partner:u-1', directory_name: 'partner-guests', member_count: 3, grant_count: 0 },
+    ] as never);
+    const { router, plugins } = setup(true);
+    await router.push('/groups');
+    const w = mount(Groups, { global: { plugins } });
+    await flushPromises();
+    expect(w.get('[data-testid="group-1"]').text()).toContain('Invoice approvers');
+    expect(w.get('[data-testid="group-origin-1"]').text()).toBe('SSO: finance · LDAP: dept-finance');
+    expect(w.get('[data-testid="group-origin-2"]').text()).toBe(en.groups.card.byHand);
+    // Another provider's group, renamed here: which directory, and its name there.
+    expect(w.get('[data-testid="group-origin-3"]').text()).toBe(`${en.groups.card.fromDirectory.replace('{name}', 'ldap-partner')} · cn=partner-guests`);
+  });
+});
+

@@ -209,10 +209,24 @@ type outputFolder struct {
 // ⚠⚠ The server's check, not the screen's. The picker only offers folders,
 // but a crafted submit can name any path — a read-only archive, another
 // tenant's storage, `.filex-trash` — and each of those is refused here.
+//
+// ⚠⚠ A `root:` token's root is asked FIRST, before the storage is looked up,
+// its read-only flag read or the folder stat-ed. Asked after them (until
+// 0.52.0), a folder outside the root answered 404 when it was not there and
+// 403 when it was, an unknown storage 404 and a read-only one 409: a map of
+// what lies outside the token's folder (filex #155).
 func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, qualified string, pluginID int64) (*outputFolder, bool) {
 	adapter, rel := splitAdapterPath(strings.ReplaceAll(strings.TrimSpace(qualified), "\\", "/"))
 	if adapter == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_folder", "message": "output.dir must be an adapter-qualified folder (storage://path)"})
+		return nil, false
+	}
+	rel = strings.Trim(path.Clean("/"+rel), "/")
+	if rel == "." {
+		rel = ""
+	}
+	if !rootAllowsNamed(r.Context(), adapter, rel) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "the chosen folder is outside this token's root"})
 		return nil, false
 	}
 	st, err := h.Store.GetStorageByName(r.Context(), adapter)
@@ -227,10 +241,6 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "read_only", "message": "the chosen folder's storage is read-only"})
 		return nil, false
 	}
-	rel = strings.Trim(path.Clean("/"+rel), "/")
-	if rel == "." {
-		rel = ""
-	}
 	if rel != "" {
 		drv, derr := h.StorageResolver(st.ID)
 		if derr != nil {
@@ -242,10 +252,6 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 			notFound(w, "folder")
 			return nil, false
 		}
-	}
-	if !rootAllows(r.Context(), h.Store, st.ID, rel) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "the chosen folder is outside this token's root"})
-		return nil, false
 	}
 	if !aclAllowForPlugin(r.Context(), h.ACL, h.Store, st.ID, rel, acl.LevelEditor, pluginID) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "you may not write into the chosen folder"})
@@ -370,7 +376,7 @@ func applyJobOutput(params map[string]any, out *wire.Output) map[string]any {
 func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginName, actionID string, storageID int64, paths []string, fromSurface, opening bool, out *wire.Output) (*checked, bool) {
 	storageID, paths, err := h.resolvePaths(r.Context(), storageID, paths)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writePathsRefused(w, err)
 		return nil, false
 	}
 	if len(paths) == 0 {
@@ -383,6 +389,18 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 	}
 	if !ownsStorage(w, r, storageID, "storage") {
 		return nil, false
+	}
+	// A root-confined token (the app token a host hands an embed) reaches
+	// only its folder, here as on every other door; the ACL below is the
+	// PERSON's, which an admin-bound token clears everywhere. Asked before
+	// the storage row is read: a storage id that is not there answered 404
+	// and one outside the root 403 (filex #155). rootAllows fails closed on
+	// an id it cannot resolve.
+	for _, rel := range paths {
+		if !rootAllows(r.Context(), h.Store, storageID, rel) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root: " + rel})
+			return nil, false
+		}
 	}
 	st, err := h.Store.GetStorage(r.Context(), storageID)
 	if err != nil || st == nil {
@@ -468,13 +486,6 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a storage root cannot be an input"})
 			return nil, false
 		}
-		// A root-confined token (the app token a host hands an embed) reaches
-		// only its folder, here as on every other door; the ACL below is the
-		// PERSON's, which an admin-bound token clears everywhere.
-		if !rootAllows(r.Context(), h.Store, storageID, rel) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "outside this token's root: " + rel})
-			return nil, false
-		}
 		if !aclAllowForPlugin(r.Context(), h.ACL, h.Store, storageID, rel, need, p.Row.ID) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "permission_denied", "message": "insufficient permission: " + rel})
 			return nil, false
@@ -525,11 +536,21 @@ func appItemOf(rel string, obj storage.Object, stateKeys []string, caller int64,
 // storage-relative paths, or adapter-qualified paths (`docs://reports/x.pdf`,
 // the explorer's own form) with no storage_id. Mixed adapters are refused —
 // one job reads one storage.
+//
+// ⚠ An adapter-qualified path outside a `root:` token's root is refused
+// (errOutsideRoot) before its storage is looked up. Asked after, an unknown
+// storage answered 400 and a known one 403 - which storages exist, to a body
+// the confinement middleware does not read (text/plain, or no Content-Type;
+// filex #155).
 func (h *AppPlugins) resolvePaths(ctx context.Context, storageID int64, paths []string) (int64, []string, error) {
+	root, rooted := callerRoot(ctx)
 	out := make([]string, 0, len(paths))
 	for _, raw := range paths {
 		adapter, rel := splitAdapterPath(strings.ReplaceAll(raw, "\\", "/"))
 		if adapter != "" {
+			if rooted && !root.Within(adapter, rel) {
+				return 0, nil, errOutsideRoot
+			}
 			st, err := h.Store.GetStorageByName(ctx, adapter)
 			if err != nil || st == nil {
 				return 0, nil, errUnknownAdapter(adapter)
@@ -549,6 +570,20 @@ func (h *AppPlugins) resolvePaths(ctx context.Context, storageID int64, paths []
 		return 0, nil, errsString("storage_id or adapter-qualified paths are required")
 	}
 	return storageID, out, nil
+}
+
+// errOutsideRoot is resolvePaths' refusal of a path outside the caller's
+// `root:`, answered 403 by writePathsRefused.
+var errOutsideRoot = errors.New("outside this token's root")
+
+// writePathsRefused answers a resolvePaths error: 403 for a path outside the
+// token's root, 400 for a request that names its paths wrongly.
+func writePathsRefused(w http.ResponseWriter, err error) {
+	if errors.Is(err, errOutsideRoot) {
+		refuseOutsideRoot(w)
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 }
 
 // Users is the people-picker's directory search:
@@ -645,6 +680,12 @@ func (h *AppPlugins) enqueue(w http.ResponseWriter, r *http.Request, c *checked,
 		actorID = &id
 	}
 	params = applyJobOutput(params, c.output)
+	// A `root:` token's job is held to its root when it runs, on the ops
+	// worker with no request behind it: the root travels on the row
+	// (wasmplugin.JobRoot), like the output choice above.
+	if root, rooted := callerRoot(r.Context()); rooted {
+		wasmplugin.SetJobRoot(params, root)
+	}
 	pb, _ := json.Marshal(params)
 	if len(pb) > maxJobParamsBytes {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "params too large"})
@@ -791,7 +832,7 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 	if len(paths) > 0 {
 		sid, resolved, err := h.resolvePaths(r.Context(), req.StorageID, paths)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writePathsRefused(w, err)
 			return
 		}
 		req.StorageID = sid
@@ -814,11 +855,22 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 			}
 			rels = append(rels, rel)
 		}
-	} else if req.StorageID > 0 && !ownsStorage(w, r, req.StorageID, "storage") {
+	} else if req.StorageID > 0 {
 		// A screen opened on no file (a home page) still names a storage, and
 		// the call's scope opens its driver and tells the app its name: the
 		// same tenant check the path branch makes.
-		return
+		//
+		// ⚠ And a `root:` token opens one only on its root's own storage. Any
+		// other storage gets the answer every app door gives a path outside
+		// the root, whether or not that storage exists (0.52.0): it opened,
+		// with that storage's name and driver in the call's scope.
+		if root, rooted := callerRoot(r.Context()); rooted && rootStorageName(r.Context(), h.Store, req.StorageID) != root.Adapter {
+			refuseOutsideRoot(w)
+			return
+		}
+		if !ownsStorage(w, r, req.StorageID, "storage") {
+			return
+		}
 	}
 	// ⚠⚠ The HOST half of show_when / required_when (surface_conditions.go).
 	// Before the plugin is told what was pressed, the values are measured
@@ -1001,7 +1053,8 @@ func jsonNumber(s string, n *int64) (bool, error) {
 // a file they could have opened themselves, so the path is resolved and run
 // through the ACL here, where the caller is known. A path that does not pass
 // simply loses its link — the screen still draws, it just does not offer to
-// go somewhere the person has no business being.
+// go somewhere the person has no business being. A `root:` token opens
+// nothing outside its root, so a link there is dropped too (filex #154).
 func (h *AppPlugins) checkSurfaceOpen(r *http.Request, s *wire.Surface) {
 	if s == nil || s.Open == nil {
 		return
@@ -1011,7 +1064,8 @@ func (h *AppPlugins) checkSurfaceOpen(r *http.Request, s *wire.Surface) {
 		s.Open = nil
 		return
 	}
-	if !ownsStorageQuiet(r, storageID) || !aclAllowID(r.Context(), h.ACL, h.Store, storageID, rels[0], acl.LevelViewer) {
+	if !rootAllows(r.Context(), h.Store, storageID, rels[0]) || !ownsStorageQuiet(r, storageID) ||
+		!aclAllowID(r.Context(), h.ACL, h.Store, storageID, rels[0], acl.LevelViewer) {
 		s.Open = nil
 	}
 }

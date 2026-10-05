@@ -240,6 +240,22 @@ func (p Policy) DownloadClient(timeout time.Duration) *http.Client {
 	}
 }
 
+// APIClient is DownloadClient's sibling for an API filex SENDS something to -
+// a body, a secret (an app store's license check carries a license key) -
+// and reads an answer from: every dial guarded the same way, but a redirect
+// is never followed. It is the answer (http.ErrUseLastResponse), so a 307 or
+// 308 cannot make the request, body and all, go to whatever host the
+// response names (an open redirect at the API, a hijacked route).
+func (p Policy) APIClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport: p.Transport(60 * time.Second),
+		Timeout:   timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 // checkRedirect is DownloadClient's redirect rule. The dial guards every hop
 // anyway; the literal check here only words the refusal by the hop.
 func (p Policy) checkRedirect(next *http.Request, via []*http.Request) error {

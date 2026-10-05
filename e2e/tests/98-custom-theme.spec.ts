@@ -23,7 +23,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { loginAs, dismissInstallBanner, logout } from '../helpers/auth';
 import { underBase } from '../helpers/base';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
-import { readWebPrefs, restoreWebPrefs } from '../helpers/prefs';
+import { WEB_PREFS_URL, readWebPrefs, restoreWebPrefs } from '../helpers/prefs';
 
 const STORAGE = `e2e-theme98-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -285,8 +285,20 @@ test.describe('tema:v1 — a custom theme, composed and worn', () => {
     await dismissInstallBanner(page);
     await loginAs(page);
 
-    // Signed in and wearing a palette of their own.
-    await page.evaluate(() => localStorage.setItem('filex.palette', 'night'));
+    // Signed in and wearing a palette of their own - chosen on the ACCOUNT,
+    // where the settings dialog puts it. ⚠ `filex.palette` is only the
+    // first-paint mirror of the account's web preferences, and the account's
+    // own palette paints over it once the document lands. Written to the
+    // mirror alone, this case measured whatever the account held: after
+    // "applying it" above that was `custom:e2e-acme` (the page wrote the
+    // palette it was opened with into an account that had none), so the
+    // brand came back instead of night (0.52.0 release round: 98 alone and
+    // the LDAP subset red on all three engines, the account's document
+    // saying `{"palette":"custom:e2e-acme"}`). afterAll puts the document
+    // back as this spec found it.
+    const doc = await readWebPrefs(page.request);
+    const put = await page.request.put(WEB_PREFS_URL, { data: { prefs: { ...doc, palette: 'night' } } });
+    expect(put.ok(), `prefs PUT failed: ${put.status()}`).toBe(true);
     await page.goto('/admin/explore');
     await expect.poll(() => token(page, '--fe-primary')).toBe('#2c4a9e');
 

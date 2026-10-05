@@ -12,6 +12,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -37,7 +39,20 @@ func invalid(format string, a ...any) error {
 }
 
 // linkKinds are the outside directories a group can be linked to.
-var linkKinds = map[string]bool{model.GroupLinkSSO: true}
+var linkKinds = map[string]bool{model.GroupLinkSSO: true, model.GroupLinkLDAP: true}
+
+// ldapSpace is the space a DN may carry around its separators.
+var ldapSpace = regexp.MustCompile(`\s*([,=+])\s*`)
+
+// LDAPValue is the form an LDAP group's name is compared in, on both sides
+// (a group's link, and the groups a directory sign-in reports): lower case,
+// and a DN without the space around its commas, equals and plus signs — a
+// directory is free to write "CN=Finance, OU=Groups" for what an
+// administrator typed as "cn=finance,ou=groups". LDAP compares these names
+// without case.
+func LDAPValue(s string) string {
+	return ldapSpace.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "$1")
+}
 
 // Normalize validates g in place and canonicalizes what it can: trimmed name
 // and description, trimmed and de-duplicated links. It does not check that
@@ -66,6 +81,9 @@ func Normalize(g *model.Group) error {
 	for _, l := range g.Links {
 		l.Kind = strings.TrimSpace(l.Kind)
 		l.Value = strings.TrimSpace(l.Value)
+		if l.Kind == model.GroupLinkLDAP {
+			l.Value = LDAPValue(l.Value)
+		}
 		if !linkKinds[l.Kind] {
 			return invalid("unknown link kind %q", l.Kind)
 		}
@@ -86,7 +104,7 @@ func Normalize(g *model.Group) error {
 
 // SyncLinked makes a person's memberships through one kind of link (kind,
 // e.g. model.GroupLinkSSO) match the outside groups a sign-in says they are
-// in (values, compared exactly): they join every group of their tenant — and
+// in (values, compared exactly — LDAP names in LDAPValue's form): they join every group of their tenant — and
 // install-wide groups only if they are the supertenant's — that names one of
 // those values, and leave every group they were in only
 // through such a link that no longer does. A member added by hand stays
@@ -117,9 +135,13 @@ func linkContext(ctx context.Context, store db.Store) ([]*model.Group, *model.Pr
 }
 
 func syncLinked(ctx context.Context, store db.Store, u *model.User, kind string, values []string, groups []*model.Group, super *model.Provider) (bool, error) {
+	same := func(v string) string { return v }
+	if kind == model.GroupLinkLDAP {
+		same = LDAPValue
+	}
 	want := map[string]bool{}
 	for _, v := range values {
-		if v != "" {
+		if v = same(v); v != "" {
 			want[v] = true
 		}
 	}
@@ -135,7 +157,7 @@ func syncLinked(ctx context.Context, store db.Store, u *model.User, kind string,
 			continue
 		}
 		for _, l := range g.Links {
-			if l.Kind == kind && want[l.Value] {
+			if l.Kind == kind && want[same(l.Value)] && (!g.GivesAdmin || adminLinkCounts(g, l, u)) {
 				ids = append(ids, g.ID)
 				break
 			}
@@ -202,28 +224,8 @@ func SyncLevels(ctx context.Context, store db.Store, userIDs []int64) error {
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && u == nil) {
 			continue
 		}
-		if err == nil && u.IsAdmin() {
-			// Bound by no role, and their level is their own: a level kept
-			// from before a group's role must not come back if they are
-			// demoted later (the SSO admin mapping promotes and demotes
-			// without passing through the role routes that forget it).
-			if err := store.DeleteUserGroupLevel(ctx, uid); err != nil {
-				return err
-			}
-			continue
-		}
 		if err != nil {
 			return err
-		}
-		own, err := store.GetUserCustomRole(ctx, uid)
-		if err != nil {
-			return err
-		}
-		if own != 0 {
-			if err := store.DeleteUserGroupLevel(ctx, uid); err != nil {
-				return err
-			}
-			continue
 		}
 		ms, err := store.ListUserGroupMemberships(ctx, uid)
 		if err != nil {
@@ -234,6 +236,76 @@ func SyncLevels(ctx context.Context, store db.Store, userIDs []int64) error {
 			if g := byID[m.GroupID]; g != nil {
 				groups = append(groups, g)
 			}
+		}
+		// Administrator through a group (migration 00086) comes before any
+		// role, the person's own included: it is more than any role gives.
+		admin := GivesAdmin(groups, u.ProviderID)
+		switch {
+		case u.IsAdmin() && !u.AdminByGroup:
+			// An administrator made by hand (or by the SSO admin mapping) is
+			// bound by no role, and no group demotes them. A level kept from
+			// before a group's role must not come back if they are demoted
+			// later (the SSO admin mapping promotes and demotes without
+			// passing through the role routes that forget it).
+			if err := store.DeleteUserGroupLevel(ctx, uid); err != nil {
+				return err
+			}
+			continue
+		case u.IsAdmin() && admin:
+			continue
+		case u.IsAdmin():
+			// No group makes them one any more: back to the level from
+			// before — never the last administrator, who would leave
+			// nobody able to administer filex.
+			last, err := LastAdmin(ctx, store, u)
+			if err != nil {
+				return err
+			}
+			if last {
+				slog.Warn("groups: no group makes this account an administrator any more, but it is the last one; it stays one",
+					slog.Int64("user_id", uid), slog.String("email", u.Email))
+				continue
+			}
+			before, ok, err := store.GetUserGroupLevel(ctx, uid)
+			if err != nil {
+				return err
+			}
+			level := model.RoleUser
+			if ok && model.ValidRole(before) && before != model.RoleAdmin {
+				level = before
+			}
+			if err := store.UpdateUserRole(ctx, uid, level); err != nil {
+				return err
+			}
+			if err := store.DeleteUserGroupLevel(ctx, uid); err != nil {
+				return err
+			}
+			slog.Info("groups: no group makes this account an administrator any more",
+				slog.Int64("user_id", uid), slog.String("email", u.Email), slog.String("role", level))
+			u.Role, u.AdminByGroup = level, false
+			changed = true
+			// On to the role their groups give now, if one does.
+		case admin:
+			if err := store.SetUserGroupLevel(ctx, uid, u.Role); err != nil {
+				return err
+			}
+			if err := store.SetUserAdminByGroup(ctx, uid); err != nil {
+				return err
+			}
+			slog.Info("groups: a group made this account an administrator",
+				slog.Int64("user_id", uid), slog.String("email", u.Email))
+			changed = true
+			continue
+		}
+		own, err := store.GetUserCustomRole(ctx, uid)
+		if err != nil {
+			return err
+		}
+		if own != 0 {
+			if err := store.DeleteUserGroupLevel(ctx, uid); err != nil {
+				return err
+			}
+			continue
 		}
 		roleID, _ := perm.EffectiveRole(0, groups, rules, u.ProviderID)
 		rule := ruleByID[roleID]
@@ -272,6 +344,64 @@ func SyncLevels(ctx context.Context, store db.Store, userIDs []int64) error {
 		perm.Invalidate()
 	}
 	return nil
+}
+
+// adminLinkCounts is the stricter matching of a group that makes its members
+// administrators. An LDAP link counts only by the group's full DN — a common
+// name matches a group of that name anywhere in any directory — and only for
+// people of the group's own directory: another directory's administrator
+// (a partner's) can name a group whatever they like, its DN included.
+func adminLinkCounts(g *model.Group, l model.GroupLink, u *model.User) bool {
+	if l.Kind != model.GroupLinkLDAP {
+		return true
+	}
+	return IsLDAPDN(l.Value) && u.DirectoryOwner() != "" && u.DirectoryOwner() == GroupDirectory(g)
+}
+
+// IsLDAPDN reports whether an LDAP link names a group by its DN rather than
+// by its common name.
+func IsLDAPDN(v string) bool {
+	return strings.Contains(v, "=")
+}
+
+// GroupDirectory is the LDAP directory a group belongs to: the one whose
+// sync brought it in, else the main directory.
+func GroupDirectory(g *model.Group) string {
+	if i := strings.Index(g.DirectoryID, ":"); i > 0 {
+		return g.DirectoryID[:i]
+	}
+	return model.MainDirectory
+}
+
+// GivesAdmin reports whether one of these groups — the account's, of its
+// tenant — makes its members administrators.
+func GivesAdmin(groups []*model.Group, providerID *int64) bool {
+	for _, g := range groups {
+		if g != nil && g.GivesAdmin && perm.GroupInScope(g, providerID) {
+			return true
+		}
+	}
+	return false
+}
+
+// LastAdmin reports whether u is the only administrator of its tenant still
+// switched on — taking it away would leave nobody to administer it. (An
+// administrator of another tenant administers only that tenant.)
+func LastAdmin(ctx context.Context, store db.Store, u *model.User) (bool, error) {
+	users, err := store.ListUsers(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, o := range users {
+		if o.ID != u.ID && o.IsAdmin() && o.Enabled && sameTenant(o.ProviderID, u.ProviderID) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func sameTenant(a, b *int64) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 // Via is the role an account holds through a group.
@@ -326,40 +456,52 @@ func EffectiveRoles(ctx context.Context, store db.Store, users []*model.User) (m
 	return out, nil
 }
 
-// SyncStoredSSO re-applies every account's SSO-linked memberships from the
-// groups its LAST sign-in carried (user_sso_groups) — what a changed SSO link
-// on a group does at once, instead of waiting for each person to sign in
-// again. users are the accounts to consider (the caller's tenant's); an
-// account that never signed in through SSO has no stored groups and is only
-// taken out of groups it was in through SSO, if any.
-func SyncStoredSSO(ctx context.Context, store db.Store, users []*model.User) error {
+// SyncStored re-applies every account's directory-linked memberships from
+// the groups its LAST sign-in carried — SSO's (user_sso_groups) and LDAP's
+// (user_ldap_groups) — what a changed link on a group does at once, instead
+// of waiting for each person to sign in again. users are the accounts to
+// consider (the caller's tenant's); an account that never signed in through
+// a directory has no stored groups and is only taken out of groups it was in
+// through one, if any.
+func SyncStored(ctx context.Context, store db.Store, users []*model.User) error {
 	groups, super, err := linkContext(ctx, store)
 	if err != nil {
 		return err
+	}
+	kinds := []struct {
+		kind   string
+		stored func(context.Context, int64) ([]string, error)
+	}{
+		{model.GroupLinkSSO, store.ListUserSSOGroups},
+		{model.GroupLinkLDAP, store.ListUserLDAPGroups},
 	}
 	for _, u := range users {
 		if u == nil {
 			continue
 		}
-		values, err := store.ListUserSSOGroups(ctx, u.ID)
-		if err != nil {
-			return err
-		}
-		if len(values) == 0 {
-			ms, err := store.ListUserGroupMemberships(ctx, u.ID)
+		var ms []*model.GroupMember
+		for _, k := range kinds {
+			values, err := k.stored(ctx, u.ID)
 			if err != nil {
 				return err
 			}
-			viaSSO := false
-			for _, m := range ms {
-				viaSSO = viaSSO || m.Source == model.GroupSourceSSO
+			if len(values) == 0 {
+				if ms == nil {
+					if ms, err = store.ListUserGroupMemberships(ctx, u.ID); err != nil {
+						return err
+					}
+				}
+				via := false
+				for _, m := range ms {
+					via = via || m.Source == k.kind
+				}
+				if !via {
+					continue
+				}
 			}
-			if !viaSSO {
-				continue
+			if _, err := syncLinked(ctx, store, u, k.kind, values, groups, super); err != nil {
+				return err
 			}
-		}
-		if _, err := syncLinked(ctx, store, u, model.GroupLinkSSO, values, groups, super); err != nil {
-			return err
 		}
 	}
 	return nil

@@ -422,7 +422,8 @@ const maxStateBytes = 64 << 10
 // navigated to one. A deleted file drops out by itself (the join is to live
 // node rows), the answer is this plugin's state and nothing else, and every
 // row is filtered through the ASKING PERSON's permission — a listing is not
-// a way around the ACL.
+// a way around the ACL — and through the root of a `root:` token the call was
+// made with (mayList).
 const maxStateListLimit = 500
 
 func hfStateList(ctx context.Context, s *Scope, in json.RawMessage) (any, error) {
@@ -436,25 +437,49 @@ func hfStateList(ctx context.Context, s *Scope, in json.RawMessage) (any, error)
 	if req.Limit <= 0 || req.Limit > maxStateListLimit {
 		req.Limit = 100
 	}
-	rows, err := s.reg.opts.Store.ListAppPluginStateFiles(ctx, s.plugin.Row.ID, strings.TrimSpace(req.Key), req.Limit)
-	if err != nil {
-		return nil, hostErr(wire.ErrUnavailable, "state: "+err.Error())
-	}
-	items := make([]map[string]any, 0, len(rows))
-	for _, f := range rows {
-		rel := strings.TrimPrefix(f.Path, "/")
-		if !s.mayList(ctx, f.StorageID, rel) {
-			continue
+	// ⚠ The limit is how many files the caller is TOLD about, so it is counted
+	// after mayList narrows the rows: the store is read a page at a time, in
+	// its one fixed order, until that many have passed or the rows run out.
+	// Read with the limit itself, a caller whose files sorted after the ones
+	// it may not see was told about none of them (0.52.0). stateListScanRows
+	// bounds the reading, so a narrow caller in a large store costs at most
+	// that many rows.
+	key := strings.TrimSpace(req.Key)
+	items := make([]map[string]any, 0, req.Limit)
+	for offset := 0; len(items) < req.Limit && offset < stateListScanRows; {
+		rows, err := s.reg.opts.Store.ListAppPluginStateFiles(ctx, s.plugin.Row.ID, key, stateListPage, offset)
+		if err != nil {
+			return nil, hostErr(wire.ErrUnavailable, "state: "+err.Error())
 		}
-		items = append(items, map[string]any{
-			"path":  f.StorageName + "://" + rel,
-			"name":  f.Name,
-			"key":   f.Key,
-			"value": f.Value,
-		})
+		for _, f := range rows {
+			rel := strings.TrimPrefix(f.Path, "/")
+			if !s.mayList(ctx, f.StorageID, f.StorageName, rel) {
+				continue
+			}
+			items = append(items, map[string]any{
+				"path":  f.StorageName + "://" + rel,
+				"name":  f.Name,
+				"key":   f.Key,
+				"value": f.Value,
+			})
+			if len(items) == req.Limit {
+				break
+			}
+		}
+		if len(rows) < stateListPage {
+			break
+		}
+		offset += len(rows)
 	}
 	return map[string]any{"items": items}, nil
 }
+
+// stateListPage is how many state rows state_list reads at a time, and
+// stateListScanRows how many it reads at most for one call.
+const (
+	stateListPage     = maxStateListLimit
+	stateListScanRows = 10 * stateListPage
+)
 
 // mayList answers whether this call may be told about a state row's file.
 //
@@ -473,7 +498,15 @@ func hfStateList(ctx context.Context, s *Scope, in json.RawMessage) (any, error)
 // ⚠ Deliberately keyed on the system MARKER and never on "the actor is nil".
 // A public page call is actor-less too, and that one is a visitor who found a
 // link — for them the nil-user refusal is exactly right, and they keep it.
-func (s *Scope) mayList(ctx context.Context, storageID int64, rel string) bool {
+//
+// ⚠⚠ A call made with a `root:` token is told only about rows inside that
+// root, before any of the above: the person behind a project's token may
+// well see the whole storage (the documented embed binds one service account
+// to many project tokens), and the token may not (filex #154).
+func (s *Scope) mayList(ctx context.Context, storageID int64, storageName, rel string) bool {
+	if !s.inRoot(storageName, rel) {
+		return false
+	}
 	if s.system {
 		return true
 	}
@@ -521,8 +554,14 @@ func (s *Scope) targetRel(ctx context.Context, ref, qualified string) (string, e
 var errPathNotHanded = hostErr(wire.ErrPermissionDenied, "path is not a file this call was handed: name an input by ref, or a file this app keeps state on")
 
 // handedPath reports whether rel is one of this call's inputs or a file this
-// app keeps state on (on the call's storage).
+// app keeps state on (on the call's storage) - inside the root of a `root:`
+// token the call was made with. The app keeps state on files all over the
+// storage, handed to it by people with no root; a token's job may name only
+// those in its own folder (filex #154).
 func (s *Scope) handedPath(ctx context.Context, rel string) bool {
+	if !s.inRoot(s.storageName, rel) {
+		return false
+	}
 	return s.hasInput(rel) || s.reg.keepsStateOn(ctx, s.plugin, s.storageID, rel)
 }
 
@@ -755,6 +794,12 @@ func hfFileUnlock(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 	rel, byPath, err := s.targetRelRaw(req.Ref, req.Path)
 	if err != nil {
 		return nil, err
+	}
+	// Outside a `root:` token's root not even the app's own lock is lifted by
+	// path, and it is refused before the lock is looked up: the same answer
+	// whether or not there is one (filex #154).
+	if byPath && !s.inRoot(s.storageName, rel) {
+		return nil, errPathNotHanded
 	}
 	ph := pathkey.Hash(s.storageID, "/"+rel)
 	cur, err := s.reg.opts.Store.GetAppPluginLock(ctx, s.storageID, ph)

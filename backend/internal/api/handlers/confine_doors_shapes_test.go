@@ -95,7 +95,11 @@ func TestConfineDoors_AnOpIsCarriedOutWhereItWasJudged(t *testing.T) {
 
 	body := fmt.Sprintf(`{"kind":"copy","storage_id":%d,"sources":["kutu/ic.txt"],"dest":"disari/alt://kutu/"}`, f.Main.ID)
 	code, raw := confRaw(t, f.URL, tok, http.MethodPost, "/api/files/ops", "text/plain", []byte(body))
-	assert.Equal(t, http.StatusBadRequest, code, "a root token, text/plain: %s", raw)
+	// Refused before it is read as a path at all (0.52.0): to a root token the
+	// `dest` names another storage, and it gets the answer the same body gets
+	// as JSON (confine_ops_one_answer_test.go). A caller with no root is
+	// answered 400 BAD_PATH below.
+	assert.Equal(t, http.StatusForbidden, code, "a root token, text/plain: %s", raw)
 
 	// An unconfined member holding a grant on rbac://kutu alone.
 	f.put(t, f.AdminTk, "rbac://kutu/a.txt", "rbac icerik")

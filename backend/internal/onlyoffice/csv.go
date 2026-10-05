@@ -19,11 +19,16 @@ package onlyoffice
 //     callback hands back a CSV (`filetype: "csv"`), but ONLYOFFICE writes it
 //     its own way whatever the file was: comma-separated, a UTF-8 byte order
 //     mark in front, "\n" line ends. A semicolon file came back with commas.
-//     RewriteCSV puts the file's own way back (its delimiter, its byte order
-//     mark or none, its line ends) before it is written. With
+//     And it writes every cell as its spreadsheet shows it: a cell that reads
+//     as a number or a date comes back as one, edited or not (`007` as `7`).
+//     KeepCSV (csv_keep.go) lines the saved records up with the file the save
+//     replaces and writes the file's own bytes back for what nobody changed;
+//     RewriteCSV, which 0.51.0 wrote alone, puts back only the file's own
+//     way (its delimiter, its byte order mark or none, its line ends) and is
+//     what is written whenever the cells cannot be kept. With
 //     `assemblyFormatAsOrigin: false` the callback hands back an XLSX
 //     (`filetype: "xlsx"`); the callback converts that to CSV first
-//     (callback.go csvSave) and never writes it under the .csv name.
+//     (callback_csv.go csvSave) and never writes it under the .csv name.
 
 import (
 	"bytes"
@@ -191,7 +196,9 @@ func (d CSVDialect) KeepsBOM() bool { return d.BOM || !d.UTF8 }
 // RewriteCSV turns the CSV the document server saved (comma-separated, a
 // UTF-8 byte order mark, "\n" line ends) back into the file's own way of
 // writing: its delimiter, its byte order mark or none, its line ends. The
-// values are not touched; a field is quoted when the delimiter, a quote or a
+// values are not touched: they stay ONLYOFFICE's, `7` for a cell that held
+// `007`. KeepCSV is what keeps the file's own text, and this is what is
+// written when it cannot. A field is quoted when the delimiter, a quote or a
 // line end is in it.
 func RewriteCSV(saved []byte, d CSVDialect) []byte {
 	body := bytes.TrimPrefix(saved, utf8BOM)
@@ -209,10 +216,11 @@ func RewriteCSV(saved []byte, d CSVDialect) []byte {
 	return append(append(out, utf8BOM...), body...)
 }
 
-// redelimit reads comma-separated records (RFC 4180: a field in quotes may
-// hold commas, quotes doubled, and line ends) and writes them with comma as
-// the delimiter and "\r\n" or "\n" between records. Records keep their
-// fields, empty lines included (encoding/csv would drop those).
+// redelimit reads comma-separated records (csvReader) and writes them with
+// comma as the delimiter and "\r\n" or "\n" between records. Records keep
+// their fields, empty lines included (encoding/csv would drop those). A field
+// is written as it is read: a line of a million delimiters is a million
+// fields, and holding them all would cost a hundred times the line.
 func redelimit(in []byte, comma byte, crlf bool) []byte {
 	var out bytes.Buffer
 	out.Grow(len(in) + len(in)/16)
@@ -220,74 +228,191 @@ func redelimit(in []byte, comma byte, crlf bool) []byte {
 	if crlf {
 		eol = "\r\n"
 	}
-	var field []byte
-	first := true
-	flush := func() {
-		if !first {
-			out.WriteByte(comma)
-		}
-		first = false
-		if bytes.IndexByte(field, comma) >= 0 || bytes.IndexByte(field, '"') >= 0 ||
-			bytes.IndexByte(field, '\n') >= 0 || bytes.IndexByte(field, '\r') >= 0 {
-			out.WriteByte('"')
-			out.Write(bytes.ReplaceAll(field, []byte{'"'}, []byte{'"', '"'}))
-			out.WriteByte('"')
-		} else {
-			out.Write(field)
-		}
-		field = field[:0]
-	}
-	i, n := 0, len(in)
-	for i < n {
-		// One field.
-		if in[i] == '"' {
-			i++
-			for i < n {
-				if in[i] == '"' {
-					if i+1 < n && in[i+1] == '"' {
-						field = append(field, '"')
-						i += 2
-						continue
-					}
-					i++
-					break
-				}
-				field = append(field, in[i])
-				i++
+	r := csvReader{in: in, comma: ','}
+	for r.more() {
+		for {
+			f, last, _, term := r.field()
+			writeCSVField(&out, f.val, comma)
+			if !last {
+				out.WriteByte(comma)
+				continue
 			}
-			// Anything between the closing quote and the delimiter is kept
-			// as it stands (a malformed field is not repaired, nor lost).
-			for i < n && in[i] != ',' && in[i] != '\n' {
-				if in[i] != '\r' {
-					field = append(field, in[i])
-				}
-				i++
+			if term > 0 {
+				out.WriteString(eol)
 			}
-		} else {
-			for i < n && in[i] != ',' && in[i] != '\n' {
-				field = append(field, in[i])
-				i++
-			}
-			if len(field) > 0 && field[len(field)-1] == '\r' && (i == n || in[i] == '\n') {
-				field = field[:len(field)-1]
-			}
-		}
-		flush()
-		if i >= n {
 			break
 		}
-		if in[i] == ',' {
-			i++
-			if i == n {
-				// A trailing delimiter: one more, empty field.
-				flush()
-			}
-			continue
-		}
-		// A line end: the record is over.
-		out.WriteString(eol)
-		first = true
-		i++
 	}
 	return out.Bytes()
+}
+
+// writeCSVField writes one value, in quotes when the delimiter, a quote or a
+// line end is in it.
+func writeCSVField(out *bytes.Buffer, val []byte, comma byte) {
+	if bytes.IndexByte(val, comma) < 0 && bytes.IndexByte(val, '"') < 0 &&
+		bytes.IndexByte(val, '\n') < 0 && bytes.IndexByte(val, '\r') < 0 {
+		out.Write(val)
+		return
+	}
+	out.WriteByte('"')
+	for {
+		i := bytes.IndexByte(val, '"')
+		if i < 0 {
+			break
+		}
+		out.Write(val[:i+1])
+		out.WriteByte('"')
+		val = val[i+1:]
+	}
+	out.Write(val)
+	out.WriteByte('"')
+}
+
+// csvField is one field of a record: as it is written, and what it says.
+type csvField struct {
+	// raw is the field's bytes in the file, its quotes included.
+	raw []byte
+	// val is its value: the quotes gone, a doubled quote one.
+	val []byte
+}
+
+// csvReader reads the records of a CSV one after another: the one reader of
+// the package, for the file on storage (its own delimiter) and for what the
+// document server saved (a comma). RFC 4180: a field in quotes may hold the
+// delimiter, quotes doubled, and line ends; a record ends at "\n" or "\r\n"
+// outside quotes. A lone "\r" ends nothing.
+//
+// Odd input is read, never repaired and never lost: what stands between a
+// closing quote and the delimiter belongs to the value, a quote nobody closed
+// runs to the end of the file, and an empty line is a record of one empty
+// field.
+//
+// A record is read whole (next) or a field at a time (field). ⚠ next holds
+// every field of the record, 48 bytes each, and a record may be a whole file
+// of delimiters: it is for records known to be narrow (csvKeepMaxFields).
+type csvReader struct {
+	in    []byte
+	comma byte
+	// pos is where the next field starts. Set it to a record's start to read
+	// that record again.
+	pos int
+
+	fields []csvField
+	// buf holds the values that are not a piece of in (a doubled quote, text
+	// after a closing quote).
+	buf []byte
+}
+
+// more reports whether a record is left. A final line end starts none. Asked
+// between records: inside one, field says when it is over.
+func (r *csvReader) more() bool { return r.pos < len(r.in) }
+
+// next reads the record at pos. Its bytes are in[start:end] for the pos it was
+// called at, and its line end the term bytes after them: 2 ("\r\n"), 1 ("\n")
+// or 0 at the end of a file that has none. The fields are valid until the
+// next call.
+func (r *csvReader) next() (fields []csvField, end, term int) {
+	r.fields, r.buf = r.fields[:0], r.buf[:0]
+	for {
+		f, last, end, term := r.step()
+		r.fields = append(r.fields, f)
+		if last {
+			return r.fields, end, term
+		}
+	}
+}
+
+// field reads the field at pos, valid until the next call. last: the record
+// ends with it, at end and with a line end of term bytes, as next says them;
+// otherwise a delimiter followed, and the record's next field is at pos even
+// at the end of the file (a delimiter there is followed by an empty field).
+func (r *csvReader) field() (f csvField, last bool, end, term int) {
+	r.buf = r.buf[:0]
+	return r.step()
+}
+
+// step reads one field, its value appended to buf when it is not a piece of
+// in.
+func (r *csvReader) step() (f csvField, last bool, end, term int) {
+	in, n, comma := r.in, len(r.in), r.comma
+	i := r.pos
+	start := i
+	// tail is where a "\r" may be the line end's: after the closing quote, or
+	// at the field's start.
+	tail := i
+	var val []byte
+	if i < n && in[i] == '"' {
+		i++
+		open, doubled := i, false
+		for i < n {
+			q := bytes.IndexByte(in[i:], '"')
+			if q < 0 {
+				i = n
+				break
+			}
+			i += q
+			if i+1 < n && in[i+1] == '"' {
+				doubled = true
+				i += 2
+				continue
+			}
+			break
+		}
+		inner := in[open:i]
+		if i < n {
+			i++
+		}
+		tail = i
+		// Anything between the closing quote and the delimiter is kept as it
+		// stands (a malformed field is not repaired, nor lost).
+		after := false
+		for i < n && in[i] != comma && in[i] != '\n' {
+			if in[i] != '\r' {
+				after = true
+			}
+			i++
+		}
+		val = inner
+		if doubled || after {
+			at := len(r.buf)
+			for {
+				q := bytes.Index(inner, []byte{'"', '"'})
+				if q < 0 {
+					break
+				}
+				r.buf = append(r.buf, inner[:q+1]...)
+				inner = inner[q+2:]
+			}
+			r.buf = append(r.buf, inner...)
+			for _, c := range in[tail:i] {
+				if c != '\r' {
+					r.buf = append(r.buf, c)
+				}
+			}
+			val = r.buf[at:]
+		}
+	} else {
+		for i < n && in[i] != comma && in[i] != '\n' {
+			i++
+		}
+		val = in[start:i]
+		if len(val) > 0 && val[len(val)-1] == '\r' && (i == n || in[i] == '\n') {
+			val = val[:len(val)-1]
+		}
+	}
+	if i < n && in[i] == comma {
+		// A delimiter: one more field, an empty one if nothing follows.
+		r.pos = i + 1
+		return csvField{raw: in[start:i], val: val}, false, 0, 0
+	}
+	// A line end, or the end of the file: the record is over.
+	end = i
+	if i < n {
+		term = 1
+		if i > tail && in[i-1] == '\r' {
+			end, term = i-1, 2
+		}
+	}
+	r.pos = end + term
+	return csvField{raw: in[start:end], val: val}, true, end, term
 }

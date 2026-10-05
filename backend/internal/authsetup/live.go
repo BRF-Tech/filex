@@ -14,6 +14,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/auth"
 	authapitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
+	authldap "github.com/brf-tech/filex/backend/internal/auth/drivers/ldap"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
 	authoidc "github.com/brf-tech/filex/backend/internal/auth/drivers/oidc"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -224,6 +225,20 @@ func (s *Set) For(tenantID int64) *View {
 	return v
 }
 
+// Serves reports whether an entry signs people in to a tenant (0: the
+// platform's own): always on an install with one tenant; on a multi-tenant
+// one when it is bound to that tenant and, a tenant's own instance, it is
+// that tenant's - the rule buildView arranges a tenant's sign-in by.
+func (s *Set) Serves(e Entry, tenantID int64) bool {
+	if !s.multiTenant || s.binds == nil {
+		return true
+	}
+	if tenantID == 0 {
+		tenantID = s.binds.Main
+	}
+	return s.binds.Bound(e.InstanceID, tenantID) && (e.Owner == 0 || e.Owner == tenantID)
+}
+
 // wholeView is the single-tenant answer: the set itself.
 func (s *Set) wholeView() *View {
 	v := &View{login: s.login, directory: s.directory, recovery: s.recovery, names: s.Names()}
@@ -319,6 +334,10 @@ type Live struct {
 	// flows are the OIDC sign-ins in flight (oidcflow.go): which instance and
 	// which tenant each was started for.
 	flows *flowBook
+
+	// Directory sync (dirsync.go): the LDAP instances whose sync is running.
+	syncMu  sync.Mutex
+	syncing map[string]bool
 }
 
 type built struct {
@@ -529,6 +548,11 @@ func tenantOwned(driver string, owner int64, guard func(map[string]any)) func(ma
 		if driver == "oidc" && owner != 0 {
 			cfg[authoidc.TenantConfigKey] = owner
 		}
+		// A tenant's own LDAP: its directory sync opens groups in its tenant
+		// and reaches that tenant's accounts only (authldap.OwnerTenantKey).
+		if driver == "ldap" && owner != 0 {
+			cfg[authldap.OwnerTenantKey] = owner
+		}
 	}
 }
 
@@ -545,6 +569,12 @@ func (l *Live) buildOne(key, driver string, s *Stored, e Entry, tweak func(map[s
 	}
 	if tweak != nil {
 		tweak(cfg)
+	}
+	if driver == "ldap" {
+		// Each LDAP instance knows its own slug: the accounts it makes are
+		// its own (users.auth_directory), and so are its people's permanent
+		// ids and its directory sync (docs/LDAP.md → Several directories).
+		cfg["directory"] = key
 	}
 	e.Directory = directory
 	fp := fingerprint(cfg)

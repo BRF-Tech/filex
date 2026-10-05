@@ -233,7 +233,7 @@ entre ambos:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; 43 MB slim / 511 MB w/ thumbnails)       │
+│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -597,12 +597,12 @@ instalador de Windows. Detalles: [docs/DESKTOP.md](docs/DESKTOP.md). Solo la CLI
 `brew install brf-tech/filex/filex` ([docs/CLI.md](docs/CLI.md); su paquete de winget,
 `BRFTech.filex`, está en la misma revisión).
 
-En Linux la aplicación nunca se ejecuta sin el entorno aislado de Chromium. El `.deb` y el
-`.rpm` no necesitan nada; en Ubuntu 23.10 y posteriores un AppImage necesita, una sola
-vez, un perfil de AppArmor, y el Snap necesita
-`sudo snap connect filex-app:browser-sandbox` hasta que la Snap Store lo conecte por sí
-sola - en ambos casos la aplicación lo dice y muestra el paso
-([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)).
+En Linux el `.deb`, el `.rpm` y el AppImage nunca se ejecutan sin el entorno aislado de
+Chromium. El `.deb` y el `.rpm` no necesitan nada; en Ubuntu 23.10 y posteriores un
+AppImage necesita, una sola vez, un perfil de AppArmor, y la aplicación lo dice y muestra
+el paso ([docs/DESKTOP.md](docs/DESKTOP.md#appimage-on-recent-ubuntu)). El Snap se
+ejecuta sin el entorno aislado de Chromium, dentro del confinamiento estricto del snap, y
+tampoco necesita nada ([docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-sandbox)).
 
 **ARM (arm64)** - lo que se distribuye para esta arquitectura (cada versión compila todo
 esto y lo ejecuta en equipos arm64 antes de publicarse):
@@ -845,7 +845,7 @@ de almacenamiento: [docs/PLUGINS.md](docs/PLUGINS.md).
 - **Uso y costo** - filex no mide la factura de su proveedor; lee el informe que el proveedor ya escribe, lo normaliza y lo valora con una tabla que usted puede editar. Los CSV diarios de Backblaze B2 se leen a través de la misma API S3 que filex ya habla, así que no hay ninguna dependencia nueva ni ningún tipo de credencial nuevo. Las cuotas gratuitas son campos propios en lugar de constantes en una fórmula, y la página mantiene la fila de nivel de cuenta del proveedor separada de sus filas por bucket - sumarlas cuenta dos veces las mismas transacciones, justo por el importe que nadie nota ([docs/USAGE.md](docs/USAGE.md)).
 - **Registro de auditoría** - cada modificación queda registrada con autor, identidad de integración y metadatos.
 - **Cliente CLI** - el mismo binario llega a un servidor remoto (`filex client`, `filex sync`) sin ningún complemento del lado del servidor: copiar y mover entre almacenamientos, la papelera, las versiones, las etiquetas, las acciones de las aplicaciones, los archivos comprimidos y sus propios enlaces, y cada tarea del servidor se sigue hasta el final; `filex client login --realm` inicia sesión en un inquilino, `filex encrypt` crea carpetas cifradas, y una sesión guardada nunca se envía más que a la dirección con la que se guardó ([docs/CLI.md](docs/CLI.md)).
-- **Actualización automática** - las versiones de parche se instalan solas, las menores se anuncian para actualizar con un clic; a una instalación que pertenece a un gestor de paquetes (Homebrew, winget, Snap, un paquete de la distribución) o a un contenedor se le informa de las versiones nuevas y del comando para obtenerlas, y la página de administración dice que solo las anunciará ([docs/UPDATES.md](docs/UPDATES.md)).
+- **Actualización automática** - las versiones menores se anuncian para actualizar con un clic, y las de parche se instalan solas una vez que usted lo permite (`AUTO_UPGRADE=true`; de fábrica filex solo comprueba y le avisa); a una instalación que pertenece a un gestor de paquetes (Homebrew, winget, Snap, un paquete de la distribución) o a un contenedor se le informa de las versiones nuevas y del comando para obtenerlas, y la página de administración dice que solo las anunciará ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Binario único** - matriz de goreleaser: linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **i18n** - inglés + turco de fábrica, **enlaces públicos incluidos**: un enlace
   compartido, una página de PIN, una página de solicitud de archivos o la pantalla de

@@ -303,6 +303,14 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: { title: '{notice_title}', body: '{notice_body}' },
     tr: { title: '{notice_title}', body: '{notice_body}' },
   },
+  // permgap.Announce → notify.PermissionGaps: saved roles that allow adding
+  // files but not encrypting, as a save on 0.50 or older leaves them. The
+  // server catalogue (srvtext `server.permission_gaps.*`) phrases it per
+  // language in meta, with the count.
+  permission_gaps: {
+    en: { title: '{notice_title}', body: '{notice_body}' },
+    tr: { title: '{notice_title}', body: '{notice_body}' },
+  },
   // replica/recorder.go NotifyReplicaFail: meta.{path,op,error}
   replica_fail: {
     en: { title: 'Replica {op} failed: {name}', body: '{error}' },
