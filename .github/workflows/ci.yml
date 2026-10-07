@@ -495,9 +495,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: e2e-build
+          # packages/core/dist too: 173 builds a real .fxe with the product's
+          # own library (v0.53.0's first full matrix: "Cannot find module
+          # packages/core/dist/filex-core.js" in Playwright chromium 2/4).
           path: |
             bin/filex
             backend/internal/wasmplugin/testdata/echo/echo.wasm
+            packages/core/dist
           if-no-files-found: error
           retention-days: 3
 
