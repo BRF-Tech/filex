@@ -228,7 +228,7 @@ jobs:
         run: bash scripts/build-wasm-fixture.sh
       - name: The shard, under -race
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           args=$(node scripts/test-shards.mjs go --profile race --shard "$SHARD" --format args) || exit 1
           mapfile -t A <<< "$args"
           [ "${#A[@]}" -gt 0 ] && [ -n "${A[0]}" ] || { echo "::error::shard $SHARD has no arguments"; exit 1; }
