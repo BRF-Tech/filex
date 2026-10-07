@@ -1,51 +1,104 @@
 name: CI
 
+# ⚠⚠ The whole test chain, split into parts that run side by side (tasks #173,
+# #174). Until 0.52 the heavy suites - Go under -race, Playwright on three
+# engines, the Document Server specs - ran one after another on a single
+# build host before every release: 4 h 42 min on 0.51, and the same Go suite
+# five times and vitest eight times over one release. Here every part is a
+# job of its own on GitHub's standard runners (free for a public repository,
+# 20 at once for the organisation), and the push of main runs all of them.
+#
+# The parts come from scripts/ci-parts.mjs, not from this file: the Go
+# shards are scripts/test-shards.json (task #171), Playwright is split by
+# `node e2e/run.mjs local --shard i/N`, and every matrix row carries the name
+# its job gets. The release tool reads the run on the commit it lands, part
+# by part, under those names (scripts/release/plan.mjs → githubMatrix), and a
+# tag run's `verify` (release.yml) publishes nothing unless this run on its
+# commit ended with `All tests (full)` green.
+#
+#   full  a push of main, a run by hand: every part below.
+#   pr    a pull request: the same without -race, with Chromium only, and
+#         without the Document Server, store and S3 lines. The 20 jobs at once
+#         are shared by every BRF-Tech repository, and a pull request is run
+#         in full again by the push that lands it.
+#
+# What the build host still runs and this does not: e2e/realenv (Pebble,
+# Caddy, Keycloak, OpenLDAP; the nightly run), the screenshots (shots.yml on a
+# tag), and the language pack the right-to-left specs prefer (not published:
+# they install the repository's own fixture instead, e2e/helpers/langPack.ts).
+#
+# ⚠ Nothing calls this workflow any more. Until #174 release.yml ran it as its
+# `test` job, so every dry run of the release ran the suite a second time;
+# now the dry run packages at once, and the push run of its commit is the
+# test (docs/CONTRIBUTING.md, Release process, step 7).
+
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  # ⚠⚠ Called by release.yml as a gate, so a tag cannot publish over a red
-  # suite. It could before: the release workflow triggers on the tag and CI on
-  # the branch push two seconds earlier, in parallel, with no relationship
-  # between them -- and nothing in the repository required a check. Measured
-  # 2026-09-06: CI had been red since v0.31.0 and FOUR tags shipped over it,
-  # the last of them a locale regression that showed a Turkish user an English
-  # admin panel. The suite is the same one either way; only the trigger differs.
-  #
-  # ⚠⚠ The gate BUILDS THE IMAGES too, and it cannot be told not to. v0.43.0
-  # (run 36026548054) was released with this job switched off by the release
-  # (`skip_docker: true`, "the release's own docker job builds the same image"):
-  # the images failed deterministically - the frontend stage did not copy two
-  # files its vite configs import - but `binaries` and `npm` run beside
-  # `docker`, not after it, so npm 0.43.0 and the GitHub Release were already
-  # public when the image build broke. A tag must not publish anything until the
-  # images are known to build. The input is gone on purpose: a switch that
-  # exists gets used again, and re-adding one should be a decision, not a flag.
-  workflow_call:
 
-# Cancel superseded runs on the same ref - started the same way.
-# ⚠ Called by release.yml, this runs with the CALLER's github context:
-# github.ref is the branch the release runs on and github.workflow is
-# "Release". Grouped by the ref alone, the dry run the release tool starts on
-# main before a tag would share a group with the CI run of the push of main
-# it starts beside, and the newer would cancel the older - one of the two
-# runs the tag waits for (docs/CONTRIBUTING.md, Release process, step 7).
+permissions:
+  contents: read
+
+# ⚠ A push of main is never cancelled: each commit's full run is what the
+# release gate and a tag's `verify` read, and a run cancelled by the next
+# push left that commit with no verdict at all. So a push (and a run by hand)
+# is grouped by its own commit, and only a pull request's superseded run is
+# cancelled. The group still names the workflow: a run of another workflow on
+# the same ref never shares it.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  backend:
-    name: Backend (Go)
+  # ── The parts of this run ───────────────────────────────────────────────
+  plan:
+    name: Plan the matrix
+    runs-on: ubuntu-latest
+    outputs:
+      profile: ${{ steps.m.outputs.profile }}
+      go: ${{ steps.m.outputs.go }}
+      race: ${{ steps.m.outputs.race }}
+      frontend: ${{ steps.m.outputs.frontend }}
+      playwright: ${{ steps.m.outputs.playwright }}
+      ds: ${{ steps.m.outputs.ds }}
+      extra: ${{ steps.m.outputs.extra }}
+      ds_grep: ${{ steps.m.outputs.ds_grep }}
+      e2e_shards: ${{ steps.m.outputs.e2e_shards }}
+      e2e_engines: ${{ steps.m.outputs.e2e_engines }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: The parts of this run
+        id: m
+        env:
+          PROFILE: ${{ github.event_name == 'pull_request' && 'pr' || 'full' }}
+        run: |
+          set -euo pipefail
+          node scripts/ci-parts.mjs github-output --profile "$PROFILE" > "$RUNNER_TEMP/matrix.txt"
+          cat "$RUNNER_TEMP/matrix.txt" >> "$GITHUB_OUTPUT"
+          node scripts/ci-parts.mjs list --profile "$PROFILE" > "$RUNNER_TEMP/parts.txt"
+          {
+            echo "### The $PROFILE matrix: $(wc -l < "$RUNNER_TEMP/parts.txt") jobs"
+            sed 's/^/- /' "$RUNNER_TEMP/parts.txt"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Go ──────────────────────────────────────────────────────────────────
+  vet:
+    name: Go vet + build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      # backend/embed/{admin,web} are git-ignored — the real bytes come from
+      # backend/embed/{admin,web} are git-ignored - the real bytes come from
       # the frontend build. `//go:embed all:admin all:web` fails to resolve on
       # empty dirs, so drop a placeholder for vet/test/build.
       - name: Embed placeholders
@@ -55,19 +108,190 @@ jobs:
       - name: Vet
         working-directory: backend
         run: go vet ./...
-      - name: Test
-        working-directory: backend
-        run: go test -timeout 30m ./...
       - name: Build
         working-directory: backend
         run: go build ./...
 
+  # One shard of `go test`, beside the services the build host gives its Go
+  # jobs: PostgreSQL, MySQL, Redis and Samba. The tests that need one skip
+  # without its address, so every address is set: a shard measures nothing
+  # it silently skipped. The echo app fixture is built first and required.
+  go:
+    name: ${{ matrix.name }}
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.go) }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: filex
+          POSTGRES_PASSWORD: filex
+          POSTGRES_DB: filex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U filex"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: filex
+          MYSQL_DATABASE: filex
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -pfilex"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      samba:
+        image: dperson/samba
+        env:
+          USER: "filex;filexpass"
+          SHARE: "data;/share;;no;no;filex;;;"
+        ports: ["445:445"]
+        options: --tmpfs /share:mode=1777
+    env:
+      SHARD: ${{ matrix.shard }}
+      FILEX_TEST_PG_DSN: postgres://filex:filex@127.0.0.1:5432/filex?sslmode=disable
+      FILEX_TEST_MYSQL_DSN: root:filex@tcp(127.0.0.1:3306)/mysql?parseTime=true&loc=UTC&charset=utf8mb4
+      FILEX_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      FILEX_SMB_TEST: 127.0.0.1:445
+      FILEX_REQUIRE_WASM_FIXTURE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Embed placeholders
+        run: |
+          mkdir -p backend/embed/admin backend/embed/web
+          touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
+      - name: The echo app fixture
+        run: bash scripts/build-wasm-fixture.sh
+      - name: Samba answers
+        run: |
+          for i in $(seq 1 60); do
+            (exec 3<>/dev/tcp/127.0.0.1/445) 2>/dev/null && exit 0
+            sleep 2
+          done
+          echo "::error::Samba did not answer on 127.0.0.1:445"
+          exit 1
+      - name: The shard
+        run: |
+          set -euo pipefail
+          args=$(node scripts/test-shards.mjs go --profile go --shard "$SHARD" --format args)
+          mapfile -t A <<< "$args"
+          [ "${#A[@]}" -gt 0 ] && [ -n "${A[0]}" ] || { echo "::error::shard $SHARD has no arguments"; exit 1; }
+          cd backend
+          go test -count=1 -timeout 30m "${A[@]}"
+
+  # One shard of `go test -race`. No database address: the engines are the
+  # Go shards' (the build host's chain does the same). -v, so the log of a
+  # shard is what `node scripts/test-shards.mjs rebalance --from` reads.
+  race:
+    name: ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.profile == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.race) }}
+    env:
+      SHARD: ${{ matrix.shard }}
+      FILEX_REQUIRE_WASM_FIXTURE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Embed placeholders
+        run: |
+          mkdir -p backend/embed/admin backend/embed/web
+          touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
+      - name: The echo app fixture
+        run: bash scripts/build-wasm-fixture.sh
+      - name: The shard, under -race
+        run: |
+          set -uo pipefail
+          args=$(node scripts/test-shards.mjs go --profile race --shard "$SHARD" --format args) || exit 1
+          mapfile -t A <<< "$args"
+          [ "${#A[@]}" -gt 0 ] && [ -n "${A[0]}" ] || { echo "::error::shard $SHARD has no arguments"; exit 1; }
+          out="$RUNNER_TEMP/race-$SHARD.out"
+          (cd backend && go test -race -count=1 -timeout 60m -v "${A[@]}") > "$out" 2>&1
+          rc=$?
+          grep -E '^(--- FAIL|FAIL|panic:)|WARNING: DATA RACE' "$out" | head -60
+          tail -25 "$out"
+          tests=$(grep -cE '^\s*--- (PASS|FAIL|SKIP): ' "$out" || true)
+          if [ "${tests:-0}" -eq 0 ]; then echo "::error::shard $SHARD ran no test"; rc=1; fi
+          echo "### -race $SHARD: $tests tests, exit $rc" >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: Keep the shard's log (rebalance reads it)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: race-${{ matrix.shard }}
+          path: ${{ runner.temp }}/race-${{ matrix.shard }}.out
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The list itself, against the tree: a test no shard runs, or two do, turns
+  # this red - the Go and -race jobs above are cut from that list. And the
+  # Playwright parts add up to the whole suite on every engine.
+  shards:
+    name: Shard lists
+    needs: plan
+    runs-on: ubuntu-latest
+    env:
+      E2E_SHARDS: ${{ needs.plan.outputs.e2e_shards }}
+      E2E_ENGINES: ${{ needs.plan.outputs.e2e_engines }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: pnpm install --frozen-lockfile
+      - name: Embed placeholders
+        run: |
+          mkdir -p backend/embed/admin backend/embed/web
+          touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
+      - name: The Go shards cover every test exactly once
+        run: node scripts/test-shards.mjs check
+      - name: The Playwright parts add up to the whole suite
+        run: node scripts/test-shards.mjs e2e-check --shards "$E2E_SHARDS" --browsers "$E2E_ENGINES"
+
+  # ── Databases ───────────────────────────────────────────────────────────
   engines:
-    # The databases the docs say you can install on. `backend` above runs on
-    # SQLite alone, which is how a column name PostgreSQL and MySQL both refuse
-    # shipped in a migration, and how a whole migration existed in two dialects
-    # out of three (issue #19). These suites skip themselves without the two
-    # DSNs, so they measure nothing unless the services below are really up.
+    # The databases the docs say you can install on. The Go shards run their
+    # suites beside both engines too; this job is the migrations: the parity
+    # suites, and the real CLI taking every migration up, three steps down
+    # and up again on SQLite, PostgreSQL and MySQL (the build host's chain
+    # runs the same round trip). A column name PostgreSQL and MySQL both
+    # refuse once shipped in a migration, and a whole migration once existed
+    # in two dialects out of three (issue #19).
     name: Databases (PostgreSQL + MySQL)
     runs-on: ubuntu-latest
     services:
@@ -96,7 +320,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - name: Embed placeholders
         run: |
@@ -108,10 +332,38 @@ jobs:
           FILEX_TEST_PG_DSN: postgres://filex:filex@127.0.0.1:5432/filex?sslmode=disable
           FILEX_TEST_MYSQL_DSN: root:filex@tcp(127.0.0.1:3306)/mysql
         run: go test -timeout 30m ./internal/db/ ./internal/queue/ ./internal/ops/
+      - name: An empty database on each server for the round trip
+        env:
+          PG: ${{ job.services.postgres.id }}
+          MY: ${{ job.services.mysql.id }}
+        run: |
+          set -euo pipefail
+          docker exec -e PGPASSWORD=filex "$PG" psql -U filex -d filex -c 'CREATE DATABASE cimig'
+          docker exec -e MYSQL_PWD=filex "$MY" mysql -uroot -e 'CREATE DATABASE cimig'
+      - name: The CLI takes every migration up, down three steps and up again
+        env:
+          MIG_DOWN: "3"
+          MIG_DSN_sqlite: file:${{ runner.temp }}/cimig.db
+          MIG_DSN_postgres: postgres://filex:filex@127.0.0.1:5432/cimig?sslmode=disable
+          MIG_DSN_mysql: root:filex@tcp(127.0.0.1:3306)/cimig?parseTime=true&loc=UTC&charset=utf8mb4
+        run: |
+          set -euo pipefail
+          (cd backend && go build -o "$RUNNER_TEMP/filex" ./cmd/filex)
+          bash .github/workflows/scripts/migrate-roundtrip.sh "$RUNNER_TEMP/filex"
 
+  # ── Web, desktop, docs ──────────────────────────────────────────────────
+  # The unit suites on CI's clock (UTC) and on the maintainer's (Istanbul):
+  # v0.43.0's CI failed a test the UTC+3 machine it was cut on had hidden, and
+  # the other way round is as possible.
   frontend:
-    name: Frontend (pnpm)
+    name: ${{ matrix.name }}
+    needs: plan
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.frontend) }}
+    env:
+      TZ: ${{ matrix.tz }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -132,6 +384,33 @@ jobs:
       - name: Unit tests
         run: pnpm --filter='./web' --filter='./packages/*' test
 
+  typecheck:
+    name: Typechecks (core, desktop, e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build packages
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: pnpm -r --filter='./packages/*' build
+      - name: The core package (vue-tsc)
+        working-directory: packages/core
+        run: pnpm exec vue-tsc --noEmit
+      - name: The desktop app
+        working-directory: desktop
+        run: pnpm run typecheck
+      - name: The e2e suite
+        working-directory: e2e
+        run: pnpm exec tsc -p tsconfig.json
+
   desktop:
     name: Desktop unit tests
     runs-on: ubuntu-latest
@@ -140,14 +419,87 @@ jobs:
       # desktop/test runs its TypeScript through Node's type stripping (Node
       # >= 22.6) and imports nothing from node_modules, so there is no install.
       # Nothing ran it before; v0.43.2 then shipped a desktop page whose script
-      # did not parse, and every window opened blank. The release gate runs
-      # this workflow, so a page that cannot load now stops the release.
+      # did not parse, and every window opened blank.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Unit tests
         working-directory: desktop
         run: node --experimental-strip-types --test test/*.test.ts
+
+  docs:
+    name: Docs (links, site, anchors, YAML)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Every relative link resolves
+        run: node scripts/check-links.mjs
+      - name: The site builds (VitePress fails on a dead page link)
+        working-directory: docs-site
+        run: npm run build
+      - name: Every in-page anchor lands
+        run: node scripts/check-doc-anchors.mjs
+      - name: Every deployment YAML parses
+        run: |
+          set -euo pipefail
+          jy=$(find node_modules/.pnpm -maxdepth 1 -type d -name 'js-yaml@4*' | head -1)
+          [ -n "$jy" ] || { echo "::error::js-yaml 4 is not under node_modules/.pnpm"; exit 1; }
+          export JY="$PWD/$jy/node_modules/js-yaml"
+          bad=0
+          for f in $(git ls-files -- '.goreleaser.yml' 'desktop/electron-builder.yml' 'deploy/*.yml' 'deploy/*.yaml' | grep -v '/templates/'); do
+            if F="$f" node -e "require(process.env.JY).loadAll(require('fs').readFileSync(process.env.F, 'utf8'))"; then
+              echo "yaml ok  $f"
+            else
+              echo "::error file=$f::does not parse"
+              bad=1
+            fi
+          done
+          exit "$bad"
+
+  # ── The browser suites ──────────────────────────────────────────────────
+  # The binary every Playwright part runs: built once, its embedded UI checked
+  # against the build, and kept for the parts with the echo app fixture.
+  build:
+    name: Build for the browser suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: pnpm install --frozen-lockfile
+      - name: Packages, admin UI, embed, server binary; the echo app fixture
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          set -euo pipefail
+          pnpm run build:all
+          bash scripts/build-wasm-fixture.sh
+          node scripts/check-embed.mjs --binary bin/filex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-build
+          path: |
+            bin/filex
+            backend/internal/wasmplugin/testdata/echo/echo.wasm
+          if-no-files-found: error
+          retention-days: 3
 
   browser:
     name: Browser E2E (Cypress)
@@ -164,7 +516,7 @@ jobs:
           cache: pnpm
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
       # The Cypress binary is a ~250 MB download that is NOT in node_modules —
@@ -199,13 +551,8 @@ jobs:
       # trace. `video` is on when CI=true (web/cypress.config.ts).
       #
       # ⚠ The server's own log is in there too, and it is the half that says
-      # WHY. On 2026-09-12 a run went red with 61 failures, all of them
-      # downstream of the admin login suddenly answering `401 invalid
-      # credentials` — a single answer the local driver deliberately gives for
-      # four different causes, each of which it names in ITS log. That log
-      # lived in a mkdtemp the runner deleted on the way out, so the run
-      # destroyed its own evidence and the same tree passed on the next
-      # trigger. `e2e/run.mjs` now keeps a copy.
+      # WHY (2026-09-12: 61 failures behind one `401 invalid credentials`,
+      # whose cause only the server log named). `e2e/run.mjs` keeps a copy.
       - name: Upload failure screenshots + video
         if: failure()
         uses: actions/upload-artifact@v4
@@ -216,26 +563,252 @@ jobs:
             web/cypress/videos
             e2e/.artifacts/server.log
           # ⚠ e2e/.artifacts is a dot-directory: upload-artifact v4.4+ leaves
-          # hidden paths out unless told otherwise, so without this line the
-          # server log this step exists to keep was never in the archive.
+          # hidden paths out unless told otherwise.
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
+  # One part of one engine's Playwright suite, on a server of its own
+  # (`--shard i/N`). No Document Server: the specs whose path differs with
+  # one run again below, with one. The apps the suite installs come from
+  # their public releases, and a missing one is a failure, not a skip
+  # (FILEX_REQUIRE_WASM_FIXTURE).
+  playwright:
+    name: ${{ matrix.name }}
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.playwright) }}
+    env:
+      E2E_BROWSERS: ${{ matrix.engine }}
+      SHARD: ${{ matrix.shard }}
+      FILEX_REQUIRE_WASM_FIXTURE: "1"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: e2e-build
+          path: .
+      # An artifact keeps neither the executable bit nor the time: the specs
+      # refuse an echo.wasm older than the sources beside it.
+      - name: The build, runnable
+        run: |
+          chmod +x bin/filex
+          touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+      - name: The apps the suite installs
+        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
+      - name: The browser, with its system libraries
+        run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
+      - name: Latin fonts for the layout checks
+        run: bash .github/workflows/scripts/ci-fonts.sh
+      - name: The part
+        run: node e2e/run.mjs local --binary bin/filex --shard "$SHARD"
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.engine }}-${{ strategy.job-index }}
+          path: |
+            e2e/test-results
+            e2e/.artifacts
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The specs whose path differs with an ONLYOFFICE Document Server, on each
+  # engine, with one connected (scripts/ci-parts.mjs, DS_SPECS). The server
+  # calls filex back through the Docker bridge, as on the build host. The
+  # Chromium row also runs the office engine's Go test on the same server.
+  playwright-ds:
+    name: ${{ matrix.name }}
+    needs: [plan, build]
+    if: needs.plan.outputs.profile == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.ds) }}
+    env:
+      E2E_BROWSERS: ${{ matrix.engine }}
+      E2E_PORT: "5212"
+      DS_GREP: ${{ needs.plan.outputs.ds_grep }}
+      FILEX_REQUIRE_WASM_FIXTURE: "1"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: e2e-build
+          path: .
+      - name: The build, runnable
+        run: |
+          chmod +x bin/filex
+          touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+      - name: The apps the suite installs
+        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
+      - name: A Document Server, and its way back to filex
+        run: bash .github/workflows/scripts/ci-docserver.sh "$E2E_PORT" 18080
+      - name: The browser, with its system libraries
+        run: pnpm --dir e2e exec playwright install --with-deps "$E2E_BROWSERS"
+      - name: Latin fonts for the layout checks
+        run: bash .github/workflows/scripts/ci-fonts.sh
+      - name: The specs whose path differs with a Document Server
+        run: node e2e/run.mjs local --binary bin/filex --port "$E2E_PORT" --grep "$DS_GREP"
+      - name: Embed placeholders
+        if: matrix.engine == 'chromium'
+        run: |
+          mkdir -p backend/embed/admin backend/embed/web
+          touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
+      - name: The office engine on a real Document Server (Go)
+        if: matrix.engine == 'chromium'
+        working-directory: backend
+        run: go test -count=1 -v -run '^TestOfficeEngine_TheConvertAppOnARealDocumentServer$' ./internal/server/
+      - name: The Document Server's log
+        if: failure()
+        run: |
+          mkdir -p e2e/.artifacts
+          docker logs --tail 200 filex-ci-ds > e2e/.artifacts/docserver.log 2>&1 || true
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-ds-${{ matrix.engine }}
+          path: |
+            e2e/test-results
+            e2e/.artifacts
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The two browser lines the build host runs on their own, on every engine:
+  # the store install with filex started without FILEX_PUBLIC_URL, and the S3
+  # specs against a local gateway (and the one the harness starts itself).
+  playwright-extra:
+    name: ${{ matrix.name }}
+    needs: [plan, build]
+    if: needs.plan.outputs.profile == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.extra) }}
+    env:
+      E2E_BROWSERS: ${{ needs.plan.outputs.e2e_engines }}
+      KIND: ${{ matrix.kind }}
+      GREP: ${{ matrix.grep }}
+      FLAG: ${{ matrix.flag }}
+      FILEX_REQUIRE_WASM_FIXTURE: "1"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: e2e-build
+          path: .
+      - name: The build, runnable
+        run: |
+          chmod +x bin/filex
+          touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+      - name: The apps the suite installs
+        run: bash .github/workflows/scripts/ci-apps.sh "$RUNNER_TEMP/apps"
+      - name: An S3 gateway for the multi-storage spec
+        if: matrix.kind == 's3'
+        run: bash .github/workflows/scripts/ci-s3.sh
+      - name: The browsers, with their system libraries
+        run: pnpm --dir e2e exec playwright install --with-deps ${E2E_BROWSERS//,/ }
+      - name: Latin fonts for the layout checks
+        run: bash .github/workflows/scripts/ci-fonts.sh
+      - name: The line
+        run: node e2e/run.mjs local --binary bin/filex "$FLAG" --grep "$GREP"
+      - name: Keep what failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.kind }}
+          path: |
+            e2e/test-results
+            e2e/.artifacts
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ── Images ──────────────────────────────────────────────────────────────
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
-    # ⚠ No `if:`. On a push, on a PR and when the release calls this workflow
-    # as its gate, the images are built - see workflow_call above for why.
+    # ⚠ No `if:`: on a push and on a pull request both images are built. A
+    # Dockerfile that cannot build is found on the commit that broke it, long
+    # before a release's dry run (which builds them again, and is what a tag
+    # run promotes).
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       # BOTH images end to end (frontend + backend + embed), the two the release
       # publishes, to catch multi-stage regressions before anything is pushed.
       # amd64 is enough to prove a Dockerfile: a missing COPY fails on every
-      # architecture alike. No push - publishing is release.yml's docker job.
+      # architecture alike. No push.
       - name: Build the full image
         run: docker build -f docker/Dockerfile -t filex:ci .
       - name: Build the slim image
         run: docker build -f docker/Dockerfile.slim -t filex:ci-slim .
+
+  # ── The verdict ─────────────────────────────────────────────────────────
+  # One job that is green only when every part of this run's profile was:
+  # what the release gate and a tag's `verify` ask for by name
+  # (scripts/ci-parts.mjs, completeName). `always()`: a red part must turn
+  # this red, not skip it - a skipped verdict reads as no verdict.
+  all:
+    name: All tests (${{ needs.plan.outputs.profile }})
+    needs: [plan, vet, go, race, shards, engines, frontend, typecheck, desktop, docs, build, browser, playwright, playwright-ds, playwright-extra, docker]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every part of the matrix passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          PROFILE: ${{ needs.plan.outputs.profile }}
+        run: |
+          set -euo pipefail
+          [ -n "$PROFILE" ] || { echo "::error::the plan did not run: there is no matrix to judge"; exit 1; }
+          # A pull request leaves out exactly these (scripts/ci-parts.mjs, runsIn).
+          bad=$(jq -r --arg p "$PROFILE" '
+            to_entries[]
+            | select(.value.result != "success")
+            | select(($p == "pr" and .value.result == "skipped" and (.key == "race" or .key == "playwright-ds" or .key == "playwright-extra")) | not)
+            | "\(.key): \(.value.result)"' <<< "$NEEDS")
+          if [ -n "$bad" ]; then
+            while IFS= read -r line; do echo "::error::$line"; done <<< "$bad"
+            exit 1
+          fi
+          echo "### Every part of the $PROFILE matrix passed" >> "$GITHUB_STEP_SUMMARY"
