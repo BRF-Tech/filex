@@ -10,7 +10,7 @@
  * it loads, or where markdown-it cannot be loaded, the notes are plain text -
  * never the raw string as markup.
  */
-import { ref, watch } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { markdownToSafeHtml } from '@brftech/filex-core';
 
 const props = defineProps<{
@@ -32,6 +32,11 @@ watch(
   },
   { immediate: true },
 );
+// Gone before the notes were turned into markup: drop that answer rather than
+// parse it into a page that no longer shows it.
+onBeforeUnmount(() => {
+  seq++;
+});
 
 /**
  * A link in the notes (a changelog, a compare view) opens in a new tab, with

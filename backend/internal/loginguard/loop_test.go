@@ -2,6 +2,7 @@ package loginguard_test
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,7 +42,22 @@ func TestTheLoopSweepsWithoutTraffic(t *testing.T) {
 		row, err := store.GetLoginThrottle(ctx, model.LoginThrottleAccount, "ada@example.com")
 		return err == nil && row != nil && row.LockLevel == 1 && row.LockedUntil == nil
 	}, 3*time.Second, 10*time.Millisecond, "the loop wrote the owed counter and released the lock, with no attempt")
-	require.Len(t, audits(t, store, loginguard.ActionUnlocked), 1, "and audited the release")
+	// The audit entry is written after the row: wait for it as well, then
+	// hold it to exactly one (GitHub's -race run of v0.53.0 read it between
+	// the two and found none).
+	require.Eventually(t, func() bool {
+		rows, err := store.ListAuditRecent(ctx, 500)
+		if err != nil {
+			return false
+		}
+		for _, r := range rows {
+			if strings.HasPrefix(r.Action, loginguard.ActionUnlocked) {
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 10*time.Millisecond, "and audited the release")
+	require.Len(t, audits(t, store, loginguard.ActionUnlocked), 1, "audited once")
 
 	cancel()
 	select {

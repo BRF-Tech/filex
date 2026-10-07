@@ -4,8 +4,8 @@ import { closeRowMenus, menuEntries, openRowMenu, pickMenuItem } from '../helper
 // should be the default tab.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 
@@ -43,6 +43,11 @@ vi.mock('@/i18n', async (importOriginal) => ({
 }));
 
 import AppPluginsTab from '@/components/plugins/AppPluginsTab.vue';
+
+// Every wrapper is unmounted after its test: ReleaseNotes parses the notes
+// after an await, and one left mounted finished after the environment was
+// torn down ("DOMParser is not defined", the v0.53.0 pretag).
+enableAutoUnmount(afterEach);
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
