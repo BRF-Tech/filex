@@ -158,10 +158,17 @@ test.describe.serial('a .csv opens in ONLYOFFICE', () => {
     const frame = await spreadsheetReady(tab);
     await expect(frame.getByText('Choose CSV options')).toHaveCount(0);
 
-    // B2 ("3") becomes 42, through the cell name box.
-    await frame.locator('#ce-cell-name').click();
-    await frame.locator('#ce-cell-name').fill('B2');
-    await frame.locator('#ce-cell-name').press('Enter');
+    // B2 ("3") becomes 42, through the cell name box. Typed key by key, and
+    // read back before typing the value: on Firefox, fill() set the box
+    // without the key events ONLYOFFICE listens for, the box never moved,
+    // the Enter went to the grid (A1 -> A2) and 42 landed in A2 (GitHub
+    // run 37606303144, v0.53.0).
+    const nameBox = frame.locator('#ce-cell-name');
+    await nameBox.click();
+    await nameBox.press('ControlOrMeta+a');
+    await nameBox.pressSequentially('B2');
+    await nameBox.press('Enter');
+    await expect(nameBox, 'the name box went to B2').toHaveValue('B2');
     await tab.waitForTimeout(500);
     await tab.keyboard.type('42');
     await tab.keyboard.press('Enter');
