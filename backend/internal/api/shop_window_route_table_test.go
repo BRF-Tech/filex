@@ -61,6 +61,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/tokenperm"
 )
 
 // The probing principal is deliberately NOT an admin: the whole classification
@@ -144,7 +145,7 @@ func TestShopWindow_DemoGuardCoversEveryOperatorSurface(t *testing.T) {
 	// only, so a cookie there IS anonymous — without this, every route on the
 	// token-auth admin surface would look "indistinct" and the /api/ai/admin
 	// hole found on 2026-09-07 would be invisible all over again.
-	userToken := issueProbeToken(t, store, u.ID, "read,write,delete,mcp")
+	userToken := issueProbeToken(t, store, u.ID, "read,write,delete,mcp"+ordinaryKeyPermissions())
 	anonClient := &http.Client{}
 
 	// ── the table ────────────────────────────────────────────────────────────
@@ -354,6 +355,28 @@ func demoGuardRefuses(method, route string) bool {
 		w.WriteHeader(http.StatusTeapot)
 	})).ServeHTTP(rec, httptest.NewRequest(method, concretePath(route), nil))
 	return rec.Code == http.StatusForbidden
+}
+
+// ordinaryKeyPermissions is ",<key>:<level>" for every permission with a
+// level (package tokenperm) an ordinary key may be minted with, each at its
+// highest level - what both API keys screens offer a person for their own key
+// (`comments:rw` since #157).
+//
+// ⚠ Without it a token-permission refusal reads as a ROLE gate: POST
+// /api/ai/comments/{id}/delete answered the probe 403 (its key held the
+// default `comments:read`) and anonymous 401, and the walk called a person's
+// own comment an operator surface for the demo guard to close. A
+// super-administrator kind of permission (Def.Superadmin) is left out on
+// purpose: a route behind one IS an operator surface and must stay one here.
+func ordinaryKeyPermissions() string {
+	var b strings.Builder
+	for _, d := range tokenperm.All() {
+		if d.Superadmin || len(d.Levels) == 0 {
+			continue
+		}
+		b.WriteString("," + d.Key + ":" + string(d.Levels[len(d.Levels)-1]))
+	}
+	return b.String()
 }
 
 func issueProbeToken(t *testing.T, store db.Store, userID int64, scopes string) string {

@@ -88,6 +88,13 @@ const (
 	// carried no token, so JWT is off on it. Measured by the Test, never
 	// guessed from the configuration (onlyoffice.CheckReversePath).
 	CodeJWTNotEnforced = "jwt_not_enforced"
+	// CodeEditorSameOrigin - ONLYOFFICE is configured and its editor has no
+	// frame on another origin (neither FILEX_ONLYOFFICE_FRAME_ORIGIN nor
+	// FILEX_APP_UI_ORIGIN), so its api.js runs in filex's own page, with the
+	// signed-in person's session (task #92). A note, not a warning: the setup
+	// works, and the document server is infrastructure the operator chose to
+	// trust.
+	CodeEditorSameOrigin = "editor_same_origin"
 )
 
 // FieldSecret is the JWT secret field, for an advisory about JWT.
@@ -207,6 +214,12 @@ type AdvisoryInput struct {
 	// differ.
 	CallbackURL string
 	Lookup      LookupFunc
+	// AppUIOrigin is FILEX_APP_UI_ORIGIN and OfficeFrameOrigin
+	// FILEX_ONLYOFFICE_FRAME_ORIGIN: with either the ONLYOFFICE editor runs in
+	// a frame on another origin, with neither in filex's own page
+	// (CodeEditorSameOrigin).
+	AppUIOrigin       string
+	OfficeFrameOrigin string
 }
 
 // Advisories returns everything worth saying about one service's addresses.
@@ -267,6 +280,18 @@ func Advise(in AdvisoryInput) []Advisory {
 				})
 			}
 		}
+	}
+
+	// Where the editor's script runs. Said on the card so the operator who
+	// never read the security notes still learns it (docs/ONLYOFFICE.md → The
+	// editor in a frame of its own).
+	if service == OnlyOffice && strings.TrimSpace(in.AppUIOrigin) == "" && strings.TrimSpace(in.OfficeFrameOrigin) == "" {
+		out = append(out, Advisory{
+			Code: CodeEditorSameOrigin, Field: FieldURL, Severity: SeverityNote,
+			Message: "The editor's script (api.js) runs inside filex's own pages, with the signed-in person's session. " +
+				"Set FILEX_ONLYOFFICE_FRAME_ORIGIN to the document server's origin, and send /filex-frame/ on that host to filex, " +
+				"and filex runs it in a frame there, out of reach of filex's session storage and pages.",
+		})
 	}
 
 	if callsBack[service] {

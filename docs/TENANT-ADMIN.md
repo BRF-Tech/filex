@@ -199,7 +199,10 @@ database, the first time it runs (the mark `auth.instances.upgraded`):
 
 A **single-tenant install** reads none of this: every enabled instance serves
 every sign-in, as every provider does today. The tables are filled anyway, so
-turning `FILEX_MULTI_TENANT` on later starts from the same bindings.
+turning multi-tenant mode on later (Admin → Multi-tenant mode, or
+`FILEX_MULTI_TENANT`) starts from the same bindings. While the mode is off the
+Identity providers page shows no bindings and lists no tenant's own provider;
+the rows are kept for when it is back on.
 
 ## Sign-in providers bound to tenants
 

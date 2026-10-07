@@ -232,6 +232,7 @@ func (s *Service) markUsed(ctx context.Context, origin string, in *Intent, resul
 			_, _ = s.opts.Store.DeleteAppStoreState(ctx, k)
 		}
 	}
+	s.pruneReqLinks(ctx, now)
 }
 
 // ── Reviewed links, between the review and the administrator's decision ──
@@ -246,6 +247,9 @@ type Pending struct {
 	Intent  *Intent
 	UserID  int64
 	Created time.Time
+	// RequestID is the plugin request (pluginreq) the link was asked for by
+	// an approval in the embedded store (RequestFor); 0 for a magic link.
+	RequestID int64
 }
 
 // pendingLife bounds how long a reviewed link waits (its own expiry, if
@@ -255,9 +259,16 @@ const pendingLife = time.Hour
 // Hold keeps a reviewed link under a new handle for the administrator who
 // reviewed it.
 func (s *Service) Hold(origin, token string, in *Intent, userID int64) *Pending {
+	return s.HoldFor(origin, token, in, userID, 0)
+}
+
+// HoldFor is Hold for a link an approval asked for: requestID is the plugin
+// request it ends (0: none).
+func (s *Service) HoldFor(origin, token string, in *Intent, userID, requestID int64) *Pending {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	p := &Pending{Handle: hex.EncodeToString(b), Origin: origin, Token: token, Intent: in, UserID: userID, Created: s.opts.Now().UTC()}
+	p := &Pending{Handle: hex.EncodeToString(b), Origin: origin, Token: token, Intent: in, UserID: userID, Created: s.opts.Now().UTC(),
+		RequestID: requestID}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.prunePendingLocked()

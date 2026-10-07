@@ -47,6 +47,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/appstore"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/auth"
+	"github.com/brf-tech/filex/backend/internal/pluginreq"
 	"github.com/brf-tech/filex/backend/internal/update"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 )
@@ -61,6 +62,12 @@ type AppStore struct {
 	// set): a link's filex_origin must be its origin. Empty: the origin the
 	// request arrived at.
 	PublicURL string
+	// Requests is the Install requests service: a link an approval asked for
+	// (the embedded store, #162) closes its request when it is installed.
+	// Groups answers a person's groups for the store screen
+	// (app_store_view.go). Either nil: that part is off.
+	Requests *pluginreq.Service
+	Groups   StoreGroups
 }
 
 // NewAppStore builds the handler set over the Apps admin handlers it shares
@@ -75,6 +82,13 @@ func (h *AppStore) MountAdmin(r chi.Router) {
 	r.Get("/stores", h.ListStores)
 	r.Post("/stores", h.TrustStore)
 	r.Delete("/stores", h.UntrustStore)
+	// The embedded store (#162, app_store_view.go): the connection a store's
+	// one-time code makes, and who sees the store screen.
+	r.Get("/stores/connection", h.GetConnection)
+	r.Post("/stores/connection", h.Connect)
+	r.Delete("/stores/connection", h.Disconnect)
+	r.Get("/store-view", h.GetView)
+	r.Put("/store-view", h.PutView)
 	r.Post("/store-intent", h.Intent)
 	r.Post("/store-intent/install", h.Install)
 	r.Post("/store-intent/cancel", h.Cancel)
@@ -110,15 +124,16 @@ func storeFail(w http.ResponseWriter, err error) {
 	code := http.StatusBadRequest
 	switch e.Code {
 	case appstore.CodeTrustRequired, appstore.CodeKeyChanged, appstore.CodeIntentUsed,
-		appstore.CodePinMismatch, appstore.CodeVersionRollback, appstore.CodeSourceChanged:
+		appstore.CodePinMismatch, appstore.CodeVersionRollback, appstore.CodeSourceChanged,
+		appstore.CodeNotConnected, appstore.CodeConnectRefused, appstore.CodeStoreRefusal:
 		code = http.StatusConflict
 	case appstore.CodeStoreRefused, appstore.CodeKeyNotConfigured:
 		code = http.StatusForbidden
-	case appstore.CodeIntentUnknown, appstore.CodeIntentNotFound:
+	case appstore.CodeIntentUnknown, appstore.CodeIntentNotFound, appstore.CodeMediaInvalid:
 		code = http.StatusNotFound
 	case appstore.CodeIntentGone, appstore.CodeIntentExpired:
 		code = http.StatusGone
-	case appstore.CodeUnreachable, appstore.CodeBadAnswer, appstore.CodeSignature:
+	case appstore.CodeUnreachable, appstore.CodeBadAnswer, appstore.CodeSignature, appstore.CodeIndexInvalid:
 		code = http.StatusBadGateway
 	}
 	writeJSON(w, code, e)
@@ -238,7 +253,16 @@ func (h *AppStore) TrustStore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AppStore) UntrustStore(w http.ResponseWriter, r *http.Request) {
-	if !h.gate(w, r, "removing a trusted store") {
+	h.dropFromStore(w, r, "removing a trusted store", h.Svc.Remove)
+}
+
+// dropFromStore is a DELETE ?store=<origin> that forgets something of a
+// store (its trust, this filex's connection to it): the gate, the origin,
+// drop, then 204, or 404 when there was nothing to forget. drop writes its
+// own audit row.
+func (h *AppStore) dropFromStore(w http.ResponseWriter, r *http.Request, what string,
+	drop func(ctx context.Context, origin string, actorID *int64) (bool, error)) {
+	if !h.gate(w, r, what) {
 		return
 	}
 	origin, ok := h.origin(w, r.URL.Query().Get("store"))
@@ -246,7 +270,7 @@ func (h *AppStore) UntrustStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.SkipAuditRow(r.Context())
-	found, err := h.Svc.Remove(r.Context(), origin, actorIDOf(r))
+	found, err := drop(r.Context(), origin, actorIDOf(r))
 	if err != nil {
 		storeFail(w, err)
 		return
@@ -468,10 +492,16 @@ func (h *AppStore) Intent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Admin.fileTypesOf(r, dry, was)
-	p := h.Svc.Hold(origin, req.Token, in, actorUserID(r))
+	// A link an approval asked for (the embedded store) carries its request:
+	// the install that ends the review closes it.
+	reqID := h.Svc.RequestFor(r.Context(), origin, in.TokenID)
+	p := h.Svc.HoldFor(origin, req.Token, in, actorUserID(r), reqID)
 	body := map[string]any{
 		"handle": p.Handle, "store": origin, "store_trust": h.Svc.TrustStatus(r.Context(), origin),
 		"intent": viewOfIntent(in), "review": dry,
+	}
+	if reqID != 0 {
+		body["request_id"] = reqID
 	}
 	if was != nil {
 		// Where the installed app came from, beside what the link brings: the
@@ -599,6 +629,13 @@ func (h *AppStore) Install(w http.ResponseWriter, r *http.Request) {
 		st = h.Admin.Registry.StatusOf(now)
 	}
 	body["plugin"] = st
+	if p.RequestID != 0 && h.Requests != nil {
+		// The request the link was asked for is decided: approved, by this
+		// install (a request decided meanwhile is left as it is).
+		if closed, ok, err := h.Requests.CompleteStore(context.WithoutCancel(ctx), p.RequestID, actorOf(r), st); err == nil && ok {
+			body["request"] = pluginRequestView(closed, langOf(r), false)
+		}
+	}
 	writeJSON(w, http.StatusCreated, body)
 }
 

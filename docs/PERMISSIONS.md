@@ -93,7 +93,7 @@ A write decides create vs modify **per file**: replacing a file that is there is
 | `share.links` | Public download links (web, agent API, the invite fallback) - and keeping the ones already made open ([below](#public-links-follow-their-creator)) |
 | `share.upload_links` | Upload-only "drop" links (file requests) - and keeping them open |
 | `share.users` | Sharing with another account or a group (the per-item permissions panel, invites) |
-| `comments.write` | Posting comments |
+| `comments.write` | Posting comments. An API key also needs its own `comments:rw` ([RBAC.md](RBAC.md#permissions-with-a-level-comments)) |
 | `ai.use` | The agent REST + MCP API at `/api/ai` |
 | `plugins.run` | Running app actions and app view events. An app may put some of its actions behind a permission of its own as well ([App permissions](#app-permissions)) |
 
@@ -164,7 +164,7 @@ tenant is given only to that tenant's accounts; one held outside its tenant
 by no role, so picking a custom role for one makes them stop being an
 administrator (never the last one) - one save, one server call.
 
-![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](screenshots/v0.52.0/roles/role-editor-1440.png)
+![A custom role's editor: its name in Turkish, its permissions, and the folder where it differs](https://filex.sh/shots/roles/role-editor-1440.1cbf21192719.png)
 
 A role has:
 
@@ -385,7 +385,7 @@ the 29, per role and per person; the app's manifest declares them
   `overrides` map is replaced on `PUT`, so a client that writes the 29 must
   send the `app.*` keys it read back with them, or they are cleared.
 
-![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](screenshots/v0.52.0/apppermissions/person-exceptions.png)
+![A person's page: their role, and their own exception to an app permission beside the answer and where it comes from](https://filex.sh/shots/apppermissions/person-exceptions.7e1f829939f4.png)
 
 ## Public links follow their creator
 
@@ -623,7 +623,7 @@ answers for all of them alike: `403 {"error":"e2e_not_allowed","reason":"permiss
   held `files.encrypt`, and "may add files, may not encrypt" is a role made on
   purpose.
 
-  ![Admin → Roles pointing out the User role and a custom role that may have lost Encrypt](screenshots/v0.52.0/roles/roles-gaps-1280.png)
+  ![Admin → Roles pointing out the User role and a custom role that may have lost Encrypt](https://filex.sh/shots/roles/roles-gaps-1280.bf4cbd7277e2.png)
 - **A permission a later version stored is kept.** A role or a person's
   exceptions saved by a newer filex may hold a key this version does not know.
   The pages cannot show it, so they cannot have taken it away: every save - a

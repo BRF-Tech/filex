@@ -354,6 +354,25 @@ export interface ExplorerConfig {
   mySharesVisible?: boolean;
 
   /**
+   * #162 - the host draws the **store screen** (the catalog of the trusted
+   * stores an administrator turned on, where a person asks for an app) as a
+   * page of its own, and handles `@open-app-store`: the SPA's `app-store`
+   * route, the desktop app's store window.
+   *
+   * ⚠ Saying yes does not draw the row. The navigation panel's "Apps → App
+   * store" row is drawn when the host can open the screen AND the server shows
+   * it to this person (`GET /api/app-store` answers `visible`: the
+   * administrator's setting for their tenant, their role and groups) AND the
+   * caller is a person, not an app token - one rule, here in the explorer, for
+   * every host (lib/appStoreRow). A host decides only whether it has the page.
+   *
+   * Default: OFF, for the reason `mySharesVisible` is off: a host that does not
+   * listen would be left with a row that leads nowhere. `<filex-explorer>`
+   * forwards `open-app-store` (the desktop app listens to it).
+   */
+  appStorePage?: boolean;
+
+  /**
    * The host draws an app plugin's `home` view as a page of ITS OWN, in the
    * same tab (the SPA's `app-home` route), and handles `@open-app-home`.
    *

@@ -1055,8 +1055,8 @@
                                  'Bu pencere, tepsi menüsü ve dosya listesi için geçerlidir.'],
         'set.language_system':  ['System', 'Sistem'],
         'ow.title':             ['Open documents with filex', 'Belgeleri filex ile aç'],
-        'ow.idea':              ['Double-click a Word, Excel or PowerPoint file and it opens here, in the editor your filex server runs - no Office needed on this computer.',
-                                 'Bir Word, Excel ya da PowerPoint dosyasına çift tıkla; filex sunucunun çalıştırdığı düzenleyicide burada açılsın - bu bilgisayarda Office gerekmez.'],
+        'ow.idea':              ['Double-click a Word, Excel, PowerPoint or CSV file and it opens here, in the editor your filex server runs - no Office needed on this computer.',
+                                 'Bir Word, Excel, PowerPoint ya da CSV dosyasına çift tıkla; filex sunucunun çalıştırdığı düzenleyicide burada açılsın - bu bilgisayarda Office gerekmez.'],
         'ow.types':             ['Handles: {types}', 'Açtığı türler: {types}'],
         'ow.registered':        ['filex is listed under "Open with" for these files.',
                                  'filex bu dosyalar için “Birlikte aç” listesinde görünür.'],
@@ -1543,6 +1543,11 @@
           // Host-owned open: every file opens in its OWN window (openDoc below),
           // not the in-page overlay. One "open" path, one instance per document.
           openInHost: true,
+          // #162 - this window has the store screen (its own window, the
+          // server's page: main.ts openStoreWindow). Whether the "App store"
+          // row is drawn is the explorer's rule, the web app's too (core
+          // lib/appStoreRow): a person, and the server shows them the screen.
+          appStorePage: true,
           // Mouse open gesture — a per-machine setting (Settings → click). Touch
           // is untouched: a tap always opens. Default: double-click opens.
           openTrigger: openTriggerPref(),
@@ -1630,6 +1635,11 @@
           },
         };
         explorer.addEventListener('error', (e) => console.error('[explorer]', e.detail));
+        // #162 - "App store": the store screen opens in a window of its own,
+        // for THIS account (captured at mount, like file-opened below).
+        explorer.addEventListener('open-app-store', () => {
+          void window.filexApp.openStore(account.id);
+        });
         // Host-owned open (config.openInHost above): the explorer emits
         // `file-opened` instead of showing its in-page overlay, and we open the
         // file in its OWN window. The account id is captured at mount, so a rail

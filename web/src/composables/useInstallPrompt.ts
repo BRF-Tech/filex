@@ -9,11 +9,12 @@
 // ⚠ This lives in web/ (the standalone SPA) ONLY, never in packages/core — the
 // embeddable explorer must not surface an install prompt inside its host apps
 // (work.example.com "Dosyalar", fishapp). See vite.config.ts for the matching SW
-// scope guard.
-import { computed, onBeforeUnmount, onMounted, readonly, ref, type ComputedRef, type Ref } from 'vue';
+// scope guard. (The settings dialog is core's, and it draws an install row
+// only when this app's host hands it one - `useAppInstall` below.)
+import { computed, readonly, ref, shallowRef, type ComputedRef, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { viewPrefsSlot } from '@brftech/filex-core';
-import { registerAppServiceWorker } from '@/lib/serviceWorker';
+import { registerAppServiceWorker, type AppServiceWorker } from '@/lib/serviceWorker';
 
 // The Chromium-only event fired when the app meets installability criteria.
 interface BeforeInstallPromptEvent extends Event {
@@ -57,11 +58,23 @@ interface BeforeInstallPromptEvent extends Event {
  * make it permanent and portable for that second person. Left alone it stays
  * what it is: an old flag in one browser, which every fresh dismissal now
  * outlives.
+ *
+ * ⚠⚠ TWO OFFERS, TWO FLAGS (task #190). A PC is offered the DESKTOP APP, a
+ * phone or a tablet the web app ITSELF, and they used to share the one
+ * `dismissed` flag - so closing the desktop chip on a PC, which follows the
+ * account to every device, also closed the phone's offer before it had ever
+ * been shown. `dismissed` keeps its name and its meaning (the desktop offer,
+ * and every dismissal already stored); the phone's offer is `app`.
+ *
+ * ⚠ The browser flag stays ONE flag for both: it lives in one browser, and a
+ * browser is one kind of device, so it was set on the only offer that browser
+ * ever showed.
  */
 const DISMISS_KEY = 'filex.installPrompt.dismissed';
 
-/** The document's corner for this feature. One top-level key, `install`. */
-const installSlot = viewPrefsSlot<{ dismissed?: boolean }>('install');
+/** The document's corner for this feature. One top-level key, `install`:
+ *  `dismissed` for the desktop app's offer, `app` for the web app's own. */
+const installSlot = viewPrefsSlot<{ dismissed?: boolean; app?: boolean }>('install');
 
 function legacyDismissed(): boolean {
   try {
@@ -72,15 +85,19 @@ function legacyDismissed(): boolean {
   }
 }
 
+/** The display modes an INSTALLED app runs in. A browser tab is `browser`. */
+const INSTALLED_DISPLAY_MODES = ['standalone', 'fullscreen', 'minimal-ui', 'window-controls-overlay'];
+
 /** True when the app is already running as an installed PWA (any platform). */
-function detectStandalone(): boolean {
+export function detectStandalone(): boolean {
   if (typeof window === 'undefined') return false;
-  const displayStandalone =
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(display-mode: standalone)').matches;
+  const displayInstalled =
+    typeof matchMedia === 'function' &&
+    INSTALLED_DISPLAY_MODES.some((m) => matchMedia(`(display-mode: ${m})`).matches);
   // iOS Safari doesn't support display-mode; it exposes navigator.standalone.
-  const iosStandalone = (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-  return displayStandalone || iosStandalone;
+  const iosStandalone =
+    typeof navigator !== 'undefined' && (navigator as unknown as { standalone?: boolean }).standalone === true;
+  return displayInstalled || iosStandalone;
 }
 
 /** iOS (iPhone/iPad) — where there is no beforeinstallprompt and the user must
@@ -389,20 +406,217 @@ export function useDesktopDownloads(): {
   };
 }
 
-export function useInstallPrompt() {
-  const deferredPrompt = ref<BeforeInstallPromptEvent | null>(null);
-  const isStandalone = ref(detectStandalone());
-  const isIOS = ref(detectIOS());
-  /* ⚠⚠ A COMPUTED, not a ref read once at setup. The document arrives from the
-   * network a moment after this composable runs, so a value snapshotted here
-   * would be "not dismissed" for every person on every load — the card would
-   * flash before the answer landed, or simply show. `slot.ready()` and
-   * `slot.get()` both read reactive state inside `lib/viewPrefs`, so this
-   * settles by itself the moment the document is there. */
-  const dismissedLocally = ref(legacyDismissed());
-  const dismissed = computed(
-    () => dismissedLocally.value || installSlot.get()?.dismissed === true,
-  );
+/* ── the browser's own install offer, captured once for the page ──────────
+ *
+ * ⚠⚠ Captured at BOOT, at module level, not by a component (task #190).
+ *
+ * The banner's own `onMounted` used to listen, and what it listened for is a
+ * one-shot: Chromium fires `beforeinstallprompt` once per page load, when its
+ * checks pass, and replays it to nobody - a listener attached later has
+ * missed it. The saved event was also the banner's private state, so the
+ * settings dialog (the offer's permanent home, the owner's ruling of
+ * 2026-09-13) could not reach it.
+ *
+ * `main.ts` calls `captureInstallPrompt()` before the app mounts, and every
+ * reader - the banner and the settings row - shares the one saved event.
+ *
+ * ⚠ `preventDefault()` is what turns Android Chrome's own mini-infobar off.
+ * That is right only because this app then shows an offer of its own on a
+ * phone: the band on the file list (InstallPrompt.vue) and the row in the
+ * settings. Before #190 neither appeared on a phone - the corner chip stepped
+ * aside behind the list's upload button (lib/keepClear) and the settings had
+ * no row for a phone - so a phone was shown NOTHING: Chrome's offer
+ * suppressed, ours never drawn. The browser menu's "Install app" was the only
+ * way left.
+ */
+const deferredPrompt = shallowRef<BeforeInstallPromptEvent | null>(null);
+/** This page runs as the installed app, or was just installed from. */
+const standalone = ref(false);
+
+/**
+ * "The app is installed on this device", remembered in THIS browser.
+ *
+ * ⚠ A browser tab on a phone that has the app installed is not told so:
+ * Chromium simply stops firing `beforeinstallprompt`, and a page without the
+ * event cannot tell "installed already" from "not offered yet". Since #190 a
+ * phone without the event is shown the browser menu's way in (`menu`), so
+ * without this flag every tab opened after the install would offer it again.
+ * Set by `appinstalled` and by a page that runs as the app (on Android the
+ * installed app and Chrome share the site's storage); cleared the moment the
+ * browser offers an install again, which means it was uninstalled. A fact
+ * about this device, so the browser is the right place for it, unlike a
+ * dismissal (see the top of this file).
+ */
+const INSTALLED_KEY = 'filex.installPrompt.installed';
+const installedHere = ref(false);
+
+function rememberInstalled(on: boolean): void {
+  installedHere.value = on;
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (on) localStorage.setItem(INSTALLED_KEY, '1');
+    else localStorage.removeItem(INSTALLED_KEY);
+  } catch {
+    /* Blocked site data: this page knows, the next one asks again. */
+  }
+}
+
+function installedFlag(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(INSTALLED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+let captureTarget: Window | null = null;
+/** The page's service worker, registered by the first banner (see below). */
+let appWorker: AppServiceWorker | null = null;
+
+function onBeforeInstallPrompt(e: Event): void {
+  // Stop Chrome's mini-infobar so we can present install on our terms.
+  e.preventDefault();
+  deferredPrompt.value = e as BeforeInstallPromptEvent;
+  // The browser offers an install: whatever this device had, it has no more.
+  if (installedHere.value) rememberInstalled(false);
+}
+
+function onAppInstalled(): void {
+  deferredPrompt.value = null;
+  standalone.value = true;
+  rememberInstalled(true);
+}
+
+/** Start listening for the browser's install offer. Call it once, as early as
+ *  the page can (main.ts, before the mount); calling it again does nothing. */
+export function captureInstallPrompt(
+  target: Window | undefined = typeof window === 'undefined' ? undefined : window,
+): void {
+  if (captureTarget || !target) return;
+  captureTarget = target;
+  standalone.value = detectStandalone();
+  if (standalone.value) rememberInstalled(true);
+  else installedHere.value = installedFlag();
+  target.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+  target.addEventListener('appinstalled', onAppInstalled);
+}
+
+/** Test seam: forget the saved event, the listeners and the service worker,
+ *  so one test cannot hand the next a saved event. Not used by the app. */
+export function __resetInstallPrompt(): void {
+  captureTarget?.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
+  captureTarget?.removeEventListener('appinstalled', onAppInstalled);
+  captureTarget = null;
+  deferredPrompt.value = null;
+  standalone.value = false;
+  installedHere.value = false;
+  appWorker = null;
+}
+
+/** Inside the Electron shell (its editor window loads this SPA, with
+ *  `window.filexDesktop` set by desktop/src/preload-editor.cts): there is no
+ *  web app to install there. */
+function inDesktopShell(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as { filexDesktop?: unknown; filexApp?: { isDesktop?: boolean } };
+  if (w.filexDesktop || w.filexApp?.isDesktop === true) return true;
+  return typeof navigator !== 'undefined' && /Electron\//i.test(navigator.userAgent ?? '');
+}
+
+/**
+ * How THIS device installs the web app:
+ *
+ *   · `prompt` - the browser has offered an install to the page (Android
+ *     Chrome, Samsung Internet, Edge): one button opens its own dialog;
+ *   · `ios`    - iPhone and iPad, where no browser offers one to a page: the
+ *     Share sheet's "Add to Home Screen" (any iOS browser since 16.4);
+ *   · `menu`   - a phone or a tablet whose browser has not offered one (yet):
+ *     its own menu still installs the page (Chrome offers it to the page only
+ *     after a tap and about 30 seconds on the site);
+ *   · `null`   - nothing to offer: running as the installed app already,
+ *     installed on this device (`installed`, see INSTALLED_KEY), inside the
+ *     desktop shell, or on a PC, which is offered the DESKTOP app instead
+ *     (`detectDesktopPlatform`).
+ */
+export type AppInstallState = 'prompt' | 'ios' | 'menu' | null;
+
+export function appInstallState(o: {
+  standalone: boolean;
+  desktopShell: boolean;
+  desktop: DesktopPlatform | null;
+  canPrompt: boolean;
+  ios: boolean;
+  installed?: boolean;
+}): AppInstallState {
+  if (o.standalone || o.desktopShell || o.desktop !== null) return null;
+  if (o.canPrompt) return 'prompt';
+  if (o.installed) return null;
+  if (o.ios) return 'ios';
+  return 'menu';
+}
+
+/** The browser's install dialog. ⚠ The event is single-use (a second
+ *  `prompt()` throws), so it is let go BEFORE the dialog is awaited: a second
+ *  tap while the dialog is up finds nothing to call. */
+async function promptInstall(): Promise<'accepted' | 'dismissed' | 'unavailable'> {
+  const evt = deferredPrompt.value;
+  if (!evt) return 'unavailable';
+  deferredPrompt.value = null;
+  try {
+    await evt.prompt();
+    const { outcome } = await evt.userChoice;
+    // Installed: say so at once rather than wait for `appinstalled`, which
+    // comes a moment later - in between the band would fall back to the
+    // browser menu's way and offer the install that was just accepted.
+    if (outcome === 'accepted') rememberInstalled(true);
+    return outcome;
+  } catch {
+    return 'unavailable';
+  }
+}
+
+export interface AppInstall {
+  /** How this device installs the web app; null when there is nothing to offer. */
+  state: ComputedRef<AppInstallState>;
+  /** Running as the installed app, or installed from this page just now. */
+  isStandalone: Readonly<Ref<boolean>>;
+  isIOS: boolean;
+  /** Open the browser's own install dialog (state `prompt`). */
+  promptInstall: () => Promise<'accepted' | 'dismissed' | 'unavailable'>;
+}
+
+/**
+ * The web app's own install, for whoever offers it: the banner below and the
+ * settings dialog's row (UserSettingsModal → core's `host.installApp`).
+ *
+ * ⚠ No dismissal here, on purpose: the settings row is the home that stays
+ * after the reminder is closed for good, so it must not read that flag.
+ */
+export function useAppInstall(): AppInstall {
+  captureInstallPrompt();
+  const ios = detectIOS();
+  const desktop = detectDesktopPlatform();
+  const desktopShell = inDesktopShell();
+  return {
+    state: computed(() =>
+      appInstallState({
+        standalone: standalone.value,
+        desktopShell,
+        desktop,
+        canPrompt: deferredPrompt.value !== null,
+        ios,
+        installed: installedHere.value,
+      }),
+    ),
+    isStandalone: readonly(standalone),
+    isIOS: ios,
+    promptInstall,
+  };
+}
+
+/* ── the service worker: registered once for the page ─────────────────── */
+
+function appServiceWorker(): AppServiceWorker {
+  if (appWorker) return appWorker;
 
   // ⚠⚠ In dev, tear down any service worker that is still registered from a
   // previous run, and do it before anything else asks the network.
@@ -416,70 +630,82 @@ export function useInstallPrompt() {
   // that no longer matches the code being served, which shows up as a blank
   // page. So the app unregisters it itself rather than asking a person to go
   // and clear their site data.
-  if (import.meta.env.DEV && typeof navigator !== 'undefined' && navigator.serviceWorker) {
-    void navigator.serviceWorker.getRegistrations().then((regs) => {
-      for (const r of regs) void r.unregister();
-    });
+  const sw = typeof navigator === 'undefined' ? undefined : navigator.serviceWorker;
+  if (import.meta.env.DEV && sw && typeof sw.getRegistrations === 'function') {
+    void sw
+      .getRegistrations()
+      .then((regs) => {
+        for (const r of regs) void r.unregister();
+      })
+      .catch(() => {
+        /* nothing registered, or no worker API: nothing to tear down */
+      });
   }
 
   // Service-worker update state (registerType: 'prompt' in vite.config.ts).
   // Registered at the address the base path gives it (lib/serviceWorker).
-  const { needRefresh, updateServiceWorker } = registerAppServiceWorker({
+  // ⚠ Once per page: the banner is the only caller today, but a second one
+  // would otherwise register the worker a second time.
+  appWorker = registerAppServiceWorker({
     onRegisteredSW(url) {
       console.debug('[pwa] service worker registered:', url);
     },
   });
+  return appWorker;
+}
+
+export function useInstallPrompt() {
+  const app = useAppInstall();
+  /* ⚠⚠ COMPUTEDS, not values read once at setup. The document arrives from
+   * the network a moment after this composable runs, so a value snapshotted
+   * here would be "not dismissed" for every person on every load — the card
+   * would flash before the answer landed, or simply show. `slot.get()` reads
+   * reactive state inside `lib/viewPrefs`, so these settle by themselves the
+   * moment the document is there. */
+  const dismissedLocally = ref(legacyDismissed());
+  const desktopDismissed = computed(
+    () => dismissedLocally.value || installSlot.get()?.dismissed === true,
+  );
+  const appDismissed = computed(() => dismissedLocally.value || installSlot.get()?.app === true);
+
+  const { needRefresh, updateServiceWorker } = appServiceWorker();
 
   // Chrome/Edge/Android: the browser offered a native install → show a button.
-  const canPromptInstall = computed(
-    () =>
-      deferredPrompt.value !== null &&
-      !isStandalone.value &&
-      !dismissed.value &&
-      // On a PC the desktop app wins: offering both at once asks the user to
-      // choose between two things that sound identical.
-      detectDesktopPlatform() === null,
-  );
+  // ⚠ Never on a PC (`useAppInstall` answers null there): the desktop app
+  // wins, and offering both at once asks the user to choose between two
+  // things that sound identical.
+  const canPromptInstall = computed(() => app.state.value === 'prompt' && !appDismissed.value);
 
   // iOS Safari: no native prompt exists → show manual "Add to Home Screen" help.
-  const showIOSInstructions = computed(
-    () => isIOS.value && !isStandalone.value && !dismissed.value,
-  );
+  const showIOSInstructions = computed(() => app.state.value === 'ios' && !appDismissed.value);
+
+  // A phone whose browser has not offered an install (yet): its own menu
+  // does it. ⚠ Shown, not left out (the owner's ruling, 2026-10-06: a phone
+  // gets the band the PC's desktop download has, from the first page): Chrome
+  // offers the install to a page only after a tap and about 30 seconds on
+  // the site, so on a first visit to the sign-in page there is no event yet.
+  // The band turns into the Install button the moment the event arrives.
+  const showMenuInstructions = computed(() => app.state.value === 'menu' && !appDismissed.value);
 
   // PC visitors: offer the native desktop app instead of a browser install.
   const desktopPlatform = ref(detectDesktopPlatform());
   const showDesktopDownload = computed(
-    () => desktopPlatform.value !== null && !isStandalone.value && !dismissed.value,
+    () => desktopPlatform.value !== null && !app.isStandalone.value && !desktopDismissed.value,
   );
 
   // Anything to show at all? Drives whether the banner mounts.
   const shouldOfferInstall = computed(
-    () => canPromptInstall.value || showIOSInstructions.value || showDesktopDownload.value,
+    () =>
+      canPromptInstall.value ||
+      showIOSInstructions.value ||
+      showMenuInstructions.value ||
+      showDesktopDownload.value,
   );
 
-  function onBeforeInstallPrompt(e: Event) {
-    // Stop Chrome's mini-infobar so we can present install on our terms.
-    e.preventDefault();
-    deferredPrompt.value = e as BeforeInstallPromptEvent;
-  }
-
-  function onAppInstalled() {
-    deferredPrompt.value = null;
-    isStandalone.value = true;
-  }
-
-  /** Trigger the native install dialog (Chrome/Edge/Android). Returns the
-   *  user's choice; the event is single-use so it's cleared afterwards. */
-  async function promptInstall(): Promise<'accepted' | 'dismissed' | 'unavailable'> {
-    const evt = deferredPrompt.value;
-    if (!evt) return 'unavailable';
-    await evt.prompt();
-    const { outcome } = await evt.userChoice;
-    deferredPrompt.value = null;
-    return outcome;
-  }
-
   /** Hide the offer and remember it so we don't nag on every load.
+   *
+   *  ⚠ The offer on screen decides WHICH flag: the desktop app's on a PC, the
+   *  web app's own everywhere else (see the dismissal note at the top).
    *
    *  ⚠ One place or the other, never both. With an account behind the session
    *  the flag goes in the person's document and follows them; with no account
@@ -488,8 +714,12 @@ export function useInstallPrompt() {
    *  browser for everyone and hand it to the next person on a shared machine,
    *  which is the whole thing this move undoes. */
   function dismiss(): void {
+    const desktopOffer = showDesktopDownload.value;
     if (installSlot.ready() && installSlot.persistable()) {
-      installSlot.set({ ...(installSlot.get() ?? {}), dismissed: true });
+      const next = { ...(installSlot.get() ?? {}) };
+      if (desktopOffer) next.dismissed = true;
+      else next.app = true;
+      installSlot.set(next);
       return;
     }
     dismissedLocally.value = true;
@@ -503,29 +733,20 @@ export function useInstallPrompt() {
 
   /** Apply a pending service-worker update and reload into the fresh bundle. */
   function reloadForUpdate(): void {
-    updateServiceWorker(true);
+    void updateServiceWorker(true);
   }
 
-  onMounted(() => {
-    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
-    window.addEventListener('appinstalled', onAppInstalled);
-  });
-
-  onBeforeUnmount(() => {
-    window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
-    window.removeEventListener('appinstalled', onAppInstalled);
-  });
-
   return {
-    isStandalone: readonly(isStandalone),
-    isIOS: readonly(isIOS),
+    isStandalone: app.isStandalone,
+    isIOS: computed(() => app.isIOS),
     canPromptInstall,
     desktopPlatform,
     showDesktopDownload,
     showIOSInstructions,
+    showMenuInstructions,
     shouldOfferInstall,
     needRefresh,
-    promptInstall,
+    promptInstall: app.promptInstall,
     dismiss,
     reloadForUpdate,
   };

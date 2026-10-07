@@ -2,8 +2,11 @@
 
 ## Supported versions
 
-filex is pre-1.0 and ships from the latest tagged release. Security fixes land
-on `main` and in the next tag. Please run a recent version.
+filex is pre-1.0 and ships from the latest tagged release. A fix for a hole that
+can be exploited in a released version ships at once, as a patch release of its
+own; hardening with no live hole behind it rides the next daily release
+([Release process](docs/CONTRIBUTING.md#release-process)). Please run a recent
+version.
 
 ## Reporting a vulnerability
 
@@ -65,9 +68,10 @@ that carries only the ambient session (the cookie, or a trusted proxy's
 header) must come from filex's own pages, filex's own address, or an origin
 the operator put in `FILEX_CORS_ALLOWED_ORIGINS`; the sign-in form is held to
 the same rule without a session. In scope: such a request getting through
-from any other origin, including a sibling subdomain, `Origin: null` and the
-app-interface host. Not in scope: an origin the operator listed (a
-`https://*.example.com` pattern trusts every subdomain by design), a request
+from any other origin, including a sibling subdomain, `Origin: null`, the
+app-interface host and the ONLYOFFICE frame origin - those two are never
+trusted, whatever the operator listed. Not in scope: an origin the operator listed (a
+`https://*.example.com` pattern trusts every other subdomain by design), a request
 carrying a key, and a browser that sends none of `Sec-Fetch-Site`, `Origin`
 or `Referer` (every current browser sends them). How it decides:
 [CONFIGURATION.md → Requests from other origins](docs/CONFIGURATION.md#requests-from-other-origins).
@@ -93,3 +97,10 @@ interface read or write files it was not opened with. Known and documented,
 not in scope: an interface sending out what it can see through WebRTC in a
 browser that ignores the measures filex takes against it
 ([APP-PLUGINS.md](docs/APP-PLUGINS.md#an-apps-own-interface)).
+
+The ONLYOFFICE editor's frame (`/filex-frame/editor` on the Document Server's
+own origin, `FILEX_ONLYOFFICE_FRAME_ORIGIN`) is the one page filex answers on
+that host. In scope: filex answering anything else there, the page running on
+filex's own origin, the frame reaching the signed-in person's session, or the
+signed editor configuration reaching any frame but the one filex's page drew
+([ONLYOFFICE.md](docs/ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)).

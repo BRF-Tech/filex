@@ -39,6 +39,7 @@ import {
   type ProtocolGuide,
 } from '../lib/connectionGuides';
 import ConnectionGuideView from './ConnectionGuideView.vue';
+import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
 import S3KeysPanel from './S3KeysPanel.vue';
 import SSHKeysPanel from './SSHKeysPanel.vue';
 import NFSExportsPanel from './NFSExportsPanel.vue';
@@ -89,6 +90,12 @@ const themeResolved = computed(() => {
 const protocols = guideProtocols();
 const protocol = ref(protocols[0] ?? 'webdav');
 const guideStorage = ref<string>('');
+/* The two pickers above the guide (#160: the shared list, no native select). */
+const protocolChoices = computed<SelectOption[]>(() => protocols.map((p) => ({ value: p, label: guideName(p) })));
+const storageChoices = computed<SelectOption[]>(() => [
+  { value: '', label: t('conn.guide.allStorages') },
+  ...visible.value.map((s) => ({ value: s, label: s })),
+]);
 
 /** What the NFS panel published: where to mount, and the path just minted. */
 const nfs = ref<{ host: string; port: number; enabled: boolean; path?: string; readOnly: boolean } | null>(
@@ -220,16 +227,21 @@ watch(
       <div class="fe-conn__guidebar">
         <label v-if="protocols.length > 1" class="fe-conn__pick">
           <span class="fe-cfield__label">{{ t('conn.guide.protocol') }}</span>
-          <select v-model="protocol" class="fe-cfield__input" data-testid="guide-protocol">
-            <option v-for="p in protocols" :key="p" :value="p">{{ guideName(p) }}</option>
-          </select>
+          <ChoiceSelect
+            :model-value="protocol"
+            :options="protocolChoices"
+            testid="guide-protocol"
+            @update:model-value="(v) => (protocol = String(v))"
+          />
         </label>
         <label class="fe-conn__pick">
           <span class="fe-cfield__label">{{ t('conn.guide.storage') }}</span>
-          <select v-model="guideStorage" class="fe-cfield__input" data-testid="guide-storage">
-            <option value="">{{ t('conn.guide.allStorages') }}</option>
-            <option v-for="s in visible" :key="s" :value="s">{{ s }}</option>
-          </select>
+          <ChoiceSelect
+            :model-value="guideStorage"
+            :options="storageChoices"
+            testid="guide-storage"
+            @update:model-value="(v) => (guideStorage = String(v))"
+          />
         </label>
       </div>
 

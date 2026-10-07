@@ -263,7 +263,10 @@ above.
 fallback filled its window (with the fallback, rows past the window were never
 read, so a window that was full is a cut answer even when few of its rows answer
 the whole query). The explorer shows *"More results than shown - narrow your
-search"* above such a list.
+search"* above such a list. For a caller confined to a folder (a `root:` token,
+`X-Filex-Root`) only the hits inside that folder count: a page or a window that
+files outside it filled is not a cut answer to that caller, since saying so
+would tell it that they exist.
 
 Two things the fallback does not do. **Typo tolerance** - edit distance is not
 something a `LIKE` can express, and faking it with more patterns would turn one
@@ -360,7 +363,7 @@ a tag cannot be used to learn that a file exists.
 opening one lists every file carrying it - from every folder and every storage
 the person can reach:
 
-![Personal and team tags, with a team tag opened](screenshots/v0.52.0/tags/tags-kinds-1440.png)
+![Personal and team tags, with a team tag opened](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png)
 
 Rules that follow from it:
 
@@ -694,7 +697,8 @@ Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": 
 already RBAC-filtered and in [rank order](#ranking). `snippet` is `""` for
 name-only hits. `truncated` is `true` when more matched than came back: the
 index returned a full `limit`, or the LIKE fallback filled its window or still
-had more than `limit` rows after ranking. The explorer's own search
+had more than `limit` rows after ranking. For a caller confined to a folder,
+only the hits inside it are counted. The explorer's own search
 (`/api/files/manager?action=search`) carries the same flag.
 
 Each hit also says what a bare node row cannot say about itself, so a client

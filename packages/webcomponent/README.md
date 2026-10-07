@@ -134,7 +134,7 @@ Simple attributes are auto-parsed into the underlying `config` prop:
 | `trash-visible` | `config.trashVisible` |
 | `sidenav` | `config.sideNav` - the navigation panel (the "+ New" menu · Home / Shared with me / My shares / Recent / Starred / Trash · your tags in two groups, personal and team · an Apps section, one row per installed app's own page · the storages this caller can reach). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |
 | `connections` | `config.connections` - the panel's "How to connect" and "API keys" entries. Default on, except under `ui-profile="simple"` where it is off. ⚠ "API keys" is additionally dropped when the caller is an **app** token - see `config.callerKind` below. |
-| `ui-profile` | `config.uiProfile` - `"standard"` (default) or `"simple"` (one pane, list/grid only, no tab strip, no split pane, "How to connect"/"API keys" off). Two values, no third: any other string resolves to `"standard"` and logs one console line naming it, so the `"drive"` profile that was **removed** after v0.40.0 no longer reduces anything - pass `"simple"` instead. ⚠⚠ It does **not** decide the look: the "+ New" menu, the one wide header search field with its ⌘K chip, the Type/People/Modified/Size filter row, the Folders/Files sections in grid (replaced by date headings while sorted by Modified), Details/Activity in the info panel and the storage line are what every embed draws now, with no string passed. |
+| `ui-profile` | `config.uiProfile` - `"standard"` (default) or `"simple"` (one pane, list/grid only, no tab strip, no split pane, "How to connect"/"API keys" off). Two values, no third: any other string resolves to `"standard"` and logs one console line naming it, so the `"drive"` profile that was **removed** after v0.40.0 no longer reduces anything - pass `"simple"` instead. ⚠⚠ It does **not** decide the look: the "+ New" menu, the one wide header search field with its ⌘K chip, the Type/Owner/Modified/Size filter row, the Folders/Files sections in grid (replaced by date headings while sorted by Modified), Details/Activity in the info panel and the storage line are what every embed draws now, with no string passed. |
 
 For anything richer (auth, custom endpoints, share base, …) set the
 `config` JS property after element creation. Properties merge on top
@@ -167,6 +167,7 @@ is always `1`.
 | `file-opened` | `{ path, basename }` |
 | `upload-progress` | `{ uploadId, percent, done }` |
 | `selection-change` | `Array<{ path, basename, type }>` |
+| `open-app-store` | *(none)* - the navigation panel's **App store** row was pressed. Drawn only with `config.appStorePage: true` (you have the store screen) when the server shows the person the screen (`GET /api/app-store` → `visible`) |
 
 ## Build
 

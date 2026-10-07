@@ -34,6 +34,12 @@ type OnlyOffice struct {
 	// Body resolves where the document's bytes are: the driver, or filex's
 	// staging area while a staged upload is still transferring. Nil-safe.
 	Body *filebody.Resolver
+	// FrameURL is the editor's frame on another origin (task #92):
+	// FILEX_ONLYOFFICE_FRAME_ORIGIN + onlyoffice.FrameHostPath, else
+	// FILEX_APP_UI_ORIGIN + base path + onlyoffice.FramePath. Handed out with
+	// every editor config so the explorer runs api.js there. Empty: neither
+	// is set, and api.js runs in filex's own page.
+	FrameURL string
 }
 
 // AttachBody wires the byte-source resolver so a document that is still being
@@ -276,6 +282,10 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Where the explorer runs the editor's api.js: a frame on the interface
+	// origin when there is one (task #92). The config itself is unchanged,
+	// whichever page loads it.
+	cfg.Frame = h.FrameURL
 	writeJSON(w, http.StatusOK, cfg)
 }
 
@@ -343,6 +353,86 @@ func (h *OnlyOffice) Diagnose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.Service.Diagnose(node.ID))
+}
+
+// Session answers the office editor about the editing session it has open,
+// when the document changed outside it (#184, onlyoffice/session_base.go).
+//
+//	POST /api/files/onlyoffice/session
+//	{ "path": "adapter://rel", "key": "<document.key>", "action": "state"|"mine"|"theirs" }
+//	→ { "stale": bool, "known": bool }
+//
+// `state` (the default) asks whether the session is still on the document's
+// current version: stale means a save of it would be written beside the
+// document, not over it. `mine` is the person's answer "write my version over
+// the outside one" (the session's base moves to the version now), `theirs`
+// "keep the outside version" (the session's save, when it comes, is not
+// written). `known` is false when this process had no record of the session.
+//
+// ⚠ Asking needs what opening the document needs (the same tenant, root and
+// viewer checks, the same 404). Answering decides what becomes of a save, so
+// it needs what an editing session needs: files.modify and a token that may
+// write.
+func (h *OnlyOffice) Session(w http.ResponseWriter, r *http.Request) {
+	if !h.Service.EnabledCtx(r.Context()) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "onlyoffice not configured"})
+		return
+	}
+	if auth.UserFrom(r.Context()) == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var body struct {
+		Path   string `json:"path"`
+		Key    string `json:"key"`
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	key := strings.TrimSpace(body.Key)
+	if body.Path == "" || key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing path or key"})
+		return
+	}
+	node, err := h.resolveNodeByPath(r.Context(), body.Path)
+	if err != nil || node == nil || !h.nodeVisible(r.Context(), node) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if h.ACL != nil && !aclAllowID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, acl.LevelViewer) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+		return
+	}
+	switch body.Action {
+	case "", "state":
+	case "mine", "theirs":
+		if h.ACL != nil && !aclCanID(r.Context(), h.ACL, h.Store, node.StorageID, node.Path, perm.FilesModify).ok {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
+			return
+		}
+		// A token's verbs, like every other door: an answer is a write.
+		if !auth.AllowVerb(w, r, auth.VerbWrite) {
+			return
+		}
+		if body.Action == "mine" {
+			if err := h.Service.RebaseSession(r.Context(), node, key); err != nil {
+				slog.Warn("onlyoffice session: could not read the document now", slog.Int64("storage", node.StorageID), slog.Any("err", err))
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "the document cannot be read now"})
+				return
+			}
+		} else if err := h.Service.DropSession(r.Context(), node, key); err != nil {
+			slog.Warn("onlyoffice session: could not record the answer", slog.Int64("storage", node.StorageID), slog.Any("err", err))
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the answer could not be recorded"})
+			return
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
+		return
+	}
+	stale, known := h.Service.SessionState(r.Context(), node, key)
+	writeJSON(w, http.StatusOK, map[string]bool{"stale": stale, "known": known})
 }
 
 // resolveNodeByPath looks up a node from a `<adapter>://<rel>` or bare

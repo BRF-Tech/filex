@@ -75,6 +75,7 @@ import {
   SITE_MUST_LINK,
 } from './shop-window-data.mjs';
 import { RETRY_WITH_GET, linksInReleaseBody } from './release-body-links.mjs';
+import { MANIFEST_REL, readManifest } from './lib/shots-site.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -878,8 +879,10 @@ async function checkFrontPage() {
 // ── screenshots: needs neither a server nor the network, only git ───────────
 //
 // ⚠ Full visual judgement is not automatable and this does not attempt it.
-// Staleness is mechanical: a picture committed before the last change to the
-// code that draws it cannot be showing that change. What it CANNOT see is
+// Staleness is mechanical: a picture taken before the last change to the code
+// that draws it cannot be showing that change. When it was taken is the
+// manifest's `taken` (e2e/shots/manifest.json) - the pictures are not in git
+// any more (task #176), so a commit date has nothing to say. What it CANNOT see is
 // listed with the failure, because a check whose limits are not written down
 // gets trusted for things it never measured.
 //
@@ -912,14 +915,23 @@ function checkScreenshots() {
     return skip('screenshots', 'this checkout has no tags, so "releases since the picture" cannot be counted');
   }
 
-  const lastCommit = (p) => Number(gitOut(['log', '-1', '--format=%ct', '--', p]).trim() || 0);
+  let manifest;
+  try {
+    manifest = readManifest(path.join(REPO, MANIFEST_REL));
+  } catch (e) {
+    fail('screenshots', `${MANIFEST_REL} cannot be read: ${e.message}`);
+    return;
+  }
 
   const drifted = [];
   const stale = [];
   for (const shot of SCREENSHOTS) {
-    const taken = lastCommit(shot.file);
-    if (!taken) {
-      fail('screenshots', `${shot.file} is declared in SCREENSHOTS but git has no commit for it`);
+    // `checked`: the last run that took it again and found its pixels the
+    // same - a retake that changed nothing is as current as a new picture.
+    const pic = manifest.pictures[shot.name];
+    const taken = Math.floor(Date.parse(pic?.checked ?? pic?.taken ?? '') / 1000);
+    if (!Number.isFinite(taken) || taken <= 0) {
+      fail('screenshots', `${shot.name} is declared in SCREENSHOTS but ${MANIFEST_REL} does not say when it was taken`);
       return;
     }
     const changes = gitOut(['log', '--format=%ct', `--since=@${taken}`, 'HEAD', '--', ...shot.depicts])
@@ -935,7 +947,7 @@ function checkScreenshots() {
       const tag = tagTimes.find((t) => t >= c);
       if (tag) releases.add(tag);
     }
-    const entry = `${shot.file} — ${changes.length} change(s) to ${shot.depicts.join(', ')} since it was taken, across ${releases.size} released version(s)`;
+    const entry = `${shot.name} — ${changes.length} change(s) to ${shot.depicts.join(', ')} since it was taken, across ${releases.size} released version(s)`;
     if (releases.size >= STALE_RELEASES) stale.push(entry);
     else drifted.push(entry);
   }
@@ -948,15 +960,15 @@ function checkScreenshots() {
         '\n    A stale screenshot is not missing information, it is WRONG information: the reader ' +
         'takes it for the current product. Retake them with one command — `pnpm shots` — then look at ' +
         'the contact sheet it prints before committing (docs/CONTRIBUTING.md → Release process, step 2).' +
-        '\n    ⚠ What this could not see: whether any picture is actually wrong. It compares commit ' +
-        'dates, so a comment added to a component counts and a theme, font or browser change counts ' +
-        'for nothing. Looking is still step 2.',
+        '\n    ⚠ What this could not see: whether any picture is actually wrong. It compares when a ' +
+        'picture was last taken with commit dates, so a comment added to a component counts and a ' +
+        'theme, font or browser change counts for nothing. Looking is still step 2.',
     );
   } else if (drifted.length) {
     pass(
       'screenshots',
       `${SCREENSHOTS.length} README pictures, none stale past ${STALE_RELEASES} releases ` +
-        `(${drifted.length} drifting: ${drifted.map((d) => d.split(' — ')[0].replace('docs/screenshots/', '')).join(', ')})`,
+        `(${drifted.length} drifting: ${drifted.map((d) => d.split(' — ')[0]).join(', ')})`,
     );
   } else {
     pass('screenshots', `${SCREENSHOTS.length} README pictures are newer than everything that draws them`);

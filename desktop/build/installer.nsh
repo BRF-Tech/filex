@@ -75,6 +75,7 @@
   !insertmacro filexClaimExt ".ods"
   !insertmacro filexClaimExt ".odp"
   !insertmacro filexClaimExt ".rtf"
+  !insertmacro filexClaimExt ".csv"
 
   ; Tell Explorer to re-read associations. Without it the new entry does not
   ; appear in "Open with" until the next sign-in, which reads as "the installer
@@ -93,6 +94,7 @@
   !insertmacro filexReleaseExt ".ods"
   !insertmacro filexReleaseExt ".odp"
   !insertmacro filexReleaseExt ".rtf"
+  !insertmacro filexReleaseExt ".csv"
   DeleteRegKey SHELL_CONTEXT "Software\Classes\${FILEX_PROGID}"
   DeleteRegKey SHELL_CONTEXT "Software\Classes\Applications\${APP_EXECUTABLE_FILENAME}"
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'

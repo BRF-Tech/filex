@@ -93,13 +93,13 @@ func TestE2EAllowed_TooManyItemsIsRefused(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, st, string(raw))
 }
 
-// A token confined to a folder (`root:`) hears of the rule only inside it. The
-// explorer's JSON body is confined on the way in (confine.Middleware refuses a
-// path outside the root, the whole request); a body sent as anything else is
-// not, so the handler reads the root itself, before any rule is asked — and
-// a place outside it answers as a place that cannot be placed does, "denied",
-// where the rule would have said "request", or "allowed" for a folder the
-// person holds an approval for.
+// A token confined to a folder (`root:`) hears of the rule only inside it. Its
+// body is confined on the way in whatever its Content-Type (confine.Middleware
+// refuses a path outside the root, the whole request; up to 0.52 only in a body
+// labelled JSON). The handler reads the root itself too, before any rule is
+// asked, so a door the middleware does not cover answers a place outside it as
+// a place that cannot be placed does, "denied" - never the rule's "request",
+// or "allowed" for a folder the person holds an approval for.
 func TestE2EAllowed_ARootConfinedTokenHearsNothingOutsideItsRoot(t *testing.T) {
 	f := newE2EFix(t)
 	useProductionAuthChain(t, f.store)
@@ -134,24 +134,25 @@ func TestE2EAllowed_ARootConfinedTokenHearsNothingOutsideItsRoot(t *testing.T) {
 		return resp.StatusCode, out.Encrypt, string(raw)
 	}
 
-	// The root itself and a folder in it; then a sibling folder the person holds
-	// an approval for, a name that only starts like the root's, and the storage.
+	// A sibling folder the person holds an approval for, and a name that only
+	// starts like the root's: whatever the Content-Type, a path outside the
+	// root refuses the whole request, and nothing of the rule is heard.
+	for _, ct := range []string{"application/json", "text/plain", ""} {
+		for _, outside := range []string{a + "Baska", a + "Proje2"} {
+			code, _, raw := ask(ct, a+"Proje/Alt", outside)
+			assert.Equal(t, http.StatusForbidden, code, "%s as %q: %s", outside, ct, raw)
+			assert.Contains(t, raw, confine.ErrOutOfRoot.Error(), "%s as %q", outside, ct)
+			assert.NotContains(t, raw, "allowed", "%s as %q", outside, ct)
+		}
+		// The root itself and a folder in it are answered as they are, and the
+		// storage is read as the root folder.
+		code, got, raw := ask(ct, a+"Proje", a+"Proje/Alt", a)
+		require.Equal(t, http.StatusOK, code, "as %q: %s", ct, raw)
+		assert.Equal(t, []string{"request", "allowed", "request"}, got, "as %q", ct)
+	}
 	paths := []string{a + "Proje", a + "Proje/Alt", a + "Baska", a + "Proje2", a}
-	code, got, raw := ask("text/plain", paths...)
-	require.Equal(t, http.StatusOK, code, raw)
-	assert.Equal(t, []string{"request", "allowed", "denied", "denied", "denied"}, got,
-		"inside the root the rule answers; outside it nothing of the rule is heard, approval or not")
 	assert.Equal(t, []string{"request", "allowed", "allowed", "request", "request"}, e2eAllowed(t, f.a.member, f.srv.URL, paths...),
 		"the same person, confined to nothing, is told what the rule says there")
-
-	// Sent as JSON, a path outside the root refuses the whole request, and the
-	// paths inside it are answered as they are.
-	code, _, raw = ask("application/json", a+"Proje/Alt", a+"Baska")
-	assert.Equal(t, http.StatusForbidden, code, raw)
-	assert.Contains(t, raw, confine.ErrOutOfRoot.Error())
-	code, got, raw = ask("application/json", a+"Proje", a+"Proje/Alt")
-	require.Equal(t, http.StatusOK, code, raw)
-	assert.Equal(t, []string{"request", "allowed"}, got)
 }
 
 // capabilitiesE2E answers the capabilities' `e2e_policy` as c sees it, and

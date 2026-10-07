@@ -36,7 +36,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('a stored pack language survives a cold start', () => {
+// ⚠ A generous timeout, as in pluralCategories.test.ts: every case imports
+// `@/i18n` cold (vi.resetModules), which pulls the built @brftech/filex-core
+// bundle and vue-i18n again - most of the 5 s default on a quiet machine, and
+// over it in the test chain's full run (2026-10-06): three cases timed out,
+// none of them waiting on anything but the import.
+const COLD = { timeout: 30_000 };
+
+describe('a stored pack language survives a cold start', COLD, () => {
   it("is held before the list arrives, and becomes the pack's words when it does", async () => {
     localStorage.setItem('filex.locale', 'es');
     serve({ '/api/public/branding': branding, '/api/public/ui-locales/es': es });

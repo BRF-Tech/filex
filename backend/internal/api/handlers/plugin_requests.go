@@ -7,6 +7,8 @@
 //	GET  /api/admin/plugin-requests[?status=…]     — list (pending by default; `all` for every state)
 //	GET  /api/admin/plugin-requests/{id}           — one request, with its frozen manifest and review
 //	POST /api/admin/plugin-requests/{id}/approve   - SESSION ONLY: install what the request froze; {"associations"?: [...]}
+//	                                                 (a request from the store screen: {"license_key"?} - asks the
+//	                                                 store for a fresh install link; the install is the store review's)
 //	POST /api/admin/plugin-requests/{id}/reject    — SESSION ONLY: {"reason"?: "…"}
 //
 // ⚠⚠ Why this exists (owner, 2026-09-28): an API key may no longer install,
@@ -53,6 +55,11 @@ type PluginRequests struct {
 	// the kinds it adds. Nil (app plugins off): no group, nothing placed.
 	Assoc *assoc.Service
 	Apps  *wasmplugin.Registry
+	// Store answers an approval of a request from the store screen (source
+	// "store", #162): a fresh install link from the connected store, which
+	// the administrator installs through the store review. Nil: such a
+	// request cannot be approved here.
+	Store *AppStore
 }
 
 // NewPluginRequests constructs the handler.
@@ -334,12 +341,20 @@ func (h *PluginRequests) Approve(w http.ResponseWriter, r *http.Request) {
 		// as the install wizard sends them. Optional: nothing chosen keeps the
 		// default order.
 		Associations []assoc.Placement `json:"associations"`
+		// LicenseKey: a request from the store screen for a paid app may carry
+		// the key the administrator has (it goes to the store with the
+		// approval; it can also be given at the install).
+		LicenseKey string `json:"license_key"`
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_request", "message": "bad json"})
 			return
 		}
+	}
+	if pending, gerr := h.Svc.Get(r.Context(), id); gerr == nil && pending.SourceKind == pluginreq.SourceStore {
+		h.approveFromStore(w, r, pending, body.LicenseKey)
+		return
 	}
 	// What an upgrade's app handled BEFORE it is replaced: the kinds it adds
 	// are the only ones its choices may place.
@@ -373,6 +388,45 @@ func (h *PluginRequests) Approve(w http.ResponseWriter, r *http.Request) {
 		view.AssociationErrors = h.Assoc.PlaceForApp(r.Context(), st.Name, body.Associations, only, actorIDOf(r))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"request": view, "plugin": result})
+}
+
+// approveFromStore answers the approval of a request from the store screen:
+// the connected store makes a FRESH install link for this filex (a link
+// made when the person asked would have expired by now), and the browser
+// opens it in the store review (/admin/store-install) - the same review, the
+// same pins and permissions as a magic link's. The request stays pending
+// until that install ends it (AppStore.Install → CompleteStore).
+func (h *PluginRequests) approveFromStore(w http.ResponseWriter, r *http.Request, req *model.PluginRequest, licenseKey string) {
+	if h.Store == nil || h.Store.Svc == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "app_store_disabled", "message": "the app store is off on this instance"})
+		return
+	}
+	if req.Status != model.PluginRequestPending {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "not_pending", "message": "this request is already " + req.Status,
+			"request": pluginRequestView(req, langOf(r), false)})
+		return
+	}
+	origin, app, version, ok := pluginreq.StoreSourceOf(req)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bad_request", "message": "the request names no store app"})
+		return
+	}
+	got, err := h.Store.Svc.RequestIntent(r.Context(), origin, app, version, licenseKey, actorIDOf(r))
+	if err != nil {
+		storeFail(w, err)
+		return
+	}
+	if err := h.Store.Svc.RememberRequest(r.Context(), origin, got.TokenID, req.ID, got.ExpiresAt); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"request": pluginRequestView(req, langOf(r), false),
+		// What the panel opens the store review with: the link's store and
+		// token, as a magic link carries them (lib/storeLink.ts).
+		"store_intent": map[string]any{"store": origin, "token": got.Token, "app": got.App, "version": got.Version,
+			"expires_at": got.ExpiresAt},
+	})
 }
 
 // fileTypesOf is a pending app request's File types group, as it stands now:

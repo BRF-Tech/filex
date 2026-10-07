@@ -14,6 +14,7 @@ import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import { __resetViewPrefs } from '@brftech/filex-core/src/lib/viewPrefs';
 import { closeRowMenus, openRowMenu, pickMenuItem } from '../helpers/rowMenu';
+import { listedOptions, pickOption } from '../helpers/choiceSelect';
 
 type Body = Record<string, unknown>;
 
@@ -585,7 +586,7 @@ describe('Sign-in security — the trail', () => {
 
   it('narrows to one event kind through the server', async () => {
     const w = await mountPage();
-    await w.get('[data-testid="login-attempt-filter"] select').setValue('login.failed');
+    await pickOption(w.get('[data-testid="login-attempt-filter"]'), 'login.failed');
     await flushPromises();
     const last = [...calls].reverse().find((c) => c.url.endsWith('/attempts'));
     expect(last?.params).toMatchObject({ action: 'login.failed', limit: 50 });
@@ -625,9 +626,9 @@ describe('Sign-in security — the trail', () => {
 
   it('offers the settings changes in the event filter', async () => {
     const w = await mountPage();
-    const options = w.findAll('[data-testid="login-attempt-filter"] option').map((o) => [o.attributes('value'), o.text()]);
+    const options = (await listedOptions(w.get('[data-testid="login-attempt-filter"]'))).map((o) => [o.value, o.label]);
     expect(options).toContainEqual(['login_security.update', en.loginSecurity.attempts.action.settings_changed]);
-    await w.get('[data-testid="login-attempt-filter"] select').setValue('login_security.update');
+    await pickOption(w.get('[data-testid="login-attempt-filter"]'), 'login_security.update');
     await flushPromises();
     const last = [...calls].reverse().find((c) => c.url.endsWith('/attempts'));
     expect(last?.params).toMatchObject({ action: 'login_security.update' });

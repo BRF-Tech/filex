@@ -35,6 +35,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -119,6 +120,7 @@ async function main() {
   mkdirSync(join(FILES, 'Documents'), { recursive: true });
   writeFileSync(join(FILES, 'Documents', 'already-here.txt'), 'x');
   writeFileSync(join(FILES, 'readme.txt'), 'x');
+  pinTimes(FILES);
   mkdirSync(DATA, { recursive: true });
 
   const bin = binary();
@@ -192,7 +194,8 @@ async function main() {
       } catch {}
     `;
 
-    const ctx = await browser.newContext();
+    const ctx = await browser.newContext({ ...SCENE_CONTEXT });
+    await stageClock(ctx);
     await ctx.addInitScript(stub);
     const page = await ctx.newPage();
     page.on('pageerror', (e) => console.log('  [pageerror]', String(e).slice(0, 200)));
@@ -380,7 +383,8 @@ async function main() {
     // button is the thing that changes it. The measurement is that
     // requestPermission is NOT called while the page loads and IS called when
     // the button is pressed — asking on load is the pattern browsers punish.
-    const sctx = await browser.newContext();
+    const sctx = await browser.newContext({ ...SCENE_CONTEXT });
+    await stageClock(sctx);
     await sctx.addInitScript(`
       window.__askedAt = [];
       window.__notifs = [];
@@ -428,7 +432,8 @@ async function main() {
     await sctx.close();
 
     // ── the desktop guard ──────────────────────────────────────────────
-    const dctx = await browser.newContext();
+    const dctx = await browser.newContext({ ...SCENE_CONTEXT });
+    await stageClock(dctx);
     await dctx.addInitScript(stub);
     await dctx.addInitScript(`window.filexApp = { isDesktop: true };`);
     const dpage = await dctx.newPage();

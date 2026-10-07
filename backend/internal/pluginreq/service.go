@@ -29,6 +29,18 @@
 //
 // Every step writes an audit row: created, approved, rejected, expired,
 // superseded.
+//
+// # A request from the embedded store (#162)
+//
+// A person who sees the store screen (internal/appstore view.go) leaves a
+// request for an app of a trusted store's signed catalog: CreateStore,
+// source kind "store". What the catalog said is frozen the same way - the
+// version, its pins, the permissions - but nothing is fetched or installed
+// from it: an approval asks the store for a FRESH install link
+// (appstore.RequestIntent) and the administrator installs through the
+// store-install review like any link (handlers/plugin_requests.go). That
+// install closes the request (CompleteStore); Approve itself refuses a
+// store request.
 package pluginreq
 
 import (
@@ -64,7 +76,14 @@ const (
 	SourceURL        = "url"
 	SourceFeed       = "source"
 	SourceFromSource = "from_source"
+	// SourceStore: an app of a trusted store's catalog, asked for from the
+	// embedded store screen (CreateStore).
+	SourceStore = "store"
 )
+
+// MaxPendingStorePerPerson bounds the store requests one person may have
+// waiting at once.
+const MaxPendingStorePerPerson = 10
 
 // The audit actions a request writes. Constants, so the admin panel's audit
 // labels are held to them (web/tests/lib/auditLabel.test.ts reads them).
@@ -94,6 +113,11 @@ type Source struct {
 	// An upgrade from the installed plugin's own source (the default for an
 	// upgrade that names no other).
 	FromSource bool `json:"from_source,omitempty"`
+	// An app of a trusted store's catalog (SourceStore): the store's origin,
+	// the app's name there and the version the catalog offered.
+	Store        string `json:"store,omitempty"`
+	StoreApp     string `json:"store_app,omitempty"`
+	StoreVersion string `json:"store_version,omitempty"`
 }
 
 // CreateInput is one request as the caller asks for it.
@@ -286,6 +310,17 @@ type plan struct {
 // sourceKey is the dedup key of a request: its kind, its operation, the
 // installed plugin an upgrade replaces, and its source spelled one way.
 func sourceKey(kind, op string, pluginID int64, sourceKind string, src Source) string {
+	if sourceKind == SourceStore {
+		// Its own shape, so the keys of every other source stay what they
+		// were (a pending request is found by its key).
+		b, _ := json.Marshal(struct {
+			Kind, Op, SourceKind string
+			PluginID             int64
+			Store, App, Version  string
+		}{kind, op, sourceKind, pluginID, strings.ToLower(src.Store), src.StoreApp, src.StoreVersion})
+		h := sha256.Sum256(b)
+		return hex.EncodeToString(h[:])
+	}
 	norm := struct {
 		Kind, Op, SourceKind string
 		PluginID             int64
@@ -327,6 +362,8 @@ func appSource(src *Source, upgrade bool) (string, error) {
 	src.ManifestURL = strings.TrimSpace(src.ManifestURL)
 	src.SHA256 = strings.ToLower(strings.TrimSpace(src.SHA256))
 	src.Source = ""
+	// A store's app is asked for from the store screen only (CreateStore).
+	src.Store, src.StoreApp, src.StoreVersion = "", "", ""
 	switch {
 	case src.GitHubRepo != "":
 		src.URL, src.ManifestURL, src.FromSource = "", "", false
@@ -473,6 +510,7 @@ type storageReview struct {
 func (s *Service) planStorage(ctx context.Context, in CreateInput) (*plan, error) {
 	p := &plan{in: in, src: in.Source}
 	p.src.GitHubRepo, p.src.Ref, p.src.ManifestURL = "", "", ""
+	p.src.Store, p.src.StoreApp, p.src.StoreVersion = "", "", ""
 	p.src.Source = strings.TrimSpace(p.src.Source)
 	p.src.URL = strings.TrimSpace(p.src.URL)
 	p.src.SHA256 = strings.ToLower(strings.TrimSpace(p.src.SHA256))
@@ -669,6 +707,13 @@ func (s *Service) ApproveWith(ctx context.Context, id int64, who Actor, lang str
 	r, err := s.pendingOrRefuse(ctx, id)
 	if err != nil {
 		return r, nil, err
+	}
+	if r.SourceKind == SourceStore {
+		// ⚠ Never installed from what the request froze: an approval asks the
+		// store for a fresh install link and the administrator installs it
+		// through the store's review (handlers/plugin_requests.go).
+		return r, nil, refuse(http.StatusConflict, "store_request",
+			"a request from the store is approved through the store's install review: the panel asks the store for a fresh link")
 	}
 	// ⚠ Detached from the request, like the install endpoints: an approval
 	// downloads and installs, and an administrator closing the tab must not
@@ -903,6 +948,181 @@ func (s *Service) Reject(ctx context.Context, id int64, who Actor, note string) 
 	}
 	s.audit(ctx, AuditActionPluginRequestReject, r, who, map[string]any{"note": note})
 	return r, nil
+}
+
+// ── Requests from the embedded store ───────────────────────────────────
+
+// StoreEntry is what a store's signed catalog said about the app a person
+// asks for (appstore.CatalogApp, without the import).
+type StoreEntry struct {
+	Store          string
+	App            string
+	Kind           string
+	Version        string
+	Label          map[string]string
+	Summary        map[string]string
+	Publisher      string
+	Repo           string
+	Permissions    []string
+	ManifestSHA256 string
+	WasmSHA256     string
+	UISHA256       string
+}
+
+// storeReview is what a store request keeps for the approval screen: the
+// manifest's label (the shape requestReview reads), the catalog's entry.
+type storeReview struct {
+	Manifest struct {
+		Label map[string]string `json:"label"`
+	} `json:"manifest"`
+	Store       string            `json:"store"`
+	Summary     map[string]string `json:"summary,omitempty"`
+	Publisher   string            `json:"publisher,omitempty"`
+	Repo        string            `json:"repo,omitempty"`
+	Kind        string            `json:"kind"`
+	Permissions []string          `json:"permissions_declared"`
+}
+
+// CreateStore records a person's request for an app of a store's catalog,
+// or answers the one already waiting for it (created=false). An app that is
+// installed is asked for as an upgrade, and only to a newer version.
+func (s *Service) CreateStore(ctx context.Context, e StoreEntry, reason string, who Actor) (*model.PluginRequest, bool, error) {
+	s.ExpireDue(ctx)
+	if s.o.Apps == nil {
+		return nil, false, refuse(http.StatusServiceUnavailable, "app_plugins_disabled", "app plugins are disabled on this instance")
+	}
+	reason = strings.TrimSpace(reason)
+	if len([]rune(reason)) > maxReason {
+		reason = string([]rune(reason)[:maxReason])
+	}
+	if reason == "" {
+		return nil, false, refuse(http.StatusBadRequest, "reason_required",
+			"say why you need the app (`reason`): the administrator who decides reads it")
+	}
+	if strings.TrimSpace(e.Store) == "" || strings.TrimSpace(e.App) == "" || strings.TrimSpace(e.Version) == "" {
+		return nil, false, refuse(http.StatusBadRequest, "bad_request", "a store request names the store, the app and its version")
+	}
+	op := model.PluginRequestOpInstall
+	var pluginID int64
+	var fromVersion string
+	if p, ok := s.o.Apps.ByName(e.App); ok {
+		if p.Row.Version == e.Version {
+			return nil, false, refuse(http.StatusConflict, "already_installed", "%s %s is installed already", e.App, e.Version)
+		}
+		op, pluginID, fromVersion = model.PluginRequestOpUpgrade, p.Row.ID, p.Row.Version
+	}
+	src := Source{Store: e.Store, StoreApp: e.App, StoreVersion: e.Version}
+	key := sourceKey(model.PluginRequestKindApp, op, pluginID, SourceStore, src)
+	if prev, err := s.pending(ctx, key); prev != nil || err != nil {
+		return prev, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prev, err := s.pending(ctx, key); prev != nil || err != nil {
+		return prev, false, err
+	}
+	if who.UserID != nil {
+		mine, err := s.Mine(ctx, *who.UserID)
+		if err != nil {
+			return nil, false, err
+		}
+		waiting := 0
+		for _, r := range mine {
+			if r.Status == model.PluginRequestPending {
+				waiting++
+			}
+		}
+		if waiting >= MaxPendingStorePerPerson {
+			return nil, false, refuse(http.StatusTooManyRequests, "too_many_requests",
+				"you have %d requests waiting for an administrator; wait for a decision before asking for more", waiting)
+		}
+	}
+	rv := storeReview{Store: e.Store, Summary: e.Summary, Publisher: e.Publisher, Repo: e.Repo, Kind: e.Kind,
+		Permissions: append([]string{}, e.Permissions...)}
+	rv.Manifest.Label = e.Label
+	perms := append([]string{}, e.Permissions...)
+	sum := e.WasmSHA256
+	if sum == "" {
+		sum = e.ManifestSHA256
+	}
+	row := &model.PluginRequest{
+		Kind: model.PluginRequestKindApp, Op: op, Name: e.App,
+		SourceKind: SourceStore, SourceJSON: jsonString(src), SourceKey: key,
+		Version: e.Version, FromVersion: fromVersion, ReviewJSON: jsonString(rv),
+		SHA256: sum, ManifestSHA256: e.ManifestSHA256, PermissionsJSON: jsonString(perms),
+		Reason: reason, RequestedBy: who.UserID, Requester: who.Name, TokenID: who.TokenID, TokenLabel: who.TokenLabel,
+		ExpiresAt: s.now().Add(s.o.TTL),
+	}
+	if pluginID > 0 {
+		id := pluginID
+		row.PluginID = &id
+	}
+	created, err := s.o.Store.CreatePluginRequest(ctx, row)
+	if err != nil {
+		return nil, false, err
+	}
+	s.audit(ctx, AuditActionPluginRequestCreate, created, who, map[string]any{"store": e.Store})
+	s.announce(ctx, created)
+	return created, true, nil
+}
+
+// Mine answers the requests a person left from the store screen, newest
+// first.
+func (s *Service) Mine(ctx context.Context, userID int64) ([]*model.PluginRequest, error) {
+	rows, err := s.o.Store.ListPluginRequests(ctx, "", 500)
+	if err != nil {
+		return nil, err
+	}
+	out := []*model.PluginRequest{}
+	for _, r := range rows {
+		if r.SourceKind == SourceStore && r.RequestedBy != nil && *r.RequestedBy == userID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// CompleteStore closes a store request as approved: its app was installed
+// through the store's review from a link the approval asked for. result is
+// what the install answered. A request that is no longer pending is left as
+// it is (decided meanwhile) and answered with ok=false.
+func (s *Service) CompleteStore(ctx context.Context, id int64, who Actor, result any) (*model.PluginRequest, bool, error) {
+	if !s.claim(id) {
+		return nil, false, refuse(http.StatusConflict, "busy", "this request is being decided right now")
+	}
+	defer s.release(id)
+	r, err := s.pendingOrRefuse(ctx, id)
+	if err != nil {
+		return r, false, nil
+	}
+	if r.SourceKind != SourceStore {
+		return r, false, refuse(http.StatusBadRequest, "bad_request", "not a request from the store")
+	}
+	ctx = context.WithoutCancel(ctx)
+	now := s.now()
+	r.Status = model.PluginRequestApproved
+	r.DecidedBy = who.UserID
+	r.Decider = who.Name
+	r.DecidedAt = &now
+	r.DecisionNote = ""
+	r.ResultJSON = jsonString(result)
+	ok, err := s.o.Store.UpdatePluginRequest(ctx, r, true)
+	if err != nil {
+		return r, false, err
+	}
+	if ok {
+		s.audit(ctx, AuditActionPluginRequestApprove, r, who, map[string]any{"via": "store_install"})
+	}
+	return r, ok, nil
+}
+
+// StoreSourceOf reads a store request's store, app and version.
+func StoreSourceOf(r *model.PluginRequest) (store, app, version string, ok bool) {
+	if r == nil || r.SourceKind != SourceStore {
+		return "", "", "", false
+	}
+	src := SourceOf(r)
+	return src.Store, src.StoreApp, src.StoreVersion, src.Store != "" && src.StoreApp != ""
 }
 
 // ── Expiry ─────────────────────────────────────────────────────────────

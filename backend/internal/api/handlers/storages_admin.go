@@ -42,6 +42,44 @@ func NewStoragesAdmin(store db.Store) *StoragesAdmin {
 type storageTestReq struct {
 	Driver string                 `json:"driver"`
 	Config map[string]interface{} `json:"config"`
+	// ID names the saved storage a form is editing: credentials it sends back
+	// masked ("***", as the form was shown them) are that storage's - while
+	// the driver and the address stay its own (storage.KeepSecrets).
+	ID int64 `json:"id,omitempty"`
+}
+
+// withSaved fills the masked credentials of req.Config from the saved
+// storage req.ID names. ok=false: the answer was written (the storage is not
+// the caller's, or a credential would go to a new address). Without an id a
+// mask is dropped, as on a create.
+func (h *StoragesAdmin) withSaved(w http.ResponseWriter, r *http.Request, req *storageTestReq) bool {
+	raw, err := json.Marshal(req.Config)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return false
+	}
+	prevDriver, prev := "", json.RawMessage(nil)
+	if req.ID > 0 {
+		if !ownsStorage(w, r, req.ID, "") {
+			return false
+		}
+		st, err := h.Store.GetStorage(r.Context(), req.ID)
+		if err != nil || st == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return false
+		}
+		prevDriver, prev = st.Driver, st.ConfigJSON
+	}
+	kept, err := storage.KeepSecrets(req.Driver, raw, prevDriver, prev)
+	if err != nil {
+		refuseStorageConfig(w, r, err)
+		return false
+	}
+	cfg := map[string]any{}
+	if err := json.Unmarshal(kept, &cfg); err == nil {
+		req.Config = cfg
+	}
+	return true
 }
 
 // ProbeTimeout bounds one "Test connection" attempt.
@@ -74,6 +112,9 @@ func (h *StoragesAdmin) Test(w http.ResponseWriter, r *http.Request) {
 	drv, err := storage.Get(req.Driver)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown driver"})
+		return
+	}
+	if !h.withSaved(w, r, &req) {
 		return
 	}
 	// A configuration that was never saved - credentials included - is
@@ -177,6 +218,9 @@ func (h *StoragesAdmin) Discover(w http.ResponseWriter, r *http.Request) {
 	defer func() { go storage.CloseDriver(drv) }() // as in Test: nothing it opened outlives the answer
 	if req.Config == nil {
 		req.Config = map[string]any{}
+	}
+	if !h.withSaved(w, r, &req) {
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ProbeTimeout)
 	defer cancel()

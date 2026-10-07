@@ -134,6 +134,19 @@ and `markdownToSafeHtml`, the sanitised Markdown the explorer's preview draws
 `MegaMenuEntry` types): the host passes the entries it lets the reader open
 and does the navigating itself
 ([ADMIN-PANEL.md](https://github.com/BRF-Tech/filex/blob/main/docs/ADMIN-PANEL.md)).
+The two choice controls every filex screen draws are exported for a host's own
+UI as well: `ChoiceSelect` (one answer from a list, without the browser's
+native dropdown; options are `SelectOption`) and `ChoiceButtons` (two to four
+answers on screen; `segmented` draws them as one inline strip) - filex itself
+draws no native dropdown
+([CONTRIBUTING.md → No native dropdown](https://github.com/BRF-Tech/filex/blob/main/docs/CONTRIBUTING.md#no-native-dropdown---one-list-control-in-core)).
+
+The panel's search is exported the same way, as `PanelSearch` with its rules
+(`parsePanelQuery`, `panelSearchGroups`, the `PanelSearchItem` types) and
+`foldText`, the one rule a typed word is compared with a name by: the host
+passes what may be found and where the recent searches live, and gets the
+chosen row back
+([ADMIN-PANEL.md → Search](https://github.com/BRF-Tech/filex/blob/main/docs/ADMIN-PANEL.md#search)).
 
 If your own UI names a keyboard shortcut, render `shortcutHint('<action>')`
 rather than the key itself: the user may remap any action from the shortcut
@@ -169,14 +182,19 @@ const config = {
   uiProfile: 'simple',    // 'standard' (default) | 'simple'
   mySharesVisible: true,  // draw the "My shares" row - only if you handle @open-my-shares
   appHomePage: true,      // an app's home view opens as YOUR page - handle @open-app-home
+  appStorePage: true,     // you have the store screen - handle @open-app-store; the explorer asks the server who sees it
 };
 ```
 
-⚠ `mySharesVisible` and `appHomePage` are **off by default**, and not because
-the surfaces are optional: each needs the host to take an event and open a
-page of its own - `@open-my-shares` for the links this person made, and
-`@open-app-home` for an app's `home` view (`{base}app/{plugin}/{view}`, with
-the open section in `?section=`). Only this Vue component emits them; the web
+⚠ `mySharesVisible`, `appHomePage` and `appStorePage` are **off by
+default**, and not because the surfaces are optional: each needs the host to
+take an event and open a page of its own - `@open-my-shares` for the links
+this person made, `@open-app-home` for an app's `home` view
+(`{base}app/{plugin}/{view}`, with the open section in `?section=`), and
+`@open-app-store` for the store screen. For the store the explorer also asks
+the server (`GET /api/app-store`) and draws the row only for a person it is
+shown to: the host says only that it has the page. `<filex-explorer>` and
+`<FileManager>` forward `open-app-store` (the desktop app listens to it). Only this Vue component emits them; the web
 component and the React adapter do not forward them yet, so switching the keys
 on there would draw a row that goes nowhere.
 
@@ -219,7 +237,7 @@ passed:
 - one **search field across the header** with a ⌘K / Ctrl+K chip that hands the
   query to the command palette - the field searches the folder you are in, the
   palette is where "everywhere", saved searches and commands live,
-- a **filter row** under the breadcrumb: Type · People · Modified · Size,
+- a **filter row** under the breadcrumb: Type · Owner · Modified · Size,
 - **Folders** and **Files** as labelled sections in grid view - replaced by
   **date headings** (Today · Yesterday · This Week · This Month · *September
   2026*) in all three views while the listing is sorted by Modified,

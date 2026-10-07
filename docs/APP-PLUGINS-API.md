@@ -949,6 +949,114 @@ same seed and payload is compatible. The intent vector:
 | sha256 (hex) | `537a73864cdeccdede19206316fc00ee0629b920f971d522e06f6c53755e0a33` |
 | signature (hex) | `85e00077995aba433383ed9649be4d82bebb618b4bc3e137670292d17b46d35ce12fb2cb9a66db23761fc9962ed84bbbcd3a93c3dc798e10168fb1b70f464e09` |
 
+### The embedded store (0.53, #162)
+
+What filex reads and sends for [the store screen](APP-PLUGINS.md#the-store-screen):
+a trusted store's catalog, its icons, and - for a store this filex is
+**connected** to - a fresh install link when an administrator approves a
+person's request. The same guarded client as above (no redirect, public
+addresses only), 16 MiB for the index, 5 MiB for an icon.
+
+#### `GET <store>/v1/index.json` + `GET <store>/v1/index.json.sig` - the catalog
+
+The store's signed index, schema 1. filex verifies the bytes **as served**
+against the store's trusted `index` keys (ed25519 over the lower-case hex
+sha256 of the bytes; the `.sig` body is the hex signature) and refuses an
+index that does not verify, whose `expires_at` has passed or whose `schema`
+is not 1 (`store_index_invalid`, 502) - nothing of it is shown then. From a
+verified index filex keeps, per app that is not revoked: its name, kind,
+label and summary, publisher (name, verified, official), categories,
+repository, and the newest version that is not yanked with its `filex`
+range, permissions and pins. A catalog is kept 10 minutes; while the store
+cannot be reached the last one that verified is served marked `stale`.
+
+#### `GET <store>/v1/media/<sha256>.<png|jpg|jpeg|webp>` - an icon
+
+Fetched only for an icon the verified catalog names, at the store's own
+address (an icon whose `url` points elsewhere is not shown); the bytes must
+hash to the name and start like a picture of that extension
+(`store_media_invalid`, 404 otherwise). Kept an hour.
+
+#### `POST <store>/v1/instances/connect` - the connection
+
+```json
+{"code": "fxc_…", "public_key": "<64 lower-hex>", "filex_origin": "https://files.example.com", "filex_instance_id": "fx-…"}
+```
+
+The code is the one-time code the store's "My instances" page made for this
+filex's address (`fxc_` and 43 characters of base64url; filex refuses another
+shape before asking). `public_key` is a fresh ed25519 key filex made for this
+store; `filex_origin` is this filex's own address (the origin of
+[`FILEX_PUBLIC_URL`](CONFIGURATION.md#public-url), or - unset - the origin the
+request arrived at, the rule an install link is held to); `filex_instance_id`
+is the id it counts license seats by. `200` and a payload signed with an `index` key:
+
+| Field | |
+|---|---|
+| `store` | the store's origin: must be the store asked |
+| `instance_id` | the store's id for this filex (a UUID): what the signed requests name |
+| `filex_origin` | must be this filex's address (`intent_wrong_instance` otherwise) |
+| `key_fingerprint` | the lower-hex sha256 of the 32-byte key: must be the key filex sent |
+| `connected_at` | RFC 3339 |
+
+`404` (an unknown code), `410` (used or expired) and `409` (`wrong_instance`,
+`key_in_use`) are `store_connect_code_invalid`. The private key is kept
+encrypted with `FILEX_SECRET_KEY` (app_store_state `conn:<store>`); a new
+connection replaces it, and **Disconnect** forgets it and tells the store
+(`DELETE <store>/v1/instances/{id}/connection`, signed).
+
+#### Signed requests
+
+A connected filex signs every request to `<store>/v1/instances/{id}/…` with
+five headers:
+
+| Header | |
+|---|---|
+| `Fapps-Instance` | the store's `instance_id` |
+| `Fapps-Key` | the key's fingerprint |
+| `Fapps-Timestamp` | Unix seconds; the store refuses one more than 5 minutes from its clock |
+| `Fapps-Nonce` | 16-64 characters of `A-Z a-z 0-9 _ -`, new for every request; the store refuses one it has seen |
+| `Fapps-Signature` | lower-hex ed25519 over the lower-hex sha256 of the text below |
+
+The text is eight lines joined by a newline:
+
+```
+FAPPS-INSTANCE-REQUEST-1
+<METHOD, upper case>
+<path as sent, no query>
+<instance id>
+<key fingerprint>
+<timestamp>
+<nonce>
+<lower-hex sha256 of the body; of no bytes when there is none>
+```
+
+`backend/internal/appstore/testdata/instance-request-vector.json` is the
+store's own test vector, made with Node's crypto: filex's `RequestText` and
+an ed25519 signature over it give the same `text_sha256` and `signature`
+from the same seed.
+
+#### `POST <store>/v1/instances/{id}/intents` - a fresh install link
+
+```json
+{"app": "sign", "version": "0.3.0", "license_key": "FXL-…"}
+```
+
+`version` and `license_key` are optional (the newest version that is not
+yanked; a key the administrator gave at the approval). `201`:
+
+```json
+{"token": "<43 base64url>", "token_id": "<16 hex>", "expires_at": "…", "app": "sign", "version": "0.3.0"}
+```
+
+The token is then read like any install link (`GET <store>/v1/install/{token}`
+above: signed, `filex_origin` this filex, held to the same review). filex
+remembers which request the link was asked for by its `token_id`
+(app_store_state `reqlink:<store>/<token_id>`, never the token), and the
+install that ends the review closes that request. `401` is
+`store_connection_refused` (connect again), another `4xx` `store_refused`
+with the store's own code in `detail.store_error`.
+
 ### filex's side: `/api/admin/app-plugins/…`
 
 Every route needs the platform operator's administrator **signed in to the
@@ -957,8 +1065,29 @@ panel** (`403 session_required` for an API key of any kind - admin-scoped,
 for a tenant administrator), and every state change passes the cross-site
 request guard. A store or license route never writes the generic audit row:
 its own rows are `app_store.trust`, `app_store.untrust`, `app_store.install`,
-`app_store.cancel`, `app_plugin.license_set`, `app_plugin.license_held`,
-`app_plugin.license_released` (a key appears by its prefix only).
+`app_store.cancel`, `app_store.connect`, `app_store.disconnect`,
+`app_store.view`, `app_store.intent_request`, `app_plugin.license_set`,
+`app_plugin.license_held`, `app_plugin.license_released` (a key appears by
+its prefix only).
+
+**Approving a request from the store screen** is `POST
+/api/admin/plugin-requests/{id}/approve` (`{license_key?}`), the same route
+as every request, session only: for a request whose `source_kind` is
+`store` it installs nothing - it asks the connected store for a fresh link
+and answers `200 {request, store_intent: {store, token, app, version,
+expires_at}}`; the panel keeps the link in the tab and opens the store
+review. `409 store_not_connected` when this filex is not connected to that
+store.
+
+**A person's store screen** is `/api/app-store` (a browser session, or the desktop app's own pairing - the key `POST /api/auth/desktop/complete` mints; any other API key is refused `403 session_required`, and `GET /api/app-store` answers it `{visible: false}`):
+
+| Route | Body → answer |
+|---|---|
+| `GET /api/app-store` | → `{visible, stores}`: whether this person sees the screen (their tenant's settings, their role and groups) and its stores |
+| `GET /api/app-store/catalog?store=<origin>` | → `{store, serial, fetched_at, stale, apps: [{name, kind, label, summary?, publisher, publisher_verified?, publisher_official?, categories, repo, version, published_at?, filex_range, permissions, permission_rows, icon?, installed_version?}]}`; `404 store_screen_hidden` for an account the screen is not shown to, `404 not_found` for a store it does not show |
+| `GET /api/app-store/media?store=<origin>&file=<name>` | an icon of that catalog (`Content-Security-Policy: default-src 'none'`) |
+| `GET /api/app-store/requests` | → `{requests: [<request>]}`: the requests this person left, without who decided |
+| `POST /api/app-store/requests` | `{store, app, reason}` → `201 {request, created: true}`, or `200` with the one already waiting; `reason_required`, `already_installed`, `429 too_many_requests` (10 waiting per person) |
 
 | Route | Body → answer |
 |---|---|
@@ -968,6 +1097,11 @@ its own rows are `app_store.trust`, `app_store.untrust`, `app_store.install`,
 | `POST /store-intent` | `{store, token}` → `{handle, store, store_trust, intent: {store, token_id, app, kind, version, repo, ref, commit, paid, license_key_prefix?, expires_at}, review: <the install dry run>, upgrade_of?: {id, version, store, repo, source_url}}`; or `409 store_trust_required` / `store_key_changed` with `detail: {store, keys, fingerprints, previous_keys?}` and nothing read from the link |
 | `POST /store-intent/install` | `{handle, permissions, associations?, license_key?}` → `201 {plugin, license?, association_errors?}`. The repository is read and the pins checked again; a paid app is held from before the install until the store answers `valid`; `license_key` empty = the link's own |
 | `POST /store-intent/cancel` | `{handle}` → `204`; the store is told `cancelled` |
+| `GET /stores/connection?store=<origin>` | → `{store, connected, instance_id?, key_fingerprint?, connected_at?, connected_by_name?}` - never the key |
+| `POST /stores/connection` | `{store, code}` → the connection; the store must be trusted; refused on a demo |
+| `DELETE /stores/connection?store=<origin>` | → `204`; the store is told to forget the key (best effort); `404` when not connected |
+| `GET /store-view[?tenant=<id>]` | → `{multi_tenant, tenant, settings: {enabled, stores, audience: everyone/roles/groups, roles, groups, updated_at?, updated_by_name?}, stores: [{origin, source, connected}]}`; a scope never set answers the screen off |
+| `PUT /store-view` | `{tenant?, settings}` → the saved settings: the stores must be trusted, the roles built-in (`admin`, `user`, `viewer`), the groups this tenant's or install-wide; in multi-tenant mode `tenant` names the tenant (the caller's own when absent) |
 | `GET /licenses` | → `{licenses: [<license>]}`, every paid app |
 | `GET /{id}/license` | → `{app, required, status, held, store, key_prefix, licensee?, seats?, seats_used?, valid_until?, updates_until?, checked_at?, next_check_by?, grace_until?, last_attempt_at?, last_error_code?, last_error?, store_trusted}`; a free app: `{required: false, status: "free"}` |
 | `PUT /{id}/license` | `{key}` → the license, checked at once (a new key starts from no answer) |
@@ -980,8 +1114,10 @@ A `handle` is the administrator's who read the link, lives an hour at most
 `store_source_changed` (409), `store_key_not_configured` /
 `store_not_allowed` (403), `intent_wrong_instance` (400), `intent_unknown` / `intent_session_unknown`
 (404), `intent_gone` / `intent_expired` (410), `store_unreachable` /
-`store_bad_answer` / `store_signature_invalid` (502), `intent_invalid` /
-`license_key_invalid` (400), and the install's own codes (`incompatible`,
+`store_bad_answer` / `store_signature_invalid` / `store_index_invalid` (502),
+`intent_invalid` / `license_key_invalid` / `store_connect_code_invalid` (400),
+`store_not_connected` / `store_connection_refused` / `store_refused` (409),
+`store_media_invalid` (404), and the install's own codes (`incompatible`,
 `name_taken`, …).
 
 ### The app reads its license
@@ -1153,9 +1289,18 @@ opened on. Four properties are the whole of it, and each one is deliberate:
   queued the job - the door records the root on the job (the host parameter
   `__root`), and the job is held to it when it runs. A link such a job opens
   records the root too (`shares.app_root`, migration 00082), and the job a
-  visitor's submit queues on it is held to it. One account commonly stands
+  visitor's submit queues on it is held to it, as is the visitor's screen
+  itself (`page_event`). One account commonly stands
   behind many such tokens, so the person's permissions alone would tell each
   project about the others' files.
+  - ⚠ The **inputs** of such a call are held to the root too, and judged on
+    every use of their ref, not only at the door: a ref to a file outside the
+    root answers `not_found` (a read, state, a lock, a notice, a link) and the
+    file is not listed in `context.inputs`. It matters for a link, whose
+    document is handed to the page where it lies NOW: moved out of the root
+    after the link was opened, it is no longer the page's, and the visitor's
+    submit is refused (below). A job held to a root whose input lies outside
+    it fails before it runs, with nothing read or written.
 
 `limit` counts the files the caller is TOLD about: the rows are read a page at
 a time, in one order, until that many have passed the person's permissions and
@@ -1353,7 +1498,8 @@ a page link's document - and anything else is `permission_denied` with one
 sentence whether or not the file exists or is locked; an app may always lift
 its OWN lock by path. For a job queued with a `root:` token, both hold only
 inside that token's folder (0.52.0): outside it the answer is the same
-`permission_denied`, the app's own lock included. The person the job runs for must also hold **editor** on
+`permission_denied`, the app's own lock included; a notice's `target.path`
+from a visitor's screen holds only inside the root its link recorded. The person the job runs for must also hold **editor** on
 the file (this app's own lock is waived); a job with nobody behind it (the
 wake-up's) may lock only its own inputs. A lock freezes one
 file for EVERYONE - owner and administrators included - until the plugin
@@ -1579,7 +1725,10 @@ BACKEND.md:
   and lifts by itself in ten minutes.
 - The plugin's `page_event` export answers the surface; `data.page` carries
   `{subject, state, visits, visitor_ip}` and `context.inputs` lists the link's
-  document (an unreadable anchor) plus the exposed copies `pub:N`.
+  document (an unreadable anchor) plus the exposed copies `pub:N`. A link
+  opened by a `root:` token's job lists its document only while it lies inside
+  that root: moved out of it, the page is handed the copies alone, and a ref
+  to the document answers `not_found`.
 - A surface carrying `job` is queued on that document **as the link's
   creator** (their ACL, their storage), with `params.page_token_hash` added;
   the visitor gets `202 {"accepted": true, "job_id"}` and never sees the ops
@@ -1607,6 +1756,9 @@ BACKEND.md:
     sent it for a new one. (`409 link_unavailable` when the action itself is
     gone; `permission_denied` when it is reserved.) A plugin should treat any
     of these as "this envelope is finished", not as a transient error to retry.
+    The same `403 no_access` answers a link a `root:` token's job opened
+    whose document has since been **moved out of that root**: the link
+    follows its document, the root does not.
   - their **account is switched off or deleted** - and this one stops the
     link at the DOOR, not at the submit: `GET …/s/{token}` reports
     `revoked: true` and every `…/event` answers **410**, so the visitor meets

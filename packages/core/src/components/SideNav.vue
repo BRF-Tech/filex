@@ -156,6 +156,13 @@ const props = withDefaults(defineProps<{
    */
   showMyShares?: boolean;
   /**
+   * #162 - draw the "App store" row under "Apps" (FileExplorer decides it,
+   * lib/appStoreRow: the host's `appStorePage`, a person, the server's
+   * answer). Absent means no, as for `showMyShares`: the screen is the
+   * host's.
+   */
+  showAppStore?: boolean;
+  /**
    * Draw the surfaces that only mean something for ONE person: API keys,
    * Recent, Starred, Shared with me. False when the caller is an app token —
    * a host proxy's shared credential, where "your keys" would be the proxy's
@@ -247,6 +254,8 @@ const emit = defineEmits<{
    * pretends otherwise.
    */
   (e: 'open-my-shares'): void;
+  /** #162 - the "App store" row: the host opens its store screen. */
+  (e: 'open-app-store'): void;
   /** App plugins — an "Apps" row: open that `home` view. */
   (e: 'open-app', key: string): void;
   /* surucu:d1 — "Request files": the access modal on THIS folder, drop tab. */
@@ -1173,7 +1182,7 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
       <!-- App plugins — "Apps": one row per `home` view. Between the storages
            and Connections: an app is a place you go, like a drive, not a
            setting. Hidden entirely when there are none. -->
-      <div v-if="appRows.length" class="fe-sidenav__section" data-testid="sidenav-apps">
+      <div v-if="appRows.length || showAppStore" class="fe-sidenav__section" data-testid="sidenav-apps">
         <p v-if="showLabels" class="fe-sidenav__heading">{{ t('sidenav.apps') }}</p>
         <hr v-else class="fe-sidenav__rule" aria-hidden="true" />
         <ul class="fe-sidenav__group" :aria-label="t('sidenav.apps')">
@@ -1189,6 +1198,39 @@ function onStoragePointerDown(s: NavStorage, ev: PointerEvent) {
               <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/actionIcons -->
               <span class="fe-sidenav__appicon" aria-hidden="true" v-html="a.svg"></span>
               <span v-if="showLabels" class="fe-sidenav__text">{{ a.label }}</span>
+            </button>
+          </li>
+          <!-- #162 - the store screen: where a person reads the catalog of the
+               stores an administrator turned on and asks for an app. The last
+               row of the group: the apps a person has come first. The screen
+               is the host's (showAppStore gates it, off by default). -->
+          <li v-if="showAppStore">
+            <button
+              type="button"
+              class="fe-sidenav__item"
+              :title="t('sidenav.appstore')"
+              :aria-label="t('sidenav.appstore')"
+              data-testid="sidenav-app-store"
+              @click="emit('open-app-store')"
+            >
+              <!-- A shop front: an awning over a door. -->
+              <svg
+                class="fe-ficon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M3 9l1.5-5h15L21 9" />
+                <path d="M3 9a3 3 0 0 0 6 0a3 3 0 0 0 6 0a3 3 0 0 0 6 0" />
+                <path d="M5 11.5V20h14v-8.5" />
+                <path d="M10 20v-5h4v5" />
+              </svg>
+              <span v-if="showLabels" class="fe-sidenav__text">{{ t('sidenav.appstore') }}</span>
             </button>
           </li>
         </ul>

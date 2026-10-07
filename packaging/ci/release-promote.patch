@@ -1,0 +1,924 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index c20c4dc6cece885ff5cbe318a997c1da815bec18..33ead601a16abcfab0221e98b4372b2970aeb08f 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -8,23 +8,38 @@ name: Release
+ #
+ # Job graph — and why it is shaped like this:
+ #
+-#   plan ── test ── verify ─┬─ binaries ─┬─ desktop  (installers, attached to
+-#                           │            │     │      the Release; the snaps
+-#                           │            │     │      also to the Snap Store)
+-#                           │            │     ├─ desktop-arm64-check (install +
+-#                           │            │     │   open on real arm64 machines
+-#                           │            │     │   and Linux x64, sandbox
+-#                           │            │     │   or snap confinement
+-#                           │            │     │   checked, screenshots)
+-#                           │            │     └─ aur (PKGBUILD push)
+-#                           │            └─ cli-smoke (CLI + server on arm64)
+-#                           ├─ docker ─── docker-manifest   (one native runner
+-#                           │                                per arch)
+-#                           └─ npm       (independent)
++#   plan ── verify ─┬─ binaries ─┬─ desktop  (installers, attached to the
++#                   │            │     │      Release; the snaps also to the
++#                   │            │     │      Snap Store)
++#                   │            │     ├─ desktop-arm64-check (install + open
++#                   │            │     │   on real arm64 machines and Linux
++#                   │            │     │   x64, sandbox or snap confinement
++#                   │            │     │   checked, screenshots)
++#                   │            │     └─ aur (PKGBUILD push)
++#                   │            └─ cli-smoke (CLI + server on arm64)
++#                   ├─ docker              (a run by hand: one native runner per
++#                   │                       arch)
++#                   ├─ promote-check ── docker-manifest   (a tag run)
++#                   └─ npm       (independent)
+ #
+-# `test` (ci.yml) runs in a run started by hand. A tag run skips it: its
+-# commit was tested before it was tagged, and `verify` checks that it was
+-# (see "The gate" below).
++# No job here runs the test suite (#174). The push of main runs ci.yml's
++# full matrix on the very commit a release lands, and `verify` asks for that
++# run before a tag run publishes anything (see "The gate" below). A dry run
++# packages at once, beside that matrix, instead of after a second copy of it.
++#
++# ⚠⚠ A tag run builds no image and no desktop package: it PROMOTES what the
++# dry run of its commit built (#174). That dry run is a release candidate
++# (`plan`: a run of everything on a version no tag has yet): it stamps the
++# version itself, pushes both images to ghcr.io by digest only, with no tag
++# anybody pulls, and keeps every desktop row's files with their sha256 sums.
++# The tag run then checks each image was built from its commit as its
++# version (`promote-check`: the labels, and `filex --version` run on its own
++# architecture), joins the digests into the tags people pull
++# (`docker-manifest`), and publishes the desktop files after checking their
++# sums - in minutes, not the 30-50 a rebuild took. The CLI binaries are still
++# built by goreleaser in the tag run: it is what creates the Release, opens
++# the winget pull request and commits the Homebrew cask, and GoReleaser OSS
++# cannot publish a build it did not make.
+ #
+ # `binaries` is goreleaser alone: it is what CREATES the GitHub Release, and
+ # the only thing the other two need. Until v0.25.0 goreleaser and the docker
+@@ -44,15 +59,26 @@ name: Release
+ # ── Run by hand (workflow_dispatch) ─────────────────────────────────────────
+ #
+ #   gh workflow run release.yml -R BRF-Tech/filex --ref <branch>
+-#       A DRY RUN of the whole release on that branch: everything is built and
+-#       tested — the gate, goreleaser (--snapshot), both images, every desktop
+-#       package including arm64 — and kept as run artifacts. Nothing is
+-#       published: no Release, no image tag, no npm, no store.
++#       A DRY RUN of the whole release on that branch: everything is built —
++#       goreleaser (--snapshot), both images (smoke-tested on their own
++#       architecture), every desktop package including arm64 — and kept as
++#       run artifacts. Nothing is published: no Release, no image tag, no
++#       npm, no store. It waits for no test suite: the push of its commit
++#       runs ci.yml's full matrix beside it.
+ #       The run is named "dry run all <commit>" (run-name, below). Before a
+ #       tag, the release tool starts one on main with -f publish=false, on the
+ #       export commit it is about to tag, and the tag run's `verify` looks for
+ #       exactly that name on its commit (docs/CONTRIBUTING.md → Release
+-#       process, step 7).
++#       process, step 7). On a version no tag has yet it is the release
++#       candidate the tag run promotes (above): its images go to ghcr.io by
++#       digest, untagged, and its desktop files are kept 14 days.
++#
++#   gh workflow run release.yml -R BRF-Tech/filex --ref main -f publish=false -f macos=false
++#       The same dry run without the macOS row, while GitHub has no macOS
++#       runner (docs/CONTRIBUTING.md, Release process: the release then goes
++#       out without the macOS packages and its notes say so). The tag run
++#       promotes what it kept and publishes no macOS package; a run with
++#       only=macos adds them once the runners are back.
+ #
+ #   gh workflow run release.yml -R BRF-Tech/filex -f tag=v0.48.0 -f only=arm64 [-f publish=true]
+ #       The ARM packages for a release that shipped without them: the Linux
+@@ -103,8 +129,9 @@ name: Release
+ # A FULL release publishes from its tag push and nothing else: `plan` refuses
+ # publish=true without only=arm64, only=macos or only=snap-arm64 (goreleaser
+ # cannot recreate a Release, and a half-rerun release is how v0.34.0's tag had
+-# to be moved). And the tag push publishes only a commit that passed ci.yml
+-# and a dry run first (`verify`).
++# to be moved). And the tag push publishes only a commit that passed ci.yml's
++# full matrix and a dry run first (`verify`), and publishes that dry run's
++# images and desktop files rather than its own builds.
+ #
+ # ⚠ In a run on a tag the workflow file comes from the branch it was started
+ # on and the code from the tag. The tag's tree has the tag's
+@@ -141,6 +168,10 @@ on:
+         description: "Attach to the tag's Release and send to the stores. Off: build, test and keep artifacts only."
+         type: boolean
+         default: false
++      macos:
++        description: "Build the macOS desktop packages in a run of everything. Off only while GitHub has no macOS runner: the release then goes out without them, and only=macos adds them later."
++        type: boolean
++        default: true
+ 
+ permissions:
+   contents: write   # create the GitHub Release + upload assets
+@@ -149,8 +180,8 @@ permissions:
+ # ⚠ Never cancels anything. A tag push is its own group (refs/tags/vX), so a
+ # run started by hand on a branch cannot touch a release in flight, and a
+ # second run on the same branch and tag waits for the first instead of
+-# killing it halfway through a store upload. (The gate's own ci.yml groups by
+-# ref too, and cancels only a run of the SAME ref.)
++# killing it halfway through a store upload. (ci.yml, the test this release
++# reads, never cancels a run of a push either: it groups a push by its commit.)
+ concurrency:
+   group: release-${{ github.ref }}-${{ inputs.tag }}
+   cancel-in-progress: false
+@@ -175,6 +206,10 @@ jobs:
+   #            arm64 snap are built
+   #   only     all, arm64, macos or snap-arm64 (a tag push: all)
+   #   desktop  the desktop matrix
++  #   candidate  true for the dry run a tag run promotes: by hand, everything,
++  #            nothing published, on a version no tag has yet. It stamps
++  #            v<version> (not -dryrun), pushes its images by digest and keeps
++  #            its desktop files for the tag run of the same commit.
+   plan:
+     name: Plan
+     runs-on: ubuntu-latest
+@@ -187,6 +222,7 @@ jobs:
+       full: ${{ steps.p.outputs.full }}
+       only: ${{ steps.p.outputs.only }}
+       desktop: ${{ steps.p.outputs.desktop }}
++      candidate: ${{ steps.p.outputs.candidate }}
+     steps:
+       - uses: actions/checkout@v4
+         with:
+@@ -200,13 +236,14 @@ jobs:
+           IN_TAG: ${{ inputs.tag }}
+           IN_ONLY: ${{ inputs.only }}
+           IN_PUBLISH: ${{ inputs.publish }}
++          IN_MACOS: ${{ inputs.macos }}
+           GH_TOKEN: ${{ github.token }}
+         run: |
+           set -euo pipefail
+           if [ "$EVENT" = push ]; then
+-            tag="$GITHUB_REF_NAME"; only=all; publish=true
++            tag="$GITHUB_REF_NAME"; only=all; publish=true; macos=true
+           else
+-            tag="$IN_TAG"; only="${IN_ONLY:-all}"; publish="${IN_PUBLISH:-false}"
++            tag="$IN_TAG"; only="${IN_ONLY:-all}"; publish="${IN_PUBLISH:-false}"; macos="${IN_MACOS:-true}"
+           fi
+           if [ -n "$tag" ]; then
+             [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::a tag looks like v1.2.3, not '$tag'"; exit 1; }
+@@ -270,6 +307,26 @@ jobs:
+           if [ "$only" = snap-arm64 ]; then
+             desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label == "linux-arm64") | .script = ""]}')
+           fi
++          # -f macos=false: a run of everything without the macos row, while
++          # GitHub has no macOS runner (the macOS-less release; only=macos adds
++          # the packages later). Never in a tag run: a tag run's rows are the
++          # ones its dry run kept (verify).
++          if [ "$only" = all ] && [ "$macos" = false ]; then
++            desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label != "macos")]}')
++          fi
++          # The release candidate (#174): a dry run of everything on a version
++          # no tag has yet. It stamps the version itself, so what it builds is
++          # what the tag run of the same commit promotes. A version that is
++          # tagged already makes a plain dry run (-dryrun) that keeps nothing.
++          candidate=false
++          if [ "$EVENT" != push ] && [ -z "$tag" ] && [ "$only" = all ] && [ "$publish" != true ]; then
++            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2>/dev/null; then
++              echo "v$version is tagged already: a plain dry run, which keeps nothing for a tag run"
++            else
++              candidate=true
++              stamp="v$version"
++            fi
++          fi
+           {
+             echo "tag=$tag"
+             echo "ref=${tag:-$GITHUB_SHA}"
+@@ -279,10 +336,14 @@ jobs:
+             echo "full=$([ "$only" = all ] && echo true || echo false)"
+             echo "only=$only"
+             echo "desktop=$(echo "$desktop" | jq -c .)"
++            echo "candidate=$candidate"
+           } >> "$GITHUB_OUTPUT"
+           {
+             echo "### ${tag:-dry run of $GITHUB_REF_NAME} — $([ "$publish" = true ] && echo PUBLISHES || echo publishes nothing)"
+-            echo "version $version, only=$only"
++            echo "version $version, only=$only$([ "$macos" = false ] && echo ', without the macOS packages')"
++            if [ "$candidate" = true ]; then
++              echo "release candidate of v$version: its images go to ghcr.io by digest (untagged) and its desktop files are kept for the tag run to promote"
++            fi
+           } >> "$GITHUB_STEP_SUMMARY"
+ 
+   # ── The gate ────────────────────────────────────────────────────────────
+@@ -308,68 +369,56 @@ jobs:
+   # the release tool starts a dry run of this workflow on the same commit and
+   # waits for both, and only then is that commit tagged.
+   #
+-  # So a run started by hand runs the suite itself (`test`), and a tag run
+-  # does not run it again: `verify` asks GitHub whether THIS commit has a
+-  # successful ci.yml run started by a push AND a successful dry run of this
++  # So `verify` asks GitHub whether THIS commit has a successful ci.yml run
++  # started by a push that ran the FULL matrix - its last job, "All tests
++  # (full)", green (scripts/ci-parts.mjs) - AND a successful dry run of this
+   # workflow (named "dry run all <commit>", see run-name). Either missing, or
+-  # GitHub not answering, and it fails: nothing is published. The tag run
+-  # still builds everything again from the tag; it does not reuse the dry
+-  # run's artifacts.
++  # GitHub not answering, and it fails: nothing is published. In a tag run it
++  # also finds what that dry run kept for promotion: both images' digests and
++  # every desktop row's files. A row with none fails, except macOS when the
++  # dry run was started without it (-f macos=false): then the release goes out
++  # without the macOS packages and says so.
++  #
++  # Until #174 a run by hand ran ci.yml itself first (`test`), and every
++  # package waited for it; the push run of the same commit already ran that
++  # very suite. A dry run now packages at once and publishes nothing, so
++  # `verify` lets it through without asking.
+   #
+   # A run that adds the ARM packages to a release (only=arm64), its macOS
+   # packages (only=macos) or its arm64 snap (only=snap-arm64), builds THAT
+-  # tag's code: `test` is skipped, and
+-  # with publish=true `verify` asks of the tag's commit exactly what it asks
+-  # on a tag push. Without publish it publishes nothing and `verify` lets it
+-  # through. So every job that publishes anything waits for `verify`, a
+-  # partial run's included.
+-  test:
+-    name: Test suite
+-    needs: plan
+-    if: needs.plan.outputs.full == 'true' && github.event_name != 'push'
+-    uses: ./.github/workflows/ci.yml
+-    # ⚠⚠ No `with: skip_docker`. The gate builds both images before
+-    # `binaries`, `docker` and `npm` may start: v0.43.0 skipped that build here,
+-    # its images failed, and the npm packages and the GitHub Release were already
+-    # out (run 36026548054). The build this adds to the gate is the price of
+-    # never publishing half a release again.
+-
++  # tag's code, and with publish=true `verify` asks of the tag's commit
++  # exactly what it asks on a tag push. So every job that publishes anything
++  # waits for `verify`, a partial run's included.
+   verify:
+     name: Verify
+-    needs: [plan, test]
+-    # !cancelled(), not the implicit success(): on a tag push, and in a run
+-    # that adds packages to a release (only=arm64, macos, snap-arm64), `test`
+-    # is skipped and this must run anyway. It decides for itself, closed.
++    needs: [plan]
++    # !cancelled(), not the implicit success(): it decides for itself,
++    # closed, whatever kind of run this is.
+     if: ${{ !cancelled() && needs.plan.result == 'success' }}
+     runs-on: ubuntu-latest
+     permissions:
+       actions: read
+       contents: read
++    outputs:
++      dry_run: ${{ steps.v.outputs.dry_run }}
++      desktop: ${{ steps.v.outputs.desktop }}
+     steps:
+-      - name: The commit this run publishes passed CI and a dry run of this workflow
++      - name: The commit this run publishes passed the full matrix and a dry run of this workflow
++        id: v
+         shell: bash
+         env:
+           EVENT: ${{ github.event_name }}
+           SHA: ${{ github.sha }}
+-          FULL: ${{ needs.plan.outputs.full }}
+           ONLY: ${{ needs.plan.outputs.only }}
+           PUBLISH: ${{ needs.plan.outputs.publish }}
+           TAG: ${{ needs.plan.outputs.tag }}
+-          TEST: ${{ needs.test.result }}
++          DESKTOP: ${{ needs.plan.outputs.desktop }}
+           GH_TOKEN: ${{ github.token }}
+         run: |
+           set -euo pipefail
+           if [ "$EVENT" != push ]; then
+-            if [ "$FULL" = true ]; then
+-              if [ "$TEST" != success ]; then
+-                echo "::error::the test suite of this run ended '$TEST'"
+-                exit 1
+-              fi
+-              echo "A run started by hand: its own test suite passed." >> "$GITHUB_STEP_SUMMARY"
+-              exit 0
+-            fi
+             if [ "$PUBLISH" != true ]; then
+-              echo "A dry run of the only=$ONLY packages of $TAG: nothing is published." >> "$GITHUB_STEP_SUMMARY"
++              echo "A dry run (only=$ONLY): nothing is published, and nothing waits for a test suite - the push of its commit runs ci.yml's full matrix." >> "$GITHUB_STEP_SUMMARY"
+               exit 0
+             fi
+             # Adds to $TAG's release, built from $TAG: its commit is asked.
+@@ -377,23 +426,35 @@ jobs:
+           fi
+           export SHA
+           export WANT="dry run all $SHA"
++          # The last job of ci.yml's full matrix (scripts/ci-parts.mjs, completeName).
++          export COMPLETE="All tests (full)"
++          runs="https://github.com/$GITHUB_REPOSITORY/actions/runs"
+           # The newest successful run of each on this very commit. A call
+           # that fails ends the step here (set -e): unknown does not pass.
+           ci=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+             -f head_sha="$SHA" -f event=push -f status=success -f per_page=100 \
+-            --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "push" and .conclusion == "success")][0].html_url // empty')
++            --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "push" and .conclusion == "success")][0].id // empty')
+           dry=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs" \
+             -f head_sha="$SHA" -f event=workflow_dispatch -f status=success -f per_page=100 \
+-            --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "workflow_dispatch" and .conclusion == "success" and .display_title == env.WANT)][0].html_url // empty')
++            --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "workflow_dispatch" and .conclusion == "success" and .display_title == env.WANT)][0].id // empty')
+           missing=0
+-          if [ -n "$ci" ]; then
+-            echo "ci.yml passed on $SHA: $ci"
+-          else
++          if [ -z "$ci" ]; then
+             echo "::error::no successful ci.yml run started by a push of $SHA"
+             missing=1
++          else
++            # It passed; was it the whole matrix? Only the full profile ends
++            # in this job (a pull request's run ends in "All tests (pr)").
++            full=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$ci/jobs" -f filter=latest -f per_page=100 --paginate \
++              --jq '.jobs[] | select(.name == env.COMPLETE and .conclusion == "success") | .name')
++            if [ -n "$full" ]; then
++              echo "ci.yml ran the full matrix on $SHA and passed: $runs/$ci"
++            else
++              echo "::error::ci.yml passed on $SHA, but not as the full matrix: run $runs/$ci has no successful \"$COMPLETE\" job"
++              missing=1
++            fi
+           fi
+           if [ -n "$dry" ]; then
+-            echo "the dry run passed on $SHA: $dry"
++            echo "the dry run passed on $SHA: $runs/$dry"
+           else
+             echo "::error::no successful run of release.yml named '$WANT'"
+             missing=1
+@@ -402,10 +463,36 @@ jobs:
+             echo "::error::$TAG publishes nothing: a commit is tagged only after both passed on it (docs/CONTRIBUTING.md, Release process, step 7)"
+             exit 1
+           fi
++          echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
++          if [ "$EVENT" = push ]; then
++            # What the tag run promotes (#174): both images, by digest, and
++            # each desktop row's files. A plain dry run (its version was
++            # tagged already, or it was no run of everything) kept none.
++            have=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$dry/artifacts" -f per_page=100 --paginate \
++              --jq '.artifacts[] | select(.expired == false) | .name')
++            for a in digests-amd64 digests-arm64; do
++              if ! grep -qx "$a" <<< "$have"; then
++                echo "::error::the dry run $runs/$dry kept no $a: it is no release candidate. Start a dry run on $SHA again (docs/CONTRIBUTING.md, Release process, step 7), then re-run this run's failed jobs."
++                exit 1
++              fi
++            done
++            rows=$(jq -c --arg have "$have" '{include: [.include[] | select(("release-files-" + .label) as $n | ($have | split("\n") | any(.[]; . == $n)))]}' <<< "$DESKTOP")
++            lost=$(jq -r --arg have "$have" '.include[] | .label | select(("release-files-" + .) as $n | ($have | split("\n") | any(.[]; . == $n)) | not)' <<< "$DESKTOP")
++            for label in $lost; do
++              if [ "$label" = macos ]; then
++                echo "::warning title=macOS::the dry run built no macOS packages (it was started with -f macos=false): $TAG goes out without them. Add them with only=macos once GitHub has macOS runners again."
++                echo "### $TAG goes out without the macOS packages: add them with only=macos" >> "$GITHUB_STEP_SUMMARY"
++              else
++                echo "::error::the dry run $runs/$dry kept no files for the $label desktop row: there is nothing to promote"
++                exit 1
++              fi
++            done
++            echo "desktop=$rows" >> "$GITHUB_OUTPUT"
++          fi
+           {
+             echo "### $TAG ($SHA) was tested before it was tagged"
+-            echo "- CI: $ci"
+-            echo "- dry run: $dry"
++            echo "- CI, the full matrix: $runs/$ci"
++            echo "- dry run: $runs/$dry"
+           } >> "$GITHUB_STEP_SUMMARY"
+ 
+   # ── Binaries (linux/macOS/windows × amd64/arm64) → GitHub Release ───────
+@@ -670,19 +757,21 @@ jobs:
+   #    into the multi-arch tags.
+   #
+   # Each leg then loads what it built and runs it (smoke-cli.mjs --image) on
+-  # its own architecture BEFORE docker-manifest tags anything: an arm64 image
+-  # that builds but does not start never becomes `latest`.
++  # its own architecture: an arm64 image that builds but does not start never
++  # becomes a candidate, let alone `latest`.
+   #
+-  # `needs:` is only the gate. The docker job builds its own binary from
+-  # source inside the Dockerfile and takes nothing from the Release, so waiting
+-  # for goreleaser only lengthened the critical path (measured on v0.30.0:
+-  # binaries 544 s, then docker 696 s = 20.7 min wall). The cost of running in
+-  # parallel is that a goreleaser failure can leave a :vX image behind with no
+-  # GitHub Release beside it — delete the tag from ghcr.io by hand if that
+-  # happens; it has to be a deliberate cleanup, not a silent inconsistency.
++  # ⚠⚠ This job runs in a run started by hand and never in a tag run (#174).
++  # The dry run of a release candidate (`plan`) pushes both images BY DIGEST,
++  # with no tag: nothing anybody pulls by name changes, and the digests travel
++  # to the tag run as this run's `digests-<arch>` artifacts (14 days). The tag
++  # run of the same commit then promotes exactly those bytes - `promote-check`
++  # reads each image's labels and runs its `filex --version` on its own
++  # architecture, `docker-manifest` joins the digests into the tags - instead
++  # of building for 10-20 minutes again. The labels say which commit and
++  # version each image was built from, and the tag run refuses any other.
+   docker:
+     needs: [plan, verify]
+-    if: needs.plan.outputs.full == 'true'
++    if: needs.plan.outputs.full == 'true' && github.event_name != 'push'
+     strategy:
+       fail-fast: false
+       matrix:
+@@ -695,7 +784,8 @@ jobs:
+             arch: arm64
+     runs-on: ${{ matrix.runner }}
+     env:
+-      PUBLISH: ${{ needs.plan.outputs.publish }}
++      # true only in a release candidate's dry run: a push by digest, untagged.
++      PUSH: ${{ needs.plan.outputs.candidate }}
+     steps:
+       - uses: actions/checkout@v4
+       - id: meta
+@@ -722,11 +812,16 @@ jobs:
+             VERSION=${{ needs.plan.outputs.stamp }}
+             COMMIT=${{ github.sha }}
+             DATE=${{ steps.meta.outputs.date }}
++          # What the tag run checks before it promotes this image.
++          labels: |
++            org.opencontainers.image.revision=${{ github.sha }}
++            org.opencontainers.image.version=${{ needs.plan.outputs.stamp }}
++            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+           cache-from: type=gha,scope=full-${{ matrix.arch }}
+           cache-to: type=gha,mode=max,scope=full-${{ matrix.arch }}
+-          # Push by digest only; docker-manifest attaches the human tags. A dry
+-          # run pushes nothing.
+-          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=${{ env.PUBLISH == 'true' }}
++          # By digest only; docker-manifest attaches the human tags, in the
++          # tag run. Only a release candidate pushes at all.
++          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=${{ env.PUSH == 'true' }}
+ 
+       - name: Slim image
+         id: slim
+@@ -739,9 +834,13 @@ jobs:
+             VERSION=${{ needs.plan.outputs.stamp }}
+             COMMIT=${{ github.sha }}
+             DATE=${{ steps.meta.outputs.date }}
++          labels: |
++            org.opencontainers.image.revision=${{ github.sha }}
++            org.opencontainers.image.version=${{ needs.plan.outputs.stamp }}
++            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+           cache-from: type=gha,scope=slim-${{ matrix.arch }}
+           cache-to: type=gha,mode=max,scope=slim-${{ matrix.arch }}
+-          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=${{ env.PUBLISH == 'true' }}
++          outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=${{ env.PUSH == 'true' }}
+ 
+       # The same two builds again into the local daemon — every layer comes
+       # from the builder's cache of the builds above, so this is an export,
+@@ -787,10 +886,11 @@ jobs:
+             node "$CI_SCRIPTS"/smoke-cli.mjs --image "$img" --expect-arch "${{ matrix.arch }}" --expect-version "${{ needs.plan.outputs.version }}"
+           done
+ 
+-      # The digests travel to the manifest job as files named after the digest,
+-      # so two matrix legs writing into one artifact never collide.
++      # The digests travel to the tag run as files named after the digest, so
++      # the two matrix legs never collide. Overwritten on a re-run of a leg:
++      # the digest kept is the one this commit's latest build pushed.
+       - name: Record digests
+-        if: env.PUBLISH == 'true'
++        if: env.PUSH == 'true'
+         run: |
+           set -euo pipefail
+           mkdir -p /tmp/digests/full /tmp/digests/slim
+@@ -801,26 +901,102 @@ jobs:
+           SLIM_DIGEST: ${{ steps.slim.outputs.digest }}
+ 
+       - uses: actions/upload-artifact@v4
+-        if: env.PUBLISH == 'true'
++        if: env.PUSH == 'true'
+         with:
+           name: digests-${{ matrix.arch }}
+           path: /tmp/digests/*
+           if-no-files-found: error
+-          retention-days: 1
++          overwrite: true
++          retention-days: 14
++
++  # ── A tag run promotes the dry run's images ───────────────────────────────
++  #
++  # One leg per architecture, on a runner of that architecture: each digest the
++  # dry run of this commit pushed (verify found that run) is pulled and must
++  # say, in its labels, that it was built from THIS commit as THIS version, be
++  # of this architecture, and answer `filex --version` with the tag and the
++  # commit. Anything else and nothing is tagged.
++  promote-check:
++    name: The dry run's ${{ matrix.arch }} images are this tag's
++    needs: [plan, verify]
++    if: needs.plan.outputs.full == 'true' && github.event_name == 'push'
++    strategy:
++      fail-fast: false
++      matrix:
++        include:
++          - arch: amd64
++            runner: ubuntu-latest
++          - arch: arm64
++            runner: ubuntu-24.04-arm
++    runs-on: ${{ matrix.runner }}
++    permissions:
++      actions: read
++      contents: read
++      packages: read
++    steps:
++      - uses: actions/download-artifact@v4
++        with:
++          name: digests-${{ matrix.arch }}
++          path: /tmp/digests
++          run-id: ${{ needs.verify.outputs.dry_run }}
++          github-token: ${{ github.token }}
++      - uses: docker/login-action@v3
++        with:
++          registry: ghcr.io
++          username: ${{ github.actor }}
++          password: ${{ secrets.GITHUB_TOKEN }}
++      - name: Each image was built from this commit, as this version, and says so
++        shell: bash
++        env:
++          TAG: ${{ needs.plan.outputs.tag }}
++          ARCH: ${{ matrix.arch }}
++        run: |
++          set -euo pipefail
++          img=ghcr.io/brf-tech/filex
++          for variant in full slim; do
++            set -- /tmp/digests/"$variant"/*
++            if [ "$#" -ne 1 ] || [ ! -e "$1" ]; then
++              echo "::error::expected one $variant digest for $ARCH from the dry run, found: $*"
++              exit 1
++            fi
++            ref="$img@sha256:$(basename "$1")"
++            docker pull -q "$ref"
++            rev=$(docker image inspect "$ref" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
++            ver=$(docker image inspect "$ref" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')
++            arch=$(docker image inspect "$ref" --format '{{ .Architecture }}')
++            out=$(docker run --rm --entrypoint /usr/local/bin/filex "$ref" --version)
++            echo "$variant $ARCH: $ref"
++            echo "  revision $rev, version $ver, architecture $arch, filex --version: $out"
++            [ "$rev" = "$GITHUB_SHA" ] || { echo "::error::$variant ($ARCH) was built from $rev, not from $TAG's commit $GITHUB_SHA"; exit 1; }
++            [ "$ver" = "$TAG" ] || { echo "::error::$variant ($ARCH) was built as $ver, not as $TAG"; exit 1; }
++            [ "$arch" = "$ARCH" ] || { echo "::error::$variant is a $arch image, not $ARCH"; exit 1; }
++            case "$out" in
++              *"$TAG"*"$GITHUB_SHA"*) ;;
++              *) echo "::error::$variant ($ARCH): filex --version says '$out', not $TAG ($GITHUB_SHA)"; exit 1 ;;
++            esac
++            echo "- $variant $ARCH: \`$ref\` - $out" >> "$GITHUB_STEP_SUMMARY"
++          done
+ 
+   # Joins the per-architecture digests into the tags people actually pull.
+-  # Nothing is tagged until BOTH architectures have pushed, so a half-built
+-  # release never appears as `:latest`.
++  # Nothing is tagged until BOTH architectures were checked, so a half-built
++  # release never appears as `:latest`. The digests are the dry run's: a tag
++  # run builds no image.
+   docker-manifest:
+-    needs: [plan, docker]
++    needs: [plan, verify, promote-check]
+     if: needs.plan.outputs.publish == 'true'
+     runs-on: ubuntu-latest
++    permissions:
++      actions: read
++      contents: read
++      packages: write
+     steps:
+       - uses: actions/download-artifact@v4
+         with:
+           pattern: digests-*
+           merge-multiple: true
+           path: /tmp/digests
++          run-id: ${{ needs.verify.outputs.dry_run }}
++          github-token: ${{ github.token }}
+       - uses: docker/setup-buildx-action@v3
+       - uses: docker/login-action@v3
+         with:
+@@ -977,15 +1153,36 @@ jobs:
+   # binaries inside what it built are the architecture it claims
+   # (arch-of.mjs): an arm64 installer with an x64 CLI inside would install,
+   # open, and fail at the first sync.
++  #
++  # ── A tag run promotes (#174) ──
++  # A tag run builds none of this. The dry run of its commit - a release
++  # candidate, `plan` - kept each row's files with their sha256 sums
++  # (release-files.mjs keep, artifact release-files-<row>), and the tag run
++  # downloads them, checks them byte for byte and against the version
++  # (release-files.mjs check), and runs only the steps that publish: the
++  # Release, the stores, winget and the cask. Its rows are the ones the dry run
++  # kept files for (`verify`): without macOS when the dry run was started with
++  # -f macos=false.
+   desktop:
+     name: Desktop packages (${{ matrix.label }})
+     needs: [plan, verify, binaries]
+     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.verify.result == 'success' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
+     strategy:
+       fail-fast: false
+-      matrix: ${{ fromJSON(needs.plan.outputs.desktop) }}
++      # A tag run: the rows its dry run kept files for (verify). Otherwise
++      # the rows plan wrote.
++      matrix: ${{ fromJSON(needs.verify.outputs.desktop || needs.plan.outputs.desktop) }}
+     runs-on: ${{ matrix.os }}
++    # gh release upload needs contents: write; a tag run downloads the dry
++    # run's artifacts (actions: read). Nothing here pushes an image.
++    permissions:
++      actions: read
++      contents: write
+     env:
++      # A tag run promotes the files its dry run built; a release candidate
++      # keeps them for that (see the note above the job).
++      PROMOTE: ${{ github.event_name == 'push' }}
++      CANDIDATE: ${{ needs.plan.outputs.candidate }}
+       # Partner Center → an Entra ID app with the Manager role
+       # (desktop/store/microsoft/listing.md). Mapped to env because a step's
+       # `if:` cannot read `secrets` directly.
+@@ -1023,12 +1220,16 @@ jobs:
+           node-version: "20"
+           cache: pnpm
+       - uses: actions/setup-go@v5
++        if: env.PROMOTE != 'true'
+         with:
+           go-version-file: backend/go.mod
+-      - run: pnpm install --frozen-lockfile
++      - name: Install the dependencies
++        if: env.PROMOTE != 'true'
++        run: pnpm install --frozen-lockfile
+       # desktop/scripts/sync-web.mjs copies packages/webcomponent/dist into the
+       # app, so the packages have to exist before the installer is built.
+       - name: Build packages
++        if: env.PROMOTE != 'true'
+         env:
+           NODE_OPTIONS: "--max-old-space-size=4096"
+         run: pnpm -r --filter='./packages/*' build
+@@ -1039,6 +1240,7 @@ jobs:
+       # up to date forever. The package would have been built, published, and
+       # invisible. (A dry run of a branch keeps package.json's version.)
+       - name: Stamp the version from the tag
++        if: env.PROMOTE != 'true'
+         shell: bash
+         run: |
+           set -euo pipefail
+@@ -1049,13 +1251,13 @@ jobs:
+       # fpm hands that to rpmbuild, which ubuntu-latest does not ship. (A row
+       # with no `script`, only=snap-arm64's, builds no .rpm or .deb.)
+       - name: rpmbuild for the .rpm
+-        if: startsWith(matrix.label, 'linux') && matrix.script != ''
++        if: startsWith(matrix.label, 'linux') && matrix.script != '' && env.PROMOTE != 'true'
+         run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
+       # ⚠ electron-builder's own fpm (for the .deb and .rpm) is an x86-64
+       # bundle with its own Ruby: on arm64 it cannot start. USE_SYSTEM_FPM
+       # makes it call this one.
+       - name: fpm for the arm64 .deb and .rpm
+-        if: matrix.label == 'linux-arm64' && matrix.script != ''
++        if: matrix.label == 'linux-arm64' && matrix.script != '' && env.PROMOTE != 'true'
+         run: |
+           set -euo pipefail
+           sudo apt-get install -y -qq ruby ruby-dev build-essential
+@@ -1063,7 +1265,7 @@ jobs:
+           fpm --version
+           echo "USE_SYSTEM_FPM=true" >> "$GITHUB_ENV"
+       - name: Build installer
+-        if: matrix.script != ''
++        if: matrix.script != '' && env.PROMOTE != 'true'
+         env:
+           # Never let the mac runner auction its keychain: a stray self-signed
+           # certificate would produce a "signed" build that fails Gatekeeper
+@@ -1087,7 +1289,7 @@ jobs:
+       # The x64 feed, set aside before the arm64 build writes its own
+       # latest.yml over it (joined below).
+       - name: Set the x64 Windows feed aside
+-        if: matrix.label == 'windows' && contains(matrix.arches, 'x64')
++        if: matrix.label == 'windows' && contains(matrix.arches, 'x64') && env.PROMOTE != 'true'
+         shell: bash
+         run: mv desktop/release/latest.yml "$RUNNER_TEMP/latest-x64.yml"
+       # NSIS installer + portable .exe for Windows on Arm, cross-built: the
+@@ -1096,7 +1298,7 @@ jobs:
+       # ⚠ GOARCH, not `--arch`: a run on an older tag has a fetch-cli.mjs that
+       # only knows the variable.
+       - name: Build the Windows arm64 installers
+-        if: matrix.label == 'windows' && contains(matrix.arches, 'arm64')
++        if: matrix.label == 'windows' && contains(matrix.arches, 'arm64') && env.PROMOTE != 'true'
+         shell: bash
+         run: |
+           set -euo pipefail
+@@ -1109,7 +1311,7 @@ jobs:
+       # release that has its x64 installer already: that release's own
+       # latest.yml is the x64 half, byte for byte.
+       - name: One Windows update feed for both architectures
+-        if: matrix.label == 'windows'
++        if: matrix.label == 'windows' && env.PROMOTE != 'true'
+         shell: bash
+         env:
+           GH_TOKEN: ${{ github.token }}
+@@ -1135,7 +1337,7 @@ jobs:
+       # a snap's default publisher is the Snap Store — the upload is the
+       # explicit step further down, which says so when it cannot run.
+       - name: snapcraft + LXD for the arm64 snap
+-        if: matrix.label == 'linux-arm64'
++        if: matrix.label == 'linux-arm64' && env.PROMOTE != 'true'
+         run: |
+           set -euo pipefail
+           # ⚠ 8.x: snapcraft 9 refuses base core20 outright ("Base 'core20'
+@@ -1153,13 +1355,13 @@ jobs:
+           snapcraft --version
+           echo "SNAPCRAFT_BUILD_ENVIRONMENT=lxd" >> "$GITHUB_ENV"
+       - name: Build snap
+-        if: startsWith(matrix.label, 'linux')
++        if: startsWith(matrix.label, 'linux') && env.PROMOTE != 'true'
+         run: pnpm --filter ./desktop exec electron-builder --linux snap --publish never
+       # store-e2e registers the package from loose files, which needs no
+       # certificate but does need Developer Mode. The runner is a throwaway
+       # admin VM, so it is switched on here rather than signing a test cert.
+       - name: Developer Mode (for the Store package check)
+-        if: matrix.label == 'store' && contains(matrix.arches, 'x64')
++        if: matrix.label == 'store' && contains(matrix.arches, 'x64') && env.PROMOTE != 'true'
+         shell: pwsh
+         run: reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
+       # ⚠ Before anything leaves the runner: installed, launched through its
+@@ -1175,10 +1377,10 @@ jobs:
+       # ⚠ Runs on the x64 package, BEFORE the arm64 one is built: it builds its
+       # own variant from build/bin, which then still holds the x64 CLI.
+       - name: Install the Store package and check it as a Store copy
+-        if: matrix.label == 'store' && contains(matrix.arches, 'x64')
++        if: matrix.label == 'store' && contains(matrix.arches, 'x64') && env.PROMOTE != 'true'
+         run: pnpm --filter ./desktop run e2e:store
+       - name: Build the arm64 Store package
+-        if: matrix.label == 'store' && contains(matrix.arches, 'arm64')
++        if: matrix.label == 'store' && contains(matrix.arches, 'arm64') && env.PROMOTE != 'true'
+         shell: bash
+         run: |
+           set -euo pipefail
+@@ -1191,7 +1393,7 @@ jobs:
+       # in a bundle must be identical but for ProcessorArchitecture, and the
+       # bundle carries their version; makeappx refuses anything else.
+       - name: Bundle the Store packages
+-        if: matrix.label == 'store' && contains(matrix.arches, 'x64') && contains(matrix.arches, 'arm64')
++        if: matrix.label == 'store' && contains(matrix.arches, 'x64') && contains(matrix.arches, 'arm64') && env.PROMOTE != 'true'
+         shell: pwsh
+         run: |
+           $ErrorActionPreference = 'Stop'
+@@ -1217,6 +1419,26 @@ jobs:
+           & $makeappx.FullName bundle /d $dir /p desktop/release/filex-desktop.msixbundle /bv $v[0] /o
+           if ($LASTEXITCODE -ne 0) { throw "makeappx bundle failed ($LASTEXITCODE)" }
+           Get-Item desktop/release/filex-desktop.msixbundle
++      # ── A tag run: the files the dry run of this commit built ──
++      # Nothing above ran (`PROMOTE`). Every step below reads desktop/release,
++      # so the dry run's files go there, and are checked before any of them is
++      # published: exactly the files it kept, byte for byte, and feeds that
++      # offer this version.
++      - name: The files the dry run built
++        if: env.PROMOTE == 'true'
++        uses: actions/download-artifact@v4
++        with:
++          name: release-files-${{ matrix.label }}
++          path: desktop/release
++          run-id: ${{ needs.verify.outputs.dry_run }}
++          github-token: ${{ github.token }}
++      - name: They are the files the dry run kept, for this version
++        if: env.PROMOTE == 'true'
++        shell: bash
++        run: |
++          set -euo pipefail
++          node "$CI_SCRIPTS"/release-files.mjs check desktop/release --version "$VER"
++          rm desktop/release/release-files.sha256
+       # Listed before uploading so a build that produced nothing is visible in
+       # the log as an empty directory rather than as a silently short release.
+       # (After every build step: the Store row builds its arm64 package late.)
+@@ -1225,7 +1447,10 @@ jobs:
+         run: ls -la desktop/release
+       # Every executable in what was built is the architecture it is sold as —
+       # the app itself and the CLI it syncs with (see arch-of.mjs).
++      # (Not in a tag run: the unpacked apps it reads are not promoted, and the
++      # dry run checked these very packages.)
+       - name: The binaries inside are the architecture on the label
++        if: env.PROMOTE != 'true'
+         shell: bash
+         run: |
+           set -euo pipefail
+@@ -1280,6 +1505,34 @@ jobs:
+             desktop/release/*amd64.snap
+           if-no-files-found: error
+           retention-days: 7
++      # A release candidate keeps what the tag run of its commit will publish,
++      # with the sums that run checks (release-files.mjs). 14 days: a tag comes
++      # hours after its dry run, and a re-run of a leg replaces its own files.
++      - name: Sum the release files for the tag run
++        if: env.CANDIDATE == 'true'
++        shell: bash
++        run: node "$CI_SCRIPTS"/release-files.mjs keep desktop/release
++      - name: Keep the release files for the tag run
++        if: env.CANDIDATE == 'true'
++        uses: actions/upload-artifact@v4
++        with:
++          name: release-files-${{ matrix.label }}
++          path: |
++            desktop/release/*.exe
++            desktop/release/*.blockmap
++            desktop/release/*.AppImage
++            desktop/release/*.deb
++            desktop/release/*.rpm
++            desktop/release/*.snap
++            desktop/release/*.dmg
++            desktop/release/*.zip
++            desktop/release/*.appx
++            desktop/release/*.msixbundle
++            desktop/release/latest*.yml
++            desktop/release/release-files.sha256
++          if-no-files-found: error
++          overwrite: true
++          retention-days: 14
+       - name: Keep the Store package for Partner Center
+         if: matrix.label == 'store'
+         uses: actions/upload-artifact@v4
+diff --git a/.github/workflows/scripts/release-files.mjs b/.github/workflows/scripts/release-files.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..92ccebbcc799ef3b0e5352099cb53b88e1f14800
+--- /dev/null
++++ b/.github/workflows/scripts/release-files.mjs
+@@ -0,0 +1,102 @@
++#!/usr/bin/env node
++// The desktop files a release candidate keeps for its tag run, and the check
++// the tag run makes before it publishes them (release.yml, `desktop`; #174).
++//
++//   node release-files.mjs keep  <dir>                    (the dry run)
++//   node release-files.mjs check <dir> --version 1.2.3    (the tag run)
++//
++// `keep` writes <dir>/release-files.sha256: the sha256 of every file the
++// desktop job publishes from <dir> (the globs of its "Attach to the release"
++// step, and the Store packages), one `<sha256>  <name>` line each, sorted.
++// `check` reads it back after the artifact is downloaded and is red unless
++// the files are exactly those, byte for byte - none missing, none added,
++// none changed - and every update feed in <dir> (latest*.yml) offers
++// --version. The tag run publishes nothing it did not check this way.
++//
++// Plain Node, no dependency: the desktop rows run on Windows, macOS and Linux.
++
++import { createHash } from 'node:crypto';
++import fs from 'node:fs';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++
++export const MANIFEST = 'release-files.sha256';
++
++/** What the desktop job publishes from desktop/release, by extension. */
++export const PUBLISHED = [/\.exe$/, /\.blockmap$/, /\.AppImage$/, /\.deb$/, /\.rpm$/, /\.snap$/, /\.dmg$/, /\.zip$/, /\.appx$/, /\.msixbundle$/, /^latest.*\.yml$/];
++
++/** The files of `dir` (not its subdirectories) the desktop job would publish, sorted. */
++export function publishedFiles(dir) {
++  return fs
++    .readdirSync(dir, { withFileTypes: true })
++    .filter((e) => e.isFile() && PUBLISHED.some((re) => re.test(e.name)))
++    .map((e) => e.name)
++    .sort();
++}
++
++function sha256(file) {
++  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
++}
++
++/** Writes the manifest of `dir`; returns its lines. */
++export function keep(dir) {
++  const files = publishedFiles(dir);
++  if (files.length === 0) throw new Error(`${dir}: nothing to keep - no file the desktop job publishes`);
++  const lines = files.map((f) => `${sha256(path.join(dir, f))}  ${f}`);
++  fs.writeFileSync(path.join(dir, MANIFEST), `${lines.join('\n')}\n`);
++  return lines;
++}
++
++/** The problems with `dir` against its manifest and `version`; [] when it is exactly what was kept. */
++export function check(dir, version) {
++  const problems = [];
++  const at = path.join(dir, MANIFEST);
++  if (!fs.existsSync(at)) return [`${dir} has no ${MANIFEST}: these are not files a release candidate kept`];
++  const want = new Map();
++  for (const line of fs.readFileSync(at, 'utf8').split(/\r?\n/).filter(Boolean)) {
++    const m = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
++    if (!m) {
++      problems.push(`${MANIFEST}: a line that is no "<sha256>  <name>": ${line}`);
++      continue;
++    }
++    want.set(m[2], m[1]);
++  }
++  const have = publishedFiles(dir);
++  for (const f of have) {
++    if (!want.has(f)) problems.push(`${f} is here and not in ${MANIFEST}: it was not kept by the dry run`);
++    else if (sha256(path.join(dir, f)) !== want.get(f)) problems.push(`${f} is not the file the dry run kept (sha256 differs)`);
++  }
++  for (const f of want.keys()) if (!have.includes(f)) problems.push(`${f} was kept by the dry run and is missing here`);
++  if (!version) problems.push('no --version to check the update feeds against');
++  for (const f of have.filter((x) => /^latest.*\.yml$/.test(x))) {
++    const v = /^version:\s*['"]?([^'"\s]+)/m.exec(fs.readFileSync(path.join(dir, f), 'utf8'))?.[1];
++    if (v !== version) problems.push(`${f} offers ${v ?? 'no version'}, not ${version}`);
++  }
++  return problems;
++}
++
++function main(argv) {
++  const [cmd, dir, ...rest] = argv;
++  if (!dir || !['keep', 'check'].includes(cmd)) {
++    console.error('usage: node release-files.mjs keep <dir> | check <dir> --version <x.y.z>');
++    return 2;
++  }
++  if (cmd === 'keep') {
++    const lines = keep(dir);
++    console.log(`${lines.length} file(s) kept in ${path.join(dir, MANIFEST)}:\n${lines.join('\n')}`);
++    return 0;
++  }
++  const i = rest.indexOf('--version');
++  const version = i >= 0 ? rest[i + 1] : '';
++  const problems = check(dir, version);
++  if (problems.length) {
++    for (const p of problems) console.log(`::error::${p}`);
++    return 1;
++  }
++  console.log(`${publishedFiles(dir).length} file(s): the ones the dry run kept, byte for byte; the feeds offer ${version}`);
++  return 0;
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  process.exit(main(process.argv.slice(2)));
++}

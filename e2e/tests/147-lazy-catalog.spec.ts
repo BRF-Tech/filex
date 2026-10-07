@@ -20,6 +20,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { apiLogin, loginAs } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName, storageRoot } from '../helpers/seed';
 import { setAccountViewMode, VIEW_MODE_LS_KEY } from '../helpers/prefs';
+import { expectChosen } from '../helpers/choiceSelect';
 
 const STAMP = Date.now();
 const LAZY_B = `e2e-lazyb-${STAMP}`;
@@ -82,12 +83,13 @@ test.afterAll(async ({ request }) => {
 test('the storage form offers the lazy catalog for a local storage', async ({ page }) => {
   await loginAs(page);
   await page.goto(`/admin/storages/${idB}`);
-  // The mode's own select — the behaviour's is drawn inside the same block.
+  // The mode's own list — the behaviour's is drawn inside the same block, so
+  // the mode is read off the first list in it (core ChoiceSelect, #160).
   const mode = page.getByTestId('storage-sync-mode');
-  await expect(mode.locator('select[name="sync_mode"]')).toHaveValue('lazy');
+  await expectChosen(mode, 'lazy');
   const fields = page.getByTestId('storage-lazy-fields');
   await expect(fields).toContainText('Catalog behavior');
-  await expect(fields.locator('select')).toHaveValue('on_open');
+  await expectChosen(fields, 'on_open');
   await expect(page.getByTestId('storage-catalog-status')).toBeVisible();
 });
 

@@ -802,12 +802,35 @@ test.describe.serial('E2E single encrypted files — what the server keeps', () 
     fs.renameSync(bigPath, named);
     bigPath = named;
     await page.locator('input[type="file"]').first().setInputFiles(bigPath);
-    const [storedBig] = await pollDisk(
-      'Arşiv',
-      (n) => n.some((x) => fs.statSync(path.join(storageRoot(MOUNT), 'Arşiv', x)).size > 200 * 1024 * 1024),
-      'the large upload reached the disk',
-      600_000,
-    ).then((n) => n.filter((x) => fs.statSync(path.join(storageRoot(MOUNT), 'Arşiv', x)).size > 200 * 1024 * 1024));
+    // ⚠ Waited for WHOLE, not for the first byte past 200 MB. A staged
+    // upload's transfer writes the storage's file in place (the local
+    // driver's Write: create, then copy - filex reads the staging copy until
+    // it is done), so the file is on disk while it is still growing: the
+    // 0.53 round caught it at 215,121,920 of 217,058,978 bytes and failed the
+    // length below on a file that was simply not finished.
+    const bigWant = 97 + BIG_SIZE + 16 * Math.ceil(BIG_SIZE / 2 ** 20);
+    const sizeIn = (x: string) => {
+      try {
+        return fs.statSync(path.join(storageRoot(MOUNT), 'Arşiv', x)).size;
+      } catch {
+        return -1;
+      }
+    };
+    let seen = '';
+    await expect
+      .poll(
+        () => {
+          const n = disk('Arşiv');
+          seen = JSON.stringify(n.map((x) => [x, sizeIn(x)]));
+          return n.some((x) => sizeIn(x) >= bigWant);
+        },
+        { message: `the large upload landed whole (${bigWant} bytes)`, timeout: 600_000 },
+      )
+      .toBe(true)
+      .catch((e: Error) => {
+        throw new Error(`${e.message}\non disk: ${seen}`);
+      });
+    const [storedBig] = disk('Arşiv').filter((x) => sizeIn(x) > 200 * 1024 * 1024);
     const bigOnDisk = path.join(storageRoot(MOUNT), 'Arşiv', storedBig);
     const head = Buffer.alloc(97);
     const rfd = fs.openSync(bigOnDisk, 'r');

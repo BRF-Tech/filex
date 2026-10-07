@@ -12,8 +12,12 @@ package handlers_test
 //     them (shares, grants, team tags, versions, uploads, archives, app
 //     actions that write), and for changing the account itself (profile,
 //     password, two-factor) — without it a token keeps its preferences,
-//     stars, recents, personal tags, comments, bell and its own keys;
-//   - `delete` for removing files.
+//     stars, recents, personal tags, bell and its own keys;
+//   - `delete` for removing files;
+//   - the `comments` permission at `rw` (`comments:rw` in the list) for adding
+//     and deleting a comment — not `write`, and not `read` alone: a token
+//     that does not name it holds it at `read` (task #157,
+//     token_comments_test.go).
 //
 // A browser session is judged by the account alone, exactly as before.
 //
@@ -329,7 +333,9 @@ func TestFilesSurface_SessionIsUnchanged(t *testing.T) {
 
 // TestFilesSurface_ReadTokenKeepsWhatAViewerKeeps — the personal surfaces are
 // not file mutations. A viewer's desktop is paired with a `read` token, and it
-// must keep its theme, its stars, its recents and its bell.
+// must keep its theme, its stars, its recents and its bell. (Comments were on
+// this list until task #157; they ask the token's `comments` permission now -
+// token_comments_test.go.)
 func TestFilesSurface_ReadTokenKeepsWhatAViewerKeeps(t *testing.T) {
 	f := newVerbFixture(t)
 	tok := testutil.NewAPIToken(t, f.store, f.memberID, "read")
@@ -479,6 +485,7 @@ var tokenSurfacePrefixes = []string{
 	"/api/files/", "/api/shares", "/api/notifications", "/api/me/", "/api/tokens", "/api/ws",
 	"/api/auth/me", "/api/auth/profile", "/api/auth/password", "/api/auth/totp/",
 	"/api/auth/s3-keys", "/api/auth/ssh-keys", "/api/auth/nfs-exports", "/api/auth/desktop/complete",
+	"/api/app-store",
 }
 
 // publicUnderTokenPrefixes are public routes that happen to live under those
@@ -505,13 +512,14 @@ var readLevelMutations = map[string]bool{
 	"POST /api/files/archive/download": true,
 	// The editor configuration: view mode unless the token may write.
 	"POST /api/files/onlyoffice/config": true,
+	// #184: is the editing session still current - a question; the person's
+	// answer (mine / theirs) needs write, and the handler asks.
+	"POST /api/files/onlyoffice/session": true,
 	// Personal tags; changing a TEAM tag needs write (the handler asks).
 	"POST /api/files/manager/tags/":      true,
 	"POST /api/files/manager/star/":      true,
 	"POST /api/files/manager/recent/":    true,
 	"PUT /api/files/manager/view-prefs/": true,
-	"POST /api/files/comments":           true,
-	"DELETE /api/files/comments/{id}":    true,
 	// An app action a viewer may run; one that writes needs write (the handler asks).
 	"POST /api/files/plugins/actions/{plugin}/{action}/run": true,
 	"POST /api/files/plugins/views/{plugin}/{view}/event":   true,
@@ -546,6 +554,19 @@ var readLevelMutations = map[string]bool{
 	"POST /api/notifications/{id}/read": true,
 	"POST /api/notifications/read-all":  true,
 	"PATCH /api/notifications/settings": true,
+	// The store screen's request (#162) changes no file, and the handler
+	// refuses every API key anyway: a person's request, from a session.
+	"POST /api/app-store/requests": true,
+}
+
+// tokenPermRoutes are the non-GET routes that ask a permission with a level
+// (package tokenperm) instead of a verb beyond `read`: a token holding every
+// verb but not the permission is refused, naming it, and a `read` token that
+// holds it is not. Adding and deleting a comment were read-level until task
+// #157 and asked nothing of the token besides.
+var tokenPermRoutes = map[string]string{
+	"POST /api/files/comments":        "comments:write",
+	"DELETE /api/files/comments/{id}": "comments:write",
 }
 
 var deleteRoutes = map[string]bool{
@@ -595,11 +616,17 @@ func TestTokenSurfaces_EveryRouteAsksItsVerb(t *testing.T) {
 			known[k] = true
 		}
 	}
+	for k := range tokenPermRoutes {
+		known[k] = true
+	}
 
 	noRead := testutil.NewAPIToken(t, f.store, f.memberID, "write,delete,mcp")
 	noWrite := testutil.NewAPIToken(t, f.store, f.memberID, "read,delete,mcp")
 	noDelete := testutil.NewAPIToken(t, f.store, f.memberID, "read,write,mcp")
 	readOnly := testutil.NewAPIToken(t, f.store, f.memberID, "read")
+	// Every verb, and the comments permission at its default (`read`).
+	allVerbs := testutil.NewAPIToken(t, f.store, f.memberID, "read,write,delete,mcp")
+	commenter := testutil.NewAPIToken(t, f.store, f.memberID, "read,comments:rw")
 
 	// {id} → a row that does not exist, so a request that DOES reach a handler
 	// changes nothing.
@@ -628,6 +655,15 @@ func TestTokenSurfaces_EveryRouteAsksItsVerb(t *testing.T) {
 		switch {
 		case handlerDecided[key]:
 			// Covered by the request-shaped tests above.
+		case tokenPermRoutes[key] != "":
+			need := tokenPermRoutes[key]
+			code, body := f.call(t, nil, allVerbs, e.method, url, probe)
+			if !(code == http.StatusForbidden && strings.Contains(body, "token missing scope: "+need)) {
+				t.Errorf("%s: a token with every verb but not `%s` got %d %q", key, need, code, trim(body))
+			}
+			if code, body := f.call(t, nil, commenter, e.method, url, probe); missing(body) {
+				t.Errorf("%s: a `read,comments:rw` token got %d %q", key, code, trim(body))
+			}
 		case readLevelMutations[key]:
 			if code, body := f.call(t, nil, readOnly, e.method, url, probe); missing(body) {
 				t.Errorf("%s: listed as read-level, but a `read` token got %d %q", key, code, trim(body))
@@ -641,7 +677,7 @@ func TestTokenSurfaces_EveryRouteAsksItsVerb(t *testing.T) {
 			code, body := f.call(t, nil, noWrite, e.method, url, probe)
 			if !(code == http.StatusForbidden && strings.Contains(body, "token missing scope: write")) {
 				t.Errorf("%s: a token without `write` got %d %q — a new mutating route must ask for `write` "+
-					"(or be listed in readLevelMutations / deleteRoutes with a reason)", key, code, trim(body))
+					"(or be listed in readLevelMutations / deleteRoutes / tokenPermRoutes with a reason)", key, code, trim(body))
 			}
 		}
 	}

@@ -30,16 +30,24 @@ describe('field validity in the panel language', () => {
     w.unmount();
   });
 
+  // The list is core's ChoiceSelect (#160): `required` rides on a hidden
+  // input the form checks, and the refusal is said under the field the same
+  // way, with the control itself marked and focused.
   it('does the same for a select', async () => {
     const w = mount(Select, {
       props: { modelValue: '', required: true, options: [{ value: 'a', label: 'A' }], placeholder: '—' },
       attachTo: document.body,
     });
+    const native = w.find('input.fe-select__native');
+    expect(native.attributes('required')).toBeDefined();
     const ev = new Event('invalid', { cancelable: true });
-    w.find('select').element.dispatchEvent(ev);
+    native.element.dispatchEvent(ev);
     await nextTick();
     expect(ev.defaultPrevented).toBe(true);
     expect(w.find('[data-testid="field-error"]').exists()).toBe(true);
+    const combo = w.get('[role="combobox"]');
+    expect(combo.attributes('aria-invalid')).toBe('true');
+    expect(document.activeElement).toBe(combo.element);
     w.unmount();
   });
 

@@ -7,6 +7,541 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-10-07
+
+### Added
+
+- **The App store inside filex** (#162). The navigation panel's **Apps → App
+  store** opens filex's own page over a trusted store's catalog - read and
+  verified on the server from the store's signed index, its icons through
+  filex, no frame of the store and no change to the Content-Security-Policy;
+  a catalog is kept ten minutes and served marked stale while the store is
+  down; the desktop app shows the same screen under the same rule, in a
+  window of its own. A person asks for an app with a reason and follows
+  **My requests**;
+  the request lands on **Install requests** beside an API key's. Approving it
+  asks the store for a **fresh** install link and opens the store review -
+  the same SHA-256, permission and license steps as any install link - and
+  that install closes the request. **Admin → Plugins → Apps → Store screen**
+  turns it on, picks the stores and who sees it (everyone, built-in roles or
+  groups), per tenant; **Trusted stores → Connect** binds this filex to a
+  store with the one-time code its "My instances" page makes (an ed25519 key
+  sealed with `FILEX_SECRET_KEY`, every request signed with a timestamp and a
+  single-use nonce). Reading a link, trusting, connecting and installing stay
+  the platform operator's, signed in to the panel
+  ([APP-PLUGINS.md → The store screen](docs/APP-PLUGINS.md#the-store-screen)).
+- **The whole test chain runs on GitHub, split into parts that run side by
+  side.** `ci.yml` is a matrix on every push of `main`: the Go suite in the
+  shards of `scripts/test-shards.json` beside PostgreSQL, MySQL, Redis and
+  Samba and again under `-race`, the migrations on three engines and through
+  the CLI (up, three steps down, up), the unit suites in UTC and on
+  Istanbul's clock, the typechecks and the docs gates, Cypress, Playwright on
+  Chromium, Firefox and WebKit in parts with the Document Server specs again
+  with one, the store and S3 lines, both images, and one `All tests (full)`
+  job that is green only when every part was. Every part is named by
+  `scripts/ci-parts.mjs`, and the release gate reads the run part by part: a
+  red part is named at once, and a run without a part is no full matrix.
+  A pull request runs the same less `-race`, Firefox, WebKit and the Document
+  Server, and a push is never cancelled by the next one
+  ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+- **A tag run promotes what the dry run of its commit built.** The dry run of
+  an untagged version is the release candidate: it pushes both images by
+  digest with no tag and keeps every desktop row's files with their sums, and
+  the tag run checks each image on its own architecture (built from the
+  tag's commit, `filex --version` naming it) and each file byte for byte
+  before it tags or publishes anything - the images in minutes instead of a
+  second build. The release workflow no longer runs the test suite itself:
+  the push run of the commit is the test, `verify` asks that it was the full
+  matrix, and the dry run packages at once. `-f macos=false` starts a dry run
+  without the macOS row while GitHub has no macOS runner.
+- **The release can be packaged off GitHub.**
+  `node scripts/release/package-local.mjs X.Y.Z [--run [--publish]]` runs the
+  release workflow's packaging on the tag's tree from a maintainer's machine -
+  goreleaser and the GitHub Release, both images for amd64 and arm64, the
+  Windows and Linux desktop packages - and says what it leaves to GitHub
+  (macOS, the arm64 snap) and to a person (npm, the stores)
+  ([CONTRIBUTING.md → When GitHub Actions is
+  down](docs/CONTRIBUTING.md#when-github-actions-is-down)).
+- **The Playwright and Go suites run in parts, side by side.**
+  `node e2e/run.mjs local --shard i/N` runs part i of N with Playwright's own
+  split - taken after `--grep` and the engines, so the parts add up to the
+  whole run - each part on a server, port, output directory and server log of
+  its own. The Go tests have one shard list, `scripts/test-shards.json`, for
+  every runner: `internal/api/handlers` and `internal/wasmplugin` are cut by
+  test file into exact `-run` groups, the other packages run as package lists,
+  and a test file or package the list does not name runs in a rest group.
+  `node scripts/test-shards.mjs check` holds the list to `go list ./...` and
+  `go test -list`, `e2e-check` holds the parts to the whole run, and
+  `rebalance` re-cuts a package from the times a run measured
+  ([CONTRIBUTING.md → Shards](docs/CONTRIBUTING.md#shards)).
+- **Comments are an API key's own permission** - `comments`, at **Read**
+  (`read`) or **Read and write** (`comments:rw`), the first permission a key
+  holds at a level. Adding and deleting a comment ask `comments:rw` on every
+  door - `/api/files/comments`, `/api/ai/comments` and the MCP
+  `file_comment_add` / `file_comment_delete` tools - through one check in the
+  handler they all run; reading them asks `read`. A key is minted with it on
+  both API keys screens (**Comments: Read / Read and write**, buttons, not a
+  list), raised or lowered later with **Edit** on Admin → API / MCP, the
+  row's **Comments: allow writing** on the API keys panel, or
+  `PATCH /api/tokens/{id}` / `PATCH /api/admin/ai-tokens/{id}`
+  `{"permissions": {"comments": "rw"}}` - the verbs never change - and every
+  key list answers each key's levels in `permissions`. A key never gives a key
+  a level above its own (`403 token_ceiling`). The rule for every such
+  permission added from now on is in the code and the docs: each declares its
+  default, `read` - existing keys get it with no migration - or none for a
+  super-administrator kind, and `tokenperm_test.go` is red for one that does
+  not ([RBAC.md → Permissions with a
+  level](docs/RBAC.md#permissions-with-a-level-comments),
+  [CONTRIBUTING.md → Adding a permission](docs/CONTRIBUTING.md#adding-a-permission)).
+- **Multi-tenant mode is a switch**: Admin → Multi-tenant mode (System →
+  Customization), the platform operator's alone - a tenant's administrator is
+  refused the page and its API (`403 supertenant_only`), an API key the change
+  (`403 session_required`). `FILEX_MULTI_TENANT` or the config file's
+  `multi_tenant`, when set, pin the mode and the switch shows it locked with
+  the variable to change instead; unset, the switch decides, off until somebody
+  turns it on. A change takes effect when filex is restarted and the page says
+  so until then (the mode is handed to the route groups, the sign-in providers
+  and the SFTP, FTPS, NFS, WebDAV and S3 servers once, at start). Turning the
+  mode off while the install has tenants asks for their number first: they go
+  into maintenance mode, nothing is deleted, and turning it back on brings
+  every tenant back as it was. Both directions are in the audit log
+  (`tenancy.enable`, `tenancy.disable`). `/api/capabilities` says
+  `multi_tenant` (the mode in force) on every install, and every screen follows
+  it. `GET`/`PUT /api/admin/tenancy`. ([MULTI-TENANCY.md → Mode
+  gating](docs/MULTI-TENANCY.md), [ADMIN-PANEL.md](docs/ADMIN-PANEL.md))
+- **The notification digest - one notification instead of a flood, if you
+  want it.** Optional and off out of the box: every kind of notification is
+  still told at once, so an upgrade changes nobody's notifications. A kind
+  turned off - by an administrator for everybody in their tenant (**Admin →
+  Notifications**, which also sets the window, 1-15 minutes, default 1), or by
+  a person for themselves (user settings → Notifications, an *Urgent* switch
+  beside every kind and one for all the administrator alerts) - is held for
+  the window and told in ONE notification that says, folder by folder, what
+  changed - "Rapor: 30 files added; Fotoğraflar: 3 files moved to the trash, 1
+  comment" - so a folder that receives 30 files in a minute is one badge step,
+  one browser pop-up and one desktop toast, not 30. Every event still keeps
+  its own row the moment it happens (the history, the admin list, the audit
+  log and every webhook are unchanged); a held row is in the person's list,
+  read, until the digest carries it. A digest names and counts only what the
+  person's own bell shows (tenant and grants), survives a restart (the window
+  is in the database) and is never written twice. A file-request owner who
+  holds those notices gets one email per window too. Webhooks can subscribe to the new
+  `notification.digest` event; only a target that ticks it receives it. API:
+  `urgent_overrides` and `digest` on `/api/notifications/settings`,
+  `GET`/`PATCH /api/admin/notifications/digest`. Migration 00087
+  ([NOTIFICATIONS.md → The digest](docs/NOTIFICATIONS.md#the-digest)).
+- **A search for the whole admin panel** (task #168). The top bar's search
+  button opened the file search page, and a phone had no search at all. Now one
+  search, beside the menu - **Ctrl+K** / **⌘K** (the explorer's palette key, as
+  you have it bound), and a button with a layer over the window on a phone -
+  finds a page and its tabs, a single setting (*Trash retention*, *Require
+  two-factor authentication*), an installed app and what it does, a person, a
+  group, an API key (by its name, never its value), a storage or a share, by
+  its name in the interface's language or in English and by its synonyms
+  (*LDAP* finds *Identity providers*), with Turkish letters and capitals
+  folded. Files come on demand: the first three and a *Search files* row, or
+  `file:` for files alone; `user:`, `app:`, `key:`, `group:`, `storage:` and
+  `setting:` keep one kind. You find only what you may open: the pages are the
+  menu's own, and every record comes from the list its page reads, through the
+  same permission - a delegated administrator holding `admin.users` finds
+  people and groups, a tenant's administrator their own tenant's. Your recent
+  searches are kept on the server (the newest 20, migration 00090), so they
+  follow you to another browser; remove one or all of them, and they are never
+  in the audit log. New: `GET /api/admin/panel-search`, `GET` · `POST` ·
+  `DELETE /api/admin/panel-search/recent`, `DELETE …/recent/{id}`, and
+  `?stats=none` on `GET /api/admin/storages`; core exports `PanelSearch`, its
+  rules and `foldText` ([ADMIN-PANEL.md → Search](docs/ADMIN-PANEL.md#search)).
+- **CircleCI stands in for GitHub Actions at the release gate.**
+  `.circleci/config.yml` runs, on every push of `main`, the Go suite in the
+  shards of `scripts/test-shards.json` beside PostgreSQL and MySQL (and red
+  unless both engines really ran), the web and package unit suites in UTC,
+  the desktop unit tests and the Playwright suite in Chromium, in parts. When
+  Actions is down, `pnpm release X.Y.Z --resume --gate circleci` reads that
+  workflow on the export commit instead of `ci.yml` and the release dry run,
+  runs here the heavy suites CircleCI does not, and records which CI passed
+  the commit. Once Actions is back, the tag run publishes that commit: its
+  `verify` takes the green CircleCI workflow when GitHub lacks its full
+  matrix and dry run, and with no dry run to promote the tag run builds the
+  images and every desktop package itself (the public repository needs a
+  `CIRCLECI_TOKEN` secret for it).
+  `node scripts/test-shards.mjs go --node i/N` gives copy i of a CI job its
+  shard, and refuses a copy count that is not the list's
+  ([CONTRIBUTING.md → When GitHub Actions is
+  down](docs/CONTRIBUTING.md#when-github-actions-is-down)).
+- **The language packs keep up with `main` between releases.**
+  `node scripts/langpacks.mjs status` names, for every language pack checkout,
+  the strings it does not translate yet, the ones whose English changed since
+  the pack was translated (which `pack.mjs sync` used to keep without a word)
+  and the ones filex dropped; `todo` writes the translator's worklists, and
+  `apply` checks every answer against the language pack validator and the
+  fixed names (filex, ONLYOFFICE) before it writes anything, then runs the
+  pack's own sync, build and validators and commits locally. `release X.Y.Z`
+  is the whole release-day step of a pack: the release's catalogue, one patch
+  version up, the README's status block, the validators, a commit, and the
+  signed tag and push commands printed, not run
+  ([CONTRIBUTING.md → Translations and language packs](docs/CONTRIBUTING.md#translations-and-language-packs)).
+- **The language packs are translated every night, by an agent, on the
+  build host.** A timer of its own (`scripts/chain/install-langpacks.sh`
+  installs it, the driver's copy and the pack checkouts) starts
+  `scripts/langpacks-nightly.mjs run`, which waits for the nightly test run
+  to end, fetches `origin/main` into a worktree of its own and, when a pack
+  lacks something, gives each pack's worklist to a Claude Code session that
+  can only read and edit its own directory of copies (no command, web or MCP
+  tool, none of the host user's settings, a HOME of its own) with the
+  project's Claude account asked from the work server at every run; only the
+  answers are taken from it, refused answers or a red validator go back to it
+  once, `apply --commit` commits each pack on the build host, and one
+  notification says per language what was translated and what is left.
+  Nothing is pushed or tagged there: on release day `node scripts/langpacks.mjs
+  pull` fast-forwards a maintainer's packs to their `nightly` remote,
+  `release` refuses a pack not pulled yet and prints the push of the release
+  commit back. Worklist items now carry the answer right after the key, and
+  every worklist's rules ask for the language's own letters and one term per
+  concept
+  ([CONTRIBUTING.md → Translations and language packs](docs/CONTRIBUTING.md#translations-and-language-packs)).
+- **The release train's tools** (`scripts/train/`), for the maintainers:
+  `pnpm train X.Y.Z` writes the day's release note (the train rule, read from
+  CONTRIBUTING; the 10:00 cut; `main` since the last tag up to the cut; what
+  came after it; the merge queue; the closing "every task to Done");
+  `pnpm merge-queue --queue <note>` merges a train's branches one after another
+  with `--no-ff` and their own messages, merges `CHANGELOG.md` conflicts by
+  Keep a Changelog section, leaves `[Unreleased]` with each heading once, stops
+  for a person on any other conflict and builds and vets the Go module after
+  every merge; `bash scripts/train/filex-ship.sh X.Y.Z` takes a green tag run
+  to everything read back in one command - backup, the trusted-proxy check,
+  the deploy instance by instance with an automatic rollback, both update
+  feeds and the CDN purge, the Releases page, docs.filex.sh, npm and the
+  embeds, then `pnpm release X.Y.Z --resume --only deploy` - with a log per
+  step; and `when-done.mjs` runs a long command and wakes whoever waits for it
+  when it ends. Hosts and keys are settings (`scripts/train/train.env.example`),
+  never in the repository. ([CONTRIBUTING.md → The release train's
+  tools](docs/CONTRIBUTING.md#the-release-trains-tools))
+- **A `.csv` opens with filex on the desktop too** (#151). *Open with filex*
+  handles eleven types now: the ten office ones and `.csv`, registered the
+  same way on every system (Windows' "Open with" list, the Microsoft Store
+  package, `text/csv` in the Linux desktop entry and `xdg-mime`, macOS with
+  rank *Alternate*), never taking the type over. With ONLYOFFICE on the server
+  it opens in the spreadsheet editor, and a save as CSV - which the server
+  writes back in the file's own dialect, the text of every cell nobody changed
+  kept - goes over the `.csv` as any save goes over its document; a save that
+  comes back as a spreadsheet goes beside it as `<name>.xlsx`
+  ([DESKTOP.md → Opening documents from your computer](docs/DESKTOP.md#opening-documents-from-your-computer)).
+
+### Changed
+
+- **The screenshots left the repository; `pnpm shots` takes and shows only
+  what changed.** The README, the docs and filex.sh show pictures published
+  on filex.sh under names that carry their content hash
+  (`https://filex.sh/shots/<name>.<12 hex>.png`), and
+  `e2e/shots/manifest.json` names the current file of each; the
+  `docs/screenshots/` folders (338 MB, about 40 MB a release) are gone from
+  the tree. A run works out each scene's digest - its script and imports, the
+  fixtures, the product (or the `INPUTS` the scene declares), the locale, the
+  platform, the release number - and skips the scenes whose digest is the
+  published one, building nothing when none is left (`--all` takes every
+  scene). Every picture it takes is compared with the published one pixel by
+  pixel; the contact sheet lists only the changed (beside the published
+  picture, with a map of what moved), new and removed ones.
+  `node scripts/shots-site.mjs upload` publishes them, add-only and read back,
+  and `accept --looked` writes the manifest and relinks every page, refusing
+  while a new picture does not answer from the site; the release audit runs
+  `verify --live`, so no page is exported linking a picture that is not
+  published. The staleness check reads the manifest's `taken`/`checked`
+  ([e2e/shots/README.md](e2e/shots/README.md),
+  [CONTRIBUTING.md → Screenshots](docs/CONTRIBUTING.md#screenshots)).
+- **The published screenshots are taken in the build host's test chain.**
+  Fonts are the system's, so the manifest says `"platform": "linux"` and
+  `"environment": "chain"` - the chain's Playwright container with its
+  fontconfig, where the nightly run takes every scene (`pnpm shots --all`) and
+  a release takes them (`CHAIN_EXTRAS=shots`, a targeted run). A run on
+  Windows or macOS is for looking only: it stages nothing for the site, and
+  `shots-site.mjs accept` refuses it, partial or whole; a run elsewhere on
+  Linux is accepted with a warning (`adopt --platform <os>` records where an
+  adopted set was taken). A scene whose declared `INPUTS` missed something is
+  caught the night it changed. The job installs the thumbnail engines a
+  picture shows (ffmpeg, ImageMagick with HEIC, Ghostscript, poppler, rsvg),
+  which the Playwright image lacks, and serves the store scene's store as
+  `https://store.example.com`, so its pictures do not name `127.0.0.1`.
+- **Every screenshot is taken at one clock**, Tuesday, September 15, 2026,
+  10:30 UTC (`e2e/shots/clock.mjs`): the scenes' browsers start there in UTC,
+  the API's times are moved into it on their way to the page (and the times
+  the page sends back moved out of it), dates print snapped to the hour, and
+  the fixtures' files carry fixed dates - so a picture no longer changes every
+  night with the date on it. `SHOTS_REAL_CLOCK=1` turns it off for a
+  diagnosis, and `accept` refuses that run. A request whose body is not JSON
+  (an upload from the page) passes the clock untouched, since the browser
+  hands the clock's route no file bytes to send on, and a scene's second
+  instance gets a port of its own.
+- **`pnpm release` checks fast, and a red gate no longer starts it over.**
+  The stage before the export now runs the builds and vue-tsc, the unit suites
+  in UTC, the desktop and its Store copy, both images and the shop window,
+  side by side; the Go suite, the migrations and Cypress are read from
+  GitHub's run on the landed commit, and Playwright runs during that wait. A
+  gate that passed on exactly the same inputs passes from a cache
+  (`--no-cache` runs everything), `--profile patch` builds and packages a
+  patch release and tests only what it changed (the Go suite on the changed
+  packages and their importers), `--profile full` runs every suite before the
+  export as before, and the export no longer runs the test suites GitHub runs
+  on the same commit ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process),
+  step 6).
+- **`write` no longer lets an API key comment.** A key needs `comments:rw` to
+  add or delete a comment, on every door; without it the answer is
+  `403 token missing scope: comments:write`. Every existing API key and agent
+  token holds comments at `read` after the upgrade: it reads them and adds
+  none. Until now `/api/files/comments` let any key add and delete (it asked
+  `read`) while `/api/ai` and MCP asked `write`, so one key commented through
+  one door and not through its twin. **Give `comments:rw` to the keys that
+  comment** - an embed's proxy key, an agent - before or right after
+  upgrading. **The desktop app is the exception**: it is the person's own app,
+  like their browser, so a desktop pairing is minted with `comments:rw`, and
+  migration 00091 gives it to the pairings made before - a desktop keeps
+  commenting across the upgrade. The account's `comments.write` is asked as
+  before.
+- **No native dropdown anywhere: one list control, in core.** Every select in
+  the explorer and in the admin panel is now `ChoiceSelect`
+  (`@brftech/filex-core`), a combobox and a list drawn in filex's own palette
+  instead of the operating system's: dark mode, the chosen theme, right-to-left
+  layout and a phone's touch targets (44px) now reach every list. It is moved
+  from the Apps store, which wrote it to come here. Keyboard as you would expect
+  (arrows, Home / End, typing a name, Enter, Escape, Tab), an option can say
+  what it means on a second line, and a disabled option stays listed. The admin panel's `ui/Select` is a
+  labelled frame around the same component, so its forty uses changed with it;
+  the value it hands back is the option's own (a number stays a number).
+  Two-to-four-answer choices that sit inline - the size unit in Advanced search,
+  the sharing dialog's access level, "user / viewer" when sharing with an
+  e-mail that has no account - are a segmented strip, a new look of
+  `ChoiceButtons` (`segmented`, icon-only cells with `iconOnly`); each access
+  level says what it means on hover and keyboard focus, and under the strip on
+  a touch screen. A gate (`web/tests/ui/noNativeSelect.test.ts`) fails the
+  build on a native select element in `packages/core/src` or `web/src`.
+  ([CONTRIBUTING.md → No native dropdown](docs/CONTRIBUTING.md#no-native-dropdown---one-list-control-in-core))
+- **With multi-tenant mode off, nothing about tenants or realms is shown.**
+  The addresses of Tenants and My tenant lead to the dashboard; Identity
+  providers lists no tenant's own provider and no owner or bindings (in its API
+  answer too), and its "add a provider" text no longer offers "an SSO for some
+  tenants only"; Appearance and Encryption drop their sentences about a
+  tenant's administrator; two connection-guide texts no longer mention a
+  tenant. `FILEX_MULTI_TENANT` now reads `1` or `true` in any case, like every
+  other boolean, and any other value pins the mode off.
+- **The Go tests against a real S3 server sign for the region they are
+  given.** All four - the provider conformance suite, the B2 report reader,
+  issue #21's rename and the driver's `Init` - read `FILEX_TEST_S3_*` in one
+  place (`backend/internal/testutil/lives3`), `FILEX_TEST_S3_REGION` and
+  `FILEX_TEST_S3_PATH_STYLE` included; three of them used to sign for `auto`,
+  which a server with a region of its own refuses. The maintainers' nightly
+  run runs them against a bucket of its own on a night the S3 code changed
+  since their last green run - the driver, its stall policy, the storage
+  contracts, the B2 reader, the AWS SDK line of `go.mod` - and a night in
+  which one of them only skipped is red; without credentials that night the
+  morning report warns, and `nightly.mjs s3-live --s3-env FILE` runs them by
+  hand with credentials brought for one run
+  ([CONTRIBUTING.md → The nightly run](docs/CONTRIBUTING.md#the-nightly-run)).
+
+### Fixed
+
+- **A phone is offered to install filex as an app** (#190). On a phone
+  nothing offered it: Android Chrome's own install bar was held back for
+  filex's offer (`preventDefault` on `beforeinstallprompt`), and that offer
+  never reached the screen - the corner chip stepped aside behind the file
+  list's upload button, which owns the same corner, and the settings had no
+  install row for a phone. Closing the desktop app's reminder on a computer,
+  a flag that follows the account, also closed the phone's offer before it was
+  ever shown. Now the browser's offer is caught once at boot and shared; a
+  phone gets the sign-in page's own band - on the sign-in page and on the
+  file list, which makes room for it - offering the web app, never the
+  desktop app: Android's **Install** (the browser's install dialog; the
+  installed app opens in a `standalone` window), the browser menu's way
+  until the browser offers one, or the iPhone and iPad's **Share → Add to
+  Home Screen**, with iOS 26's **⋯** first; **Settings → Preferences →
+  Install as a web app** keeps it; closing it is remembered apart from the
+  desktop app's reminder; the installed app, and a browser tab on a device
+  that has it installed, offer nothing. index.html links an `apple-touch-icon`
+  for the iPhone's Home Screen. Notifications on a `/drive/` page now reach a
+  phone: the service worker was looked up by the page's address, which its
+  `/admin/` scope does not cover, so Android, where only a worker may notify,
+  dropped them in a tab and in the installed app; an iPhone's Safari tab is
+  told that notifications work in the Home Screen app (iOS 16.4+). Web Push
+  (a notification with filex closed) is not there yet. Manifest and worker
+  options moved to `web/pwa.config.ts`, held by a test to what a browser needs
+  to install
+  ([On a phone or a tablet](docs/DESKTOP.md#on-a-phone-or-a-tablet-the-web-app),
+  [Browser notifications](docs/NOTIFICATIONS.md#browser-notifications)).
+
+- **Replication never ran: a linked storage now really fans out, and its
+  existing files are copied** (#186, GitHub Discussion #91). A storage linked
+  to a replication target on the Replication page sent nothing to it - no
+  copy, no failure row, no notification - in every version since the feature
+  was added: the server handed out the storage's bare driver and never built
+  the replication wrapper, and *Fix all* ran without one ("no replica
+  configured"). A storage linked to an enabled target is now wrapped where
+  every write goes through (uploads, saves, copies, moves, deletes, trash,
+  versions, the SFTP/FTP/NFS/S3 doors), keeping what its own driver can do
+  (modification times, multipart uploads to a bucket, download links).
+  Linking, relinking or unlinking a storage and editing, switching off or
+  deleting a target apply without a restart. The files a storage **already
+  held** when it is linked are copied by an **initial copy**: in the
+  background from the queue (`replica_initial_copy`), in short slices that
+  keep their place, so a restart goes on where it stopped; `skip` rules are
+  respected and a file the target already has (same size and time) is left
+  alone; the Replication page shows each storage's progress - counted,
+  copied, already there, left out, failed - and *Run again*. After the
+  upgrade it runs once for every storage that was linked before. A target
+  that stops answering makes the copy wait and resume by itself instead of
+  failing file by file. Failures now name their storage (migration `00094`):
+  *Fix all* and *Fix one* replay them through that storage's live wrapper, a
+  repaired move or copy is resolved, a file gone from the storage or a storage
+  no longer linked leaves nothing to repair, and *Fix all* replays every
+  unresolved failure (it stopped at the newest hundred). A file missing on the primary is
+  no longer served from the backup (in `append_only` the backup keeps deleted
+  files, and the fallback served them again). A rule such as `docs/**` now
+  holds whether the path is written `/docs/a` or `docs/a`. `PATCH
+  /api/admin/replication-targets/{id}` keeps the fields the body leaves out
+  (`{"enabled": false}` used to wipe the target's name and configuration). A
+  link to a target that does not exist is refused, and only the platform
+  operator may change a storage's link. A storage **created** already linked
+  (`POST /api/admin/storages` with `replica_target_id`, the
+  `admin_storages_create` tool) keeps its link: it was saved unlinked on every
+  database. Every storage writes into a **folder
+  of its own** on the target (its name made safe for every backend, chosen
+  once when it is linked, unique per target, kept through a rename;
+  `GET`/`PUT /api/admin/replica/links`, shown on the storage's row; migration
+  `00095`), so storages sharing a target never overwrite each other, and
+  **filex's own folders** - trash, versions, thumbnails, open-with copies,
+  drafts - are never replicated, before any rule (a file moved to the trash
+  leaves the backup like a delete, a restore brings it back)
+  ([REPLICATION.md](docs/REPLICATION.md)).
+
+- **A document that changes while it is open in the office editor is no
+  longer overwritten, and the editor shows the new version** (#184). Opened
+  from your computer with *Open with filex*, an `.xlsx` that an agent rewrote
+  on disk stayed old in the filex window, and the next save went over
+  everything the agent wrote. The desktop app now watches the document (its
+  folder, so a temp-file-and-rename save is seen) and holds every save to the
+  version it last read or wrote, by content. On the server, filex records the
+  version each editing session opened, and a save of a session the file has
+  moved on from is written beside it as `<name>.filex-conflict-<time>.<ext>`
+  for an editor who may create files there, with a notice
+  (`server.onlyoffice.saved_conflict_*`) and an audit row
+  (`file.office_saved_conflict`). In the editor (the same component on the
+  web, in the desktop app and in the embeds): with nothing unsaved the new
+  version is loaded and a note says so; with edits, it asks *Keep the outside
+  version* / *Write mine* / *Keep both*, and nothing is written over anything
+  until you answer. A window closed without an answer keeps both. The web
+  editor hears changes on the server through the realtime feed of its
+  folder, confirmed by the new `POST /api/files/onlyoffice/session`
+  (`state`, and the answers `mine` / `theirs`). The record of each session's
+  version is kept in the database (migration 00092, `office_sessions`), so a
+  restart or a second instance behind the same database still knows it,
+  with filex's new in-process cache in front of it (`internal/memcache`, one
+  bounded, expiring, write-through cache for small state; the storage usage
+  card's cache moved onto it): reads that only save work come from the
+  cache, every decision about a save is read from the database. The reload is a new editor on
+  a fresh configuration; ONLYOFFICE's `refreshFile()` is only for its own
+  `onRequestRefreshFile`. ([DESKTOP.md → When the file changes while it is
+  open](docs/DESKTOP.md#when-the-file-changes-while-it-is-open),
+  [ONLYOFFICE.md → When the document changes while it is
+  open](docs/ONLYOFFICE.md#when-the-document-changes-while-it-is-open))
+- **The scripts in the public repository are executable again.** The public
+  tree was staged on Windows, where git cannot see an executable bit, so every
+  script added since lost it: `e2e/realenv/run.sh`, which
+  [CONTRIBUTING.md → Against the real servers](docs/CONTRIBUTING.md#against-the-real-servers)
+  tells you to run as it is, answered "Permission denied" in a fresh clone.
+  Each file now keeps the bit it has in the source, and the release stops on a
+  file that does not.
+- **A `.doc`, `.xls` or `.ppt` opened from your computer no longer loses its
+  edit** (#151). ONLYOFFICE saves no old binary format, so since 0.51 the
+  server has written the edit of `rapor.doc` beside the desktop's working copy
+  as DOCX (`.filex-open/<session>-rapor.docx`) - where the desktop app never
+  looked: `rapor.doc` did not change, nobody was told, and the edit was
+  removed with the working folder. The desktop app now brings it home BESIDE
+  the document as `rapor.docx` (`rapor (2).docx` when that name is taken -
+  never over another file), says so in a notification (*Your edit was saved
+  as rapor.docx*) and in the strip under the editor, and writes every later
+  save of the session to that same file, held to the version it wrote there:
+  changed outside filex since, the save goes to a conflict copy beside it.
+  `rapor.doc` is never written. A save a server before 0.51 wrote over the
+  working copy in another format is recognised by its bytes and goes the same
+  way, and an edit left on the server by a crash is recovered beside the
+  document as `rapor.filex-recovered-<time>.docx`
+  ([DESKTOP.md → A save in another format](docs/DESKTOP.md#a-save-in-another-format)).
+- **One main region per page.** The admin panel's *Corporate identity* page
+  drew its live preview of the public link page with that page's own
+  `<main>`, inside the panel's, and an app's screen in the admin panel did
+  the same: two main landmarks for a screen reader, and HTML that is not
+  valid. The preview and an embedded app screen now draw their body as a
+  plain block (core `PublicShell` and `PluginPageView`, `embedded`); the
+  public link page and an app page in a tab of their own keep theirs.
+- **The search panel, the bell's and the account menu's panels line up with
+  their button** in a browser whose scrollbar takes room (Chrome and Edge
+  on Windows, macOS set to always show scrollbars). They are placed in the
+  window less the scrollbar now, not the whole window, and no longer hang a
+  scrollbar's width to the left of the button's end edge.
+- **A delayed job no longer starts up to a second early.** The operations
+  queue keeps a job's "not before" time in whole seconds on SQLite, MySQL
+  and Redis, and cut it DOWN to its second: a save scan due at 12:00:02.9
+  could start at 12:00:02. The time is now rounded up, so a job starts at
+  its time or within the second after it, never before; PostgreSQL kept the
+  exact time and is unchanged. A test now checks, on every driver, that a
+  delayed job is never handed out before its time.
+
+### Security
+
+- **A storage's credentials are no longer shown back.** Every read of a
+  storage - the Storages page, a tenant administrator's storage settings,
+  `GET /api/admin/storages[/{id}]` and the create and update answers, an
+  admin API key on `/api/ai/admin` and the `admin_storages_*` MCP tools -
+  answered with its S3 secret key, its SMB, SFTP, WebDAV or FTP password or
+  its SFTP private key in clear (only administrators could read it). They are
+  masked as `***` now, the form shows such a field empty ("Saved - type to
+  change it"), a save or a *Test connection* that sends the mask back uses the
+  saved value - and only while the driver and the address stay the same: a
+  new host, endpoint or URL needs the credential typed again (`400
+  SECRET_NEEDED`), so a saved password cannot be sent to a server of
+  somebody's choosing. The same rule holds for replication targets.
+- **A replication target's credentials are no longer shown back.** Every read
+  of a target - the Replication page, `GET /api/admin/replication-targets`,
+  an admin API key on `/api/ai/admin` and the `admin_replication_targets_*`
+  MCP tools - answered with its S3 secret key, its SMB, SFTP, WebDAV or FTP
+  password or its SFTP private key in clear (only administrators could read
+  it). They are masked as `***` now; a save that sends the mask back keeps
+  the stored value (#186).
+- A call confined to a folder (a `root:` token, `X-Filex-Root`) has its request
+  body held to that folder whatever its `Content-Type`.
+- **A visitor's screen on an app's page is held to the root of the job that
+  opened the link,** as the job its submit queues already was.
+- **A caller confined to a folder is held to it in a few more places,** and an
+  app's link stops reaching its document once it is moved out of that root.
+- **Maintenance mode holds on every request, not only at sign-in.** With
+  multi-tenant mode off on an install that has tenants, a session a tenant's
+  account opened while the mode was on, and its API keys, kept working with no
+  tenant scope at all - a tenant's administrator was an administrator of the
+  whole instance until the session ran out. They now answer `401` with
+  `reason: maintenance`, and work again when the mode is back on. The generic
+  settings API refuses the switch's key (`400 tenancy_setting`), so the
+  confirmation and the audit row cannot be skipped.
+- **The ONLYOFFICE editor's script can run outside filex's pages, on the
+  Document Server's own origin (`FILEX_ONLYOFFICE_FRAME_ORIGIN`).** The
+  Document Server's reverse proxy sends `/filex-frame/*` to filex, filex serves
+  the editor's page there (that one path, nothing else on that host) and the
+  viewer frames it, so `api.js` no longer runs with the signed-in person's
+  session, the web client's key in `sessionStorage` or the page - another
+  origin is enough, the same site included, no new domain needed. The signed
+  editor configuration crosses once, to the frame the page drew, at its
+  origin, with a one-time session; the editor's events come back over a port.
+  Opening, editing, saving, the "Download failed" diagnosis and the reload
+  when a document changes outside the editor work as before, on the web, in
+  the desktop app and in embeds. `FILEX_APP_UI_ORIGIN` serves the same page
+  when there is no frame origin. With neither nothing changes, and the
+  ONLYOFFICE card, the start-up log and the browser console say where the
+  script runs
+  ([ONLYOFFICE.md → The editor in a frame of its own](docs/ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)).
+- **The frame origin and the app-interface origin are never trusted by the
+  cross-origin guard or answered by CORS,** whatever
+  `FILEX_CORS_ALLOWED_ORIGINS` says: a wildcard such as `https://*.example.com`
+  trusted the Document Server's host for writes with a person's session and
+  let it read filex's answers. Every cookie filex sets is HttpOnly, now held by
+  a test.
+
 ## [0.52.0] - 2026-10-05
 
 ### Added

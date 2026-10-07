@@ -7,7 +7,7 @@
 //
 //   node e2e/shots/authproviders.mjs       (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/authproviders/ (or SHOTS_OUT):
+// Writes e2e/.artifacts/shots/capture/authproviders/ (or SHOTS_OUT):
 //
 //   auth-providers-1440.png        Admin → Identity providers, the overview on
 //                                  its Windows tab (the card of each provider)

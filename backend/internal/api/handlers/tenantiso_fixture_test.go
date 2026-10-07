@@ -104,7 +104,10 @@ const mtUserPass = "VictimPass!1"
 // topology with the feature switched off, which is how the single-tenant
 // assertions are written: identical requests, opposite expectation, and they
 // pass on `main` too because with no scope attached every predicate is inert.
-func newMTFix(t *testing.T, multiTenant bool) *mtFix {
+//
+// opts adjust the notify service's configuration before it is made (the
+// notification digest's suite switches the digest on and sets its clock).
+func newMTFix(t *testing.T, multiTenant bool, opts ...func(*notify.Config)) *mtFix {
 	t.Helper()
 	ctx := context.Background()
 
@@ -194,7 +197,11 @@ func newMTFix(t *testing.T, multiTenant bool) *mtFix {
 	cfg.CORS.AllowedOrigins = []string{"*"}
 	cfg.MultiTenant = multiTenant
 
-	notifSvc := notify.New(store, notify.Config{})
+	notifCfg := notify.Config{}
+	for _, o := range opts {
+		o(&notifCfg)
+	}
+	notifSvc := notify.New(store, notifCfg)
 	t.Cleanup(notifSvc.Stop)
 
 	srv := httptest.NewServer(api.BuildRouter(&api.Deps{

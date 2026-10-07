@@ -26,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/memcache"
 	"github.com/brf-tech/filex/backend/internal/quota"
 )
 
@@ -43,7 +44,7 @@ type Quota struct {
 	ACL *acl.Resolver
 
 	// usage memoises per-storage (files, bytes) for storageUsageTTL.
-	usage *storageUsageCache
+	usage *memcache.Cache[int64, storageUsage]
 	// Lazy says when a storage's catalogue — and so its usage figure — covers
 	// only part of it (docs/LAZY-CATALOGUE.md). nil: a figure is a figure.
 	Lazy LazyCatalogue

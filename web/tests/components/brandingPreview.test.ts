@@ -59,6 +59,12 @@ describe('Corporate identity preview', () => {
     expect(style).toContain('--fe-primary-ink: #aa3355');
     // A preview is looked at: its controls do not act inside the admin page.
     expect(preview.attributes('inert')).toBeDefined();
+    // ⚠ …and it is not a second main region. The panel's layout already has
+    // the page's <main>; the link page's card drawn inside it made two, which
+    // is not valid HTML and broke every `main` read on this page (e2e 204,
+    // 0.53 round). The shell is mounted `embedded` here.
+    expect(preview.find('main').exists(), 'the preview draws no <main>').toBe(false);
+    expect(preview.find('.fe-ppage__card').exists()).toBe(true);
     w.unmount();
   });
 

@@ -251,6 +251,20 @@ describe('audit labels — every writer, not only the middleware', () => {
     expect(auditTargetLabel('e2e_request', '7', tTr, teTr, 'Dosyalar://Maaşlar')).toBe('Şifreleme isteği “Dosyalar://Maaşlar”');
   });
 
+  // The multi-tenant switch's two rows (task #167). Its actions are the
+  // constants ActionEnable / ActionDisable of internal/tenancy, which the
+  // handler scan above does not read (it knows `AuditAction…` names), so
+  // `tenancy.enable` would have reached the panel as the raw verb.
+  it('the multi-tenant switch reads as a sentence, in both languages', () => {
+    const { t: tEn, te: teEn } = lookup(en as Record<string, unknown>);
+    const { t: tTr, te: teTr } = lookup(tr as Record<string, unknown>);
+    expect(auditActionLabel('tenancy.enable', tEn, teEn)).toBe('Multi-tenant mode: turned on');
+    expect(auditActionLabel('tenancy.disable', tEn, teEn)).toBe('Multi-tenant mode: turned off');
+    expect(auditActionLabel('tenancy.enable', tTr, teTr)).toBe('Çok kiracılı mod: açıldı');
+    expect(auditActionLabel('tenancy.disable', tTr, teTr)).toBe('Çok kiracılı mod: kapatıldı');
+    expect(auditTargetLabel('tenancy', null, tTr, teTr)).toBe('Çok kiracılı mod');
+  });
+
   it('an action taken through the AI admin surface reads as the same action, marked (AI)', () => {
     const { t, te } = lookup(tr as Record<string, unknown>);
     const label = auditActionLabel('ai.user.create', t, te);

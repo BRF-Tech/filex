@@ -96,7 +96,7 @@ import { deviceTimeZone, resolvedTimeZone } from '../lib/timezone';
 import { personInitial, personName } from '../lib/personName';
 import { getDensity, setDensity, type Density } from '../lib/density';
 import { downscaleImageToDataURL } from '../lib/imageDownscale';
-import { WEBHOOK_EVENTS, eventFixableBy, eventOffReason, userEventKey } from '../lib/webhookEvents';
+import { DIGEST_EVENT, WEBHOOK_EVENTS, eventFixableBy, eventOffReason, userEventKey } from '../lib/webhookEvents';
 import type {
   BrowserNotifyPermission,
   SettingsNotificationPrefs,
@@ -609,19 +609,63 @@ const offeredEvents = computed(() => {
   }).filter((row) => !row.gate.hidden);
 });
 
-async function patchSettings(inApp: boolean, muted: string[]) {
+async function patchSettings(inApp: boolean, muted: string[], urgent?: Record<string, boolean>) {
   savingNotif.value = true;
   try {
     // ⚠ PATCH replaces the WHOLE preference — sending one half clears the
-    // other (docs/NOTIFICATIONS.md → Per-user settings).
-    const next = await props.host.api.updateNotificationSettings({ in_app_enabled: inApp, muted_events: muted });
-    notifPrefs.value = next ?? { in_app_enabled: inApp, muted_events: muted };
+    // other (docs/NOTIFICATIONS.md → Per-user settings). The urgent choices
+    // are the exception: left out, they are kept, and they are sent only when
+    // one of them changes (lib/userSettingsHost SettingsNotificationPrefs).
+    const prefs = urgent
+      ? { in_app_enabled: inApp, muted_events: muted, urgent_overrides: urgent }
+      : { in_app_enabled: inApp, muted_events: muted };
+    const next = await props.host.api.updateNotificationSettings(prefs);
+    notifPrefs.value = next ?? { ...(notifPrefs.value ?? {}), ...prefs };
     props.host.toast('success', t('notifications.prefs.saved'));
   } catch (e: unknown) {
     props.host.toast('error', props.host.errorText(e, t('errors.generic')));
   } finally {
     savingNotif.value = false;
   }
+}
+
+/* ── the digest (backend notify/digest.go) ─────────────────────────────
+ * A kind marked URGENT reaches the person at once; every other kind is held
+ * for the window an administrator set and arrives in one summary, folder by
+ * folder. The server says which kinds are urgent for this person (their own
+ * choices over the administrator's defaults); a switch moved back to the
+ * default drops the person's own choice, so a later change of the default
+ * reaches them. No digest (an older server, or the digest off): no switches. */
+const digest = computed(() => notifPrefs.value?.digest ?? null);
+const urgentSet = computed(() => new Set(digest.value?.urgent_events ?? []));
+const adminEvents = computed(() => digest.value?.admin_events ?? []);
+const adminUrgent = computed(
+  () => adminEvents.value.length > 0 && adminEvents.value.every((e) => urgentSet.value.has(e)),
+);
+/** Is any kind held for this person? Out of the box none is - every kind is
+ *  urgent - and then the pane says how to hold one rather than how long a
+ *  held one waits. */
+const anyHeld = computed(() => {
+  const d = digest.value;
+  return !!d && d.events.some((e) => !urgentSet.value.has(e));
+});
+
+/** Does this kind get an urgent switch? Not the digest itself: it is what
+ *  tells the held ones. */
+function hasUrgentSwitch(event: string): boolean {
+  return !!digest.value && event !== DIGEST_EVENT && digest.value.events.includes(event);
+}
+
+function setUrgent(events: string[], on: boolean) {
+  const d = digest.value;
+  if (!d) return;
+  const defaults = new Set(d.default_urgent);
+  const next: Record<string, boolean> = { ...(notifPrefs.value?.urgent_overrides ?? {}) };
+  for (const ev of events) {
+    if (defaults.has(ev) === on) delete next[ev];
+    else next[ev] = on;
+  }
+  void patchSettings(inAppOn.value, mutedEvents.value, next);
 }
 
 function setInApp(v: boolean) {
@@ -647,6 +691,25 @@ async function askPermission() {
   if (!b) return;
   permission.value = await b.ask();
   if (permission.value === 'granted') setBrowser(true);
+}
+
+/* ── installing the web app (task #190) ─────────────────────────────────
+ * The host's row: a phone or a tablet in a browser (lib/userSettingsHost
+ * `installApp`). The reminder on the file list says it once; this is where it
+ * stays after that reminder is closed for good. */
+const installingApp = ref(false);
+
+/** The browser's own install dialog. ⚠ From the click and from nowhere else:
+ *  a browser opens it only in answer to a gesture. */
+async function installApp() {
+  const a = props.host.installApp;
+  if (!a || installingApp.value) return;
+  installingApp.value = true;
+  try {
+    await a.install();
+  } finally {
+    installingApp.value = false;
+  }
 }
 
 /* ── security ────────────────────────────────────────────────────────────
@@ -1279,6 +1342,39 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
               <span class="fx-us__hint">{{ t('userSettings.prefs.desktopAppHint') }}</span>
             </div>
 
+            <!-- The web app itself, installed on a phone or a tablet (#190) -
+                 the same permanent home the desktop downloads have above. -->
+            <div
+              v-if="host.installApp?.state"
+              class="fx-us__group"
+              data-testid="user-settings-install-app"
+              :data-state="host.installApp.state"
+            >
+              <span class="fx-us__group-title">{{ t('userSettings.prefs.installApp') }}</span>
+              <p class="fx-us__readout">{{ t('userSettings.prefs.installAppLead') }}</p>
+              <div v-if="host.installApp.state === 'prompt'" class="fx-us__install-foot">
+                <button
+                  type="button"
+                  class="fx-us__btn fx-us__btn--primary"
+                  data-testid="user-settings-install-app-button"
+                  :disabled="installingApp"
+                  @click="installApp"
+                >
+                  {{ t('install.install') }}
+                </button>
+              </div>
+              <p
+                v-else-if="host.installApp.state === 'ios'"
+                class="fx-us__hint"
+                data-testid="user-settings-install-app-ios"
+              >
+                {{ t('install.iosInstructions') }}
+              </p>
+              <p v-else class="fx-us__hint" data-testid="user-settings-install-app-menu">
+                {{ t('install.menuInstructions') }}
+              </p>
+            </div>
+
             <div class="fx-us__field">
               <span class="fx-us__label">{{ t('quota.title') }}</span>
               <p class="fx-us__readout" data-testid="user-settings-quota">
@@ -1412,6 +1508,17 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
                     <span v-if="permission === 'denied'" class="fx-us__hint">
                       {{ t('notifications.prefs.permDeniedHint') }}
                     </span>
+                    <!-- #190 - an iPhone's browser tab has no notifications at
+                         all; the app added to the Home Screen has them (iOS
+                         16.4+). Said here, because "this browser cannot" reads
+                         as "never" otherwise. -->
+                    <span
+                      v-if="permission === 'unsupported' && host.installApp?.state === 'ios'"
+                      class="fx-us__hint"
+                      data-testid="user-settings-browser-ios"
+                    >
+                      {{ t('notifications.prefs.iosHomeScreen') }}
+                    </span>
                   </template>
                 </div>
               </div>
@@ -1420,6 +1527,12 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
             <div class="fx-us__field">
               <span class="fx-us__label">{{ t('userSettings.notifications.eventsTitle') }}</span>
               <span class="fx-us__hint">{{ t('userSettings.notifications.eventsHint') }}</span>
+              <span v-if="digest && anyHeld" class="fx-us__hint" data-testid="user-settings-digest-hint">{{
+                t('userSettings.notifications.digestHint', { minutes: digest.window_minutes })
+              }}</span>
+              <span v-else-if="digest" class="fx-us__hint" data-testid="user-settings-digest-off-hint">{{
+                t('userSettings.notifications.digestOffHint')
+              }}</span>
               <div class="fx-us__events">
                 <div
                   v-for="row in offeredEvents"
@@ -1447,6 +1560,55 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
                       class="fx-us__event-off"
                       :data-testid="`user-settings-event-off-${row.ev}`"
                     >{{ row.gate.title }}</span>
+                  </span>
+                  <!-- The digest: told at once, or held for the summary. A
+                       muted kind is told never, so it has nothing to choose. -->
+                  <span v-if="hasUrgentSwitch(row.ev)" class="fx-us__urgent">
+                    <button
+                      type="button"
+                      role="switch"
+                      class="fx-us__switch"
+                      :class="{ 'is-on': urgentSet.has(row.ev) }"
+                      :aria-checked="urgentSet.has(row.ev)"
+                      :aria-label="t('userSettings.notifications.urgentFor', { event: t(userEventKey(row.ev)) })"
+                      :title="t('userSettings.notifications.urgentFor', { event: t(userEventKey(row.ev)) })"
+                      :disabled="savingNotif || row.gate.disabled || mutedEvents.includes(row.ev)"
+                      :data-testid="`user-settings-urgent-${row.ev}`"
+                      @click="setUrgent([row.ev], !urgentSet.has(row.ev))"
+                    >
+                      <span class="fx-us__switch-knob" />
+                    </button>
+                    <span class="fx-us__urgent-label" aria-hidden="true">{{ t('userSettings.notifications.urgent') }}</span>
+                  </span>
+                </div>
+                <!-- The administrator alerts, one switch: an administrator's
+                     bell is the only one they reach. -->
+                <div
+                  v-if="digest && host.isAdmin && adminEvents.length"
+                  class="fx-us__switch-row"
+                  data-testid="user-settings-urgent-admin-row"
+                >
+                  <span class="fx-us__switch-spacer" aria-hidden="true" />
+                  <span class="fx-us__event-label">
+                    {{ t('userSettings.notifications.adminAlerts') }}
+                    <span class="fx-us__event-off">{{ t('userSettings.notifications.adminAlertsHint') }}</span>
+                  </span>
+                  <span class="fx-us__urgent">
+                    <button
+                      type="button"
+                      role="switch"
+                      class="fx-us__switch"
+                      :class="{ 'is-on': adminUrgent }"
+                      :aria-checked="adminUrgent"
+                      :aria-label="t('userSettings.notifications.urgentFor', { event: t('userSettings.notifications.adminAlerts') })"
+                      :title="t('userSettings.notifications.urgentFor', { event: t('userSettings.notifications.adminAlerts') })"
+                      :disabled="savingNotif"
+                      data-testid="user-settings-urgent-admin"
+                      @click="setUrgent(adminEvents, !adminUrgent)"
+                    >
+                      <span class="fx-us__switch-knob" />
+                    </button>
+                    <span class="fx-us__urgent-label" aria-hidden="true">{{ t('userSettings.notifications.urgent') }}</span>
                   </span>
                 </div>
               </div>
@@ -2049,6 +2211,10 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
   font-size: var(--fe-text-sm);
   color: var(--fe-text-muted);
 }
+/* The install row's one button, at its own width rather than the group's. */
+.fx-us__install-foot {
+  display: flex;
+}
 
 /* Desktop-app downloads. The ROWS are drawn in this pane's own idiom rather
    than borrowed from the reminder's stylesheet — a scoped style cannot cross
@@ -2292,6 +2458,24 @@ select.fx-us__input {
   flex-direction: column;
   gap: var(--fe-gap-sm);
   margin-top: var(--fe-gap-xs);
+}
+/* The digest's urgent switch, at the inline end of an event's row. */
+.fx-us__urgent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fe-gap-xs);
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+}
+.fx-us__urgent-label {
+  font-size: var(--fe-text-xs);
+  color: var(--fe-text-muted);
+}
+/* Where a row has no mute switch (the administrator alerts), the space of one,
+   so the labels line up. */
+.fx-us__switch-spacer {
+  flex: 0 0 auto;
+  width: 34px;
 }
 
 /* ── chips ────────────────────────────────────────────────────────── */

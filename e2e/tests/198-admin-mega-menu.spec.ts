@@ -22,7 +22,7 @@ const EVERY_PAGE = [
   '/admin/users', '/admin/groups', '/admin/roles', '/admin/grants',
   '/admin/auth-providers', '/admin/login-security', '/admin/encryption', '/admin/protection', '/admin/api-mcp',
   '/admin/plugins', '/admin/external', '/admin/webhooks', '/admin/notifications',
-  '/admin/settings', '/admin/branding', '/admin/appearance', '/admin/archives',
+  '/admin/settings', '/admin/tenancy', '/admin/branding', '/admin/appearance', '/admin/archives',
   '/admin/queue', '/admin/tools', '/admin/audit', '/admin/updates', '/admin/about',
 ];
 

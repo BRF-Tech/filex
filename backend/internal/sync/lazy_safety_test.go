@@ -381,8 +381,7 @@ func TestLazySafety_NothingSweepsBySeenAt(t *testing.T) {
 // a storage in behaviour B: a folder nobody opens keeps rows whose files are
 // long gone, while the folder next to it is opened, catalogued and watched.
 func TestLazySafety_OnOpenEngineLeavesUnvisitedFoldersAlone(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	_, store := dbtest.NewTestDB(t)
 	root := t.TempDir()
 	cfg := map[string]any{"root": root, "lazy_fill": "on_open"}
@@ -426,13 +425,24 @@ func TestLazySafety_OnOpenEngineLeavesUnvisitedFoldersAlone(t *testing.T) {
 	assert.Equal(t, CoverageVisitedOnly, cov.Reason)
 }
 
-// setFastLazy runs the filler and the watch debounce at test speed.
-func setFastLazy() func() {
+// setFastLazy runs the filler and the watch debounce at test speed until the
+// test is over. Call it first, before the test starts anything.
+//
+// ⚠ The old values come back in a t.Cleanup, not a defer. Cleanups run after
+// the test's defers and in reverse order, so one registered first runs last:
+// after Worker.Stop (which waits for the watch loop, the servers and the
+// filler) and every other cleanup the test added. A `defer restore()` ran
+// BEFORE t.Cleanup(w.Stop), while the engine's watch loop still read
+// LazyWatchQuiet: a data race under -race (lazy_watch.go loop, the 0.53 full
+// run full-20261006-204443Z). A goroutine a test starts by hand must be
+// waited for in a defer, which also runs before this cleanup.
+func setFastLazy(t *testing.T) {
+	t.Helper()
 	idle, busy, quiet, maxWait, batch := LazyFillIdlePause, LazyFillBusyPause, LazyWatchQuiet, LazyWatchMaxWait, LazyFillBatch
 	LazyFillIdlePause, LazyFillBusyPause, LazyWatchQuiet, LazyWatchMaxWait = 0, time.Millisecond, 100*time.Millisecond, 400*time.Millisecond
-	return func() {
+	t.Cleanup(func() {
 		LazyFillIdlePause, LazyFillBusyPause, LazyWatchQuiet, LazyWatchMaxWait, LazyFillBatch = idle, busy, quiet, maxWait, batch
-	}
+	})
 }
 
 // folderGuardOK's table, so a change to the thresholds is a deliberate one.

@@ -253,8 +253,23 @@ func slowWrite(w http.ResponseWriter, payload []byte, rate int) {
 
 // ⚠ The bug itself: a transfer that keeps moving for longer than the minute
 // the old client allowed. 75 s at 512 KB/s (a slow line) each way, both at
-// once. The attempt timeout here is 1 s, so the transfer also outlasts it 75
+// once. The attempt timeout here is 10 s, so the transfer also outlasts it 7.5
 // times over: what is bounded is silence, not length.
+//
+// ⚠ 10 s, not the suite's 1 s. The store sends a piece every 125 ms by the
+// clock, so with 1 s the download had 875 ms of slack per piece for 75 s, and
+// a pause of the whole test machine longer than that reads as silence: the
+// stall timer counts wall-clock time, and when the process resumes it can
+// fire before the reader is scheduled to take the bytes that arrived. The
+// 0.53 full run (full-20261006-204443Z, -race beside the other jobs on a 14
+// GB host) cut it at 28.1 s with "the answer stopped arriving for 1s"; during
+// that job node_exporter showed every task on the host stalled on memory for
+// about half of a 15 s window (PSI memory and io "full" 0.47 and 0.50 at
+// 21:20:45), and the same commit passed without -race in that run and with
+// -race in the run before. What the test measures does not depend on the
+// attempt timeout: the transfer is as long as before, and a timer that bounded
+// length (armed once instead of per Read, or the total budget) still cuts it
+// far short of 61 s.
 func TestDeadStore_MovingTransfersOutlastTheOldMinute(t *testing.T) {
 	if testing.Short() {
 		t.Skip("75 s: moves a file for longer than the old 60 s limit")
@@ -281,7 +296,7 @@ func TestDeadStore_MovingTransfersOutlastTheOldMinute(t *testing.T) {
 			answerOK(w, r)
 		}
 	})
-	d := davDriver(t, fs.srv.URL, nil)
+	d := davDriver(t, fs.srv.URL, map[string]any{"attempt_timeout_s": 10, "total_timeout_s": 20})
 
 	t.Run("upload", func(t *testing.T) {
 		t.Parallel()
@@ -357,14 +372,60 @@ func TestDeadStore_SlowStoreFinishingTheUploadIsNotCut(t *testing.T) {
 
 // A download that keeps arriving, read by a caller who walks away for a
 // while: the stall timer runs only while a Read waits on the network.
+//
+// ⚠ Nothing here waits for the store against a clock (#159, the same test as
+// the S3 driver's). The store sends each piece the moment the reader asks for
+// it and holds the next until then, so a Read waits only for a store that is
+// already sending, and nothing piles up in the sockets while the reader is
+// away. All the time the download takes is spent by the reader BETWEEN Reads,
+// where a slower machine only makes the claim stronger. The old version had
+// the store send by the clock (2 MB/s) straight through the reader's pause,
+// and both ways that went wrong were the clock's: the store could finish into
+// the kernel's socket buffers while the reader was away, so the run ended
+// under the 5 s it needs (2026-09-26, the v0.47.0 release gate, large loopback
+// buffers under WSL); and the S3 copy of this test was cut on a loaded GitHub
+// runner when its reader came back to sockets that had been full for seconds
+// and the next piece took longer than the attempt timeout to come.
 func TestDeadStore_SlowDownloadAndSlowReaderAreNeverCut(t *testing.T) {
-	const size = 8 << 20
-	payload := bytes.Repeat([]byte("z"), size)
+	const (
+		piece  = 256 << 10
+		pieces = 32
+		size   = piece * pieces
+		// After each piece the reader dawdles: 31 x 125 ms, about 4 s, so the
+		// download keeps moving for longer than the whole 3 s budget.
+		dawdle = 125 * time.Millisecond
+		// Once, halfway, it walks away for 2.5 attempt timeouts.
+		away = 2500 * time.Millisecond
+	)
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i / piece) // a piece lost, repeated or swapped shows
+	}
+	ask := make(chan struct{}, pieces)
+	quit := make(chan struct{})
 	fs := newFakeDAV(t, func(w http.ResponseWriter, r *http.Request, _ int32) {
+		if r.Method != http.MethodGet {
+			answerOK(w, r)
+			return
+		}
 		w.Header().Set("Content-Length", fmt.Sprint(size))
 		w.WriteHeader(http.StatusOK)
-		slowWrite(w, payload, 2<<20)
+		w.(http.Flusher).Flush() // the answer starts at once; each piece waits to be asked for
+		for off := 0; off < size; off += piece {
+			select {
+			case <-ask:
+			case <-quit:
+				return
+			case <-r.Context().Done():
+				return
+			}
+			if _, err := w.Write(payload[off : off+piece]); err != nil {
+				return
+			}
+			w.(http.Flusher).Flush()
+		}
 	})
+	t.Cleanup(func() { close(quit) }) // after newFakeDAV: runs before srv.Close, which waits for the handler
 	d := davDriver(t, fs.srv.URL, nil)
 	start := time.Now()
 	rc, err := d.Read(context.Background(), "/big.bin")
@@ -372,26 +433,27 @@ func TestDeadStore_SlowDownloadAndSlowReaderAreNeverCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rc.Close()
-	half := make([]byte, size/2)
-	if _, err := io.ReadFull(rc, half); err != nil {
-		t.Fatalf("first half: %v", err)
+	got := make([]byte, 0, size)
+	buf := make([]byte, piece)
+	for i := range pieces {
+		ask <- struct{}{} // the store sends this piece now: the Read below waits on the network, under the stall timer
+		if _, err := io.ReadFull(rc, buf); err != nil {
+			t.Fatalf("piece %d of %d: the download was cut after %.1fs: %v", i+1, pieces, time.Since(start).Seconds(), err)
+		}
+		got = append(got, buf...)
+		if i == pieces/2-1 {
+			time.Sleep(away) // no Read waits: the stall timer must not run
+		} else {
+			time.Sleep(dawdle)
+		}
 	}
-	// ⚠ 3.5 s, not 2.5: the first half cannot arrive faster than the store
-	// sends it (2 s at 2 MB/s), so the whole read takes at least 2 + 3.5 s
-	// however much the pause lets pile up. With 2.5 s the store could finish
-	// the second half into the kernel's socket buffers while the reader was
-	// away (large loopback buffers under WSL), the rest came out at once, and
-	// the run ended at 4.5 s, under the 5 s this test needs: red on a machine
-	// whose driver was fine (2026-09-26, the v0.47.0 release gate).
-	time.Sleep(3500 * time.Millisecond)
-	rest, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("the download was cut after %.1fs: %v", time.Since(start).Seconds(), err)
+	if rest, err := io.ReadAll(rc); err != nil || len(rest) != 0 {
+		t.Fatalf("after the last piece: %d more bytes, err=%v", len(rest), err)
 	}
 	if took := time.Since(start); took < 5*time.Second {
 		t.Fatalf("the download took only %.1fs — it did not outlast the budget", took.Seconds())
 	}
-	if sha256.Sum256(append(half, rest...)) != sha256.Sum256(payload) {
+	if sha256.Sum256(got) != sha256.Sum256(payload) {
 		t.Fatal("the download arrived altered")
 	}
 }

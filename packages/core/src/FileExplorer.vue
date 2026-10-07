@@ -73,6 +73,7 @@ import { underApiBase } from './lib/appBase';
 import { provideTableEnv } from './lib/tableEnv';
 import { gateOnService, isOfficeExt } from './lib/serviceGate';
 import { canShareAny, sharingHeld, type SharingHeld } from './lib/sharingHeld';
+import { appStoreAsks, appStoreRowShown } from './lib/appStoreRow';
 import { publicLinksOff } from './lib/e2eLinks';
 import { opFailure, sayFailure } from './lib/errorWords';
 import { jobOpenOf } from './lib/jobOpen'; /* filex #78 - a finished job's `open` */
@@ -397,6 +398,12 @@ const emit = defineEmits<{
    * SideNav.vue.
    */
   (e: 'open-my-shares'): void;
+  /**
+   * #162 - the navigation panel's "App store" row was pressed. Passed
+   * through, like `open-my-shares`: the store screen is a page of the host
+   * (`config.appStorePage`).
+   */
+  (e: 'open-app-store'): void;
   /**
    * An "Apps" row was pressed and the host draws app home pages itself
    * (`config.appHomePage`): the plugin and its `home` view. ⚠ Passed
@@ -2916,6 +2923,30 @@ const callerIsApp = computed(
  * Trash and "How to connect" stay useful inside an embed.
  */
 const identitySurfaces = computed(() => !callerIsApp.value);
+/**
+ * #162 - may the panel draw its "App store" row? ONE rule for every host
+ * (lib/appStoreRow): the host has the page (`config.appStorePage`), the caller
+ * is a person, and the server shows this person the screen - asked here, once
+ * per host decision and caller kind, never by the host. The web SPA and the
+ * desktop app read the same answer from the same code.
+ */
+const appStoreVisible = ref(false);
+let appStoreAsk = 0;
+watch(
+  () => [props.config.appStorePage === true, callerIsApp.value] as const,
+  async ([hostHasPage, isApp]) => {
+    const seq = ++appStoreAsk;
+    if (!appStoreAsks(hostHasPage, isApp)) {
+      appStoreVisible.value = false;
+      return;
+    }
+    const status = await api.appStoreStatus();
+    // A newer question (the caller kind landed meanwhile) owns the answer.
+    if (seq === appStoreAsk) appStoreVisible.value = appStoreRowShown(hostHasPage, isApp, status);
+  },
+  { immediate: true },
+);
+const appStoreEnabled = computed(() => appStoreRowShown(props.config.appStorePage === true, callerIsApp.value, { visible: appStoreVisible.value }));
 const showConnections = ref(false);
 const showTokens = ref(false);
 function openConnections() {
@@ -10639,6 +10670,8 @@ function closeRecoveryKey() {
       @open-connections="openConnections"
       @open-tokens="openTokens"
       @open-my-shares="emit('open-my-shares') /* paylas:m1 — the host owns the page */"
+      :show-app-store="appStoreEnabled /* #162 - off unless the host has the store screen */"
+      @open-app-store="emit('open-app-store')"
       :apps="pluginHomeApps /* App plugins — the home views */"
       @open-app="openPluginHome"
     />

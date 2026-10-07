@@ -202,8 +202,11 @@ listed.
 ### What a save does
 
 A save-back is a write like any other write in filex, and since **v0.34.0** it
-goes through the same shared post-write gate every other surface does. In
-order, the callback:
+goes through the same shared post-write gate every other surface does. First
+the callback checks that the file is still the version the editing session
+opened; a file that changed since is not written over, the save goes beside it
+([When the document changes while it is open](#when-the-document-changes-while-it-is-open)).
+Then, in order, it:
 
 1. takes a **version snapshot**, so the revision it is about to replace stays
    recoverable from the file's history - and **refuses the save** if that
@@ -254,6 +257,169 @@ is the only one there will ever be.
 The window itself is the setting on **Admin → Protection**
 (`antivirus.save_scan_window_minutes`, default 30 min) - it is one window, shared
 with the text editor, not a second knob.
+
+---
+
+## The editor in a frame of its own
+
+The Document Server's editor API is a script, `web-apps/apps/api/documents/api.js`,
+that an integrator loads into its own page - and a script in filex's page can
+do whatever that page can: read the key the web client keeps for the session
+(`sessionStorage`), call filex's API as the signed-in person, read the page.
+That is why the [security notes](#security-notes) say to trust the Document
+Server as much as filex itself.
+
+**Set `FILEX_ONLYOFFICE_FRAME_ORIGIN` to the Document Server's own origin and
+that script runs there instead.** filex then serves a small page,
+`<document server origin>/filex-frame/editor`, through the Document Server's
+reverse proxy, and the viewer frames it instead of loading `api.js` into its
+own page. The script runs on the origin it came from: no origin gets anything
+it did not have.
+
+```
+ filex's page (files.example.com)                 the frame (docs.example.com)
+   POST /api/files/onlyoffice/config  ──► filex
+   ◄── { documentServerUrl, config (signed), frame }
+   <iframe src="frame#<session>" sandbox=…> ─────► GET /filex-frame/editor
+                                                  (the proxy sends it to filex)
+                                         ◄──────── hello {session}
+   open {session, config} + a port ─────────────►  loads api.js from the Document Server,
+                                                   new DocsAPI.DocEditor(config)
+   ◄── over the port: started, ready, state {dirty}, error {channel, code}, failed
+```
+
+### Setting it up
+
+1. On the Document Server's host, send one path to filex and leave the rest
+   alone. With Caddy:
+
+   ```
+   docs.example.com {
+   	handle /filex-frame/* {
+   		reverse_proxy filex:5212
+   	}
+   	handle {
+   		reverse_proxy onlyoffice:80
+   	}
+   }
+   ```
+
+   The proxy must pass the `Host` header on (Caddy does). With nginx, a
+   `location /filex-frame/ { proxy_pass http://filex:5212; proxy_set_header Host $host; }`
+   beside the Document Server's own `location /`.
+2. Set `FILEX_ONLYOFFICE_FRAME_ORIGIN=https://docs.example.com` on filex
+   (YAML `external_services.onlyoffice.frame_origin`) and restart: filex reads
+   it at start, because it decides what that host may be answered.
+3. Open a document. The ONLYOFFICE card under **External services** loses its
+   `editor_same_origin` note, and the start-up log says
+   `onlyoffice: the editor runs in a frame on its own origin`.
+
+On that host filex answers `/filex-frame/editor` and **nothing else** - not
+its pages, not its API, not a share - at the host's root, whatever filex's own
+`FILEX_BASE_PATH`; on every other host `/filex-frame/` is a 404, so the page
+never runs on filex's own origin. A value that is not an origin, filex's own
+origin, or the app-interface origin stops filex at start, saying what to
+write.
+
+Without it, `FILEX_APP_UI_ORIGIN` is used when it is set (the page is then
+`<interface origin><base>/_appui/_onlyoffice/editor`); the frame origin comes
+first when both are set.
+
+### Why the Document Server's own origin is enough
+
+The Document Server's host is usually the **same site** as filex
+(`docs.example.com` beside `files.example.com`), and no new domain is needed:
+
+- **Origins, not sites, keep a page's things apart.** `sessionStorage`,
+  `localStorage`, the page itself and its `window` belong to one origin; a
+  script on `docs.example.com` reaches none of `files.example.com`'s. The
+  frame's sandbox also takes `document.domain` away from it and from
+  everything inside it, so it cannot relax its way back (and filex's pages
+  never set it).
+- **Every cookie filex sets is HttpOnly.** On a multi-tenant install the
+  session cookie's `Domain` is the parent domain (`.example.com`), so the
+  browser sends it to the Document Server's host too - but no script there can
+  read it. The cookies, all HttpOnly, `SameSite=Lax`, `Secure` behind TLS: the
+  session (`filex_session`), a share's PIN unlock, the sign-in state and flow
+  of an SSO sign-in. filex sets no cookie a script must read.
+- **A request from there cannot use it.** `SameSite=Lax` does not keep the
+  cookie off a same-site request, so filex's
+  [cross-origin guard](CONFIGURATION.md#requests-from-other-origins) refuses a
+  state-changing request the browser says came from another origin - the same
+  site included (`Sec-Fetch-Site: same-site`) - unless that origin is trusted,
+  and the frame origin never is: not even when a `FILEX_CORS_ALLOWED_ORIGINS`
+  wildcard (`https://*.example.com`) covers it. The same holds for reading:
+  filex sends that origin no CORS answer, so no script there can read what
+  filex answers, with the cookie or without.
+
+What the Document Server's own code can do is what it always could: it sees
+the documents it edits, and its server receives the cookies the browser sends
+it - it is infrastructure you run. What changes is that it no longer runs in
+filex's page.
+
+### How it works
+
+- **What crosses.** The editor configuration, as filex's server signed it,
+  goes to the frame once; the editor's events come back over a `MessagePort`
+  the page handed over with it. Nothing else does. Saving was never the
+  browser's business - the Document Server fetches the document from filex and
+  posts the save back, server to server - so the frame needs no way to filex
+  at all.
+- **The checks, on filex's side.** The page takes the frame's `hello` only from
+  the frame element it drew (`event.source`), only from the origin the frame's
+  address names, and only with the one-time session it put in that address's
+  fragment - once per frame, never after the frame loaded a second document.
+  It posts the configuration to that origin by name, never to `*`. Messages
+  that are not the protocol's (`filex-oo`, version 1) are dropped.
+- **The checks, on the frame's side.** It answers no page but its parent,
+  takes the configuration only with its own session and only once, and loads
+  `api.js` only from the Document Server filex's server names in the page -
+  never one the framing page names. Its own policy allows no other script:
+  `script-src` is the frame's script by hash and the Document Server, and
+  `frame-src`, `connect-src`, `img-src`, `font-src` and `form-action` name the
+  Document Server only. It is served `no-store`, so a Document Server changed
+  in the admin page is the one the next editor loads, and it reads no cookie.
+- **The frame element.** Built with `sandbox="allow-scripts allow-same-origin
+  allow-forms allow-popups allow-downloads allow-modals"` before its address and
+  before it is in the page, `referrerpolicy="no-referrer"`, and
+  `allow="clipboard-read; clipboard-write; fullscreen; autoplay"` (the editor's
+  paste button, a slideshow, media in a presentation - no camera, microphone or
+  screen). `allow-same-origin` keeps the frame on its own origin, which the
+  Document Server's editor needs for its storage, and that origin is not
+  filex's. No `allow-top-navigation`: the editor never takes the page away.
+- **Who may frame it.** `frame-ancestors *`. The explorer is embedded in other
+  sites by design (`<filex-explorer>`, tenants on their own domains), and the
+  page holds nothing: what it opens is a configuration the framing page's own
+  session obtained, which that page could as well hand to the Document Server
+  directly.
+- **The same on every surface.** The web app, the editor tab, the desktop
+  app's document windows and every embed open office documents through the one
+  viewer, so they all take the frame when the server names one. A page that
+  embeds the explorer and sends a Content-Security-Policy must allow the
+  frame's origin - the Document Server's - in its `frame-src`
+  ([INTEGRATION.md](INTEGRATION.md)).
+- **What does not change.** Opening, editing, saving, "Download as" and
+  printing inside the editor, a [CSV](#csv-files) or an
+  [older format](#a-save-in-another-format) and its note, the
+  [Download failed diagnosis](#failure-editor-shows-download-failed), and the
+  rule for [a document that changes while it is open](#when-the-document-changes-while-it-is-open):
+  the reload is this frame taken away and a new one on a fresh configuration,
+  and "edited" is the editor's `onDocumentStateChange`, arriving over the port.
+  If the frame does not answer within 20 seconds, the viewer says the editor
+  frame did not load from that origin (to an administrator) and the Document
+  Server is not answering (to everybody else).
+
+**With neither setting nothing changes:** `api.js` is loaded into filex's page,
+as in every release before. There is no in-between on filex's own origin, on
+purpose: the Document Server's editor needs a frame with `allow-same-origin`
+(its own storage), and a frame with `allow-same-origin` on filex's own origin
+*is* filex - it would isolate nothing. Nor is the Document Server's origin the
+default: the Document Server does not serve this page, its proxy has to send
+it to filex, and a default that relied on a proxy rule nobody wrote yet would
+leave every editor blank after an upgrade. So that setup is said out loud
+instead: the ONLYOFFICE card carries a note (`editor_same_origin`), filex logs
+a warning at start (`onlyoffice: the editor's script (api.js) runs in filex's
+own pages`), and the browser console says it once per page.
 
 ---
 
@@ -358,6 +524,8 @@ That's it - reopen an Office file in filex and it should launch the editor.
 | `FILEX_ONLYOFFICE_URL` | `external_services.onlyoffice.url` | yes | Document Server base URL (e.g. `https://office.example.com`) |
 | `FILEX_ONLYOFFICE_JWT` | `external_services.onlyoffice.jwt_secret` | yes | Shared HS256 secret - identical to the Document Server's `JWT_SECRET` |
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | `external_services.onlyoffice.callback_url` | no | The address the **Document Server** uses to reach filex. Empty (the default) means `FILEX_PUBLIC_URL`. Set it only when those two must differ - see [When the Document Server needs a different address](#when-the-document-server-needs-a-different-address-from-your-users) |
+| `FILEX_ONLYOFFICE_FRAME_ORIGIN` | `external_services.onlyoffice.frame_origin` | no (recommended) | The Document Server's own origin (`https://docs.example.com`), whose proxy sends `/filex-frame/*` to filex: the editor's `api.js` runs in a frame there, not in filex's page. Read at start - see [The editor in a frame of its own](#the-editor-in-a-frame-of-its-own) |
+| `FILEX_APP_UI_ORIGIN` | `app_ui_origin` | no | The origin app interfaces are served from; when `FILEX_ONLYOFFICE_FRAME_ORIGIN` is empty the editor's frame is served there |
 
 Both are optional in the sense that the **admin UI** can supply them instead -
 whichever way they arrive, the value the running process uses is the one in the
@@ -408,11 +576,11 @@ opens in the table).
 
 | | |
 |---|---|
-| ![A semicolon CSV open in ONLYOFFICE's spreadsheet, a look first](screenshots/v0.52.0/csvoffice/csv-view-1440.png) | ![The CSV in the editor tab, with the line on what a save keeps](screenshots/v0.52.0/csvoffice/csv-edit-1440.png) |
+| ![A semicolon CSV open in ONLYOFFICE's spreadsheet, a look first](https://filex.sh/shots/csvoffice/csv-view-1440.83237ba55d3d.png) | ![The CSV in the editor tab, with the line on what a save keeps](https://filex.sh/shots/csvoffice/csv-edit-1440.4efc379a293d.png) |
 | A double click: the spreadsheet, a look first, no "Choose CSV options" question. | **Edit**: the editor tab, and filex's line on what a save as CSV keeps. |
-| ![The file menu: Open with ONLYOFFICE, the built-in viewer, Choose an app…](screenshots/v0.52.0/csvoffice/csv-open-with-menu.png) | ![Choose an app…, ONLYOFFICE and the table](screenshots/v0.52.0/csvoffice/csv-choose-app.png) |
+| ![The file menu: Open with ONLYOFFICE, the built-in viewer, Choose an app…](https://filex.sh/shots/csvoffice/csv-open-with-menu.2caeabb88a28.png) | ![Choose an app…, ONLYOFFICE and the table](https://filex.sh/shots/csvoffice/csv-choose-app.57b1ed93440f.png) |
 | The file's menu offers both. | **Choose an app…** can make either the person's default. |
-| ![Default apps: .csv, ONLYOFFICE first, the table second](screenshots/v0.52.0/csvoffice/default-apps-csv-1440.png) | ![ONLYOFFICE switched off: its row greyed, saying where to set it up](screenshots/v0.52.0/csvoffice/csv-menu-no-onlyoffice.png) |
+| ![Default apps: .csv, ONLYOFFICE first, the table second](https://filex.sh/shots/csvoffice/default-apps-csv-1440.f78775e4ce39.png) | ![ONLYOFFICE switched off: its row greyed, saying where to set it up](https://filex.sh/shots/csvoffice/csv-menu-no-onlyoffice.dc12b704a282.png) |
 | *Admin → Plugins → Default apps* lists `.csv` while ONLYOFFICE is connected. | ONLYOFFICE switched off: the table opens the file, and an administrator sees the row greyed. |
 
 ### Opening without the "Choose CSV options" question
@@ -675,6 +843,108 @@ log writes `file.office_save_refused`. A file in its own format (a `.docx`
 saved as DOCX, an `.odt` as ODT) is written in place, as always; a `.csv` is
 converted back and written in place ([CSV files](#csv-files)).
 
+**A document opened from somebody's computer** (the desktop app's *Open with
+filex*) is edited through a working copy, `.filex-open/<session>-rapor.doc`,
+and its save in another format is written beside that copy:
+`.filex-open/<session>-rapor.docx`, then `<session>-rapor (2).docx` for the
+next save of the session. Nobody is notified about it from here - the server
+announces nothing about filex's own folders, neither in the bell nor to a
+webhook. The desktop app (0.53 and later) brings it home **beside the
+person's own file** as `rapor.docx` and tells them, writes the session's later
+saves to that same file, and removes the copies with the session
+([DESKTOP.md → A save in another format](DESKTOP.md#a-save-in-another-format)).
+An older desktop app does not: the edit stays in the working folder and is
+removed with it.
+
+---
+
+## When the document changes while it is open
+
+The Document Server edits the version it fetched when the editing session
+opened, and saves the whole document back when the session ends (about ten
+seconds after the last editor closes). If the file changed in between -
+another person saved it over WebDAV, a sync client brought a newer copy, an
+agent rewrote it on a mounted folder, a second editing session opened on the
+newer version - that save used to be written over the newer version, and the
+change it replaced was gone without a word. Since the release after 0.52 it is
+not.
+
+**The session's version.** When filex hands out an editing config it records,
+per document key, the version the storage driver reports for the file at that
+moment (size, modification time, etag). A second person handed the same key
+joins the running session and sees *its* version, so the first record stands.
+The session's own save moves the record on: a session that force-saves and
+then saves again is not "out of date" after its first save.
+
+**The save.** Right before the callback writes over the file it asks the
+driver again. Same version: written, as always. Different: the save is
+written **beside** the file as `<name>.filex-conflict-<time>.<ext>` (UTC time,
+the name the desktop app gives its conflict copies too; the next free
+`(2)` when it is taken), and the file keeps the other change. As with
+[a save in another format](#a-save-in-another-format), it is written for one
+of the session's editors who may create a file in that folder; the editors get
+*rapor.docx changed while you were editing it* - *rapor.docx was changed
+somewhere else after your editing session opened it, so your edit was not
+written over that version: it is in rapor.filex-conflict-20261006T101500.docx,
+in the same folder. rapor.docx keeps the other change.*, and the audit log
+writes `file.office_saved_conflict`. When none of them may create a file there
+the save is not written and they are told why (`file.office_save_refused`).
+
+**The open editor.** An office document open in filex's viewer (the explorer,
+the editor tab, the embeds) joins its folder on the realtime feed, like the
+explorer does for the folder it shows. When a change names the document it
+asks the server whether its session is still current -
+`POST /api/files/onlyoffice/session` `{path, key, action: "state"}` answers
+`{stale, known}` - because the editor's own save looks the same on the feed.
+A stale session:
+
+- with nothing unsaved in the editor, is reloaded: the editor is closed and
+  opened again on a fresh configuration (a new key - the file changed), and
+  a note says *The file was updated outside filex; the new version is loaded*;
+- with edits in the editor, asks which version stays: **Keep the outside
+  version** (the edits made here are dropped: `action: "theirs"`, the
+  session's save is not written when it comes), **Write mine** (`action:
+  "mine"`: the session now stands on the version there, and its save is
+  written over it - over that version only; a later change makes it stale
+  again), **Keep both** (nothing to send: the session's save goes beside the
+  file, as above). Escape puts the question away without answering it; until
+  an answer nothing is written over anything.
+
+"Edits in the editor" means ONLYOFFICE's `onDocumentStateChange` said `true`
+since this editor opened. It stays true when ONLYOFFICE later says `false`:
+that only means the edits reached the Document Server, not the file.
+
+⚠ ONLYOFFICE's `refreshFile()` is not used for this. It answers the Document
+Server's own `onRequestRefreshFile` (Docs 8.3 and later: an editor opened with
+a key that was already saved, or a reconnect) and only when there are no
+unsaved changes; it is not a way for an integrator to say "load the new
+version now". The reload is `destroyEditor()` and a new editor.
+
+**Where the record lives.** In the database (table `office_sessions`,
+migration 00092), so a restart does not forget a running session and every
+filex instance behind the same database knows the sessions any of them handed
+out - an answer given through one instance (*Write mine*, *Keep the outside
+version*) holds for a save that arrives at another. In front of the table sits
+filex's in-process cache (`internal/memcache`; no Redis, nothing outside the
+process): it only makes the frequent reads cheap - every editing config asks
+whether its session is recorded already. The decisions - may this save go
+over the file, did the person drop it, is the editor's session still current -
+are always read from the database, because another instance's answer is not
+in this instance's cache; a write goes to the database first and to the cache
+only when the database took it. The modification time is stored as an integer
+(Unix nanoseconds), so it compares exactly on every engine.
+
+A row is removed when its session ends (the last save, or *closed with no
+change*); one whose session never said so is swept two days later (an hourly
+look, on the server's minute maintenance tick). A session filex has no record
+of - opened before this table existed, or its record expired - is judged by
+the key the document would get now: an older key is out of date, and is
+recorded as such.
+
+The desktop app's "Open with filex" adds the same rule for a document on your
+own disk, where the server cannot see the change
+([DESKTOP.md → When the file changes while it is open](DESKTOP.md#when-the-file-changes-while-it-is-open)).
+
 ---
 
 ## Creating new documents
@@ -740,7 +1010,7 @@ field selects the name part only, the way a rename does, so typing replaces
   extension is swapped (`notes.txt` → `notes.md`); a name with no extension, or
   one you chose (`test.conf`), stays as it is.
 
-![The New document dialog with a Plain text document named LICENSE](screenshots/v0.52.0/newdoc/newdoc-any-name-1280.png)
+![The New document dialog with a Plain text document named LICENSE](https://filex.sh/shots/newdoc/newdoc-any-name-1280.c36430b7d719.png)
 
 The create itself is `POST /api/files/manager?action=newfile` with
 `{path, name, type, exact_name}`, where `type` is one of the `newdoc_types`
@@ -790,11 +1060,11 @@ you were in gets nothing until you save it.
 
 | What Create opens - a draft, under the bar that says where Save puts it | Closing a draft that was never saved |
 |---|---|
-| ![The text editor on a new draft, with the draft bar](screenshots/v0.52.0/newdoc/newdoc-license-editor-1280.png) | ![Save to disk, Keep in Drafts or Discard](screenshots/v0.52.0/newdoc/drafts-close-1280.png) |
+| ![The text editor on a new draft, with the draft bar](https://filex.sh/shots/newdoc/newdoc-license-editor-1280.7c6b9a266ab5.png) | ![Save to disk, Keep in Drafts or Discard](https://filex.sh/shots/newdoc/drafts-close-1280.d49e1e1267da.png) |
 
 | Save, when a file has taken the name meanwhile | Drafts, in the navigation panel |
 |---|---|
-| ![Save the draft under another name?](screenshots/v0.52.0/newdoc/drafts-taken-1280.png) | ![The Drafts view](screenshots/v0.52.0/newdoc/drafts-view-1280.png) |
+| ![Save the draft under another name?](https://filex.sh/shots/newdoc/drafts-taken-1280.c0d6502f3476.png) | ![The Drafts view](https://filex.sh/shots/newdoc/drafts-view-1280.6092d950f3fb.png) |
 
 Drafts belong to a person, so a caller that is not one creates the file
 directly, as before: an app token, and an embed confined to one folder by its
@@ -1136,14 +1406,20 @@ later.)
 - The shared secret is the whole trust boundary. Treat it as one wherever it
   lives - an env file with `chmod 600` and not committed, or the stored row,
   which `GET /api/admin/external` redacts to `"***"` and never returns.
-- ⚠ **You trust the Document Server as much as filex's own pages.** To open
-  the editor, the explorer loads the server's `web-apps/apps/api/documents/api.js`
-  as a script *into the filex page itself* - that is how the Document Server's
-  editor API works - so that script runs with everything the page can do, in
-  the signed-in person's session. Point filex only at a Document Server you run
-  or trust as fully as filex, reach it over HTTPS, and keep its host as closely
-  guarded as filex's. (draw.io is different: it runs in its own frame, and
-  filex only exchanges messages with that frame at its configured origin.)
+- ⚠ **Without `FILEX_ONLYOFFICE_FRAME_ORIGIN` (or `FILEX_APP_UI_ORIGIN`) you
+  trust the Document Server as much as filex's own pages.** To open the
+  editor, the explorer then loads the server's
+  `web-apps/apps/api/documents/api.js` as a script *into the filex page itself* -
+  that is how the Document Server's editor API works - so that script runs with
+  everything the page can do, in the signed-in person's session. Point filex
+  only at a Document Server you run or trust as fully as filex, reach it over
+  HTTPS, and keep its host as closely guarded as filex's. With
+  `FILEX_ONLYOFFICE_FRAME_ORIGIN` the script runs in a frame on the Document
+  Server's own origin instead and reaches none of that
+  ([The editor in a frame of its own](#the-editor-in-a-frame-of-its-own));
+  the Document Server still sees the documents it edits, as it always must.
+  (draw.io is different: it runs in its own frame, and filex only exchanges
+  messages with that frame at its configured origin.)
 
 ---
 

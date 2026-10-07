@@ -1,0 +1,520 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 33ead601a16abcfab0221e98b4372b2970aeb08f..8fa6f6564a0cb309f3e2b1c351ccab3b0c3a8f38 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -17,8 +17,9 @@ name: Release
+ #                   │            │     │   checked, screenshots)
+ #                   │            │     └─ aur (PKGBUILD push)
+ #                   │            └─ cli-smoke (CLI + server on arm64)
+-#                   ├─ docker              (a run by hand: one native runner per
+-#                   │                       arch)
++#                   ├─ docker              (a run by hand, and a tag run with
++#                   │                       nothing to promote: one native
++#                   │                       runner per arch)
+ #                   ├─ promote-check ── docker-manifest   (a tag run)
+ #                   └─ npm       (independent)
+ #
+@@ -41,6 +42,15 @@ name: Release
+ # the winget pull request and commits the Homebrew cask, and GoReleaser OSS
+ # cannot publish a build it did not make.
+ #
++# ⚠ Unless there is no dry run to promote (#181). When GitHub Actions was
++# down as the commit was gated, the release tool took CircleCI's `ci`
++# workflow as its test (`pnpm release X.Y.Z --resume --gate circleci`) and
++# no dry run ran. `verify` then takes that green CircleCI workflow instead
++# (circleci-green.mjs), and the tag run builds what it would have
++# promoted, as a tag run did before #174: `docker` builds both images and
++# pushes them by digest, `promote-check` checks them as it checks a dry
++# run's, and every desktop row builds its packages.
++#
+ # `binaries` is goreleaser alone: it is what CREATES the GitHub Release, and
+ # the only thing the other two need. Until v0.25.0 goreleaser and the docker
+ # builds were ONE job, so `desktop` (needs: that job) waited for the arm64
+@@ -131,7 +141,9 @@ name: Release
+ # cannot recreate a Release, and a half-rerun release is how v0.34.0's tag had
+ # to be moved). And the tag push publishes only a commit that passed ci.yml's
+ # full matrix and a dry run first (`verify`), and publishes that dry run's
+-# images and desktop files rather than its own builds.
++# images and desktop files rather than its own builds - or, when GitHub lacks
++# them, a commit CircleCI's `ci` workflow passed, and then its own builds
++# (#181).
+ #
+ # ⚠ In a run on a tag the workflow file comes from the branch it was started
+ # on and the code from the tag. The tag's tree has the tag's
+@@ -389,6 +401,21 @@ jobs:
+   # tag's code, and with publish=true `verify` asks of the tag's commit
+   # exactly what it asks on a tag push. So every job that publishes anything
+   # waits for `verify`, a partial run's included.
++  #
++  # #181: when GitHub Actions is down, the release tool gates a commit on
++  # CircleCI's `ci` workflow instead (`--gate circleci`), and no dry run
++  # runs. Once Actions is back, the tag run of that commit finds neither of
++  # the runs above. `verify` then asks CircleCI (circleci-green.mjs, with the
++  # CIRCLECI_TOKEN secret and the CIRCLECI_PROJECT_SLUG variable): a green
++  # `ci` workflow on this very commit stands in for both, on a tag push and
++  # in a run that adds to a release alike. GitHub's own runs come first: when
++  # both are there, CircleCI is not asked, and a red, unfinished or missing
++  # CircleCI workflow - or one CircleCI cannot be asked about - is no
++  # evidence. With CircleCI's word there is no dry run to promote (`promote`
++  # false), and the tag run builds the images and the desktop packages
++  # itself - unless its tag has a GitHub Release already: a release packaged
++  # off GitHub while Actions was down (package-local.mjs) is not published a
++  # second time by its late tag run, which then publishes nothing.
+   verify:
+     name: Verify
+     needs: [plan]
+@@ -402,8 +429,26 @@ jobs:
+     outputs:
+       dry_run: ${{ steps.v.outputs.dry_run }}
+       desktop: ${{ steps.v.outputs.desktop }}
++      # #181: what tested the commit - `github` (ci.yml's full matrix and a
++      # dry run) or `circleci` (its `ci` workflow, when GitHub lacks them) -
++      # and, in a tag run, whether there is a dry run to promote: `true`, or
++      # `false` and this run builds the images and the desktop packages.
++      evidence: ${{ steps.v.outputs.evidence }}
++      promote: ${{ steps.v.outputs.promote }}
+     steps:
+-      - name: The commit this run publishes passed the full matrix and a dry run of this workflow
++      # The CircleCI reader, this commit's copy (see the note on runs on a tag
++      # above). Not in a dry run: verify asks nothing there.
++      - uses: actions/checkout@v4
++        if: needs.plan.outputs.publish == 'true'
++        with:
++          ref: ${{ github.sha }}
++          path: .ci
++          sparse-checkout: .github/workflows/scripts
++      - uses: actions/setup-node@v4
++        if: needs.plan.outputs.publish == 'true'
++        with:
++          node-version: "22"
++      - name: The commit this run publishes passed the full matrix and a dry run of this workflow, or CircleCI
+         id: v
+         shell: bash
+         env:
+@@ -414,6 +459,12 @@ jobs:
+           TAG: ${{ needs.plan.outputs.tag }}
+           DESKTOP: ${{ needs.plan.outputs.desktop }}
+           GH_TOKEN: ${{ github.token }}
++          # #181: a CircleCI personal API token, read by circleci-green.mjs
++          # alone and never printed; and the project's slug, gh/<org>/<repo>
++          # unless the CIRCLECI_PROJECT_SLUG variable says otherwise (a
++          # project on the CircleCI GitHub App: circleci/<org id>/<project id>).
++          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
++          CIRCLECI_PROJECT: ${{ vars.CIRCLECI_PROJECT_SLUG || format('gh/{0}', github.repository) }}
+         run: |
+           set -euo pipefail
+           if [ "$EVENT" != push ]; then
+@@ -437,10 +488,11 @@ jobs:
+           dry=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs" \
+             -f head_sha="$SHA" -f event=workflow_dispatch -f status=success -f per_page=100 \
+             --jq '[.workflow_runs[] | select(.head_sha == env.SHA and .event == "workflow_dispatch" and .conclusion == "success" and .display_title == env.WANT)][0].id // empty')
+-          missing=0
++          # What GitHub lacks, said as an error only when CircleCI cannot
++          # stand in for it either (below).
++          lacks=()
+           if [ -z "$ci" ]; then
+-            echo "::error::no successful ci.yml run started by a push of $SHA"
+-            missing=1
++            lacks+=("no successful ci.yml run started by a push of $SHA")
+           else
+             # It passed; was it the whole matrix? Only the full profile ends
+             # in this job (a pull request's run ends in "All tests (pr)").
+@@ -449,19 +501,62 @@ jobs:
+             if [ -n "$full" ]; then
+               echo "ci.yml ran the full matrix on $SHA and passed: $runs/$ci"
+             else
+-              echo "::error::ci.yml passed on $SHA, but not as the full matrix: run $runs/$ci has no successful \"$COMPLETE\" job"
+-              missing=1
++              lacks+=("ci.yml passed on $SHA, but not as the full matrix: run $runs/$ci has no successful \"$COMPLETE\" job")
+             fi
+           fi
+           if [ -n "$dry" ]; then
+             echo "the dry run passed on $SHA: $runs/$dry"
+           else
+-            echo "::error::no successful run of release.yml named '$WANT'"
+-            missing=1
++            lacks+=("no successful run of release.yml named '$WANT'")
+           fi
++          missing=${#lacks[@]}
++          evidence=github
++          cc=""
+           if [ "$missing" -ne 0 ]; then
+-            echo "::error::$TAG publishes nothing: a commit is tagged only after both passed on it (docs/CONTRIBUTING.md, Release process, step 7)"
+-            exit 1
++            # #181: GitHub has not tested this commit (Actions was down when
++            # the release tool gated it on CircleCI). A green `ci` workflow
++            # of CircleCI on this very commit stands in for both runs; red,
++            # unfinished, none, or CircleCI not answering does not.
++            if cc=$(node "$CI_SCRIPTS"/circleci-green.mjs --project "$CIRCLECI_PROJECT" --sha "$SHA" --branch main --workflow ci 2>&1); then
++              evidence=circleci
++            else
++              for l in "${lacks[@]}"; do echo "::error::$l"; done
++              echo "::error::CircleCI: $cc"
++              echo "::error::$TAG publishes nothing: a commit is tagged only after GitHub's full matrix and a dry run, or CircleCI's ci workflow, passed on it (docs/CONTRIBUTING.md, Release process, step 7)"
++              exit 1
++            fi
++          fi
++          echo "evidence=$evidence" >> "$GITHUB_OUTPUT"
++          if [ "$evidence" = circleci ]; then
++            for l in "${lacks[@]}"; do echo "GitHub: $l"; done
++            if [ "$EVENT" = push ]; then
++              # A release packaged off GitHub while Actions was down
++              # (package-local.mjs) has its GitHub Release already. Its tag
++              # run, started once Actions is back, must not build and tag
++              # images over the ones published, nor attach files over the
++              # ones the feeds and winget pin by hash: it publishes nothing.
++              if rel=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .html_url 2>&1); then
++                echo "::error::$TAG has a GitHub Release already ($rel): it was packaged off GitHub, and this run publishes nothing. Add what it lacks with only=macos or only=snap-arm64 (docs/CONTRIBUTING.md, When GitHub Actions is down)."
++                exit 1
++              elif ! grep -q 'HTTP 404' <<< "$rel"; then
++                echo "::error::could not ask whether $TAG has a GitHub Release ($rel): unknown does not pass"
++                exit 1
++              fi
++            fi
++            echo "::notice title=CircleCI::$SHA was tested on CircleCI, not on GitHub: $cc"
++            {
++              echo "### $TAG ($SHA) was tested on CircleCI before it was tagged"
++              echo "- CircleCI, workflow ci: $cc"
++              echo "- GitHub lacks its full matrix or its dry run (GitHub Actions was down when it was gated)"
++            } >> "$GITHUB_STEP_SUMMARY"
++            if [ "$EVENT" = push ]; then
++              # No dry run, so nothing to promote: this run builds both
++              # images (docker) and every desktop row's packages itself, and
++              # promote-check checks the images as it checks a dry run's.
++              echo "promote=false" >> "$GITHUB_OUTPUT"
++              echo "- no dry run to promote: this run builds the images and the desktop packages itself" >> "$GITHUB_STEP_SUMMARY"
++            fi
++            exit 0
+           fi
+           echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
+           if [ "$EVENT" = push ]; then
+@@ -488,6 +583,7 @@ jobs:
+               fi
+             done
+             echo "desktop=$rows" >> "$GITHUB_OUTPUT"
++            echo "promote=true" >> "$GITHUB_OUTPUT"
+           fi
+           {
+             echo "### $TAG ($SHA) was tested before it was tagged"
+@@ -760,7 +856,7 @@ jobs:
+   # its own architecture: an arm64 image that builds but does not start never
+   # becomes a candidate, let alone `latest`.
+   #
+-  # ⚠⚠ This job runs in a run started by hand and never in a tag run (#174).
++  # ⚠⚠ This job runs in a run started by hand and in no promoting tag run (#174).
+   # The dry run of a release candidate (`plan`) pushes both images BY DIGEST,
+   # with no tag: nothing anybody pulls by name changes, and the digests travel
+   # to the tag run as this run's `digests-<arch>` artifacts (14 days). The tag
+@@ -769,9 +865,15 @@ jobs:
+   # architecture, `docker-manifest` joins the digests into the tags - instead
+   # of building for 10-20 minutes again. The labels say which commit and
+   # version each image was built from, and the tag run refuses any other.
++  #
++  # The one tag run it runs in is one with nothing to promote (#181): a
++  # commit CircleCI tested while GitHub Actions was down has no dry run, so
++  # `verify` says `promote` false. Then this job builds both images here and
++  # pushes them by digest exactly as a candidate does, `promote-check` checks
++  # this run's digests, and `docker-manifest` tags them.
+   docker:
+     needs: [plan, verify]
+-    if: needs.plan.outputs.full == 'true' && github.event_name != 'push'
++    if: needs.plan.outputs.full == 'true' && (github.event_name != 'push' || needs.verify.outputs.promote == 'false')
+     strategy:
+       fail-fast: false
+       matrix:
+@@ -784,8 +886,9 @@ jobs:
+             arch: arm64
+     runs-on: ${{ matrix.runner }}
+     env:
+-      # true only in a release candidate's dry run: a push by digest, untagged.
+-      PUSH: ${{ needs.plan.outputs.candidate }}
++      # true in a release candidate's dry run, and in a tag run with nothing
++      # to promote (#181): a push by digest, untagged.
++      PUSH: ${{ needs.plan.outputs.candidate == 'true' || needs.verify.outputs.promote == 'false' }}
+     steps:
+       - uses: actions/checkout@v4
+       - id: meta
+@@ -820,7 +923,8 @@ jobs:
+           cache-from: type=gha,scope=full-${{ matrix.arch }}
+           cache-to: type=gha,mode=max,scope=full-${{ matrix.arch }}
+           # By digest only; docker-manifest attaches the human tags, in the
+-          # tag run. Only a release candidate pushes at all.
++          # tag run. Only a release candidate pushes at all, and a tag run
++          # with nothing to promote (#181).
+           outputs: type=image,name=ghcr.io/brf-tech/filex,push-by-digest=true,name-canonical=true,push=${{ env.PUSH == 'true' }}
+ 
+       - name: Slim image
+@@ -916,10 +1020,16 @@ jobs:
+   # say, in its labels, that it was built from THIS commit as THIS version, be
+   # of this architecture, and answer `filex --version` with the tag and the
+   # commit. Anything else and nothing is tagged.
++  #
++  # With nothing to promote (#181: `verify` took CircleCI's word, and there
++  # is no dry run) the digests are the ones `docker` pushed in this very run,
++  # and they are checked the same way.
+   promote-check:
+-    name: The dry run's ${{ matrix.arch }} images are this tag's
+-    needs: [plan, verify]
+-    if: needs.plan.outputs.full == 'true' && github.event_name == 'push'
++    name: The ${{ matrix.arch }} images are this tag's
++    needs: [plan, verify, docker]
++    # !cancelled(): `docker` is skipped in a tag run that promotes, and a
++    # skipped need would skip this job. It asks for verify itself.
++    if: ${{ !cancelled() && needs.plan.outputs.full == 'true' && github.event_name == 'push' && needs.verify.result == 'success' && (needs.verify.outputs.promote == 'true' || needs.docker.result == 'success') }}
+     strategy:
+       fail-fast: false
+       matrix:
+@@ -938,7 +1048,8 @@ jobs:
+         with:
+           name: digests-${{ matrix.arch }}
+           path: /tmp/digests
+-          run-id: ${{ needs.verify.outputs.dry_run }}
++          # The dry run's, or this run's own when there was none (#181).
++          run-id: ${{ needs.verify.outputs.dry_run || github.run_id }}
+           github-token: ${{ github.token }}
+       - uses: docker/login-action@v3
+         with:
+@@ -979,11 +1090,14 @@ jobs:
+ 
+   # Joins the per-architecture digests into the tags people actually pull.
+   # Nothing is tagged until BOTH architectures were checked, so a half-built
+-  # release never appears as `:latest`. The digests are the dry run's: a tag
+-  # run builds no image.
++  # release never appears as `:latest`. The digests are the dry run's - a tag
++  # run that promotes builds no image - or, with nothing to promote (#181),
++  # the ones `docker` pushed in this run.
+   docker-manifest:
+     needs: [plan, verify, promote-check]
+-    if: needs.plan.outputs.publish == 'true'
++    # !cancelled() for the same reason as promote-check (a skipped `docker`
++    # above it); it still waits for promote-check to pass, in a full run.
++    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true' && !cancelled() && needs.promote-check.result == 'success'
+     runs-on: ubuntu-latest
+     permissions:
+       actions: read
+@@ -995,7 +1109,7 @@ jobs:
+           pattern: digests-*
+           merge-multiple: true
+           path: /tmp/digests
+-          run-id: ${{ needs.verify.outputs.dry_run }}
++          run-id: ${{ needs.verify.outputs.dry_run || github.run_id }}
+           github-token: ${{ github.token }}
+       - uses: docker/setup-buildx-action@v3
+       - uses: docker/login-action@v3
+@@ -1163,6 +1277,9 @@ jobs:
+   # Release, the stores, winget and the cask. Its rows are the ones the dry run
+   # kept files for (`verify`): without macOS when the dry run was started with
+   # -f macos=false.
++  # A tag run with nothing to promote (#181: `verify` took CircleCI's word,
++  # and no dry run ran) builds every row of the plan here, as a dry run does,
++  # and publishes what it built: PROMOTE is verify's `promote`, not the event.
+   desktop:
+     name: Desktop packages (${{ matrix.label }})
+     needs: [plan, verify, binaries]
+@@ -1179,9 +1296,10 @@ jobs:
+       actions: read
+       contents: write
+     env:
+-      # A tag run promotes the files its dry run built; a release candidate
+-      # keeps them for that (see the note above the job).
+-      PROMOTE: ${{ github.event_name == 'push' }}
++      # A tag run with a dry run promotes the files it built (verify:
++      # promote); a release candidate keeps them for that (see the note
++      # above the job).
++      PROMOTE: ${{ needs.verify.outputs.promote == 'true' }}
+       CANDIDATE: ${{ needs.plan.outputs.candidate }}
+       # Partner Center → an Entra ID app with the Manager role
+       # (desktop/store/microsoft/listing.md). Mapped to env because a step's
+diff --git a/.github/workflows/scripts/circleci-green.mjs b/.github/workflows/scripts/circleci-green.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6f23ac995b00a8422074e6fe7cd3b255f0d91a5e
+--- /dev/null
++++ b/.github/workflows/scripts/circleci-green.mjs
+@@ -0,0 +1,187 @@
++#!/usr/bin/env node
++// Whether CircleCI passed a commit: the evidence a release run's `verify`
++// takes when GitHub holds no full matrix and no dry run of that commit
++// (release.yml; #181).
++//
++//   node circleci-green.mjs --project <slug> --sha <commit> [--branch main] [--workflow ci]
++//
++// Exit 0, and the workflow's page on stdout, when a workflow of that name in
++// a pipeline of the branch that ran the commit succeeded (a rerun that passed
++// counts, as on GitHub). Exit 1, and why on stderr, when none did: none ran,
++// one failed, one is still going. Exit 2 when CircleCI could not be asked -
++// whether the commit passed is then unknown, and unknown is not a pass.
++//
++// Why CircleCI at all: when GitHub Actions is down (2026-10-05: the 0.52.0
++// dry run could not get a runner, twice), the release tool gates the commit
++// on CircleCI's `ci` workflow instead (`pnpm release X.Y.Z --resume --gate
++// circleci`). Once Actions is back, the tag run of that commit finds no
++// ci.yml run and no dry run on it, and this is what lets it publish.
++//
++// The project slug: `gh/<org>/<repo>` for an organization connected through
++// GitHub OAuth, `circleci/<org id>/<project id>` on the GitHub App (Project
++// Settings → Overview). The token: CIRCLECI_TOKEN in the environment (the
++// repository secret of that name), sent as the Circle-Token header and never
++// printed. A public project's pipelines may answer without one; when they do
++// not, the error says so.
++//
++// ⚠ It reads a commit exactly as the release tool's gate does
++// (scripts/release/circleci.mjs and runVerdict in scripts/release/checks.mjs),
++// but cannot import them: a run on a tag checks this commit's workflow
++// scripts out on their own (CI_SCRIPTS in release.yml), not the tree.
++// web/tests/deploy/releaseVerifyCircleci.test.ts runs both on the same
++// answers and holds them to one verdict.
++//
++// Plain Node 18 or later, no dependency.
++
++import { fileURLToPath } from 'node:url';
++import path from 'node:path';
++
++export const CIRCLECI_API = 'https://circleci.com/api/v2';
++
++/** A project slug: two path segments after the VCS (or `circleci`), nothing that could leave the path. */
++export const PROJECT_SLUG = /^(?:gh|github|bb|bitbucket|circleci)\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
++
++/** A full commit id. */
++export const COMMIT = /^[0-9a-f]{40}$/;
++
++/**
++ * Workflow states that are not over yet: `on_hold` waits for an approval.
++ * Every other state is an end, and only `success` is green.
++ */
++const GOING = new Set(['running', 'on_hold']);
++
++/**
++ * The commit a pipeline ran: `vcs.revision` (both integrations), or what a
++ * GitHub App pipeline's trigger parameters carry when `vcs` is absent.
++ */
++export function pipelineRevision(p) {
++  return p?.vcs?.revision ?? p?.trigger_parameters?.git?.checkout_sha ?? p?.trigger_parameters?.github_app?.checkout_sha ?? null;
++}
++
++/** The app's page of a workflow. */
++export function workflowUrl(project, pipelineNumber, workflowId) {
++  return `https://app.circleci.com/pipelines/${project}/${pipelineNumber}/workflows/${workflowId}`;
++}
++
++/**
++ * The verdict on `sha`: every workflow named `workflow` in the pipelines of
++ * `branch` that ran it.
++ *
++ *   { state: 'success', url }                 one of them passed
++ *   { state: 'running', url, status }         none passed, one is going
++ *   { state: 'failure', url, status }         every one ended, none passed
++ *   { state: 'none' }                         no pipeline of the commit ran it
++ *   { error }                                 CircleCI could not be asked
++ *
++ * `fetch` and `token` are injectable so a test hands in a stand-in that never
++ * touches the network.
++ */
++export async function circleciVerdict({ project, sha, branch = 'main', workflow = 'ci', token = '', fetch: doFetch = (...args) => globalThis.fetch(...args), api = CIRCLECI_API, pages = 5 }) {
++  const headers = { Accept: 'application/json', ...(token ? { 'Circle-Token': token } : {}) };
++
++  async function get(pathAndQuery) {
++    let res;
++    try {
++      res = await doFetch(`${api}${pathAndQuery}`, { headers });
++    } catch (e) {
++      return { error: `GET ${pathAndQuery}: ${e?.message ?? e}` };
++    }
++    let body = null;
++    try {
++      body = await res.json();
++    } catch {
++      body = null;
++    }
++    if (!res.ok) {
++      const said = body?.message ? `: ${body.message}` : '';
++      let hint = '';
++      if ([401, 403, 404].includes(res.status)) {
++        hint = token
++          ? ` - is ${project} the project's slug (Project Settings → Overview; the CIRCLECI_PROJECT_SLUG variable), and may this token read it?`
++          : ` - CIRCLECI_TOKEN is not set: the repository secret of that name holds a CircleCI personal API token; and check that ${project} is the project's slug`;
++      }
++      return { error: `GET ${pathAndQuery} answered ${res.status}${said}${hint}` };
++    }
++    if (!body || typeof body !== 'object') return { error: `GET ${pathAndQuery} did not answer JSON` };
++    return { body };
++  }
++
++  const found = [];
++  let pageToken = null;
++  for (let page = 0; page < pages; page++) {
++    const q = new URLSearchParams({ branch });
++    if (pageToken) q.set('page-token', pageToken);
++    const r = await get(`/project/${project}/pipeline?${q}`);
++    if (r.error) return { error: r.error };
++    const items = Array.isArray(r.body.items) ? r.body.items : [];
++    const mine = items.filter((p) => pipelineRevision(p) === sha);
++    found.push(...mine);
++    pageToken = r.body.next_page_token ?? null;
++    // Newest first: past the pipelines of this commit, older pages hold
++    // older commits.
++    if (!pageToken || (found.length && !mine.length)) break;
++  }
++  const runs = [];
++  for (const p of found) {
++    const r = await get(`/pipeline/${p.id}/workflow`);
++    if (r.error) return { error: r.error };
++    for (const wf of Array.isArray(r.body.items) ? r.body.items : []) {
++      if (wf?.name !== workflow) continue;
++      runs.push({ status: String(wf?.status ?? '') || 'unknown', url: workflowUrl(project, p.number, wf.id) });
++    }
++  }
++  if (!runs.length) return { state: 'none' };
++  const ok = runs.find((r) => r.status === 'success');
++  if (ok) return { state: 'success', url: ok.url };
++  const going = runs.find((r) => GOING.has(r.status));
++  if (going) return { state: 'running', url: going.url, status: going.status };
++  return { state: 'failure', url: runs[0].url, status: runs[0].status };
++}
++
++/** `--name value` pairs; null when an argument is not one of them. */
++function options(argv) {
++  const out = {};
++  for (let i = 0; i < argv.length; i += 2) {
++    const m = /^--(project|sha|branch|workflow)$/.exec(argv[i] ?? '');
++    if (!m || argv[i + 1] === undefined) return null;
++    out[m[1]] = argv[i + 1];
++  }
++  return out;
++}
++
++export async function main(argv, env = process.env) {
++  const o = options(argv);
++  const usage = 'usage: node circleci-green.mjs --project <slug> --sha <40-hex commit> [--branch main] [--workflow ci]';
++  if (!o || !PROJECT_SLUG.test(o.project ?? '') || !COMMIT.test(o.sha ?? '')) {
++    console.error(usage);
++    return 2;
++  }
++  const branch = o.branch ?? 'main';
++  const workflow = o.workflow ?? 'ci';
++  const v = await circleciVerdict({ project: o.project, sha: o.sha, branch, workflow, token: env.CIRCLECI_TOKEN ?? '' });
++  if (v.error) {
++    console.error(`could not ask CircleCI (${v.error}): whether ${o.sha} passed there is unknown, and unknown does not pass`);
++    return 2;
++  }
++  if (v.state === 'success') {
++    console.log(v.url);
++    return 0;
++  }
++  if (v.state === 'none') console.error(`no pipeline of ${o.project} on ${branch} ran the workflow "${workflow}" on ${o.sha}`);
++  else if (v.state === 'running') console.error(`the workflow "${workflow}" on ${o.sha} is not over (${v.status}): ${v.url}`);
++  else console.error(`the workflow "${workflow}" on ${o.sha} ended "${v.status}": ${v.url}`);
++  return 1;
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  // exitCode, not exit(): what was printed reaches a pipe before the process ends.
++  main(process.argv.slice(2)).then(
++    (code) => {
++      process.exitCode = code;
++    },
++    (e) => {
++      console.error(`circleci-green.mjs: ${e?.stack ?? e}`);
++      process.exitCode = 2;
++    },
++  );
++}

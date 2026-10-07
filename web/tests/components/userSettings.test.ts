@@ -780,3 +780,155 @@ describe('UserSettingsModal', () => {
     holder.remove();
   });
 });
+
+// The notification digest (backend notify/digest.go): a kind marked URGENT
+// reaches the person at once, a kind turned off waits for the window and comes
+// in one summary. Out of the box EVERY kind is urgent (the owner's decision,
+// 2026-10-06): the digest is opt-in. The switch per kind writes the person's
+// own choice; one put back where the default is drops it, so a later default
+// reaches them. ⚠ Red before the digest: no `user-settings-urgent-*` switch
+// exists.
+describe('UserSettingsModal - the digest', () => {
+  const EVENTS = ['file.uploaded', 'file.infected', 'file.moved', 'share.created', 'update_available', 'disk_full'];
+  /** The built-in default: every kind told at once. */
+  const DIGEST = {
+    window_minutes: 3,
+    urgent_events: EVENTS,
+    default_urgent: EVENTS,
+    events: EVENTS,
+    admin_events: ['update_available', 'disk_full'],
+  };
+
+  function answer(inApp: boolean, muted: string[], overrides: Record<string, boolean>): NotificationSettings {
+    const urgent = EVENTS.filter((e) => (e in overrides ? overrides[e] : DIGEST.default_urgent.includes(e)));
+    return {
+      user_id: 42,
+      in_app_enabled: inApp,
+      muted_events: muted,
+      urgent_overrides: overrides,
+      digest: { ...DIGEST, urgent_events: urgent },
+    } as NotificationSettings;
+  }
+
+  afterEach(() => {
+    while (live.length) live.pop()!.unmount();
+  });
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    // The person holds new files and links; everything else is as the default says.
+    getSettings.mockResolvedValue(answer(true, ['file.moved'], { 'file.uploaded': false, 'share.created': false }));
+    // The server answers with the choice applied, as handlers/notifications.go does.
+    updateSettings.mockImplementation(async (p) => {
+      const o = (p as { urgent_overrides?: Record<string, boolean> }).urgent_overrides ?? {};
+      return answer(p.in_app_enabled, p.muted_events, o);
+    });
+  });
+
+  async function openPane(user: User) {
+    const auth = useAuthStore();
+    auth.user = user;
+    // Virus scanning on: a virus alert is a kind this instance can send.
+    const caps = useCapabilitiesStore();
+    caps.data = { ...caps.data, antivirus: true };
+    const notif = useNotificationsStore();
+    const w = mountModal();
+    await notif.fetchSettings();
+    await w.vm.$nextTick();
+    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+    await flushPromises();
+    return w;
+  }
+
+  it('out of the box, every switch is on and nothing is said of a wait', async () => {
+    getSettings.mockResolvedValue(answer(true, [], {}));
+    const w = await openPane(NON_ADMIN);
+    for (const ev of ['file.uploaded', 'file.infected', 'share.created']) {
+      expect(w.find(`[data-testid="user-settings-urgent-${ev}"]`).attributes('aria-checked'), ev).toBe('true');
+    }
+    expect(w.find('[data-testid="user-settings-digest-hint"]').exists(), 'a wait is described while nothing waits').toBe(false);
+    expect(w.find('[data-testid="user-settings-digest-off-hint"]').exists()).toBe(true);
+  });
+
+  it('says how long a held kind waits, and marks the held kinds', async () => {
+    const w = await openPane(NON_ADMIN);
+    expect(w.find('[data-testid="user-settings-digest-hint"]').text()).toContain('3 min');
+    expect(w.find('[data-testid="user-settings-digest-off-hint"]').exists()).toBe(false);
+    expect(w.find('[data-testid="user-settings-urgent-file.uploaded"]').attributes('aria-checked')).toBe('false');
+    expect(w.find('[data-testid="user-settings-urgent-share.created"]').attributes('aria-checked')).toBe('false');
+    expect(w.find('[data-testid="user-settings-urgent-file.infected"]').attributes('aria-checked')).toBe('true');
+    // The digest is what tells the held ones: it has no urgent switch.
+    expect(w.find('[data-testid="user-settings-urgent-notification.digest"]').exists()).toBe(false);
+    // A muted kind is told never: nothing to choose.
+    expect(w.find('[data-testid="user-settings-urgent-file.moved"]').attributes('disabled')).toBeDefined();
+  });
+
+  it('writes the choice, carrying the bell flag and the mutes along', async () => {
+    const w = await openPane(NON_ADMIN);
+    // Back to the default (urgent): the person's own choice is dropped, not stored as true.
+    await w.find('[data-testid="user-settings-urgent-file.uploaded"]').trigger('click');
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      in_app_enabled: true,
+      muted_events: ['file.moved'],
+      urgent_overrides: { 'share.created': false },
+    });
+    await flushPromises();
+    expect(w.find('[data-testid="user-settings-urgent-file.uploaded"]').attributes('aria-checked')).toBe('true');
+
+    // Held again.
+    await w.find('[data-testid="user-settings-urgent-file.uploaded"]').trigger('click');
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      in_app_enabled: true,
+      muted_events: ['file.moved'],
+      urgent_overrides: { 'share.created': false, 'file.uploaded': false },
+    });
+  });
+
+  it('lets a person put a security alert in the digest', async () => {
+    const w = await openPane(NON_ADMIN);
+    const sw = w.find('[data-testid="user-settings-urgent-file.infected"]');
+    expect(sw.attributes('aria-checked')).toBe('true');
+    expect(sw.attributes('disabled')).toBeUndefined();
+    await sw.trigger('click');
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      in_app_enabled: true,
+      muted_events: ['file.moved'],
+      urgent_overrides: { 'file.uploaded': false, 'share.created': false, 'file.infected': false },
+    });
+  });
+
+  it('gives an administrator one switch for the administrator alerts, and nobody else', async () => {
+    const member = await openPane(NON_ADMIN);
+    expect(member.find('[data-testid="user-settings-urgent-admin"]').exists()).toBe(false);
+    member.unmount();
+    live.splice(live.indexOf(member), 1);
+
+    const admin = await openPane(ADMIN);
+    const sw = admin.find('[data-testid="user-settings-urgent-admin"]');
+    expect(sw.attributes('aria-checked')).toBe('true');
+    await sw.trigger('click');
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      in_app_enabled: true,
+      muted_events: ['file.moved'],
+      urgent_overrides: { 'file.uploaded': false, 'share.created': false, update_available: false, disk_full: false },
+    });
+  });
+
+  it('a mute does not send the urgent choices (a save without them keeps them)', async () => {
+    const w = await openPane(NON_ADMIN);
+    await w.find('[data-testid="user-settings-event-file.infected"]').trigger('click');
+    expect(updateSettings).toHaveBeenLastCalledWith({
+      in_app_enabled: true,
+      muted_events: ['file.moved', 'file.infected'],
+    });
+  });
+
+  it('draws no urgent switch for a server without the digest', async () => {
+    getSettings.mockResolvedValue({ user_id: 42, in_app_enabled: true, muted_events: [] });
+    const w = await openPane(NON_ADMIN);
+    expect(w.findAll('[data-testid^="user-settings-urgent-"]').length).toBe(0);
+    expect(w.find('[data-testid="user-settings-digest-hint"]').exists()).toBe(false);
+    expect(w.find('[data-testid="user-settings-digest-off-hint"]').exists()).toBe(false);
+  });
+});

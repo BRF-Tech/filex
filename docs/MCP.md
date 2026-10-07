@@ -139,11 +139,15 @@ curl -X POST https://files.example.com/api/admin/ai-tokens \
   (since v0.43.0 - before, it granted every scope, `admin` included). `admin`
   is granted only when it is in the list. Any scope outside the canonical set
   is rejected up front (`400 scope_unknown`), so a typo can't silently grant
-  nothing.
+  nothing. `comments:rw` lets the token add and delete comments
+  ([below](#comments-a-permission-with-a-level)).
 - `label` / `expires_in_days` - optional.
 
-`GET /api/admin/ai-tokens` lists all tokens (no secrets); `DELETE
-/api/admin/ai-tokens/{id}` revokes one.
+`GET /api/admin/ai-tokens` lists all tokens (no secrets), each with
+`permissions` - its level of every permission with one (`{"comments": "read"}`);
+`PATCH /api/admin/ai-tokens/{id}` edits `label`, `usernames`, `kind` and
+`permissions` (`{"permissions": {"comments": "rw"}}` - the verbs never change);
+`DELETE /api/admin/ai-tokens/{id}` revokes one.
 
 **2. Self-service - `POST /api/tokens`** (any authenticated user, including
 `viewer`). The token is **force-bound to the caller** (a client-supplied
@@ -176,8 +180,9 @@ Ceiling rules (privilege-escalation guards):
   credentials that already exist are untouched.
 
 `GET /api/tokens` lists the caller's own tokens; `PATCH /api/tokens/{id}` edits
-its label / usernames; `DELETE /api/tokens/{id}` revokes one
-(ownership-checked). `kind` is **not** editable here - only an admin changes it,
+its label / usernames and the levels of its permissions (`{"permissions":
+{"comments": "rw"}}`, never above a calling token's own); `DELETE
+/api/tokens/{id}` revokes one (ownership-checked). `kind` is **not** editable here - only an admin changes it,
 or an app token could promote itself out of the restriction.
 
 ⚠ The whole `/api/tokens` surface answers **403** to an app token (see
@@ -202,7 +207,8 @@ access it had - see the CHANGELOG's upgrade note, and review those tokens.
 | Scope | Grants |
 |-------|--------|
 | `read` | `list` / `info` / `download` / `search` (read-only file ops), and the listings of the explorer's operations: app actions, the operations queue, the trash, a file's versions, one's own links; the bell (`notifications_list`, `notification_read`), a file's comments, an item's permissions and the people it could be shared with |
-| `write` | `upload` / `mkdir` / `move` / `copy` **and** `share` / `unshare` / `zip` / `unzip`, app actions (`convert` …), stopping an operation, trash restore, version restore and snapshot, archives, file requests; a star, adding and deleting a comment, setting and revoking an item's permissions |
+| `write` | `upload` / `mkdir` / `move` / `copy` **and** `share` / `unshare` / `zip` / `unzip`, app actions (`convert` …), stopping an operation, trash restore, version restore and snapshot, archives, file requests; a star, setting and revoking an item's permissions |
+| `comments:rw` | adding and deleting a comment (`file_comment_add`, `file_comment_delete`, their REST twins and `/api/files/comments`) - with `read`; `write` does not include it ([below](#comments-a-permission-with-a-level)) |
 | `delete` | `delete` (soft-delete to trash) |
 | `mcp` | the streamable-HTTP MCP server at `/api/ai/mcp` |
 | `admin` | the admin REST surface at `/api/ai/admin/*` **and** the `admin_*` MCP tools - a subset of the admin panel, listed [under Tool set](#tool-set) |
@@ -221,7 +227,7 @@ Scopes bound the **token**; the account behind it has its own permissions
 (see *Failure modes* below).
 
 > **Least privilege.** Give an agent only what it needs - most read/write agents
-> want `read,write,mcp`. `admin` is a superuser scope (it can manage users,
+> want `read,write,mcp` (and `comments:rw` if they comment). `admin` is a superuser scope (it can manage users,
 > storages, settings, replica, queue …); reserve it for trusted operator tools.
 
 > ⚠⚠ **Mint agent and embed tokens on a non-admin account** (`user_id`). Scopes
@@ -234,6 +240,19 @@ Scopes bound the **token**; the account behind it has its own permissions
 > reaches every storage and every folder its verbs allow, because the
 > administrator does. A token is only as narrow as its scopes **and** the
 > account it is bound to.
+
+#### Comments: a permission with a level
+
+`comments` is held at a level: `read` - every token that does not name it,
+every token minted before 0.53 among them - or `rw`, written `comments:rw`
+(`comments:write` is read the same). Adding and deleting a comment ask
+`comments:rw` on every door, `write` or not, and answer
+`403 token missing scope: comments:write` without it; reading asks `read`.
+Mint with `comments:rw`, or raise an existing token with `PATCH` and
+`{"permissions": {"comments": "rw"}}`. An agent that comments needs it: since
+0.53 `write` is not enough. The rule, and the default every permission added
+later gets: [RBAC.md → Permissions with a
+level](RBAC.md#permissions-with-a-level-comments).
 
 ### Root confinement
 
@@ -318,8 +337,8 @@ held to the router by a test ([BACKEND.md](BACKEND.md)).
 | POST | `/api/ai/notifications/read` | `read` | `{id}` or `{all: true}` - your own bookkeeping, not audited |
 | POST | `/api/ai/star` | `write` | `{path, star?}` (`star` defaults to `true`) |
 | GET | `/api/ai/comments?path=` | `read` | → `{comments, node_id}` |
-| POST | `/api/ai/comments` | `write` | `{path, text}` |
-| POST | `/api/ai/comments/{id}/delete` | `write` | your own comment (any, for an administrator) |
+| POST | `/api/ai/comments` | `read` + `comments:rw` | `{path, text}` |
+| POST | `/api/ai/comments/{id}/delete` | `read` + `comments:rw` | your own comment (any, for an administrator) |
 | GET | `/api/ai/permissions?path=` | `read` | → `{path, storage_rbac, direct, inherited, effective}` (owner level) |
 | GET | `/api/ai/permissions/users?q=` | `read` | → `{users}` to grant to |
 | POST | `/api/ai/permissions` | `write` | `{path, user_id \| group_id, level}` |
@@ -394,15 +413,17 @@ token used with it must carry `mcp`. Each file tool also needs the verb of its
 REST twin - `read` for `file_list` / `file_info` / `file_read` / `file_search` /
 `file_tags` / `app_actions` / `ops_list` / `op_get` / `trash_list` /
 `file_versions` / `share_list` / `notifications_list` / `notification_read` /
-`file_comments` / `file_permissions` / `file_permission_users`, `write` for
+`file_comments` / `file_comment_add` / `file_comment_delete` /
+`file_permissions` / `file_permission_users`, `write` for
 `file_write` / `file_upload_ticket` / `file_mkdir` / `file_move` / `file_copy` /
 `file_share` / `file_unshare` / `file_zip` / `file_unzip` / `app_run` /
 `file_convert` / `op_cancel` / `trash_restore` / `file_version_restore` /
 `file_snapshot` / `archive_create` / `archive_extract` / `file_request_create` /
-`file_star` / `file_comment_add` / `file_comment_delete` / `file_permission_set`
-/ `file_permission_revoke` (and for setting tags), `delete` for
-`file_delete`; `file_root` needs none. A tool the token cannot use is not
-listed. The `admin_*` tools additionally need `admin` (and an unconfined token).
+`file_star` / `file_permission_set` / `file_permission_revoke` (and for setting
+tags), `delete` for `file_delete`; `file_root` needs none. `file_comment_add`
+and `file_comment_delete` need `comments:rw` besides
+([Comments](#comments-a-permission-with-a-level)). A tool the token cannot use
+is not listed. The `admin_*` tools additionally need `admin` (and an unconfined token).
 
 Connect an MCP client by pointing it at the endpoint and supplying the token as a
 header. With the Claude Code CLI:
@@ -519,8 +540,8 @@ keeps what hangs off a file:
 | `notification_read` | `POST /api/ai/notifications/read` | Mark a notice read (`id`), or all you can see (`all: true`). Your own bookkeeping: `read` is enough and no audit row is written, as in the bell. |
 | `file_star` | `POST /api/ai/star` | Star a file or folder for yourself (`star: false` takes it off); it is listed under **Starred**. |
 | `file_comments` | `GET /api/ai/comments?path=` | The comments on an item; everyone who can see it reads them. |
-| `file_comment_add` | `POST /api/ai/comments` | Comment on an item (`text`); its owner is told. Needs the account's `comments.write`. |
-| `file_comment_delete` | `POST /api/ai/comments/{id}/delete` | Delete your own comment (an administrator, any on the tenant's files). |
+| `file_comment_add` | `POST /api/ai/comments` | Comment on an item (`text`); its owner is told. Needs the account's `comments.write` and the token's `comments:rw`. |
+| `file_comment_delete` | `POST /api/ai/comments/{id}/delete` | Delete your own comment (an administrator, any on the tenant's files). Needs the token's `comments:rw`. |
 | `file_permissions` | `GET /api/ai/permissions?path=` | Who may open an item, as its Share dialog shows the **owner**: the grants on it (`direct`), the ones from a folder above (`inherited`), your own level (`effective`). |
 | `file_permission_users` | `GET /api/ai/permissions/users?q=` | People in your tenant to grant to, by part of a name or e-mail. |
 | `file_permission_set` | `POST /api/ai/permissions` | Grant a person (`user_id`) or a group (`group_id`) `viewer`, `editor` or `owner` on an item: owner level on it and the account's `share.users`, on a storage with access control; a viewer account is never given more than viewer ([RBAC.md](RBAC.md)). |
@@ -670,7 +691,13 @@ and the operator's addresses as the panel does.
   with the operation(s), which `op_get` follows and `op_cancel` stops
   ([TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints)).
 - **Replica** (0.50): `admin_replica_failures_count`, `admin_replica_fix`
-  (every unresolved failure) and `admin_replica_fix_one` (`{path, op}`).
+  (every unresolved failure) and `admin_replica_fix_one`
+  (`{storage_id, path, op}`; 0.53 names the storage, a failure's path is
+  relative to it). 0.53 adds `admin_replica_initial_copies`: each
+  replicating storage's [initial copy](REPLICATION.md#initial-copy) and how
+  far it has come, and `admin_replica_links`: the folder each storage writes
+  into on its target. `admin_replication_targets_*` answer with a target's
+  credentials masked (`***`).
 - **Webhook targets** (0.50): `admin_webhooks_list`, `_create`, `_update`,
   `_delete`, `_test` - the targets of Admin → Notifications → Webhooks
   ([NOTIFICATIONS.md](NOTIFICATIONS.md)), beside the older single
@@ -808,6 +835,9 @@ client must send the header on every request.
 The token lacks the scope for that verb (e.g. calling `upload` with a read-only
 token, or an `admin_*` tool without the `admin` scope). Mint a token with the
 needed scope - remember `write` also covers share/zip, `delete` is separate.
+`token missing scope: comments:write` is a comment added or deleted by a token
+without `comments:rw` - `write` does not cover it; raise the token with `PATCH
+… {"permissions": {"comments": "rw"}}` ([Comments](#comments-a-permission-with-a-level)).
 
 ### 403 Forbidden (`… is authenticated by an app token …`, `reason: "app_token"`)
 A self-service credential call - `/api/tokens`, `/api/auth/s3-keys`,

@@ -8,8 +8,6 @@
 // live check on a query nobody is shown proves nothing, and a copy check on a
 // query nobody runs proves nothing either.
 
-import { SHOTS_ROOT_REL } from '../e2e/shots/release.mjs';
-
 /**
  * The example searches the demo splash tells a visitor to type, and the file
  * each one promises them.
@@ -133,11 +131,11 @@ export const EXTERNAL_SENTINELS = [
  * offline half of the gate measures it.
  */
 export const REPO_ABOUT =
-  'Self-hosted file manager: one Go binary, a full web UI, and storage that ' +
-  'plugs in - local, S3, SFTP, WebDAV, FTP, SMB. The same tree is also ' +
-  'reachable AS S3, SFTP, FTPS, NFS and WebDAV. Sign in with SSO, LDAP or ' +
-  "the server's Windows/Linux accounts. Groups, multi-tenant, E2E folders, " +
-  'sandboxed apps, desktop app, built-in MCP server. MIT.';
+  'Self-hosted file manager & sharing with a web UI, in one Go binary - ' +
+  'open-source alternative to Nextcloud, Dropbox and Google Drive. ' +
+  'Web-based file browser for local, S3, SFTP, WebDAV, FTP and SMB storage: ' +
+  'private cloud served as S3, SFTP, NFS, WebDAV. SSO/LDAP, multi-tenant, ' +
+  'encrypted folders, embeddable web component, desktop app, MCP server.';
 
 /** The `homepage` field beside it. Not the docs site: filex.sh links there. */
 export const REPO_HOMEPAGE = 'https://filex.sh';
@@ -158,22 +156,23 @@ export const SITE_MUST_LINK = [
   { host: 'demo.filex.sh', why: 'the demo. It is the shortest path from "what is this" to "I have used it"' },
 ];
 
-// ⚠ The folder is not spelled here. Each release's pictures live in their own
-// `docs/screenshots/vX.Y.Z/`, named once in `e2e/shots/release.mjs`; the README
-// links that folder, and the test beside this declaration fails the moment the
-// two disagree — so bumping the release there moves every declaration here.
+// ⚠ Pictures are named here as e2e/shots/manifest.json names them
+// (`sidenav/sidenav-rail-1440.png`), not by URL: the URL carries the content
+// hash and changes with every retake, the name does not. The README links the
+// manifest's current URL of each, and the test beside this declaration fails
+// when a README picture is not declared here (task #176).
 /**
  * Every screenshot the README shows, and the sources of what is IN it.
  *
  * ⚠⚠ A screenshot is a promise about what the product looks like now, and a
  * stale one is not missing information — it is WRONG information, because the
- * reader takes it for the current product. `docs/screenshots/admin-plugins.png`
- * shipped six releases out of date with a private repository URL inside it, and
- * nothing in eleven release steps looks at a picture.
+ * reader takes it for the current product. `admin-plugins.png` shipped six
+ * releases out of date with a private repository URL inside it, and nothing in
+ * eleven release steps looked at a picture.
  *
- * Full visual judgement is not automatable. Staleness is: a picture committed
+ * Full visual judgement is not automatable. Staleness is: a picture taken
  * before the last change to the code that draws it cannot be showing that
- * change. `depicts` is what makes that question answerable — it is the one
+ * change (the manifest's `taken` is when). `depicts` is what makes that question answerable — it is the one
  * thing here a person has to know, so it is written down once, next to
  * everything else the gate knows, and the offline half asserts every path in it
  * still exists. A rename empties a glob silently; that is the failure this
@@ -187,75 +186,75 @@ export const SITE_MUST_LINK = [
  */
 export const SCREENSHOTS = [
   {
-    file: `${SHOTS_ROOT_REL}/explorer-grid-light.png`,
+    name: 'explorer-grid-light.png',
     depicts: ['packages/core/src/components/GridView.vue', 'packages/core/src/components/Toolbar.vue', 'packages/core/src/components/ViewSwitcher.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/explorer-grid-dark.png`,
+    name: 'explorer-grid-dark.png',
     depicts: ['packages/core/src/components/GridView.vue', 'packages/core/src/components/Toolbar.vue', 'packages/core/src/styles'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/share-modal.png`,
+    name: 'share-modal.png',
     depicts: ['packages/core/src/modals/PermissionsModal.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/viewer-markdown.png`,
+    name: 'viewer-markdown.png',
     depicts: ['packages/core/src/modals/PreviewModal.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/admin-dashboard.png`,
+    name: 'admin-dashboard.png',
     depicts: ['web/src/views/Dashboard.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/demo-landing.png`,
+    name: 'demo-landing.png',
     depicts: ['web/src/views/Login.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/connections-guide.png`,
+    name: 'connections-guide.png',
     depicts: ['packages/core/src/components/ConnectionGuideView.vue', 'packages/core/src/components/ConnectionsPanel.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/admin-plugins.png`,
+    name: 'admin-plugins.png',
     // The storage-plugins table moved into a tab when Apps arrived; the page
     // shell draws the tab strip, the tab draws what the picture shows.
     depicts: ['web/src/views/Plugins.vue', 'web/src/components/plugins/StoragePluginsTab.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/driveshell/driveshell-hero-1440.png`,
+    name: 'driveshell/driveshell-hero-1440.png',
     depicts: ['packages/core/src/FileExplorer.vue', 'packages/core/src/components/SideNav.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/driveshell/driveshell-search-1440.png`,
+    name: 'driveshell/driveshell-search-1440.png',
     depicts: ['packages/core/src/components/FilterBar.vue', 'packages/core/src/components/CommandPalette.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/sidenav/sidenav-expanded-1440.png`,
+    name: 'sidenav/sidenav-expanded-1440.png',
     depicts: ['packages/core/src/components/SideNav.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/sidenav/sidenav-rail-1440.png`,
+    name: 'sidenav/sidenav-rail-1440.png',
     depicts: ['packages/core/src/components/SideNav.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/sidenav/view-shared-1440.png`,
+    name: 'sidenav/view-shared-1440.png',
     depicts: ['packages/core/src/components/SideNav.vue', 'packages/core/src/components/ListView.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/sidenav/embed-webcomponent-1440.png`,
+    name: 'sidenav/embed-webcomponent-1440.png',
     depicts: ['packages/webcomponent/src'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/sidenav/connect-1440.png`,
+    name: 'sidenav/connect-1440.png',
     depicts: ['packages/core/src/components/ConnectionsPanel.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/sidenav/apikeys-minted-1440.png`,
+    name: 'sidenav/apikeys-minted-1440.png',
     depicts: ['packages/core/src/components/TokensPanel.vue'],
   },
   // ── v0.43.0: Apps, and the signing round that debuts them ──────────────
   // e2e/shots/signing.mjs, apps.mjs, appearance.mjs and symlinks.mjs.
   {
-    file: `${SHOTS_ROOT_REL}/signing/sign-define-1440.png`,
+    name: 'signing/sign-define-1440.png',
     depicts: [
       'packages/core/src/components/plugin/nodes/SurfacePdfFields.vue',
       'packages/core/src/components/plugin/nodes/PdfFieldEditor.vue',
@@ -263,13 +262,13 @@ export const SCREENSHOTS = [
     ],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/sign-place-1440.png`,
+    name: 'signing/sign-place-1440.png',
     depicts: ['packages/core/src/components/plugin/nodes/SurfacePdfFields.vue', 'packages/core/src/components/plugin/PluginPageView.vue'],
   },
   {
     // The one screen a stranger ever sees. ⚠ It is a SHELL shared by every
     // outward-facing page, so a change to any of these moves the picture.
-    file: `${SHOTS_ROOT_REL}/public-share.png`,
+    name: 'public-share.png',
     depicts: [
       'packages/core/src/components/public/PublicShell.vue',
       'packages/core/src/components/public/PublicShareBody.vue',
@@ -277,11 +276,11 @@ export const SCREENSHOTS = [
     ],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/sign-outside-pin-1440.png`,
+    name: 'signing/sign-outside-pin-1440.png',
     depicts: ['packages/core/src/components/public/PublicPinGate.vue', 'packages/core/src/components/public/PublicShell.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/sign-outside-fill-1440.png`,
+    name: 'signing/sign-outside-fill-1440.png',
     depicts: [
       'packages/core/src/components/public/PublicLinkPage.vue',
       'packages/core/src/components/plugin/nodes/SurfaceSignaturePad.vue',
@@ -289,19 +288,19 @@ export const SCREENSHOTS = [
     ],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/sign-status-1440.png`,
+    name: 'signing/sign-status-1440.png',
     depicts: ['packages/core/src/components/plugin/PluginInspectorSection.vue', 'packages/core/src/components/InspectorPanel.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/apps/apps-install-review-1440.png`,
+    name: 'apps/apps-install-review-1440.png',
     depicts: ['web/src/components/plugins/AppPluginInstallWizard.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/apps/apps-detail-1440.png`,
+    name: 'apps/apps-detail-1440.png',
     depicts: ['web/src/components/plugins/AppPluginDetail.vue', 'web/src/components/plugins/AppPluginsTab.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/apps/convert-wizard-1440.png`,
+    name: 'apps/convert-wizard-1440.png',
     depicts: [
       'packages/core/src/components/plugin/PluginViewModal.vue',
       'packages/core/src/components/plugin/nodes/SurfaceSteps.vue',
@@ -310,67 +309,67 @@ export const SCREENSHOTS = [
   },
   // ── v0.48.0: an app's own interface (e2e/shots/apps.mjs + board-app/) ──
   {
-    file: `${SHOTS_ROOT_REL}/apps/app-interface-review-1440.png`,
+    name: 'apps/app-interface-review-1440.png',
     depicts: ['web/src/components/plugins/AppPluginInstallWizard.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/apps/app-interface-viewer-1440.png`,
+    name: 'apps/app-interface-viewer-1440.png',
     depicts: ['packages/core/src/components/plugin/AppFrame.vue', 'packages/app-ui/src', 'e2e/shots/board-app'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/bell-badge-1440.png`,
+    name: 'signing/bell-badge-1440.png',
     depicts: ['packages/core/src/components/NotificationBell.vue', 'packages/core/src/components/UnreadBadge.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/notifications-list-1440.png`,
+    name: 'signing/notifications-list-1440.png',
     depicts: ['packages/core/src/components/NotificationsPanel.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/my-shares-1440.png`,
+    name: 'signing/my-shares-1440.png',
     depicts: ['web/src/views/MyShares.vue', 'packages/core/src/components/RowActions.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/signing/admin-table-actions-1440.png`,
+    name: 'signing/admin-table-actions-1440.png',
     depicts: ['web/src/views/Shares.vue', 'packages/core/src/components/DataTable.vue', 'packages/core/src/components/RowActions.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/appearance/theme-editor-1440.png`,
+    name: 'appearance/theme-editor-1440.png',
     depicts: ['web/src/views/Appearance.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/appearance/themed-explorer-1440.png`,
+    name: 'appearance/themed-explorer-1440.png',
     depicts: ['web/src/lib/instanceThemes.ts', 'packages/core/src/lib/themes.ts'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/appearance/themed-signin-1440.png`,
+    name: 'appearance/themed-signin-1440.png',
     depicts: ['web/src/views/Login.vue', 'web/src/lib/theme.ts'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/symlinks/symlink-badge-1440.png`,
+    name: 'symlinks/symlink-badge-1440.png',
     depicts: ['packages/core/src/components/ListView.vue', 'packages/core/src/components/InspectorPanel.vue'],
   },
   {
     // The Apps list itself, with a language pack in it — the row that says
     // what a pack is and how far it goes.
-    file: `${SHOTS_ROOT_REL}/langpack/apps-list-1440.png`,
+    name: 'langpack/apps-list-1440.png',
     depicts: ['web/src/components/plugins/AppPluginsTab.vue', 'web/src/components/plugins/AppPluginLanguages.vue'],
   },
   {
     // Two kinds of tag, under their own headings, with one opened.
-    file: `${SHOTS_ROOT_REL}/tags/tags-kinds-1440.png`,
+    name: 'tags/tags-kinds-1440.png',
     depicts: ['web/src/views/TaggedFiles.vue', 'packages/core/src/components/TagKindIcon.vue', 'web/src/api/tags.ts'],
   },
   {
     // Trash: deleted-from, deleted-on and how long is left are columns of the
     // explorer's own table, filled by the shared "time left" sentence.
-    file: `${SHOTS_ROOT_REL}/sidenav/view-trash-1440.png`,
+    name: 'sidenav/view-trash-1440.png',
     depicts: ['packages/core/src/components/ListView.vue', 'packages/core/src/lib/trashTimeLeft.ts'],
   },
   // ── v0.49.0: roles (e2e/shots/roles.mjs) ──────────────────────────────
   {
     // Admin → Roles: the built-in roles and the custom ones in the
     // explorer's table, each row's name read in the panel's language.
-    file: `${SHOTS_ROOT_REL}/roles/roles-list-1440.png`,
+    name: 'roles/roles-list-1440.png',
     depicts: ['web/src/views/Roles.vue', 'web/src/lib/roleName.ts'],
   },
   // ── v0.50.0: groups, sign-in security, Default apps, folder previews
@@ -378,32 +377,32 @@ export const SCREENSHOTS = [
   {
     // Admin → Groups: each group's role, priority, members, folders and SSO
     // links in the explorer's table.
-    file: `${SHOTS_ROOT_REL}/groups/groups-list-1440.png`,
+    name: 'groups/groups-list-1440.png',
     depicts: ['web/src/views/Groups.vue'],
   },
   {
     // The sharing panel: a group suggested beside people, Owner asked in the dialog.
-    file: `${SHOTS_ROOT_REL}/groups/share-group-1440.png`,
+    name: 'groups/share-group-1440.png',
     depicts: ['packages/core/src/modals/PermissionsModal.vue'],
   },
   {
-    file: `${SHOTS_ROOT_REL}/loginsecurity/login-security-1440.png`,
+    name: 'loginsecurity/login-security-1440.png',
     depicts: ['web/src/views/LoginSecurity.vue', 'web/src/components/loginSecurity/AddressListEditor.vue'],
   },
   {
     // The sign-in form on a locked account: the message and the button counting down.
-    file: `${SHOTS_ROOT_REL}/loginsecurity/login-locked-1440.png`,
+    name: 'loginsecurity/login-locked-1440.png',
     depicts: ['web/src/views/Login.vue'],
   },
   {
     // Plugins → Default apps: every kind something besides filex handles, one with a rule.
-    file: `${SHOTS_ROOT_REL}/defaultapps/default-apps-1440.png`,
+    name: 'defaultapps/default-apps-1440.png',
     depicts: ['web/src/components/plugins/DefaultAppsTab.vue'],
   },
   {
     // The grid over folders drawn with the files that came into them last,
     // the SVGs drawn by the built-in engine.
-    file: `${SHOTS_ROOT_REL}/thumbnails/folders-grid-1440.png`,
+    name: 'thumbnails/folders-grid-1440.png',
     depicts: ['packages/core/src/components/FolderMosaic.vue', 'packages/core/src/components/ThumbTile.vue'],
   },
   // ── v0.51.0: the admin menu, who may encrypt, a .csv in ONLYOFFICE
@@ -411,43 +410,43 @@ export const SCREENSHOTS = [
   {
     // The People & security panel open over Admin → Users: sections, a line
     // under every page, the page you are on.
-    file: `${SHOTS_ROOT_REL}/megamenu/people-panel-1440.png`,
+    name: 'megamenu/people-panel-1440.png',
     depicts: ['packages/core/src/components/MegaMenu.vue', 'web/src/lib/adminNav.ts', 'web/src/components/TopNav.vue'],
   },
   {
     // Admin → Encryption: the policy card and the requests waiting.
-    file: `${SHOTS_ROOT_REL}/encryption/admin-encryption-1440.png`,
+    name: 'encryption/admin-encryption-1440.png',
     depicts: ['web/src/views/Encryption.vue', 'web/src/components/encryption/EncryptionPolicyCard.vue', 'web/src/components/encryption/EncryptionRequestsPanel.vue'],
   },
   {
     // The New folder dialog's request for an encrypted folder, a reason written.
-    file: `${SHOTS_ROOT_REL}/encryption/request-new-folder.png`,
+    name: 'encryption/request-new-folder.png',
     depicts: ['packages/core/src/components/E2eRequestModal.vue', 'packages/core/src/modals/NewFolderModal.vue'],
   },
   {
     // A semicolon CSV in ONLYOFFICE's spreadsheet, a look first.
-    file: `${SHOTS_ROOT_REL}/csvoffice/csv-view-1440.png`,
+    name: 'csvoffice/csv-view-1440.png',
     depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv.go'],
   },
   {
     // The editor tab with the note on what a save as CSV keeps.
-    file: `${SHOTS_ROOT_REL}/csvoffice/csv-edit-1440.png`,
+    name: 'csvoffice/csv-edit-1440.png',
     depicts: ['packages/core/src/modals/PreviewModal.vue', 'backend/internal/onlyoffice/csv.go'],
   },
   // ── v0.52.0: installing from a store, a paid app's license (e2e/shots/store.mjs) ──
   {
     // The install review opened from a store's link, marked From store.
-    file: `${SHOTS_ROOT_REL}/store/store-review-1440.png`,
+    name: 'store/store-review-1440.png',
     depicts: ['web/src/components/plugins/AppPluginInstallWizard.vue', 'web/src/views/StoreInstall.vue'],
   },
   {
     // The first link from a store: its address and its keys' fingerprints.
-    file: `${SHOTS_ROOT_REL}/store/store-trust-1440.png`,
+    name: 'store/store-trust-1440.png',
     depicts: ['web/src/views/StoreInstall.vue'],
   },
   {
     // A license the store revoked: the app held, the band on an admin page.
-    file: `${SHOTS_ROOT_REL}/store/store-license-held-1440.png`,
+    name: 'store/store-license-held-1440.png',
     depicts: ['web/src/components/AppLicenseAlert.vue', 'web/src/components/plugins/AppPluginsTab.vue'],
   },
 ];

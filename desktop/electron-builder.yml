@@ -110,6 +110,8 @@ linux:
     - application/vnd.oasis.opendocument.spreadsheet
     - application/vnd.oasis.opendocument.presentation
     - application/rtf
+    # #151: a .csv opens with filex too (src/openwith.ts OFFICE_EXTENSIONS).
+    - text/csv
     # ── filex:// — the browser sign-in hands the code back on it ──────
     # The one entry here that is not a document type: `x-scheme-handler/filex`
     # in the desktop entry is how a Linux desktop learns who opens filex://
@@ -195,6 +197,7 @@ mac:
         - ods
         - odp
         - rtf
+        - csv
       name: Office document
       role: Editor
       rank: Alternate

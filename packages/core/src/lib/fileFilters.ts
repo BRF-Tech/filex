@@ -150,8 +150,13 @@ export const EMPTY_FILTERS: DriveFilters = {
  *  ⚠ And the four Latin i's are one letter, as they are to the server's search
  *  and to tags (internal/namefold, `tagKey`): `ı` has no mark to strip, so
  *  without the last step "ışık" did not answer to "IŞIK" — nor "IŞIK" to
- *  "ışık", since `toLowerCase` lowers `I` to `i`. */
-function fold(s: string): string {
+ *  "ışık", since `toLowerCase` lowers `I` to `i`.
+ *
+ *  Exported (task #168) as the one rule for comparing what a person typed
+ *  with a name or a label: the admin panel's search (lib/panelSearch) folds
+ *  with it too, so "kullanici" finds "Kullanıcılar" and "guvenlik" finds
+ *  "Güvenlik" exactly as a file name is found. */
+export function foldText(s: string): string {
   return s
     .normalize('NFD')
     .replace(/\p{M}+/gu, '')
@@ -328,7 +333,7 @@ function matchesSize(n: FileNode, g: DriveFilters): boolean {
  */
 export function nameMatches(name: string, needle: string): boolean {
   if (!needle) return true;
-  return fold(name || '').includes(fold(needle));
+  return foldText(name || '').includes(foldText(needle));
 }
 
 /** The same predicate over a listing row. Folders take part like any other row:

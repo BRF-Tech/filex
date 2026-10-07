@@ -238,6 +238,16 @@ export const NOTIFICATION_PHRASES: Record<string, Record<NotifyLocale, Phrase>> 
     en: { title: '{notice_title}', body: '{plugin}: {notice_body}' },
     tr: { title: '{notice_title}', body: '{plugin}: {notice_body}' },
   },
+  // backend notify/digest.go: one person's held notifications, told together
+  // at the end of their window - meta.{count, groups[{name, path, storage,
+  // encrypted, e2e_root, parts[{key, count}]}], other_parts, more_folders,
+  // item}. The title is this phrase; the body is composed folder by folder
+  // from the parts (renderDigest), not from a template. A digest of one
+  // (`meta.item`) says what that one row says.
+  'notification.digest': {
+    en: { title: '{count} notifications', body: '{summary}', one: { title: '{count} notification' } },
+    tr: { title: '{count} bildirim', body: '{summary}' },
+  },
 
   // ── Operational alarms ──────────────────────────────────────────────────
   // Not in the subscribable catalogue, and the server writes their title in
@@ -650,6 +660,158 @@ export interface RenderOptions {
 
 const NOTIFY_KEY = 'server.notify.';
 
+/**
+ * The phrases a digest line is made of (backend notify/digest.go `digestPart`):
+ * the key after `server.notify.digest.`, then its `_one` form.
+ *
+ * ⚠ The words live in the SERVER catalogue (backend/internal/srvtext/locales,
+ * `server.notify.digest.*`), because the digest's email says them too and Go
+ * cannot read this file - the arrangement of WORDS. This table is the desktop
+ * shell's offline copy and the fallback for a key a pack lacks;
+ * web/tests/lib/notificationDigest.test.ts holds it to the catalogue.
+ */
+export const DIGEST_PARTS: Record<NotifyLocale, Record<string, string>> = {
+  en: {
+    admin: '{count} administrator alerts',
+    admin_one: '{count} administrator alert',
+    archive_created: '{count} archives created',
+    archive_created_one: '{count} archive created',
+    archive_extracted: '{count} archives extracted',
+    archive_extracted_one: '{count} archive extracted',
+    comment_added: '{count} comments',
+    comment_added_one: '{count} comment',
+    drop_received: '{count} uploads through a file request',
+    drop_received_one: '{count} upload through a file request',
+    e2e_escrow_used: '{count} encrypted folders opened with the escrow key',
+    e2e_escrow_used_one: '{count} encrypted folder opened with the escrow key',
+    e2e_password_changed: '{count} encryption passwords changed',
+    e2e_password_changed_one: '{count} encryption password changed',
+    e2e_request_created: '{count} encryption requests',
+    e2e_request_created_one: '{count} encryption request',
+    e2e_request_decided: '{count} encryption requests answered',
+    e2e_request_decided_one: '{count} encryption request answered',
+    file_deleted: '{count} files deleted for good',
+    file_deleted_one: '{count} file deleted for good',
+    file_infected: '{count} files with a virus',
+    file_infected_one: '{count} file with a virus',
+    file_moved: '{count} files moved',
+    file_moved_one: '{count} file moved',
+    file_trashed: '{count} files moved to the trash',
+    file_trashed_one: '{count} file moved to the trash',
+    file_updated: '{count} files changed',
+    file_updated_one: '{count} file changed',
+    file_upload_failed: '{count} uploads failed',
+    file_upload_failed_one: '{count} upload failed',
+    file_uploaded: '{count} files added',
+    file_uploaded_one: '{count} file added',
+    more: '{count} more folders',
+    more_one: '{count} more folder',
+    other: '{count} other notifications',
+    other_one: '{count} other notification',
+    plugin_notice: '{count} app notifications',
+    plugin_notice_one: '{count} app notification',
+    share_created: '{count} share links created',
+    share_created_one: '{count} share link created',
+  },
+  tr: {
+    admin: '{count} yönetici uyarısı',
+    archive_created: '{count} arşiv oluşturuldu',
+    archive_extracted: '{count} arşiv çıkarıldı',
+    comment_added: '{count} yorum',
+    drop_received: 'dosya isteğine {count} yükleme',
+    e2e_escrow_used: '{count} şifreli klasör emanet anahtarıyla açıldı',
+    e2e_password_changed: '{count} şifreleme parolası değişti',
+    e2e_request_created: '{count} şifreleme isteği',
+    e2e_request_decided: '{count} şifreleme isteği yanıtlandı',
+    file_deleted: '{count} dosya kalıcı olarak silindi',
+    file_infected: '{count} dosyada virüs bulundu',
+    file_moved: '{count} dosya taşındı',
+    file_trashed: '{count} dosya çöp kutusuna taşındı',
+    file_updated: '{count} dosya değişti',
+    file_upload_failed: '{count} yükleme başarısız oldu',
+    file_uploaded: '{count} dosya eklendi',
+    more: '{count} klasör daha',
+    other: '{count} diğer bildirim',
+    plugin_notice: '{count} uygulama bildirimi',
+    share_created: '{count} paylaşım bağlantısı oluşturuldu',
+  },
+};
+
+const DIGEST_KEY = 'server.notify.digest.';
+
+/** One digest phrase, in the reader's language: the pack's form for the
+ *  count's plural category, then its plain form, then this table's. */
+function digestPart(key: string, count: number, locale: NotifyLocale, opts: RenderOptions): string {
+  const table = DIGEST_PARTS[locale];
+  const known = key in DIGEST_PARTS.en ? key : 'other';
+  const n = String(count);
+  const cat = pluralCategory(opts.lang, n);
+  const pack =
+    (cat !== 'other' && packValue(opts.strings, `${DIGEST_KEY}${known}_${cat}`)) ||
+    packValue(opts.strings, DIGEST_KEY + known);
+  const own = (count === 1 && table[`${known}_one`]) || table[known] || DIGEST_PARTS.en[known];
+  return fillTemplate(pack ?? own, { count: n });
+}
+
+/** A digest's parts (`[{key, count}]`) as one comma-separated phrase. */
+function digestParts(parts: unknown, locale: NotifyLocale, opts: RenderOptions): string {
+  if (!Array.isArray(parts)) return '';
+  const out: string[] = [];
+  for (const p of parts) {
+    const part = asRecord(p);
+    const count = typeof part.count === 'number' ? part.count : 0;
+    if (count > 0) out.push(digestPart(str(part.key), count, locale, opts));
+  }
+  return out.join(', ');
+}
+
+/**
+ * A digest (backend notify/digest.go): "{count} notifications" over one line
+ * per folder - "Rapor: 12 dosya eklendi; Fotoğraflar: 3 dosya çöp kutusuna
+ * taşındı, 1 yorum". A digest of one says what that one row says, and opens
+ * what it opens (the row's target is the item's).
+ *
+ * ⚠ A folder inside an encrypted folder whose names are encrypted comes with
+ * no name (`encrypted`): the reader's explorer names it when it has the
+ * folder unlocked (opts.e2eName), otherwise it is the locked word - never the
+ * ciphertext in `path`.
+ */
+function renderDigest(row: NotificationLike, locale: NotifyLocale, opts: RenderOptions): NotificationText {
+  const meta = asRecord(row.meta);
+  const item = asRecord(meta.item);
+  if (meta.count === 1 && typeof item.event === 'string' && item.event && item.event !== 'notification.digest') {
+    return renderNotification(
+      { event: item.event, title: str(item.title), body: str(item.body), meta: item.meta, target: row.target },
+      locale,
+      opts,
+    );
+  }
+  const count = typeof meta.count === 'number' ? String(meta.count) : '';
+  const phrase = NOTIFICATION_PHRASES['notification.digest'][locale];
+  const packTitle = packField(opts, 'notification.digest', 'title', count);
+  const singular = count === '1' ? phrase.one?.title : undefined;
+  const title = fillTemplate(packTitle ?? singular ?? phrase.title, { count }) || str(row.title);
+  const words = packWords(WORDS[locale], opts.strings);
+  const lines: string[] = [];
+  for (const g of Array.isArray(meta.groups) ? meta.groups : []) {
+    const group = asRecord(g);
+    let name = str(group.name) || str(group.path) || str(group.storage);
+    if (group.encrypted === true) {
+      const root = str(group.e2e_root);
+      const known = root && opts.e2eName ? opts.e2eName(`${str(group.storage)}://${str(group.path)}`, root) : null;
+      name = known?.name || words.locked;
+    }
+    const parts = digestParts(group.parts, locale, opts);
+    if (parts) lines.push(`${name}: ${parts}`);
+  }
+  const more = typeof meta.more_folders === 'number' ? meta.more_folders : 0;
+  if (more > 0) lines.push(digestPart('more', more, locale, opts));
+  const other = digestParts(meta.other_parts, locale, opts);
+  if (other) lines.push(other);
+  const say = (text: string): string => (typeof opts.foreign === 'function' ? opts.foreign(text) : text);
+  return { title: say(title), body: say(lines.join('; ')) };
+}
+
 /** A pack's value for key, or undefined when it has none. */
 function packValue(strings: Record<string, string> | undefined, key: string): string | undefined {
   const v = strings?.[key];
@@ -720,6 +882,7 @@ export function renderNotification(
   locale: NotifyLocale,
   opts: RenderOptions = {},
 ): NotificationText {
+  if (row.event === 'notification.digest') return renderDigest(row, locale, opts);
   const vars = notificationVars(row, locale, opts.strings, opts.lang, opts.e2eName);
   const phrase = NOTIFICATION_PHRASES[row.event]?.[locale];
   const meta = asRecord(row.meta);

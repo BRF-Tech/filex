@@ -24,7 +24,10 @@
     "check:embed": "node scripts/check-embed.mjs",
     "shots": "node scripts/shots.mjs",
     "goreleaser:snapshot": "goreleaser release --snapshot --clean --skip=publish",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "train": "node scripts/train/new-train.mjs",
+    "merge-queue": "node scripts/train/merge-queue.mjs",
+    "ship": "node scripts/train/ship.mjs"
   },
   "engines": {
     "node": ">=20",

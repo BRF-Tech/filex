@@ -105,6 +105,7 @@ import UserEdit from '@/views/UserEdit.vue';
 import RoleEditor from '@/components/RoleEditor.vue';
 import UserRolesCard from '@/components/UserRolesCard.vue';
 import { unmountAll } from '../helpers/teardown';
+import { listedOptions, listOffering, optionLabels } from '../helpers/choiceSelect';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () {
@@ -150,7 +151,18 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('Role editor: other languages', () => {
+// ⚠ 30s for every case, like pluralCategories' COLD. Nothing here waits on a
+// clock or the network (every API module is mocked above): the file takes
+// 0.4-0.8s in a quiet run (the 0.53 runs full-20261006-164410Z and the
+// targeted ones after it). In full-20261006-204443Z the web job started with
+// the Cypress, docs and Go jobs while the host's memory was short (PSI memory
+// and io "full" about 0.5 for the minute at 20:48). The files that ran in that
+// minute were twenty to sixty times slower than in the run before (dateGroups
+// 0.35s, then 20s; this one 0.4s, then 20.6s), and the Roles table's case took
+// 13.8s against the default 5s.
+const UNDER_LOAD = { timeout: 30_000 };
+
+describe('Role editor: other languages', UNDER_LOAD, () => {
   it('a new role is written with its names in other languages, blanks left out', async () => {
     await mountAt(RoleEditor, { props: { modelValue: true, rule: null, catalogue, storages: [] } });
     // Folded, with a row per language the panel offers.
@@ -203,7 +215,7 @@ describe('Role editor: other languages', () => {
   });
 });
 
-describe('A custom role is named in the panel’s language', () => {
+describe('A custom role is named in the panel’s language', UNDER_LOAD, () => {
   it('the Roles table, with its description, and the delete-and-move dialog', async () => {
     await mountAt(Roles, { locale: 'tr' });
     expect(q('[data-testid="role-name-rule-7"]').textContent).toContain('Muhasebe');
@@ -222,7 +234,7 @@ describe('A custom role is named in the panel’s language', () => {
     await openRowMenu(w2, 'role-actions-rule-8');
     await pickMenuItem('role-actions-rule-8-delete');
     await flushPromises();
-    const labels = [...q<HTMLSelectElement>('[data-testid="role-delete-move"] select').options].map((o) => o.textContent?.trim());
+    const labels = await optionLabels(q('[data-testid="role-delete-move"]'));
     expect(labels).toContain('Muhasebe');
     expect(labels).not.toContain('Accounting');
   });
@@ -236,17 +248,16 @@ describe('A custom role is named in the panel’s language', () => {
   it('the Users list: the badge and the role filter', async () => {
     await mountAt(Users, { locale: 'tr' });
     expect(document.body.textContent).toContain('Muhasebe');
-    const filter = [...document.body.querySelectorAll('select')].find((x) =>
-      [...x.options].some((o) => o.value === 'custom:7'),
-    ) as HTMLSelectElement;
-    expect([...filter.options].find((o) => o.value === 'custom:7')?.textContent?.trim()).toBe('Muhasebe');
+    const filter = await listOffering('custom:7');
+    expect(filter, 'a list offers the custom role').toBeTruthy();
+    expect((await listedOptions(filter!)).find((o) => o.value === 'custom:7')?.label).toBe('Muhasebe');
     expect(document.body.textContent).not.toContain('Accounting');
   });
 
   it('a person’s page: the Role field, the badge, the card and the grid’s source', async () => {
     await mountAt(UserEdit, { path: '/users/2', locale: 'tr' });
-    const field = q<HTMLSelectElement>('form select');
-    expect([...field.options].find((o) => o.value === 'custom:7')?.textContent?.trim()).toBe('Muhasebe');
+    const field = q('form .fe-select__trigger');
+    expect((await listedOptions(field)).find((o) => o.value === 'custom:7')?.label).toBe('Muhasebe');
     expect(q('[data-testid="user-edit-role"]').textContent?.trim()).toBe('Muhasebe');
     expect(q('[data-testid="user-permissions-preset"]').textContent?.trim()).toBe('Muhasebe');
     expect(q('[data-testid="perm-row-files.delete"]').textContent).toContain('Muhasebe');

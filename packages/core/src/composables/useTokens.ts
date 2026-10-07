@@ -109,9 +109,31 @@ export function useTokens(config: ExplorerConfig) {
     }
   }
 
+  /**
+   * Change the levels of a token's permissions - `{comments: 'rw'}` lets it
+   * add and delete comments, `{comments: 'read'}` takes that back (task #157).
+   * Its verbs never change. A token calling this cannot raise a token above
+   * its own level, itself included; the server says so in words.
+   */
+  async function setPermissions(id: number, permissions: Record<string, string>): Promise<boolean> {
+    error.value = null;
+    try {
+      await api.jsonFetch(url(`/api/tokens/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permissions }),
+      });
+      await load();
+      return true;
+    } catch (e) {
+      error.value = messageOf(e);
+      return false;
+    }
+  }
+
   function dismiss(): void {
     revealed.value = null;
   }
 
-  return { tokens, loading, loaded, error, canMint, revealed, load, create, remove, dismiss };
+  return { tokens, loading, loaded, error, canMint, revealed, load, create, remove, setPermissions, dismiss };
 }

@@ -5,7 +5,7 @@
 //
 //   node e2e/shots/thumbnails.mjs       (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/thumbnails/:
+// Writes e2e/.artifacts/shots/capture/thumbnails/:
 //
 //   folders-grid-1440.png     the explorer's grid over a storage whose files
 //                             were put on its disk behind filex's back (a sync

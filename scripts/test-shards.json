@@ -1,0 +1,705 @@
+{
+  "$comment": [
+    "The Go test shards: ONE list for the build host chain, GitHub Actions and CircleCI (tasks #171, #180).",
+    "scripts/test-shards.mjs reads it (go | check | rebalance); scripts/lib/test-shards.mjs explains units, rests and profiles.",
+    "A sharded package is cut by TEST FILE; the unit marked rest also runs every test file no unit lists.",
+    "Among the package units, the rest runs every package go list ./... knows that no unit names.",
+    "weight_s: seconds the unit is expected to take under -race on the build host. The first split is an ESTIMATE",
+    "(weight_from); measure it on the first full run and run `rebalance --from <log> --write`.",
+    "docs/CONTRIBUTING.md, Testing -> Shards, says how to change this file."
+  ],
+  "module": "backend",
+  "units": {
+    "./internal/api/handlers": [
+      {
+        "name": "handlers-1",
+        "weight_s": 1128,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "ai_kindconflict_test.go",
+          "ai_move_size_test.go",
+          "app_plugins_ca_test.go",
+          "app_plugins_wire_test.go",
+          "app_ui_newdoc_test.go",
+          "auth_logout_test.go",
+          "auth_tenant_test.go",
+          "capabilities_caller_admin_test.go",
+          "confine_archive_root_test.go",
+          "confine_doors_shapes_test.go",
+          "csv_onlyoffice_test.go",
+          "dashboard_activity_email_test.go",
+          "demo_proxyauto_mask_test.go",
+          "duplicates_test.go",
+          "e2e_policy_admin_test.go",
+          "external_url_rule_test.go",
+          "gone_rows_test.go",
+          "internal_locks_test.go",
+          "mail_templates_test.go",
+          "notifications_tenant_iso_test.go",
+          "onlyoffice_offer_internal_test.go",
+          "password_refusal_reason_test.go",
+          "perm_delegated_reach_test.go",
+          "public_app_link_counts_test.go",
+          "public_i18n_test.go",
+          "queue_subject_test.go",
+          "queued_rename_restore_test.go",
+          "read_during_transfer_test.go",
+          "restore_occupied_test.go",
+          "restore_scan_test.go",
+          "save_text_thumb_test.go",
+          "save_text_untyped_test.go",
+          "share_list_test.go",
+          "shared_test.go",
+          "shares_mine_test.go",
+          "storages_create_enabled_test.go",
+          "storages_rescan_test.go",
+          "surface_conditions_test.go",
+          "thumb_note_listing_test.go",
+          "token_verbs_test.go",
+          "upload_staged_bookkeeping_test.go",
+          "upload_staged_surfaces_test.go",
+          "usage_test.go",
+          "users_tenant_gate_test.go",
+          "viewprefs_instance_default_test.go"
+        ]
+      },
+      {
+        "name": "handlers-2",
+        "weight_s": 1127,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "ai_admin_group_grants_test.go",
+          "ai_mcp_audit_test.go",
+          "ai_move_taken_name_test.go",
+          "ai_ops_test.go",
+          "app_actor_perms_test.go",
+          "app_output_folder_root_test.go",
+          "app_plugins_wave2_test.go",
+          "audit_targets_test.go",
+          "auth_realm_test.go",
+          "auth_self_avatar_test.go",
+          "confine_keys_test.go",
+          "custom_css_test.go",
+          "desktop_auth_test.go",
+          "directory_sync_gate_test.go",
+          "download_headers_test.go",
+          "download_link_test.go",
+          "drop_pages_test.go",
+          "e2e_policy_gate_internal_test.go",
+          "e2e_requests_rules_test.go",
+          "entry_unavailable_test.go",
+          "external_probe_signed_test.go",
+          "folder_preview_test.go",
+          "groups_admin_role_test.go",
+          "login_security_internal_test.go",
+          "login_security_test.go",
+          "manager_listing_traversal_test.go",
+          "manager_rename_taken_name_test.go",
+          "manager_storage_info_test.go",
+          "mutation_client_leaves_test.go",
+          "notifications_readstate_test.go",
+          "ops_submit_guard_test.go",
+          "providers_realm_test.go",
+          "public_page_job_output_test.go",
+          "save_text_parent_test.go",
+          "shares_admin_url_test.go",
+          "smtp_test_reason_test.go",
+          "storages_delete_client_leaves_test.go",
+          "storages_order_test.go",
+          "storages_scan_exclude_test.go",
+          "thumb_authz_test.go",
+          "tools_thumbs_test.go",
+          "totp_test.go",
+          "update_test.go",
+          "users_create_test.go",
+          "ws_url_unconfigured_test.go"
+        ]
+      },
+      {
+        "name": "handlers-3",
+        "weight_s": 1127,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "admin_instance_wide_tenant_test.go",
+          "ai_admin_audit_internal_test.go",
+          "ai_doors_apps_test.go",
+          "ai_mcp_audit_internal_test.go",
+          "ai_unavailable_test.go",
+          "app_plugins_test.go",
+          "app_store_intent_test.go",
+          "app_ui_save_test.go",
+          "archive_admin_test.go",
+          "auth_first_login_live_test.go",
+          "auth_providers_live_test.go",
+          "comments_test.go",
+          "demo_signin_mask_test.go",
+          "desktop_scopes_test.go",
+          "e2e_convert_test.go",
+          "e2e_listing_test.go",
+          "e2e_requests_test.go",
+          "e2e_rows_internal_test.go",
+          "file_types_admin_test.go",
+          "file_types_wire_test.go",
+          "manager_move_taken_name_test.go",
+          "manager_mutate_test.go",
+          "manager_tenant_iso_test.go",
+          "notifications_root_test.go",
+          "oidc_trust_api_test.go",
+          "openwith_test.go",
+          "ops_cross_test.go",
+          "perm_later_keys_test.go",
+          "plugins_updates_test.go",
+          "providers_screen_test.go",
+          "public_link_creator_test.go",
+          "save_text_drawio_test.go",
+          "search_demo_suggestion_test.go",
+          "server_text_test.go",
+          "shares_admin_plugin_test.go",
+          "shares_list_drop_test.go",
+          "storage_update_reload_test.go",
+          "tokens_kind_test.go",
+          "trash_original_path_test.go",
+          "trash_restore_tenant_test.go",
+          "update_package_test.go",
+          "webhooks_admin_test.go",
+          "write_event_kind_test.go",
+          "ws_avatar_test.go",
+          "ws_watch_test.go"
+        ]
+      },
+      {
+        "name": "handlers-4",
+        "weight_s": 1126,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "admin_ownership_tenant_test.go",
+          "admin_scoped_reads_tenant_test.go",
+          "ai_admin_gaps_test.go",
+          "ai_rest_parity_test.go",
+          "ai_tags_test.go",
+          "app_plugins_locale_test.go",
+          "app_ui_test.go",
+          "archive_cancel_test.go",
+          "archive_create_progress_test.go",
+          "capabilities_public_url_test.go",
+          "confine_body_items_test.go",
+          "dashboard_sync_state_test.go",
+          "drafts_test.go",
+          "e2e_fxe_password_test.go",
+          "e2e_keyfile_watch_test.go",
+          "e2e_policy_agent_doors_test.go",
+          "e2e_policy_rename_test.go",
+          "grants_root_confine_test.go",
+          "groups_test.go",
+          "lazy_listing_test.go",
+          "lazy_merge_test.go",
+          "login_totp_test.go",
+          "multipart_temp_test.go",
+          "onlyoffice_purpose_fetch_test.go",
+          "overwrite_etag_test.go",
+          "overwrite_guard_test.go",
+          "perm_role_names_test.go",
+          "perm_rule_audit_test.go",
+          "rename_s3_live_test.go",
+          "s3keys_no_secret_test.go",
+          "save_text_scan_test.go",
+          "search_content_test.go",
+          "share_revoked_at_test.go",
+          "shares_admin_pin_test.go",
+          "sharex_test.go",
+          "storages_create_test.go",
+          "storages_probe_timeout_test.go",
+          "tenant_signin_test.go",
+          "tenant_urls_test.go",
+          "trash_list_pages_test.go",
+          "trash_tenant_iso_test.go",
+          "upload_expect_test.go",
+          "upload_staged_test.go",
+          "upload_ticket_test.go",
+          "users_admin_test.go"
+        ]
+      },
+      {
+        "name": "handlers-5",
+        "weight_s": 1125,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "ai_admin_test.go",
+          "ai_cross_events_test.go",
+          "ai_root_hint_test.go",
+          "ai_search_query_test.go",
+          "ai_token_test.go",
+          "app_ui_call_test.go",
+          "app_user_perm_internal_test.go",
+          "auth_logout_live_test.go",
+          "builtin_roles_tenant_test.go",
+          "capabilities_heic_test.go",
+          "dashboard_queue_depth_test.go",
+          "e2e_allowed_test.go",
+          "e2e_names_search_test.go",
+          "e2e_password_test.go",
+          "external_live_test.go",
+          "files_tenant_cross_test.go",
+          "grants_path_test.go",
+          "grants_test.go",
+          "manager_cache_test.go",
+          "manager_changes_test.go",
+          "oidc_refusal_reason_test.go",
+          "oidc_tenant_boundary_test.go",
+          "onlyoffice_diagnose_test.go",
+          "page_dir_internal_test.go",
+          "pathguard_test.go",
+          "plugin_logs_test.go",
+          "protection_avconfig_test.go",
+          "providers_test.go",
+          "public_api_test.go",
+          "public_cache_test.go",
+          "rename_announce_test.go",
+          "search_issue15_demo_test.go",
+          "server_text_internal_test.go",
+          "share_browse_test.go",
+          "share_limit_test.go",
+          "share_revoke_app_link_test.go",
+          "shares_admin_empty_test.go",
+          "storages_demo_test.go",
+          "storages_discover_test.go",
+          "tenant_self_test.go",
+          "tokens_self_test.go",
+          "trash_deleted_by_test.go",
+          "users_provider_test.go",
+          "versions_authz_test.go",
+          "ws_test.go"
+        ]
+      },
+      {
+        "name": "handlers-6",
+        "weight_s": 1122,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "ai_doors_test.go",
+          "ai_move_no_free_name_test.go",
+          "app_link_ended_test.go",
+          "app_plugins_ca_warn_test.go",
+          "app_plugins_updates_test.go",
+          "app_state_root_test.go",
+          "app_store_security_test.go",
+          "app_ui_sec_test.go",
+          "auth_providers_pam_test.go",
+          "auth_providers_windows_live_test.go",
+          "base_path_urls_test.go",
+          "capabilities_archive_test.go",
+          "cors_preflight_test.go",
+          "demo_account_exempt_test.go",
+          "demo_redact_internal_test.go",
+          "external_pinned_test.go",
+          "internal_writes_test.go",
+          "login_throttle_test.go",
+          "meta_rows_thumb_test.go",
+          "notifications_audience_test.go",
+          "ops_transfer_name_test.go",
+          "perm_enforce_test.go",
+          "perm_gaps_api_test.go",
+          "person_label_test.go",
+          "protection_avwindow_test.go",
+          "public_cache_scope_test.go",
+          "public_exposed_copy_csp_test.go",
+          "quota_accounting_test.go",
+          "s3keys_test.go",
+          "security_review_test.go",
+          "served_file_policy_test.go",
+          "share_internal_trees_test.go",
+          "share_unavailable_test.go",
+          "storage_plugin_harden_test.go",
+          "storages_scan_lifetime_test.go",
+          "tags_kinds_test.go",
+          "thumb_listing_fresh_test.go",
+          "token_admin_gate_test.go",
+          "tokens_list_empty_test.go",
+          "tools_thumbs_office_test.go",
+          "upload_staged_guard_test.go",
+          "upload_staged_s3commit_test.go",
+          "userprefs_test.go",
+          "writehook_surface_test.go"
+        ]
+      },
+      {
+        "name": "handlers-7",
+        "weight_s": 1122,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "account_rules_test.go",
+          "ai_archive_test.go",
+          "ai_cross_test.go",
+          "ai_denial_status_test.go",
+          "ai_mcp_verbs_internal_test.go",
+          "app_plugin_output_override_test.go",
+          "app_plugins_root_confine_test.go",
+          "app_plugins_view_paths_test.go",
+          "archive_create_test.go",
+          "auth_username_login_test.go",
+          "body_length_test.go",
+          "confine_body_shapes_test.go",
+          "confine_sweep_test.go",
+          "demo_exposure_test.go",
+          "drop_refusal_words_test.go",
+          "drop_test.go",
+          "e2e_fxe_escrow_test.go",
+          "e2e_policy_copy_test.go",
+          "e2e_policy_drop_test.go",
+          "e2e_policy_undecided_test.go",
+          "file_types_upgrade_test.go",
+          "guards_metrics_test.go",
+          "internal_dirs_test.go",
+          "internal_editor_test.go",
+          "link_creator_test.go",
+          "manager_multi_test.go",
+          "manager_newdoc_test.go",
+          "manager_range_test.go",
+          "meta_rows_perm_test.go",
+          "name_taken_test.go",
+          "notifications_rbac_test.go",
+          "perm_admin_api_test.go",
+          "public_entries_test.go",
+          "public_path_param_test.go",
+          "quota_admin_test.go",
+          "save_text_mime_test.go",
+          "search_owner_test.go",
+          "search_rebuild_test.go",
+          "search_tags_test.go",
+          "storages_lazy_test.go",
+          "tenant_self_acme_test.go",
+          "token_scopes_doors_test.go",
+          "trash_empty_async_test.go",
+          "users_usage_test.go"
+        ]
+      },
+      {
+        "name": "handlers-8",
+        "rest": true,
+        "weight_s": 1122,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "admin_session_only_test.go",
+          "ai_admin_output_test.go",
+          "ai_doors_people_test.go",
+          "ai_e2e_surface_test.go",
+          "app_page_root_test.go",
+          "app_plugins_locks_test.go",
+          "archive_download_test.go",
+          "auth_providers_probe_test.go",
+          "branding_sso_test.go",
+          "branding_test.go",
+          "cloud_test.go",
+          "confine_ops_one_answer_test.go",
+          "drop_proxy_gives_up_test.go",
+          "e2e_policy_app_test.go",
+          "e2e_policy_doors_test.go",
+          "e2e_policy_folder_test.go",
+          "external_test_form_values_test.go",
+          "handlers_test.go",
+          "header_proxy_refusal_reason_test.go",
+          "login_security_doors_test.go",
+          "manager_rename_subtree_test.go",
+          "meta_empty_test.go",
+          "ops_list_payload_test.go",
+          "ops_owner_test.go",
+          "ops_tenant_iso_test.go",
+          "plugin_job_output_test.go",
+          "plugin_requests_test.go",
+          "protection_test.go",
+          "public_api_leak_test.go",
+          "public_branding_locales_test.go",
+          "public_page_job_guard_test.go",
+          "public_page_job_params_test.go",
+          "quota_storages_test.go",
+          "search_decomposed_names_test.go",
+          "search_one_rule_test.go",
+          "search_window_test.go",
+          "share_folder_test.go",
+          "share_prezip_thumb_test.go",
+          "storages_scan_settings_test.go",
+          "tenantiso_fixture_test.go",
+          "themes_test.go",
+          "token_ceiling_test.go",
+          "users_enabled_test.go",
+          "users_timezone_test.go",
+          "ws_tenant_iso_test.go"
+        ]
+      }
+    ],
+    "./internal/wasmplugin": [
+      {
+        "name": "wasmplugin-1",
+        "weight_s": 1025,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "compat_test.go",
+          "fetch_guard_test.go",
+          "jobrow_test.go",
+          "langpack_test.go",
+          "license_hold_slot_test.go",
+          "outbound_test.go",
+          "path_confinement_test.go",
+          "public_ceiling_test.go",
+          "public_promised_test.go",
+          "runtime_test.go",
+          "settings_i18n_test.go",
+          "signing_ca_test.go",
+          "ui_sec_test.go",
+          "uicall_test.go",
+          "upgrade_rollback_test.go"
+        ]
+      },
+      {
+        "name": "wasmplugin-2",
+        "weight_s": 1021,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "applies_override_test.go",
+          "engine_ext_test.go",
+          "fetch_redirect_test.go",
+          "job_open_test.go",
+          "license_hold_test.go",
+          "locks_test.go",
+          "perm_labels_test.go",
+          "schedule_test.go",
+          "signing_eku_test.go",
+          "statelist_system_test.go",
+          "ui_newdoc_test.go"
+        ]
+      },
+      {
+        "name": "wasmplugin-3",
+        "weight_s": 1020,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "actor_perms_test.go",
+          "applies_override_engine_test.go",
+          "fetch_commit_test.go",
+          "job_error_code_test.go",
+          "manifest_test.go",
+          "office_engine_test.go",
+          "public_pin_test.go",
+          "public_test.go",
+          "registry_test.go",
+          "security_review_api_test.go",
+          "srvtext_test.go",
+          "tenant_scope_test.go",
+          "thumbnails_test.go",
+          "ui_test.go",
+          "versions_test.go"
+        ]
+      },
+      {
+        "name": "wasmplugin-4",
+        "rest": true,
+        "weight_s": 1014,
+        "weight_from": "estimate: the 0.52 -race shards (cut by first letter) took 38/31/45/36 min (handlers) and 20/8/30/10 min (wasmplugin) on the build host; a test weighs its letter range's minutes / its tests",
+        "files": [
+          "assets_test.go",
+          "install_concurrent_test.go",
+          "install_review_test.go",
+          "jobtext_test.go",
+          "linkof_test.go",
+          "public_catalogue_test.go",
+          "public_pageless_test.go",
+          "seal_test.go",
+          "security_review_test.go",
+          "signing_test.go",
+          "statelist_root_test.go",
+          "statelist_test.go",
+          "updates_test.go",
+          "wave2_platform_test.go"
+        ]
+      }
+    ]
+  },
+  "packages": [
+    {
+      "name": "db",
+      "weight_s": 383,
+      "weight_from": "estimate: sum of the packages' -race times in the 0.52 build host run (go test -race -p 3)",
+      "packages": [
+        "./internal/db",
+        "./internal/db/drivers/conformance",
+        "./internal/db/drivers/sqlite"
+      ]
+    },
+    {
+      "name": "io",
+      "weight_s": 2459,
+      "weight_from": "estimate: sum of the packages' -race times in the 0.52 build host run (go test -race -p 3)",
+      "packages": [
+        "./internal/dav",
+        "./internal/ftpsrv",
+        "./internal/nfssrv",
+        "./internal/ops",
+        "./internal/protocolauth",
+        "./internal/protocolsync",
+        "./internal/queue",
+        "./internal/s3api",
+        "./internal/search",
+        "./internal/sftpsrv",
+        "./internal/storage/drivers/ftp",
+        "./internal/storage/drivers/s3",
+        "./internal/storage/drivers/sftp",
+        "./internal/storage/drivers/smb",
+        "./internal/storage/drivers/webdav",
+        "./internal/storage/stall",
+        "./internal/sync"
+      ]
+    },
+    {
+      "name": "rest",
+      "rest": true,
+      "weight_s": 2591,
+      "weight_from": "estimate: sum of the packages' -race times in the 0.52 build host run (go test -race -p 3)"
+    }
+  ],
+  "profiles": {
+    "go": [
+      {
+        "name": "handlers-1-2",
+        "units": [
+          "handlers-1",
+          "handlers-2"
+        ]
+      },
+      {
+        "name": "handlers-3-4",
+        "units": [
+          "handlers-3",
+          "handlers-4"
+        ]
+      },
+      {
+        "name": "handlers-5-6",
+        "units": [
+          "handlers-5",
+          "handlers-6"
+        ]
+      },
+      {
+        "name": "handlers-7-8",
+        "units": [
+          "handlers-7",
+          "handlers-8"
+        ]
+      },
+      {
+        "name": "wasmplugin-1-2",
+        "units": [
+          "wasmplugin-1",
+          "wasmplugin-2"
+        ]
+      },
+      {
+        "name": "wasmplugin-3-4",
+        "units": [
+          "wasmplugin-3",
+          "wasmplugin-4"
+        ]
+      },
+      {
+        "name": "db",
+        "units": [
+          "db"
+        ]
+      },
+      {
+        "name": "io-rest",
+        "units": [
+          "io",
+          "rest"
+        ]
+      }
+    ],
+    "race": [
+      {
+        "name": "handlers-1",
+        "units": [
+          "handlers-1"
+        ]
+      },
+      {
+        "name": "handlers-2",
+        "units": [
+          "handlers-2"
+        ]
+      },
+      {
+        "name": "handlers-3",
+        "units": [
+          "handlers-3"
+        ]
+      },
+      {
+        "name": "handlers-4",
+        "units": [
+          "handlers-4"
+        ]
+      },
+      {
+        "name": "handlers-5",
+        "units": [
+          "handlers-5"
+        ]
+      },
+      {
+        "name": "handlers-6",
+        "units": [
+          "handlers-6"
+        ]
+      },
+      {
+        "name": "handlers-7",
+        "units": [
+          "handlers-7"
+        ]
+      },
+      {
+        "name": "handlers-8",
+        "units": [
+          "handlers-8"
+        ]
+      },
+      {
+        "name": "wasmplugin-1",
+        "units": [
+          "wasmplugin-1"
+        ]
+      },
+      {
+        "name": "wasmplugin-2",
+        "units": [
+          "wasmplugin-2"
+        ]
+      },
+      {
+        "name": "wasmplugin-3",
+        "units": [
+          "wasmplugin-3"
+        ]
+      },
+      {
+        "name": "wasmplugin-4",
+        "units": [
+          "wasmplugin-4"
+        ]
+      },
+      {
+        "name": "db-io",
+        "units": [
+          "db",
+          "io"
+        ]
+      },
+      {
+        "name": "rest",
+        "units": [
+          "rest"
+        ]
+      }
+    ]
+  }
+}

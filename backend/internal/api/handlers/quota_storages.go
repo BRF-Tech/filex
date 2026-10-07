@@ -19,12 +19,12 @@ package handlers
 
 import (
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
+	"github.com/brf-tech/filex/backend/internal/memcache"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
 )
 
@@ -44,46 +44,18 @@ import (
 // read by everybody, repeatedly, and wants to be cheap.
 const storageUsageTTL = 15 * time.Second
 
-type storageUsageEntry struct {
+// storageUsage is one storage's (files, bytes) pair, as the cache keeps it.
+type storageUsage struct {
 	files int64
 	bytes int64
-	at    time.Time
 }
 
-// storageUsageCache is the process-local TTL cache behind the endpoint. Keyed
-// by storage id, so two people looking at the same drive pay for one count.
-type storageUsageCache struct {
-	mu  sync.Mutex
-	m   map[int64]storageUsageEntry
-	ttl time.Duration
-	now func() time.Time
-}
-
-func newStorageUsageCache(ttl time.Duration) *storageUsageCache {
-	return &storageUsageCache{m: map[int64]storageUsageEntry{}, ttl: ttl, now: time.Now}
-}
-
-// get returns the cached pair when it is still fresh.
-func (c *storageUsageCache) get(id int64) (int64, int64, bool) {
-	if c == nil || c.ttl <= 0 {
-		return 0, 0, false
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	e, ok := c.m[id]
-	if !ok || c.now().Sub(e.at) > c.ttl {
-		return 0, 0, false
-	}
-	return e.files, e.bytes, true
-}
-
-func (c *storageUsageCache) put(id, files, bytes int64) {
-	if c == nil || c.ttl <= 0 {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.m[id] = storageUsageEntry{files: files, bytes: bytes, at: c.now()}
+// newStorageUsageCache is the process-local TTL cache behind the endpoint.
+// Keyed by storage id, so two people looking at the same drive pay for one
+// count. A memcache.Cache - filex's one in-process cache (internal/memcache) -
+// with nothing behind it: the figure is recounted, not stored.
+func newStorageUsageCache(ttl time.Duration) *memcache.Cache[int64, storageUsage] {
+	return memcache.New[int64, storageUsage](memcache.Options{TTL: ttl})
 }
 
 // StorageUsageRow is one drive's answer.
@@ -173,7 +145,8 @@ func (h *Quota) StorageUsage(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		files, bytes, ok := h.usage.get(s.ID)
+		u, ok := h.usage.Get(s.ID)
+		files, bytes := u.files, u.bytes
 		if !ok {
 			c, sz, serr := h.Store.StorageStats(ctx, s.ID)
 			if serr != nil {
@@ -183,7 +156,7 @@ func (h *Quota) StorageUsage(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			files, bytes = c, sz
-			h.usage.put(s.ID, files, bytes)
+			h.usage.Put(s.ID, storageUsage{files: files, bytes: bytes})
 		}
 		row := StorageUsageRow{Name: s.Name, UsedBytes: bytes, FileCount: files}
 		if h.Lazy != nil {

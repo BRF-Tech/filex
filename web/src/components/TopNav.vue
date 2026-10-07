@@ -4,7 +4,6 @@ import { RouterLink, useRouter } from 'vue-router';
 import {
   Menu as MenuIcon,
   LogOut,
-  Search,
   ChevronDown,
   SlidersHorizontal,
 } from 'lucide-vue-next';
@@ -26,6 +25,7 @@ import { useSettingsDeepLink } from '@/composables/useSettingsDeepLink';
 import NotificationBell from './NotificationBell.vue';
 import QuotaWidget from './QuotaWidget.vue';
 import AdminNav from './AdminNav.vue';
+import AdminSearch from './AdminSearch.vue';
 import LogoMark from './LogoMark.vue';
 
 // Async so the modal's markup, its strings and core's stylesheet stay out of
@@ -52,10 +52,6 @@ const { t, locale } = useI18n();
 
 async function logout() {
   await signOut(auth, router);
-}
-
-function gotoSearch() {
-  router.push({ name: 'search' });
 }
 </script>
 
@@ -95,20 +91,14 @@ function gotoSearch() {
 
     <AdminNav v-if="wide" mode="bar" />
 
-    <!-- The placeholder is long ("Search files… by name, or tag:label"), and
-         beside the menu it fits only from 1536px: the glyph alone below that,
-         with the words as its name. -->
-    <button
-      type="button"
-      class="hidden md:inline-flex items-center gap-2 rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-1.5 text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-      :aria-label="t('search.queryPlaceholder')"
-      @click="gotoSearch"
-    >
-      <Search class="h-4 w-4" />
-      <span class="hidden 2xl:inline">{{ t('search.queryPlaceholder') }}</span>
-    </button>
-
     <div class="ms-auto flex items-center gap-1.5">
+      <!-- The panel's search (task #168, docs/ADMIN-PANEL.md → Search): pages,
+           settings, people, API keys, apps, storages, shares and files, in
+           one box. It used to be a button that opened the file search page,
+           and only from 768px: a phone had no search at all. Now a box on a
+           wide screen and a button with a layer over the window on a phone;
+           Ctrl+K opens it on either. -->
+      <AdminSearch :compact="!wide" />
       <QuotaWidget />
       <NotificationBell />
 

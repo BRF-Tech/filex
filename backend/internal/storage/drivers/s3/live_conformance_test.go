@@ -15,7 +15,10 @@ package s3_test
 //	FILEX_TEST_S3_REGION=eu-central-003 \
 //	  go test ./internal/storage/drivers/s3/ -run TestLiveProviderConformance -v
 //
-// It writes under a prefix of its own and deletes what it wrote.
+// It writes under a prefix of its own and deletes what it wrote. The server is
+// read by internal/testutil/lives3 (FILEX_TEST_S3_PATH_STYLE=0 for
+// virtual-hosted addressing); the build host's nightly run points it at the
+// bucket its settings name (scripts/chain/job/s3-live.sh).
 
 import (
 	"bytes"
@@ -23,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -32,30 +34,14 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/storage"
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/s3"
+	"github.com/brf-tech/filex/backend/internal/testutil/lives3"
 )
 
 func liveDriver(t *testing.T) (storage.Driver, string) {
 	t.Helper()
-	bucket := os.Getenv("FILEX_TEST_S3_BUCKET")
-	access := os.Getenv("FILEX_TEST_S3_ACCESS_KEY")
-	secret := os.Getenv("FILEX_TEST_S3_SECRET_KEY")
-	if bucket == "" || access == "" || secret == "" {
-		t.Skip("set FILEX_TEST_S3_* to measure a real provider")
-	}
-	cfg := map[string]any{
-		"bucket":     bucket,
-		"endpoint":   os.Getenv("FILEX_TEST_S3_ENDPOINT"),
-		"access_key": access,
-		"secret_key": secret,
-	}
-	if r := os.Getenv("FILEX_TEST_S3_REGION"); r != "" {
-		cfg["region"] = r
-	}
-	// Path style is what a local MinIO/Garage needs; a real provider is happy
-	// either way and B2 accepts both.
-	if os.Getenv("FILEX_TEST_S3_PATH_STYLE") != "0" {
-		cfg["path_style"] = true
-	}
+	// Path style unless FILEX_TEST_S3_PATH_STYLE=0: what a local MinIO/Garage
+	// needs; a real provider is happy either way and B2 accepts both.
+	cfg := lives3.Config(t, "measure a real provider")
 	d, err := storage.Get("s3")
 	require.NoError(t, err)
 	require.NoError(t, d.Init(context.Background(), cfg))

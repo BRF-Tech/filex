@@ -115,6 +115,11 @@ type Deps struct {
 	// through the connection built from the configuration it had at boot.
 	// Nil is legal: it means nothing is cached (tests, embedders).
 	ForgetStorage func(int64)
+	// ReplicaLinks is told when a storage's replication link or a
+	// replication target changes, so the drivers are rebuilt around it and
+	// the initial copy starts, restarts or stops (internal/server
+	// storage_cache.go). Nil is legal: nothing replicates (tests, embedders).
+	ReplicaLinks handlers.ReplicaLinks
 	// Plugins manages out-of-process storage drivers (internal/plugin). Nil
 	// when FILEX_PLUGINS_DISABLED — the admin routes then answer 503.
 	Plugins *plugin.Manager
@@ -185,6 +190,14 @@ type Deps struct {
 	// address, for the web form and every password protocol alike
 	// (internal/loginguard). Constructed in BuildRouter from Store when nil.
 	LoginGuard *loginguard.Guard
+	// TenantLockout: this server started with multi-tenant mode OFF on an
+	// install that has tenants (maintenance mode, internal/tenancy). Every
+	// authenticated route group then refuses a tenant's account
+	// (auth.MaintenanceLockout) where TenantResolver would have scoped it, so
+	// a session or API key opened while the mode was on stops working too.
+	// internal/server decides it at start; false (a test router) mounts
+	// nothing.
+	TenantLockout bool
 	// FTPSAddr reports the address the FTPS listener actually bound.
 	//
 	// ⚠⚠ A function, not a string, and read at REQUEST time. Config may say
@@ -241,6 +254,17 @@ type Deps struct {
 // BuildRouter constructs the chi router with all routes wired up.
 func BuildRouter(d *Deps) http.Handler {
 	r := chi.NewRouter()
+
+	// The tenant step of every authenticated route group, ONE value so the
+	// groups cannot disagree: multi-tenant mode on scopes the request to the
+	// caller's tenant (auth.TenantResolver); off on an install that has
+	// tenants holds a tenant's account off (auth.MaintenanceLockout, maintenance
+	// mode); off on a plain install it is the pass-through TenantResolver has
+	// always been there.
+	tenantScope := auth.TenantResolver(d.Store, d.Cfg.MultiTenant)
+	if !d.Cfg.MultiTenant && d.TenantLockout {
+		tenantScope = auth.MaintenanceLockout(d.Store)
+	}
 
 	// RBAC/ACL resolver — the identity-driven complement to confine. Every
 	// file handler consults it to filter listings and gate reads/mutations by
@@ -358,6 +382,15 @@ func BuildRouter(d *Deps) http.Handler {
 
 	r.Use(LoggerAt(d.Cfg.BasePath))
 	r.Use(Recoverer)
+	// Task #92: the ONLYOFFICE editor's frame on its own origin
+	// (FILEX_ONLYOFFICE_FRAME_ORIGIN, normally the document server's). On that
+	// host filex answers /filex-frame/editor and nothing else - never the SPA,
+	// the API or a share - at the host's root, whatever the base path; on
+	// every other host /filex-frame/ is refused. ⚠ Above the base path and
+	// every other layer: nothing of filex's but that page is reachable there.
+	// The handler is set below, once ooh exists.
+	var officeFrame http.Handler = http.NotFoundHandler()
+	r.Use(officeFrameHost(d.Cfg.ExternalServices.OnlyOffice.FrameOrigin, d.Cfg.BasePath, func() http.Handler { return officeFrame }))
 	// FILEX_APP_UI_ORIGIN: apps' interfaces on an origin of their own. That
 	// host answers the interface route (and /healthz) and nothing else —
 	// never the SPA, the API or a share — and every other host refuses the
@@ -394,6 +427,11 @@ func BuildRouter(d *Deps) http.Handler {
 	// preflight, a demo refusal) carries the default as well: "every /api
 	// answer" has no exceptions but the ones a handler names.
 	r.Use(APINoStore)
+	// The origins where code filex did not write runs (the ONLYOFFICE frame
+	// origin, the app-interface origin) never get a CORS answer, whatever
+	// the list below says (origin_guard.go untrustedOrigins). Outside it, so
+	// its answer is what goes out.
+	r.Use(corsNever(untrustedOrigins(d)))
 	// Exposed Retry-After: a caller that opted in to the "preparing" answer
 	// (X-Filex-Accept-Prepare) has to be able to read how long to wait.
 	r.Use(cors.Handler(cors.Options{
@@ -644,6 +682,18 @@ func BuildRouter(d *Deps) http.Handler {
 	ooh := handlers.NewOnlyOffice(d.OnlyOffice, d.Store, d.StorageResolver)
 	ooh.AttachACL(d.ACL)
 	ooh.AttachBody(d.Body)
+	// Task #92: the editor's api.js runs in a frame on another origin
+	// (onlyoffice/frame.go), and every editor config names that frame: the
+	// frame origin (FILEX_ONLYOFFICE_FRAME_ORIGIN, normally the document
+	// server's own) when it is set, else the interface origin. With neither it
+	// runs in filex's own page.
+	switch {
+	case d.Cfg.ExternalServices.OnlyOffice.FrameOrigin != "":
+		ooh.FrameURL = d.Cfg.ExternalServices.OnlyOffice.FrameOrigin + onlyoffice.FrameHostPath
+	case d.Cfg.AppUIOrigin != "":
+		ooh.FrameURL = d.Cfg.AppUIOrigin + strings.TrimRight(d.Cfg.BasePath, "/") + onlyoffice.FramePath
+	}
+	officeFrame = http.HandlerFunc(ooh.Frame)
 	// The save callback fans out through the same post-write gate as every
 	// other write surface: row + index + thumbnail + realtime frame +
 	// `file.updated` + antivirus. ⚠ Without this wire an office document keeps
@@ -691,6 +741,7 @@ func BuildRouter(d *Deps) http.Handler {
 	stg.Plugins = d.Plugins
 	stg.StorageResolver = d.StorageResolver
 	stg.ForgetStorage = d.ForgetStorage
+	stg.ReplicaLinks = d.ReplicaLinks
 	stg.DemoMode = d.Cfg.Demo.Mode
 	ush := handlers.NewUsers(d.Store)
 	ush.ACL = d.ACL
@@ -763,6 +814,8 @@ func BuildRouter(d *Deps) http.Handler {
 
 	externalH := handlers.NewExternalAdmin(d.Store, d.Caps, d.External, envManagedExternal(d.Cfg))
 	externalH.AttachPublicURL(d.Cfg.PublicURL, d.Cfg.PublicURLSet)
+	externalH.AttachAppUIOrigin(d.Cfg.AppUIOrigin)
+	externalH.AttachOfficeFrameOrigin(d.Cfg.ExternalServices.OnlyOffice.FrameOrigin)
 	// The third leg. Without this the Test button can only say it did not
 	// check the document server's route back to filex — which is where the
 	// reporter of issue #17 spent two rounds.
@@ -779,8 +832,24 @@ func BuildRouter(d *Deps) http.Handler {
 	searchAdmH := handlers.NewSearchAdmin(d.Index, d.Store)
 	queueH := handlers.NewQueue(d.Queue)
 	queueH.AttachStore(d.Store)
+	// The admin panel's search (task #168, handlers/panel_search.go). Each of
+	// its sources is added below, next to the route it reads and behind that
+	// route's own gate, so who may find what is who may open what.
+	panelH := handlers.NewPanelSearch(d.Store, d.ACL)
 	notifH := handlers.NewNotifications(d.Notify, d.Store, d.ACL)
+	// The digest's background pass judges a person's held rows through the
+	// bell this handler gives them (internal/notify digest.go): their tenant
+	// on the context, then bellFor and the per-row pass.
+	if d.Cfg.MultiTenant {
+		notifH.UserScope = func(ctx context.Context, u *model.User) context.Context {
+			return tenant.WithScope(ctx, auth.ScopeForUser(ctx, d.Store, u))
+		}
+	}
+	if dg, ok := d.Notify.(notify.Digests); ok {
+		dg.SetViewer(notifH.DigestViewer)
+	}
 	replicaH := handlers.NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader)
+	replicaH.Links = d.ReplicaLinks
 	trashH := handlers.NewTrash(d.Trash, d.Store)
 	trashH.AttachSearchIndex(d.Index)
 	trashH.AttachACL(d.ACL)
@@ -971,6 +1040,16 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Get("/_appui/*", ui.ServeHTTP)
 		r.Head("/_appui/*", ui.ServeHTTP)
 	}
+	// The editor's frame (task #92): ONLYOFFICE's api.js runs here, on the
+	// interface origin, instead of in filex's page. Only with that origin -
+	// on filex's own host the interface route is refused (appUIHostSplit),
+	// and a frame of filex's own origin would isolate nothing. Not an app:
+	// served whether or not the app runtime is on. ⚠ The path is
+	// onlyoffice.FramePath, spelt out so docs/BACKEND.md's route check reads it.
+	if d.Cfg.AppUIOrigin != "" {
+		r.Get("/_appui/_onlyoffice/editor", ooh.Frame)
+		r.Head("/_appui/_onlyoffice/editor", ooh.Frame)
+	}
 
 	// ────── onlyoffice public endpoints (HMAC/JWT signed) ──────
 	// The admin Test's reverse-path probe arrives at /fetch too, signed like a
@@ -1030,7 +1109,7 @@ func BuildRouter(d *Deps) http.Handler {
 		// A token that names no `read` sees no thumbnail (auth/token_verbs.go);
 		// a signed URL carries no token and is judged by its signature.
 		r.Use(auth.RequireVerb(auth.VerbRead))
-		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(tenantScope)
 		r.Use(confine.Middleware)
 		r.Get("/api/files/thumb/{id}", th.Serve)
 	})
@@ -1225,7 +1304,7 @@ func BuildRouter(d *Deps) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.MiddlewareWithToken(d.Store, false))
 		r.Use(auth.RequireVerb(auth.VerbRead))
-		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(tenantScope)
 		r.Get("/api/ws", wsh.Handle)
 	})
 
@@ -1240,15 +1319,17 @@ func BuildRouter(d *Deps) http.Handler {
 		// ones that change files add `write` and the ones that remove files
 		// add `delete`, route by route below. The personal state a person
 		// keeps whatever their role — preferences, stars, recents, personal
-		// tags, comments, the bell, their own API/S3/SSH keys and NFS exports
-		// (each with its own ceiling) — needs `read` only. Changing the
-		// account itself (profile, password, two-factor) needs `write`, below.
+		// tags, the bell, their own API/S3/SSH keys and NFS exports (each with
+		// its own ceiling) — needs `read` only. Comments need the token's
+		// `comments` permission instead (`comments:rw` to add and delete,
+		// auth/token_perms.go; asked by the handler). Changing the account
+		// itself (profile, password, two-factor) needs `write`, below.
 		// A new route that changes files must say `write` or `delete`;
 		// handlers/token_verbs_test.go walks this group and goes red if not.
 		r.Use(auth.RequireVerb(auth.VerbRead))
 		// Resolve the tenant (provider) scope from the user (no-op unless
 		// multi-tenant mode is on). See docs/MULTI-TENANCY.md.
-		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(tenantScope)
 		// Audit curated self-service + file mutations (profile, password,
 		// TOTP, shares, file deletes — shouldAudit() filters the rest).
 		r.Use(auth.AuditMiddleware(d.Store))
@@ -1394,6 +1475,18 @@ func BuildRouter(d *Deps) http.Handler {
 			r.With(handlers.RequirePersonalCaller).Get("/{id}/pin", sharesMineH.Pin)
 		})
 
+		// ────── the embedded store screen (#162) ──────
+		//
+		// A person who sees it (the administrator's settings, per tenant) reads
+		// a trusted store's catalog through filex and leaves a request on the
+		// Install requests list (handlers/app_store_view.go). A person's
+		// screen: the handlers refuse an API key, and nothing here installs,
+		// trusts or asks a store for a link.
+		apStoreUser := handlers.NewAppStore(d.AppStore, handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason), d.Cfg.Demo.Mode)
+		apStoreUser.Requests = pluginRequests
+		apStoreUser.Groups = d.Store
+		r.Route("/api/app-store", apStoreUser.MountUser)
+
 		// Per-user notifications (bell + history + read/unread).
 		//
 		// ⚠ confine.Middleware, as on /api/files and /api/shares: a notice names
@@ -1519,6 +1612,11 @@ func BuildRouter(d *Deps) http.Handler {
 			// ask for this document, and what did filex answer? Read-only,
 			// for whoever may open the document (OnlyOffice.Diagnose, #80).
 			r.Get("/onlyoffice/diagnose", ooh.Diagnose)
+			// #184: the editor's session and a document that changed outside
+			// it - is it still current, and the person's answer (mine /
+			// theirs). Asking needs view; answering checks files.modify and a
+			// token that may write in the handler (OnlyOffice.Session).
+			r.Post("/onlyoffice/session", ooh.Session)
 
 			// Plain-text save target for the SFC's code/markdown editor.
 			r.With(write).Post("/save-text", saveTextH.Save)
@@ -1591,7 +1689,11 @@ func BuildRouter(d *Deps) http.Handler {
 			/* calisma:d3 comments */
 			// Node comments — flat chronological threads on files/folders
 			// (v0.6 "Çalışma" (Work)). Read+write = anyone who can SEE the node;
-			// delete = author-or-admin (both enforced in the handler).
+			// delete = author-or-admin (both enforced in the handler). A token
+			// also needs its `comments` permission - `comments:rw` to add and
+			// delete, which `write` does not stand in for (task #157). The
+			// handler asks it, so /api/ai and MCP, which run the same handler,
+			// ask it too.
 			cmtH := handlers.NewComments(d.Store)
 			cmtH.AttachACL(d.ACL)
 			r.Get("/comments", cmtH.List)
@@ -1690,7 +1792,7 @@ func BuildRouter(d *Deps) http.Handler {
 		// Scope admin to its tenant (no-op unless multi-tenant mode is on). A
 		// tenant-admin then only sees its own storages/users; the supertenant
 		// sees all. See docs/MULTI-TENANCY.md.
-		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(tenantScope)
 		// Record every successful mutating admin action. The middleware is
 		// otherwise defined but never installed anywhere, which left the
 		// Audit page empty even after real changes.
@@ -1767,6 +1869,9 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(users).Post("/groups/{id}/members", groupsH.AddMembers)
 				r.With(users).Delete("/groups/{id}/members/{user_id}", groupsH.RemoveMember)
 				r.With(users).Get("/users/{id}/groups", groupsH.UserGroups)
+				// The panel's search reads these two lists through the same gate.
+				panelH.AddUsers(users(http.HandlerFunc(ush.List)))
+				panelH.AddGroups(users(http.HandlerFunc(groupsH.List)))
 				// Per-user quota, nested where callers look for it first. The
 				// flat /quota/{user_id} predates it and still works;
 				// handlers/quota.go has documented the nested shape since before
@@ -1791,6 +1896,7 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(shares).Get("/shares/", sharesAdmH.List)
 				r.With(shares).Post("/shares/{id}/revoke", sharesAdmH.Revoke)
 				r.With(shares).Delete("/shares/{id}", sharesAdmH.Delete)
+				panelH.AddShares(shares(http.HandlerFunc(sharesAdmH.List)))
 
 				audit := handlers.RequireAdminPermission(d.ACL, perm.AdminAudit)
 				r.With(audit).Get("/audit", auditH.List)
@@ -1808,6 +1914,19 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(monitor).Get("/queue", queueH.List)
 				r.With(monitor).Get("/queue/", queueH.List)
 				r.With(monitor).Get("/queue/{id}", queueH.Get)
+
+				// The panel's search (task #168): open to whoever the panel
+				// opens for - an administrator, or a session holding any one
+				// of the permissions above. What each reader FINDS is decided
+				// per source, by the gate of the list it reads. The recent
+				// searches are the caller's own, and never in the audit log
+				// (auth.ActionForPath).
+				panel := panelH.RequirePanel
+				r.With(panel).Get("/panel-search", panelH.Search)
+				r.With(panel).Get("/panel-search/recent", panelH.Recent)
+				r.With(panel).Post("/panel-search/recent", panelH.Remember)
+				r.With(panel).Delete("/panel-search/recent", panelH.Clear)
+				r.With(panel).Delete("/panel-search/recent/{id}", panelH.Forget)
 			})
 
 			// ── Administrators only ─────────────────────────────────────────
@@ -1898,6 +2017,11 @@ func BuildRouter(d *Deps) http.Handler {
 				if d.AppStore != nil {
 					apAdm.OnRemoved = d.AppStore.Forget
 				}
+				// The embedded store (#162): a request from the store screen is
+				// approved through the store review, and that install closes it.
+				apStore.Requests = pluginRequests
+				apStore.Groups = d.Store
+				pluginReqH.Store = apStore
 				r.Route("/app-plugins", func(r chi.Router) {
 					apStore.MountAdmin(r)
 					r.Get("/", apAdm.List)
@@ -1929,6 +2053,9 @@ func BuildRouter(d *Deps) http.Handler {
 					// same rows filtered, for a panel that wants one app's table.
 					r.Get("/shares", sharesAdmH.ListAppPluginShares)
 				})
+				// The panel's search: the installed apps, and - when the reader
+				// may list those - what each one does from the file menu.
+				panelH.AddApps(auth.RequireAdmin(http.HandlerFunc(apAdm.List)), auth.RequireAdmin(http.HandlerFunc(apH.Actions)))
 
 				// Default apps: which app opens a kind of file, and which draws
 				// its thumbnails (handlers/file_types_admin.go, internal/assoc).
@@ -1957,10 +2084,12 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Get("/{id}/sync-runs", storagesAdmH.SyncRuns)
 					r.Get("/{id}/drift", storagesAdmH.Drift)
 				})
+				panelH.AddStorages(auth.RequireAdmin(http.HandlerFunc(stg.List)))
 
 				// Replication targets — separate entity (backup-only sinks).
 				// See handlers/replication_targets.go for the rationale.
 				repTargetsH := handlers.NewReplicationTargets(d.Store)
+				repTargetsH.Links = d.ReplicaLinks
 				r.Route("/replication-targets", func(r chi.Router) {
 					r.Get("/", repTargetsH.List)
 					r.Post("/", repTargetsH.Create)
@@ -2056,6 +2185,13 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Delete("/{id}/storages/{storageID}", provH.UnlinkStorage)
 				})
 
+				// Multi-tenant mode (internal/tenancy, handlers/tenancy_admin.go):
+				// the platform operator's switch, saved for the next start. Both
+				// gates (supertenant, a person's session) are inside the handler.
+				tenancyH := handlers.NewTenancyAdmin(d.Store, d.Cfg)
+				r.Get("/tenancy", tenancyH.Get)
+				r.Put("/tenancy", tenancyH.Put)
+
 				// Who may encrypt (internal/e2epolicy, handlers/e2e_policy_admin.go):
 				// the policy of the tenant the caller administers and — for the
 				// supertenant alone — every tenant's ceiling. Writes are a
@@ -2084,6 +2220,7 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Patch("/{id}", aiTokensH.Update)
 					r.Delete("/{id}", aiTokensH.Delete)
 				})
+				panelH.AddKeys(auth.RequireAdmin(http.HandlerFunc(aiTokensH.List)))
 
 				// Release awareness / self-upgrade. GET is cached (never touches
 				// the network), /check forces a fetch, /apply installs.
@@ -2155,6 +2292,11 @@ func BuildRouter(d *Deps) http.Handler {
 					r.Post("/test", notifH.AdminTest)
 					r.Get("/webhook-config", notifH.AdminWebhookConfig)
 					r.Patch("/webhook-config", notifH.AdminUpdateWebhookConfig)
+					// The digest's defaults - the window and which kinds are
+					// urgent - for the tenant the caller administers
+					// (handlers/notification_digest.go).
+					r.Get("/digest", notifH.AdminDigest)
+					r.Patch("/digest", notifH.AdminUpdateDigest)
 				})
 
 				// Webhook v2 targets — multi-destination, event-filtered,
@@ -2182,6 +2324,10 @@ func BuildRouter(d *Deps) http.Handler {
 					})
 					r.Post("/fix", replicaH.FixAll)
 					r.Post("/fix-one", replicaH.FixOne)
+					r.Get("/initial-copies", replicaH.InitialCopies)
+					r.Post("/initial-copies/{storage_id}/restart", replicaH.RestartInitialCopy)
+					r.Get("/links", replicaH.ListLinks)
+					r.Put("/links/{storage_id}", replicaH.SetLinkFolder)
 					r.Get("/report", replicaH.GetReport)
 					r.Post("/report/run-now", replicaH.RunReportNow)
 					r.Get("/settings", replicaH.GetSettings)
@@ -2241,12 +2387,16 @@ func BuildRouter(d *Deps) http.Handler {
 		ReplicaService:  d.ReplicaService,
 		ReplicaCron:     d.ReplicaCron,
 		ReplicaReloader: d.ReplicaReloader,
+		ForgetStorage:   d.ForgetStorage,
+		ReplicaLinks:    d.ReplicaLinks,
 
 		External:           d.External,
 		EnvManagedExternal: envManagedExternal(d.Cfg),
 		DemoMode:           d.Cfg.Demo.Mode,
 		PublicURL:          d.Cfg.PublicURL,
 		PublicURLSet:       d.Cfg.PublicURLSet,
+		AppUIOrigin:        d.Cfg.AppUIOrigin,
+		OfficeFrameOrigin:  d.Cfg.ExternalServices.OnlyOffice.FrameOrigin,
 		ReversePath:        reversePath,
 		AuthLive:           d.AuthLive,
 
@@ -2276,7 +2426,7 @@ func BuildRouter(d *Deps) http.Handler {
 		r.Use(auth.APITokenMiddleware(d.Store))
 		// Agents are tenant-scoped too — resolve the token user's provider
 		// (no-op unless multi-tenant mode is on). See docs/MULTI-TENANCY.md.
-		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(tenantScope)
 		// Attribute every AI write to its token + username in the audit log
 		// (reads are GET and never audited). Runs after the token middleware so
 		// TokenFrom/TokenUserFrom are on the context.
@@ -2337,13 +2487,16 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(auth.RequireScope("read")).Get("/shares", aiH.SharesList)
 		r.With(auth.RequireScope("write")).Post("/share/request", aiH.FileRequest)
 		// The bell (marking read is the caller's bookkeeping, `read` as on
-		// /api/notifications), a star, comments, item permissions.
+		// /api/notifications), a star, comments, item permissions. Adding and
+		// deleting a comment ask `read` here and the token's `comments:rw` in
+		// the explorer's handler they run (handlers/comments.go) - the rule of
+		// /api/files/comments, not `write` (task #157).
 		r.With(auth.RequireScope("read")).Get("/notifications", aiH.NotificationsList)
 		r.With(auth.RequireScope("read")).Post("/notifications/read", aiH.NotificationRead)
 		r.With(auth.RequireScope("write")).Post("/star", aiH.Star)
 		r.With(auth.RequireScope("read")).Get("/comments", aiH.CommentsList)
-		r.With(auth.RequireScope("write")).Post("/comments", aiH.CommentAdd)
-		r.With(auth.RequireScope("write")).Post("/comments/{id}/delete", aiH.CommentDelete)
+		r.With(auth.RequireScope("read")).Post("/comments", aiH.CommentAdd)
+		r.With(auth.RequireScope("read")).Post("/comments/{id}/delete", aiH.CommentDelete)
 		r.With(auth.RequireScope("read")).Get("/permissions", aiH.PermissionsList)
 		r.With(auth.RequireScope("read")).Get("/permissions/users", aiH.PermissionUsers)
 		r.With(auth.RequireScope("write")).Post("/permissions", aiH.PermissionSet)
@@ -2379,7 +2532,7 @@ func BuildRouter(d *Deps) http.Handler {
 	sxUploadH.AttachBody(d.Body)
 	r.Route("/api/sharex", func(r chi.Router) {
 		r.Use(auth.APITokenMiddleware(d.Store))
-		r.Use(auth.TenantResolver(d.Store, d.Cfg.MultiTenant))
+		r.Use(tenantScope)
 		r.Use(auth.AuditMiddleware(d.Store))
 		r.With(auth.RequireScope("write")).Post("/upload", sxUploadH.Upload)
 	})
@@ -2857,7 +3010,43 @@ func pageFrameSources(d *Deps) func(*http.Request) []string {
 		if d.Cfg.AppUIOrigin != "" {
 			out = append(out, d.Cfg.AppUIOrigin)
 		}
+		// The ONLYOFFICE editor's frame (task #92), when its origin is not
+		// already the document server's above.
+		if fo := d.Cfg.ExternalServices.OnlyOffice.FrameOrigin; fo != "" {
+			out = append(out, fo)
+		}
 		return out
+	}
+}
+
+// officeFrameHost serves the ONLYOFFICE editor's frame on its own origin
+// (FILEX_ONLYOFFICE_FRAME_ORIGIN, task #92): on that host the one path
+// onlyoffice.FrameHostPath answers, through frame(), and every other path is a
+// 404 - the document server's proxy sends filex nothing else, and filex must
+// not answer anything else there if it ever did. On every other host the
+// /filex-frame/ prefix is a 404 too, so a proxy rule pointed at the wrong
+// filex, or a frame origin left unset, never serves filex's pages under it.
+// Installed with an empty origin as well (that refusal still holds), and under
+// filex's base path too.
+func officeFrameHost(origin, basePath string, frame func() http.Handler) func(http.Handler) http.Handler {
+	host := ""
+	if u, err := url.Parse(origin); err == nil && origin != "" {
+		host = strings.ToLower(u.Host)
+	}
+	prefix := onlyoffice.FrameHostPrefix
+	basePrefix := strings.TrimRight(basePath, "/") + prefix
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			onFrameHost := host != "" && strings.EqualFold(r.Host, host)
+			switch {
+			case onFrameHost && r.URL.Path == onlyoffice.FrameHostPath:
+				frame().ServeHTTP(w, r)
+			case onFrameHost, strings.HasPrefix(r.URL.Path, prefix), strings.HasPrefix(r.URL.Path, basePrefix):
+				http.NotFound(w, r)
+			default:
+				next.ServeHTTP(w, r)
+			}
+		})
 	}
 }
 

@@ -1,0 +1,281 @@
+# CircleCI: the public repository's second CI, and the release gate's
+# stand-in when GitHub Actions is down (task #181).
+#
+# What it runs, on every push of main and on a pipeline started by hand on
+# main: the Go suite (PostgreSQL, MySQL and Redis beside it), the web and
+# package unit suites in UTC, the desktop unit tests, and the Playwright suite
+# in Chromium. `pnpm release X.Y.Z --gate circleci` reads the workflow `ci`
+# below, by that name, instead of GitHub (docs/CONTRIBUTING.md, Release
+# process, "When GitHub Actions is down").
+#
+# ⚠⚠ The parts are the ones every runner uses, never a list of this file's:
+#   - the Go job runs on as many copies as the `go` profile of
+#     scripts/test-shards.json has shards, and copy i asks
+#     `node scripts/test-shards.mjs go --profile go --node i/N` for its own.
+#     A parallelism that is not the profile's shard count is refused there,
+#     and web/tests/deploy/circleciConfig.test.ts is red on it before a push;
+#   - the Playwright job runs `node e2e/run.mjs local --shard i/N`: Playwright
+#     splits the suite itself, so the copies add up to the whole run.
+#
+# ⚠⚠ Why this file lives in the private repository, when .github/workflows
+# does not. The export (scripts/export-public.sh) keeps the public checkout's
+# .github/workflows and never writes them; a change to them reaches the
+# public repository as packaging/ci/*.patch. They hold the tokens and the tag
+# run that publishes, and an export must never rewrite the pipeline that
+# publishes it. This file publishes nothing, holds no secret and asks for
+# none, and it calls this tree's scripts (scripts/test-shards.mjs,
+# e2e/run.mjs, scripts/ci/engines-ran.mjs), so it has to change in the same
+# commit as they do. It is therefore ordinary source: the export copies it
+# with the code it tests, the pipeline of a landed commit runs the config
+# written for that commit (lesson #1098: a workflow pushed ahead of its export
+# went red), and the guard above holds it to the shard list and to the files
+# it calls on every web test run.
+#
+# Set up on CircleCI once, by the maintainer: the project for the public
+# repository on the Free plan (a public repository gets the open-source
+# credits), no builds of forked pull requests, no secret anywhere. Nothing here
+# reads a project variable or a context. docs/CONTRIBUTING.md says how.
+
+version: 2.1
+
+executors:
+  # Go and Node: the build, the Go suite, the unit suites. The Go version is
+  # backend/go.mod's (the guard holds the tag to it).
+  go-node:
+    docker:
+      - image: cimg/go:1.25-node
+    resource_class: large
+  # The browsers Playwright needs, at the version pnpm-lock.yaml pins (the
+  # guard holds the tag to it), so nothing is downloaded per run.
+  browser:
+    docker:
+      - image: mcr.microsoft.com/playwright:v1.59.1-noble
+    resource_class: large
+
+commands:
+  pnpm-install:
+    description: pnpm as package.json pins it, then the workspace from the lockfile
+    parameters:
+      cache:
+        type: string
+    steps:
+      # Into the home directory, never a system one: the convenience images
+      # run as an ordinary user, the Playwright image as root.
+      - run:
+          name: pnpm, as package.json pins it
+          command: |
+            pm="$(node -p "require('./package.json').packageManager")"
+            bin="$HOME/.local/bin"
+            mkdir -p "$bin"
+            echo "export PATH=$bin:\$PATH" >> "$BASH_ENV"
+            export PATH="$bin:$PATH"
+            if command -v corepack >/dev/null 2>&1; then
+              corepack enable --install-directory "$bin" pnpm
+              corepack prepare "$pm" --activate
+            else
+              npm install -g --prefix "$HOME/.local" "$pm"
+            fi
+            node --version
+            pnpm --version
+      - restore_cache:
+          keys:
+            - pnpm-v1-<< parameters.cache >>-{{ checksum "pnpm-lock.yaml" }}
+      - run:
+          name: pnpm install --frozen-lockfile
+          command: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
+      - save_cache:
+          key: pnpm-v1-<< parameters.cache >>-{{ checksum "pnpm-lock.yaml" }}
+          paths:
+            - ~/.pnpm-store
+  go-modules:
+    steps:
+      - restore_cache:
+          keys:
+            - go-mod-v1-{{ checksum "backend/go.sum" }}
+      - run:
+          name: go mod download
+          working_directory: backend
+          command: go mod download
+      - save_cache:
+          key: go-mod-v1-{{ checksum "backend/go.sum" }}
+          paths:
+            - ~/go/pkg/mod
+
+jobs:
+  # Packages, admin UI (vue-tsc + vite), embed, the server binary; go vet on
+  # the module with the real UI embedded. The binary and the echo app
+  # fixture go to the Playwright job.
+  build:
+    executor: go-node
+    environment:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      CYPRESS_INSTALL_BINARY: "0"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      TZ: UTC
+    steps:
+      - checkout
+      - pnpm-install:
+          cache: go-node
+      - go-modules
+      - run:
+          name: the echo app fixture
+          command: bash scripts/build-wasm-fixture.sh
+      - run:
+          name: packages, admin UI, embed and the server binary
+          environment:
+            NODE_OPTIONS: --max-old-space-size=4096
+          command: pnpm run build:all
+      - run:
+          name: go vet
+          working_directory: backend
+          command: go vet ./...
+      - persist_to_workspace:
+          root: .
+          paths:
+            - bin/filex
+            - backend/internal/wasmplugin/testdata/echo/echo.wasm
+
+  # Copy i of N runs shard i of the `go` profile: scripts/test-shards.json is
+  # the list, this job holds only how many copies there are.
+  go:
+    docker:
+      - image: cimg/go:1.25-node
+      - image: postgres:17
+        environment:
+          POSTGRES_USER: filex
+          POSTGRES_PASSWORD: filex
+          POSTGRES_DB: filex
+      # 8.4: the MySQL LTS docs/DATABASES.md names.
+      - image: mysql:8.4
+        environment:
+          MYSQL_ROOT_PASSWORD: filex
+          MYSQL_DATABASE: filex
+      - image: redis:7-alpine
+    resource_class: large
+    parallelism: 8
+    environment:
+      FILEX_TEST_PG_DSN: "postgres://filex:filex@127.0.0.1:5432/postgres?sslmode=disable"
+      FILEX_TEST_MYSQL_DSN: "root:filex@tcp(127.0.0.1:3306)/mysql?parseTime=true&loc=UTC&charset=utf8mb4"
+      FILEX_TEST_REDIS_URL: "redis://127.0.0.1:6379/0"
+      # The fixture is built below: a test that cannot find it is red here.
+      FILEX_REQUIRE_WASM_FIXTURE: "1"
+      TZ: UTC
+    steps:
+      - checkout
+      - go-modules
+      # backend/embed/{admin,web} are build output; //go:embed refuses a
+      # pattern that matches nothing.
+      - run:
+          name: embed placeholders
+          command: |
+            mkdir -p backend/embed/admin backend/embed/web
+            touch backend/embed/admin/.placeholder backend/embed/web/.placeholder
+      - run:
+          name: the echo app fixture
+          command: bash scripts/build-wasm-fixture.sh
+      # A server that is not up turns its engine's tests into skips, and a
+      # skip is a pass: wait for each, and stop when one never comes.
+      - run:
+          name: PostgreSQL, MySQL and Redis are up
+          command: |
+            for port in 5432 3306 6379; do
+              n=0
+              until (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do
+                n=$((n + 1))
+                if [ "$n" -ge 90 ]; then echo "nothing listens on $port after 180 s"; exit 1; fi
+                sleep 2
+              done
+              echo "port $port is up"
+            done
+      - run:
+          name: this copy's shard of the Go suite
+          command: |
+            mkdir -p test-results/go
+            node scripts/test-shards.mjs go --profile go --format args --node "$((CIRCLE_NODE_INDEX + 1))/$CIRCLE_NODE_TOTAL" > /tmp/shard.args
+            mapfile -t A < /tmp/shard.args
+            if [ "${#A[@]}" -eq 0 ]; then echo "the shard list gave this copy no arguments"; exit 1; fi
+            cd backend
+            gotestsum --junitfile ../test-results/go/junit.xml --jsonfile ../test-results/go/go-test.json --format testname -- -count=1 -timeout 30m "${A[@]}"
+      - run:
+          name: PostgreSQL and MySQL really ran (when this shard tested internal/db)
+          command: node scripts/ci/engines-ran.mjs test-results/go/go-test.json
+      - store_test_results:
+          path: test-results
+
+  # The web and package unit suites in UTC (as on GitHub), and the desktop
+  # unit tests (Node's own runner, no install).
+  web:
+    executor: go-node
+    environment:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      CYPRESS_INSTALL_BINARY: "0"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      TZ: UTC
+    steps:
+      - checkout
+      - pnpm-install:
+          cache: go-node
+      - run:
+          name: the packages the web suite imports
+          environment:
+            NODE_OPTIONS: --max-old-space-size=4096
+          command: pnpm -r --filter='./packages/*' build
+      - run:
+          name: web and package unit tests
+          command: pnpm --filter='./web' --filter='./packages/*' test
+      - run:
+          name: desktop unit tests
+          working_directory: desktop
+          command: node --experimental-strip-types --test test/*.test.ts
+
+  # Copy i of N runs part i of the Playwright suite, Chromium, against the
+  # binary the build job made, on a server, port and output directory of its
+  # own (e2e/lib/shard.mjs).
+  e2e:
+    executor: browser
+    parallelism: 4
+    environment:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      CYPRESS_INSTALL_BINARY: "0"
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      TZ: UTC
+      E2E_BROWSERS: chromium
+      FILEX_REQUIRE_WASM_FIXTURE: "1"
+    steps:
+      - checkout
+      - pnpm-install:
+          cache: browser
+      - attach_workspace:
+          at: .
+      # The specs refuse a module older than the sources beside it, and this
+      # checkout is newer than the build job's: the module was built in this
+      # pipeline, from this commit, so it is made newer again here.
+      - run:
+          name: the echo module of this pipeline
+          command: touch backend/internal/wasmplugin/testdata/echo/echo.wasm
+      - run:
+          name: this copy's part of the Playwright suite
+          command: node e2e/run.mjs local --binary bin/filex --shard "$((CIRCLE_NODE_INDEX + 1))/$CIRCLE_NODE_TOTAL"
+      - store_artifacts:
+          path: e2e/test-results
+          destination: test-results
+      - store_artifacts:
+          path: e2e/.artifacts
+          destination: server-logs
+
+workflows:
+  # The name the release gate reads (scripts/release/plan.mjs, circleciWorkflow).
+  ci:
+    # main only: GitHub tests pull requests, and a branch is never a release.
+    when:
+      equal: [main, << pipeline.git.branch >>]
+    jobs:
+      - build
+      - go
+      - web
+      - e2e:
+          requires:
+            - build

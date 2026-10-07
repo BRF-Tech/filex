@@ -180,11 +180,16 @@ describe('PWA install surface', () => {
         androidUA(win);
       },
     });
-    // Nothing is offered on a phone until the browser says it can install.
-    cy.get('[data-testid="pwa-install-banner"]').should('not.exist');
+    // #190 (the owner's ruling, 2026-10-06): a phone gets the band from the
+    // first page. Before the browser offers an install it says where the
+    // browser's menu has one; the Install button comes with the event.
+    cy.get('[data-testid="pwa-install-banner"]').should('be.visible');
+    cy.get('[data-testid="pwa-menu-instructions"]').should('be.visible');
+    cy.get('[data-testid="pwa-install-button"]').should('not.exist');
     cy.window().then((win) => fireBeforeInstallPrompt(win));
     cy.get('[data-testid="pwa-install-banner"]').should('be.visible');
     cy.get('[data-testid="pwa-install-button"]').should('be.visible');
+    cy.get('[data-testid="pwa-menu-instructions"]').should('not.exist');
     cy.get('[data-testid="desktop-download-button"]').should('not.exist');
     cy.get('[data-testid="pwa-ios-instructions"]').should('not.exist');
   });

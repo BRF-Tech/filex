@@ -14,6 +14,13 @@ export interface ApiToken {
   id: number;
   label: string;
   scopes: string;
+  /**
+   * The level of each permission the key holds, as the server answers it -
+   * `{comments: 'read' | 'rw'}`. A key whose list does not name a permission
+   * holds its default, and the server is where that rule lives; absent only
+   * from an older server.
+   */
+  permissions?: Record<string, string>;
   /** Per-token display identities for the audit trail; may be absent. */
   usernames?: string | null;
   created_at?: string;
@@ -33,6 +40,8 @@ export interface ApiTokenRequest {
    * Comma-separated verbs. The server CAPS this against the caller's role and
    * their own grants, so asking for more than you have is refused rather than
    * quietly granted — never send `admin`, it is rejected outright here.
+   * `comments:rw` lets the key add and delete comments too; without it the
+   * key reads them (`write` does not include it).
    */
   scopes?: string;
   expires_in_days?: number;

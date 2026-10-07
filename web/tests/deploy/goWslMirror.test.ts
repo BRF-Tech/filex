@@ -185,7 +185,10 @@ describe('Go under WSL runs from a mirror on WSL\'s own disk', () => {
       const src = read(rel);
       expect(src, rel).not.toMatch(/cd \$\{(shq|q)\(toWslPath\(/);
     }
-    expect(read('scripts/release/plan.mjs')).toMatch(/wslMirrorCd\(/);
+    // The release gates and the train's merge queue run Go through
+    // goShellArgv, which mirrors with wslMirrorCd (#179).
+    expect(read('scripts/release/plan.mjs')).toMatch(/goShellArgv\(/);
+    expect(read('scripts/lib/go-build.mjs')).toMatch(/wslMirrorCd\(dir\)/);
     expect(read('scripts/release/gates/engines.mjs')).toMatch(/wslMirrorCd\(/);
     expect(read('scripts/lib/go-build.mjs')).toMatch(/wslMirrorCd\(cwd\)/);
   });

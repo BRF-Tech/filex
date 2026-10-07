@@ -37,22 +37,25 @@ type RedirectFn = (to: unknown) => { name?: string };
 const target = (rec: RouteRecordNormalized): string | undefined =>
   (rec.redirect as RedirectFn)({ path: '/', query: {}, hash: '', params: {} }).name;
 
-describe('front doors', () => {
+// ⚠ 20s for every case. `routerOn` is a COLD `import('@/router')` after
+// `vi.resetModules()`: the first case pays for transforming the router's whole
+// eager graph — which reaches `@brftech/filex-core` (stores/auth →
+// lib/timezone, the settings modal's palette grid) and, since #167, the
+// capabilities store and `@/i18n` — and every case evaluates it again. The
+// first was measured at 4.5s against the default 5s; the later ones run in
+// ~450ms alone, but took over 5s in the test chain's full run (2026-10-06,
+// next to the Go shards), so the 20s the first case had is now the file's.
+const COLD = { timeout: 20_000 };
+
+describe('front doors', COLD, () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/admin/');
   });
 
-  // ⚠ 20s, and only here. `routerOn` is a COLD `import('@/router')` after
-  // `vi.resetModules()`, so the first case in this file pays for transforming
-  // the router's whole eager graph — which now reaches `@brftech/filex-core`
-  // (stores/auth → lib/timezone, and the settings modal's palette grid). The
-  // later cases reuse the transform and run in ~450ms. Measured at 4.5s
-  // against the default 5s, i.e. green by half a second, which is not a test
-  // result, it is a coin toss on a busy machine.
   it('the operator lands on Home from /admin/ too, not on the dashboard', async () => {
     const router = await routerOn('/admin/');
     expect(target(rootRedirect(router))).toBe('home');
-  }, 20_000);
+  });
 
   it('the end user lands on Home from /drive/', async () => {
     const router = await routerOn('/drive/');

@@ -14,8 +14,8 @@
 // Environment:
 //   FILEX_BIN     binary to run (default: bin/filex-starstags.exe, bin/filex.exe, bin/filex)
 //   SHOTS_URL     use an ALREADY-RUNNING instance instead of spawning one
-//   SHOTS_OUT     output directory (default: docs/screenshots/<release>/starstags,
-//                 the release named in ./release.mjs)
+//   SHOTS_OUT     output directory (default: e2e/.artifacts/shots/capture/starstags,
+//                 the capture folder named in ./release.mjs)
 //   SHOTS_KEEP=1  leave the instance running afterwards
 //
 // ⚠ Every shot is in English three ways over — browser locale, the stored
@@ -28,6 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
 import { seedFixtures, syncAndWait, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
@@ -219,6 +220,7 @@ async function seed() {
   seedFixtures(root); // Photos/ with real PNGs, Documents/, …
   writeOfficeFile(join(root, 'Documents', 'Q3 budget.xlsx'));
   writeOfficeFile(join(root, 'Documents', 'Proposal.docx'));
+  pinTimes(root);
   const storage = await makeStorage(token, 'My files', root);
 
   for (const p of ['My files://', 'My files://Photos', 'My files://Documents']) {
@@ -268,6 +270,7 @@ async function seedTags(token, photos, docs) {
 // ── browser ───────────────────────────────────────────────────────────────
 async function newContext(browser, width, height) {
   const ctx = await browser.newContext({
+    ...SCENE_CONTEXT,
     viewport: { width, height },
     deviceScaleFactor: 2,
     locale: 'en-US',
@@ -280,6 +283,8 @@ async function newContext(browser, width, height) {
     localStorage.setItem('filex.tourDone', '1');
     localStorage.setItem('filex.installPrompt.dismissed', '1');
   });
+  // The scene's clock (clock.mjs): the same dates in every run.
+  await stageClock(ctx);
   return ctx;
 }
 

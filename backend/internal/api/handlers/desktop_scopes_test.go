@@ -17,6 +17,10 @@ import (
 // says why — the account dialog asks it, the viewer role still refuses every
 // file change). It is the only verb the desktop may hold beyond the self-service
 // ceiling, and only for a viewer; anything else wider is a failure here.
+//
+// Every desktop carries `comments:rw` (task #157, the maintainer's decision):
+// that is not wider than the ceiling - anybody may mint it at /api/tokens - it
+// is only the one door that hands it out without being asked.
 func TestDesktopScopes_NeverExceedTheSelfServiceCeiling(t *testing.T) {
 	h := &SelfTokens{}
 	for _, role := range []string{model.RoleAdmin, model.RoleUser, model.RoleViewer} {
@@ -31,11 +35,14 @@ func TestDesktopScopes_NeverExceedTheSelfServiceCeiling(t *testing.T) {
 			t.Fatalf("%s: desktop scopes %q must be an explicit list without admin", role, want)
 		}
 		selfService := want
+		if !strings.HasSuffix(want, ",comments:rw") {
+			t.Fatalf("%s: desktop scopes %q, want comments:rw - the desktop comments as the browser does", role, want)
+		}
 		if role == model.RoleViewer {
-			if want != "read,write" {
-				t.Fatalf("viewer: desktop scopes %q, want read,write — the account dialog asks write", want)
+			if want != "read,write,comments:rw" {
+				t.Fatalf("viewer: desktop scopes %q, want read,write,comments:rw — the account dialog asks write", want)
 			}
-			selfService = "read"
+			selfService = "read,comments:rw"
 		}
 		got, err := h.cappedScopes(context.Background(), u, selfService)
 		if err != nil {

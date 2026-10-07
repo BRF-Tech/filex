@@ -16,6 +16,7 @@
 package notify
 
 import (
+	"context"
 	"path"
 	"strings"
 	"time"
@@ -279,6 +280,19 @@ const (
 	// every bell (bell.go → everyoneEvents); e2e 109 seeds a non-admin's bell
 	// with it.
 	EventAdminTest EventType = "admin_test"
+	// EventNotificationDigest is one person's digest (digest.go): the
+	// notifications of the kinds they did not mark urgent, held for the
+	// window an administrator set and told in this one row, folder by folder.
+	// Addressed to that person. Meta carries `count`, `groups` (per folder:
+	// `storage`, `path`, `name`, `counts` by event, `encrypted`), `other` (the
+	// counts of rows that name no folder), `from`/`to` (the window) and, for a
+	// digest of one, `item` (that row's event and meta).
+	//
+	// ⚠ Delivered only to a webhook target that names it in its allow-list:
+	// every row it sums up was delivered to the webhooks on its own, so a
+	// target with an empty list (everything) and the legacy global webhook do
+	// not receive it twice over.
+	EventNotificationDigest EventType = "notification.digest"
 )
 
 // Target is the typed "where does a click on this notification go" —
@@ -437,7 +451,26 @@ type Event struct {
 	// event addressed to several people one row at a time, where the webhook
 	// is told once, with the first row (e2epolicy announce).
 	NoWebhook bool `json:"-"`
+
+	// Mail asks for the addressee (UserID) to be told by email as well. When
+	// they hold this kind for their digest (digest.go) the email waits too
+	// and comes as the digest's, once for the window; otherwise Title and
+	// Body go at once, the Link under them. Kept in the row's meta (`mail`)
+	// so a server that restarts mid-window still knows; never in the webhook
+	// body.
+	Mail *Mail `json:"-"`
 }
+
+// Mail is how an event asks for an email to its addressee (Event.Mail).
+type Mail struct {
+	// Lang is the language Title and Body are written in — the addressee's.
+	Lang string `json:"lang,omitempty"`
+	// Link is put under the text: where the person acts on it.
+	Link string `json:"link,omitempty"`
+}
+
+// MailFunc sends one email (Config.Mail): the server's mailer, in lang.
+type MailFunc func(ctx context.Context, lang, to, subject, body string) error
 
 // WebhookStatus enumerates the lifecycle of a single webhook attempt
 // chain. Persisted to notifications.webhook_status and surfaced in the

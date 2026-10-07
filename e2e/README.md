@@ -29,6 +29,8 @@ Drop `--build` once you have a binary in `bin/`, or point at one with
 | `--keep` | leaves the server (and the data dir) up afterwards so you can poke at it |
 | `--port <n>` | fixed port instead of a free one |
 | `--grep <pattern>` | passed through to Playwright |
+| `--grep-invert <pattern>` | passed through to Playwright: leaves the matching tests out |
+| `--shard <i/N>` | runs part `i` of `N` (Playwright's own `--shard`, applied after `--grep` and the engines, so the parts add up to the whole run), on a server, port and data dir of its own, with Playwright's output in `test-results/shard-i-of-N` and the server log in `.artifacts/shard-i-of-N` - N parts can run side by side on one machine. `node scripts/test-shards.mjs e2e-check --shards N` proves the parts add up; [CONTRIBUTING.md → Shards](../docs/CONTRIBUTING.md#shards) has the rest |
 | `--base-path <p>` | serves filex under a sub-path (`FILEX_BASE_PATH`, e.g. `/filex`) behind `lib/subpath-proxy.mjs`, which passes the full path like a real proxy, redirects the specs' own root-relative requests into the base, and **fails the run** when the app asks for anything outside it. `164-sub-path.spec.ts` asserts where each journey lands; at the root it asserts the root addresses. On Git Bash set `MSYS_NO_PATHCONV=1`, or `/filex` arrives as a Windows path |
 | `--no-public-url` | starts filex without `FILEX_PUBLIC_URL`, so it reads its own address from each request (`Host`, `X-Forwarded-Proto`) - the case `202-store-install.spec.ts` holds a store link's `filex_origin` to on an install with no public URL. Ignored with `--base-path` |
 
@@ -187,24 +189,28 @@ machine cannot start. `realenv/README.md` has the stages and the wiring.
 
 ## Screenshots (`shots/`)
 
-Every picture the README and the docs show comes from the scripts in `shots/`,
-in English, against the build in this working tree. Reviewing them is a
-numbered step in the release process (`docs/CONTRIBUTING.md`): a stale
-screenshot is wrong information, not missing information.
+Every picture the README, the docs and filex.sh show comes from the scripts in
+`shots/`, in English, against the build in this working tree. Reviewing them is
+a numbered step in the release process (`docs/CONTRIBUTING.md`): a stale
+screenshot is wrong information, not missing information. The pictures are not
+kept in this repository: they are published on filex.sh, and
+[`shots/README.md`](shots/README.md) is the whole flow.
 
 ```bash
-pnpm shots                          # build → verify the embedded UI → shoot → sync → contact sheet
+pnpm shots                          # plan → build → verify the embedded UI → shoot what changed → compare → contact sheet
+pnpm shots --all                    # every scene, whatever changed
 pnpm shots --only sidenav,capture   # a subset
 ```
 
-`scripts/shots.mjs` builds the whole chain in order, proves with
-`scripts/check-embed.mjs` that the binary serves `web/dist` byte for byte
-**before** a picture is taken, runs every script in `shots/` (`capture`,
-`driveshell`, `sidenav`, `starstags`, `tags`, `langpack`, `notifications`,
-`e2e-recovery`, `apps`, `signing`, `appearance`, `symlinks` - all twelve),
-syncs the site assets
-and writes one contact sheet, `e2e/.artifacts/shots/contact-sheet.html` - look
-at it. Pictures land in `docs/screenshots/<release>/`.
+`scripts/shots.mjs` works out which scenes can show something new (a digest of
+what each one reads), builds the whole chain in order when there is anything to
+take, proves with `scripts/check-embed.mjs` that the binary serves `web/dist`
+byte for byte **before** a picture is taken, runs those scripts in `shots/`,
+compares every picture with the published one pixel by pixel, and writes one
+contact sheet, `e2e/.artifacts/shots/contact-sheet.html`, with only the
+changed, new and removed pictures - look at it. Pictures land in
+`e2e/.artifacts/shots/capture/` (git-ignored); the changed ones are staged for
+the site in `e2e/.artifacts/shots/publish/`.
 
 Each script can still be run on its own (`node e2e/shots/capture.mjs`); it
 boots its own instance, generates the demo tree (`shots/fixtures.mjs` - PNGs
@@ -215,7 +221,7 @@ variables:
 | Variable | Why |
 |---|---|
 | `FILEX_BIN` | binary to run (default `bin/filex`) |
-| `SHOTS_OUT` | output directory (default `docs/screenshots/<release>/`) |
+| `SHOTS_OUT` | output directory (default `e2e/.artifacts/shots/capture/`, from `shots/release.mjs`); `pnpm shots` never passes it on, it compares only what lands in the capture folder |
 | `SHOTS_URL` | shoot an instance that is ALREADY running instead of booting one |
 | `SHOTS_STORAGE` / `SHOTS_MOUNT` | the fixture directory as *this machine* and as the *server* see it - they differ when the server runs in a VM / WSL / container |
 | `SHOTS_SEED_ONLY`, `SHOTS_SKIP_SEED` | two passes: seed, run `filex thumb backfill` out of band, then capture. Thumbnails are rendered on UPLOAD, so fixtures written straight to disk have none and the hero shot comes out as a grid of generic icons |
@@ -223,13 +229,15 @@ variables:
 | `SHOTS_PLUGIN_BIN` | an already-built `examples/plugin-memfs` binary for the shots machine. Normally unnecessary: when `go` is not on the PATH the script cross-builds the plugin **through WSL**. ⚠ A path that is set and wrong is an error, not a shrug |
 | `SHOTS_ALLOW_SKIP` | permit a deliberate partial run. ⚠ Without it, **a shot the script was asked for and could not take fails the run** - that is the point: `admin-plugins.png` sat outdated for several releases behind a script that logged one line, skipped it and exited 0, and a release step that reports success while leaving the old file in place is not a gate |
 | `SHOTS_KEEP` | leave the instance running afterwards |
+| `SHOTS_REAL_CLOCK` | `1`: the browsers on the real clock instead of the scenes' one (`shots/clock.mjs`: 2026-09-15 10:30 UTC, the API's times moved into it, dates snapped to the hour). To tell a scene that breaks on the clock from one that breaks on its own; `pnpm shots` passes it on, and `accept` refuses the run |
+| `SHOTS_ENVIRONMENT` | where `pnpm shots` runs, recorded in its review: `chain` in the build host's test chain (`scripts/chain/job/shots.sh` sets it), where the published set is taken - the chain's Playwright container and fontconfig; anything else is `local`, and `accept` warns that its pictures may read in another typeface |
 | `FILEX_SIGN_APP_DIR` / `FILEX_CONVERT_APP_DIR` | where `apps.mjs` and `signing.mjs` find the two apps' `plugin.wasm` + `filex-app.json` - the same variables and the same fallbacks (`../filex-sign/dist`, `../filex-convert`) as the Playwright specs' `resolveApp`. Set, a directory is the only one looked in. Missing, the script **fails** rather than skipping the pictures; `pnpm shots` passes these two through and no other `FILEX_*` |
 
 `apps.mjs`, `signing.mjs`, `appearance.mjs` and `symlinks.mjs` share one stage,
 `shots/scene.mjs`: an instance on its own port and data directory with no
 `FILEX_*` inherited from your shell, an API client per person, a browser
-pinned to English, `shot()`, and the agreement PDF the signing scenes send
-round. ⚠ `symlinks.mjs` needs a host that can create symlinks (Windows only
+pinned to English and to the scenes' clock (`shots/clock.mjs`), `shot()`, and
+the agreement PDF the signing scenes send round. ⚠ `symlinks.mjs` needs a host that can create symlinks (Windows only
 with Developer Mode or elevation) and fails where it cannot.
 
 ## Notes
@@ -298,7 +306,7 @@ The public repository's GitHub Actions (`.github/workflows/`):
 | Workflow · job | When | What |
 |---|---|---|
 | `ci.yml` · `browser` | every push to `main` and every pull request | `node e2e/run.mjs cypress --build` - the Cypress suite against a throwaway build of that commit; failure screenshots and video are uploaded |
-| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux - a shot script that no longer fits the product turns red here instead of on release night. ⚠ The scenes that need an app build (`apps.mjs`, `signing.mjs`) are **left out** in CI and taken locally at release step 2 - see [CONTRIBUTING.md → Screenshots](../docs/CONTRIBUTING.md#screenshots) |
+| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux - a shot script that no longer fits the product turns red here instead of on release night. ⚠ The scenes that need an app build (`apps.mjs`, `signing.mjs`) are **left out** in CI and taken on the build host at release step 2 - see [CONTRIBUTING.md → Screenshots](../docs/CONTRIBUTING.md#screenshots) |
 
 ⚠ **No CI job runs the Playwright suite** (`node e2e/run.mjs local`). It gates a
 release because the release process runs it (`docs/CONTRIBUTING.md` → *Release

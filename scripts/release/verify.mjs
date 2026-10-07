@@ -341,3 +341,39 @@ export function snapChannel(name, snap, arches, { channel = 'stable', ...opts } 
     },
   };
 }
+
+/**
+ * The Microsoft Store offers THIS version's bundle, for every architecture,
+ * to anyone (displaycatalog.mp.microsoft.com, no account needed). It changes
+ * only once certification passes — hours to three working days after the
+ * submission — so a release that went through its own run reads the run
+ * instead (plan.mjs storeBundle); this is what a release submitted outside
+ * that run (by hand in Partner Center, 0.52.0) is checked against.
+ * `storeVersion` is the Store's version for the release (1.0.5200.0 for 0.52.0,
+ * desktop/scripts/appx-manifest.cjs).
+ */
+export async function storeListing(productId, identity, storeVersion, arches, opts = {}) {
+  const url = `https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=${productId}&market=US&languages=en-US`;
+  const impl = opts.fetch ?? globalThis.fetch;
+  let doc;
+  try {
+    const res = await impl(url, { signal: AbortSignal.timeout(opts.timeout ?? TIMEOUT) });
+    if (!res.ok) return { ok: false, detail: `${url} answered HTTP ${res.status}` };
+    doc = await res.json();
+  } catch (e) {
+    return { ok: false, detail: `could not check — ${url}: ${e?.cause?.code ?? e?.message ?? e}` };
+  }
+  const packages = (doc?.Products ?? [])
+    .flatMap((p) => p?.DisplaySkuAvailabilities ?? [])
+    .flatMap((d) => d?.Sku?.Properties?.Packages ?? []);
+  const prefix = `${identity}_${storeVersion}_`;
+  const offered = packages.filter((p) => String(p?.PackageFullName ?? '').startsWith(prefix));
+  if (!offered.length) {
+    const seen = [...new Set(packages.map((p) => String(p?.PackageFullName ?? '').split('_')[1]).filter(Boolean))];
+    return { ok: false, detail: `the Store offers ${identity} ${seen.join(', ') || 'nothing'}, not ${storeVersion} (certification can take up to three working days)` };
+  }
+  const has = new Set(offered.flatMap((p) => p?.Architectures ?? []));
+  const missing = arches.filter((a) => !has.has(a));
+  if (missing.length) return { ok: false, detail: `the Store offers ${identity} ${storeVersion} without ${missing.join(', ')}` };
+  return { ok: true, detail: `the Store offers ${identity} ${storeVersion} (${arches.join(' + ')})` };
+}

@@ -1,0 +1,102 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 5ea241fbedd4ce0fe1e39f3e0489302ec14c5c02..c20c4dc6cece885ff5cbe318a997c1da815bec18 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -36,8 +36,9 @@ name: Release
+ # still building.
+ #
+ # npm publishing is a SEPARATE job (`npm`) so it can be re-run on its own — a
+-# failed publish (e.g. a bad token) does not force goreleaser to re-run, which
+-# would fail on the "release already exists" tag. Re-run just the npm job with
++# failed publish (e.g. a package npm has no trusted publisher for yet) does not
++# force goreleaser to re-run, which would fail on the "release already exists"
++# tag. Re-run just the npm job with
+ #   gh run rerun <id> --repo BRF-Tech/filex --failed
+ #
+ # ── Run by hand (workflow_dispatch) ─────────────────────────────────────────
+@@ -854,15 +855,29 @@ jobs:
+           docker buildx imagetools inspect "${img}:slim-${ver}"
+ 
+   # ── npm packages → npmjs (@brftech scope) ─────────────────────────────
+-  # Independent of `binaries` so it can be re-run on its own. Publishes only if
+-  # an NPM_TOKEN repo secret is set — and that token MUST be an npm *Automation*
+-  # token (or a granular access token), which bypasses 2FA; a "Publish" token
+-  # still demands an OTP and fails with EOTP in CI. Package versions are pinned
+-  # to the tag, so a `v0.1.60` tag publishes @brftech/*@0.1.60.
++  # Independent of `binaries` so it can be re-run on its own. Published through
++  # npm's trusted publishing (OIDC), with no token: every package has a trusted
++  # publisher on npmjs.com (the package's Settings page) that names GitHub
++  # Actions, BRF-Tech / filex and the workflow file release.yml, with
++  # `npm publish` allowed. A package without one is refused and this job fails
++  # (ENEEDAUTH). A NEW package cannot have one before it exists, so its first
++  # version is published by hand (docs/CONTRIBUTING.md → Release process).
++  # Package versions are pinned to the tag, so a `v0.1.60` tag publishes
++  # @brftech/*@0.1.60.
++  #
++  # ⚠ The token this job used to read (NPM_TOKEN, an npm granular token, 90
++  # days at most) ran out unnoticed: 0.50.0 went out without its npm packages
++  # (PUT 404). There is no secret here to run out.
+   npm:
+     needs: [plan, verify]
+     if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.full == 'true'
+     runs-on: ubuntu-latest
++    # id-token: write lets the job ask GitHub for its identity, which npm
++    # trades for a short-lived publish token per package. Nothing else is
++    # granted: the release-wide contents/packages write is not needed here.
++    permissions:
++      contents: read
++      id-token: write
+     steps:
+       - uses: actions/checkout@v4
+       - uses: pnpm/action-setup@v4
+@@ -870,21 +885,46 @@ jobs:
+           version: "9.12.0"
+       - uses: actions/setup-node@v4
+         with:
+-          node-version: "20"
++          node-version: "22"
+           cache: pnpm
++      # Trusted publishing needs npm 11.5.1 or later on Node 22.14.0 or later
++      # (docs.npmjs.com/trusted-publishers). Node 22 brings npm 10, so npm 11
++      # goes over it, and both are checked before anything is published: a
++      # runner image that changes either fails here, in words.
++      - name: npm that can publish through trusted publishing
++        run: |
++          npm install -g npm@11
++          at_least() { [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]; }
++          npm_v=$(npm --version)
++          node_v=$(node --version)
++          node_v=${node_v#v}
++          echo "npm $npm_v, Node $node_v"
++          at_least 11.5.1 "$npm_v" || { echo "::error::npm $npm_v cannot publish through trusted publishing: it needs 11.5.1 or later"; exit 1; }
++          at_least 22.14.0 "$node_v" || { echo "::error::Node $node_v cannot publish through trusted publishing: it needs 22.14.0 or later"; exit 1; }
+       - run: pnpm install --frozen-lockfile
+       - name: Build packages
+         env:
+           NODE_OPTIONS: "--max-old-space-size=4096"
+         run: pnpm -r --filter='./packages/*' build
++      # pnpm publish packs each package (the workspace:* ranges become the real
++      # version) and hands the tarball to `npm publish`, the npm installed
++      # above, which does the trusted publishing. Its recursive form does not
++      # pass --provenance on, so provenance is asked for in npm's own config
++      # (NPM_CONFIG_PROVENANCE); npm adds it to a trusted publish of a public
++      # package from a public repository anyway.
++      #
++      # ⚠ npm checks the provenance against each package's repository.url as
++      # written, letter case included, and refuses a mismatch (E422). The
++      # export writes github.com/brf-tech/filex; GitHub signs
++      # github.com/BRF-Tech/filex. So the url is set here from the repository
++      # the run is in.
+       - name: Publish
+         env:
+-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
++          NPM_CONFIG_PROVENANCE: "true"
+         run: |
+-          if [ -z "$NPM_TOKEN" ]; then echo "NPM_TOKEN not set — skipping npm publish"; exit 0; fi
+-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+           VER="${GITHUB_REF_NAME#v}"
+           pnpm -r --filter='./packages/*' exec npm version "$VER" --no-git-tag-version --allow-same-version
++          pnpm -r --filter='./packages/*' exec npm pkg set "repository.url=git+https://github.com/${GITHUB_REPOSITORY}.git"
+           pnpm publish --filter='./packages/*' --access public --no-git-checks
+ 
+   # ── Desktop packages ────────────────────────────────────────────────────

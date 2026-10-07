@@ -1,0 +1,14 @@
+{
+  "seed_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+  "public_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+  "key_fingerprint": "fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+  "method": "POST",
+  "path": "/v1/instances/0f1e2d3c-4b5a-4968-8776-655443322110/intents",
+  "instance_id": "0f1e2d3c-4b5a-4968-8776-655443322110",
+  "timestamp": "1790000000",
+  "nonce": "n0nce_AAAAAAAAAAAAAAAA",
+  "body": "{\"app\":\"hello\",\"version\":\"1.2.0\"}",
+  "body_sha256": "5a0efc00ca9678d79f56b5fe42c626477e7acd0b95b896e8c9399cfb0c683f9b",
+  "text_sha256": "9d5ed5d636fb5bb5436cf99bc5cf3e46bd42c0a1ed0b0eab5d30596c48959e49",
+  "signature": "9893164011285badb606ebaf500cd000390d355dfd5b21167fb05ff12bcfdfad0ece805f531ba32c597dcb12d0bc5a98c71b2fe993f8f4b5315190f35c18a40d"
+}

@@ -58,6 +58,13 @@ var instanceWideNoTenantForm = []struct {
 	{"replica rules list", http.MethodGet, "/api/admin/replica/rules", nil},
 	{"replica settings read", http.MethodGet, "/api/admin/replica/settings", nil},
 	{"replica settings write", http.MethodPatch, "/api/admin/replica/settings", map[string]any{"enabled": true}},
+	// The initial copies (#186): every replicating storage's progress, and
+	// starting one again.
+	{"replica initial copies", http.MethodGet, "/api/admin/replica/initial-copies", nil},
+	{"replica initial copy restart", http.MethodPost, "/api/admin/replica/initial-copies/1/restart", map[string]any{}},
+	// Each storage's folder on its target.
+	{"replica links", http.MethodGet, "/api/admin/replica/links", nil},
+	{"replica link folder", http.MethodPut, "/api/admin/replica/links/1", map[string]any{"folder": "x"}},
 	{"search index stats", http.MethodGet, "/api/admin/search/stats", nil},
 	{"search index rebuild", http.MethodPost, "/api/admin/search/rebuild", map[string]any{}},
 	{"queue list", http.MethodGet, "/api/admin/queue", nil},

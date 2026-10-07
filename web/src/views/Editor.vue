@@ -13,7 +13,7 @@
  * `saveText: '/api/files/save-text'`.
  */
 
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
@@ -30,6 +30,8 @@ import {
   type FileNode,
   type ExternalServiceStatus,
   type OpenRule,
+  type OutsideAnswer,
+  type OutsideChange,
   type PluginViewRow,
 } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
@@ -210,6 +212,62 @@ function onDraftSaved(saved: { path: string; name: string }) {
   document.title = saved.name;
 }
 
+/* === #184 — the desktop app's "Open with filex" window ====================
+ *
+ * The page in that window is THIS route, served by the server. The app watches
+ * the document on the person's computer and, when something else rewrites it,
+ * says so through its editor preload (`window.filexOutside`, desktop/src/
+ * preload-editor.cts). The viewer (PreviewModal `outsideChange`) decides -
+ * reload, or the three-way question - and its answer goes back the same way.
+ * In a browser there is no bridge and nothing here runs: the viewer hears the
+ * server's own changes itself.
+ */
+interface OutsideBridge {
+  hello(version: number): void;
+  report(state: { edited: boolean }): void;
+  answer(a: { seq: number; choice: string; path: string }): void;
+  on(cb: (c: OutsideChange) => void): void;
+}
+const outsideBridge = (window as unknown as { filexOutside?: OutsideBridge }).filexOutside ?? null;
+const outsideChange = ref<OutsideChange | null>(null);
+if (outsideBridge) {
+  outsideBridge.on((c) => {
+    outsideChange.value = { seq: c.seq, path: c.path ?? null, pending: c.pending === true };
+  });
+}
+/* Hello once the viewer is on the page: a change that arrived before it would
+ * be a prop it was mounted with, not a change it saw happen. */
+let saidHello = false;
+watch(
+  () => !!node.value && capsLoaded.value && appsLoaded.value,
+  (ready) => {
+    if (!ready || saidHello || !outsideBridge) return;
+    saidHello = true;
+    void nextTick(() => outsideBridge?.hello(1));
+  },
+  { immediate: true },
+);
+
+function onOfficeEdited(edited: boolean) {
+  outsideBridge?.report({ edited });
+}
+
+function onOutsideResolved(a: OutsideAnswer) {
+  // The document is at a new working copy now: a reload of this page opens
+  // that one, like a draft's Save (onDraftSaved).
+  if (a.path && a.path !== node.value?.path) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('path', a.path);
+      window.history.replaceState(window.history.state, '', url.toString());
+    } catch {
+      /* an address the browser would not take — the reload is the only loss */
+    }
+  }
+  // Only a change the app announced is the app's to act on.
+  if (a.origin === 'host') outsideBridge?.answer({ seq: a.seq, choice: a.choice, path: a.path });
+}
+
 function closeWindow() {
   try {
     window.close();
@@ -261,8 +319,11 @@ onMounted(() => {
       :auth-headers="authHeaders"
       :auth-credentials="'same-origin'"
       :locale="locale"
+      :outside-change="outsideChange"
       chromeless
       @draft-saved="onDraftSaved"
+      @office-edited="onOfficeEdited"
+      @outside-resolved="onOutsideResolved"
       @close="closeWindow"
     />
     <div v-else-if="!node" class="empty">

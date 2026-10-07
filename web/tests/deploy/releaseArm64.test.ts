@@ -167,7 +167,9 @@ describe('the release ships arm64', () => {
     expect(s).toMatch(/linux-unpacked\/filex-app-bin" "\$r\/linux-unpacked\/resources\/bin\/filex" --expect amd64/);
     expect(s).toMatch(/head -1 "\$r\/linux-unpacked\/filex-app" \| grep -qx '#!\/bin\/sh'/);
     expect(s).toMatch(/resources\/bin\/filex\.exe" --expect "\$a"/);
-    expect(cond(s), 'every row checks').toBe('');
+    // Every row that builds checks; a tag run builds nothing (#174) - it
+    // promotes the packages its dry run built and checked here.
+    expect(cond(s), 'every row that builds checks').toBe("env.PROMOTE != 'true'");
   });
 
   it.runIf(!!DIR)("uploads each Linux architecture's snap to the Snap Store", () => {
@@ -191,8 +193,11 @@ describe('the release ships arm64', () => {
     const docker = job(release, 'docker');
     expect(docker).toMatch(/smoke-cli\.mjs --image "\$img" --expect-arch "\$\{\{ matrix\.arch \}\}"/);
     expect(docker).toMatch(/runner: ubuntu-24\.04-arm/);
-    // The smoke test runs before anything is tagged: docker-manifest waits for docker.
-    expect(job(release, 'docker-manifest')).toMatch(/needs: \[plan, docker\]/);
+    // The smoke test runs before anything is tagged: in the dry run, on the
+    // build the tag run promotes; the tag run checks each digest again on its
+    // own architecture (promote-check) before docker-manifest tags it (#174).
+    expect(job(release, 'docker-manifest')).toMatch(/needs: \[plan, verify, promote-check\]/);
+    expect(job(release, 'promote-check')).toMatch(/runner: ubuntu-24\.04-arm/);
   });
 
   it.runIf(!!DIR)('installs and opens the arm64 desktop packages on arm64 machines', () => {
@@ -326,8 +331,17 @@ describe('a release run started by hand', () => {
       }
     }
     expect(offenders).toEqual([]);
-    // The two that publish through an argument rather than a step.
-    expect(release).toMatch(/push=\$\{\{ env\.PUBLISH == 'true' \}\}/);
+    // The two that publish through an argument rather than a step. The images
+    // are pushed by a release candidate's dry run, by digest, with no tag
+    // anybody pulls, and never by a tag run that promotes them (#174) - only
+    // by one with no dry run to promote (#181), for docker-manifest to tag.
+    const docker = job(release, 'docker');
+    expect(docker).toMatch(/\n {6}PUSH: \$\{\{ needs\.plan\.outputs\.candidate == 'true' \|\| needs\.verify\.outputs\.promote == 'false' \}\}/);
+    expect(docker).toMatch(/\n {4}if: needs\.plan\.outputs\.full == 'true' && \(github\.event_name != 'push' \|\| needs\.verify\.outputs\.promote == 'false'\)/);
+    const pushes = docker.split('\n').filter((l) => /push=\$\{\{/.test(l));
+    expect(pushes.length).toBe(2);
+    for (const l of pushes) expect(l).toMatch(/push-by-digest=true,name-canonical=true,push=\$\{\{ env\.PUSH == 'true' \}\}/);
+    expect(docker, 'a dry run tags an image').not.toMatch(/imagetools create/);
     expect(release).not.toMatch(/push=true/);
     expect(release).toMatch(/args: \$\{\{ env\.PUBLISH == 'true' && 'release --clean --release-notes=\/tmp\/release-notes\.md' \|\| 'release --snapshot --clean --skip=publish' \}\}/);
     // A dry run has no tag of its own, and the commit also carries the Go

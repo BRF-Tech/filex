@@ -32,8 +32,8 @@ Rechners, auf dem filex läuft - und in einer mandantenfähigen Installation **v
 sich jeder Mandant selbst**: eigene Anmeldeanbieter, eigene Domain und eigenes Zertifikat.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.51.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.51.0/explorer-grid-light.png" alt="filex-Explorer - Raster mit Vorschaubildern" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.5ddafe2dac64.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.484fb070ca19.png" alt="filex-Explorer - Raster mit Vorschaubildern" width="900">
 </picture>
 
 </div>
@@ -234,7 +234,7 @@ Datei-Tabs installiert). filex zielt auf die Lücke dazwischen:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
+│  filex (Go binary; image ~62 MB slim / ~241 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -288,117 +288,117 @@ der Link, den der Partner bekommt, ist eine gewöhnliche Freigabe.
 
 | Legen Sie die Felder fest - benennen Sie jedes und geben Sie an, wem es gehört; das Dokument kommt als Nächstes | Platzieren Sie sie - wählen Sie ein Feld, tippen Sie dort auf die Seite, wo es hingehört |
 |---|---|
-| ![Die Felder einer Unterschriftsanfrage festlegen](docs/screenshots/v0.51.0/signing/sign-define-1440.png) | ![Die Felder auf dem Dokument platzieren](docs/screenshots/v0.51.0/signing/sign-place-1440.png) |
+| ![Die Felder einer Unterschriftsanfrage festlegen](https://filex.sh/shots/signing/sign-define-1440.4a966ffefa4f.png) | ![Die Felder auf dem Dokument platzieren](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
 
 | Der Link des Partners - der eine öffentliche Bildschirm von filex, im Namen Ihrer Instanz, hinter einer PIN | …und was sich dahinter öffnet: nur die eigenen Felder - hier ein Name, getippt in der Schrift, die die anfordernde Person gewählt hat (gezeichnet und hochgeladen sind die beiden anderen) |
 |---|---|
-| ![Die PIN-Abfrage des externen Unterzeichners](docs/screenshots/v0.51.0/signing/sign-outside-pin-1440.png) | ![Der externe Unterzeichner füllt seine Felder aus](docs/screenshots/v0.51.0/signing/sign-outside-fill-1440.png) |
+| ![Die PIN-Abfrage des externen Unterzeichners](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![Der externe Unterzeichner füllt seine Felder aus](https://filex.sh/shots/signing/sign-outside-fill-1440.54632da00ef4.png) |
 
 | Solange es im Umlauf ist - das Dokument ist für alle eingefroren, in seinen Details steht, wer unterschrieben hat | Eine App installieren - jede Berechtigung, die sie verlangt, in klaren Worten, bevor irgendetwas läuft |
 |---|---|
-| ![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](docs/screenshots/v0.51.0/signing/sign-status-1440.png) | ![Die Berechtigungsprüfung des Installationsassistenten](docs/screenshots/v0.51.0/apps/apps-install-review-1440.png) |
+| ![Das gesperrte Dokument mit geöffnetem Bereich „Unterschriften“](https://filex.sh/shots/signing/sign-status-1440.518a3bd6651f.png) | ![Die Berechtigungsprüfung des Installationsassistenten](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
 
 | Eine installierte App - woher sie stammt, ihr Fingerabdruck und jede Berechtigung, die sie hat, in klaren Worten (ihre Einstellungen und ihre Aktionen folgen weiter unten auf der Seite) | Der Konverter, eine weitere App - jedes Ziel unter seiner Kategorie, drei Schritte |
 |---|---|
-| ![Die Detailansicht einer installierten App](docs/screenshots/v0.51.0/apps/apps-detail-1440.png) | ![Der Assistent des Konverters](docs/screenshots/v0.51.0/apps/convert-wizard-1440.png) |
+| ![Die Detailansicht einer installierten App](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png) | ![Der Assistent des Konverters](https://filex.sh/shots/apps/convert-wizard-1440.231ada006fd6.png) |
 
 | Eine App, die ihre eigene Oberfläche mitbringt - die Überprüfung zeigt den Fingerabdruck des Pakets, jede Adresse außerhalb davon (eine Live-Adresse ist eine Berechtigung, in Gelb) und was ein Browser nicht versprechen kann | …und diese Oberfläche, mit ihrem eigenen Dateityp geöffnet, dort, wo sonst die Vorschau von filex wäre. Sie liest und speichert die Datei über filex, in einem Sandbox-Frame (eine kleine Beispiel-App, für diese Bilder geschrieben) |
 |---|---|
-| ![Die Prüfung bei der Installation einer App mit eigener Oberfläche](docs/screenshots/v0.51.0/apps/app-interface-review-1440.png) | ![Die eigene Oberfläche einer App, als Vorschau einer Datei geöffnet](docs/screenshots/v0.51.0/apps/app-interface-viewer-1440.png) |
+| ![Die Prüfung bei der Installation einer App mit eigener Oberfläche](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png) | ![Die eigene Oberfläche einer App, als Vorschau einer Datei geöffnet](https://filex.sh/shots/apps/app-interface-viewer-1440.519b23618156.png) |
 
 | Jede App auf der Instanz, darunter ein **Sprachpaket** - ein Manifest, in dem nichts läuft: Es sagt, wie viel von diesem filex es übersetzt, und mit ihm geht seine Sprache wieder |
 |---|
-| ![Die Liste „Apps“, ein Sprachpaket unter den Apps](docs/screenshots/v0.51.0/langpack/apps-list-1440.png) |
+| ![Die Liste „Apps“, ein Sprachpaket unter den Apps](https://filex.sh/shots/langpack/apps-list-1440.c0b6a723e725.png) |
 
 ### Ihre eigenen Dinge, wo immer Sie sind
 
 | Die Glocke - darauf die Zahl der ungelesenen Benachrichtigungen, jede Zeile führt an den Ort, den sie nennt | Alle Ihre Benachrichtigungen, im Explorer - für alle, nicht nur für Administratoren |
 |---|---|
-| ![Die Glocke mit ihrem Badge für Ungelesenes, geöffnet](docs/screenshots/v0.51.0/signing/bell-badge-1440.png) | ![Die vollständige Liste der Benachrichtigungen über dem Explorer](docs/screenshots/v0.51.0/signing/notifications-list-1440.png) |
+| ![Die Glocke mit ihrem Badge für Ungelesenes, geöffnet](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![Die vollständige Liste der Benachrichtigungen über dem Explorer](https://filex.sh/shots/signing/notifications-list-1440.cb8cc10769dc.png) |
 
 | Meine Freigaben - die Links, die Sie erstellt haben, und deren PINs, wenn Sie eine weitergeben müssen | Jede Tabelle im Adminbereich - ein angeheftetes Menü **Aktionen** pro Zeile, dasselbe Menü, das sich über das ⋮ des Explorers öffnet |
 |---|---|
-| ![Meine Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](docs/screenshots/v0.51.0/signing/my-shares-1440.png) | ![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](docs/screenshots/v0.51.0/signing/admin-table-actions-1440.png) |
+| ![Meine Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/my-shares-1440.3cdfc7ee8ef3.png) | ![Admin → Freigaben, das Menü „Aktionen“ einer Zeile geöffnet](https://filex.sh/shots/signing/admin-table-actions-1440.401d5cbfacf8.png) |
 
 ### Ihre Marke
 
 | Darstellung - stellen Sie ein Design in Ihren eigenen Farben zusammen, mit Vorschau, während Sie tippen | Ist es als Standard festgelegt, trägt es der Explorer bei allen… |
 |---|---|
-| ![Der Design-Editor](docs/screenshots/v0.51.0/appearance/theme-editor-1440.png) | ![Der Explorer trägt das Design des Betreibers](docs/screenshots/v0.51.0/appearance/themed-explorer-1440.png) |
+| ![Der Design-Editor](https://filex.sh/shots/appearance/theme-editor-1440.7cf3d997f7b1.png) | ![Der Explorer trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png) |
 
 | …und die Anmeldeseite, bevor sich irgendjemand angemeldet hat | Ein Symlink, dem filex nicht folgt, sagt das - in der Dateiliste und in Worten in seinen Details |
 |---|---|
-| ![Die Anmeldeseite trägt das Design des Betreibers](docs/screenshots/v0.51.0/appearance/themed-signin-1440.png) | ![Ein Symlink, der den Speicher verlässt, gekennzeichnet](docs/screenshots/v0.51.0/symlinks/symlink-badge-1440.png) |
+| ![Die Anmeldeseite trägt das Design des Betreibers](https://filex.sh/shots/appearance/themed-signin-1440.84197bec297e.png) | ![Ein Symlink, der den Speicher verlässt, gekennzeichnet](https://filex.sh/shots/symlinks/symlink-badge-1440.f85936372113.png) |
 
 ### Der Dateimanager
 
 | Freigaben - PIN, Ablaufdatum, Download-Limit, `curl`-Einzeiler | Markdown-Vorschau |
 |---|---|
-| ![Der Dialog „Teilen“](docs/screenshots/v0.51.0/share-modal.png) | ![Markdown-Vorschau](docs/screenshots/v0.51.0/viewer-markdown.png) |
+| ![Der Dialog „Teilen“](https://filex.sh/shots/share-modal.eaf11836828a.png) | ![Markdown-Vorschau](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
 
 | …und was die Person am anderen Ende öffnet. filex hat EINEN Bildschirm nach außen - eine geteilte Datei, ein Ordner, eine Dateianforderung, die Unterschriftsseite einer App und die PIN vor jedem davon sind alle diese Seite, im Namen Ihrer Instanz |
 |---|
-| ![Ein öffentlicher Freigabelink, wie ihn der Empfänger sieht](docs/screenshots/v0.51.0/public-share.png) |
+| ![Ein öffentlicher Freigabelink, wie ihn der Empfänger sieht](https://filex.sh/shots/public-share.0e3ba07f7c88.png) |
 
 | Adminbereich | Startseite der Demo |
 |---|---|
-| ![Übersicht im Adminbereich](docs/screenshots/v0.51.0/admin-dashboard.png) | ![Startseite der Demo](docs/screenshots/v0.51.0/demo-landing.png) |
+| ![Übersicht im Adminbereich](https://filex.sh/shots/admin-dashboard.7c334e824b3c.png) | ![Startseite der Demo](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
 
 | Das Adminmenü - alle Seiten in drei Bereichen, **Dateien & Speicher**, **Personen & Sicherheit** und **System**, mit einer kurzen Zeile unter jeder Seite; ein Smartphone bekommt dieselben Seiten in einer ausfahrbaren Leiste ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)) |
 |---|
-| ![Der Bereich „Personen & Sicherheit“ des Adminmenüs, geöffnet über der Seite Admin → Benutzer](docs/screenshots/v0.51.0/megamenu/people-panel-1440.png) |
+| ![Der Bereich „Personen & Sicherheit“ des Adminmenüs, geöffnet über der Seite Admin → Benutzer](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) |
 
 | Rollen - Administrator, Benutzer, Betrachter und eigene Rollen: wer sie jeweils hat, was sie erlauben, wo sie je nach Ordner abweichen, ihre Einschränkungen ([docs/PERMISSIONS.md](docs/PERMISSIONS.md)) |
 |---|
-| ![Admin → Rollen: die integrierten Rollen und zwei benutzerdefinierte](docs/screenshots/v0.51.0/roles/roles-list-1440.png) |
+| ![Admin → Rollen: die integrierten Rollen und zwei benutzerdefinierte](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png) |
 
 | Gruppen - benannte Mengen von Personen mit Ordnerzugriff und einer Rolle; Mitglieder von Hand oder im Gleichschritt mit den Gruppen, die eine Anmeldung mitbringt ([docs/GROUPS.md](docs/GROUPS.md)) | Einen Ordner mit einer Gruppe teilen, neben Personen - „Eigentümer“ wird im Dialog erst nach Rückfrage erteilt, nicht per Klick |
 |---|---|
-| ![Admin → Gruppen](docs/screenshots/v0.51.0/groups/groups-list-1440.png) | ![Einen Ordner mit einer Gruppe teilen](docs/screenshots/v0.51.0/groups/share-group-1440.png) |
+| ![Admin → Gruppen](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png) | ![Einen Ordner mit einer Gruppe teilen](https://filex.sh/shots/groups/share-group-1440.31c2a81e1eeb.png) |
 
 | Anmeldesicherheit - die Begrenzung der Anmeldeversuche, erlaubte Adressen, vertrauenswürdige Proxys, die Sperren und das Anmeldeprotokoll ([Begrenzung der Anmeldeversuche](docs/CONFIGURATION.md#sign-in-attempt-limits)) | …und was das Anmeldeformular eines gesperrten Kontos sagt, während es die Sperre auf seiner Schaltfläche herunterzählt |
 |---|---|
-| ![Admin → Anmeldesicherheit](docs/screenshots/v0.51.0/loginsecurity/login-security-1440.png) | ![Das Anmeldeformular bei einem gesperrten Konto](docs/screenshots/v0.51.0/loginsecurity/login-locked-1440.png) |
+| ![Admin → Anmeldesicherheit](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png) | ![Das Anmeldeformular bei einem gesperrten Konto](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png) |
 
 | Wer verschlüsseln darf - aus, nur Administratoren, alle, deren Rolle es erlaubt, oder nach Genehmigung durch einen Administrator; die wartenden Anfragen, jeweils mit der Angabe, wer gefragt hat und warum ([wer verschlüsseln darf](docs/E2E-ENCRYPTION.md#who-may-encrypt)) | …und aus Sicht der Person: Der Dialog „Neuer Ordner“ bittet einen Administrator um einen einzelnen verschlüsselten Ordner, mit einer Begründung |
 |---|---|
-| ![Admin → Verschlüsselung: die Genehmigungsrichtlinie und drei wartende Anfragen](docs/screenshots/v0.51.0/encryption/admin-encryption-1440.png) | ![Einen verschlüsselten Ordner im Dialog „Neuer Ordner“ anfragen](docs/screenshots/v0.51.0/encryption/request-new-folder.png) |
+| ![Admin → Verschlüsselung: die Genehmigungsrichtlinie und drei wartende Anfragen](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png) | ![Einen verschlüsselten Ordner im Dialog „Neuer Ordner“ anfragen](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png) |
 
 | Standard-Apps - jeder Dateityp, den außer filex noch etwas verarbeitet: wer ihn öffnet und wer sein Vorschaubild erzeugt, in der Reihenfolge, die Sie festlegen ([Standard-Apps](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)) | Ordnervorschauen - jeder Ordner, gezeichnet mit den drei Dateien, die zuletzt hineingekommen sind; die SVGs zeichnet die integrierte Engine von filex ([docs/thumbnails.md](docs/thumbnails.md#folder-previews)) |
 |---|---|
-| ![Plug-ins → Standard-Apps](docs/screenshots/v0.51.0/defaultapps/default-apps-1440.png) | ![Ordner, gezeichnet mit ihren neuesten Dateien](docs/screenshots/v0.51.0/thumbnails/folders-grid-1440.png) |
+| ![Plug-ins → Standard-Apps](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png) | ![Ordner, gezeichnet mit ihren neuesten Dateien](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png) |
 
 | Eine `.csv`-Datei öffnet sich in der Tabellenkalkulation von ONLYOFFICE, wenn eines angebunden ist - zuerst zum Ansehen und ohne Dialog für das Trennzeichen: Das eigene Trennzeichen der Datei wird mitgegeben ([CSV-Dateien](docs/ONLYOFFICE.md#csv-files)) | …und ihr Editor, der sagt, was beim Speichern als CSV erhalten bleibt; die Datei geht als dieselbe Art von CSV zurück |
 |---|---|
-| ![Eine CSV-Datei mit Semikolon als Trennzeichen, in der Tabellenkalkulation von ONLYOFFICE geöffnet](docs/screenshots/v0.51.0/csvoffice/csv-view-1440.png) | ![Die CSV-Datei im Editor von ONLYOFFICE, mit dem Hinweis, was beim Speichern erhalten bleibt](docs/screenshots/v0.51.0/csvoffice/csv-edit-1440.png) |
+| ![Eine CSV-Datei mit Semikolon als Trennzeichen, in der Tabellenkalkulation von ONLYOFFICE geöffnet](https://filex.sh/shots/csvoffice/csv-view-1440.83237ba55d3d.png) | ![Die CSV-Datei im Editor von ONLYOFFICE, mit dem Hinweis, was beim Speichern erhalten bleibt](https://filex.sh/shots/csvoffice/csv-edit-1440.4efc379a293d.png) |
 
 | Die Shell - wo alle landen | Diesen Ordner durchsuchen; `⌘K` / `Ctrl K` übergibt die Suchanfrage an die Befehlspalette |
 |---|---|
-| ![Die filex-Shell](docs/screenshots/v0.51.0/driveshell/driveshell-hero-1440.png) | ![Einen Ordner durchsuchen](docs/screenshots/v0.51.0/driveshell/driveshell-search-1440.png) |
+| ![Die filex-Shell](https://filex.sh/shots/driveshell/driveshell-hero-1440.d8c44de4f498.png) | ![Einen Ordner durchsuchen](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
 
 | Navigationsbereich - Start, Mit mir geteilt, Meine Freigaben, Zuletzt verwendet, Favoriten, Papierkorb und die Speicher, die Sie erreichen können | Zur Icon-Leiste eingeklappt |
 |---|---|
-| ![Navigationsbereich](docs/screenshots/v0.51.0/sidenav/sidenav-expanded-1440.png) | ![Zu einer Leiste eingeklappt](docs/screenshots/v0.51.0/sidenav/sidenav-rail-1440.png) |
+| ![Navigationsbereich](https://filex.sh/shots/sidenav/sidenav-expanded-1440.ef235f94c521.png) | ![Zu einer Leiste eingeklappt](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
 
 | Tags - Ihre eigenen oder die Ihres Teams; ein Tag öffnet alle Dateien, die es tragen, aus allen Ordnern, in denen sie liegen | Papierkorb - was gelöscht wurde, woher es kam und wie viel Zeit bleibt, bis es verschwindet |
 |---|---|
-| ![Persönliche Tags und Team-Tags](docs/screenshots/v0.51.0/tags/tags-kinds-1440.png) | ![Die Ansicht „Papierkorb“](docs/screenshots/v0.51.0/sidenav/view-trash-1440.png) |
+| ![Persönliche Tags und Team-Tags](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png) | ![Die Ansicht „Papierkorb“](https://filex.sh/shots/sidenav/view-trash-1440.c7438b1e66a8.png) |
 
 | Mit mir geteilt - Ordner, für die Ihnen andere Zugriff erteilt haben, keine Anleitung zum Einbinden | Eingebettet in die Seite eines anderen Produkts |
 |---|---|
-| ![Mit mir geteilt](docs/screenshots/v0.51.0/sidenav/view-shared-1440.png) | ![Eingebettete Webkomponente](docs/screenshots/v0.51.0/sidenav/embed-webcomponent-1440.png) |
+| ![Mit mir geteilt](https://filex.sh/shots/sidenav/view-shared-1440.6f68fd5b581d.png) | ![Eingebettete Webkomponente](https://filex.sh/shots/sidenav/embed-webcomponent-1440.2dc86ba73804.png) |
 
 | So verbinden Sie sich - die Anleitungen, aus *Ihrer* Installation erzeugt | API-Schlüssel - erstellen Sie Ihre eigenen, im Explorer oder in einer Einbettung (Sitzung oder Schlüssel einer Person; eine Einbettung, die über einen Proxy mit einem gemeinsamen *App*-Schlüssel läuft, bekommt diesen Eintrag nicht) |
 |---|---|
-| ![So verbinden Sie sich](docs/screenshots/v0.51.0/sidenav/connect-1440.png) | ![API-Schlüssel](docs/screenshots/v0.51.0/sidenav/apikeys-minted-1440.png) |
+| ![So verbinden Sie sich](https://filex.sh/shots/sidenav/connect-1440.ade9043dddde.png) | ![API-Schlüssel](https://filex.sh/shots/sidenav/apikeys-minted-1440.14eb6d484613.png) |
 
 | filex von allem aus erreichen - S3, SFTP, FTPS, NFS, WebDAV. Jeder Befehl wird aus *Ihrer* Installation erzeugt |
 |---|
-| ![Verbindungsanleitung](docs/screenshots/v0.51.0/connections-guide.png) |
+| ![Verbindungsanleitung](https://filex.sh/shots/connections-guide.cf9a135724c9.png) |
 
 | Ein Speicher, den filex nicht mitliefert - unter **Plug-ins → Speicher-Plug-ins** als Plug-in installiert, das sein eigenes Konfigurationsformular beschreibt |
 |---|
-| ![Plug-ins](docs/screenshots/v0.51.0/admin-plugins.png) |
+| ![Plug-ins](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png) |
 
 ## Schnellstart - Binärdatei
 
@@ -543,11 +543,12 @@ halbe Kopie:
   30-Tage-Papierkorb und eine Engine, die sich weigert, aus einem fehlenden Ordner eine
   Massenlöschung zu machen ([docs/SYNC.md](docs/SYNC.md)).
 - **Öffnet Office-Dokumente von Ihrer eigenen Festplatte** - Doppelklicken Sie auf eine
-  `.docx`/`.xlsx`/`.pptx`-Datei (oder einen beliebigen der zehn Office-Typen), und sie
+  `.docx`/`.xlsx`/`.pptx`-Datei (oder einen beliebigen der zehn Office-Typen oder eine `.csv`), und sie
   öffnet sich in dem Editor, den Ihr Server betreibt, auf einem Rechner ohne installiertes
   Office. Ein Dokument in einem Ordner, den Sie auf diesem Computer behalten, wird selbst
   geöffnet; alles andere wird auf den Server kopiert, bearbeitet und über das Original
-  zurückgeschrieben
+  zurückgeschrieben - oder daneben, wenn der Editor es in einem anderen Format speichert
+  (eine alte `.doc` kommt als `.docx` zurück)
   ([docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)).
 - **Mount as a drive** („Als Laufwerk einbinden“) - Eine Schaltfläche in den Einstellungen
   bindet den Server über WebDAV als Laufwerk des Betriebssystems ein, und eine weitere hebt

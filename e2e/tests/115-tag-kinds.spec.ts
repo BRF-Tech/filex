@@ -20,6 +20,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { loginAs, apiLogin, dismissInstallBanner } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName, findNodeIdByBasename, newAuthedRequest } from '../helpers/seed';
+import { settled } from '../helpers/stable';
 
 const STORAGE = `e2e-tagkind-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -56,7 +57,21 @@ async function openTagEditor(page: Page, explorePath: string) {
   const row = page.locator(`.fe__body [data-fe-path="${QUALIFIED}"]`).first();
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: /^(tags|etiketler)…?/i }).click();
+  // ⚠⚠ Aim at the entry only once the menu has stopped moving. The menu asks
+  // the server whether this file may be encrypted (POST
+  // /api/files/e2e/allowed) and draws "Encrypt with E2EE…" only when the
+  // answer lands (FileExplorer.vue e2eAnswerAt), which pushes every entry
+  // below it one row down. In the 0.53 full chain run (Firefox, 2026-10-07)
+  // the answer took 101 ms and landed between the press and the release of
+  // the click on Tags: the pointer ended on Star, the menu stayed open and
+  // nothing opened. `settled` waits for the same node in the same place over
+  // several reads and clicks exactly that node.
+  const entry = await settled(page.getByRole('menuitem', { name: /^(tags|etiketler)…?/i }), {
+    samples: 5,
+    interval: 150,
+  });
+  await entry.click();
+  await entry.dispose();
   const picker = page.locator('.filex-tag-picker').last();
   await expect(picker).toBeVisible();
   await expect(picker).not.toHaveClass(/is-loading/);

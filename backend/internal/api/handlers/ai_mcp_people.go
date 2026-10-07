@@ -77,13 +77,13 @@ func registerPeopleTools(srv *mcp.Server, ops *aiOps) {
 		func(ctx context.Context, in mcpPathIn) (doorAnswer, error) { return ops.Comments(ctx, in.Path) }, nil)
 
 	regDoorTool(srv, ops, "file_comment_add",
-		"Comment on a file or folder. Everyone who can see the item reads it and its owner is told; needs the account's comments.write.",
+		"Comment on a file or folder. Everyone who can see the item reads it and its owner is told; needs the account's comments.write and the API key's comments:rw.",
 		func(ctx context.Context, in mcpCommentAddIn) (doorAnswer, error) {
 			return ops.CommentAdd(ctx, in.Path, in.Text)
 		}, nil)
 
 	regDoorTool(srv, ops, "file_comment_delete",
-		"Delete a comment by its id: your own, or - for an administrator - any on the tenant's files.",
+		"Delete a comment by its id: your own, or - for an administrator - any on the tenant's files. Needs the API key's comments:rw.",
 		func(ctx context.Context, in mcpCommentIDIn) (doorAnswer, error) { return ops.CommentDelete(ctx, in.ID) },
 		func(in mcpCommentIDIn) string { return fmt.Sprint(in.ID) })
 

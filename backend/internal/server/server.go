@@ -14,7 +14,7 @@ import (
 	goruntime "runtime"
 	"sort"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/antivirus"
@@ -68,6 +68,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/staging"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	syncpkg "github.com/brf-tech/filex/backend/internal/sync"
+	"github.com/brf-tech/filex/backend/internal/tenancy"
 	"github.com/brf-tech/filex/backend/internal/tenant"
 	"github.com/brf-tech/filex/backend/internal/tenantdomain"
 	"github.com/brf-tech/filex/backend/internal/tenantstore"
@@ -155,8 +156,10 @@ type Server struct {
 	// it to age out of the idle sweeper (up to upload.staging_ttl later).
 	staging *staging.Area
 
-	mu       sync.RWMutex
-	storages map[int64]storage.Driver
+	// drivers is the storage resolver's cache (storage_cache.go): one live
+	// driver per storage, wrapped for replication when the storage is linked
+	// to an enabled target.
+	drivers *storageCache
 }
 
 // New constructs and wires a Server but does not Start it.
@@ -207,6 +210,30 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// (FILEX_TENANT_DOMAIN, docs/TENANT-ADMIN.md): one process-wide answer
 	// every store wrapper's GetProviderByHost gives (db.ResolveExtraHost).
 	db.SetTenantDomain(cfg.TenantDomain)
+
+	// The multi-tenant mode this start runs with (internal/tenancy):
+	// FILEX_MULTI_TENANT or the config file pin it, else the switch on
+	// Admin → Multi-tenant mode. ⚠ HERE, before the first reader of
+	// cfg.MultiTenant (the environment's sign-in drivers below): everything
+	// after this line is handed the one answer.
+	tenancy.Resolve(ctx, store, &cfg)
+	// Off on an install that has tenants is maintenance mode: only the
+	// platform's own tenant signs in, and a tenant's open session or API key
+	// stops working too (auth.MaintenanceLockout, mounted by the router).
+	tenantLockout := false
+	if !cfg.MultiTenant {
+		if n, err := tenancy.CountTenants(ctx, store); err != nil {
+			slog.Warn("tenancy: could not count the tenants; a tenant's open session is not held off by maintenance mode until the next start",
+				slog.Any("err", err))
+		} else if n > 0 {
+			tenantLockout = true
+			slog.Warn("tenancy: multi-tenant mode is off and the install has tenants: maintenance mode, only the platform's own tenant signs in; nothing is deleted",
+				slog.Int("tenants", n))
+		}
+	}
+	slog.Info("tenancy: multi-tenant mode",
+		slog.Bool("on", cfg.MultiTenant),
+		slog.String("from", tenancyFrom(cfg)))
 	switch cfg.TLS.Mode {
 	case "", config.TLSModeProxy, config.TLSModeACME:
 	default:
@@ -320,7 +347,16 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	// are released, owed writes retried, idle counters dropped, and `auto` is
 	// worked out again (a container can join a network at run time; the log
 	// hears of it only when the answer changes).
-	loginGuard.OnTick = func(context.Context) { clientip.RefreshAuto() }
+	// The same tick sweeps the office editing sessions' records whose session
+	// never said it ended (#184, onlyoffice.Service.PruneSessions, at most
+	// hourly) - once the document server's service exists, further down.
+	var officeSessions atomic.Pointer[onlyoffice.Service]
+	loginGuard.OnTick = func(tctx context.Context) {
+		clientip.RefreshAuto()
+		if svc := officeSessions.Load(); svc != nil {
+			svc.PruneSessions(tctx)
+		}
+	}
 	go loginGuard.Run(ctx)
 
 	// Auth drivers.
@@ -688,7 +724,6 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		idx:          idx,
 		pipeline:     pipeline,
 		thumbRefresh: thumbRefresh,
-		storages:     map[int64]storage.Driver{},
 	}
 
 	// External services (OnlyOffice, drawio, converter) resolve from the
@@ -714,6 +749,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		cfg.PublicURL,
 		0,
 	)
+	officeSessions.Store(ooSvc)
 	ooSvc.Live = func(ctx context.Context) (string, string) {
 		st := extResolver.Get(ctx, external.OnlyOffice)
 		if !st.Enabled {
@@ -747,36 +783,21 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		})
 	}
 	logOfficeThumbs(ctx, ooSvc)
+	logOfficeEditorOrigin(ctx, ooSvc, cfg.ExternalServices.OnlyOffice.FrameOrigin, cfg.AppUIOrigin)
+
+	// The replica rule engine, made before the resolver: every replication
+	// wrapper the resolver builds consults it, and the admin endpoints reload
+	// this same one (srvObj.replicaReloader below).
+	replicaRules, replicaReloader := replica.NewRulesEngine(store)
 
 	// Storage resolver — connects API handlers and pipeline to live drivers.
-	resolver := func(id int64) (storage.Driver, error) {
-		srvObj.mu.RLock()
-		drv, ok := srvObj.storages[id]
-		srvObj.mu.RUnlock()
-		if ok {
-			return drv, nil
-		}
-		st, err := store.GetStorage(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		drv, err = storage.Get(st.Driver)
-		if err != nil {
-			return nil, err
-		}
-		cfg := map[string]any{}
-		if len(st.ConfigJSON) > 0 {
-			_ = jsonDecode(st.ConfigJSON, &cfg)
-		}
-		if err := drv.Init(ctx, cfg); err != nil {
-			return nil, err
-		}
-		srvObj.mu.Lock()
-		srvObj.storages[id] = drv
-		srvObj.mu.Unlock()
-		pipeline.AttachStorage(id, drv)
-		return drv, nil
-	}
+	// ⚠ A storage linked to an enabled replication target comes back WRAPPED
+	// (storage_cache.go): its writes fan out to the target. The notification
+	// service is read when a wrapper sends, since it is made further down.
+	srvObj.drivers = newStorageCache(ctx, store, replicaRules,
+		replica.NewNotifierFunc(func() notify.Service { return srvObj.notify }),
+		pipeline.AttachStorage)
+	resolver := srvObj.drivers.resolve
 
 	// Pre-warm storages so the pipeline knows about them on first access.
 	if storages, err := store.ListEnabledStorages(ctx); err == nil {
@@ -787,25 +808,9 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	srvObj.resolver = resolver
 
 	// forgetStorage drops a cached driver so the next resolve rebuilds it from
-	// the row as it now stands. The cache above is keyed by storage id and
-	// never expires, which is right for a hot path and wrong the moment an
-	// operator edits the storage: without this, the endpoint, bucket and
-	// credentials a driver was built with outlive the admin page that changed
-	// them, and only a restart applies the fix (issue #21).
-	forgetStorage := func(id int64) {
-		srvObj.mu.Lock()
-		drv, ok := srvObj.storages[id]
-		delete(srvObj.storages, id)
-		srvObj.mu.Unlock()
-		if !ok {
-			return
-		}
-		// Drivers that hold a connection (sftp, ftp, smb) close it rather than
-		// leak one per edit, and a storage plugin's driver releases the
-		// instance holding the storage's credentials. Driver does not require
-		// Close, so this is best-effort by contract, not by accident.
-		storage.CloseDriver(drv)
-	}
+	// the row as it now stands - its configuration and its replication link
+	// (storageCache.forget, issue #21, #186).
+	forgetStorage := srvObj.drivers.forget
 
 	// Now that resolver exists, fill in dependents that need it.
 	caps.AttachStorageResolver(resolver)
@@ -959,6 +964,20 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		srvObj.notify = notify.New(store, notify.Config{
 			WebhookURL:   cfg.Notify.WebhookURL,
 			WebhookToken: cfg.Notify.WebhookToken,
+			// The notification digest (internal/notify digest.go): the kinds a
+			// person did not mark urgent are told in one notification per
+			// window. A tenant's administrators set its defaults.
+			Digest: &notify.DigestConfig{MultiTenant: cfg.MultiTenant},
+			// The emails an event asks for (a file request's owner) and the
+			// digest's. The mailer is made further down; it is read when a mail
+			// goes, not now.
+			Mail: func(ctx context.Context, lang, to, subject, body string) error {
+				m := srvObj.mailer
+				if m == nil {
+					return mailer.ErrNotConfigured
+				}
+				return m.Send(mailer.WithLanguage(ctx, lang), to, subject, body)
+			},
 		})
 		// An operating-system sign-in provider (windows) the administrator
 		// switched on that can no longer start is left out of the running set;
@@ -1068,28 +1087,24 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		}
 	}
 
-	// Replica orchestration. The wrapper Driver itself is created
-	// lazily by the resolver — when a primary storage with a
-	// matching replica row exists. v0.1 does not auto-discover the
-	// replica pairing; admins set storages.role + replica_of_id via
-	// SQL or the (forthcoming) admin UI. This block wires the
-	// reconcile + report Service so the queue handler is registered
-	// and the cron scheduler comes online; the rules engine runs
-	// regardless because it's also consulted by the admin handler
-	// (preview rules before saving them).
+	// Replica orchestration. The wrapper Driver itself is built by the
+	// resolver (storage_cache.go) for every storage linked to an enabled
+	// replication target. This block wires the reconcile, initial copy and
+	// report Service to those same wrappers - Fix all, Fix one and the
+	// initial copy find a storage's wrapper through the resolver's cache, so
+	// they write to the target the storage is linked to NOW - registers its
+	// queue handlers and brings the cron scheduler online.
+	//
+	// ⚠ The Service was built with a nil wrapper until 0.53 ("v0.1 skips
+	// that"): every repair answered "no replica configured" (#186).
 	{
-		_, reloader := replica.NewRulesEngine(store)
-		srvObj.replicaReloader = reloader
-		// Service is wired with a nil ReplicatedDriver until the
-		// admin pairs primary+replica; the queue handler returns a
-		// "no replica configured" error in that case. We could lazily
-		// look up the wrapper from the resolver but v0.1 skips that
-		// and surfaces the missing pair via 503 in the admin UI.
-		srvObj.replicaSvc = replica.New(store, nil, srvObj.queue, srvObj.notify)
+		srvObj.replicaReloader = replicaReloader
+		srvObj.replicaSvc = replica.New(store, srvObj.drivers, srvObj.queue, srvObj.notify)
 		srvObj.replicaCron = replica.NewCronScheduler(srvObj.replicaSvc)
 
 		if srvObj.qpool != nil {
 			srvObj.qpool.Register(queue.TypeReplicaRetry, srvObj.replicaSvc.HandleRetry)
+			srvObj.qpool.Register(queue.TypeReplicaInitialCopy, srvObj.replicaSvc.HandleInitialCopy)
 			srvObj.qpool.Register(queue.TypeReplicaReport, func(ctx context.Context, _ queue.Op) error {
 				return srvObj.replicaSvc.GenerateReport(ctx)
 			})
@@ -1358,6 +1373,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		ReplicaReloader:          srvObj.replicaReloader,
 		StorageResolver:          resolver,
 		ForgetStorage:            forgetStorage,
+		ReplicaLinks:             replicaLinks{cache: srvObj.drivers, svc: srvObj.replicaSvc},
 		Plugins:                  pluginMgr,
 		AppPlugins:               appPlugins,
 		AppPluginsDisabledReason: appPluginsReason,
@@ -1375,6 +1391,7 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		AVScanAfterSave:          avEnqueueAfterSave, /* koru:k2 av — debounced editor save */
 		E2EEscrow:                escrowKey,          /* wiring:e2 — nil when escrow is off */
 		LoginGuard:               loginGuard,
+		TenantLockout:            tenantLockout,
 	}
 	// WebDAV server (/dav/<storage>/<path>, HTTP Basic) — the handler itself
 	// is composed inside api.BuildRouter (single Mount line, see
@@ -1796,6 +1813,16 @@ func (s *Server) Start(ctx context.Context) error {
 		s.replicaCron.Start()
 		_ = s.replicaCron.Reload(ctx)
 	}
+	// Every storage that replicates gets its initial copy: queued for a link
+	// that never had one (the upgrade from a version whose replication never
+	// ran copies what those storages hold, once), resumed for one under way.
+	if s.replicaSvc != nil && s.qpool != nil {
+		go func() {
+			if err := s.replicaSvc.ResumeInitialCopies(ctx); err != nil {
+				slog.Warn("replica: initial copies not resumed", slog.String("err", err.Error()))
+			}
+		}()
+	}
 
 	// ⚠⚠ Revocation for the protocols that authenticate ONCE and then stay open.
 	// SFTP, FTPS and NFS check a credential at login and never again, so
@@ -1821,6 +1848,11 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	if s.versions != nil {
 		go s.versions.RunRetentionLoop(ctx, 24*time.Hour)
+	}
+	// The notification digest's background pass: the windows that ended -
+	// a stopped server's included - are told (internal/notify digest.go).
+	if dg, ok := s.notify.(notify.Digests); ok {
+		dg.StartDigests(ctx)
 	}
 
 	// SMTP config verification — run once on boot, then every 5 minutes. The
@@ -1878,6 +1910,11 @@ func (s *Server) Start(ctx context.Context) error {
 		s.worker.Stop()
 		if s.ops != nil {
 			s.ops.Stop()
+		}
+		// The replication fan-outs in flight record their failures in the
+		// database: they finish (or are given up on) before it closes.
+		if s.drivers != nil {
+			s.drivers.stopAll(20 * time.Second)
 		}
 		if s.qpool != nil {
 			s.qpool.Stop()
@@ -2217,6 +2254,15 @@ func normalizeDriverName(name string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "_", "-")
 }
 
+// tenancyFrom names, for the start log, what decided the multi-tenant mode:
+// the variable, the config file, or the switch's setting.
+func tenancyFrom(cfg config.Config) string {
+	if cfg.MultiTenantFrom != "" {
+		return cfg.MultiTenantFrom
+	}
+	return "setting " + tenancy.SettingKey
+}
+
 // queueDriverFor picks the persistent queue backend.
 //
 // ⚠ An unset driver follows the DATABASE rather than defaulting to "sqlite".
@@ -2329,6 +2375,31 @@ func logOfficeThumbs(ctx context.Context, oo *onlyoffice.Service) {
 	slog.Warn("thumbs: office documents get no thumbnail: OnlyOffice is not configured",
 		slog.String("engine", "onlyoffice"),
 		slog.String("configure", "Settings -> External services -> OnlyOffice (or FILEX_ONLYOFFICE_URL and FILEX_ONLYOFFICE_JWT)"))
+}
+
+// logOfficeEditorOrigin says where the editor's api.js runs (task #92): in a
+// frame on the frame origin (FILEX_ONLYOFFICE_FRAME_ORIGIN, normally the
+// document server's own), else on the interface origin, else - with neither -
+// in filex's own pages, with the signed-in person's session. The last is a
+// warning because it is a choice the operator may not know they made; the
+// ONLYOFFICE card in the admin panel says it too (editor_same_origin).
+// Nothing when no document server is configured at boot.
+func logOfficeEditorOrigin(ctx context.Context, oo *onlyoffice.Service, frameOrigin, appUIOrigin string) {
+	if !oo.EnabledCtx(ctx) {
+		return
+	}
+	switch {
+	case frameOrigin != "":
+		slog.Info("onlyoffice: the editor runs in a frame on its own origin; its proxy must send "+onlyoffice.FrameHostPrefix+" to filex",
+			slog.String("origin", frameOrigin))
+	case appUIOrigin != "":
+		slog.Info("onlyoffice: the editor runs in a frame on the interface origin",
+			slog.String("origin", appUIOrigin))
+	default:
+		slog.Warn("onlyoffice: the editor's script (api.js) runs in filex's own pages, with the signed-in person's session",
+			slog.String("isolate", "set FILEX_ONLYOFFICE_FRAME_ORIGIN to the document server's origin and send "+onlyoffice.FrameHostPrefix+" there to filex"),
+			slog.String("docs", "docs/ONLYOFFICE.md#the-editor-in-a-frame-of-its-own"))
+	}
 }
 
 // withRecoveryLogin and withSessionAuthenticator live in internal/authsetup

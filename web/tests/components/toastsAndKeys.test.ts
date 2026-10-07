@@ -123,4 +123,25 @@ describe('the self-service key form', () => {
   it('says it in Turkish too', () => {
     expect(coreTr['conn.tokens.scopesRequired']).toBe('En az bir izin seçin - hiçbir izni olmayan bir API anahtarı verilmez.');
   });
+
+  // Task #157: comments are a permission of their own. A key reads them
+  // unless it says otherwise - Read is chosen and sends nothing - and Read
+  // and write sends `comments:rw`; `write` does not include it.
+  it('comments are read unless chosen, and Read and write sends comments:rw', async () => {
+    const w = mount(TokensPanel, { props: { config: CONFIG, full: true }, attachTo: document.body });
+    await flushPromises();
+    await flushPromises();
+
+    expect(w.find('[data-testid="token-comments-read"]').attributes('aria-checked')).toBe('true');
+    // A choice of two is buttons that show both answers, never a native select.
+    expect(w.find('[aria-labelledby="token-comments-label"]').attributes('role')).toBe('radiogroup');
+    await w.find('[data-testid="token-mint"]').trigger('click');
+    await flushPromises();
+    expect((posted[0] as { scopes: string }).scopes).toBe('read');
+
+    await w.find('[data-testid="token-comments-rw"]').trigger('click');
+    await w.find('[data-testid="token-mint"]').trigger('click');
+    await flushPromises();
+    expect((posted[1] as { scopes: string }).scopes).toBe('read,comments:rw');
+  });
 });

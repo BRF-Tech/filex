@@ -183,9 +183,9 @@ func (h *E2E) resolveDir(w http.ResponseWriter, r *http.Request, wire string) (*
 		return nil, ""
 	}
 	// The token's `root:`. The escrow, password-change and cleanup doors all
-	// resolve their folder here, and confine.Middleware rewrites `path` only
-	// in a body labelled JSON: the same body as text/plain reached an
-	// encrypted folder outside the root - its encryption state, its owner's
+	// resolve their folder here, and up to 0.52 confine.Middleware rewrote
+	// `path` only in a body labelled JSON: the same body as text/plain reached
+	// an encrypted folder outside the root - its encryption state, its owner's
 	// notices, and (cleanup) the hard delete of its versions and trash
 	// entries (GHSA-8gvc-6w52-6c7j).
 	if !rootAllowsIn(r.Context(), st, rel) {

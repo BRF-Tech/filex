@@ -1,6 +1,28 @@
 <script setup lang="ts">
+/**
+ * The panel's select field: a label, the control, and a hint or an error
+ * under it.
+ *
+ * ⚠⚠ The control is core's `ChoiceSelect`, not a native select element
+ * (#160; the owner, 2026-10-04: "hiç bir yerde öyle basit bir dropdown
+ * kullanma"). This file is only the panel's frame around it - the label, the
+ * hint, the browser's verdict said in the panel's words (lib/formCheck) - so
+ * every select in the admin panel and every one in the explorer is ONE
+ * control: one keyboard, one look, one dark mode, one right-to-left layout.
+ * Do not grow behaviour here; it belongs in the core component.
+ *
+ * The props and events are what they were when this wrapped a native select,
+ * so no page changed to follow it. Two differences a page may notice, both
+ * deliberate:
+ *   - the value that comes back is the chosen option's own value (a number
+ *     stays a number in a mixed list, where the native one handed back a
+ *     string);
+ *   - `aria-label` names the control itself now (it used to land on the
+ *     wrapper, where a screen reader never read it).
+ */
 import { computed, ref, useId } from 'vue';
-import { onFieldInvalid } from '@/lib/formCheck';
+import { ChoiceSelect } from '@brftech/filex-core';
+import { validityMessage } from '@/lib/formCheck';
 
 interface Option {
   value: string | number;
@@ -19,6 +41,8 @@ interface Props {
   disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
   name?: string;
+  /** The control's accessible name when there is no visible label. */
+  ariaLabel?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), { size: 'md' });
@@ -30,31 +54,28 @@ const emit = defineEmits<{
 
 const fallback = useId();
 const selectId = computed(() => props.name ?? fallback);
+const hintId = computed(() => `${selectId.value}-hint`);
 
 /* The browser's verdict, in the panel's language (see ui/Input). */
 const nativeError = ref('');
 const shownError = computed(() => props.error || nativeError.value);
 
-function onChange(ev: Event) {
+function onPick(v: string | number) {
   nativeError.value = '';
-  const v = (ev.target as HTMLSelectElement).value;
-  // Coerce back to number if every option is numeric.
-  const allNumeric = props.options.every((o) => typeof o.value === 'number');
-  const out: string | number = allNumeric ? Number(v) : v;
-  emit('update:modelValue', out);
-  emit('change', out);
+  emit('update:modelValue', v);
+  emit('change', v);
 }
 
-const padding = computed(() => {
-  switch (props.size) {
-    case 'sm':
-      return 'px-2.5 py-1 text-sm';
-    case 'lg':
-      return 'px-4 py-2.5 text-base';
-    default:
-      return 'px-3 py-2 text-sm';
-  }
-});
+/* ChoiceSelect has already suppressed the browser's bubble and moved the
+   focus (the first refused field of the form takes it); what is left is the
+   sentence under the field. */
+function onInvalid(ev: Event) {
+  nativeError.value = validityMessage(ev.target as HTMLInputElement);
+}
+
+/* The panel's type sizes, which the control inherits (its height comes from
+   core's `--fe-h-*` control heights through `size`). */
+const textSize = computed(() => (props.size === 'lg' ? 'text-base' : 'text-sm'));
 </script>
 
 <template>
@@ -63,46 +84,24 @@ const padding = computed(() => {
       {{ label }}
       <span v-if="required" class="text-rose-500" aria-hidden="true">*</span>
     </label>
-    <div class="relative">
-      <select
+    <div :class="textSize">
+      <ChoiceSelect
         :id="selectId"
         :name="name"
-        :value="modelValue ?? ''"
+        :model-value="modelValue ?? ''"
+        :options="options"
+        :placeholder="placeholder"
         :required="required"
         :disabled="disabled"
-        :aria-invalid="shownError ? 'true' : undefined"
-        :class="[
-          'input-base appearance-none pe-9',
-          padding,
-          shownError && 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/30',
-        ]"
-        @invalid="(e) => (nativeError = onFieldInvalid(e))"
-        @change="onChange"
-      >
-        <option v-if="placeholder" value="" disabled>{{ placeholder }}</option>
-        <option
-          v-for="opt in options"
-          :key="opt.value"
-          :value="opt.value"
-          :disabled="opt.disabled"
-        >
-          {{ opt.label }}
-        </option>
-      </select>
-      <svg
-        class="pointer-events-none absolute end-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-        aria-hidden="true"
-      >
-        <path
-          fill-rule="evenodd"
-          d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.24 4.38a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z"
-          clip-rule="evenodd"
-        />
-      </svg>
+        :invalid="!!shownError"
+        :size="size"
+        :aria-label="ariaLabel"
+        :aria-describedby="shownError || hint ? hintId : undefined"
+        @update:model-value="onPick"
+        @invalid="onInvalid"
+      />
     </div>
-    <p v-if="shownError" class="error-text" data-testid="field-error">{{ shownError }}</p>
-    <p v-else-if="hint" class="help-text">{{ hint }}</p>
+    <p v-if="shownError" :id="hintId" class="error-text" data-testid="field-error">{{ shownError }}</p>
+    <p v-else-if="hint" :id="hintId" class="help-text">{{ hint }}</p>
   </div>
 </template>

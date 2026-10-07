@@ -49,6 +49,7 @@ vi.mock('@/api/roles', () => ({
 }));
 
 import Users from '@/views/Users.vue';
+import { optionLabels, pickOption } from '../helpers/choiceSelect';
 
 const mounted: VueWrapper[] = [];
 afterEach(() => {
@@ -94,10 +95,9 @@ describe('Users list: source and groups', () => {
 
   it('narrows the list to one group', async () => {
     await mountUsers();
-    const filter = document.body.querySelector<HTMLSelectElement>('[data-testid="users-group-filter"] select, select[data-testid="users-group-filter"]')!;
-    expect([...filter.options].map((o) => o.textContent?.trim())).toEqual(['All groups', 'Auditors', 'Finance', 'Staff']);
-    filter.value = '7';
-    filter.dispatchEvent(new Event('change'));
+    const filter = document.body.querySelector('[data-testid="users-group-filter"]')!;
+    expect(await optionLabels(filter)).toEqual(['All groups', 'Auditors', 'Finance', 'Staff']);
+    await pickOption(filter, '7');
     await flushPromises();
     const rows = rowText();
     expect(rows.some((r) => r.includes('bob@local'))).toBe(true);

@@ -6,9 +6,10 @@
 // Node's own zlib — no image library, no network.
 
 import { deflateSync } from 'node:zlib';
-import { copyFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { copyFileSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fixtureTime, pinTimes } from './clock.mjs';
 
 // The real Office files the e2e suite already carries (scripts/_gen_fixtures.py).
 const OFFICE_FIXTURES = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/file-types');
@@ -29,6 +30,9 @@ export function writeOfficeFile(dest) {
   const source = OFFICE_SOURCE[kind];
   if (!source) throw new Error(`writeOfficeFile: no real fixture for .${kind} (${dest})`);
   copyFileSync(join(OFFICE_FIXTURES, source), dest);
+  // A fixed date, like every fixture (clock.mjs): a copy is dated now.
+  const t = new Date(fixtureTime(basename(dest)));
+  utimesSync(dest, t, t);
 }
 
 // ── minimal PNG encoder (8-bit RGB, no interlace) ─────────────────────────
@@ -232,6 +236,9 @@ export function seedFixtures(root) {
   writeFileSync(join(docs, 'release-notes.md'), NOTES);
   writeFileSync(join(docs, 'budget.csv'), 'quarter,revenue,costs\nQ1,120000,84000\nQ2,138500,91200\n');
   writeFileSync(join(docs, 'deploy.sh'), '#!/usr/bin/env bash\nset -euo pipefail\nfilex serve --listen 0.0.0.0:5212\n');
+  // Every file and folder dated as in every other run (clock.mjs). A script
+  // that writes more beside them calls pinTimes(root) again before its sync.
+  pinTimes(root);
 
   return { photos: 'Photos', readme: 'README.md' };
 }

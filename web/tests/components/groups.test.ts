@@ -69,6 +69,7 @@ import GroupEdit from '@/views/GroupEdit.vue';
 import { useAuthStore } from '@/stores/auth';
 import { DataTable } from '@brftech/filex-core';
 import { closeRowMenus, openRowMenu, pickMenuItem } from '../helpers/rowMenu';
+import { optionValues, pickOption } from '../helpers/choiceSelect';
 
 function tableIds(w: { findAllComponents: (c: unknown) => { props: (k: string) => unknown }[] }): unknown[] {
   return w.findAllComponents(DataTable).map((t) => t.props('tableId'));
@@ -194,7 +195,7 @@ describe('Group page', () => {
     await flushPromises();
     expect(groupsApi.update.mock.calls[0][1]).toMatchObject({ role_id: 7, priority: 9 });
 
-    await w.get('[data-testid="group-role"] select').setValue('');
+    await pickOption(w.get('[data-testid="group-role"]'), '');
     expect(w.find('[data-testid="group-priority"]').exists()).toBe(false);
   });
 
@@ -203,7 +204,7 @@ describe('Group page', () => {
     await router.push('/groups/3');
     const w = mount(GroupEdit, { global: { plugins } });
     await flushPromises();
-    await w.get('[data-testid="group-role"] select').setValue('admin');
+    await pickOption(w.get('[data-testid="group-role"]'), 'admin');
     expect(w.find('[data-testid="group-priority"]').exists()).toBe(false);
     expect(w.text()).toContain(en.groups.fields.adminHint);
     await w.get('[data-testid="group-form"]').trigger('submit');
@@ -216,7 +217,7 @@ describe('Group page', () => {
     await router.push('/groups/3');
     const w = mount(GroupEdit, { global: { plugins } });
     await flushPromises();
-    const values = w.findAll('[data-testid="group-role"] option').map((o) => o.attributes('value'));
+    const values = await optionValues(w.get('[data-testid="group-role"]'));
     expect(values).not.toContain('admin');
   });
 
@@ -263,11 +264,11 @@ describe('Groups from directory sync', () => {
     expect(w.find('[data-testid="group-removed-10"]').text()).toBe(en.groups.directory.removed);
     expect(w.find('[data-testid="group-removed-9"]').exists()).toBe(false);
 
-    await w.get('[data-testid="groups-kind"] select').setValue('removed');
+    await pickOption(w.get('[data-testid="groups-kind"]'), 'removed');
     expect(rowIds(w)).toEqual(['group-10']);
-    await w.get('[data-testid="groups-kind"] select').setValue('synced');
+    await pickOption(w.get('[data-testid="groups-kind"]'), 'synced');
     expect(rowIds(w)).toEqual(['group-9']);
-    await w.get('[data-testid="groups-kind"] select').setValue('sso');
+    await pickOption(w.get('[data-testid="groups-kind"]'), 'sso');
     expect(rowIds(w)).toEqual(['group-3']);
   });
 

@@ -9,6 +9,12 @@ configured destination.
 The whole subsystem is optional and safe to leave on - with no webhook
 configured it simply records to the bell and skips the outbound call.
 
+Out of the box every notification is told at once. [The digest](#the-digest)
+is optional: an administrator (for their tenant) or a person (for themselves)
+turns a kind off, and that kind is then held for a short window and told in
+**one** notification, folder by folder - a folder that receives 30 files in a
+minute is one notification, not 30.
+
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
 - [The webhook](#the-webhook) - [payload](#payload) · [headers](#headers) · [delivery--retry](#delivery--retry)
@@ -16,6 +22,7 @@ configured it simply records to the bell and skips the outbound call.
 - [Click target](#click-target) - [the field](#the-field) · [which events carry one](#which-events-carry-one) · [where a click goes](#where-a-click-goes)
 - [In-app bell (endpoints)](#in-app-bell-endpoints)
 - [Reaching someone who is not looking at the bell](#reaching-someone-who-is-not-looking-at-the-bell)
+- [The digest](#the-digest) - [what is held](#what-is-held) · [urgent kinds](#urgent-kinds) · [the window](#the-window) · [the digest row](#the-digest-row) · [email and webhooks](#email-and-webhooks)
 - [Admin endpoints](#admin-endpoints)
 - [Per-user settings](#per-user-settings)
 - [Failure modes & troubleshooting](#failure-modes--troubleshooting)
@@ -56,6 +63,13 @@ of their own: nothing extra is sent and nothing extra is polled (see
 [Reaching someone who is not looking at the bell](#reaching-someone-who-is-not-looking-at-the-bell)). Webhook errors are recorded **against the notification row**, never
 bubbled up to break the action that triggered the event.
 
+Which rows a person is TOLD about - the badge, the pop-ups, the email - is
+decided in that same read, per person: a kind they hold for
+[the digest](#the-digest) (none, out of the box) is in their list at once but
+counts for nothing until the digest that carries it is written. Every row is
+still written the moment its event happens, and every webhook still receives
+it then.
+
 > **Master switch.** `FILEX_NOTIFY_ENABLED` (default **true**) toggles the whole
 > subsystem. When **false**, `Service.Send` is a no-op and every
 > `/api/notifications/…` endpoint returns **503 `{"error":"notifications
@@ -95,7 +109,8 @@ Every event produces one outbound `POST` **per destination**. There are two
 kinds of destination and they are independent:
 
 - the **legacy global webhook** - `FILEX_WEBHOOK_URL`, one for the whole
-  install, receives every event;
+  install, receives every event (except `notification.digest`, see
+  [Email and webhooks](#email-and-webhooks));
 - any number of **webhook v2 targets** - rows managed in **Admin → Webhooks**,
   each with its own URL, its own signing secret and its own **per-event
   allow-list**. A target with an empty allow-list receives everything.
@@ -251,6 +266,7 @@ of them tickable on a target in **Admin → Webhooks**:
 | `e2e.password_changed` | An encrypted folder's password was changed - or reset with its **recovery key** (`meta.via = "recovery_key"`, severity `warning`) - in the web UI, which announces it once the new key file is written ([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#changing-the-password)). Sent to the folder's **owner**, who may not be the person who changed it. `meta` carries `storage`, `folder`, `via`, `rekey` (the folder key was replaced too) and, when the caller was signed in, `actor_email`. A single encrypted file's password change is the same event, with `file` and `kind: "file"` in place of `folder`, sent to the file's owner. |
 | `e2e.request_created` | Somebody asked to encrypt a folder or a file under the tenant's `approval` policy ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)). A tenant's request is one broadcast placed on the folder: the tenant's administrators see it, the platform operator's bell does not (they see it under Admin → Encryption), a member never does. The platform's own request (the supertenant's) is addressed to each of the supertenant's administrators instead, the webhook told once. Webhooks get every tenant's. `meta` carries `requester`, `reason`, `request_id`, `storage` and `target_kind` (`folder` \| `new_folder` \| `file`; for a file the node is the folder it goes into). **Once** per request: asking again while it waits tells nobody. |
 | `e2e.request_decided` | An administrator approved or rejected an encryption request. Sent to the person who asked, and to nobody else. `meta` carries `decision` (`approved` \| `rejected`), `decider`, `note`, `request_id`, `storage` and `target_kind`. A request that lapses unanswered tells nobody; the audit log has it (`e2e_request.expire`). |
+| `notification.digest` | One person's [digest](#the-digest): the notifications of the kinds they did not mark urgent, held for the window and told together. **Only** to a target that ticks it - never to the legacy webhook or a target with an empty list, which received each row already. `meta` carries `count`, `groups` (per folder: `storage`, `path`, `name`, `counts` by event, `parts`, `encrypted`, `e2e_root`), `other` / `other_parts` (the rows that name no folder), `more_folders`, `window_start`, `window_end`, `recipient.id` and, for a digest of one row, `item`. |
 | `plugin.notice` | An installed app plugin (see `APP-PLUGINS.md`) sent a message through its `notify_send` host function - a signature request, a finished job. Title/body are the plugin's English wording; `meta` carries `plugin` (the app's install id), `plugin_label_<lang>` (its name as people know it - what a reader prints in front of the message, never the id), `title_<lang>`/`body_<lang>` - one of each per language the app wrote it in (`_en`/`_tr` always, at most 16 more; the reader's own language is used, then its base language, then English), `job` for a queued action, and up to eight small facts the plugin added. The app may address one person instead of the instance feed, and may attach a target: the file plus, optionally, the app screen to open on it (`target.open = {plugin, action|view}`), so a click lands in the signing screen rather than on the notifications page. |
 
 The six **write** events (`file.uploaded`, `file.updated`, `file.upload_failed`,
@@ -366,6 +382,7 @@ otherwise hit:
 | `e2e.request_created` | `dir` - the folder to encrypt (for a file, its folder) | |
 | `e2e.request_decided` | `dir` - the folder to encrypt (for a file, its folder) | |
 | `share.created` | `share` - the token | The event is "a link now exists"; the link is the thing. |
+| `notification.digest` | the row's own target for a digest of one row; `dir` - the folder for a digest of one folder; `none` for several | A digest of several folders has no one place; the rows it carries are in the list under it. |
 | `admin_test` · `webhook_test` | `none` | |
 | `update_available` · `update_applied` | `none` | Not about a file. |
 | `auth_provider_down` · `ldap_legacy_account_elsewhere` | `none` | About sign-in, not a file. |
@@ -487,6 +504,20 @@ event's [target](#click-target).
   constructed by the page keeps its callback - which is what marks the row
   read and navigates inside the running SPA; the worker can only open an
   address.
+- **The worker is found by its own scope** (`/admin/`), never by the page's
+  address. A page under `/drive/` - the whole product for an account that is
+  not an administrator - is outside that scope, and until #190 the lookup
+  asked for a worker covering the page itself, found none, and dropped every
+  notification on Android, in a tab and in the installed app alike.
+- **iPhone and iPad**: a Safari tab has no notifications at all (the dialog
+  says so under the switch). The app added to the Home Screen has them, on
+  iOS 16.4 or later, once the permission is asked from the button there
+  ([On a phone or a tablet](DESKTOP.md#on-a-phone-or-a-tablet-the-web-app)).
+- ⚠ **Only while filex is open.** These notifications ride the bell's poll
+  (below), in a tab or in the installed app. There is no Web Push yet - no
+  push subscription, no key to sign one with - so with filex closed, on a
+  phone above all, nothing arrives. `notify-sw.js` already answers a `push`
+  with the app's own toast, for the day a subscription exists.
 - One toast per notification id (`tag: filex-notification-<id>`), so a
   re-render cannot produce two. `renotify` rides with the tag, because Android
   replaces a same-tag notification silently otherwise.
@@ -527,6 +558,165 @@ start, must not replay every unread row the user already had as toasts.
 
 ⚠ A notification carries **a name, a count and a target** - never file content
 and never a credential. The title and body are the same strings the bell shows.
+
+---
+
+## The digest
+
+A folder that receives 30 files in a minute produces 30 bell rows, 30 steps
+of the badge, 30 browser pop-ups and 30 desktop toasts, and people turn
+notifications off. Since 0.53 a kind of notification can be **held** instead:
+it waits for a short window, and the window ends in ONE notification that
+says, folder by folder, what changed:
+
+> **34 notifications**
+> Rapor: 30 files added; Fotoğraflar: 3 files moved to the trash, 1 comment
+
+**The digest is optional, and off out of the box: every kind is urgent - told
+at once, exactly as before 0.53 - until an administrator or a person turns it
+off.** An upgrade changes nobody's notifications.
+
+The bell, the browser's pop-up, the desktop app and the email all take the same
+digest: it is decided in the one read every one of them makes, not in any of
+them (`internal/notify/digest.go`).
+
+### What is held
+
+- **The row is written as always.** Every event keeps its own row, the moment
+  it happens: the history, the admin list, the audit log and the webhooks see
+  each event on its own. Only the *telling* is held.
+- A held row is **quiet** for its person: it is in their list at once (the
+  bell's **View all** shows it), marked read, and counted by neither the badge
+  nor `GET /api/notifications?unread=true` - so neither the browser nor the
+  desktop app raises a pop-up for it.
+- When the window ends, one row of `notification.digest` is written to that
+  person, unread. That row is the notification: the badge moves by one, the
+  browser and the desktop app raise one pop-up, and the rows it carries are
+  marked read for good.
+- A window of **one** row is told as that row: the digest says what it says and
+  opens what it opens. A digest of one folder opens that folder; one of several
+  folders opens nothing (the rows it carries are in the list under it).
+- A muted kind is in no digest - it is in no bell. A person whose bell is off
+  (`in_app_enabled: false`) gets no digest row; an email a held row asked for
+  is still sent.
+
+### Urgent kinds
+
+**Every kind is urgent by default** (the built-in list, what an
+administrator who chose nothing has). The kinds that flood - and so the ones
+worth holding - are the file activity (`file.uploaded`, `file.updated`,
+`file.moved`, `file.trashed`, `file.deleted`), `archive.*`, `share.created`,
+`drop.received` and `comment.added`. The security and administrator alerts
+(`file.infected`, `file.upload_failed`, the `e2e.*` events, the operator
+alarms) can be held as well; that is a choice, not a default.
+
+A kind a later version adds is told at once until somebody decides about it.
+
+- **The person**: **user settings → Notifications**, an **Urgent** switch beside
+  every kind under *What to tell me about*, and - for an administrator - one
+  switch for all the administrator alerts. Turning a switch off holds that
+  kind for this person; turning it on tells it at once again. The pane says
+  how long a held kind waits only while one is held. A switch put back where
+  the default is drops the person's own choice, so a later change of the
+  default reaches them.
+- **The administrator**: **Admin → Notifications → Notification digest** -
+  how long the window is (**1 to 15 minutes**, default 1) and which kinds are
+  told at once by default; the card says *every kind is told at once* while
+  nothing is held, and *Restore defaults* brings back the built-in list
+  (everything at once). On a multi-tenant install every tenant has its own: a
+  tenant's administrator sets their tenant's, the platform operator the
+  supertenant's. A person cannot change the window.
+
+### The window
+
+The window starts with the first held row and ends that many minutes later;
+everything held by then is in the digest, and what arrives while it is being
+written starts the next window. A backlog larger than 2,000 rows is told
+oldest first, in more than one digest.
+
+The window is in the database, not in memory (`notify_digest_state`, migration
+00087): the person's digest point - every row at or below it has been told -
+and when the open window ends. A server that stops with a window open keeps
+it, and the next start tells it at its first pass (the background pass runs
+every 10 seconds; a person's own read of their bell tells an ended window too).
+The digest row is written in one transaction with a compare-and-set of the
+point, so two servers, two tabs or a restart in the middle never write it
+twice, and a row that no digest carried is simply unread again and told on its
+own - never lost.
+
+A window of a person's own rows opens when the row is written. One of
+broadcasts - an antivirus alert for everybody who can see the file - opens at
+the person's next read of their bell, because who reads a broadcast is decided
+when it is read.
+
+⚠ A digest is made of the rows the person's own bell shows: their own rows,
+and the broadcasts their bell takes, through the same per-row pass - the
+tenant, the grants ([The bell, and who can reach it](#the-bell-and-who-can-reach-it-product-rule)).
+It never names or counts a file the person could not read in their bell. A
+token confined to one folder reads a digest only when every folder it names is
+inside the folder.
+
+### The digest row
+
+```json
+{
+  "event": "notification.digest",
+  "severity": "info",
+  "title": "34 new notifications",
+  "body": "Rapor: 30 files added; Fotoğraflar: 3 files moved to the trash, 1 comment",
+  "meta": {
+    "count": 34,
+    "groups": [
+      { "storage": "team", "path": "Rapor", "name": "Rapor", "count": 30,
+        "counts": { "file.uploaded": 30 },
+        "parts": [ { "key": "file_uploaded", "count": 30 } ] },
+      { "storage": "team", "path": "Fotoğraflar", "name": "Fotoğraflar", "count": 4,
+        "counts": { "file.trashed": 3, "comment.added": 1 },
+        "parts": [ { "key": "file_trashed", "count": 3 }, { "key": "comment_added", "count": 1 } ] }
+    ],
+    "window_start": "2026-10-06T09:15:02Z",
+    "window_end": "2026-10-06T09:15:58Z",
+    "recipient": { "id": 7 }
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `count` | How many rows the digest carries. |
+| `groups` | One per folder, the most changed first, at most 20: `storage` (name), `path` inside it, `name`, `count`, `counts` by event id, and `parts` - the phrases the line is said in (`key` is the catalogue key after `server.notify.digest.`; the administrator alerts share `admin`). A folder inside an end-to-end encrypted folder whose names are encrypted has no `name` and `encrypted: true`, with its `e2e_root`: a reader shows its own name where the explorer has it unlocked, the lock word otherwise, never the ciphertext. |
+| `more_folders` / `more_count` | The folders past the twentieth, and how many rows they held. |
+| `other` / `other_parts` | The rows that name no folder (an operator alarm), by event and as phrases. |
+| `item` | A digest of one row: that row's `event`, `title`, `body` and `meta`. |
+| `recipient` | Whose digest it is - for a webhook receiver; the row itself is addressed to that person. |
+
+The title and body are the server's English; the bell, the pop-ups and the
+desktop app say it in the reader's language (`packages/core`
+`lib/notificationText.ts`, the `server.notify.digest.*` keys of the server
+catalogue, which a language pack translates).
+
+### Email and webhooks
+
+- **Email.** An event can ask for an email to its addressee - today the owner
+  of a file request, told of each drop (`drop.received`). When the owner holds
+  that kind, the email waits too: one email per window, the digest's, in the
+  owner's language, folder by folder, with the link the drop carried. When
+  they mark it urgent, each drop is emailed at once, as before.
+- **Webhooks.** Every webhook receives every event on its own, as before -
+  nothing a receiver relies on is held. The digest is an event too,
+  `notification.digest`, and it goes **only** to a webhook target that ticks it
+  in **Admin → Webhooks**: not to a target with an empty list (everything) and
+  not to the legacy global webhook, which received each row already. One per
+  person per window; `meta.recipient.id` says whose.
+
+### Endpoints
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/notifications/settings` | Also answers `urgent_overrides` and `digest` - see [Per-user settings](#per-user-settings). |
+| `PATCH /api/notifications/settings` | `urgent_overrides` changes the person's urgent choices; left out, they are kept. |
+| `GET /api/admin/notifications/digest` | The defaults the caller administers → `{window_minutes, urgent_events, saved, scope, tenant, defaults, events, admin_events, window_min, window_max}`. Out of the box `urgent_events` is every kind in `events` and `saved` is `false`. `scope` is `instance` on a single-tenant install, `tenant` otherwise (a tenant's own, the supertenant's included). |
+| `PATCH /api/admin/notifications/digest` | `{window_minutes?, urgent_events?}`. A field left out keeps its value; `urgent_events: null` restores the built-in list; a window outside 1-15 answers `400 invalid_window`; event ids the catalogue does not know are dropped. |
 
 ---
 
@@ -698,6 +888,7 @@ tenant admin reads the tenant's own events in their bell, which is scoped.
 | `POST /api/admin/notifications/test` | Emit an `admin_test` event through **both** channels → `{id}`. Use it to verify the webhook is wired. |
 | `GET /api/admin/notifications/webhook-config` | Current config → `{url, token_set}`. |
 | `PATCH /api/admin/notifications/webhook-config` | Set the webhook URL/token at runtime → `{ok:true}`. |
+| `GET` / `PATCH /api/admin/notifications/digest` | The [digest](#the-digest)'s defaults - the window and the urgent kinds - for the tenant the caller administers (the instance on a single-tenant install). Open to a tenant's administrator for their own tenant; see [Endpoints](#endpoints). |
 | `GET /api/admin/webhooks` | List the webhook v2 targets (secrets masked to a `secret_set` flag) plus each one's last delivery. |
 | `POST /api/admin/webhooks` | Create a target: `name`, `url`, optional `secret`, optional `events` allow-list, `enabled`. |
 | `PATCH /api/admin/webhooks/{id}` | Update one target. |
@@ -739,7 +930,15 @@ visible in one place; **Notifications** keeps the history and points there.
 {
   "user_id": 7,
   "in_app_enabled": true,
-  "muted_events": ["replica_status_report", "drop.received"]
+  "muted_events": ["replica_status_report", "drop.received"],
+  "urgent_overrides": { "file.uploaded": false, "comment.added": false },
+  "digest": {
+    "window_minutes": 1,
+    "urgent_events": ["file.updated", "file.upload_failed", "file.infected", "…"],
+    "default_urgent": ["file.uploaded", "file.updated", "file.upload_failed", "…"],
+    "events": ["file.uploaded", "file.updated", "…"],
+    "admin_events": ["update_available", "…"]
+  }
 }
 ```
 
@@ -747,6 +946,8 @@ visible in one place; **Notifications** keeps the history and points there.
 |---|---|---|
 | `in_app_enabled` | bool | `false` empties this user's bell: the list returns nothing and the unread badge is 0. |
 | `muted_events` | array of event ids | Event types dropped from this user's list **and** unread count. |
+| `urgent_overrides` | object, event id → bool | The person's own [digest](#the-digest) choices: `true` tells a kind at once, `false` holds it. A kind not named follows the administrator's default (out of the box: at once). ⚠ **Left out of a `PATCH`, they are kept** - unlike the two fields above - so a client that does not know them cannot wipe them. A `PATCH` that carries them first tells what is held under the old choice. |
+| `digest` | object, read only | `null` when the digest is off. `window_minutes`, `urgent_events` (what is urgent for this person now), `default_urgent` (the administrator's list), `events` (every kind a choice can be made about) and `admin_events` (the administrator alerts among them). |
 
 A user with **no settings row** is treated as the default: `in_app_enabled=true`
 with **no** muted events. `PATCH` replaces the whole preference (send the full
@@ -821,7 +1022,13 @@ The receiver expects auth filex isn't sending, or a mismatched secret. Set
 your receiver validates - filex sends it as `Authorization: Bearer <token>`.
 
 ### Too many notifications
-This is a per-user preference, not a global one: have the user add the noisy
+First, the [digest](#the-digest), which is off out of the box: have the person
+turn the **Urgent** switch off for the noisy kind (user settings →
+Notifications), or hold it for everybody by default (Admin → Notifications →
+Notification digest). A held kind is told once per window, folder by folder,
+however many events it carries; the window is 1 to 15 minutes.
+
+To stop hearing about a kind at all, it is a per-user preference, not a global one: have the user add the noisy
 event ids to `muted_events` via `PATCH /api/notifications/settings`, or set
 `in_app_enabled: false` to silence their bell entirely. To reduce **webhook**
 volume instead, give the target a **per-event allow-list**: tick only the events

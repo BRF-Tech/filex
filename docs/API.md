@@ -225,6 +225,7 @@ function onError(e: { message: string; context?: unknown }) {
 | `navigate`         | `{ path: string }` - the viewed folder changed |
 | `refresh`          | *(none)* - the viewer asked for a refresh |
 | `open-my-shares`   | *(none)* - the navigation panel's **My shares** row was pressed. The row is drawn only with `config.mySharesVisible: true` (default off); the page it leads to is the host's, so set the flag only if you handle this. Not forwarded by `<filex-explorer>` or `<FileManager>` |
+| `open-app-store`   | *(none)* - the navigation panel's **App store** row was pressed (0.53, the store screen). `config.appStorePage: true` (default off) says the host has the page - the SPA's `app-store` route, the desktop app's store window; the explorer then draws the row only for a person whom the server shows the screen (`GET /api/app-store` → `visible`), the one rule for every host. Forwarded by `<filex-explorer>` (`open-app-store`) and `<FileManager>` (`onOpenAppStore`) |
 
 `refresh` is a **notification, not a request**: the explorer reloads the listing
 itself and does not wait for the host. It exists for the half it cannot know

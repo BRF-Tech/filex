@@ -25,6 +25,7 @@ import type { AuthProvider } from '@/api/types';
 import { extractError } from '@/api/client';
 import { formatInterval, formatRelative } from '@/lib/format';
 import { useToastStore } from '@/stores/toast';
+import { useTenancy } from '@/composables/useTenancy';
 
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
@@ -42,7 +43,9 @@ const items = ref<AuthProvider[]>([]);
 const loading = ref(false);
 const recoveryLogin = ref(false);
 const secretKey = ref(true);
-const multiTenant = ref(false);
+// Whether anything about tenants is drawn: the server's one answer
+// (composables/useTenancy), not this page's own reading of its list.
+const { enabled: multiTenant } = useTenancy();
 const reviewPending = ref(false);
 /** Each LDAP provider's sync, for its card. */
 const syncs = reactive<Record<string, DirectorySyncStatus | undefined>>({});
@@ -115,7 +118,6 @@ async function load() {
     items.value = o.providers;
     recoveryLogin.value = o.recoveryLogin;
     secretKey.value = o.secretKey;
-    multiTenant.value = o.multiTenant === true;
     reviewPending.value = o.reviewPending === true;
   } catch (e) {
     toast.error(extractError(e, t('errors.generic')));
@@ -363,7 +365,7 @@ onMounted(load);
     <!-- Another provider of a kind: made switched off, then filled in on its page. -->
     <Modal v-model="adding" :title="t('authProviders.addTitle')" size="sm">
       <form class="space-y-3" data-testid="auth-provider-add-form" @submit.prevent="createProvider">
-        <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('authProviders.addHint') }}</p>
+        <p class="text-sm text-zinc-500 dark:text-zinc-400">{{ multiTenant ? t('authProviders.addHint') : t('authProviders.addHintSingle') }}</p>
         <Select v-model="addKind" :options="kindOptions" :label="t('authProviders.kind')" data-testid="auth-provider-add-kind" />
         <Input v-model="addLabel" :label="t('authProviders.label')" :hint="t('authProviders.labelHint')" data-testid="auth-provider-add-label" />
         <Input v-model="addSlug" :label="t('authProviders.slug')" :hint="t('authProviders.slugHint')" monospace data-testid="auth-provider-add-slug" />

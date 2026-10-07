@@ -6,11 +6,11 @@ package handlers_test
 // a `root:` token's folder however the body is shaped. A move, a delete and a
 // rename also name the ITEMS they act on (`items[].path`, `item`), a rename
 // names a new path, and the listing names a folder by `?path=`. Those are
-// confined by confine.Middleware only when it reads the request: a body
-// labelled JSON, a `?path=` that is there. Each test sends one of them in a
-// shape the middleware does not read and is red while something outside the
-// root changes (or is listed); each also shows the same shape still works
-// inside the root.
+// confined by confine.Middleware only when it reads the request: a `?path=`
+// that is there, and up to 0.52 only a body labelled JSON (since 0.53 a body
+// in any Content-Type). Each test sends one of them in a shape the middleware
+// did not read and is red while something outside the root changes (or is
+// listed); each also shows the same shape still works inside the root.
 
 import (
 	"encoding/json"
@@ -85,17 +85,26 @@ func TestConfineItems_AListingWithNoPathIsTheRoot(t *testing.T) {
 
 // `allowed` changes nothing, but it answers which permissions the caller holds
 // at a path; outside the root it holds none, however the question is sent.
+// Since 0.53 confine.Middleware refuses such a question whole, in any
+// Content-Type (up to 0.52 a text/plain one reached the handler, which held
+// nothing there itself).
 func TestConfineItems_AllowedHoldsNothingOutsideTheRoot(t *testing.T) {
 	f, tok := confinedFix(t)
 
-	code, raw := confRaw(t, f.URL, tok, http.MethodPost, "/api/files/manager?action=allowed", "text/plain",
-		[]byte(`{"items":[{"path":"main://disari/gizli.txt"},{"path":"main://kutu/ic.txt"}],"permissions":["files.delete"]}`))
-	require.Equal(t, http.StatusOK, code, raw)
-	var out struct {
-		Allowed [][]string `json:"allowed"`
+	for _, ct := range []string{"text/plain", "", "application/json"} {
+		code, raw := confRaw(t, f.URL, tok, http.MethodPost, "/api/files/manager?action=allowed", ct,
+			[]byte(`{"items":[{"path":"main://disari/gizli.txt"},{"path":"main://kutu/ic.txt"}],"permissions":["files.delete"]}`))
+		assert.Equal(t, http.StatusForbidden, code, "as %q: %s", ct, raw)
+		assert.NotContains(t, raw, "files.delete", "as %q: nothing is held outside the root", ct)
+
+		code, raw = confRaw(t, f.URL, tok, http.MethodPost, "/api/files/manager?action=allowed", ct,
+			[]byte(`{"items":[{"path":"main://kutu/ic.txt"}],"permissions":["files.delete"]}`))
+		require.Equal(t, http.StatusOK, code, "as %q: %s", ct, raw)
+		var out struct {
+			Allowed [][]string `json:"allowed"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(raw), &out), raw)
+		require.Len(t, out.Allowed, 1, raw)
+		assert.Equal(t, []string{"files.delete"}, out.Allowed[0], "as %q: inside the root the member's permission is held", ct)
 	}
-	require.NoError(t, json.Unmarshal([]byte(raw), &out), raw)
-	require.Len(t, out.Allowed, 2, raw)
-	assert.Empty(t, out.Allowed[0], "nothing is held outside the root")
-	assert.Equal(t, []string{"files.delete"}, out.Allowed[1], "inside the root the member's permission is held")
 }

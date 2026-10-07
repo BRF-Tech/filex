@@ -23,6 +23,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
 
 import AdvancedSearch from '@brftech/filex-core/src/components/AdvancedSearch.vue';
+import { chosenValue, listedOptions, pickOption } from '../helpers/choiceSelect';
 import type { AdvCountResult, AdvSearchRequest } from '@brftech/filex-core/src/lib/advSearch';
 
 const MB = 1024 * 1024;
@@ -68,7 +69,7 @@ describe('AdvancedSearch — what the form hands the query', () => {
   it('a custom size range reaches the request as BYTES', async () => {
     const w = mountDialog();
     await w.find('[data-testid="advsearch-query"]').setValue('report');
-    await w.find('[data-testid="advsearch-size"]').setValue('range');
+    await pickOption(w.find('[data-testid="advsearch-size"]'), 'range');
     // ⚠ The regression itself. Vue hands this back as a number, not a string.
     await w.find('[data-testid="advsearch-size-from"]').setValue('2');
     await settle(w);
@@ -82,7 +83,7 @@ describe('AdvancedSearch — what the form hands the query', () => {
   it('an empty end of the range stays OPEN — never zero bytes', async () => {
     const w = mountDialog();
     await w.find('[data-testid="advsearch-query"]').setValue('report');
-    await w.find('[data-testid="advsearch-size"]').setValue('range');
+    await pickOption(w.find('[data-testid="advsearch-size"]'), 'range');
     await w.find('[data-testid="advsearch-size-to"]').setValue('5');
     await settle(w);
     expect(last().filters.sizeMin).toBeNull();
@@ -93,9 +94,10 @@ describe('AdvancedSearch — what the form hands the query', () => {
   it('the unit multiplies the number the reader typed', async () => {
     const w = mountDialog();
     await w.find('[data-testid="advsearch-query"]').setValue('report');
-    await w.find('[data-testid="advsearch-size"]').setValue('range');
+    await pickOption(w.find('[data-testid="advsearch-size"]'), 'range');
     await w.find('[data-testid="advsearch-size-from"]').setValue('4');
-    await w.find('.fe-advsearch__unit').setValue('kb');
+    // The unit is a segmented strip of three (#160), so it is clicked.
+    await w.find('[data-testid="advsearch-unit-kb"]').trigger('click');
     await settle(w);
     expect(last().filters.sizeMin).toBe(4 * 1024);
     w.unmount();
@@ -180,20 +182,20 @@ describe('AdvancedSearch — what the form hands the query', () => {
     await w.find('[data-testid="advsearch-query"]').setValue('report');
     await settle(w);
     expect(last().filters.people).toBe('any');
-    await w.find('[data-testid="advsearch-people"]').setValue('me');
+    await pickOption(w.find('[data-testid="advsearch-people"]'), 'me');
     await settle(w);
     expect(last().filters.people).toBe('me');
-    await w.find('[data-testid="advsearch-people"]').setValue('system');
+    await pickOption(w.find('[data-testid="advsearch-people"]'), 'system');
     await settle(w);
     expect(last().filters.people).toBe('system');
     w.unmount();
   });
 
-  it('offers Anyone / You / System with no directory behind them', () => {
+  it('offers Anyone / You / System with no directory behind them', async () => {
     const w = mountDialog();
-    const opts = w.find('[data-testid="advsearch-people"]').findAll('option');
-    expect(opts.map((o) => o.attributes('value'))).toEqual(['any', 'me', 'system']);
-    expect(opts.map((o) => o.text())).toEqual(['Anyone', 'You', 'System']);
+    const opts = await listedOptions(w.find('[data-testid="advsearch-people"]'));
+    expect(opts.map((o) => o.value)).toEqual(['any', 'me', 'system']);
+    expect(opts.map((o) => o.label)).toEqual(['Anyone', 'You', 'System']);
     w.unmount();
   });
 
@@ -202,22 +204,23 @@ describe('AdvancedSearch — what the form hands the query', () => {
     countAnswer = { count: 4, capped: false, people: [{ value: 'u:7', name: 'Grace Hopper' }] };
     await w.find('[data-testid="advsearch-query"]').setValue('report');
     await settle(w);
-    const opts = w.find('[data-testid="advsearch-people"]').findAll('option');
-    expect(opts.map((o) => o.attributes('value'))).toEqual(['any', 'me', 'system', 'u:7']);
-    expect(opts[3].text()).toBe('Grace Hopper');
+    const opts = await listedOptions(w.find('[data-testid="advsearch-people"]'));
+    expect(opts.map((o) => o.value)).toEqual(['any', 'me', 'system', 'u:7']);
+    expect(opts[3].label).toBe('Grace Hopper');
 
-    await w.find('[data-testid="advsearch-people"]').setValue('u:7');
+    await pickOption(w.find('[data-testid="advsearch-people"]'), 'u:7');
     await settle(w);
     expect(last().filters.people).toBe('u:7');
 
     // ⚠ The member leaves when the next run's rows no longer contain it. A
-    // <select> holding a value that is no longer an option renders BLANK and
-    // goes on filtering — so the choice has to fall back, visibly, to Anyone.
+    // list holding a value that is no longer an option shows no choice (a
+    // native one rendered BLANK) and goes on filtering — so the choice has to
+    // fall back, visibly, to Anyone.
     countAnswer = { count: 2, capped: false, people: [] };
     await w.find('[data-testid="advsearch-query"]').setValue('reports');
     await settle(w);
     await settle(w);
-    expect((w.find('[data-testid="advsearch-people"]').element as HTMLSelectElement).value).toBe('any');
+    expect(chosenValue(w.find('[data-testid="advsearch-people"]'))).toBe('any');
     expect(last().filters.people).toBe('any');
     w.unmount();
   });
@@ -225,7 +228,7 @@ describe('AdvancedSearch — what the form hands the query', () => {
   it('turns Owner OFF under the content scopes, and stops filtering by it', async () => {
     const w = mountDialog();
     await w.find('[data-testid="advsearch-query"]').setValue('report');
-    await w.find('[data-testid="advsearch-people"]').setValue('me');
+    await pickOption(w.find('[data-testid="advsearch-people"]'), 'me');
     await settle(w);
     expect(last().filters.people).toBe('me');
     expect(w.find('[data-testid="advsearch-people"]').attributes('disabled')).toBeUndefined();
@@ -247,8 +250,8 @@ describe('AdvancedSearch — what the form hands the query', () => {
   it('reopening over the applied query shows the filter that is IN FORCE', async () => {
     const w = mountDialog();
     await w.find('[data-testid="advsearch-query"]').setValue('report');
-    await w.find('[data-testid="advsearch-type"]').setValue('folder');
-    await w.find('[data-testid="advsearch-people"]').setValue('me');
+    await pickOption(w.find('[data-testid="advsearch-type"]'), 'folder');
+    await pickOption(w.find('[data-testid="advsearch-people"]'), 'me');
     await w.find('[data-testid="advsearch-tags"]').setValue('invoice');
     await settle(w);
     await w.find('[data-testid="advsearch-submit"]').trigger('click');
@@ -263,8 +266,8 @@ describe('AdvancedSearch — what the form hands the query', () => {
 
     // ⚠⚠ The bug: this used to be `any` / `any` / `''`, and pressing Search
     // from there submitted the reset form and silently dropped the filter.
-    expect((w.find('[data-testid="advsearch-type"]').element as HTMLSelectElement).value).toBe('folder');
-    expect((w.find('[data-testid="advsearch-people"]').element as HTMLSelectElement).value).toBe('me');
+    expect(chosenValue(w.find('[data-testid="advsearch-type"]'))).toBe('folder');
+    expect(chosenValue(w.find('[data-testid="advsearch-people"]'))).toBe('me');
     expect((w.find('[data-testid="advsearch-tags"]').element as HTMLInputElement).value).toBe('invoice');
     // …and the count now describes THAT filter, not an empty one.
     expect(last().filters.type).toBe('folder');
@@ -276,7 +279,7 @@ describe('AdvancedSearch — what the form hands the query', () => {
   it('reopening after the toolbar query changed starts CLEAN', async () => {
     const w = mountDialog();
     await w.find('[data-testid="advsearch-query"]').setValue('report');
-    await w.find('[data-testid="advsearch-type"]').setValue('folder');
+    await pickOption(w.find('[data-testid="advsearch-type"]'), 'folder');
     await settle(w);
     await w.find('[data-testid="advsearch-submit"]').trigger('click');
 
@@ -286,7 +289,7 @@ describe('AdvancedSearch — what the form hands the query', () => {
     await w.setProps({ open: false });
     await w.setProps({ open: true, initialQuery: 'budget' });
     await settle(w);
-    expect((w.find('[data-testid="advsearch-type"]').element as HTMLSelectElement).value).toBe('any');
+    expect(chosenValue(w.find('[data-testid="advsearch-type"]'))).toBe('any');
     expect((w.find('[data-testid="advsearch-query"]').element as HTMLInputElement).value).toBe('budget');
     expect(last().filters.type).toBe('any');
     w.unmount();
@@ -295,7 +298,7 @@ describe('AdvancedSearch — what the form hands the query', () => {
   it('abandoning the dialog changes nothing — the NEXT opening still shows what is applied', async () => {
     const w = mountDialog();
     await w.find('[data-testid="advsearch-query"]').setValue('report');
-    await w.find('[data-testid="advsearch-size"]').setValue('lt1');
+    await pickOption(w.find('[data-testid="advsearch-size"]'), 'lt1');
     await settle(w);
     await w.find('[data-testid="advsearch-submit"]').trigger('click');
 
@@ -303,14 +306,14 @@ describe('AdvancedSearch — what the form hands the query', () => {
     await w.setProps({ open: false });
     await w.setProps({ open: true, initialQuery: 'report' });
     await settle(w);
-    await w.find('[data-testid="advsearch-size"]').setValue('gt100');
-    await w.find('[data-testid="advsearch-type"]').setValue('image');
+    await pickOption(w.find('[data-testid="advsearch-size"]'), 'gt100');
+    await pickOption(w.find('[data-testid="advsearch-type"]'), 'image');
     await settle(w);
     await w.setProps({ open: false });
     await w.setProps({ open: true, initialQuery: 'report' });
     await settle(w);
-    expect((w.find('[data-testid="advsearch-size"]').element as HTMLSelectElement).value).toBe('lt1');
-    expect((w.find('[data-testid="advsearch-type"]').element as HTMLSelectElement).value).toBe('any');
+    expect(chosenValue(w.find('[data-testid="advsearch-size"]'))).toBe('lt1');
+    expect(chosenValue(w.find('[data-testid="advsearch-type"]'))).toBe('any');
     w.unmount();
   });
 });

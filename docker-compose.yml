@@ -1,7 +1,7 @@
 # filex — self-hosted file manager stack.
 #
 # Profiles let you mix-and-match optional services. Defaults to the slim
-# filex image only (~43 MB, no thumbnail toolchain), with SQLite + local
+# filex image only (~62 MB, no thumbnail toolchain), with SQLite + local
 # storage. Bring up extras as needed:
 #
 #   docker compose up                                            # filex slim only
@@ -74,8 +74,8 @@ services:
 
   # ---------------------------------------------------------------------
   # filex (full) — the registry's default tag; thumbnail toolchain included
-  # (~225 MB; no LibreOffice since 0.50 - office documents are the connected
-  # ONLYOFFICE's). The lean alternative is ghcr.io/brf-tech/filex:slim (~43 MB),
+  # (~241 MB; no LibreOffice since 0.50 - office documents are the connected
+  # ONLYOFFICE's). The lean alternative is ghcr.io/brf-tech/filex:slim (~62 MB),
   # which has the same binary and none of the programs the thumbnailer shells
   # out to.
   # Activate with `--profile full` and stop the `filex` service first

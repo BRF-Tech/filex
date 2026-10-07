@@ -28,11 +28,11 @@ administrator makes a group nobody is in one.
 - [Audit](#audit)
 - [Things to know](#things-to-know)
 
-![Admin → Groups: where each group's members come from, its role and priority, its members, folders and the SSO or LDAP groups it is linked to](screenshots/v0.52.0/groups/groups-list-1440.png)
+![Admin → Groups: where each group's members come from, its role and priority, its members, folders and the SSO or LDAP groups it is linked to](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png)
 
 ## Folder access
 
-![The explorer's sharing panel: a group offered beside people, Owner asked for in the dialog](screenshots/v0.52.0/groups/share-group-1440.png)
+![The explorer's sharing panel: a group offered beside people, Owner asked for in the dialog](https://filex.sh/shots/groups/share-group-1440.31c2a81e1eeb.png)
 
 A group's grant counts exactly as the same grant to each member would:
 
@@ -52,7 +52,7 @@ when they reconnect, as for a person's grant.
 
 ## The role
 
-![A person's page: the role they hold through a group, and the groups they are in](screenshots/v0.52.0/groups/user-groups-1440.png)
+![A person's page: the role they hold through a group, and the groups they are in](https://filex.sh/shots/groups/user-groups-1440.d6c5428fd5f4.png)
 
 Every person has **one** role ([PERMISSIONS.md](PERMISSIONS.md#custom-roles)).
 Groups only fill it in for someone who has none of their own:
@@ -143,7 +143,7 @@ keep it, and who may edit it, as tight as the directory's own admin groups.
 
 ## Members and SSO links
 
-![One group's page: its name, role and role priority, its SSO and LDAP groups, and its members with how each one joined](screenshots/v0.52.0/groups/group-page-1440.png)
+![One group's page: its name, role and role priority, its SSO and LDAP groups, and its members with how each one joined](https://filex.sh/shots/groups/group-page-1440.61f4012ef1b0.png)
 
 A membership is either:
 

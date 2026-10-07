@@ -31,6 +31,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/tokenperm"
 )
 
 func init() {
@@ -56,6 +57,9 @@ const bearerPrefix = "Bearer "
 //	mcp    — the streamable-HTTP MCP server at /api/ai/mcp
 //	admin  — the full admin surface at /api/ai/admin/* and the admin_*
 //	         MCP tools (users, storages, settings, replica, queue, …)
+//
+// Beside the verbs a list may name a permission at a level, `comments:rw`
+// (package tokenperm); one it does not name holds its default.
 const (
 	ScopeRead   = "read"
 	ScopeWrite  = "write"
@@ -74,8 +78,9 @@ const ScopeRootPrefix = "root:"
 // `root:` confinement scope is validated separately (see IsValidScope).
 var ValidScopes = []string{ScopeRead, ScopeWrite, ScopeDelete, ScopeMCP, ScopeAdmin}
 
-// IsValidScope reports whether s is a known issuable scope — a verb scope or a
-// well-formed `root:<adapter>://<rel>` confinement scope.
+// IsValidScope reports whether s is a known issuable scope — a verb scope, a
+// well-formed `root:<adapter>://<rel>` confinement scope, or a permission of
+// package tokenperm at one of its levels (`comments:read`, `comments:rw`).
 //
 // ⚠ "Well-formed" is decided by the confinement parser itself, not by a
 // non-empty check. A root scope it cannot read (`root:projects`, no storage
@@ -90,6 +95,9 @@ func IsValidScope(s string) bool {
 	if strings.HasPrefix(s, ScopeRootPrefix) {
 		_, ok := confine.ParseRoot(strings.TrimPrefix(s, ScopeRootPrefix))
 		return ok
+	}
+	if _, _, isPerm, err := tokenperm.ParseEntry(s); isPerm {
+		return err == nil
 	}
 	return false
 }

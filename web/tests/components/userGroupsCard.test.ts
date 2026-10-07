@@ -25,6 +25,7 @@ vi.mock('@/api/groups', () => ({ GroupsApi: groupsApi }));
 import UserGroupsCard from '@/components/UserGroupsCard.vue';
 import { DataTable } from '@brftech/filex-core';
 import { closeRowMenus, openRowMenu, pickMenuItem } from '../helpers/rowMenu';
+import { pickOption } from '../helpers/choiceSelect';
 
 function mountCard() {
   setActivePinia(createPinia());
@@ -69,7 +70,7 @@ describe("a person's groups", () => {
   it('adds the person to a group they are not in', async () => {
     const w = mountCard();
     await flushPromises();
-    await w.get('[data-testid="user-groups-card"] select').setValue('4');
+    await pickOption(w.get('[data-testid="user-groups-card"]'), '4');
     await w.get('[data-testid="user-group-add"]').trigger('click');
     await flushPromises();
     expect(groupsApi.addMembers).toHaveBeenCalledWith(4, [9]);

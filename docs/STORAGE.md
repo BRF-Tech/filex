@@ -107,6 +107,21 @@ Saving takes effect on the running process: the cached driver is dropped, the
 syncer is stopped and a new one is started from the row you just wrote. No
 restart, and no stale connection left holding the previous credentials.
 
+**Saved credentials are never shown back.** A password, an S3 access or
+secret key, an SFTP private key - every field the driver marks secret, and any
+key that is a credential by name - comes back from the server as `***`: on the
+Storages page, in a tenant administrator's storage settings, through an admin
+API key and through the `admin_storages_*` MCP tools. The form shows such a
+field empty with **Saved - type to change it**; left alone it keeps the saved
+value, typed into it replaces it. **Test connection** on the edit page tests
+with the saved value too.
+
+⚠ A saved credential is only sent where it was saved. Change the storage's
+address (`host`, `endpoint`, `url`, …) or its driver and the credential has to
+be typed again - the save answers **400** `SECRET_NEEDED` naming the field.
+Otherwise anybody who may edit a storage but not read its password could
+point it at a server of their own and have filex send the password there.
+
 ⚠ **Renaming a storage changes its address on every file protocol.** The name
 is the first path segment:
 
@@ -160,9 +175,9 @@ one order, decided in three layers - the most personal wins:
 3. **Creation order**, when neither has been set - what every install showed
    before this existed.
 
-![A storage row's order menu in the navigation panel](screenshots/v0.52.0/sidenav/storage-order-menu-1440.png)
+![A storage row's order menu in the navigation panel](https://filex.sh/shots/sidenav/storage-order-menu-1440.e1a6747973ba.png)
 
-![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](screenshots/v0.52.0/sidenav/admin-storages-order-1440.png)
+![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](https://filex.sh/shots/sidenav/admin-storages-order-1440.46981beab527.png)
 
 A storage the person's own order does not name - one added after they
 arranged theirs, or one they could not see then - keeps the position the

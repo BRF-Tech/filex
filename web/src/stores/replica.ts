@@ -3,6 +3,8 @@ import { computed, ref } from 'vue';
 import { ReplicaApi } from '@/api/replica';
 import type {
   ReplicaFailure,
+  ReplicaInitialCopy,
+  ReplicaLink,
   ReplicaRule,
   ReplicaRuleInput,
   ReplicaSettings,
@@ -24,6 +26,12 @@ export const useReplicaStore = defineStore('replica', () => {
   const report = ref<ReplicaStatusReport | null>(null);
   // Settings
   const settings = ref<ReplicaSettings>({ report_cron: '', report_enabled: false, default_mode: 'mirror' });
+  // Initial copies, by storage id
+  const initialCopies = ref<Record<number, ReplicaInitialCopy>>({});
+  // Each storage's folder on its target, by storage id
+  const links = ref<Record<number, ReplicaLink>>({});
+  /** Whether a copy is still on its way (the page then reads them again). */
+  const copying = computed(() => Object.values(initialCopies.value).some((c) => c.phase !== 'done'));
 
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -77,10 +85,37 @@ export const useReplicaStore = defineStore('replica', () => {
     await fetchFailures();
     return r;
   }
-  async function fixOne(path: string, op: string): Promise<{ ok: boolean; queued?: boolean }> {
-    const r = await ReplicaApi.fixOne(path, op);
+  async function fixOne(storageId: number | undefined, path: string, op: string): Promise<{ ok: boolean; queued?: boolean }> {
+    const r = await ReplicaApi.fixOne(storageId, path, op);
     await fetchFailures();
     return r;
+  }
+
+  // ── Initial copies ───────────────────────────────────────
+  async function fetchInitialCopies(): Promise<void> {
+    try {
+      const list = await ReplicaApi.initialCopies();
+      const next: Record<number, ReplicaInitialCopy> = {};
+      for (const c of list) next[c.storage_id] = c;
+      initialCopies.value = next;
+    } catch (e: unknown) {
+      error.value = extractError(e, t('errors.loadFailed'));
+    }
+  }
+  async function fetchLinks(): Promise<void> {
+    try {
+      const list = await ReplicaApi.links();
+      const next: Record<number, ReplicaLink> = {};
+      for (const l of list) next[l.storage_id] = l;
+      links.value = next;
+    } catch (e: unknown) {
+      error.value = extractError(e, t('errors.loadFailed'));
+    }
+  }
+  async function restartInitialCopy(storageId: number): Promise<void> {
+    const c = await ReplicaApi.restartInitialCopy(storageId);
+    initialCopies.value = { ...initialCopies.value, [storageId]: { ...initialCopies.value[storageId], ...c } };
+    await fetchInitialCopies();
   }
   function setUnresolvedFilter(v: boolean): void {
     onlyUnresolved.value = v;
@@ -124,6 +159,9 @@ export const useReplicaStore = defineStore('replica', () => {
     onlyUnresolved,
     report,
     settings,
+    initialCopies,
+    links,
+    copying,
     loading,
     error,
     failurePages,
@@ -135,6 +173,9 @@ export const useReplicaStore = defineStore('replica', () => {
     fetchFailures,
     fixAll,
     fixOne,
+    fetchInitialCopies,
+    fetchLinks,
+    restartInitialCopy,
     setUnresolvedFilter,
     setFailuresPage,
     fetchReport,

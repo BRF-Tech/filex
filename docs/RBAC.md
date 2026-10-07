@@ -15,7 +15,7 @@ before.
 > the roles are **Admin → Roles**. (Before 0.49 the grants page was called
 > *Permissions*.)
 
-![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](screenshots/v0.52.0/roles/folder-access-1440.png)
+![Admin → Folder access: every per-folder grant - who, which storage, which path, which level](https://filex.sh/shots/roles/folder-access-1440.693f0707339e.png)
 
 > A grant can also be given to a **group** - every member holds it, the
 > highest covering level still wins and the account ceiling still caps it.
@@ -79,7 +79,8 @@ from a token (they inherit its verbs).
 | `delete` | deleting (to the trash), discarding a draft, dropping versions or trash entries |
 
 Without `write` a token keeps what a **viewer** keeps: its preferences, stars,
-recently opened, personal tags, comments and notifications. It can read its own
+recently opened, personal tags and notifications. Comments are a permission of
+their own, with a level ([below](#permissions-with-a-level-comments)). It can read its own
 account (`GET /api/auth/me`) but not change its profile, its password or its
 two-factor setup - a token that may only read must not be able to take the
 account over. A refused request answers
@@ -100,6 +101,104 @@ On each surface:
 | `/api/ai` REST and MCP | each route and each `file_*` tool asks the verb of its REST twin; `tools/list` leaves out the tools the token cannot use ([MCP.md](MCP.md#mcp-endpoint-apiaimcp)) |
 | WebDAV, SFTP, FTPS (a token as the password) | `read` to list and download, `write` to create, change, rename and move, `delete` to remove |
 | S3 access keys and NFS exports **minted from a token** | carry that token's verbs the same way; one minted from a browser session carries every verb, as before |
+
+### Permissions with a level: comments
+
+Beside its verbs, a token holds some permissions at a **level**. The first is
+**`comments`**:
+
+| Level | In the token's list | Allows |
+|---|---|---|
+| `read` | nothing (the default) | reading a file's or a folder's comments |
+| `rw` (read and write) | `comments:rw` | also adding a comment and deleting one (one's own; an administrator any on the tenant's files) |
+
+The same rule on every door: `POST` / `DELETE /api/files/comments`,
+`POST /api/ai/comments` and `POST /api/ai/comments/{id}/delete`, and the MCP
+tools `file_comment_add` / `file_comment_delete` ask `comments:rw`; reading
+(`GET /api/files/comments`, `GET /api/ai/comments`, `file_comments`) asks
+`read`. One handler asks it for all of them (`handlers/comments.go`, through
+`auth.CommentsWrite`), and `tools/list` does not offer the two tools to a token
+without it. A token without it gets
+`403 {"error":"token missing scope: comments:write"}`.
+
+⚠ **`write` does not include it** (since 0.53). Until then
+`/api/files/comments` let any token add and delete (it asked `read`), while
+`/api/ai` and MCP asked `write`: one token could comment through one door and
+not through its twin. Now a token that should comment says so, whatever its
+verbs - a `read,comments:rw` token comments and changes no file, a
+`read,write,delete` token changes files and does not comment.
+
+**Every token reads comments unless it says otherwise.** A token whose list
+does not name `comments` holds it at `read`: every API key and agent token
+minted before 0.53 - no migration rewrites their lists, the default is what an
+unnamed permission holds - and every new one minted without choosing.
+
+**The one exception is the desktop app's own token** (the maintainer's
+decision): the desktop is the person's own app, like their browser, so a
+pairing is minted with `comments:rw`, for every role, and migration `00091`
+gave the pairings made before 0.53 the same level (`source = 'desktop'`
+tokens; a list that already names a level is left as it is). The account's own
+`comments.write` still decides, as in the browser. To let any other token
+comment:
+
+- **mint it with it** - `comments:rw` in `scopes`
+  (`POST /api/tokens`, `POST /api/admin/ai-tokens`), or **Comments → Read and
+  write** on the API keys screens (Admin → API / MCP, and the API keys panel of
+  the explorer and the desktop app);
+- **or raise an existing one** - `PATCH /api/tokens/{id}` or
+  `PATCH /api/admin/ai-tokens/{id}` with `{"permissions": {"comments": "rw"}}`
+  (`"read"` takes it back), **Edit** on Admin → API / MCP, or the token's
+  **Actions → Comments: allow writing** on the API keys panel. Only the levels
+  change; the verbs and the `root:` stay as they were.
+
+`comments:write` is read as `comments:rw` when a token is minted; the stored
+form is `rw`, and a level that is the default is not written at all. Every
+token list answers each token's levels in `permissions`
+(`{"comments": "read"}`). A token caller cannot give a token a level above its
+own - minting one or raising one, its own included (`403`,
+`reason: "token_ceiling"`).
+
+The **account** still decides too: adding a comment needs the account's
+`comments.write` permission ([PERMISSIONS.md](PERMISSIONS.md)), whatever the
+token holds. That role permission is the roles' side of the same thing - a role
+without it reads comments, a role with it reads and writes - and it is not
+changed: the built-in User and Viewer roles keep allowing it, as they did. A
+browser session is judged by the account alone.
+
+⚠ **Integrations that comment through a token** - an embed's proxy token, an
+agent - need `comments:rw` after the upgrade to 0.53, or their people's
+comments answer `403`.
+
+#### Every permission added from now on (the rule)
+
+A permission with a level is declared in `backend/internal/tokenperm`, and its
+declaration says what every token that does not name it holds - its
+**`DefaultLevel`**:
+
+- **`read`** - every permission. Existing tokens get it the moment the version
+  that adds it starts, with no migration, and so does a new token whose minter
+  did not choose.
+- **none** - only a **super-administrator kind** of permission (administering
+  the server, tenants, system settings), marked `Superadmin`. It is never
+  handed to a token that did not ask for it.
+
+A shipped default never changes: a token that never named the permission would
+change with it, without a word. `tokenperm_test.go` fails for a permission
+added without a `DefaultLevel`, for a default that breaks the rule, and for a
+shipped default that changed; [CONTRIBUTING.md → Adding a
+permission](CONTRIBUTING.md#adding-a-permission) says what to do.
+
+A kind of token that should hold more than the default is given it where it
+is minted, with the reason written there - never by changing the default. The
+desktop pairing's `comments:rw` is the one such case today
+(`handlers.desktopScopes`, and migration `00091` for the pairings made
+before).
+
+Role permissions ([PERMISSIONS.md](PERMISSIONS.md)) are single actions -
+allowed or not, no level - and a new one follows the role catalogue's own
+upgrade rule there: it is handed to a saved role only when it is carved out of
+one the role already allows, and the administration permissions (`admin.*`)
+never.
 
 ### Public links need edit rights on every surface
 
@@ -186,6 +285,11 @@ Tenant scope is applied explicitly here, not inherited: `tenantstore` wraps only
 the storage/user *listing* methods, so a per-grant read like this one has to gate
 itself or it hands one tenant the paths of another's shared folders.
 
+So is a folder confinement (a `root:` token, `X-Filex-Root`): the rows are the
+grants inside the root, and `storages[]` names only the root's own storage, and
+only when one of the caller's grants there lies inside the root or covers it (a
+whole-storage grant, or one on a folder above the root).
+
 ## Endpoints - self-service tokens (`/api/tokens`)
 
 Any authenticated user (incl. non-admin) mints tokens **bound to themselves**,
@@ -194,13 +298,14 @@ capped server-side:
 | Method | Path | Notes |
 |--------|------|-------|
 | GET | `/api/tokens` | The caller's own tokens (no secrets). |
-| POST | `/api/tokens` | `{label, scopes, expires_in_days?}`. Always minted as `kind: "user"`. Verb-scope ceiling: viewer→`read`/`mcp` only; user→`read,write,delete,mcp`; **never `admin`**. At least one verb is required - an empty list is refused with `400 scopes_required` (the rule every token door shares; an empty list grants nothing). A `root:<adapter>://<rel>` scope must be ⊆ the caller's own grants. Plaintext returned once. |
-| PATCH | `/api/tokens/{id}` | Ownership-checked; label / usernames only. `kind` is admin-only. |
+| POST | `/api/tokens` | `{label, scopes, expires_in_days?}`. Always minted as `kind: "user"`. Verb-scope ceiling: viewer→`read`/`mcp` only; user→`read,write,delete,mcp`; **never `admin`**. At least one verb is required - an empty list is refused with `400 scopes_required` (the rule every token door shares; an empty list grants nothing). A `root:<adapter>://<rel>` scope must be ⊆ the caller's own grants. `comments:rw` lets the token comment ([above](#permissions-with-a-level-comments)). Plaintext returned once. |
+| PATCH | `/api/tokens/{id}` | Ownership-checked; label / usernames, and the levels of the token's permissions - `{"permissions": {"comments": "rw"}}` ([above](#permissions-with-a-level-comments)); the verbs and the `root:` never change. `kind` is admin-only. |
 | DELETE | `/api/tokens/{id}` | Ownership-checked. |
 
 ⚠⚠ **Since v0.43.0 the calling credential is a second ceiling.** When the
 caller is a token, whatever it mints here - a token, an S3 access key, an SSH
-key or an NFS export - must hold a subset of that token's verbs, a confinement
+key or an NFS export - must hold a subset of that token's verbs, no permission
+at a level above its own (since 0.53, `comments`), a confinement
 root inside its `root:`, and an expiry no later than its own; a narrow caller
 cannot borrow a wider parent token either. Otherwise: **`403`,
 `reason: "token_ceiling"`**, naming what was too wide. Browser sessions are
@@ -261,5 +366,9 @@ capped to viewer ([MCP.md](MCP.md#the-bell-stars-comments-permissions)).
 
 `backend/internal/acl/acl_test.go` (resolution: Effective/CanSee/ceiling/prefix),
 `backend/internal/api/handlers/tokens_self_test.go` (scope-ceiling / escalation),
+`backend/internal/api/handlers/token_comments_test.go` (the `comments`
+permission on every door, the default, the key screens' level),
+`backend/internal/tokenperm/tokenperm_test.go` (every permission states its
+default; the guard),
 `backend/internal/api/handlers/grants_test.go` (end-to-end: owner grant, viewer
 ceiling, owner-only panel, self-token limits, admin overview, non-admin 403).

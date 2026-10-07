@@ -3,7 +3,7 @@
 //
 //   node e2e/shots/loginsecurity.mjs       (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/loginsecurity/ (or SHOTS_OUT):
+// Writes e2e/.artifacts/shots/capture/loginsecurity/ (or SHOTS_OUT):
 //
 //   login-security-1440.png   Admin → Sign-in security, whole page: the limit
 //                             numbers, the allowed addresses with "add my

@@ -18,6 +18,8 @@
 //
 // GitHub Actions is the fixture plan's stand-in (FIXTURE_GH_*): the gate
 // stage asks it for runs and starts the dry run through it, never `gh`.
+// CircleCI too (FIXTURE_CC_*, #181): `--gate circleci` asks it instead,
+// through the real circleci.mjs's mapping of its workflow states.
 //
 // The fixture is a real git history: a private repository with its bare
 // remote, a public checkout with its own, the real release engine
@@ -49,6 +51,7 @@ const COPY = [
   'scripts/release/checks.mjs',
   'scripts/release/stages.mjs',
   'scripts/release/verify.mjs',
+  'scripts/release/circleci.mjs',
   'scripts/release-notes.mjs',
   'scripts/sync-deploy-versions.mjs',
   'docs-site/.vitepress/github-slug.mjs',
@@ -286,6 +289,17 @@ function dispatched(fx: Fixture): Array<{ sha: string; title: string; ref: strin
   return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : [];
 }
 
+/** How often the gate asked each CI (the fixture plan counts): { github?: n, circleci?: n }. */
+function askedOf(fx: Fixture): { github?: number; circleci?: number } {
+  const f = path.join(fx.root, 'gh', 'asked.json');
+  return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {};
+}
+
+/** The recorded run of the release (what --resume reads). */
+function recordOf(fx: Fixture) {
+  return JSON.parse(fs.readFileSync(path.join(fx.src, '.git', 'filex-release', `${TAG}.json`), 'utf8'));
+}
+
 /** From the start to WAITING at land: audit confirmed, stamped, tested, exported. */
 async function toLand(fx: Fixture) {
   let r = await release(fx, [VERSION]);
@@ -336,6 +350,55 @@ describe.concurrent('pnpm release — options', () => {
     expect(ack.out).toContain('a person can confirm only audit, export-withheld, deploy');
     expect((await release(fx, [`v${VERSION}`])).code).toBe(2);
     expect((await release(fx, ['1.0.4'])).out).toContain('there is no 1.0.x');
+  });
+
+  // #172: a patch profile tests only what changed since the last release, so
+  // it is for X.Y.Z+1 alone; a profile it does not know is refused like an
+  // option it does not know.
+  it('refuses a patch profile for a minor, and a profile it does not know', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = template;
+    const minor = await release(fx, [VERSION, '--profile', 'patch']);
+    expect(minor.code).toBe(2);
+    expect(minor.out).toContain('--profile patch: 0.2.0 is no patch number');
+    const unknown = await release(fx, [VERSION, '--profile', 'quick']);
+    expect(unknown.code).toBe(2);
+    expect(unknown.out).toContain('the profiles are minor, patch, full');
+    const only = await release(fx, [VERSION, '--resume', '--only', 'deploy', '--profile', 'full']);
+    expect(only.code).toBe(2);
+    expect(only.out).toContain('--only deploy runs no test gate');
+  });
+
+  // #181: where the gate reads the export commit's suites is a choice
+  // between two named CIs, and nothing else - not a way to skip the gate.
+  it('refuses a gate source it does not know, and a gate source with --only deploy', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = template;
+    for (const v of ['gitlab', 'none', 'skip']) {
+      const r = await release(fx, [VERSION, '--gate', v]);
+      expect(r.code, v).toBe(2);
+      expect(r.out).toContain(`--gate ${v}: the gate reads github or circleci`);
+    }
+    const bare = await release(fx, [VERSION, '--gate']);
+    expect(bare.code).toBe(2);
+    expect(bare.out).toContain('--gate needs a value');
+    const only = await release(fx, [VERSION, '--resume', '--only', 'deploy', '--gate', 'circleci']);
+    expect(only.code).toBe(2);
+    expect(only.out).toContain('--only deploy runs no test gate');
+  });
+});
+
+describe.concurrent('pnpm release — profiles', () => {
+  // The patch profile against the last tag: preflight refuses a patch
+  // profile on anything but X.Y.Z+1 even when the number itself is one
+  // (the fixture's last tag is v0.1.0, so 0.1.1 is a patch step and runs).
+  it('a patch profile on a patch step runs every stage, and says what it chose', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    const before = footprint(fx);
+    const r = await release(fx, ['0.1.1', '--dry-run', '--profile', 'patch']);
+    expect(r.out).toContain('profile patch');
+    expect(r.out).toContain('--profile patch: 0.1.1 is a patch step');
+    expect(r.out).toContain('DRY RUN GREEN');
+    expect(r.code).toBe(0);
+    expect(footprint(fx)).toEqual(before);
   });
 });
 
@@ -419,6 +482,25 @@ describe.concurrent('pnpm release --dry-run', () => {
     expect(footprint(fx)).toEqual(before);
   });
 
+  // #181: a dry run that names CircleCI says what the real gate would read,
+  // and asks neither CI anything.
+  it('with --gate circleci, says the gate reads CircleCI and starts nothing on GitHub', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    const before = footprint(fx);
+    const r = await release(fx, [VERSION, '--dry-run', '--gate', 'circleci']);
+    expect(r.out).toContain('DRY RUN GREEN');
+    expect(r.code).toBe(0);
+    const gate = r.out.slice(r.out.indexOf(banner('gate')), r.out.indexOf(banner('sign')));
+    expect(gate).toContain('CircleCI tests the export commit');
+    expect(gate).toContain('the workflow "ci" (.circleci/config.yml)');
+    expect(gate).toContain('the release dry run does not run');
+    expect(gate).not.toContain('gh workflow run release.yml');
+    expect(r.out).toContain('CircleCI has tested the export commit');
+    expect(dispatched(fx)).toEqual([]);
+    expect(askedOf(fx)).toEqual({});
+    expect(footprint(fx)).toEqual(before);
+  });
+
   it('stops at a red pretag gate, before the export', { timeout: TIMEOUT }, async ({ expect }) => {
     const fx = fixture();
     const before = footprint(fx);
@@ -459,6 +541,26 @@ describe.concurrent('pnpm release --dry-run', () => {
     expect(ok.code).toBe(0);
     expect(ok.out).toContain('withheld on purpose');
   });
+
+  // Lesson #1108: on Windows the export's `git add -A` staged every new file
+  // 100644, and a script the docs tell a reader to run went public without
+  // its executable bit. The fixture's export writes files without their bits,
+  // as that one did; the release reads the bits back and stops.
+  it('refuses an export that drops an executable bit (lesson #1108)', { timeout: TIMEOUT }, async ({ expect }) => {
+    const fx = fixture();
+    const file = path.join(fx.src, 'scripts', 'run-me.sh');
+    write(file, '#!/usr/bin/env bash\necho run\n');
+    fs.chmodSync(file, 0o755);
+    gitIn(fx, fx.src, 'add', '--', 'scripts/run-me.sh');
+    gitIn(fx, fx.src, 'update-index', '--chmod=+x', '--', 'scripts/run-me.sh');
+    gitIn(fx, fx.src, 'commit', '-q', '-m', 'a script a reader runs as it is');
+    gitIn(fx, fx.src, 'push', '-q', 'origin', 'main');
+    const r = await release(fx, [VERSION, '--dry-run']);
+    expect(r.code, r.out).toBe(1);
+    expect(r.out).toContain('FAILED  the public tree keeps every executable bit the private tree has');
+    expect(r.out).toContain('executable here, not in the public tree: scripts/run-me.sh');
+    expect(r.out).toContain('STOPPED at export');
+  });
 });
 
 describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing the person\'s steps', () => {
@@ -482,6 +584,33 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(r.out).not.toContain('FAILED  export checkout');
     expect(r.code).toBe(3);
     expect(r.out).toContain('WAITING at land');
+  });
+
+  // v0.53.0: the documented order commits the packaging/ci patches in the
+  // public checkout before the pretag and lets the land push them, but the
+  // export gate wanted that checkout identical to GitHub and stopped there.
+  it('lets the public checkout run ahead of GitHub by workflow commits alone', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    let r = await release(fx, [VERSION]);
+    expect(r.code).toBe(3);
+    write(path.join(fx.exp, '.github', 'workflows', 'patched.yml'), 'name: patched\n');
+    gitIn(fx, fx.exp, 'add', '--', '.github/workflows/patched.yml');
+    gitIn(fx, fx.exp, 'commit', '-q', '-m', 'ci: a packaging/ci patch');
+    r = await release(fx, [VERSION, '--resume', '--ack', 'audit']);
+    expect(r.out).toContain('workflow commit(s) under .github/, pushed by the land');
+    expect(r.out).not.toContain('FAILED  export checkout in step');
+    expect(r.out).toContain('WAITING at land');
+  });
+
+  it('refuses a public checkout that is ahead of GitHub by anything but workflows', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    write(path.join(fx.exp, 'notes.txt'), 'a stray file\n');
+    gitIn(fx, fx.exp, 'add', '--', 'notes.txt');
+    gitIn(fx, fx.exp, 'commit', '-q', '-m', 'not a workflow');
+    const r = await release(fx, [VERSION]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('FAILED  export checkout in step');
+    expect(r.out).toMatch(/ahead of \S+ by more than workflow commits: notes\.txt/);
   });
 
   it('stamps once, stops at every human step, refuses every wrong move, and verifies what was published', { timeout: TIMEOUT }, async () => {
@@ -778,5 +907,137 @@ describe.skipIf(!SSH_KEYGEN)('pnpm release — a whole release, a person doing t
     expect(r.code).toBe(1);
     expect(r.out).toContain(`FAILED  ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
     expect(dispatched(fx)).toHaveLength(1);
+  });
+
+  // #173/#174: ci.yml is a matrix, a job per part, and its one conclusion
+  // said neither which part failed nor that one never ran. The gate reads the
+  // run part by part, and asks the dry run for what the tag run promotes.
+  it('reads the push run part by part: a red part is named, a missing one is no full matrix, and the dry run must keep what the tag run promotes', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    await toLand(fx);
+    const exportCommit = landBoth(fx);
+    const M = { FIXTURE_GH_MATRIX: '1' };
+    // A red part while the run still goes on: red at once, by its name.
+    let r = await release(fx, [VERSION, '--resume'], { ...M, FIXTURE_GH_CI: 'in_progress', FIXTURE_GH_PARTS: 'failure:Go (b)' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`FAILED  ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('Go (b) (failure');
+    expect(r.out).toContain('once that run has finished, gh run rerun 1 --failed');
+    expect(r.out).toContain(`${TAG} is not spent`);
+    // A run that passed without one of its parts is no full matrix.
+    r = await release(fx, [VERSION, '--resume'], { ...M, FIXTURE_GH_PARTS: 'missing:All tests (full)' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('it is not the full matrix');
+    expect(r.out).toContain('never ran - All tests (full)');
+    // A dry run that kept no image digests is no release candidate.
+    r = await release(fx, [VERSION, '--resume'], { ...M, FIXTURE_GH_ARTIFACTS: 'digests-amd64,release-files-linux' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`FAILED  the dry run kept what the ${TAG} run promotes`);
+    expect(r.out).toContain('kept no digests-arm64');
+    // Every part green and everything kept but macOS: on to the tags, saying so.
+    r = await release(fx, [VERSION, '--resume'], { ...M, FIXTURE_GH_ARTIFACTS: 'digests-amd64,digests-arm64,release-files-linux' });
+    expect(r.code, r.out).toBe(3);
+    expect(r.out).toContain(`ok      ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('4/4 parts green');
+    expect(r.out).toContain('the fixture heavy suite: 2/2 parts green');
+    expect(r.out).toContain('without release-files-macos');
+    expect(r.out).toContain('WAITING at sign');
+    expect(dispatched(fx)).toHaveLength(1);
+    expect(gitIn(fx, fx.src, 'tag', '--list', TAG)).toBe('');
+  });
+});
+
+// #181: GitHub Actions down (2026-10-05: the 0.52.0 dry run could not get a
+// runner, twice, and the release went out from a PC). CircleCI schedules its
+// own jobs, and `--gate circleci` lets the gate read its workflow `ci` on the
+// export commit instead of ci.yml and the dry run. A person chooses it; the
+// record says which CI passed the commit.
+describe('pnpm release — the gate when GitHub Actions is down (--gate circleci)', () => {
+  it('passes the gate on CircleCI alone: GitHub is not asked, nothing is started, and the record says CircleCI', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    await toLand(fx);
+    const exportCommit = landBoth(fx);
+    // GitHub has no run at all on the commit: Actions is down.
+    let r = await release(fx, [VERSION, '--resume', '--gate', 'circleci'], { FIXTURE_GH_CI: '', FIXTURE_CC_CI: 'success' });
+    expect(r.out).toContain('gate    circleci');
+    expect(r.out).toContain('the release dry run does not run');
+    expect(r.out).toContain(`ok      CircleCI ci passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain('CircleCI has tested the export commit');
+    expect(r.out).toContain(`tag -s ${TAG} -m "${TAG}" ${exportCommit}`);
+    expect(r.code).toBe(3);
+    expect(dispatched(fx)).toEqual([]);
+    expect(askedOf(fx)).toEqual({ circleci: 1 });
+    const rec = recordOf(fx);
+    expect(rec.gateSource).toBe('circleci');
+    expect(rec.stages.gate).toMatchObject({
+      status: 'done',
+      source: 'circleci',
+      exportHead: exportCommit,
+      circleci: 'https://app.circleci.com/pipelines/gh/fixture/fixture/7/workflows/wf-1',
+    });
+
+    // a resume keeps the source and does not ask again: the commit passed
+    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: '', FIXTURE_CC_CI: 'success' });
+    expect(r.out).toContain('gate    circleci');
+    expect(r.out).toContain('WAITING at sign');
+    expect(r.code).toBe(3);
+    expect(askedOf(fx)).toEqual({ circleci: 1 });
+    const status = await release(fx, [VERSION, '--status']);
+    expect(status.out).toContain('gate circleci');
+  });
+
+  it('a red CircleCI stops the release and spends no number; with Actions back, --gate github reads GitHub again', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    await toLand(fx);
+    const exportCommit = landBoth(fx);
+    for (const state of ['failed', 'failing']) {
+      const r = await release(fx, [VERSION, '--resume', '--gate', 'circleci'], { FIXTURE_GH_CI: '', FIXTURE_CC_CI: state });
+      expect(r.code, state).toBe(1);
+      expect(r.out).toContain('STOPPED at gate');
+      expect(r.out).toContain(`FAILED  CircleCI ci passed on ${exportCommit.slice(0, 10)}`);
+      expect(r.out).toContain(`ended "${state}"`);
+      expect(r.out).toContain(`${TAG} is not spent`);
+      expect(r.out).toContain('Rerun workflow from failed');
+    }
+    expect(dispatched(fx)).toEqual([]);
+    expect(askedOf(fx).github).toBeUndefined();
+    expect(gitIn(fx, fx.src, 'tag', '--list', TAG)).toBe('');
+
+    // Actions is back: the person names GitHub, and the gate is GitHub's again
+    const r = await release(fx, [VERSION, '--resume', '--gate', 'github']);
+    expect(r.out).toContain('(changed by --gate)');
+    expect(r.out).toContain(`ok      ci.yml (push) passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain(`ok      release.yml dry run passed on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('WAITING at sign');
+    expect(r.out).toContain('GitHub has tested the export commit');
+    expect(r.code).toBe(3);
+    expect(dispatched(fx)).toHaveLength(1);
+    expect(recordOf(fx).stages.gate.source).toBe('github');
+  });
+
+  it('a CircleCI that cannot be asked, or never ran the workflow, is red; one still running is waited for', { timeout: TIMEOUT }, async () => {
+    const fx = fixture();
+    await toLand(fx);
+    const exportCommit = landBoth(fx);
+    let r = await release(fx, [VERSION, '--resume', '--gate', 'circleci'], { FIXTURE_GH_CI: '', FIXTURE_CC_ERROR: '1' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('FAILED  CircleCI answered');
+    expect(r.out).toContain('unknown does not pass');
+
+    // the source is kept: this resume asks CircleCI again, and no pipeline
+    // ever ran the workflow on the commit
+    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: '', FIXTURE_GATE_APPEAR_MS: '200' });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`FAILED  CircleCI ran the workflow "ci" on ${exportCommit.slice(0, 10)}`);
+    expect(r.out).toContain('Is the project set up');
+
+    r = await release(fx, [VERSION, '--resume'], { FIXTURE_GH_CI: '', FIXTURE_CC_CI: 'running', FIXTURE_GATE_TIMEOUT_MS: '500' });
+    expect(r.code).toBe(3);
+    expect(r.out).toContain('WAITING at gate');
+    expect(r.out).toContain('CircleCI has not finished');
+    expect(r.out).toContain(`pnpm release ${VERSION} --resume --gate circleci`);
+    expect(dispatched(fx)).toEqual([]);
+    expect(askedOf(fx).github).toBeUndefined();
   });
 });

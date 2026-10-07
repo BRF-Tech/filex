@@ -104,12 +104,17 @@ vi.mock('@/api/tenantSelf', async (orig) => ({ ...(await orig<object>()), Tenant
 
 import Tenants from '@/views/Tenants.vue';
 import TenantEdit from '@/views/TenantEdit.vue';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import { normalizeTenant, type Tenant } from '@/api/tenants';
 import { DataTable } from '@brftech/filex-core';
 import { closeRowMenus, openRowMenu, pickMenuItem } from '../helpers/rowMenu';
+import { optionLabels, pickOption } from '../helpers/choiceSelect';
 
-function setup(locale: 'en' | 'tr' = 'en') {
+function setup(locale: 'en' | 'tr' = 'en', multiTenant = true) {
   setActivePinia(createPinia());
+  // The server's one answer the page follows (composables/useTenancy, #167).
+  const caps = useCapabilitiesStore();
+  caps.data = { ...caps.data, multi_tenant: multiTenant };
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -159,13 +164,17 @@ describe('Tenants list', () => {
     w.unmount();
   });
 
-  it('says that tenants cannot sign in while multi-tenant mode is off', async () => {
-    tenantsApi.list.mockImplementation(async () => ({ providers: structuredClone(rows), multi_tenant: false }));
-    const { router, plugins } = setup();
+  // #167: with the mode off the page has nothing to show - the router sends
+  // the reader to the dashboard, and the page itself neither draws a tenant
+  // nor asks the server for the list.
+  it('draws nothing and asks nothing while multi-tenant mode is off', async () => {
+    const { router, plugins } = setup('en', false);
     await router.push('/tenants');
     const w = mount(Tenants, { global: { plugins } });
     await flushPromises();
-    expect(w.get('[data-testid="tenants-mode-off"]').text()).toContain('FILEX_MULTI_TENANT');
+    expect(tenantsApi.list).not.toHaveBeenCalled();
+    expect(w.text()).toBe('');
+    expect(w.find('[data-testid="tenant-new"]').exists()).toBe(false);
   });
 });
 
@@ -290,10 +299,10 @@ describe('Tenant page', () => {
     await flushPromises();
     const box = w.get('[data-testid="tenant-storages"]');
     expect(box.text()).toContain('acme-files');
-    const options = box.findAll('[data-testid="tenant-link-choice"] option').map((o) => o.text());
+    const options = await optionLabels(box.get('[data-testid="tenant-link-choice"]'));
     expect(options).toContain('shared');
     expect(options, 'a linked storage is not offered again').not.toContain('acme-files');
-    await box.get('[data-testid="tenant-link-choice"] select').setValue('6');
+    await pickOption(box.get('[data-testid="tenant-link-choice"]'), '6');
     await box.get('[data-testid="tenant-link"]').trigger('click');
     await flushPromises();
     expect(tenantsApi.linkStorage).toHaveBeenCalledWith(2, 6);

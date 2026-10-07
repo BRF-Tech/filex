@@ -32,6 +32,23 @@
 // the download rows, the iOS help and the install button are written once, so
 // the corner form cannot drift away from the card the sign-in page shows.
 //
+// ⚠⚠ ON A PHONE'S FILE LIST, THE BAND (task #190). A phone's offer - the
+// browser's install, or iOS's Add to Home Screen - never reached the screen as
+// a chip: the list's upload button (`.fe-fab`) owns that very corner, its rows
+// reach both edges, and `lib/keepClear` rightly steps an advert aside from
+// anything to press. So on the file list (`home`, `explore`) that offer wears
+// the sign-in page's band, and the list makes room for it: Explore.vue
+// reserves `--filex-install-banner-h`, which this publishes for every band.
+// Nothing is covered, and × closes it for good, as everywhere.
+//
+// ⚠ ONE band, the owner's ruling of 2026-10-06 ("ekran altı bandımız var ya,
+// aynısı olsun"): it is the same markup and the same shell the sign-in page
+// uses for the desktop app on a PC - a phone's sign-in page wears it too,
+// offering the web app, and a phone is never offered the desktop app
+// (`detectDesktopPlatform` is null there). Before the browser offers an
+// install the band says where its menu has one (`showMenuInstructions`), and
+// becomes the Install button when it does.
+//
 // ⚠ The service-worker UPDATE bar is NOT part of this and deliberately keeps
 // its full-width bottom band — see the template.
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -74,6 +91,7 @@ const {
   canPromptInstall,
   showDesktopDownload,
   showIOSInstructions,
+  showMenuInstructions,
   shouldOfferInstall,
   needRefresh,
   promptInstall,
@@ -105,7 +123,20 @@ const route = useRoute();
  * corner chip instead — the shape every other page already wears, the owner's
  * ruling of 2026-09-13. A resize re-arms the full card and measures again. */
 const fits = ref(true);
-const loud = computed(() => route?.name === 'login' && fits.value);
+
+/** The routes that make room for a band at the bottom (Explore.vue reserves
+ *  `--filex-install-banner-h`). Both are the file list. */
+const BAND_ROUTES = new Set(['home', 'explore']);
+/** A phone's (or a tablet's) offer of the web app itself, on the file list —
+ *  the band, never the chip; see the header. The desktop app's offer is a PC's
+ *  and keeps its chip there. */
+const appBand = computed(
+  () =>
+    !showDesktopDownload.value &&
+    (canPromptInstall.value || showIOSInstructions.value || showMenuInstructions.value) &&
+    BAND_ROUTES.has(String(route?.name ?? '')),
+);
+const loud = computed(() => (route?.name === 'login' && fits.value) || appBand.value);
 
 function overlaps(a: DOMRect, b: DOMRect): boolean {
   return a.bottom > b.top && a.top < b.bottom && a.left < b.right && a.right > b.left;
@@ -447,6 +478,12 @@ onBeforeUnmount(() => {
         <!-- iOS: no programmatic prompt, walk the user through Share sheet. -->
         <p v-if="showIOSInstructions" class="ip-ios" data-testid="pwa-ios-instructions">
           {{ $t('install.iosInstructions') }}
+        </p>
+        <!-- A phone whose browser has not offered an install yet: its menu
+             does it, and this turns into the Install button below the moment
+             the browser offers one (#190). -->
+        <p v-if="showMenuInstructions" class="ip-ios" data-testid="pwa-menu-instructions">
+          {{ $t('install.menuInstructions') }}
         </p>
 
         <!-- PC: the useful install is the desktop app — it is the only build

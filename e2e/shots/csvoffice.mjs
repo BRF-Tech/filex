@@ -5,7 +5,7 @@
 //   SHOTS_ONLYOFFICE_URL=… SHOTS_ONLYOFFICE_JWT=… SHOTS_ONLYOFFICE_CALLBACK_HOST=… \
 //     node e2e/shots/csvoffice.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/csvoffice/ (or SHOTS_OUT):
+// Writes e2e/.artifacts/shots/capture/csvoffice/ (or SHOTS_OUT):
 //
 //   csv-view-1440.png          a double-click on a semicolon CSV: ONLYOFFICE's
 //                              spreadsheet, a look first (view mode), and no

@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('filexApp', {
   /** Opens the SERVER's admin panel in the system browser, not in here —
    *  `page: 'notifications'` for the bell's "Manage notifications" door. */
   openAdmin: (id: string, page?: 'notifications') => ipcRenderer.invoke('account:openAdmin', id, page),
+  /** #162 - the store screen ("App store"): the server's own page in a window
+   *  of its own, the way a document opens (main.ts openStoreWindow). */
+  openStore: (id: string) => ipcRenderer.invoke('account:openStore', id),
 
   // files
   /** Host-owned open: open a remote file in its OWN editor/viewer window, one

@@ -1,0 +1,12 @@
+# When the morning report goes out. A template: scripts/chain/install-nightly.sh
+# fills @REPORT_AT@ (default "07:00 Europe/Istanbul").
+[Unit]
+Description=filex nightly test run: the morning report at @REPORT_AT@
+
+[Timer]
+OnCalendar=*-*-* @REPORT_AT@
+Persistent=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

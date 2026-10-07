@@ -3,7 +3,7 @@
 //
 //   node e2e/shots/encryption.mjs     (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/encryption/ (or SHOTS_OUT):
+// Writes e2e/.artifacts/shots/capture/encryption/ (or SHOTS_OUT):
 //
 //   admin-encryption-1440.png  Admin → Encryption: the policy (approval) and
 //                              three requests waiting - one new encrypted

@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/tokenperm"
 )
 
 // DesktopAuth authorizes the desktop app through the BROWSER instead of a
@@ -211,16 +212,25 @@ func (h *DesktopAuth) Complete(w http.ResponseWriter, r *http.Request) {
 // An explicit list through the one issuance rule every door shares
 // (apitoken.ParseIssued): never empty, and never `admin` — a desktop pairing is
 // not where an administrator hands out administration.
+//
+// ⚠ Comments at `rw`, for every role (the maintainer, 2026-10-06, task #157):
+// the desktop is the person's own app, the browser's twin, and in the browser
+// the person comments (as far as the account's own comments.write allows).
+// It is the ONE door that hands out `comments:rw` without being asked. The
+// catalogue's default stays `read` (package tokenperm, its guard test), and so
+// does every API key and agent token, which hold what their minter chose;
+// migration 00091 gives the pairings made before this the same level.
 func desktopScopes(u *model.User) (string, error) {
 	want := []string{apitoken.ScopeRead, apitoken.ScopeWrite, apitoken.ScopeDelete}
 	if u.IsViewer() {
 		want = []string{apitoken.ScopeRead, apitoken.ScopeWrite}
 	}
-	verbs, roots, err := apitoken.ParseIssued(strings.Join(want, ","))
+	want = append(want, tokenperm.Comments+":"+string(tokenperm.ReadWrite))
+	verbs, roots, perms, err := apitoken.ParseIssued(strings.Join(want, ","))
 	if err != nil {
 		return "", err
 	}
-	return apitoken.JoinScopes(verbs, roots), nil
+	return apitoken.JoinScopes(verbs, roots, perms), nil
 }
 
 type desktopExchangeReq struct {

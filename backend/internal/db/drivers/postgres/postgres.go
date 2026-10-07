@@ -80,6 +80,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.NodeDeletedBySQL = &db.NodeDeletedBySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Drafts (00064), written once in internal/db.
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Recent searches (00090), the same way.
+	s.RecentSearchSQL = &db.RecentSearchSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Rows deleted where they stood (issue #74), written once in internal/db.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
@@ -95,6 +97,12 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// Sign-in attempt counters (00072), written once in internal/db.
 	s.LoginThrottleSQL = &db.LoginThrottleSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// Office editing sessions (00092), written once in internal/db.
+	s.OfficeSessionSQL = &db.OfficeSessionSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Replication initial copies (00094), written once in internal/db.
+	s.ReplicaInitialCopySQL = &db.ReplicaInitialCopySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// The folder each storage writes into on its target (00095), the same way.
+	s.ReplicaLinkSQL = &db.ReplicaLinkSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Groups (00074), written once in internal/db.
 	s.GroupSQL = db.NewGroupSQL(sqlDB, true)
 	// Tenant self-service (00076), written once in internal/db.
@@ -109,6 +117,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// The app store's state (00081), written once in internal/db.
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// The notification digest (00087), written once in internal/db.
+	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	return s
 }
 
@@ -128,6 +138,9 @@ type Store struct {
 	*db.NodeDeletedBySQL
 	// The drafts methods (internal/db drafts_sql.go).
 	*db.DraftSQL
+	// A person's recent searches (internal/db recent_searches_sql.go,
+	// migration 00090).
+	*db.RecentSearchSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
@@ -142,6 +155,15 @@ type Store struct {
 	*db.AppStoreSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
+	// The office editing sessions (internal/db office_session_sql.go,
+	// migration 00092).
+	*db.OfficeSessionSQL
+	// The replication initial copies (internal/db replica_initial_copy_sql.go,
+	// migration 00094).
+	*db.ReplicaInitialCopySQL
+	// The replication folders (internal/db replica_link_sql.go, migration
+	// 00095).
+	*db.ReplicaLinkSQL
 	// The group methods (internal/db group_sql.go, migration 00074).
 	*db.GroupSQL
 	// Sign-in instances, their bindings, own domains (internal/db
@@ -155,6 +177,8 @@ type Store struct {
 	*db.OIDCIdentitySQL
 	// The encryption requests (internal/db e2e_requests_sql.go).
 	*db.E2ERequestSQL
+	// The notification digest (internal/db digest_sql.go, migration 00087).
+	*db.DigestSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -186,10 +210,11 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 	if st.UID == "" {
 		st.UID = model.NewStorageUID()
 	}
+	// replica_target_id too: see the same note in the sqlite driver (#186).
 	row := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled, uid)
-		 VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10) RETURNING `+storageCols,
-		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, st.Enabled, st.ReadOnly, st.RBACEnabled, st.UID)
+		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled, uid, replica_target_id)
+		 VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9,$10,$11) RETURNING `+storageCols,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, st.Enabled, st.ReadOnly, st.RBACEnabled, st.UID, st.ReplicaTargetID)
 	return scanStorage(row)
 }
 
@@ -1630,6 +1655,12 @@ func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernam
 		}
 	}
 	return nil
+}
+
+// UpdateAPITokenScopes writes a token's whole scope list.
+func (s *Store) UpdateAPITokenScopes(ctx context.Context, id int64, scopes string) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE api_tokens SET scopes=$1 WHERE id=$2`, scopes, id)
+	return err
 }
 
 func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
@@ -3791,6 +3822,35 @@ func hiddenBodiesClause(patterns []string, idx int) (string, []any, int) {
 	return "(" + strings.Join(parts, " AND ") + ")", args, idx
 }
 
+// quietClause is the reader's digest predicate (model.DigestFilter), numbering
+// from idx and returning the next free index: a row above their digest point,
+// of a kind they hold for the digest. f.Only keeps the quiet rows alone (and
+// stops at f.UpTo); otherwise, on an unread read, they are left out. See the
+// SQLite driver.
+func quietClause(f *model.DigestFilter, unread bool, idx int) (string, []any, int) {
+	if f == nil || len(f.Quiet) == 0 || (!f.Only && !unread) {
+		return "", nil, idx
+	}
+	args := make([]any, 0, len(f.Quiet)+2)
+	args = append(args, f.After)
+	after := idx
+	idx++
+	for _, e := range f.Quiet {
+		args = append(args, e)
+	}
+	ph, idx := pgPlaceholders(len(f.Quiet), idx)
+	quiet := fmt.Sprintf("(n.id > $%d AND n.event IN (%s))", after, ph)
+	if !f.Only {
+		return "NOT " + quiet, args, idx
+	}
+	if f.UpTo > 0 {
+		quiet += fmt.Sprintf(" AND n.id <= $%d", idx)
+		args = append(args, f.UpTo)
+		idx++
+	}
+	return quiet, args, idx
+}
+
 // bellClause builds the per-user predicate over `notifications n`, starting
 // numbering at idx: the reader's own rows, plus the broadcasts (user_id NULL)
 // the filter admits. It returns the next free placeholder index. The zero
@@ -3947,6 +4007,13 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 		args = append(args, hideArgs...)
 		idx = next
 	}
+	if userID != nil {
+		if clause, quietArgs, next := quietClause(broadcasts.Digest, onlyUnread, idx); clause != "" {
+			whereC = append(whereC, clause)
+			args = append(args, quietArgs...)
+			idx = next
+		}
+	}
 	from := " FROM notifications n" + join
 	if len(whereC) > 0 {
 		from += " WHERE " + strings.Join(whereC, " AND ")
@@ -4089,9 +4156,16 @@ func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mute
 		args = append(args, muteArgs...)
 		idx = next
 	}
-	if clause, hideArgs, _ := hiddenBodiesClause(hiddenBodies, idx); clause != "" {
+	if clause, hideArgs, next := hiddenBodiesClause(hiddenBodies, idx); clause != "" {
 		q += ` AND ` + clause
 		args = append(args, hideArgs...)
+		idx = next
+	}
+	if userID != nil {
+		if clause, quietArgs, _ := quietClause(broadcasts.Digest, true, idx); clause != "" {
+			q += ` AND ` + clause
+			args = append(args, quietArgs...)
+		}
 	}
 	var n int64
 	if err := s.conn(ctx).QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
@@ -4238,15 +4312,16 @@ func (s *Store) UpdateWebhookTargetDelivery(ctx context.Context, id int64, httpS
 // when no row exists).
 func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error) {
 	row := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT user_id, in_app_enabled, muted_events::text
+		`SELECT user_id, in_app_enabled, muted_events::text, COALESCE(urgent_overrides, '')
 		 FROM notification_settings WHERE user_id=$1`, userID)
 	out := &model.NotificationSettings{UserID: userID, InAppEnabled: true, MutedEventsRaw: []byte("[]")}
 	var (
-		gotUser  int64
-		enabled  bool
-		mutedRaw string
+		gotUser   int64
+		enabled   bool
+		mutedRaw  string
+		urgentRaw string
 	)
-	if err := row.Scan(&gotUser, &enabled, &mutedRaw); err != nil {
+	if err := row.Scan(&gotUser, &enabled, &mutedRaw, &urgentRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return out, nil
 		}
@@ -4257,6 +4332,9 @@ func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*mod
 	out.MutedEventsRaw = json.RawMessage(mutedRaw)
 	if len(out.MutedEventsRaw) == 0 {
 		out.MutedEventsRaw = []byte("[]")
+	}
+	if urgentRaw != "" {
+		out.UrgentOverridesRaw = json.RawMessage(urgentRaw)
 	}
 	return out, nil
 }
@@ -4271,14 +4349,20 @@ func (s *Store) UpsertNotificationSettings(ctx context.Context, st *model.Notifi
 	if len(muted) == 0 {
 		muted = []byte("[]")
 	}
+	// ⚠ A nil urgent_overrides keeps what is stored (db.Store).
+	var urgent any
+	if len(st.UrgentOverridesRaw) > 0 {
+		urgent = string(st.UrgentOverridesRaw)
+	}
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO notification_settings (user_id, in_app_enabled, muted_events, updated_at)
-		 VALUES ($1,$2,$3::jsonb, NOW())
+		`INSERT INTO notification_settings AS t (user_id, in_app_enabled, muted_events, urgent_overrides, updated_at)
+		 VALUES ($1,$2,$3::jsonb,$4, NOW())
 		 ON CONFLICT (user_id) DO UPDATE SET
-		   in_app_enabled = EXCLUDED.in_app_enabled,
-		   muted_events   = EXCLUDED.muted_events,
-		   updated_at     = NOW()`,
-		st.UserID, st.InAppEnabled, string(muted))
+		   in_app_enabled   = EXCLUDED.in_app_enabled,
+		   muted_events     = EXCLUDED.muted_events,
+		   urgent_overrides = COALESCE(EXCLUDED.urgent_overrides, t.urgent_overrides),
+		   updated_at       = NOW()`,
+		st.UserID, st.InAppEnabled, string(muted), urgent)
 	if err != nil {
 		return fmt.Errorf("postgres: upsert notif settings: %w", err)
 	}
@@ -4362,18 +4446,18 @@ func (s *Store) DeleteReplicaRule(ctx context.Context, id int64) error {
 	return err
 }
 
-// UpsertReplicaFailure inserts or bumps the (path, op) row.
-func (s *Store) UpsertReplicaFailure(ctx context.Context, path, op, errCode, errMsg string) error {
+// UpsertReplicaFailure inserts or bumps the (storage, path, op) row.
+func (s *Store) UpsertReplicaFailure(ctx context.Context, storageID int64, path, op, errCode, errMsg string) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO replica_failures (path, op, error_code, error_msg, attempts, last_attempt_at)
-		 VALUES ($1,$2,$3,$4,1, NOW())
-		 ON CONFLICT (path, op) DO UPDATE SET
+		`INSERT INTO replica_failures (storage_id, path, op, error_code, error_msg, attempts, last_attempt_at)
+		 VALUES ($1,$2,$3,$4,$5,1, NOW())
+		 ON CONFLICT (storage_id, path, op) DO UPDATE SET
 		   error_code      = EXCLUDED.error_code,
 		   error_msg       = EXCLUDED.error_msg,
 		   attempts        = replica_failures.attempts + 1,
 		   last_attempt_at = NOW(),
 		   resolved_at     = NULL`,
-		path, op, errCode, errMsg)
+		storageID, path, op, errCode, errMsg)
 	if err != nil {
 		return fmt.Errorf("postgres: upsert replica failure: %w", err)
 	}
@@ -4381,10 +4465,10 @@ func (s *Store) UpsertReplicaFailure(ctx context.Context, path, op, errCode, err
 }
 
 // ResolveReplicaFailure stamps resolved_at on the matching row.
-func (s *Store) ResolveReplicaFailure(ctx context.Context, path, op string) error {
+func (s *Store) ResolveReplicaFailure(ctx context.Context, storageID int64, path, op string) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE replica_failures SET resolved_at = NOW()
-		 WHERE path=$1 AND op=$2 AND resolved_at IS NULL`, path, op)
+		 WHERE storage_id=$1 AND path=$2 AND op=$3 AND resolved_at IS NULL`, storageID, path, op)
 	return err
 }
 
@@ -4409,7 +4493,7 @@ func (s *Store) ListReplicaFailures(ctx context.Context, onlyUnresolved bool, li
 
 	rows, err := s.conn(ctx).QueryContext(ctx,
 		fmt.Sprintf(
-			`SELECT id, path, op, error_code, error_msg, attempts, last_attempt_at, resolved_at
+			`SELECT id, storage_id, path, op, error_code, error_msg, attempts, last_attempt_at, resolved_at
 			 FROM replica_failures %s
 			 ORDER BY last_attempt_at DESC, id DESC
 			 LIMIT $1 OFFSET $2`, whereSQL),
@@ -4423,7 +4507,7 @@ func (s *Store) ListReplicaFailures(ctx context.Context, onlyUnresolved bool, li
 	for rows.Next() {
 		f := &model.ReplicaFailure{}
 		var resolvedAt sql.NullTime
-		if err := rows.Scan(&f.ID, &f.Path, &f.Op, &f.ErrorCode, &f.ErrorMsg, &f.Attempts, &f.LastAttemptAt, &resolvedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.StorageID, &f.Path, &f.Op, &f.ErrorCode, &f.ErrorMsg, &f.Attempts, &f.LastAttemptAt, &resolvedAt); err != nil {
 			return nil, 0, err
 		}
 		if resolvedAt.Valid {

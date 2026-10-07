@@ -280,3 +280,39 @@ func TestRecord_AuditsTheAccountOncePerMinute(t *testing.T) {
 	hit("forged-cookie")
 	assert.Len(t, store.rows, 2, "no live session, no account to audit: no row")
 }
+
+// Task #92: the ONLYOFFICE editor's frame origin (the document server's own,
+// usually a sibling host) and the app-interface origin are Untrusted - never
+// trusted, whatever the CORS list says, a wildcard covering them included. Red
+// before #92: the field did not exist, and a wildcard trusted the sibling.
+func TestJudge_UntrustedBeatsTheCORSList(t *testing.T) {
+	docs := "https://docs.example.com"
+	for _, trusted := range [][]string{{"https://*.example.com"}, {docs}, {"HTTPS://Docs.Example.com:443"}} {
+		g := New(Config{
+			Trusted:       trusted,
+			Untrusted:     []string{"HTTPS://DOCS.example.com/", "https://apps.usercontent.example"},
+			Self:          "https://platform.example.com",
+			SessionCookie: "filex_session",
+		})
+		for _, site := range []string{"same-site", "cross-site", ""} {
+			v := g.Judge(req(http.MethodPost, "/api/files/copy", map[string]string{"Sec-Fetch-Site": site, "Origin": docs}))
+			assert.True(t, v.Refused, "trusted %v, Sec-Fetch-Site %q", trusted, site)
+		}
+		// Referer when the Origin is missing: the same origin, the same answer.
+		v := g.Judge(req(http.MethodPost, "/api/files/copy", map[string]string{"Sec-Fetch-Site": "same-site", "Referer": docs + "/filex-frame/editor"}))
+		assert.True(t, v.Refused, "trusted %v, by Referer", trusted)
+		// The wildcard still covers the operator's other sibling hosts.
+		if trusted[0] == "https://*.example.com" {
+			v = g.Judge(req(http.MethodPost, "/api/files/copy", map[string]string{"Sec-Fetch-Site": "same-site", "Origin": "https://dash.example.com"}))
+			assert.False(t, v.Refused)
+		}
+	}
+}
+
+func TestCanonical(t *testing.T) {
+	c, ok := Canonical("HTTPS://Docs.Example.com:443/")
+	assert.True(t, ok)
+	assert.Equal(t, "https://docs.example.com", c)
+	_, ok = Canonical("null")
+	assert.False(t, ok)
+}

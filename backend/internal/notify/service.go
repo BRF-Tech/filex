@@ -111,6 +111,16 @@ type Config struct {
 	WebhookToken  string
 	HTTPTimeout   time.Duration
 	RetryBackoffs []time.Duration // attempt delays; default {1s,3s,9s}
+
+	// Digest switches the notification digest on (digest.go). Nil: every
+	// notification is told on its own, as before 0.53.
+	Digest *DigestConfig
+	// Mail sends the emails an event asks for (Event.Mail) and the digest's.
+	// Nil: no email.
+	Mail MailFunc
+	// Now is the clock the digest windows are measured with (tests). Nil:
+	// time.Now.
+	Now func() time.Time
 }
 
 // New returns a Service backed by the given store.
@@ -131,6 +141,11 @@ func New(store db.Store, cfg Config) Service {
 		backoffs:     cfg.RetryBackoffs,
 		stopCh:       make(chan struct{}),
 		targetStatus: make(map[int64]TargetDeliveryStatus),
+		now:          cfg.Now,
+		mail:         cfg.Mail,
+	}
+	if cfg.Digest != nil {
+		s.dig = &digestRuntime{cfg: *cfg.Digest, people: map[int64]personDigest{}}
 	}
 	s.idle = sync.NewCond(&s.inflightMu)
 	s.SetWebhook(cfg.WebhookURL, cfg.WebhookToken)
@@ -159,11 +174,21 @@ type service struct {
 	idle       *sync.Cond
 	inflight   int
 	stopped    bool
+	// loopDone is closed when the digest's background pass has returned
+	// (StartDigests); nil while none runs. Guarded by inflightMu, like
+	// stopped: a pass that starts after Stop is refused there.
+	loopDone chan struct{}
 
 	// targetStatus caches the last delivery outcome per webhook target
 	// id (guarded by tsMu). Feeds the admin list's "last status" column.
 	tsMu         sync.Mutex
 	targetStatus map[int64]TargetDeliveryStatus
+
+	// The digest (digest.go): nil when it is off. viewer is guarded by mu.
+	dig    *digestRuntime
+	viewer Viewer
+	now    func() time.Time
+	mail   MailFunc
 }
 
 // destination is one webhook endpoint a single event is delivered to —
@@ -187,9 +212,44 @@ func Signature(secret string, body []byte) string {
 }
 
 // Send persists then async-delivers.
+//
+// A row of a kind its addressee holds for their digest (digest.go) is written
+// the same way and goes to the webhooks the same way; what waits is telling
+// the person — their window is opened here, and their digest tells it.
 func (s *service) Send(ctx context.Context, e Event) (int64, error) {
+	e, input, announce, err := s.prepare(ctx, e)
+	if err != nil || !announce {
+		return 0, err
+	}
+	// ⚠ Before the insert: a person's first held row must be above their
+	// digest point (holdFor makes it).
+	held := s.holdFor(ctx, e)
+	id, err := s.store.InsertNotification(ctx, input)
+	if err != nil {
+		return 0, err
+	}
+	if held != nil {
+		s.openWindow(ctx, *e.UserID, held)
+	} else if e.Mail != nil && e.UserID != nil {
+		s.mailNow(ctx, e)
+	}
+	if e.NoWebhook {
+		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "sent to the webhooks with another row of the same event")
+		return id, nil
+	}
+	s.dispatch(id, e)
+	return id, nil
+}
+
+// prepare turns an event into the row it is stored as: its meaning to a
+// person (personview.go) — or announce=false when it means nothing and is not
+// announced at all — its one click target and its encrypted-folder mark.
+// Before anything is stored or sent, so the bell row and every webhook body
+// carry the same meaning. Send and the digest (digest.go) both write through
+// it.
+func (s *service) prepare(ctx context.Context, e Event) (Event, *model.NotificationInput, bool, error) {
 	if e.Event == "" || e.Severity == "" {
-		return 0, errors.New("notify: event and severity required")
+		return e, nil, false, errors.New("notify: event and severity required")
 	}
 	if e.TS.IsZero() {
 		e.TS = time.Now().UTC()
@@ -197,14 +257,11 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	if e.At.IsZero() {
 		e.At = e.TS
 	}
-	// What the event means to a person — or that it means nothing and is not
-	// announced at all (personview.go). Before anything is stored or sent, so
-	// the bell row and every webhook body carry the same meaning.
 	var announce bool
 	if e, announce = personView(e); !announce {
 		slog.Debug("notify: not announcing a write inside filex's own directories",
 			slog.String("event", string(e.Event)))
-		return 0, nil
+		return e, nil, false, nil
 	}
 	if e.Title == "" {
 		e.Title = string(e.Event)
@@ -213,25 +270,45 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	e = s.stampE2eRoot(ctx, e)
 	metaJSON, err := marshalMeta(e)
 	if err != nil {
-		return 0, fmt.Errorf("notify: marshal meta: %w", err)
+		return e, nil, false, fmt.Errorf("notify: marshal meta: %w", err)
 	}
-	id, err := s.store.InsertNotification(ctx, &model.NotificationInput{
+	return e, &model.NotificationInput{
 		Event:    string(e.Event),
 		Severity: string(e.Severity),
 		Title:    e.Title,
 		Body:     e.Body,
 		MetaJSON: metaJSON,
 		UserID:   e.UserID,
-	})
-	if err != nil {
-		return 0, err
+	}, true, nil
+}
+
+// mailNow emails an event's addressee at once (Event.Mail): its Title as the
+// subject, its Body and Link as the text, in the language they were written
+// in. Off the caller's path, counted with the deliveries so Stop waits for it;
+// a mail that cannot go (no SMTP set up, no address) is left out quietly, as
+// the drop notice always did.
+func (s *service) mailNow(ctx context.Context, e Event) {
+	if s.mail == nil || s.store == nil || e.UserID == nil || e.Mail == nil {
+		return
 	}
-	if e.NoWebhook {
-		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "sent to the webhooks with another row of the same event")
-		return id, nil
+	u, err := s.store.GetUser(ctx, *e.UserID)
+	if err != nil || u == nil || strings.TrimSpace(u.Email) == "" {
+		return
 	}
-	s.dispatch(id, e)
-	return id, nil
+	body := e.Body
+	if e.Mail.Link != "" {
+		body += "\n\n" + e.Mail.Link
+	}
+	to, subject, lang := u.Email, e.Title, e.Mail.Lang
+	if !s.beginDelivery() {
+		return
+	}
+	go func() {
+		defer s.endDelivery()
+		if err := s.mail(context.WithoutCancel(ctx), lang, to, subject, body); err != nil {
+			slog.Debug("notify: email not sent", slog.String("event", string(e.Event)), slog.String("err", err.Error()))
+		}
+	}()
 }
 
 // stampE2eRoot marks a row about an item INSIDE an end-to-end encrypted folder
@@ -285,7 +362,7 @@ func (s *service) stampE2eRoot(ctx context.Context, e Event) Event {
 // history keeps the event context without extra columns.
 func marshalMeta(e Event) ([]byte, error) {
 	hasTarget := e.Target != nil && e.Target.Kind != "" && e.Target.Kind != TargetNone
-	if len(e.Meta) == 0 && e.Node == nil && e.Share == nil && e.Actor == nil && !hasTarget {
+	if len(e.Meta) == 0 && e.Node == nil && e.Share == nil && e.Actor == nil && e.Mail == nil && !hasTarget {
 		return []byte("{}"), nil
 	}
 	m := make(map[string]any, len(e.Meta)+4)
@@ -300,6 +377,11 @@ func marshalMeta(e Event) ([]byte, error) {
 	}
 	if e.Actor != nil {
 		m["actor"] = e.Actor
+	}
+	// The email the event asked for (Event.Mail): kept so that a digest made
+	// after a restart still knows to send one.
+	if e.Mail != nil {
+		m["mail"] = e.Mail
 	}
 	// ⚠ Only a REAL target is persisted. A `{"kind":"none"}` blob in every
 	// row would be a field that is always present and never useful, and the
@@ -435,8 +517,13 @@ func (s *service) dispatch(id int64, e Event) {
 			}
 		}()
 
+		// ⚠ A digest goes only where it was asked for by name: every row it
+		// sums up went to the webhooks on its own already, so the legacy
+		// webhook and a target with an empty list (everything) would receive
+		// each event twice over (EventNotificationDigest).
+		named := e.Event == EventNotificationDigest
 		dests := make([]destination, 0, 4)
-		if legacyURL != "" {
+		if legacyURL != "" && !named {
 			dests = append(dests, destination{url: legacyURL, bearer: token})
 		}
 		targets, err := s.store.ListWebhookTargets(ctx)
@@ -449,11 +536,18 @@ func (s *service) dispatch(id int64, e Event) {
 			if !t.Enabled || !t.MatchesEvent(string(e.Event)) {
 				continue
 			}
+			if named && !hasString(t.EventList(), string(e.Event)) {
+				continue
+			}
 			dests = append(dests, destination{targetID: t.ID, name: t.Name, url: t.URL, secret: t.Secret})
 		}
 		if len(dests) == 0 {
 			// No webhook configured — still record the skip for the audit.
-			_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "no webhook URL configured")
+			why := "no webhook URL configured"
+			if named {
+				why = "no webhook target names " + string(EventNotificationDigest)
+			}
+			_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), why)
 			return
 		}
 
@@ -678,11 +772,13 @@ func (s *service) List(ctx context.Context, userID *int64, bell Bell, onlyUnread
 	if userID == nil {
 		return s.History(ctx, 0, onlyUnread, limit, offset)
 	}
+	f := bellFilter(userID, bell)
+	f.Digest = s.quietFilter(ctx, *userID, View{Bell: bell}, true)
 	muted, silenced := s.bellPrefs(ctx, userID, bell)
 	if silenced {
 		return nil, 0, nil
 	}
-	return s.read(ctx, userID, onlyUnread, muted, bellFilter(userID, bell), limit, offset)
+	return s.read(ctx, userID, onlyUnread, muted, f, limit, offset)
 }
 
 // History reads the admin-global list: every row, a broadcast carrying
@@ -718,11 +814,15 @@ func (s *service) ListVisible(ctx context.Context, userID int64, bell Bell, only
 	if offset < 0 {
 		offset = 0
 	}
+	// ⚠ A window is told only through the person's whole bell: a
+	// folder-confined read (keepOwn) sees a part of it, and a digest made from
+	// that part would tell the rest as nothing.
+	f := bellFilter(&uid, bell)
+	f.Digest = s.quietFilter(ctx, uid, View{Bell: bell, Keep: keep}, keepOwn == nil)
 	muted, silenced := s.bellPrefs(ctx, &uid, bell)
 	if silenced {
 		return nil, 0, nil
 	}
-	f := bellFilter(&uid, bell)
 
 	// The broadcasts, walked and judged.
 	bf := f
@@ -844,6 +944,8 @@ func (s *service) read(ctx context.Context, userID *int64, onlyUnread bool, mute
 	if userID == nil {
 		s.nameOwners(ctx, kept)
 		markAudience(kept)
+	} else if f.Digest != nil {
+		quietRead(kept, f.Digest)
 	}
 	return kept, total, err
 }
@@ -895,11 +997,15 @@ func (s *service) MarkAllBroadcastsRead(ctx context.Context, readerID int64) err
 }
 
 func (s *service) UnreadCount(ctx context.Context, userID *int64, bell Bell) (int64, error) {
+	f := bellFilter(userID, bell)
+	if userID != nil {
+		f.Digest = s.quietFilter(ctx, *userID, View{Bell: bell}, true)
+	}
 	muted, silenced := s.bellPrefs(ctx, userID, bell)
 	if silenced {
 		return 0, nil
 	}
-	return s.store.UnreadNotificationCount(ctx, userID, muted, hiddenBodies(), bellFilter(userID, bell))
+	return s.store.UnreadNotificationCount(ctx, userID, muted, hiddenBodies(), f)
 }
 
 func (s *service) MarkRead(ctx context.Context, id int64, userID *int64) error {
@@ -973,5 +1079,14 @@ func (s *service) Stop() {
 		s.inflightMu.Unlock()
 		close(s.stopCh)
 	})
+	// The digest's background pass ends at its next look at stopCh; what it
+	// was telling is in the database either way (digest.go). No pass starts
+	// once stopped is set (StartDigests checks it under the same mutex).
+	s.inflightMu.Lock()
+	done := s.loopDone
+	s.inflightMu.Unlock()
+	if done != nil {
+		<-done
+	}
 	s.waitIdle()
 }

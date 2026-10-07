@@ -1,55 +1,54 @@
-// `site/assets/` must be the copy of the current release's screenshots that
-// `site/README.md` says it is — `docs/screenshots/<release>/`, the folder named
-// once in `e2e/shots/release.mjs` (older releases keep their own folders and are
-// never compared against).
+// `site/assets/` holds the filex.sh page's own files and the store badges -
+// and no copy of a screenshot.
 //
-// ⚠⚠ That sentence had been true when it was written and nothing kept it true.
-// Found 2026-09-06: `site/assets/admin-plugins.png` was the pre-fix capture
-// whose footer read `github.com/brf-tech/filex` — the PRIVATE repo — on
-// the public marketing page at filex.sh, after the same picture had already
-// been retaken for the README. Three more had fallen behind beside it.
-//
-// `scripts/sync-site-assets.mjs` copies them; this is why the next release
-// cannot ship a marketing page showing an older product than the README.
+// ⚠⚠ It used to hold a copy of the current release's screenshots, synced from
+// `docs/screenshots/<release>/`. Found 2026-09-06: `site/assets/admin-plugins.png`
+// was the pre-fix capture whose footer read the PRIVATE repository's address,
+// on the public marketing page at filex.sh, after the same picture had been
+// retaken for the README. Since task #176 (2026-10-06) the screenshots are
+// published once, on filex.sh itself, under names that carry their content
+// hash, and the page links them there like the README does
+// (e2e/shots/manifest.json; web/tests/deploy/shotsSite.test.ts checks every
+// link). A copy coming back is the drift coming back, so it fails here.
 
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { SHOTS_ROOT, SHOTS_ROOT_REL } from '../../../e2e/shots/release.mjs';
+import { MANIFEST_REL, readManifest } from '../../../scripts/lib/shots-site.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
-const SRC: string = SHOTS_ROOT;
 const DST = path.join(REPO, 'site', 'assets');
+const manifest = readManifest(path.join(REPO, MANIFEST_REL));
 
-// Files with no counterpart are site-owned, not copies: `social-preview.png`
-// is rendered from `social-preview.src.html`, `end-user-drive.png` is a
-// site-only crop. They are deliberately not synced.
 // ⚠ `site/` is withheld from the public export (scripts/export-public.sh), so
 // in the published tree this directory does not exist at all and there is
 // nothing to compare. Skipping there is correct; skipping in the source repo
 // would make the gate a decoration, so the two cases are told apart by the
 // directory's presence and the skip is announced.
 const sitePresent = existsSync(DST);
-const copies = sitePresent
-  ? readdirSync(DST)
-      .filter((f) => f.endsWith('.png'))
-      .filter((f) => existsSync(path.join(SRC, f)))
-  : [];
 
-// ⚠⚠ UNCONDITIONAL, and that is the whole reason it was moved out here.
+/**
+ * The page's own pictures: `social-preview.png` is rendered from
+ * `social-preview.src.html` (the link-preview card), `end-user-drive.png` is a
+ * crop GitHub issue #14 embeds from its public URL. Neither is a screenshot a
+ * shot script takes.
+ */
+const SITE_OWNED = ['social-preview.png', 'end-user-drive.png'];
+
+// ⚠⚠ UNCONDITIONAL, and that is the whole reason it is out here.
 //
 // It used to sit inside the block below, where `describe.skipIf` skipped it
 // along with everything it was guarding — so the one assertion written to catch
 // "the list went empty through a rename" was switched off by the same condition
 // that would have emptied it. Measured 2026-09-07: in the published tree, which
-// CI runs this same suite against, this file reports its EIGHT tests as zero
-// and exits 0.
+// CI runs this same suite against, this file reported its EIGHT tests as zero
+// and exited 0.
 //
-// The predicate is two-valued now. A checkout is either the source tree (site/
-// is here and shares pictures with docs/) or the published one (site/ was
-// withheld by the export, and `scripts/export-public.sh` went with it).
-// Anything else — site/assets renamed, moved or emptied — is neither, and says
-// so instead of quietly measuring nothing.
+// The predicate is two-valued. A checkout is either the source tree (site/
+// is here) or the published one (site/ was withheld by the export, and
+// `scripts/export-public.sh` went with it). Anything else says so instead of
+// quietly measuring nothing.
 it('this checkout is coherently one tree or the other', () => {
   const exporterPresent = existsSync(path.join(REPO, 'scripts', 'export-public.sh'));
   if (!exporterPresent) {
@@ -61,27 +60,27 @@ it('this checkout is coherently one tree or the other', () => {
     ).toBe(false);
     return;
   }
-  expect(
-    sitePresent,
-    'scripts/export-public.sh is here, so this is the source tree, but site/assets is missing',
-  ).toBe(true);
-  expect(
-    copies.length,
-    `site/assets exists and shares no picture with ${SHOTS_ROOT_REL}. Either the sync stopped ` +
-      '(node scripts/sync-site-assets.mjs) or one of the two directories was renamed — and until ' +
-      'that is fixed the comparison below has nothing to compare.',
-  ).toBeGreaterThan(0);
+  expect(sitePresent, 'scripts/export-public.sh is here, so this is the source tree, but site/assets is missing').toBe(true);
+  expect(Object.keys(manifest.pictures).length, `${MANIFEST_REL} holds no picture — the comparison below compares nothing`).toBeGreaterThan(50);
 });
 
 describe.skipIf(!sitePresent)('site assets', () => {
-  it.each(copies)(`site/assets/%s is byte-identical to ${SHOTS_ROOT_REL}`, (name) => {
-    const a = readFileSync(path.join(SRC, name));
-    const b = readFileSync(path.join(DST, name));
+  const pngs = sitePresent ? readdirSync(DST).filter((f) => f.endsWith('.png')) : [];
+  const published = new Set(Object.values(manifest.pictures).map((p: { sha256: string }) => p.sha256));
+  const rootNames = new Set(Object.keys(manifest.pictures).filter((n) => !n.includes('/')));
+
+  it('the page still has its own pictures', () => {
+    for (const name of SITE_OWNED) expect(pngs, `site/assets/${name} is gone`).toContain(name);
+  });
+
+  it.each(pngs)('site/assets/%s is not a copy of a published screenshot', (name) => {
+    const sha = createHash('sha256').update(readFileSync(path.join(DST, name))).digest('hex');
     expect(
-      b.equals(a),
-      `site/assets/${name} differs — filex.sh would show an older picture than the README. ` +
-        'Run: node scripts/sync-site-assets.mjs',
-    ).toBe(true);
+      published.has(sha) || rootNames.has(name),
+      `site/assets/${name} is a screenshot (it is in ${MANIFEST_REL}). The page links the published file on ` +
+        'filex.sh instead: node scripts/shots-site.mjs relink --write. A copy here is the copy that drifted.',
+    ).toBe(false);
+    expect(SITE_OWNED, `site/assets/${name} is neither a site-owned picture nor allowed here`).toContain(name);
   });
 });
 

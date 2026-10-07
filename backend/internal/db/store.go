@@ -343,6 +343,11 @@ type Store interface {
 	// to "app": a personal token minted before the split needs one admin edit
 	// to become a "user" token again.
 	UpdateAPITokenMeta(ctx context.Context, id int64, label, usernames, kind *string) error
+	// UpdateAPITokenScopes writes a token's whole list. Its only caller
+	// changes the levels of the permissions of package tokenperm
+	// (`comments:rw`, PATCH .../tokens/{id} {permissions}); the verbs and the
+	// `root:` are written back as they were, so they stay immutable.
+	UpdateAPITokenScopes(ctx context.Context, id int64, scopes string) error
 	DeleteAPIToken(ctx context.Context, id int64) error
 
 	// S3 access keys (migration 00026) — the credential an S3 client signs
@@ -960,7 +965,49 @@ type Store interface {
 	UnreadNotificationCount(ctx context.Context, userID *int64, mutedEvents, hiddenBodies []string, broadcasts model.BroadcastFilter) (int64, error)
 	UpdateWebhookStatus(ctx context.Context, id int64, status, errMsg string) error
 	GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error)
+	// UpsertNotificationSettings writes a person's preferences. A nil
+	// UrgentOverridesRaw keeps the urgent choices already stored (migration
+	// 00087), so a client that does not know them cannot wipe them.
 	UpsertNotificationSettings(ctx context.Context, s *model.NotificationSettings) error
+
+	// The notification digest (migration 00087, internal/notify digest.go):
+	// a person's digest point and open window, and the administrators'
+	// defaults. Written once for every engine (digest_sql.go).
+	//
+	// DigestState answers through (every notification at or below it has
+	// been told), due (when the open window ends, nil for none) and found.
+	DigestState(ctx context.Context, userID int64) (through int64, due *time.Time, found bool, err error)
+	// EnsureDigestState gives userID a digest point when they have none — the
+	// newest notification there is, so nothing that came before is ever
+	// held — and returns their point either way.
+	EnsureDigestState(ctx context.Context, userID int64) (int64, error)
+	// SetDigestDue opens userID's window to end at due, or brings an open one
+	// forward to it; a window that ends earlier is kept. exact sets it as
+	// given (a window found to end later than the one recorded).
+	SetDigestDue(ctx context.Context, userID int64, due time.Time, exact bool) error
+	// ClearDigestDue closes userID's window when it ended at or before now.
+	ClearDigestDue(ctx context.Context, userID int64, now time.Time) error
+	// DueDigests lists the people whose window ended at or before now, the
+	// longest-waiting first, at most limit of them.
+	DueDigests(ctx context.Context, now time.Time, limit int) ([]int64, error)
+	// AdvanceDigest moves userID's digest point from `from` to `to` and closes
+	// their window, and answers whether it did: false when the point is no
+	// longer `from` (somebody else told these rows first). Compare-and-set,
+	// so a digest is made once however many servers or requests try.
+	AdvanceDigest(ctx context.Context, userID, from, to int64, now time.Time) (bool, error)
+	// NewestNotificationID is the highest notification id there is, 0 for none.
+	NewestNotificationID(ctx context.Context) (int64, error)
+	// OldestQuietOwn is when the oldest of userID's OWN rows above `after` of
+	// one of these kinds was made, nil for none: when their next window opened.
+	OldestQuietOwn(ctx context.Context, userID, after int64, events []string) (*time.Time, error)
+	// MarkOwnNotificationsRead stamps the rows with these ids that are
+	// addressed to userID and still unread. Others are left alone.
+	MarkOwnNotificationsRead(ctx context.Context, userID int64, ids []int64) error
+	// GetDigestPolicy is the defaults of one scope (0: the instance), nil when
+	// none were saved.
+	GetDigestPolicy(ctx context.Context, scope int64) (*model.DigestPolicy, error)
+	// SaveDigestPolicy replaces the defaults of p.Scope.
+	SaveDigestPolicy(ctx context.Context, p *model.DigestPolicy) error
 
 	// Webhook targets (webhook v2, migration 00017) — additional POST
 	// destinations next to the legacy single global webhook. Update
@@ -984,8 +1031,10 @@ type Store interface {
 	UpdateReplicaRule(ctx context.Context, id int64, in *model.ReplicaRuleInput) (*model.ReplicaRule, error)
 	DeleteReplicaRule(ctx context.Context, id int64) error
 
-	UpsertReplicaFailure(ctx context.Context, path, op, errCode, errMsg string) error
-	ResolveReplicaFailure(ctx context.Context, path, op string) error
+	// Failures are keyed by (storage, path, op) since migration 00094: a path
+	// is relative to its storage, and several storages replicate at once.
+	UpsertReplicaFailure(ctx context.Context, storageID int64, path, op, errCode, errMsg string) error
+	ResolveReplicaFailure(ctx context.Context, storageID int64, path, op string) error
 	ListReplicaFailures(ctx context.Context, onlyUnresolved bool, limit, offset int) ([]*model.ReplicaFailure, int64, error)
 	CountUnresolvedReplicaFailures(ctx context.Context) (int64, error)
 	CountRecentlyResolvedReplicaFailures(ctx context.Context, since time.Time) (int64, error)
@@ -995,6 +1044,40 @@ type Store interface {
 
 	GetReplicaSettings(ctx context.Context) (*model.ReplicaSettings, error)
 	UpsertReplicaSettings(ctx context.Context, s *model.ReplicaSettings) error
+
+	// Initial copies (migration 00094, internal/replica initial.go, #186): the
+	// copy of the files a storage already held when it was linked to a
+	// replication target. One row per storage. Written once for every engine
+	// (ReplicaInitialCopySQL).
+	// GetReplicaInitialCopy answers (nil, nil) when the storage has no row.
+	GetReplicaInitialCopy(ctx context.Context, storageID int64) (*model.ReplicaInitialCopy, error)
+	ListReplicaInitialCopies(ctx context.Context) ([]*model.ReplicaInitialCopy, error)
+	// StartReplicaInitialCopy makes the storage's row a fresh copy to
+	// targetID - unless one for that target is already there and restart is
+	// false, in which case that row stands. started says which happened; the
+	// row returned is the one that stands. now is Unix seconds.
+	StartReplicaInitialCopy(ctx context.Context, storageID, targetID, now int64, restart bool) (c *model.ReplicaInitialCopy, started bool, err error)
+	// ClaimReplicaInitialCopy takes the row for one slice of work: it succeeds
+	// while the copy is not done, is still to targetID and nobody holds an
+	// unexpired lease (lease_until < now). until is when the claim lapses.
+	ClaimReplicaInitialCopy(ctx context.Context, storageID, targetID int64, owner string, now, until int64) (bool, error)
+	// SaveReplicaInitialCopy writes c's progress, phase, cursor and lease
+	// (c.LeaseOwner/LeaseUntil; an empty owner releases it) - only while
+	// `owner` still holds the row. ok=false: the lease was lost.
+	SaveReplicaInitialCopy(ctx context.Context, c *model.ReplicaInitialCopy, owner string) (ok bool, err error)
+	DeleteReplicaInitialCopy(ctx context.Context, storageID int64) error
+
+	// Replica links (migration 00095, internal/replica folder.go): the folder
+	// each storage writes into on its target. Written once for every engine
+	// (ReplicaLinkSQL).
+	// GetReplicaLink answers (nil, nil) when the storage has no row.
+	GetReplicaLink(ctx context.Context, storageID int64) (*model.ReplicaLink, error)
+	ListReplicaLinks(ctx context.Context) ([]*model.ReplicaLink, error)
+	// PutReplicaLink creates or replaces the storage's row. A folder another
+	// storage on the same target holds is refused by the (target_id,
+	// folder_key) unique key.
+	PutReplicaLink(ctx context.Context, l *model.ReplicaLink) error
+	DeleteReplicaLink(ctx context.Context, storageID int64) error
 
 	/* calisma:d3 comments */
 	// Node comments (migration 00020) — flat chronological threads on
@@ -1026,6 +1109,17 @@ type Store interface {
 	// limit check and the navigation panel's badge.
 	CountLiveDrafts(ctx context.Context, userID int64) (int, error)
 	DeleteDraft(ctx context.Context, id int64) error
+
+	// Recent searches (migration 00090, task #168) - what a person searched
+	// for in a search box that keeps its history on the server (the admin
+	// panel's), newest first. Written once for every engine (RecentSearchSQL).
+	// AddRecentSearch moves the same words to the top and keeps the newest
+	// `keep`; DeleteRecentSearch answers ok=false for an id that is not the
+	// person's own, exactly as for one that does not exist.
+	AddRecentSearch(ctx context.Context, userID int64, surface, query string, keep int) (*model.RecentSearch, error)
+	ListRecentSearches(ctx context.Context, userID int64, surface string, limit int) ([]*model.RecentSearch, error)
+	DeleteRecentSearch(ctx context.Context, userID, id int64) (bool, error)
+	ClearRecentSearches(ctx context.Context, userID int64, surface string) error
 
 	// Plugin install requests (migration 00070, internal/pluginreq) — what an
 	// API key leaves instead of installing a plugin, for an administrator to
@@ -1088,6 +1182,22 @@ type Store interface {
 	LoadLoginThrottles(ctx context.Context, since time.Time, limit int) ([]*model.LoginThrottle, error)
 	// PruneLoginThrottles drops counters idle since before; n = rows removed.
 	PruneLoginThrottles(ctx context.Context, before time.Time) (int64, error)
+
+	// Office editing sessions (migration 00092, internal/onlyoffice
+	// session_base.go, #184): the version of a document each ONLYOFFICE
+	// editing session opened, by document key. Written once for every engine
+	// (OfficeSessionSQL).
+	// GetOfficeSession answers (nil, nil) when there is no row.
+	GetOfficeSession(ctx context.Context, key string) (*model.OfficeSession, error)
+	// PutOfficeSession creates or overwrites the row for s.DocKey.
+	PutOfficeSession(ctx context.Context, s *model.OfficeSession) error
+	// AddOfficeSession records s unless an unexpired row for its key is
+	// there, and returns the row that stands (the first writer's).
+	AddOfficeSession(ctx context.Context, s *model.OfficeSession, now time.Time) (*model.OfficeSession, error)
+	// DeleteOfficeSession removes the row for key.
+	DeleteOfficeSession(ctx context.Context, key string) error
+	// PruneOfficeSessions removes the rows that expired before `before`.
+	PruneOfficeSessions(ctx context.Context, before time.Time) (int64, error)
 
 	// Encryption requests (migration 00080, internal/e2epolicy) — what a
 	// person leaves where the tenant's policy wants an administrator's

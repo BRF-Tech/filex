@@ -660,6 +660,11 @@ const explorerConfig = computed<ExplorerConfig | null>(() => {
     // same tab (`app-home`): the owner asked for "its own page", with a menu
     // of its sections and a working Back. `@open-app-home` below pushes it.
     appHomePage: true,
+    // #162 - the store screen is a page of this SPA (`app-store`,
+    // `@open-app-store` below). Whether the "App store" row is drawn is the
+    // explorer's own rule (core lib/appStoreRow: a person, and the server
+    // shows them the screen) - the same one the desktop app gets.
+    appStorePage: true,
     showInfoPanel: true,
     multiStorageRoot: true,
     // ⚠ Explicit, and NOT the simple profile's default. In this deployment a
@@ -753,7 +758,7 @@ function firstAdminPage(): string {
        so .fe (height:100%) grows with it and .fe__body's internal overflow:auto
        never engages → the whole PAGE scrolls. height:100vh caps the shell so the
        listing scrolls INSIDE each pane instead. -->
-  <div class="h-screen flex flex-col bg-[var(--fe-bg-elev)]">
+  <div class="h-screen flex flex-col bg-[var(--fe-bg-elev)] fx-explore-shell">
     <!-- gorunum:v2-topbar — THE PAGE HAS NO TOP BAR.
          What stood here (wordmark + tagline, Back, Admin panel, How to
          connect, Settings, Sign out, the dark-mode toggle and the language
@@ -830,6 +835,7 @@ function firstAdminPage(): string {
           @error="onExplorerError"
           @refresh="rediscoverStorages /* gorunum:v2-topbar — the other half of Refresh */"
           @open-my-shares="router.push({ name: 'my-shares' }) /* paylas:m1 — the nav's own door */"
+          @open-app-store="router.push({ name: 'app-store' }) /* #162 - the store screen */"
           @open-app-home="openAppHome"
         >
           <!-- gorunum:v3-shell — the top bar's far-left corner. The explorer
@@ -917,6 +923,17 @@ function firstAdminPage(): string {
 </template>
 
 <style scoped>
+/* #190 - room for a band at the bottom of the viewport: a phone's offer to
+ * install the web app (InstallPrompt.vue wears its band on the file list) and
+ * the "new version" bar. InstallPrompt publishes the band's height in
+ * `--filex-install-banner-h` (0 when there is none) exactly so that a page can
+ * keep its own controls out from under it; the sign-in page has always read
+ * it (Login.vue). Without this the band stood on the list's upload button and
+ * its last rows. The shell is `h-screen` with border-box sizing, so the
+ * padding shortens the explorer instead of growing the page. */
+.fx-explore-shell {
+  padding-block-end: var(--filex-install-banner-h, 0px);
+}
 .explore-host {
   /* The FileExplorer SFC fills its host via flex layout. */
   display: flex;

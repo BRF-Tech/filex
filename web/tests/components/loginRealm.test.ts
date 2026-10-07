@@ -75,6 +75,21 @@ describe('the Realm field', () => {
     expect(login).toHaveBeenCalledWith(expect.objectContaining({ realm: undefined }));
   });
 
+  // #167: `multi_tenant` is the one answer (composables/useTenancy): off, no
+  // field and no realm sent, whatever else the answer carries; and no word of
+  // tenants or realms on the page.
+  it('is not there when the server says multi-tenant mode is off', async () => {
+    withCaps({ multi_tenant: false, realm: { enabled: true, locked_realm: 'acme' } });
+    const auth = useAuthStore();
+    const login = vi.spyOn(auth, 'login').mockResolvedValue(true);
+    const wrapper = mountLogin();
+    await flushPromises();
+    expect(wrapper.find('#realm').exists()).toBe(false);
+    expect(wrapper.text()).not.toMatch(/realm|tenant/i);
+    await fillAndSubmit(wrapper);
+    expect(login).toHaveBeenCalledWith(expect.objectContaining({ realm: undefined }));
+  });
+
   it('is empty and free on the platform page, and sends what was typed', async () => {
     withCaps({ realm: { enabled: true, locked_realm: null } });
     const auth = useAuthStore();

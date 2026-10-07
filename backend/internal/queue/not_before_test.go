@@ -52,26 +52,56 @@ func TestNotBefore_IsZoneIndependent(t *testing.T) {
 
 // A delay in the future really holds the op back, and it really is released
 // once the delay passes. This is the property the whole debounced save-scan
-// rests on.
+// rests on. TestDriverContract_NotBeforeHoldsThenReleases asks the same of
+// every configured driver.
 func TestNotBefore_HoldsThenReleases(t *testing.T) {
-	ctx := context.Background()
-	drv := setupSQLite(t)
+	assertHoldsThenReleases(t, setupSQLite(t))
+}
 
-	at := time.Now().Add(2 * time.Second)
+// assertHoldsThenReleases checks a delayed op against the CLOCK, never
+// against how fast the test itself runs.
+//
+// ⚠⚠ The first version enqueued an op two seconds out and asked "is it
+// runnable right after Enqueue?". In the 0.53 full chain run (2026-10-07, on
+// a build host) the disk answered a write in 130-440 ms on average while that test
+// ran, enqueuing took more than the delay, the op HAD reached its time, and
+// the queue rightly gave it out: red for the host, not for the queue. A busy
+// host can only make Dequeue LATER, never earlier, so three things are asked
+// that hold however slow it is. The hold: an op due an hour from now is never
+// given out. The release: an op due in a moment is given out. Never early:
+// when it is given out, the clock read after Dequeue returned is already past
+// its time. That last check is the one that found the SQL and Redis drivers
+// rounding the deadline DOWN to its second.
+func assertHoldsThenReleases(t *testing.T, drv queue.Driver) {
+	t.Helper()
+	ctx := context.Background()
+
+	far := time.Now().Add(time.Hour)
+	_, err := drv.Enqueue(ctx, queue.Op{Type: "delayed", NotBefore: &far})
+	require.NoError(t, err)
+
+	at := time.Now().Add(1500 * time.Millisecond)
 	id, err := drv.Enqueue(ctx, queue.Op{Type: "delayed", NotBefore: &at})
 	require.NoError(t, err)
 
-	_, err = drv.Dequeue(ctx, []string{"delayed"})
-	require.ErrorIs(t, err, queue.ErrEmpty, "must not be runnable before its time")
-
-	var got queue.Op
-	require.Eventually(t, func() bool {
+	// Wall clocks on both sides: the database compares wall-clock time, and
+	// Round(0) drops the monotonic reading a time.Now() carries.
+	wallAt := at.Round(0)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
 		op, derr := drv.Dequeue(ctx, []string{"delayed"})
-		if derr != nil {
-			return false
+		returned := time.Now().Round(0)
+		if derr == nil {
+			require.Equal(t, id, op.ID, "the op due in an hour must not be given out")
+			require.False(t, returned.Before(wallAt),
+				"must not be runnable before its time: given out %v early", wallAt.Sub(returned))
+			break
 		}
-		got = op
-		return true
-	}, 10*time.Second, 100*time.Millisecond, "must become runnable once the delay passes")
-	assert.Equal(t, id, got.ID)
+		require.ErrorIs(t, derr, queue.ErrEmpty)
+		require.True(t, time.Now().Before(deadline), "must become runnable once the delay passes")
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	_, err = drv.Dequeue(ctx, []string{"delayed"})
+	assert.ErrorIs(t, err, queue.ErrEmpty, "the op due in an hour is still held")
 }

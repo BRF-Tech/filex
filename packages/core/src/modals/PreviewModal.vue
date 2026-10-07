@@ -60,6 +60,27 @@ import type { PluginViewRow } from '../types/Plugins';
 import type { FileApi } from '../composables/useFileApi';
 import { labelOf as pluginLabelOf } from '../lib/pluginLabel';
 import DraftConflictModal from './DraftConflictModal.vue';
+import OutsideChangeModal from './OutsideChangeModal.vue';
+import {
+  officeSession,
+  officeSessionEndpoint,
+  outsideAction,
+  outsideDocumentName,
+  type OutsideAnswer,
+  type OutsideChange,
+  type OutsideChoice,
+} from '../lib/outsideChange';
+import { useDocumentWatch } from '../composables/useDocumentWatch';
+import {
+  buildOfficeFrame,
+  frameOriginOf,
+  frameSetting,
+  linkOfficeFrame,
+  newFrameSession,
+  warnEditorInPage,
+  type OfficeFrameEvent,
+  type OfficeFrameLink,
+} from '../lib/officeFrame';
 
 const props = defineProps<{
   open: boolean;
@@ -167,6 +188,15 @@ const props = defineProps<{
   /** Storage names an app's save-as may span (AppFrame `storages`); absent,
    *  the frame asks the server's listing. */
   storages?: string[];
+  /**
+   * #184 - the document open in the office editor changed OUTSIDE it. The
+   * host says so (the desktop app watches the file on the computer, the web
+   * hears the server's realtime feed); the viewer decides: nothing of this
+   * editor's unsaved, the new version is loaded with a note; otherwise the
+   * person is asked which version stays (OutsideChangeModal), and the answer
+   * goes back as `outside-resolved`. lib/outsideChange has the rule.
+   */
+  outsideChange?: OutsideChange | null;
 }>();
 
 const emit = defineEmits<{
@@ -193,6 +223,13 @@ const emit = defineEmits<{
   /** #110: the file in view was saved from here (an app's interface, the
    *  code or Markdown editor): its new size, so the host's row catches up. */
   (e: 'saved', saved: { path: string; size?: number }): void;
+  /** #184: whether the office editor holds an edit of this session's (sticky
+   *  from the first keystroke until the editor is reloaded). The desktop app
+   *  reads it; nothing else has to. */
+  (e: 'office-edited', edited: boolean): void;
+  /** #184: what became of an `outsideChange` - taken in without a question
+   *  ('reloaded'), or the person's answer. */
+  (e: 'outside-resolved', answer: OutsideAnswer): void;
 }>();
 
 const { t, formatSize, formatDate, nodeDisplayName } = useLocale(() => props.locale);
@@ -1250,7 +1287,7 @@ async function diagnoseOfficeDownload(gen: number): Promise<void> {
   } catch {
     return;
   }
-  const d = await fetchOfficeDiagnosis(endpoint, file.path, {
+  const d = await fetchOfficeDiagnosis(endpoint, livePath.value || file.path, {
     headers,
     credentials: props.authCredentials || 'same-origin',
   });
@@ -1288,6 +1325,9 @@ async function mountOnlyOfficeEditor(): Promise<void> {
   officeError.value = null;
   officeDiagnosis.value = null;
   const gen = officeGen;
+  // A new editor has no edits of its own (#184).
+  setOfficeEdited(false);
+  officeKey = null;
   if (!props.file || kind.value !== 'office') return;
   /* ⚠ BOTH halves. The standalone /files/edit route always handed over the
    * config ENDPOINT and left the base null when the capabilities probe said
@@ -1312,7 +1352,10 @@ async function mountOnlyOfficeEditor(): Promise<void> {
         // `<adapter>://<rel>` against ListEnabledStorages; passing the
         // bare relative path falls back to storages[0] which 404s for
         // anything sitting on a non-primary storage (e.g. s3-test).
-        path: props.file.path,
+        // ⚠ The LIVE path: after a draft's Save, or after an outside change
+        // the desktop app put on a new working copy (#184), the document is
+        // there and no longer where the viewer was opened.
+        path: livePath.value || props.file.path,
         mode: props.openMode || 'edit',
       }),
     });
@@ -1320,47 +1363,50 @@ async function mountOnlyOfficeEditor(): Promise<void> {
       officeError.value = await officeConfigError(res);
       return;
     }
-    const { config, documentServerUrl } = (await res.json()) as {
+    const { config, documentServerUrl, frame } = (await res.json()) as {
       config: any;
       documentServerUrl: string;
+      /** Task #92: the editor's frame on another origin, when the server
+       *  has one (FILEX_ONLYOFFICE_FRAME_ORIGIN, else FILEX_APP_UI_ORIGIN). */
+      frame?: string;
     };
 
+    // Task #92: the server named a frame on another origin - api.js runs
+    // there, never in this page. Every host (the explorer, the editor tab,
+    // the desktop's document windows, the embeds) takes this one path.
+    if (frame) {
+      if (gen === officeGen) mountOfficeFrame(frame, config, gen);
+      return;
+    }
+    warnEditorInPage();
+
     await loadOnlyOfficeScript(documentServerUrl);
+    // Another opening started while this one waited (an outside change came
+    // in twice): the newer one mounts, not this.
+    if (gen !== officeGen) return;
     disposeOnlyOfficeEditor();
 
     const mountId = OFFICE_MOUNT_ID;
     officeEl.value.id = mountId;
-    officeHostEl = officeEl.value.parentElement;
+    // ⚠ After a reload in place (#184) the element this component rendered
+    // is no longer in the page: api.js replaced it with its frame, and
+    // destroyEditor() put a placeholder of its own there, with the same id.
+    // That placeholder is where the next editor goes, and its parent is the
+    // host the dead-editor cleanup looks in.
+    officeHostEl = (document.getElementById(mountId) ?? officeEl.value).parentElement;
+    officeKey = typeof config?.document?.key === 'string' ? config.document.key : null;
 
-    /* ⚠⚠ The screen is never split. A trouble the editor cannot go on from
-       (lib/officeDiagnosis officeEventEndsTheEditor) closes the editor
-       BEFORE the fallback is drawn: api.js put its iframe where the mount
-       was, so the fallback replacing the mount left the dead editor, its
-       own "Download failed" dialog and all, standing beside it (measured
-       against ONLYOFFICE Docs 9.4 in the 0.50 final run). Anything else is
-       the document server's to show, in its own closable dialog, over an
-       editor that goes on - no fallback. */
-    const onOfficeEvent = (channel: OfficeEventChannel, err: any) => {
-      if (!officeEventEndsTheEditor(channel)) {
-        console.info('[filex] ONLYOFFICE warning', officeErrorCode(err), formatOnlyOfficeError(err));
-        return;
-      }
-      closeDeadOfficeEditor();
-      officeError.value = formatOnlyOfficeError(err);
-      // "Download failed" is two failures in one sentence; filex knows
-      // which (issue #80). The code, not the localised description, says
-      // it is that one.
-      if (officeErrorCode(err) === OFFICE_DOWNLOAD_ERROR) void diagnoseOfficeDownload(gen);
-    };
     config.events = {
-      onError: (err: any) => onOfficeEvent('onError', err),
-      onWarning: (err: any) => onOfficeEvent('onWarning', err),
+      onError: (err: any) => onOfficeEvent('onError', err, gen),
+      onWarning: (err: any) => onOfficeEvent('onWarning', err, gen),
       // Drafts: the document server keeps the edits until the session ends
       // and then saves them into the draft itself; this only tells the page
       // there ARE edits (the leave-page question).
-      onDocumentStateChange: (ev: any) => {
-        if (ev?.data) draftTouched.value = true;
-      },
+      //
+      // #184: the same event says this editor holds an edit, for the
+      // outside-change rule. ⚠ Sticky: `data: false` means the edits reached
+      // the DOCUMENT SERVER, not the file (lib/outsideChange outsideAction).
+      onDocumentStateChange: (ev: any) => onOfficeEdited(!!ev?.data, gen),
     };
 
     const W = window as any;
@@ -1368,12 +1414,125 @@ async function mountOnlyOfficeEditor(): Promise<void> {
       throw new Error('DocsAPI not available after script load');
     }
     officeEditor = new W.DocsAPI.DocEditor(mountId, config);
+    // #184: from here on a change to the document outside this editor is
+    // heard (the server's realtime feed; the desktop app's own working
+    // copies excepted - it watches the person's file itself).
+    docWatch.watch(props.open && props.api?.wsTicket ? livePath.value : null);
   } catch (err) {
     /* The document server's script did not load, or did not define its API:
        the server is configured but not answering. The detail is for the
        console, the sentence for the person. */
     console.warn('[filex] ONLYOFFICE did not start', err);
     officeError.value = t(props.canConfigure ? 'viewer.office_unreachable_admin' : 'viewer.office_unreachable');
+  }
+}
+
+/* ⚠⚠ The screen is never split. A trouble the editor cannot go on from
+   (lib/officeDiagnosis officeEventEndsTheEditor) closes the editor BEFORE the
+   fallback is drawn: api.js put its iframe where the mount was, so the
+   fallback replacing the mount left the dead editor, its own "Download
+   failed" dialog and all, standing beside it (measured against ONLYOFFICE
+   Docs 9.4 in the 0.50 final run). Anything else is the document server's to
+   show, in its own closable dialog, over an editor that goes on - no
+   fallback. The same for an editor in its own frame (task #92), whose events
+   arrive over the frame's port. */
+function onOfficeEvent(channel: OfficeEventChannel, err: any, gen: number): void {
+  if (!officeEventEndsTheEditor(channel)) {
+    console.info('[filex] ONLYOFFICE warning', officeErrorCode(err), formatOnlyOfficeError(err));
+    return;
+  }
+  closeDeadOfficeEditor();
+  officeError.value = formatOnlyOfficeError(err);
+  // "Download failed" is two failures in one sentence; filex knows which
+  // (issue #80). The code, not the localised description, says it is that one.
+  if (officeErrorCode(err) === OFFICE_DOWNLOAD_ERROR) void diagnoseOfficeDownload(gen);
+}
+
+/** ONLYOFFICE's onDocumentStateChange, in the page or from the frame. */
+function onOfficeEdited(dirty: boolean, gen: number): void {
+  if (!dirty || gen !== officeGen) return;
+  draftTouched.value = true;
+  setOfficeEdited(true);
+}
+
+/* === Task #92: the editor in a frame of its own ===========================
+ *
+ * The server named a page on another origin (the document server's own,
+ * FILEX_ONLYOFFICE_FRAME_ORIGIN, or the interface origin); the
+ * frame goes INSIDE the mount (api.js, which used to replace the mount, now
+ * runs in the frame), and the config goes to it as the server signed it
+ * (lib/officeFrame has the protocol and its checks). Everything else is the
+ * same as in the page: the events say "edited" and "the editor cannot go on",
+ * a reload (#184) is this frame taken away and a new one on a new config,
+ * and saving is the document server's, server to server.
+ */
+let officeFrameEl: HTMLIFrameElement | null = null;
+let officeFrameLink: OfficeFrameLink | null = null;
+
+function mountOfficeFrame(address: string, config: unknown, gen: number): void {
+  const origin = frameOriginOf(address);
+  const host = officeEl.value;
+  if (!origin || !host) {
+    console.warn('[filex] ONLYOFFICE frame address is not an http(s) address', address);
+    officeError.value = t(props.canConfigure ? 'viewer.office_unreachable_admin' : 'viewer.office_unreachable');
+    return;
+  }
+  disposeOnlyOfficeEditor();
+  const key = (config as { document?: { key?: unknown } } | null)?.document?.key;
+  officeKey = typeof key === 'string' ? key : null;
+  const session = newFrameSession();
+  const el = buildOfficeFrame(address, session, props.file?.basename || 'ONLYOFFICE');
+  const link = linkOfficeFrame({
+    frame: () => el,
+    origin,
+    session,
+    config,
+    onEvent: (e) => onFrameEvent(e, gen, el),
+    onSilent: () => {
+      if (gen !== officeGen || officeFrameEl !== el) return;
+      // The page on the interface origin never answered: that host does not
+      // reach this filex (DNS, the proxy, TLS), or it served something else.
+      console.warn('[filex] the ONLYOFFICE frame did not answer', origin);
+      closeDeadOfficeEditor();
+      officeError.value = props.canConfigure
+        ? t('viewer.office_frame_unreachable_admin', { origin, env: frameSetting(address) })
+        : t('viewer.office_unreachable');
+    },
+  });
+  el.addEventListener('load', () => link.frameLoaded());
+  officeFrameEl = el;
+  officeFrameLink = link;
+  host.appendChild(el);
+  // #184: from here on a change to the document outside this editor is heard.
+  docWatch.watch(props.open && props.api?.wsTicket ? livePath.value : null);
+}
+
+function onFrameEvent(e: OfficeFrameEvent, gen: number, el: HTMLIFrameElement): void {
+  if (gen !== officeGen || officeFrameEl !== el) return;
+  switch (e.type) {
+    case 'started':
+    case 'ready':
+      // For a person measuring it (and an end-to-end test): how far it got.
+      el.dataset.state = e.type;
+      return;
+    case 'state':
+      onOfficeEdited(e.dirty, gen);
+      return;
+    case 'error':
+      // ONLYOFFICE's own event shape, so the one function reads both.
+      onOfficeEvent(
+        e.channel,
+        { data: { errorCode: e.code ?? undefined, errorDescription: e.description || undefined } },
+        gen,
+      );
+      return;
+    case 'failed':
+      // api.js did not load in the frame, or did not define its API: the
+      // document server is configured but not answering.
+      console.warn('[filex] ONLYOFFICE did not start in its frame', e.reason);
+      closeDeadOfficeEditor();
+      officeError.value = t(props.canConfigure ? 'viewer.office_unreachable_admin' : 'viewer.office_unreachable');
+      return;
   }
 }
 
@@ -1384,6 +1543,10 @@ function disposeOnlyOfficeEditor(): void {
     /* ignore */
   }
   officeEditor = null;
+  officeFrameLink?.close();
+  officeFrameLink = null;
+  officeFrameEl?.remove();
+  officeFrameEl = null;
 }
 
 /** Where api.js is told to put its editor (it REPLACES this element). */
@@ -1406,6 +1569,198 @@ function closeDeadOfficeEditor(): void {
   for (const frame of Array.from(officeHostEl?.querySelectorAll('iframe[name^="frameEditor"]') ?? [])) frame.remove();
   officeHostEl = null;
 }
+
+/* === #184: the document changed OUTSIDE this editor =========================
+ *
+ * The host says so (`outsideChange`); this decides, on every surface alike
+ * (lib/outsideChange): nothing of this editor's unsaved, the new version is
+ * loaded in place and a note says so; otherwise the person is asked which
+ * version stays (OutsideChangeModal). The answer goes back to the host
+ * (`outside-resolved`), which writes nothing over anything until it has one.
+ *
+ * ⚠ The reload is destroyEditor() and a new editor on a fresh config, not
+ * ONLYOFFICE's refreshFile(): that method is for the document server's own
+ * onRequestRefreshFile (Docs 8.3+, a key already saved, or a reconnect) and
+ * only with no unsaved changes - it is not an integrator's "reload now". A
+ * fresh config carries a new key, because the file it names has changed (the
+ * server's key covers its mtime and size; the desktop's new working copy is a
+ * new file altogether).
+ */
+
+/** This editor holds an edit of its session's (sticky, see outsideAction). */
+const officeEdited = ref(false);
+/** The ONLYOFFICE `document.key` the editor on screen was opened with. */
+let officeKey: string | null = null;
+/** The change waiting for an answer, and whether its question is on screen
+ *  (Escape puts it away; the line under the bar brings it back). */
+const outsideAsk = ref<OutsideChange | null>(null);
+const outsideAskOpen = ref(false);
+/** What the last change came to, said for a moment under the bar. */
+const outsideNote = ref<OutsideChoice | null>(null);
+let outsideNoteTimer: ReturnType<typeof setTimeout> | undefined;
+/** The highest change already handled: one change is handled once. */
+let outsideSeen = 0;
+/** Who noticed the change waiting for an answer (OutsideAnswer.origin). */
+let outsideOrigin: 'host' | 'server' = 'host';
+/** The viewer's own count of the changes it heard from the server. */
+let serverSeq = 0;
+
+/** POST /api/files/onlyoffice/session, next to the config endpoint. */
+const sessionEndpoint = computed(() =>
+  officeSessionEndpoint(officeDiagnoseEndpoint(props.onlyOfficeConfigEndpoint)),
+);
+
+/**
+ * The document's folder on the realtime feed (composables/useDocumentWatch).
+ * A frame naming the document is only "something happened to it": the
+ * server says whether this editor's session is still on the current version,
+ * because the editor's own save announces itself the same way.
+ */
+const docWatch = useDocumentWatch({
+  ticket: async () => (props.api?.wsTicket ? props.api.wsTicket() : null),
+  onMaybeChanged: () => void checkOutsideOnServer(),
+});
+
+async function checkOutsideOnServer(): Promise<void> {
+  const key = officeKey;
+  const path = livePath.value;
+  const endpoint = sessionEndpoint.value;
+  if (!key || !path || !endpoint || !props.open || kind.value !== 'office') return;
+  const state = await officeSession(authedFetch, endpoint, { path, key, action: 'state' });
+  // Another editor on screen by now (a reload, another file): not its news.
+  if (!state?.stale || key !== officeKey) return;
+  // The same version heard twice is one question.
+  if (outsideAsk.value && outsideOrigin === 'server') return;
+  takeChange({ seq: ++serverSeq }, 'server');
+}
+
+/** The person's answer to a change the viewer heard itself: the server keeps
+ *  or drops the session's save accordingly ('both' is its default). */
+function tellServer(choice: OutsideChoice, key: string | null, path: string): void {
+  const endpoint = sessionEndpoint.value;
+  if (!endpoint || !key || (choice !== 'mine' && choice !== 'theirs')) return;
+  void officeSession(authedFetch, endpoint, { path, key, action: choice });
+}
+
+function setOfficeEdited(v: boolean): void {
+  if (officeEdited.value === v) return;
+  officeEdited.value = v;
+  emit('office-edited', v);
+}
+
+const outsideName = computed(() =>
+  props.file ? outsideDocumentName(livePath.value || props.file.path, props.file.basename) : '',
+);
+
+const outsideNoteText = computed(() => {
+  switch (outsideNote.value) {
+    case 'reloaded':
+      return t('outside.note.reloaded');
+    case 'theirs':
+      return t('outside.note.theirs');
+    case 'mine':
+      return t('outside.note.mine');
+    case 'both':
+      return t('outside.note.both');
+    default:
+      return '';
+  }
+});
+
+function sayOutside(choice: OutsideChoice): void {
+  outsideNote.value = choice;
+  if (outsideNoteTimer) clearTimeout(outsideNoteTimer);
+  outsideNoteTimer = setTimeout(() => {
+    outsideNote.value = null;
+  }, 8000);
+}
+
+/** The new version, in place: the editor on screen goes (its session's edits
+ *  with it - the host keeps or drops those as the answer says) and a new one
+ *  opens on the version the change names. */
+async function takeOutside(c: OutsideChange, choice: 'reloaded' | 'theirs', origin: 'host' | 'server'): Promise<void> {
+  const key = officeKey;
+  const before = livePath.value;
+  outsideAsk.value = null;
+  outsideAskOpen.value = false;
+  if (origin === 'server') tellServer(choice, key, before);
+  if (c.path) outsidePath.value = c.path;
+  officeGen++;
+  // ⚠ disposeOnlyOfficeEditor, not closeDeadOfficeEditor: destroyEditor()
+  // leaves api.js's own placeholder where the frame was, and that is where
+  // the next editor goes. Taking it away would leave the new editor nowhere
+  // to mount.
+  disposeOnlyOfficeEditor();
+  officeError.value = null;
+  officeDiagnosis.value = null;
+  emit('outside-resolved', { seq: c.seq, choice, path: livePath.value, key, origin });
+  sayOutside(choice);
+  await nextTick();
+  if (!props.open || kind.value !== 'office') return;
+  await mountOnlyOfficeEditor();
+}
+
+function onOutsideChoose(choice: Exclude<OutsideChoice, 'reloaded'>): void {
+  const c = outsideAsk.value;
+  if (!c) return;
+  const origin = outsideOrigin;
+  if (choice === 'theirs') {
+    void takeOutside(c, 'theirs', origin);
+    return;
+  }
+  outsideAsk.value = null;
+  outsideAskOpen.value = false;
+  if (origin === 'server') tellServer(choice, officeKey, livePath.value);
+  sayOutside(choice);
+  emit('outside-resolved', { seq: c.seq, choice, path: livePath.value, key: officeKey, origin });
+}
+
+/** One change, from either side: reloaded without a question when nothing of
+ *  this editor's would be lost, else asked. */
+function takeChange(c: OutsideChange, origin: 'host' | 'server'): void {
+  // Only the office editor follows a change (the case #184 is about: the
+  // text editors save on every pause, and an app's interface owns its
+  // document). Anything else keeps what it shows.
+  if (kind.value !== 'office') return;
+  // A question still open is not answered by the next change: it is asked
+  // again, about the newest version.
+  if (!outsideAsk.value && outsideAction(officeEdited.value, c) === 'reload') {
+    void takeOutside(c, 'reloaded', origin);
+    return;
+  }
+  outsideAsk.value = c;
+  outsideOrigin = origin;
+  outsideAskOpen.value = true;
+}
+
+watch(
+  () => props.outsideChange,
+  (c) => {
+    if (!c || !props.open || !props.file) return;
+    if (!(c.seq > outsideSeen)) return;
+    outsideSeen = c.seq;
+    takeChange(c, 'host');
+  },
+);
+
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) docWatch.stop();
+  },
+);
+
+// Another file in view: what was asked about the last one is not about it.
+watch(
+  () => props.file?.path,
+  () => {
+    docWatch.stop();
+    outsidePath.value = null;
+    outsideAsk.value = null;
+    outsideAskOpen.value = false;
+    outsideNote.value = null;
+  },
+);
 
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -1514,8 +1869,15 @@ const draftBusy = ref(false);
 const draftError = ref<string | null>(null);
 const showDraftClose = ref(false);
 
-/** The path the file is at NOW: the draft's, or where its Save put it. */
-const livePath = computed(() => draftSaved.value?.path ?? props.file?.path ?? '');
+/**
+ * #184: where the desktop app put the version of the document the office
+ * editor now shows, after an outside change it took in (a new working copy
+ * each time). null: where it was opened.
+ */
+const outsidePath = ref<string | null>(null);
+/** The path the file is at NOW: the draft's, where its Save put it, or the
+ *  working copy an outside change moved the editor to (#184). */
+const livePath = computed(() => draftSaved.value?.path ?? outsidePath.value ?? props.file?.path ?? '');
 /** Still a draft: opened on a draft's path and not saved yet. Share and the
  *  star are a file's, not a draft's - and after the Save it IS a file, at
  *  `livePath`, the same row (the Save moves it), so they come back (#85).
@@ -1725,6 +2087,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload);
   window.removeEventListener('pagehide', onPageHide);
   if (draftNoteTimer) clearTimeout(draftNoteTimer);
+  if (outsideNoteTimer) clearTimeout(outsideNoteTimer);
+  docWatch.stop();
 });
 
 </script>
@@ -1859,6 +2223,22 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="file && csvOfficeNote" class="fe-officenote" role="note" data-testid="office-csv-note">
         {{ t('viewer.csv_office_note') }}
+      </p>
+      <!-- #184: the document changed outside the editor - a question put
+           away and still open, or what the last change came to. -->
+      <p
+        v-if="file && outsideAsk && !outsideAskOpen"
+        class="fe-officenote fe-officenote--outside"
+        role="status"
+        data-testid="outside-pending"
+      >
+        <span>{{ t('outside.pending') }}</span>
+        <button type="button" class="fe-btn fe-btn--sm" data-testid="outside-choose" @click="outsideAskOpen = true">
+          {{ t('outside.choose') }}
+        </button>
+      </p>
+      <p v-else-if="file && outsideNoteText" class="fe-officenote" role="status" data-testid="outside-note">
+        {{ outsideNoteText }}
       </p>
 
       <div
@@ -2194,6 +2574,14 @@ onBeforeUnmount(() => {
     @save="onCloseSave"
     @keep="onCloseKeep"
     @discard="onCloseDiscard"
+  />
+  <OutsideChangeModal
+    :open="!!outsideAsk && outsideAskOpen"
+    :locale="locale"
+    :theme="theme"
+    :name="outsideName"
+    @dismiss="outsideAskOpen = false"
+    @choose="onOutsideChoose"
   />
   <DraftConflictModal
     :open="!!draftSave.question.value"

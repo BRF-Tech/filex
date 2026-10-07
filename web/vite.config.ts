@@ -4,6 +4,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
 // Shared with scripts/i18n-export.mjs (types: i18n-catalogue.d.mts).
 import { catalogueFiles } from '../scripts/lib/i18n-catalogue.mjs';
+// The manifest and the worker's options (task #190: a test reads them).
+import { PWA_INCLUDE_ASSETS, PWA_MANIFEST, PWA_WORKBOX } from './pwa.config';
 
 /**
  * The interface's string catalogue, written next to the SPA it describes
@@ -88,98 +90,14 @@ export default defineConfig({
       // auto-inject a registration script or the SW registers twice.
       injectRegister: false,
       // Service-worker registration scope. Deliberately narrower than the
-      // manifest scope below: the SW owns the offline shell for the panel and
+      // manifest scope (pwa.config.ts): the SW owns the offline shell for the panel and
       // must not claim clients outside it. /drive/ (the end-user mount, see
       // routes.go) therefore has no offline shell — it loads from the network
       // like any other page, which is correct and not an oversight.
       scope: '/admin/',
-      includeAssets: ['favicon.svg', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png'],
-      manifest: {
-        id: '/admin/',
-        name: 'filex - File Manager',
-        short_name: 'filex',
-        description: 'Self-hosted file manager: browse, upload, share and edit your files.',
-        start_url: '/admin/',
-        // ⚠ '/' rather than '/admin/', and it is the MANIFEST scope only —
-        // the service-worker registration above stays pinned to '/admin/'.
-        // Manifest scope decides which navigations stay inside the installed
-        // window; since GitHub #14 a non-admin who opens the app is handed
-        // straight on to /drive/, and with a '/admin/' scope that hand-off
-        // ejects them from the installed app into a browser tab on their very
-        // first screen. Widening a scope is the safe direction (it only ever
-        // keeps more URLs in-app); narrowing one orphans installed clients.
-        //
-        // ⚠ `id` must NOT follow it. The id is the app's identity — change it
-        // and every existing install becomes a second, separate app.
-        scope: '/',
-        display: 'standalone',
-        orientation: 'any',
-        // Product blue — in step with index.html's theme-color meta,
-        // web/public/favicon.svg, web/public/icons/icon.svg and LogoMark.vue.
-        theme_color: '#2f6ceb',
-        background_color: '#0a0a0a',
-        icons: [
-          // A full-bleed SVG doubles as the "any" and "maskable" icon; Chrome
-          // (desktop + Android) accepts sizes:"any" SVG for installability.
-          {
-            src: 'icons/icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'any',
-          },
-          {
-            src: 'icons/icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'maskable',
-          },
-          // ⚠ The PNG set is not a nicety. iOS Safari ignores an SVG
-          // apple-touch icon, and — the reason it exists now — Chromium's
-          // NOTIFICATION decoder has no SVG at all, so an installed app whose
-          // only icon is the SVG raises toasts with no logo. Rasterised from
-          // the same mark by `scripts/make-icon-pngs.mjs`.
-          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-        ],
-      },
-      workbox: {
-        // ⚠ The notification handlers. The worker is GENERATED, so there is
-        // nowhere in it to write `notificationclick` / `push`; this pulls in
-        // `public/notify-sw.js` verbatim. Without it a toast raised BY the
-        // worker (the only kind Android Chrome allows) has a click that does
-        // nothing, and a future push would show the browser's "site updated
-        // in the background" placeholder instead of the app's own toast.
-        importScripts: ['notify-sw.js'],
-        // ⚠ No map for the generated service worker. workbox builds it from a
-        // temp copy, so its map's only source was the builder's temp path —
-        // `C:/Users/<account>/AppData/Local/Temp/…/sw.js`, account name
-        // included, inside every binary built on that machine. The map
-        // describes generated code nobody debugs; scripts/check-embed.mjs
-        // refuses any shipped map that names an absolute path.
-        sourcemap: false,
-        // Precache the built app shell + assets. navigateFallback keeps the
-        // Vue history-mode routes (createWebHistory('/admin/')) working
-        // offline by serving index.html for unmatched navigations.
-        globPatterns: ['**/*.{js,css,html,svg,woff2}'],
-        // Keep the heavy lazy-loaded chunks OUT of the precache. Monaco's
-        // editor core (~3.8 MB) and its TypeScript worker (~7 MB) are only
-        // pulled when someone opens the code editor; precaching them would
-        // make every install download ~12 MB up front and blow past workbox's
-        // 2 MiB-per-asset limit (which is what the build was failing on).
-        // They still load fine over the network on demand — they are simply
-        // not part of the offline shell.
-        globIgnores: ['**/editor.main-*.js', '**/*.worker-*.js', '**/model-viewer-*.js'],
-        // ⚠ RELATIVE, resolved against the worker's own URL: `/admin/index.html`
-        // at the root, `/filex/admin/index.html` under a base path. The
-        // absolute '/admin/index.html' is not in the precache under a base, and
-        // workbox then refuses every navigation ("non-precached-url").
-        navigateFallback: 'index.html',
-        // Never let the SW intercept the API — those must always hit the
-        // network (and, in Electron, a remote origin).
-        navigateFallbackDenylist: [/^\/api\//],
-        cleanupOutdatedCaches: true,
-      },
+      includeAssets: PWA_INCLUDE_ASSETS,
+      manifest: PWA_MANIFEST,
+      workbox: PWA_WORKBOX,
       devOptions: {
         // ⚠⚠ OFF by default in `vite dev`, and the default is the decision.
         //

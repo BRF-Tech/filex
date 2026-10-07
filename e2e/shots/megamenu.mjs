@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/megamenu.mjs     (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/megamenu/ (or SHOTS_OUT):
+// Writes e2e/.artifacts/shots/capture/megamenu/ (or SHOTS_OUT):
 //
 //   people-panel-1440.png     the top bar with People & security open over
 //                             Admin → Users: two sections, a short line under
@@ -11,10 +11,17 @@
 //                             the same menu, translated, three sections
 //   drawer-390.png            a phone: the Menu button's drawer, every page as
 //                             a list under its panel and section headings
+//   search-ldap-1440.png      the panel's search (task #168) for "ldap": the
+//                             Identity providers page and its LDAP tab, found
+//                             by a synonym
+//   search-tr-390.png         a phone, in Turkish: the search over the window
+//                             for "kullanici" (Kullanıcılar, folded)
 //
 // It also MEASURES, in a real browser (jsdom has no layout): each panel opens
 // inside the window at 1024 and 1440 px in English and Turkish, nothing on the
-// page scrolls sideways, and the drawer fits a 390 px phone. A failed
+// page scrolls sideways, the drawer fits a 390 px phone, the search's panel
+// opens inside the window at 1024 and 1440 px in both languages, and the
+// phone's search covers the window. A failed
 // measurement throws; the pictures are only written by a run that passed it.
 //
 // ⚠ The panels open on a CLICK, never on hover (docs/ADMIN-PANEL.md), and
@@ -157,7 +164,75 @@ async function main() {
     if (sideways.some((p) => p.startsWith('the page scrolls sideways'))) throw new Error(`the phone page scrolls sideways: ${sideways.join('; ')}`);
     await shot(ppage, SET, 'drawer-390.png');
     await phone.close();
-    log('People & security over Users, System in Turkish dark, the phone drawer');
+
+    // ── 4. The panel's search (task #168): it fits, then "ldap" at 1440 ──
+    const sctx = await newContext(browser, { width: 1440, height: 900 });
+    const spage = await sctx.newPage();
+    await signIn(spage, inst.url, ADMIN);
+    const searchProblems = [];
+    for (const locale of ['en', 'tr']) {
+      await setLanguage(admin, spage, locale);
+      for (const width of [1024, 1440]) {
+        await spage.setViewportSize({ width, height: 900 });
+        await spage.goto(`${inst.url}/admin/dashboard`);
+        await spage.getByTestId('mega-menu').first().waitFor({ timeout: 20_000 });
+        await settled(spage);
+        await spage.getByTestId('panel-search-open').click();
+        const layer = spage.getByTestId('panel-search');
+        await layer.waitFor({ state: 'visible', timeout: 10_000 });
+        await spage.getByTestId('panel-search-input').fill('se');
+        await sleep(700);
+        const sbox = await layer.boundingBox();
+        if (!sbox || sbox.x < 0 || sbox.x + sbox.width > width + 0.5 || sbox.y + sbox.height > 900.5) {
+          searchProblems.push(`${locale} ${width}px: the search panel does not fit the window (${JSON.stringify(sbox)})`);
+        }
+        for (const x of await layoutProblems(spage)) searchProblems.push(`${locale} ${width}px, search open: ${x}`);
+        await spage.keyboard.press('Escape');
+        await sleep(200);
+      }
+    }
+    if (searchProblems.length) throw new Error(`search layout problems:\n  ${searchProblems.join('\n  ')}`);
+    log('the search panel fits at 1024 and 1440 px, in English and Turkish');
+
+    await setLanguage(admin, spage, 'en');
+    await spage.setViewportSize({ width: 1440, height: 760 });
+    await spage.goto(`${inst.url}/admin/users`);
+    await spage.getByTestId('mega-menu').first().waitFor({ timeout: 20_000 });
+    await settled(spage);
+    await spage.getByTestId('panel-search-open').click();
+    await spage.getByTestId('panel-search-input').fill('ldap');
+    const found = spage.getByTestId('panel-search');
+    await found.waitFor({ state: 'visible', timeout: 10_000 });
+    await sleep(700);
+    await mustSay(found, 'the search for "ldap"', ['Pages', 'Identity providers', 'LDAP / Active Directory']);
+    await shot(spage, SET, 'search-ldap-1440.png');
+    await sctx.close();
+
+    // ── 5. A phone, in Turkish: the search over the whole window ─────────
+    const sphone = await newContext(browser, { width: 390, height: 844 });
+    const sppage = await sphone.newPage();
+    await signIn(sppage, inst.url, ADMIN);
+    await setLanguage(admin, sppage, 'tr');
+    await sppage.goto(`${inst.url}/admin/dashboard`);
+    const searchButton = sppage.getByTestId('panel-search-open');
+    await searchButton.first().waitFor({ timeout: 20_000 });
+    for (let i = 0; i < 50 && (await searchButton.count()) !== 1; i++) await sleep(100);
+    if ((await searchButton.count()) !== 1) throw new Error(`expected one search button, found ${await searchButton.count()}`);
+    await sleep(400);
+    await searchButton.click();
+    await sppage.getByTestId('panel-search-input').fill('kullanici');
+    const over = sppage.getByTestId('panel-search');
+    await over.waitFor({ state: 'visible', timeout: 10_000 });
+    await sleep(700);
+    await mustSay(over, 'the Turkish phone search', ['Sayfalar', 'Kullanıcılar']);
+    const obox = await over.boundingBox();
+    if (!obox || obox.x < -0.5 || obox.width < 389) throw new Error(`the phone's search does not cover the window: ${JSON.stringify(obox)}`);
+    const phoneSideways = await layoutProblems(sppage);
+    if (phoneSideways.some((p) => p.startsWith('the page scrolls sideways'))) throw new Error(`the phone page scrolls sideways: ${phoneSideways.join('; ')}`);
+    await shot(sppage, SET, 'search-tr-390.png');
+    await setLanguage(admin, sppage, 'en');
+    await sphone.close();
+    log('People & security over Users, System in Turkish dark, the phone drawer, the search at 1440 and on a phone');
   } finally {
     await browser.close();
     await inst.stop();

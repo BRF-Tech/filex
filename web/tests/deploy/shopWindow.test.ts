@@ -33,6 +33,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ADVERTISED_QUERIES, REPO_ABOUT, REPO_HOMEPAGE, SCREENSHOTS } from '../../../scripts/shop-window-data.mjs';
+import { MANIFEST_REL, findReferences, readManifest } from '../../../scripts/lib/shots-site.mjs';
 import { bashArray as exporterArray } from '../helpers/exporterArrays';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
@@ -635,10 +636,14 @@ describe('the advertised search queries are the ones the product prints', () => 
 // Both are assertions here.
 
 describe('every README screenshot declares what it shows', () => {
+  // ⚠ The pictures are not files in this tree any more (task #176): the
+  // README links their published URLs on filex.sh, and e2e/shots/manifest.json
+  // names the current file of each. So "is the picture still here" became "is
+  // the picture still published", and a README link is read back to the
+  // picture's NAME, which is what SCREENSHOTS declares.
   const trackedSet = new Set(TRACKED_ALL);
-  const shownInReadme = [
-    ...new Set([...read('README.md').matchAll(/docs\/screenshots\/[A-Za-z0-9_./-]+\.png/g)].map((m) => m[0])),
-  ];
+  const manifest = readManifest(path.join(REPO, MANIFEST_REL));
+  const shownInReadme = [...new Set(findReferences(read('README.md'), { base: manifest.base }).map((r: { name: string }) => r.name))];
 
   it('the README still shows screenshots at all', () => {
     // Without this the two `it.each` below are empty and agree with anything.
@@ -646,26 +651,29 @@ describe('every README screenshot declares what it shows', () => {
     expect(SCREENSHOTS.length).toBeGreaterThan(5);
   });
 
-  it.each(shownInReadme)('%s is declared in SCREENSHOTS', (rel) => {
+  it.each(shownInReadme)('%s is declared in SCREENSHOTS', (name) => {
     expect(
-      SCREENSHOTS.some((s: { file: string }) => s.file === rel),
-      `${rel} is in the README and not in SCREENSHOTS (scripts/shop-window-data.mjs), so nothing ` +
+      SCREENSHOTS.some((s: { name: string }) => s.name === name),
+      `${name} is in the README and not in SCREENSHOTS (scripts/shop-window-data.mjs), so nothing ` +
         'will ever notice it going out of date. Add it with the sources of what is in the picture.',
     ).toBe(true);
   });
 
-  it.each(SCREENSHOTS.map((s: { file: string }) => s.file))('%s is still a tracked file', (rel) => {
-    expect(trackedSet.has(rel), `${rel} is declared in SCREENSHOTS but git does not track it`).toBe(true);
+  it.each(SCREENSHOTS.map((s: { name: string }) => s.name))('%s is a published picture', (name) => {
+    expect(
+      manifest.pictures[name],
+      `${name} is declared in SCREENSHOTS but ${MANIFEST_REL} does not hold it - renamed, or no scene takes it any more`,
+    ).toBeTruthy();
   });
 
-  it.each(SCREENSHOTS.map((s: { file: string; depicts: string[] }) => [s.file, s] as const))(
+  it.each(SCREENSHOTS.map((s: { name: string; depicts: string[] }) => [s.name, s] as const))(
     '%s depicts paths that still exist',
-    (_file, shot) => {
+    (_name, shot) => {
       for (const dep of shot.depicts) {
         const hit = trackedSet.has(dep) || TRACKED_ALL.some((f) => f.startsWith(`${dep}/`));
         expect(
           hit,
-          `${shot.file} says it depicts ${dep}, and git tracks nothing there. A renamed component ` +
+          `${shot.name} says it depicts ${dep}, and git tracks nothing there. A renamed component ` +
             'makes the staleness check compare against nothing and report the picture as fresh ' +
             'for ever. Point it at the file that draws this picture now.',
         ).toBe(true);

@@ -3,11 +3,11 @@
 // top; scripts/lib/shot-scripts.mjs).
 //
 // ⚠⚠ Why this is a test. apps.mjs and signing.mjs photograph filex-sign and
-// filex-convert, whose builds live in other repositories. Both CI jobs that
-// run `pnpm shots` on a tag (GitLab `shots`, GitHub *Screenshots*) have
-// neither build, and until this rule existed the v0.43.0 tag would have
-// turned both red on "the sign app is not built" — at the release that first
-// ships the scenes. So in CI those scenes are left out, loudly; locally a
+// filex-convert, whose builds live in other repositories. The CI job that
+// runs `pnpm shots` on a tag (GitHub *Screenshots*; GitLab had a `shots` job
+// too until 0.53) has neither build, and until this rule existed the v0.43.0
+// tag would have turned it red on "the sign app is not built" — at the
+// release that first ships the scenes. So in CI those scenes are left out, loudly; locally a
 // missing build is refused before an hour of building. Nothing else runs this
 // logic before a tag does, which is the one moment it must not be wrong.
 import path from 'node:path';

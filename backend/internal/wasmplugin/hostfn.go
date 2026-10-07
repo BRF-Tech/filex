@@ -559,7 +559,7 @@ var errPathNotHanded = hostErr(wire.ErrPermissionDenied, "path is not a file thi
 // storage, handed to it by people with no root; a token's job may name only
 // those in its own folder (filex #154).
 func (s *Scope) handedPath(ctx context.Context, rel string) bool {
-	if !s.inRoot(s.storageName, rel) {
+	if !s.inOwnRoot(rel) {
 		return false
 	}
 	return s.hasInput(rel) || s.reg.keepsStateOn(ctx, s.plugin, s.storageID, rel)
@@ -798,7 +798,7 @@ func hfFileUnlock(ctx context.Context, s *Scope, in json.RawMessage) (any, error
 	// Outside a `root:` token's root not even the app's own lock is lifted by
 	// path, and it is refused before the lock is looked up: the same answer
 	// whether or not there is one (filex #154).
-	if byPath && !s.inRoot(s.storageName, rel) {
+	if byPath && !s.inOwnRoot(rel) {
 		return nil, errPathNotHanded
 	}
 	ph := pathkey.Hash(s.storageID, "/"+rel)

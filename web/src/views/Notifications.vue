@@ -14,6 +14,7 @@ import type { Severity } from '@/api/types';
 
 import Button from '@/components/ui/Button.vue';
 import Toggle from '@/components/ui/Toggle.vue';
+import DigestPolicyCard from '@/components/DigestPolicyCard.vue';
 import Badge from '@/components/ui/Badge.vue';
 import { DataTable, foreignText, type DataColumn } from '@brftech/filex-core';
 
@@ -265,6 +266,11 @@ const columns = computed<DataColumn<NotificationRow>[]>(() => [
         {{ t('notifications.webhooksLink') }}
       </RouterLink>
     </div>
+
+    <!-- The digest's defaults: how long the kinds that are not urgent are
+         held, and which are urgent (backend notify/digest.go). A person
+         changes their own in the user settings dialog. -->
+    <DigestPolicyCard />
 
     <DataTable
       table-id="admin.notifications"

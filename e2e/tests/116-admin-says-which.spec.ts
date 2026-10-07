@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { apiLogin, dismissInstallBanner } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName, storageRoot } from '../helpers/seed';
+import { pickOption } from '../helpers/choiceSelect';
 
 const STAMP = Date.now();
 const ADMIN = `says-which-${STAMP}@example.com`;
@@ -154,7 +155,7 @@ test.describe('the admin panel says which thing, in words', () => {
     await page.goto('/admin/audit');
     const ips = await page.locator('.fe-list__row .fe-list__cell').allInnerTexts();
     expect(ips.some((x) => /^\d+\.\d+\.\d+\.\d+:\d+$/.test(x.trim())), 'an IPv4 address with a port').toBe(false);
-    await page.getByTestId('audit-resource-filter').locator('select').selectOption({ label: 'Kullanıcı' });
+    await pickOption(page.getByTestId('audit-resource-filter'), { label: 'Kullanıcı' });
     await expect(page.locator('[data-testid="audit-target"]').first()).toBeVisible();
     const actions = await page.locator('.fe-list__row').allInnerTexts();
     expect(actions.length).toBeGreaterThan(0);

@@ -405,10 +405,10 @@ const columns = computed<DataColumn<TrashEntry>[]>(() => [
   },
 ]);
 
-/* The storage filter, as options rather than a bare <select>: the panel has
-   one control for this and it is `ui/Select`. An `undefined` value cannot
-   round-trip through a <select>'s string value, so "all storages" is the
-   empty string on the way in and back to `undefined` on the way out. */
+/* The storage filter, as options for the panel's one list control
+   (`ui/Select`, core's ChoiceSelect - never a native dropdown). An `undefined`
+   value cannot be an option's value, so "all storages" is the empty string on
+   the way in and back to `undefined` on the way out. */
 const storageOptions = computed(() => [
   { value: '', label: t('trash.all_storages') },
   ...storages.items.map((s) => ({ value: String(s.id), label: s.name })),

@@ -74,12 +74,13 @@ func rootAllowsIn(ctx context.Context, s *model.Storage, rel string) bool {
 
 // confinedBody reads a request body a handler decodes as JSON (at most limit
 // bytes) and, for a caller confined to a folder, holds it to the root exactly
-// as confine.Middleware holds a body labelled JSON, whatever Content-Type the
-// request has. A path outside the root is refused with the middleware's own
-// answer (confine.Refuse): the same 403, byte for byte, as the JSON body gets,
+// as confine.Middleware holds it, whatever Content-Type the request has. A
+// path outside the root is refused with the middleware's own answer
+// (confine.RefuseFor): the same 403, byte for byte, as the middleware gives,
 // before anything is asked about the storage or the path - so neither the
-// shape of the body nor what lies outside the root changes the answer. Where
-// it refused, ok is false and the answer is written.
+// shape of the body nor what lies outside the root changes the answer. An
+// object that does not parse gets the middleware's 400. Where it refused, ok
+// is false and the answer is written.
 func confinedBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, limit))
 	if err != nil {
@@ -92,7 +93,7 @@ func confinedBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, 
 	}
 	held, err := confine.HoldBody(root, body)
 	if err != nil {
-		confine.Refuse(w)
+		confine.RefuseFor(w, err)
 		return nil, false
 	}
 	return held, true
@@ -111,11 +112,12 @@ func refuseOutsideRoot(w http.ResponseWriter) {
 // unchanged - the latter is then refused by the root check that follows
 // (rootAllows / rootAllowsIn), not quietly moved inside.
 //
-// ⚠⚠ The middleware rewrites only `?path=` and the keys of a body labelled
-// JSON. The same path in a body under another Content-Type, in a multipart
-// field, or not given at all reaches the handler as the client wrote it
-// (GHSA-8gvc-6w52-6c7j), so a handler that resolves a client path reads it
-// through here before it picks a storage.
+// ⚠⚠ The middleware rewrites only `?path=` and the keys of a JSON object
+// body (since 0.53 whatever its Content-Type; up to 0.52 only one labelled
+// JSON, GHSA-8gvc-6w52-6c7j). The same path in a multipart field, in the body
+// of a route it passes on unread (confine.rawBodyRoutes), or not given at all
+// reaches the handler as the client wrote it, so a handler that resolves a
+// client path reads it through here before it picks a storage.
 func confinedPath(ctx context.Context, raw string) string {
 	root, confined := confine.RootFrom(ctx)
 	if !confined {

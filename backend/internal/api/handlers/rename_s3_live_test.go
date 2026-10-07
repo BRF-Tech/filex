@@ -9,15 +9,16 @@ package handlers_test
 // the code path" and "we watched it work on S3" are different claims.
 //
 //	FILEX_TEST_S3_ENDPOINT=http://127.0.0.1:9000 FILEX_TEST_S3_BUCKET=renametest \
-//	FILEX_TEST_S3_ACCESS_KEY=… FILEX_TEST_S3_SECRET_KEY=… \
+//	FILEX_TEST_S3_ACCESS_KEY=… FILEX_TEST_S3_SECRET_KEY=… FILEX_TEST_S3_REGION=us-east-1 \
 //	  go test ./internal/api/handlers/ -run TestRenameOnS3
+//
+// The server is read by internal/testutil/lives3, region included.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,24 +32,15 @@ import (
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/s3"
 	filexsync "github.com/brf-tech/filex/backend/internal/sync"
 	"github.com/brf-tech/filex/backend/internal/testutil"
+	"github.com/brf-tech/filex/backend/internal/testutil/lives3"
 )
 
 func TestRenameOnS3_TheReportersSequence(t *testing.T) {
-	bucket := os.Getenv("FILEX_TEST_S3_BUCKET")
-	endpoint := os.Getenv("FILEX_TEST_S3_ENDPOINT")
-	access := os.Getenv("FILEX_TEST_S3_ACCESS_KEY")
-	secret := os.Getenv("FILEX_TEST_S3_SECRET_KEY")
-	if bucket == "" || access == "" || secret == "" {
-		t.Skip("set FILEX_TEST_S3_* to run the rename against a real S3 server")
-	}
+	cfg := lives3.Config(t, "run the rename against a real S3 server")
 	ctx := context.Background()
 
 	drv, err := storage.Get("s3")
 	require.NoError(t, err)
-	cfg := map[string]any{
-		"bucket": bucket, "endpoint": endpoint,
-		"access_key": access, "secret_key": secret, "path_style": true,
-	}
 	require.NoError(t, drv.Init(ctx, cfg))
 
 	// A folder with a file in it and a subfolder with another — under a prefix

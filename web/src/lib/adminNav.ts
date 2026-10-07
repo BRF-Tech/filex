@@ -46,6 +46,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Lock,
+  Network,
   Palette,
   PlugZap,
   RefreshCcw,
@@ -80,9 +81,11 @@ export interface AdminNavPage {
   /**
    * Shown only on a multi-tenant install, and only to one of its two kinds
    * of administrator: `tenants` to the platform operator, `tenantSelf` to a
-   * tenant's own administrator (docs/TENANT-ADMIN.md).
+   * tenant's own administrator (docs/TENANT-ADMIN.md). `platform`: to the
+   * administrator who may configure the instance, on every install (the
+   * Multi-tenant mode switch, task #167).
    */
-  only?: 'tenants' | 'tenantSelf';
+  only?: 'tenants' | 'tenantSelf' | 'platform';
 }
 
 export interface AdminNavSection {
@@ -191,6 +194,7 @@ export const ADMIN_NAV: AdminNavEntry[] = [
         label: 'nav.section.customize',
         pages: [
           { route: 'settings', label: 'nav.settings', hint: 'nav.hint.settings', icon: Settings },
+          { route: 'tenancy', label: 'nav.tenancy', hint: 'nav.hint.tenancy', icon: Network, only: 'platform' },
           { route: 'branding', label: 'nav.branding', hint: 'nav.hint.branding', icon: Palette },
           { route: 'appearance', label: 'nav.appearance', hint: 'nav.hint.appearance', icon: Brush },
           { route: 'archives', label: 'nav.archives', hint: 'nav.hint.archives', icon: Archive },
@@ -274,6 +278,12 @@ export interface AdminNavContext {
   tenants: boolean;
   /** A multi-tenant install, read by one of its tenants' administrators. */
   tenantSelf: boolean;
+  /**
+   * The reader may configure the instance (capabilities `caller_admin`):
+   * the platform operator on a multi-tenant install, any administrator on a
+   * single-tenant one. Absent: no such page is offered.
+   */
+  platform?: boolean;
   apps: AdminNavApp[];
   /** The trash holds something: its row wears the full bin. */
   trashFull?: boolean;
@@ -303,6 +313,7 @@ function pageItem(ctx: AdminNavContext, p: AdminNavPage): MegaMenuItem {
 function pageShown(ctx: AdminNavContext, p: AdminNavPage): boolean {
   if (p.only === 'tenants' && !ctx.tenants) return false;
   if (p.only === 'tenantSelf' && !ctx.tenantSelf) return false;
+  if (p.only === 'platform' && !ctx.platform) return false;
   return ctx.open({ name: p.route });
 }
 

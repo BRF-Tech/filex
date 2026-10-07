@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/pluginrequests.mjs     (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/pluginrequests/:
+// Writes e2e/.artifacts/shots/capture/pluginrequests/:
 //
 //   requests-1440.png   Plugins page: the "Install requests" panel above the
 //                       tabs — two requests an agent's API key left (the

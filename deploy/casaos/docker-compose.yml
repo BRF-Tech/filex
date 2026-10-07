@@ -7,7 +7,7 @@
 name: filex
 services:
   filex:
-    image: ghcr.io/brf-tech/filex:v0.52.0
+    image: ghcr.io/brf-tech/filex:v0.53.0
     container_name: filex
     network_mode: bridge
     restart: unless-stopped
@@ -82,7 +82,7 @@ x-casaos:
       first frame that is not black, a text file's first lines, an SVG,
       what is inside an archive) and folders drawn with the files that came
       into them last, trash and
-      versioning, file ownership with an Owner column and a People filter,
+      versioning, file ownership with an Owner column and an Owner filter,
       end-to-end encrypted folders with a recovery key and a policy for
       who may create them (an administrator's approval when you want
       one), RBAC with groups,
@@ -106,11 +106,12 @@ x-casaos:
   # withheld from the public repository, so no raw.githubusercontent URL can
   # reach it. filex.sh serves it (the og:image of site/index.html).
   thumbnail: https://filex.sh/assets/social-preview.png
-  # The current release's pictures (e2e/shots/release.mjs names the folder).
+  # Published screenshots: e2e/shots/manifest.json names the current file of
+  # each, and `node scripts/shots-site.mjs relink` keeps these three on it.
   screenshot_link:
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.52.0/explorer-grid-light.png
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.52.0/admin-dashboard.png
-    - https://raw.githubusercontent.com/BRF-Tech/filex/main/docs/screenshots/v0.52.0/share-modal.png
+    - https://filex.sh/shots/explorer-grid-light.484fb070ca19.png
+    - https://filex.sh/shots/admin-dashboard.7c334e824b3c.png
+    - https://filex.sh/shots/share-modal.eaf11836828a.png
   tips:
     before_install:
       en_US: >-
@@ -124,7 +125,7 @@ x-casaos:
   port_map: "5212"
   scheme: http
   store_app_id: filex
-  version: "0.52.0"
+  version: "0.53.0"
   website: https://filex.sh
   repo: https://github.com/BRF-Tech/filex
   support: https://github.com/BRF-Tech/filex/issues

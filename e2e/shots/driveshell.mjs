@@ -26,8 +26,8 @@
 // Environment:
 //   FILEX_BIN     binary to run (default: bin/filex.exe on Windows, bin/filex)
 //   SHOTS_URL     use an ALREADY-RUNNING instance instead of spawning one
-//   SHOTS_OUT     output directory (default: docs/screenshots/<release>/driveshell,
-//                 the release named in ./release.mjs)
+//   SHOTS_OUT     output directory (default: e2e/.artifacts/shots/capture/driveshell,
+//                 the capture folder named in ./release.mjs)
 //   SHOTS_KEEP=1  leave the instance running afterwards
 //
 // ⚠ Every shot is in English three ways over — browser locale, the stored
@@ -53,6 +53,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
 import { seedFixtures, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
@@ -309,6 +310,7 @@ async function seed() {
       copyFileSync(join(demoRoot, 'Photos', shots[0]), join(demoRoot, 'cover.png'));
     }
   }
+  pinTimes(demoRoot);
   const demo = await makeStorage(adminToken, 'My files', demoRoot, false);
 
   const teamRoot = mkdtempSync(join(tmpdir(), 'filex-driveshell-team-'));
@@ -318,6 +320,7 @@ async function seed() {
   writeFileSync(join(teamRoot, 'Q3 campaign', 'brief.md'), '# Q3 campaign brief\n');
   writeFileSync(join(teamRoot, 'Brand assets', 'logo-usage.md'), '# Logo usage\n');
   writeFileSync(join(teamRoot, 'Payroll', 'secret.md'), '# Not for Ayse\n');
+  pinTimes(teamRoot);
   const team = await makeStorage(adminToken, 'Marketing', teamRoot, true);
 
   for (const [st, paths] of [
@@ -448,6 +451,7 @@ async function seed() {
 // ── browser ───────────────────────────────────────────────────────────────
 async function newContext(browser, width, height, scheme = 'light') {
   const ctx = await browser.newContext({
+    ...SCENE_CONTEXT,
     viewport: { width, height },
     deviceScaleFactor: 2,
     locale: 'en-US',
@@ -461,6 +465,8 @@ async function newContext(browser, width, height, scheme = 'light') {
     localStorage.setItem('filex.tourDone', '1');
     localStorage.setItem('filex.installPrompt.dismissed', '1');
   }, scheme);
+  // The scene's clock (clock.mjs): the same dates in every run.
+  await stageClock(ctx);
   return ctx;
 }
 
@@ -1252,10 +1258,9 @@ async function run(tokens) {
     // ⚠ Renamed from `standard-profile-1440.png`: there is no "standard
     // profile" any more, and a file whose name asserts a removed concept is how
     // a screenshot outlives the thing it documented. Nothing links to the old
-    // name (checked across docs + README). The old picture stays where it is,
-    // in the pre-v0.41.0 `docs/screenshots/driveshell/` set — earlier releases'
-    // folders are never pruned (see ./release.mjs) — and the versioned folders
-    // from v0.41.0 on simply carry the new name.
+    // name (checked across docs + README). Published pictures are never
+    // pruned either: an old one stays at its URL on filex.sh, and the new name
+    // is a new picture (e2e/shots/README.md).
     await shot(apage, 'admin-shell-1440.png');
     await adm.close();
 
@@ -1343,7 +1348,7 @@ if (failed.length) {
 //
 // PROPOSAL, not done here: this script is no longer about a "drive shell",
 // because there is no other shell for it to be contrasted with. Renaming it to
-// `shell.mjs` (and the `driveshell/` set inside a release folder → `shell/`,
+// `shell.mjs` (and the `driveshell/` set → `shell/`,
 // with the `driveshell-*.png` prefix following) would make the name say what
 // the file measures. It is left alone on purpose: two PNGs in that directory
 // are linked from README.md ("The drive shell" / "Searching in the drive

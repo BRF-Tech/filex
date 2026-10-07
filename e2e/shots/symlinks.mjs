@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/symlinks.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/symlinks/:
+// Writes e2e/.artifacts/shots/capture/symlinks/:
 //
 //   symlink-badge-1440.png   a `local` storage whose `archive` is a link that
 //                            leaves the storage root: badged in the listing,

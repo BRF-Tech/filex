@@ -146,6 +146,7 @@ import Users from "@/views/Users.vue";
 import UserEdit from "@/views/UserEdit.vue";
 import RoleEditor from "@/components/RoleEditor.vue";
 import UserRolesCard from "@/components/UserRolesCard.vue";
+import { chosenValue, listOffering, pickOption } from "../helpers/choiceSelect";
 
 if (
   typeof HTMLDialogElement !== "undefined" &&
@@ -204,9 +205,9 @@ async function click(el: Element) {
   await flushPromises();
 }
 
-async function choose(select: HTMLSelectElement, value: string) {
-  select.value = value;
-  select.dispatchEvent(new Event("change"));
+/** Pick from a list (core ChoiceSelect, #160): open it, click the option. */
+async function choose(list: Element, value: string) {
+  await pickOption(list, value);
   await flushPromises();
 }
 
@@ -298,10 +299,7 @@ describe("Roles page", () => {
     await flushPromises();
 
     expect(confirm).not.toHaveBeenCalled();
-    await choose(
-      q<HTMLSelectElement>('[data-testid="role-delete-move"] select'),
-      "viewer",
-    );
+    await choose(q('[data-testid="role-delete-move"]'), "viewer");
     await click(q('[data-testid="role-delete-confirm"]'));
     expect(roles.deleteRule).toHaveBeenCalledWith(7, "viewer");
   });
@@ -537,8 +535,8 @@ describe("Person card", () => {
 });
 
 describe("Role field on a person’s page", () => {
-  function roleSelect(): HTMLSelectElement {
-    return q<HTMLSelectElement>("form select");
+  function roleSelect(): HTMLElement {
+    return q('form .fe-select__trigger');
   }
   async function submitDetails() {
     q("form").dispatchEvent(new Event("submit", { cancelable: true }));
@@ -560,7 +558,7 @@ describe("Role field on a person’s page", () => {
       },
     });
     await mountAt(UserEdit, { path: "/users/2" });
-    expect(roleSelect().value).toBe("custom:7");
+    expect(chosenValue(roleSelect())).toBe("custom:7");
     await submitDetails();
     expect(usersApi.get).toHaveBeenCalledTimes(2); // the save ran: it reads the account back
     expect(roles.setUserRole).not.toHaveBeenCalled();
@@ -646,12 +644,10 @@ describe("Users filter", () => {
       .map((p) => p.email)
       .filter((e) => document.body.textContent?.includes(e));
   }
-  function filterSelect(): HTMLSelectElement {
-    const s = [...document.body.querySelectorAll("select")].find((x) =>
-      [...x.options].some((o) => o.value === "custom:7"),
-    );
+  async function filterSelect(): Promise<HTMLElement> {
+    const s = await listOffering("custom:7");
     expect(s).toBeTruthy();
-    return s as HTMLSelectElement;
+    return s as HTMLElement;
   }
 
   it("search narrows the list by address (the server returns every account)", async () => {
@@ -663,15 +659,15 @@ describe("Users filter", () => {
     await flushPromises();
     expect(shown()).toEqual(["bob@local"]);
     // …and together with the role filter.
-    await choose(filterSelect(), "custom:7");
+    await choose(await filterSelect(), "custom:7");
     expect(shown()).toEqual([]);
   });
 
   it("lists a person on a custom role under that role, not under User", async () => {
     await mountAt(Users);
-    await choose(filterSelect(), "user");
+    await choose(await filterSelect(), "user");
     expect(shown()).toEqual(["bob@local"]);
-    await choose(filterSelect(), "custom:7");
+    await choose(await filterSelect(), "custom:7");
     expect(shown()).toEqual(["demo@local"]);
   });
 });
@@ -684,9 +680,11 @@ describe('Add user', () => {
     const email = q<HTMLInputElement>('input[name="new-user-email"]');
     email.value = 'new@local';
     email.dispatchEvent(new Event('input'));
-    const roleSelect = [...document.body.querySelectorAll('[role="dialog"] select, dialog select')].find((x) =>
-      [...(x as HTMLSelectElement).options].some((o) => o.value === 'custom:7'),
-    ) as HTMLSelectElement | undefined;
+    let roleSelect: HTMLElement | null = null;
+    for (const dialog of document.body.querySelectorAll('[role="dialog"], dialog')) {
+      roleSelect = await listOffering('custom:7', dialog);
+      if (roleSelect) break;
+    }
     expect(roleSelect, 'the Add user role list offers NoDelete').toBeTruthy();
     await choose(roleSelect!, 'custom:7');
     await click(q('[data-testid="user-create-access-invite"]'));

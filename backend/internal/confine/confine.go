@@ -20,9 +20,14 @@
 // rewritten to the confined folder so listings open there. It covers an
 // endpoint only through the keys it knows: a guard test holds every handler
 // request body to that list (api/handlers/confine_keys_test.go).
+//
+// The body is read as JSON whatever its Content-Type, because that is how the
+// handlers read it; only the routes whose body is the bytes of a file
+// (rawBodyRoutes) are passed on unread.
 package confine
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -37,6 +42,18 @@ import (
 
 // ErrOutOfRoot is returned when a requested path escapes the confinement root.
 var ErrOutOfRoot = errors.New("path outside confined root")
+
+// ErrBadBody is returned for a body that begins as a JSON object and does not
+// parse as one: what this layer cannot read it cannot hold to the root.
+var ErrBadBody = errors.New("bad json")
+
+// ErrBodyTooLarge is returned for a body that begins as a JSON object and is
+// larger than maxBody: past the cut its keys would go unseen.
+var ErrBodyTooLarge = errors.New("request body too large")
+
+// maxBody is the most of a request body Middleware reads to hold it to the
+// root.
+const maxBody = 8 << 20
 
 // Root is a confinement scope: a single storage adapter + a clean relative
 // prefix within it (no leading/trailing slash; "" == the storage root).
@@ -237,23 +254,157 @@ func Middleware(next http.Handler) http.Handler {
 			r.URL.RawQuery = q.Encode()
 		}
 
-		// 2) JSON body path fields (move/delete/copy/share/upload/...)
-		if r.Body != nil && hasJSON(r) {
-			body, _ := io.ReadAll(io.LimitReader(r.Body, 8<<20))
-			_ = r.Body.Close()
-			nb, err := confineBody(root, body)
-			if err != nil {
-				forbid(w, err)
+		// 2) body path fields (move/delete/copy/share/upload/...)
+		if r.Body != nil && r.Body != http.NoBody && !rawBody(r) {
+			if err := holdRequestBody(root, r); err != nil {
+				refuse(w, err)
 				return
 			}
-			r.Body = io.NopCloser(bytes.NewReader(nb))
-			r.ContentLength = int64(len(nb))
-			r.Header.Set("Content-Length", itoa(len(nb)))
 		}
 
 		// Stash the root so id-based handlers (trash) can filter by it.
 		next.ServeHTTP(w, r.WithContext(withRoot(r.Context(), root)))
 	})
+}
+
+// holdRequestBody holds r's body to the root the way the handlers will read
+// it: as JSON, whatever its Content-Type and method.
+//
+// ⚠⚠ Up to 0.52 a body was read only when its Content-Type contained "json",
+// while the handlers decode theirs with json.Decoder under any label: the
+// same object sent as text/plain, or with no Content-Type, reached them as the
+// client wrote it (GHSA-8gvc-6w52-6c7j). Every handler now asks the root
+// itself too; this layer is the one that catches the handler that forgets.
+//
+//   - A body whose first value is not an object (a multipart form, a list,
+//     nothing at all) names no path a handler reads, and is passed on as it
+//     was sent, at any size: only its leading white space is read here.
+//   - An object is read whole, held key by key (confineBody) and passed on
+//     re-encoded.
+//   - An object larger than maxBody is refused (ErrBodyTooLarge), and so is one
+//     that does not parse (ErrBadBody). Passing either on would hand the
+//     handler keys this layer never saw.
+func holdRequestBody(root Root, r *http.Request) error {
+	orig := r.Body
+	br := bufio.NewReader(orig)
+	var lead []byte
+	for {
+		b, err := br.ReadByte()
+		if err == io.EOF {
+			r.Body = &replay{Reader: bytes.NewReader(lead), Closer: orig}
+			return nil
+		}
+		if err != nil {
+			return ErrBadBody
+		}
+		lead = append(lead, b)
+		if !isJSONSpace(b) {
+			break
+		}
+		if len(lead) > maxBody {
+			return ErrBodyTooLarge
+		}
+	}
+	if lead[len(lead)-1] != '{' {
+		r.Body = &replay{Reader: io.MultiReader(bytes.NewReader(lead), br), Closer: orig}
+		return nil
+	}
+	rest, err := io.ReadAll(io.LimitReader(br, int64(maxBody+1-len(lead))))
+	if err != nil {
+		return ErrBadBody
+	}
+	body := append(lead, rest...)
+	if len(body) > maxBody {
+		return ErrBodyTooLarge
+	}
+	_ = orig.Close()
+	nb, err := confineBody(root, body)
+	if err != nil {
+		return err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(nb))
+	r.ContentLength = int64(len(nb))
+	r.Header.Set("Content-Length", itoa(len(nb)))
+	return nil
+}
+
+// replay is a body whose first bytes were read here: they are read again,
+// then the rest, and closing it closes the request's own body.
+type replay struct {
+	io.Reader
+	io.Closer
+}
+
+// isJSONSpace is white space as encoding/json skips it before a value.
+func isJSONSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// beginsObject reports whether the first JSON value in body is an object.
+func beginsObject(body []byte) bool {
+	for _, b := range body {
+		if !isJSONSpace(b) {
+			return b == '{'
+		}
+	}
+	return false
+}
+
+// rawBodyRoutes are the requests whose body is the bytes of a file, passed on
+// unread: not cut at maxBody, not re-encoded, whatever the Content-Type says.
+// A file's bytes may well begin with `{` (a .json saved) and be of any size;
+// holding them as a request object would rewrite or refuse the file. Their
+// paths come in the query, which is still held. A "*" is one path segment,
+// never empty.
+//
+//   - PUT /api/files/upload/{id} - one part of a staged upload
+//     (handlers/upload_staged.go).
+//   - PUT /api/files/plugins/ui/{plugin}/{view}/save - an app's interface
+//     saving a file, whole or a chunk of it (handlers/app_ui.go,
+//     app_ui_chunks.go).
+//
+// ⚠⚠ Exempt a route here only when its handler reads the body as bytes and
+// never as JSON: a route on this list is a route this layer does not read. A
+// multipart form needs no entry - it begins with its boundary, never with an
+// object, and passes untouched - and is deliberately not exempted by its
+// Content-Type: the label is the client's to choose, and a JSON object
+// labelled multipart is still read as JSON by a handler that decodes it.
+var rawBodyRoutes = []struct {
+	method string
+	path   []string
+}{
+	{http.MethodPut, []string{"api", "files", "upload", "*"}},
+	{http.MethodPut, []string{"api", "files", "plugins", "ui", "*", "*", "save"}},
+}
+
+// rawBody reports whether r is one of rawBodyRoutes. The path is the one chi
+// routes on (the escaped form when the request has one), so a request is
+// exempt only when it reaches the very route that is listed.
+func rawBody(r *http.Request) bool {
+	p := r.URL.RawPath
+	if p == "" {
+		p = r.URL.Path
+	}
+	if !strings.HasPrefix(p, "/") {
+		return false
+	}
+	segs := strings.Split(p[1:], "/")
+	for _, route := range rawBodyRoutes {
+		if r.Method != route.method || len(segs) != len(route.path) {
+			continue
+		}
+		match := true
+		for i, want := range route.path {
+			if segs[i] == "" || (want != "*" && segs[i] != want) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 // The JSON body keys Middleware confines.
@@ -339,9 +490,12 @@ func oneOf(k string, keys []string) string {
 	return ""
 }
 
+// confineBody holds a request body to the root: a body whose first value is
+// not an object is returned as it is, an object is held key by key and
+// returned re-encoded, and an object that does not parse is ErrBadBody.
 func confineBody(root Root, body []byte) ([]byte, error) {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return body, nil
+	if !beginsObject(body) {
+		return body, nil // no object here: a handler's decoder reads no path from it
 	}
 	var m map[string]any
 	// Read it the way the handlers do — json.Decoder, which takes the FIRST
@@ -349,8 +503,16 @@ func confineBody(root Root, body []byte) ([]byte, error) {
 	// so it left `{…} trailing` untouched while the handler read the object and
 	// used its (unconfined) path. Decoding only the first object and
 	// re-marshalling it drops the tail, which the handler would have ignored.
-	if json.NewDecoder(bytes.NewReader(body)).Decode(&m) != nil {
-		return body, nil // first value is not a JSON object — nothing to confine here
+	//
+	// ⚠⚠ UseNumber, and an object that does not decode is refused, never
+	// passed on: up to 0.52 a number no float64 holds (`"n":1e999`) failed this
+	// decoding, the body went on untouched, and the handler's struct - which
+	// has no field for that number and so never converts it - decoded the
+	// `path` beside it, outside the root, in a body labelled JSON too.
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if dec.Decode(&m) != nil {
+		return nil, ErrBadBody
 	}
 	itemKeys := func(km map[string]string) []string {
 		out := make([]string, 0, len(km))
@@ -429,19 +591,37 @@ func confineBody(root Root, body []byte) ([]byte, error) {
 			}
 		}
 	}
-	return json.Marshal(m)
-}
-
-func hasJSON(r *http.Request) bool {
-	if r.Method == http.MethodGet || r.Method == http.MethodHead {
-		return false
+	// Written back as it was read: numbers as their literals (no float64
+	// rounding of an id past 2^53) and text without HTML escaping.
+	var out bytes.Buffer
+	enc := json.NewEncoder(&out)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(m); err != nil {
+		return nil, ErrBadBody
 	}
-	return strings.Contains(r.Header.Get("Content-Type"), "json")
+	return bytes.TrimSuffix(out.Bytes(), []byte("\n")), nil
 }
 
 func forbid(w http.ResponseWriter, err error) {
+	answer(w, http.StatusForbidden, err)
+}
+
+// refuse writes this layer's answer to err: 413 for a body too large to hold,
+// 400 for one that does not parse, 403 for a path outside the root.
+func refuse(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrBodyTooLarge):
+		answer(w, http.StatusRequestEntityTooLarge, ErrBodyTooLarge)
+	case errors.Is(err, ErrBadBody):
+		answer(w, http.StatusBadRequest, ErrBadBody)
+	default:
+		forbid(w, err)
+	}
+}
+
+func answer(w http.ResponseWriter, status int, err error) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
+	w.WriteHeader(status)
 	_, _ = w.Write([]byte(`{"error":"` + err.Error() + `"}`))
 }
 
@@ -489,16 +669,18 @@ func CallerRoot(ctx context.Context) (Root, bool) {
 func (r Root) String() string { return r.Adapter + "://" + r.Rel }
 
 // HoldBody holds a request body a handler reads as JSON to the root exactly as
-// Middleware holds one labelled JSON: the same keys, rewritten or checked the
-// same way, refused with ErrOutOfRoot. A handler that decodes its body
-// whatever the Content-Type calls it, so a text/plain body (or one with no
-// Content-Type) is read as the JSON one would be - and a body Middleware has
-// already rewritten passes through unchanged.
+// Middleware holds one: the same keys, rewritten or checked the same way,
+// refused with ErrOutOfRoot, and an object that does not parse refused with
+// ErrBadBody. A body Middleware has already held passes through unchanged.
 func HoldBody(r Root, body []byte) ([]byte, error) { return confineBody(r, body) }
 
 // Refuse writes Middleware's own answer to a path outside the root, so a
-// handler that refuses one answers byte for byte what a JSON body is answered.
+// handler that refuses one answers byte for byte what Middleware answers.
 func Refuse(w http.ResponseWriter) { forbid(w, ErrOutOfRoot) }
+
+// RefuseFor writes Middleware's own answer to an error HoldBody returned:
+// 403 for a path outside the root, 400 for a body that does not parse.
+func RefuseFor(w http.ResponseWriter, err error) { refuse(w, err) }
 
 // Within reports whether a storage-relative path (no adapter prefix) is inside
 // the root for the given adapter name.

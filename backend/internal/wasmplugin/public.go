@@ -747,7 +747,18 @@ func (r *Registry) PageEvent(ctx context.Context, sh *model.Share, p *Installed,
 	}
 	defer scope.Close()
 	scope.page = sh
+	// ⚠⚠ The visitor's screen is held to the root of the job that opened the
+	// link (model.Share.AppRoot), as the job its submit queues is
+	// (StampJobRoot). Without it the screen was not: the ACL tells a visitor's
+	// state_list nothing, but a notice's target.path is judged by the app's
+	// own state and named any file the app keeps state on, outside the root
+	// included (holdToLink).
+	r.holdToLink(ctx, scope, sh, storageID)
 	// The context file is an anchor for state_*, never readable here.
+	// ⚠ Registered where it lies NOW, and judged against the root on every
+	// use of its ref (Scope.file): a document moved out of the root after the
+	// link was opened is not named to the page, and its ref is no ref
+	// (filex #185).
 	if rel != "" {
 		scope.AddInput(rel, 0, "")
 	}
@@ -803,6 +814,33 @@ func (r *Registry) pageAnchor(ctx context.Context, sh *model.Share) (int64, stri
 		return 0, ""
 	}
 	return node.StorageID, strings.TrimPrefix(node.Path, "/")
+}
+
+// holdToLink holds a call made on a link to the root the link recorded
+// (model.Share.AppRoot): the visitor's screen (PageEvent), and the door that
+// queues the visitor's job (LinkHolds). A link's call has no storage name of
+// its own (its inputs carry no adapter-qualified path), so the root is judged
+// against the name of storageID, the anchor's storage (Scope.rootStorage). A
+// recorded root that does not read as one holds the call to nothing
+// (linkRoot), and so does a storage whose name cannot be read. A link opened
+// with no root holds nothing.
+func (r *Registry) holdToLink(ctx context.Context, s *Scope, sh *model.Share, storageID int64) {
+	if root, ok := linkRoot(sh.AppRoot); ok {
+		s.confineTo(root)
+		s.rootStorage, _ = r.storageFacts(ctx, storageID)
+	}
+}
+
+// LinkHolds reports whether rel on storageID - the link's document where it
+// lies now (PageAnchor) - is inside the root the link recorded; true for a
+// link opened with no root. It is the screen's own judgement (holdToLink,
+// Scope.inOwnRoot), asked by the door that queues a visitor's job, so a
+// document moved out of the root after the link was opened stops the submit
+// there instead of in the worker (filex #185).
+func (r *Registry) LinkHolds(ctx context.Context, sh *model.Share, storageID int64, rel string) bool {
+	s := &Scope{}
+	r.holdToLink(ctx, s, sh, storageID)
+	return s.inOwnRoot(rel)
 }
 
 // PageFile opens an exposed copy for the visitor (Range-capable).

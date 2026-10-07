@@ -56,6 +56,10 @@ func TestActionForPath(t *testing.T) {
 		{"e2e policy, slash", http.MethodPatch, "/api/admin/e2e/", "", "", "", "", ""},
 		{"e2e ceiling", http.MethodPatch, "/api/admin/e2e/tenants/3", "3", "", "", "", ""},
 		{"e2e approval", http.MethodPost, "/api/admin/e2e/requests/9/approve", "9", "", "", "", ""},
+		// A person's own recent searches (task #168) are not an admin change.
+		{"recent search kept", http.MethodPost, "/api/admin/panel-search/recent", "", "", "", "", ""},
+		{"recent search removed", http.MethodDelete, "/api/admin/panel-search/recent/4", "4", "", "", "", ""},
+		{"recent searches cleared", http.MethodDelete, "/api/admin/panel-search/recent", "", "", "", "", ""},
 		// Non-admin, non-mutating-significant path → empty.
 		{"unmapped path", http.MethodPost, "/api/files/nope", "", "", "", "", ""},
 	}

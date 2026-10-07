@@ -18,8 +18,9 @@
 // pushed untagged, CI runs on that push, the release tool starts a dry run of
 // release.yml on the same commit, and only a commit that passed both is
 // tagged. The gate of a tag run is `verify`: it publishes nothing unless
-// GitHub holds those two successful runs on its commit, and it fails when it
-// cannot ask. A run started by hand still runs the suite itself (`test`).
+// GitHub holds those two successful runs on its commit - the CI run as the
+// full matrix (#173) - and it fails when it cannot ask. Since #174 no run of
+// release.yml runs the suite itself: the push run of the commit is the test.
 //
 // ⚠ The workflows live in the PUBLIC checkout only (scripts/export-public.sh
 // keeps .github/workflows out of the private tree), so this reads them from
@@ -117,10 +118,26 @@ describe('a release cannot publish before its images build', () => {
     expect(DIR).toBeUndefined();
   });
 
-  it.runIf(!!DIR)('the release calls the gate WITHOUT skip_docker', () => {
-    const test = job(code('release.yml'), 'test');
-    expect(test.join('\n')).toMatch(/uses:\s*\.\/\.github\/workflows\/ci\.yml/);
-    expect(test.filter((l) => /\bskip_docker\s*:/.test(l)), 'release.yml passes skip_docker to the gate').toEqual([]);
+  // ⚠ #174: until then release.yml ran ci.yml itself (`test`) in every run by
+  // hand, and every package of a dry run waited for that second copy of the
+  // suite the push of the same commit was running anyway. Now the push run is
+  // the test - ci.yml's full matrix - and a dry run packages at once.
+  it.runIf(!!DIR)('a dry run packages at once: no job of the release runs the test suite, the push run of its commit does', () => {
+    const release = code('release.yml');
+    expect(release.filter((l) => /uses:\s*\.\/\.github\/workflows\/ci\.yml/.test(l)), 'a job of release.yml calls ci.yml again').toEqual([]);
+    expect(jobNames(release)).not.toContain('test');
+    expect(release.filter((l) => /\bskip_docker\s*:/.test(l)), 'release.yml passes skip_docker').toEqual([]);
+    // verify waits for the plan alone, and the packaging for verify: a dry
+    // run (publish off) is let through at once (verify's script, below).
+    expect(needs(job(release, 'verify'))).toEqual(['plan']);
+    for (const name of ['binaries', 'docker', 'desktop']) expect(needs(job(release, name)), name).not.toContain('test');
+    const script = runBlocks(job(release, 'verify')).map((b) => b.join('\n')).join('\n');
+    const letThrough = script.indexOf('if [ "$PUBLISH" != true ]; then');
+    expect(letThrough, 'verify lets a dry run through').toBeGreaterThan(0);
+    expect(letThrough, 'before it asks GitHub anything').toBeLessThan(script.indexOf('gh api'));
+    // ci.yml is not called any more, so it is no longer started by a caller.
+    const ci = code('ci.yml');
+    expect(ci.slice(0, ci.findIndex((l) => l === 'jobs:')).join('\n'), 'ci.yml still offers itself to a caller').not.toMatch(/workflow_call/);
   });
 
   it.runIf(!!DIR)("ci.yml's docker job cannot be switched off, and builds both images", () => {
@@ -142,38 +159,31 @@ describe('a release cannot publish before its images build', () => {
       // run past a verify that failed (always(), !cancelled(), failure()).
       expect(block.filter((l) => /^ {4}if:/.test(l) && /\b(always|cancelled|failure|success)\(\)/.test(l)), `${name} overrides the wait for verify`).toEqual([]);
     }
-    // The gate itself waits for the suite of a run by hand.
-    expect(needs(job(release, 'verify'))).toContain('test');
-    // …and what depends on those still depends on the gate, one step removed.
-    expect(needs(job(release, 'docker-manifest'))).toContain('docker');
+    // …and what depends on those still depends on the gate. The tags people
+    // pull are made from the digests the dry run pushed, after both were
+    // checked on their own architecture (#174), and wait for verify itself.
+    expect(needs(job(release, 'docker-manifest'))).toEqual(expect.arrayContaining(['verify', 'promote-check']));
+    expect(needs(job(release, 'promote-check'))).toContain('verify');
     const desktop = job(release, 'desktop');
     expect(needs(desktop)).toContain('binaries');
     expect(needs(desktop)).toContain('verify');
     expect(desktop.find((l) => /^ {4}if:/.test(l)), 'desktop runs a full release only after verify passed').toMatch(/needs\.verify\.result == 'success'/);
   });
 
-  it.runIf(!!DIR)('a run started by hand runs the suite itself, and a tag run does not run it again', () => {
-    const test = job(code('release.yml'), 'test');
-    const cond = test.find((l) => /^ {4}if:/.test(l)) ?? '';
-    expect(cond).toMatch(/needs\.plan\.outputs\.full == 'true'/);
-    expect(cond, 'a tag push runs the suite again: its commit passed it before it was tagged').toMatch(/github\.event_name != 'push'/);
-  });
-
   it.runIf(!!DIR)('a tag run publishes only a commit that passed CI and a dry run, and fails closed', () => {
     const verify = job(code('release.yml'), 'verify');
     const body = verify.join('\n');
     const cond = verify.find((l) => /^ {4}if:/.test(l)) ?? '';
-    // It must run when `test` is skipped (a tag push, a run that adds the
-    // ARM packages), and never be cancelled into a pass.
+    // It decides for itself whatever the run (a tag push, a run that adds
+    // the ARM packages), and is never cancelled into a pass.
     expect(cond).toMatch(/!cancelled\(\)/);
     expect(cond).not.toMatch(/always\(\)/);
     expect(cond, 'verify skips the runs that add the ARM packages, and they publish unasked').not.toMatch(/outputs\.full/);
     expect(body, 'reads the runs with the token it is given, nothing more').toMatch(/permissions:\s*\n\s+actions: read/);
     const script = runBlocks(verify).map((b) => b.join('\n')).join('\n');
     expect(script).toMatch(/^set -euo pipefail$/m);
-    // a run by hand: its own suite must have passed
-    expect(body).toMatch(/TEST: \$\{\{ needs\.test\.result \}\}/);
-    expect(script).toMatch(/\[ "\$TEST" != success \][\s\S]*?exit 1/);
+    // #174: no run asks for a suite of its own any more (the push run is it)
+    expect(body).not.toMatch(/needs\.test\./);
     // a tag run: both runs, on THIS commit, successful
     expect(body).toMatch(/SHA: \$\{\{ github\.sha \}\}/);
     const ci = script.match(/actions\/workflows\/ci\.yml\/runs[\s\S]*?--jq '([^']*)'/);
@@ -189,7 +199,15 @@ describe('a release cannot publish before its images build', () => {
     // the dry run of EVERYTHING, by the name run-name gives it
     expect(dry![1]).toContain('.display_title == env.WANT');
     expect(script, 'the name the release tool waits for (dryRunTitle)').toMatch(/export WANT="dry run all \$SHA"/);
-    // either missing: red, and nothing after it runs
+    // #174: and the CI run was the FULL matrix - its last job passed
+    // (scripts/ci-parts.mjs, completeName; the name pinned here as text)
+    expect(script).toMatch(/export COMPLETE="All tests \(full\)"/);
+    const jobs = script.match(/actions\/runs\/\$ci\/jobs[\s\S]*?--jq '([^']*)'/);
+    expect(jobs, "asks for the jobs of that ci.yml run").not.toBeNull();
+    expect(jobs![1]).toContain('.name == env.COMPLETE');
+    expect(jobs![1]).toContain('.conclusion == "success"');
+    // either missing: red, and nothing after it runs - unless CircleCI's ci
+    // workflow passed on the commit (#181, releaseVerifyCircleci.test.ts)
     expect(script).toMatch(/if \[ "\$missing" -ne 0 \]; then[\s\S]*?exit 1/);
   });
 
@@ -225,10 +243,12 @@ describe('a release cannot publish before its images build', () => {
   });
 
   it.runIf(!!DIR)("ci.yml's concurrency keeps a run the release calls apart from the branch's own", () => {
-    // Called by release.yml, ci.yml runs with the caller's github context: a
-    // group of the ref alone puts the release tool's dry run on main and the
-    // CI run of that push of main in one group, and the newer cancels the
-    // older - one of the two runs the tag waits for.
+    // Until #174 release.yml called ci.yml, which then ran with the caller's
+    // github context: a group of the ref alone put the release tool's dry run
+    // on main and the CI run of that push of main in one group, and the newer
+    // cancelled the older - one of the two runs the tag waits for. The group
+    // still names both (ciFullMatrix.test.ts holds the rest: a push is grouped
+    // by its commit and never cancelled).
     const ci = code('ci.yml');
     const i = ci.findIndex((l) => /^concurrency:/.test(l));
     expect(i, 'ci.yml has a concurrency block').toBeGreaterThanOrEqual(0);

@@ -33,6 +33,7 @@
  *   node e2e/run.mjs local --s3                 # + an S3 server container and an s3 storage
  *   node e2e/run.mjs local --binary ../bin/filex.exe --keep
  *   node e2e/run.mjs local --base-path /filex   # served under a sub-path, behind a proxy
+ *   node e2e/run.mjs local --shard 2/4          # one part of four, on a server of its own
  *   node e2e/run.mjs cypress
  *   node e2e/run.mjs cypress --spec "cypress/e2e/13-navigation-ui.cy.ts"
  *   node e2e/run.mjs deployment --url https://fm.example.com
@@ -51,6 +52,7 @@ import { fileURLToPath } from 'node:url';
 import { unknownOptions, unknownOptionMessage } from './lib/args.mjs';
 import { S3_HEALTH_PATH, S3_REGION, s3BucketArgs, s3Image, s3RemoveArgs, s3RunArgs } from './lib/s3server.mjs';
 import { REPORT_PATH } from './lib/subpath-proxy.mjs';
+import { artifactsDir, localSpecs, shardFromArgv, shardLabel, shardPlaywrightArgs } from './lib/shard.mjs';
 
 const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(E2E_DIR, '..');
@@ -83,6 +85,8 @@ if (!PROFILES.includes(profile)) {
   console.error('                      behind a proxy that passes the full path (lib/subpath-proxy.mjs)');
   console.error('    --no-public-url   start filex without FILEX_PUBLIC_URL (it then reads its own address');
   console.error('                      from each request - 202-store-install holds a link to that)');
+  console.error('    --shard <i/N>     run part i of N (Playwright --shard), on a server, port and output');
+  console.error('                      directory of its own, so N parts can run side by side');
   console.error('');
   console.error('  cypress     hermetic Cypress run against the same kind of instance');
   console.error('    --binary / --build / --port / --keep as above');
@@ -107,6 +111,21 @@ if (!PROFILES.includes(profile)) {
 const strays = unknownOptions(argv.slice(1));
 if (strays.length) {
   console.error(unknownOptionMessage(strays));
+  process.exit(2);
+}
+
+// One part of the suite (lib/shard.mjs says why the split is Playwright's).
+// A malformed --shard stops the run for the same reason an unknown option
+// does: ignored, it would report a whole run as a part, or a part as a whole.
+let SHARD = null;
+try {
+  SHARD = shardFromArgv(argv.slice(1));
+} catch (err) {
+  console.error(`[e2e] ${err.message}`);
+  process.exit(2);
+}
+if (SHARD && profile !== 'local') {
+  console.error(`[e2e] --shard splits the Playwright suite of the local profile; ${profile} does not take it`);
   process.exit(2);
 }
 
@@ -156,10 +175,17 @@ function freePort() {
   });
 }
 
-async function waitFor(url, what, timeoutMs = 90_000) {
+/**
+ * Poll `url` until it answers 2xx. `stopIf`, when given, is asked before each
+ * try and ends the wait at once with its reason (the process that should
+ * answer has exited: 90 more seconds will not bring it back).
+ */
+async function waitFor(url, what, timeoutMs = 90_000, stopIf = () => null) {
   const deadline = Date.now() + timeoutMs;
   let lastErr = 'no attempt made';
   while (Date.now() < deadline) {
+    const stop = stopIf();
+    if (stop) throw new Error(`${what} never became ready at ${url}: ${stop}`);
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
       if (res.ok) return;
@@ -181,14 +207,6 @@ function run(cmd, args, opts = {}) {
 function tryRun(cmd, args) {
   const res = spawnSync(cmd, args, { stdio: 'ignore', shell: process.platform === 'win32' });
   return res.status === 0;
-}
-
-/** Every spec except the deployment smoke — that one is the other profile. */
-function localSpecs() {
-  return fs
-    .readdirSync(path.join(E2E_DIR, 'tests'))
-    .filter((f) => f.endsWith('.spec.ts') && !f.startsWith('90-deployment-smoke'))
-    .sort();
 }
 
 /**
@@ -224,6 +242,9 @@ function playwright(specs, env) {
   if (grep) args.push('--grep', grep);
   const grepInvert = value('grep-invert');
   if (grepInvert) args.push('--grep-invert', grepInvert);
+  // A part: Playwright's --shard, and an output directory of its own
+  // (Playwright empties its output directory when a run starts).
+  args.push(...shardPlaywrightArgs(E2E_DIR, SHARD));
 
   // Windows needs a shell to run playwright.cmd, and a shell re-parses the
   // argument list. `--grep "a|b"` then loses its quotes and the `|` becomes a
@@ -319,9 +340,49 @@ function build() {
   return out;
 }
 
+/** What filex writes when its port is already held (the guard below reads the same). */
+const BIND_FAILURE = /bind:|address already in use|Only one usage of each socket address/i;
+
+/** This attempt's port was taken between freePort() and filex's bind. */
+class PortTaken extends Error {
+  constructor(port, detail) {
+    super(`port ${port} was taken by another process before filex bound it`);
+    this.port = port;
+    this.detail = detail;
+  }
+}
+
+/**
+ * Start the server on a free port; when that port is taken before filex binds
+ * it, start again on another one (three attempts), unless --port named it.
+ *
+ * ⚠ Why: freePort() can only find a port that is free NOW. It closes its probe
+ * and filex binds ~1.3 s later, after its migrations. Parts of a sharded run
+ * (`--shard i/N`) start side by side on one machine, each asking for free
+ * ports at the same moment, and the second one to ask can be handed the port
+ * the first is about to bind. assertOurOwnInstance turns that into a refusal,
+ * never into a run against the other part's server; this turns the refusal
+ * into a second try.
+ */
 async function startServer(binary) {
-  const port = Number(value('port')) || (await freePort());
+  const fixed = Number(value('port')) || 0;
+  const attempts = fixed ? 1 : 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await startServerOn(binary, fixed || (await freePort()));
+    } catch (err) {
+      if (!(err instanceof PortTaken)) throw err;
+      if (attempt >= attempts) throw new Error(`${err.message}\n${err.detail}`);
+      log(`${err.message}; trying another port (attempt ${attempt + 1} of ${attempts})`);
+    }
+  }
+}
+
+async function startServerOn(binary, port) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-e2e-'));
+  // Set when this attempt lost its port: its cleanup then removes it even
+  // under --keep, and keeps its log under a name of its own.
+  let portTaken = false;
   // 127.0.0.1, never "localhost": on Windows localhost resolves to ::1 first,
   // and a server bound to 127.0.0.1 answers that with ECONNREFUSED. The health
   // probe and Playwright both hit this, and it looks exactly like a server that
@@ -442,7 +503,7 @@ async function startServer(binary) {
   });
 
   cleanups.push(async () => {
-    if (flag('keep')) {
+    if (flag('keep') && !portTaken) {
       log(`--keep: server still on ${baseURL}, data dir ${dataDir}`);
       return;
     }
@@ -462,11 +523,17 @@ async function startServer(binary) {
     // in the log to say why and it could not be reproduced — the reasons are
     // logged now, and this is what stops them being deleted before anyone
     // reads them. CI uploads this path with the screenshots and video.
+    //
+    // A part of a sharded run keeps its log in a directory of its own
+    // (.artifacts/shard-i-of-N): parts run side by side and would otherwise
+    // overwrite each other's. An attempt that lost its port keeps its log
+    // under another name, so it cannot overwrite the log of the attempt that
+    // ran the suite (cleanups run newest first).
     try {
-      const keepDir = path.join(REPO, 'e2e', '.artifacts');
+      const keepDir = artifactsDir(E2E_DIR, SHARD);
       fs.mkdirSync(keepDir, { recursive: true });
       if (fs.existsSync(logFile)) {
-        fs.copyFileSync(logFile, path.join(keepDir, 'server.log'));
+        fs.copyFileSync(logFile, path.join(keepDir, portTaken ? `server-port-${port}-taken.log` : 'server.log'));
       }
       const proxyLogFile = path.join(dataDir, 'subpath-proxy.log');
       if (fs.existsSync(proxyLogFile)) {
@@ -478,13 +545,25 @@ async function startServer(binary) {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
+  const serverLog = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '');
   try {
-    await waitFor(`${baseURL}/healthz`, 'filex');
+    try {
+      await waitFor(`${baseURL}/healthz`, 'filex', 90_000, () => (exited ? `the process exited (${exited})` : null));
+    } catch (err) {
+      const tail = serverLog().slice(-2000);
+      throw new Error(`${err.message}${exited ? ` (process exited: ${exited})` : ''}\n${tail}`);
+    }
+    await assertOurOwnInstance(apiRoot, () => exited, logFile);
   } catch (err) {
-    const tail = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').slice(-2000) : '';
-    throw new Error(`${err.message}${exited ? ` (process exited: ${exited})` : ''}\n${tail}`);
+    // Lost the port to another process (see startServer): say so, so the
+    // caller can try another one. Anything else is the error it was.
+    if (BIND_FAILURE.test(serverLog())) {
+      portTaken = true;
+      child.kill();
+      throw new PortTaken(port, err.message);
+    }
+    throw err;
   }
-  await assertOurOwnInstance(apiRoot, () => exited, logFile);
   log('server is up');
   if (!BASE_PATH) return { baseURL, apiRoot, dataDir, proxy: null };
 
@@ -608,8 +687,8 @@ ${readLog().slice(-1500)}`,
   // exit 1 — all within ~2ms. So: wait for the marker, then settle briefly.
   //
   // ⚠ The marker alone proves nothing (the FAILING child logs it too). It is
-  // only the starting gun for the settle window.
-  const BIND_FAILURE = /bind:|address already in use|Only one usage of each socket address/i;
+  // only the starting gun for the settle window. (BIND_FAILURE is defined at
+  // startServer, which also reads it to try another port.)
   const AT_BIND = /filex listening/;
   const deadline = Date.now() + 90_000;
   let settleUntil = null;
@@ -856,8 +935,15 @@ async function main() {
 
   if (BASE_PATH) env.E2E_BASE_PATH = BASE_PATH;
 
-  const specs = localSpecs().map((f) => `tests/${f}`);
-  log(`running ${specs.length} spec files`);
+  const specs = localSpecs(E2E_DIR).map((f) => `tests/${f}`);
+  if (SHARD) {
+    log(
+      `${shardLabel(SHARD)}: Playwright runs part ${SHARD.current} of ${SHARD.total} of ${specs.length} spec files ` +
+        `(output e2e/test-results/${shardLabel(SHARD)}, server log e2e/.artifacts/${shardLabel(SHARD)})`,
+    );
+  } else {
+    log(`running ${specs.length} spec files`);
+  }
   const code = playwright(specs, env);
   return proxy ? await subpathVerdict(proxy, code) : code;
 }

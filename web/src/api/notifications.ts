@@ -1,8 +1,10 @@
 import { api } from './client';
 import type {
+  DigestPolicy,
   NotificationItem,
   NotificationListResponse,
   NotificationSettings,
+  NotificationSettingsPatch,
   WebhookConfig,
 } from './types';
 
@@ -37,7 +39,7 @@ export const NotificationsApi = {
     return data;
   },
 
-  async updateSettings(payload: { in_app_enabled: boolean; muted_events: string[] }): Promise<NotificationSettings> {
+  async updateSettings(payload: NotificationSettingsPatch): Promise<NotificationSettings> {
     const { data } = await api.patch<NotificationSettings>('/notifications/settings', payload);
     return data;
   },
@@ -62,6 +64,18 @@ export const NotificationsApi = {
 
   async updateWebhookConfig(url: string, token: string): Promise<{ ok: boolean }> {
     const { data } = await api.patch<{ ok: boolean }>('/admin/notifications/webhook-config', { url, token });
+    return data;
+  },
+
+  // The digest's defaults for the tenant (or the instance) the caller runs.
+  async getDigestPolicy(): Promise<DigestPolicy> {
+    const { data } = await api.get<DigestPolicy>('/admin/notifications/digest');
+    return data;
+  },
+
+  /** `urgent_events: null` restores the built-in list; a field left out keeps its value. */
+  async updateDigestPolicy(patch: { window_minutes?: number; urgent_events?: string[] | null }): Promise<DigestPolicy> {
+    const { data } = await api.patch<DigestPolicy>('/admin/notifications/digest', patch);
     return data;
   },
 };

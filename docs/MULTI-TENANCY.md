@@ -99,7 +99,49 @@ checkable. §16 lists what is still open.
 
 ## 3. Mode gating (backward-compat is non-negotiable)
 
-`FILEX_MULTI_TENANT` (config `multi_tenant`, env `FILEX_MULTI_TENANT=1|true`).
+Since 0.53 the mode is a switch: **Admin → Multi-tenant mode** (System →
+Customization), the platform operator's alone. It is decided once, at start,
+in this order:
+
+1. `FILEX_MULTI_TENANT`, when it is set at all - `1` or `true` (any case) is
+   on, any other value is off;
+2. `multi_tenant` in the config file, when the file names it;
+3. the switch's saved setting (`tenancy.multi_tenant`);
+4. off.
+
+The first two **pin** the mode: the switch shows their value, locked, and
+names the variable (or the file's key) to change instead. While they pin it,
+the switch's setting is kept equal to it, so removing `FILEX_MULTI_TENANT=1`
+later changes nothing until somebody flips the switch - an install does not
+drop into maintenance mode because a compose line was deleted.
+
+**A change takes effect when filex is restarted.** The mode is handed, at
+start, to everything that enforces it: every HTTP route group's tenant scope,
+about thirty handlers, the sign-in providers (the page's and the
+environment's LDAP and header drivers), the SFTP, FTPS, NFS, WebDAV and S3
+servers, the tenant domain checker, the sign-in handoff store, the apps' user
+scope and the encryption policy's first-start carry. Flipping some of them
+live and not the others would run a server that scopes a request on one door
+and not on the next, so the switch saves the change for the next start and
+says "restart filex" until then; in a cluster every server needs the restart.
+The capabilities answer's `multi_tenant` is always the mode **in force**, and
+it is the one answer every screen reads: with it false the sign-in page has no
+Realm field, the menu has no Tenants or My tenant (their addresses lead to the
+dashboard), Identity providers lists no tenant's own provider and no tenant
+bindings, and Encryption shows no tenant ceilings.
+
+Who can change it: the platform operator, signed in to the panel. A tenant's
+administrator is refused the page and its API (`403 supertenant_only`), an API
+key is refused the change (`403 session_required`), and the generic settings
+API refuses the setting's key (`400 tenancy_setting`). Both directions are in
+the audit log (`tenancy.enable`, `tenancy.disable`, with the number of
+tenants). The API: `GET /api/admin/tenancy`, `PUT /api/admin/tenancy`
+`{"enabled": bool, "confirm": "<number of tenants>"}`.
+
+Turning the mode **off while the install has tenants** besides the platform's
+own is refused (`409 confirm_required`, with the number) unless `confirm` is
+that number; the page says how many tenants there are and what happens to them
+(below), and asks for the number before it saves.
 
 - **OFF (default):** on a plain single-tenant install (only the `default`
   provider, which is the supertenant) it behaves **exactly** as today - the
@@ -113,6 +155,14 @@ checkable. §16 lists what is still open.
   back on. (This is why single-tenant is unchanged: there the only provider *is*
   the supertenant, so nobody is locked out.) Turning the mode off is therefore a
   safe operation, not a one-way door.
+  Since 0.53 the lockout holds on every request too, not only at sign-in: a
+  session a tenant's account opened while the mode was on, and its API keys,
+  answer `401` with `reason: maintenance` (`auth.MaintenanceLockout`, mounted
+  where the tenant scope would be when the server starts off with tenants
+  present). Before, such a session kept working with no tenant scope at all -
+  a tenant's administrator was an administrator of the whole instance until
+  the session ran out. The sessions and keys are kept; turning the mode back on
+  makes them work again.
 - **ON:** host resolution, per-provider confinement and directory scoping engage.
 
 This lets the OSS product sell both postures: isolation-maximalists run
@@ -121,7 +171,12 @@ one install, mode on.
 
 ### Activation / migration
 
-Flipping the flag on must not require surgery:
+Flipping the flag on (the switch, or `FILEX_MULTI_TENANT`) must not require
+surgery. The first start in multi-tenant mode also carries a single-tenant
+install's encryption policy (the `e2e.policy` setting) over to the platform's
+own tenant, once (`e2epolicy.CarryInstancePolicy`); a switch turned on from the
+panel gets it at the restart that puts the mode in force, exactly as the
+variable did.
 
 1. There must be a super-admin. If a pre-existing OIDC provider exists, mark it
    `is_supertenant`; if the install is local-auth only, the local bootstrap
@@ -352,8 +407,9 @@ provider's `provider` pin. A real domain (a mail attribute, `email_domain`,
 belongs to another tenant is refused before anything is written to it.
 
 **The sign-in form.** On a multi-tenant install `/api/capabilities` carries
-`realm: {enabled: true, locked_realm}` (a single-tenant answer carries no
-`realm` at all, and the form has no field):
+`multi_tenant: true` and `realm: {enabled: true, locked_realm}` (a
+single-tenant answer carries `multi_tenant: false` and no `realm` at all, and
+the form has no field):
 
 - on the **platform's page** the Realm field is empty and free - empty is the
   platform's own accounts, `acme` is acme's;
@@ -362,7 +418,7 @@ belongs to another tenant is refused before anything is written to it.
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](screenshots/v0.52.0/realm/login-realm-1440.png) | ![A tenant's own sign-in page, its realm filled in](screenshots/v0.52.0/realm/login-realm-locked-1440.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.0df0913e40f3.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.00d83a01c149.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has

@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+import type { PluginText } from '@brftech/filex-core';
+
 import { api } from './client';
+import { getApiBaseUrl } from './runtimeConfig';
 import { INSTALL_TIMEOUT_MS, type AppPlugin, type AppPluginDryRun, type AppPluginPlacement } from './appPlugins';
+import type { PluginRequest } from './pluginRequests';
 
 // Installing an app from a store's install link, the stores this filex trusts,
 // and the licenses of paid apps (/api/admin/app-plugins/stores, …/store-intent,
@@ -188,6 +192,138 @@ export const AppStoreApi = {
 
   async verifyLicense(id: number): Promise<AppLicense> {
     const { data } = await api.post<AppLicense>(`${BASE}/${id}/license/verify`, {});
+    return data;
+  },
+
+  // ── The embedded store (#162) ─────────────────────────────────────────
+
+  /** Whether this filex is connected to a store (its one-time code). */
+  async connection(store: string): Promise<StoreConnection> {
+    const { data } = await api.get<StoreConnection>(`${BASE}/stores/connection`, { params: { store } });
+    return data;
+  },
+
+  /** Connect with the code the store's "My instances" page made. */
+  async connect(store: string, code: string): Promise<StoreConnection> {
+    const { data } = await api.post<StoreConnection>(`${BASE}/stores/connection`, { store, code });
+    return data;
+  },
+
+  async disconnect(store: string): Promise<void> {
+    await api.delete(`${BASE}/stores/connection`, { params: { store } });
+  },
+
+  /** Who sees the store screen in a scope (`tenant`: multi-tenant mode). */
+  async view(tenant?: number): Promise<StoreViewAnswer> {
+    const { data } = await api.get<StoreViewAnswer>(`${BASE}/store-view`, { params: tenant ? { tenant } : {} });
+    return data;
+  },
+
+  async saveView(settings: StoreViewSettings, tenant?: number): Promise<StoreViewAnswer> {
+    const body: Record<string, unknown> = { settings };
+    if (tenant) body.tenant = String(tenant);
+    const { data } = await api.put<StoreViewAnswer>(`${BASE}/store-view`, body);
+    return data;
+  },
+};
+
+// ── The embedded store (#162) ────────────────────────────────────────────
+
+/** Whether filex holds a key for a store (never the key). */
+export interface StoreConnection {
+  store: string;
+  connected: boolean;
+  instance_id?: string;
+  key_fingerprint?: string;
+  connected_at?: string;
+  connected_by_name?: string;
+}
+
+/** Who sees the store screen: everyone, some built-in roles, some groups. */
+export type StoreAudience = 'everyone' | 'roles' | 'groups';
+
+export interface StoreViewSettings {
+  enabled: boolean;
+  /** The trusted stores the screen shows. */
+  stores: string[];
+  audience: StoreAudience;
+  /** Built-in roles: admin, user, viewer. */
+  roles: string[];
+  /** Group ids. */
+  groups: number[];
+  updated_at?: string;
+  updated_by_name?: string;
+}
+
+export interface StoreViewAnswer {
+  multi_tenant: boolean;
+  /** The tenant the settings are for (multi-tenant mode). */
+  tenant: number;
+  settings: StoreViewSettings;
+  /** The trusted stores, and whether this filex is connected to each. */
+  stores?: Array<{ origin: string; source: string; connected: boolean }>;
+}
+
+/** An app of a store's catalog, as filex verified it. */
+export interface CatalogApp {
+  name: string;
+  kind: 'app' | 'language_pack' | string;
+  label: PluginText;
+  summary?: PluginText;
+  publisher: string;
+  publisher_verified?: boolean;
+  publisher_official?: boolean;
+  categories: string[];
+  repo: string;
+  version: string;
+  published_at?: string;
+  filex_range: string;
+  permissions: string[];
+  /** An icon's file name, served through filex (StoreScreenApi.iconUrl). */
+  icon?: string;
+  /** The version installed here, when it is. */
+  installed_version?: string;
+}
+
+export interface StoreCatalog {
+  store: string;
+  serial: number;
+  fetched_at: string;
+  /** The store could not be reached: the last catalog that verified. */
+  stale: boolean;
+  apps: CatalogApp[];
+}
+
+/**
+ * A person's store screen (/api/app-store): what a person sees and asks for.
+ * ⚠ Nothing here installs: a request lands on the Install requests list and
+ * an administrator decides.
+ */
+export const StoreScreenApi = {
+  async status(): Promise<{ visible: boolean; stores: string[] }> {
+    const { data } = await api.get<{ visible: boolean; stores: string[] }>('/app-store');
+    return { visible: data.visible === true, stores: data.stores ?? [] };
+  },
+
+  async catalog(store: string): Promise<StoreCatalog> {
+    const { data } = await api.get<StoreCatalog>('/app-store/catalog', { params: { store } });
+    return { ...data, apps: data.apps ?? [] };
+  },
+
+  /** An icon's address: through filex, never the store's own. */
+  iconUrl(store: string, file: string): string {
+    const q = new URLSearchParams({ store, file });
+    return `${getApiBaseUrl()}/app-store/media?${q.toString()}`;
+  },
+
+  async requests(): Promise<PluginRequest[]> {
+    const { data } = await api.get<{ requests: PluginRequest[] }>('/app-store/requests');
+    return data.requests ?? [];
+  },
+
+  /** Ask for an app: 201 a new request, 200 the one already waiting. */
+  async request(store: string, app: string, reason: string): Promise<{ request: PluginRequest; created: boolean }> {
+    const { data } = await api.post<{ request: PluginRequest; created: boolean }>('/app-store/requests', { store, app, reason });
     return data;
   },
 };

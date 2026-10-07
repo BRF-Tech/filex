@@ -42,6 +42,7 @@ import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-c
 import EmptyState from '@/components/ui/EmptyState.vue';
 import AppPluginInstallWizard from './AppPluginInstallWizard.vue';
 import AppStoresPanel from './AppStoresPanel.vue';
+import AppStoreViewPanel from './AppStoreViewPanel.vue';
 import AppPluginLanguages from './AppPluginLanguages.vue';
 import { loadOfferedLocales } from '@/i18n';
 
@@ -49,6 +50,9 @@ const emit = defineEmits<{
   /** The list answered — the page uses it to pick the default tab. */
   (e: 'loaded', info: { enabled: boolean; count: number }): void;
 }>();
+
+/** Bumped when the trusted stores or a connection changed: the store screen's settings read them again (#162). */
+const storesGeneration = ref(0);
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
@@ -571,8 +575,11 @@ function onRowAction(key: string, row: AppPlugin) {
       </DataTable>
     </template>
 
-    <!-- The stores this filex takes install links from (0.52.0). -->
-    <AppStoresPanel v-if="runtime?.enabled" />
+    <!-- The stores this filex takes install links from (0.52.0), and the
+         connection a store's code makes (#162). -->
+    <AppStoresPanel v-if="runtime?.enabled" @changed="storesGeneration++" />
+    <!-- Who sees the store screen (#162). -->
+    <AppStoreViewPanel v-if="runtime?.enabled" :generation="storesGeneration" />
 
     <AppPluginInstallWizard
       :model-value="wizardOpen || !!upgradeOf || !!updateOf"

@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -53,6 +54,11 @@ func TestFileToolVerb_EveryFileToolHasAVerb(t *testing.T) {
 			t.Errorf("fileToolVerb names %s, which registerFilexTools no longer offers", n)
 		}
 	}
+	for n := range fileToolPerm {
+		if !registered[n] {
+			t.Errorf("fileToolPerm names %s, which registerFilexTools no longer offers", n)
+		}
+	}
 }
 
 // TestWithdrawUngrantedFileTools — what each verb set is offered.
@@ -67,13 +73,48 @@ func TestWithdrawUngrantedFileTools(t *testing.T) {
 		}
 		return out
 	}
-	for _, scopes := range []string{"mcp", "read,mcp", "read,write,mcp", "read,delete,mcp", "read,write,delete,mcp"} {
+	for _, scopes := range []string{
+		"mcp", "read,mcp", "read,write,mcp", "read,delete,mcp", "read,write,delete,mcp",
+		"read,mcp,comments:rw", "read,write,delete,mcp,comments:rw", "mcp,comments:rw",
+	} {
 		tok := &model.APIToken{Scopes: scopes}
 		got := offered(scopes)
 		for name, verb := range fileToolVerb {
-			if want := verb == "" || tok.HasScope(verb); got[name] != want {
+			want := verb == "" || tok.HasScope(verb)
+			if need, ok := fileToolPerm[name]; ok && !auth.TokenHolds(tok, need) {
+				want = false
+			}
+			if got[name] != want {
 				t.Errorf("%s with %q: offered=%v, want %v", name, scopes, got[name], want)
 			}
 		}
 	}
+}
+
+// TestWithdrawUngrantedFileTools_CommentsAskTheirPermission - task #157:
+// adding and deleting a comment are offered to a token that holds the
+// comments permission at `rw`, with or without `write`, and to no other -
+// not to one with every verb that does not name it. Reading the comments
+// stays with `read`.
+func TestWithdrawUngrantedFileTools_CommentsAskTheirPermission(t *testing.T) {
+	offered := func(scopes string) map[string]bool {
+		srv := mcp.NewServer(&mcp.Implementation{Name: "verbs-test", Version: "0"}, nil)
+		registerFilexTools(srv, &aiOps{}, nil)
+		withdrawUngrantedFileTools(srv, &model.APIToken{Scopes: scopes})
+		out := map[string]bool{}
+		for _, n := range offeredTools(t, srv) {
+			out[n] = true
+		}
+		return out
+	}
+	everyVerb := offered("read,write,delete,mcp")
+	require.True(t, everyVerb["file_comments"], "reading comments needs read")
+	require.False(t, everyVerb["file_comment_add"], "write does not stand in for comments:rw")
+	require.False(t, everyVerb["file_comment_delete"], "write does not stand in for comments:rw")
+
+	commenter := offered("read,mcp,comments:rw")
+	for _, n := range []string{"file_comments", "file_comment_add", "file_comment_delete"} {
+		require.True(t, commenter[n], "read,mcp,comments:rw is offered %s", n)
+	}
+	require.False(t, commenter["file_write"], "comments:rw is not write")
 }

@@ -118,9 +118,10 @@ func (h *Grants) resolvePath(w http.ResponseWriter, r *http.Request, raw string)
 	rel = acl.CleanRel(rel)
 	// The token's `root:`. Every path this file takes - a grant's, an
 	// invitation's (which can mint a public link), a share mail's - is
-	// resolved here, and confine.Middleware rewrites a body's `path` only
-	// when the body is labelled JSON: the same body as text/plain granted,
-	// invited to and linked files outside the root (GHSA-8gvc-6w52-6c7j).
+	// resolved here, and up to 0.52 confine.Middleware rewrote a body's
+	// `path` only when the body was labelled JSON: the same body as text/plain
+	// granted, invited to and linked files outside the root
+	// (GHSA-8gvc-6w52-6c7j).
 	if !rootAllowsIn(r.Context(), st, rel) {
 		refuseOutsideRoot(w)
 		return nil, "", false

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/brf-tech/filex/backend/internal/syspath"
 )
 
 // RuleSpec is the declarative shape of one rule. It mirrors
@@ -50,7 +52,14 @@ func NewRulesEngine(reloadFn func() ([]RuleSpec, ReplicaMode)) RuleEngine {
 // Match returns the mode for a path. Priority asc, first enabled
 // match wins. Empty rule set falls back to defaultMode (mirror by
 // default — owner decision E2 / SPEC §4.4).
+//
+// ⚠ filex's own folders come first and no rule reaches them: a path in the
+// trash, version history, legacy thumbnails, the desktop's open-with copies or
+// the drafts (internal/syspath) is always ModeSkip (InternalPath).
 func (e *rulesEngine) Match(path string) ReplicaMode {
+	if InternalPath(path) {
+		return ModeSkip
+	}
 	rules, _ := e.cache.Load().([]RuleSpec)
 	if len(rules) == 0 {
 		return e.defaultMode
@@ -178,6 +187,17 @@ func matchAt(subpattern, path string, start int, anchor bool) int {
 	// segment — good enough for the v0.1 surface.
 	return pos - len(parts[len(parts)-1])
 }
+
+// InternalPath reports whether p is in one of filex's own folders - the
+// trash, version history, legacy thumbnails, the desktop's open-with working
+// copies, the drafts - at any depth (syspath.InDir). Replication leaves them
+// out, before every rule and whatever a rule says (the maintainers, 2026-10-06): they
+// are filex's machinery, tied to rows in its database, not anybody's files,
+// and a backup of them restores nothing a person could open. A file that
+// moves INTO one of them (to the trash) leaves the backup like a delete; one
+// that comes OUT (a restore) reaches it like a new file (ReplicatedDriver.Move
+// and Copy).
+func InternalPath(p string) bool { return syspath.InDir(p) }
 
 // DefaultRules returns a no-op engine (everything mirrors). Useful
 // when callers haven't wired a real engine yet.

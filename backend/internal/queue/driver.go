@@ -55,6 +55,11 @@ const (
 	TypeReplicaReport = "replica_report"
 	TypeReconcile     = "reconcile"
 	TypeThumb         = "thumb"
+
+	// TypeReplicaInitialCopy is one slice of a storage's initial copy to its
+	// replication target (internal/replica initial.go): it re-queues itself
+	// until the copy is done.
+	TypeReplicaInitialCopy = "replica_initial_copy"
 )
 
 // DefaultMaxAttempts is the retry budget when an Op enqueue request omits

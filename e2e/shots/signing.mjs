@@ -6,7 +6,7 @@
 //
 // The story: Dana (an ordinary account) asks Alex (another account on this
 // filex) and Sam (an outside partner with no account) to sign a service
-// agreement. Writes docs/screenshots/<release>/signing/:
+// agreement. Writes e2e/.artifacts/shots/capture/signing/:
 //
 //   sign-define-1440.png           "The boxes": every box named and given to a
 //                                  signer, and no document on screen yet
@@ -35,6 +35,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { pinTimes } from './clock.mjs';
 import { syncAndWait } from './fixtures.mjs';
 import {
   AGREEMENT,
@@ -104,6 +105,7 @@ async function main() {
     for (const [name, body] of Object.entries(NEIGHBOURS)) {
       writeFileSync(join(root, name), typeof body === 'string' ? body : documentPDF(body));
     }
+    pinTimes(root);
     const storage = await addLocalStorage(admin, STORAGE, root);
     // Catalogued before anything is photographed, so the explorer lists the
     // whole folder from the catalogue. (A signing request on a file the

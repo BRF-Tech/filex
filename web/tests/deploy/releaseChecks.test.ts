@@ -23,7 +23,10 @@ import {
   newestTag,
   newHeadings,
   parseFeed,
+  partsLine,
+  partsVerdict,
   privateHostLines,
+  promotionVerdict,
   readmeImages,
   runVerdict,
   setPackageVersion,
@@ -33,6 +36,7 @@ import {
   workspacePackages,
 } from '../../../scripts/release/checks.mjs';
 import { releaseNotes } from '../../../scripts/release-notes.mjs';
+import { matrixState } from '../../../scripts/release/stages.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 
@@ -323,5 +327,68 @@ describe('what GitHub ran on a commit', () => {
     for (const c of ['failure', 'cancelled', 'timed_out', 'skipped', 'neutral']) {
       expect(runVerdict([run('completed', c)]).state, c).toBe('failure');
     }
+  });
+});
+
+// #173/#174: ci.yml is a matrix, a job per part. The gate stage reads the
+// run part by part: its one conclusion said neither which part failed nor
+// that a part never ran, and a matrix that lost a part still ended green.
+describe('the parts of a GitHub run', () => {
+  const job = (name: string, status: string, conclusion: string | null = null) => ({ name, status, conclusion, url: `https://x/${name}` });
+  const EXPECTED = ['Plan', 'Go (a)', 'Go (b)', 'All tests (full)'];
+
+  it('green only when every expected part ran and passed', () => {
+    const v = partsVerdict(EXPECTED.map((n) => job(n, 'completed', 'success')), EXPECTED, { finished: true });
+    expect(v.state).toBe('success');
+    expect(partsLine(v)).toBe('4/4 parts green');
+    // a job the plan does not expect changes nothing
+    expect(partsVerdict([...EXPECTED.map((n) => job(n, 'completed', 'success')), job('Extra', 'completed', 'failure')], EXPECTED, { finished: true }).state).toBe('success');
+  });
+
+  it('a red part is red at once, even while the rest still run, and says which', () => {
+    const v = partsVerdict([job('Plan', 'completed', 'success'), job('Go (a)', 'in_progress'), job('Go (b)', 'completed', 'failure')], EXPECTED);
+    expect(v.state).toBe('failure');
+    expect(v.failed.map((p) => p.name)).toEqual(['Go (b)']);
+    expect(v.failed[0]).toMatchObject({ conclusion: 'failure', url: 'https://x/Go (b)' });
+    expect(partsLine(v)).toBe('1/4 parts green, 2 running, 1 red');
+    // cancelled, timed out, skipped: none of them is a pass
+    for (const c of ['cancelled', 'timed_out', 'skipped', 'neutral']) {
+      expect(partsVerdict([job('Go (a)', 'completed', c)], ['Go (a)'], { finished: true }).state, c).toBe('failure');
+    }
+  });
+
+  it('a part with no job waits while the run goes on (GitHub expands a matrix late), and is missing once it ended', () => {
+    const jobs = [job('Plan', 'completed', 'success'), job('Go (a)', 'completed', 'success'), job('Go (b)', 'completed', 'success')];
+    const going = partsVerdict(jobs, EXPECTED, { finished: false });
+    expect(going.state).toBe('running');
+    expect(going.running.map((p) => p.name)).toEqual(['All tests (full)']);
+    const ended = partsVerdict(jobs, EXPECTED, { finished: true });
+    expect(ended.state).toBe('incomplete');
+    expect(ended.missing.map((p) => p.name)).toEqual(['All tests (full)']);
+    expect(partsLine(ended)).toBe('3/4 parts green, 1 missing');
+  });
+
+  it("the run's state with its parts: a red part fails a running run, a green run without a part is incomplete", () => {
+    const green = partsVerdict(EXPECTED.map((n) => job(n, 'completed', 'success')), EXPECTED, { finished: true });
+    const red = partsVerdict([job('Go (b)', 'completed', 'failure')], EXPECTED, { finished: false });
+    const short = partsVerdict([job('Plan', 'completed', 'success')], EXPECTED, { finished: true });
+    expect(matrixState('success', green)).toBe('success');
+    expect(matrixState('running', red)).toBe('failure');
+    expect(matrixState('success', short)).toBe('incomplete');
+    expect(matrixState('running', partsVerdict([], EXPECTED))).toBe('running');
+    // a run that failed in a job no part names is still red
+    expect(matrixState('failure', green)).toBe('failure');
+    // no parts named (an older plan): the run's own state, as before #174
+    expect(matrixState('success', null)).toBe('success');
+    expect(matrixState('none', null)).toBe('none');
+  });
+
+  it('a dry run is a release candidate only with every required artifact; an optional one may be missing and is named', () => {
+    const required = ['digests-amd64', 'digests-arm64', 'release-files-linux'];
+    const optional = ['release-files-macos'];
+    expect(promotionVerdict([...required, ...optional], { required, optional })).toEqual({ ok: true, lacking: [], without: [] });
+    expect(promotionVerdict(required, { required, optional })).toEqual({ ok: true, lacking: [], without: ['release-files-macos'] });
+    expect(promotionVerdict(['digests-amd64', 'release-files-macos'], { required, optional })).toEqual({ ok: false, lacking: ['digests-arm64', 'release-files-linux'], without: [] });
+    expect(promotionVerdict(undefined, { required })).toMatchObject({ ok: false, lacking: required });
   });
 });

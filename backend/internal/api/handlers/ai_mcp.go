@@ -26,6 +26,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
 	"github.com/brf-tech/filex/backend/internal/thumb"
+	"github.com/brf-tech/filex/backend/internal/tokenperm"
 	"github.com/brf-tech/filex/backend/internal/version"
 )
 
@@ -212,26 +213,51 @@ var fileToolVerb = map[string]string{
 
 	// The bell, stars, comments and item permissions (ai_doors_people.go).
 	// Marking one's own notices read is bookkeeping (`read`, as the bell's
-	// route); a star, a comment and a grant change something (`write`).
+	// route); a star and a grant change something (`write`). A comment asks
+	// `read` and the token's `comments` permission (fileToolPerm) - as
+	// /api/files/comments does; `write` does not stand in for it (#157).
 	"notifications_list":     auth.VerbRead,
 	"notification_read":      auth.VerbRead,
 	"file_star":              auth.VerbWrite,
 	"file_comments":          auth.VerbRead,
-	"file_comment_add":       auth.VerbWrite,
-	"file_comment_delete":    auth.VerbWrite,
+	"file_comment_add":       auth.VerbRead,
+	"file_comment_delete":    auth.VerbRead,
 	"file_permissions":       auth.VerbRead,
 	"file_permission_users":  auth.VerbRead,
 	"file_permission_set":    auth.VerbWrite,
 	"file_permission_revoke": auth.VerbWrite,
 }
 
-// withdrawUngrantedFileTools removes every file tool whose verb tok does not
-// hold. The MCP route is token-only, so tok is never nil behind it; a nil tok
-// (a server built by hand) withdraws everything that needs a verb.
+// fileToolPerm is, for the tools that also ask a permission with a level
+// (package tokenperm), that need: the one the handler they run asks
+// (handlers/comments.go). It decides only whether tools/list offers the tool;
+// the handler refuses a call on its own either way.
+var fileToolPerm = map[string]tokenperm.Need{
+	"file_comments":       auth.CommentsRead,
+	"file_comment_add":    auth.CommentsWrite,
+	"file_comment_delete": auth.CommentsWrite,
+}
+
+// fileToolOffered reports whether a token may be offered the file tool name:
+// it holds the tool's verb and, for a tool in fileToolPerm, its permission.
+func fileToolOffered(tok *model.APIToken, name string) bool {
+	if verb := fileToolVerb[name]; verb != "" && !tok.HasScope(verb) {
+		return false
+	}
+	if need, ok := fileToolPerm[name]; ok && !auth.TokenHolds(tok, need) {
+		return false
+	}
+	return true
+}
+
+// withdrawUngrantedFileTools removes every file tool tok may not be offered
+// (fileToolOffered). The MCP route is token-only, so tok is never nil behind
+// it; a nil tok (a server built by hand) withdraws everything that needs a
+// verb.
 func withdrawUngrantedFileTools(srv *mcp.Server, tok *model.APIToken) {
 	var drop []string
-	for name, verb := range fileToolVerb {
-		if verb != "" && !tok.HasScope(verb) {
+	for name := range fileToolVerb {
+		if !fileToolOffered(tok, name) {
 			drop = append(drop, name)
 		}
 	}

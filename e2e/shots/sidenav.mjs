@@ -12,8 +12,8 @@
 // Environment:
 //   FILEX_BIN     binary to run (default: bin/filex.exe on Windows, bin/filex)
 //   SHOTS_URL     use an ALREADY-RUNNING instance instead of spawning one
-//   SHOTS_OUT     output directory (default: docs/screenshots/<release>/sidenav,
-//                 the release named in ./release.mjs)
+//   SHOTS_OUT     output directory (default: e2e/.artifacts/shots/capture/sidenav,
+//                 the capture folder named in ./release.mjs)
 //   SHOTS_KEEP=1  leave the instance running afterwards
 //
 // ⚠ Every shot is in English three ways over — browser locale, the stored
@@ -27,6 +27,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
 import { seedFixtures, syncAndWait, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
@@ -187,6 +188,7 @@ async function seed() {
   writeOfficeFile(join(demoRoot, 'Documents', 'Proposal.docx'));
   mkdirSync(join(demoRoot, 'Documents', 'Contracts'), { recursive: true });
   writeFileSync(join(demoRoot, 'Documents', 'Contracts', 'msa-2026.md'), '# MSA 2026\n\nDraft.\n');
+  pinTimes(demoRoot);
   const demo = await makeStorage(adminToken, 'My files', demoRoot, false);
 
   // A shared drive: RBAC on, so it is invisible until somebody is granted
@@ -199,6 +201,7 @@ async function seed() {
   writeFileSync(join(teamRoot, 'Q3 campaign', 'brief.md'), '# Q3 campaign brief\n');
   writeFileSync(join(teamRoot, 'Brand assets', 'logo-usage.md'), '# Logo usage\n');
   writeFileSync(join(teamRoot, 'Payroll', 'secret.md'), '# Not for Ayse\n');
+  pinTimes(teamRoot);
   const team = await makeStorage(adminToken, 'Marketing', teamRoot, true);
 
   for (const [st, paths] of [
@@ -306,6 +309,7 @@ function backfillThumbs() {
 // ── browser ───────────────────────────────────────────────────────────────
 async function newContext(browser, width, height) {
   const ctx = await browser.newContext({
+    ...SCENE_CONTEXT,
     viewport: { width, height },
     deviceScaleFactor: 2,
     locale: 'en-US',
@@ -318,6 +322,8 @@ async function newContext(browser, width, height) {
     localStorage.setItem('filex.tourDone', '1');
     localStorage.setItem('filex.installPrompt.dismissed', '1');
   });
+  // The scene's clock (clock.mjs): the same dates in every run.
+  await stageClock(ctx);
   return ctx;
 }
 

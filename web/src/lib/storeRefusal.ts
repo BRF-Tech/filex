@@ -25,6 +25,13 @@ export const STORE_CODES = [
   'intent_version_rollback',
   'intent_session_unknown',
   'license_key_invalid',
+  // The embedded store (#162): the connection, a store's refusal, the catalog.
+  'store_not_connected',
+  'store_connection_refused',
+  'store_connect_code_invalid',
+  'store_refused',
+  'store_index_invalid',
+  'store_media_invalid',
 ] as const;
 
 /**
@@ -80,5 +87,6 @@ export function storeSentence(r: StoreRefusal, t: T): string {
     if (r.detail?.public_url_invalid) return t('appStore.err.intent_wrong_instance_public_url');
     return t('appStore.err.intent_wrong_instance', { link: r.detail?.filex_origin || '-', here: r.detail?.this_filex || '-' });
   }
+  if (r.error === 'store_refused') return t('appStore.err.store_refused', { message: r.message || '-' });
   return t(`appStore.err.${r.error}`);
 }

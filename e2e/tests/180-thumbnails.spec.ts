@@ -21,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { apiLogin, loginAs } from '../helpers/auth';
 import { dropStorageByName, seedLocalStorage, storageRoot } from '../helpers/seed';
+import { pickOption } from '../helpers/choiceSelect';
 
 const STAMP = Date.now();
 const NAME = `e2e-thumbs-${STAMP}`;
@@ -172,8 +173,8 @@ test.describe('Thumbnails follow their files', () => {
   test('Tools → Thumbnail repair repairs a storage and says what it did', async ({ page }) => {
     await loginAs(page);
     await page.goto('/admin/tools?tab=thumbnails');
-    await page.getByTestId('thumb-repair-storage').locator('select').selectOption(NAME);
-    await page.getByTestId('thumb-repair-mode').locator('select').selectOption('rebuild');
+    await pickOption(page.getByTestId('thumb-repair-storage'), NAME);
+    await pickOption(page.getByTestId('thumb-repair-mode'), 'rebuild');
     await page.getByTestId('thumb-repair-start').click();
     const result = page.getByTestId('thumb-repair-result');
     await expect(result).toBeVisible({ timeout: 60_000 });

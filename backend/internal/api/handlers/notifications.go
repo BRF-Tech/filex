@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -26,6 +27,11 @@ type Notifications struct {
 	// member.
 	Store db.Store
 	ACL   *acl.Resolver
+	// UserScope puts a person's tenant on a context that has none — the
+	// digest's background pass judging their bell without a request
+	// (DigestViewer). Nil on a single-tenant install, where there is no tenant
+	// to put.
+	UserScope func(ctx context.Context, u *model.User) context.Context
 }
 
 // NewNotifications constructs the handler.
@@ -250,6 +256,9 @@ func (j *bellJudge) inRoot(n *model.Notification) bool {
 	if len(n.MetaJSON) == 0 {
 		return true
 	}
+	if n.Event == string(notify.EventNotificationDigest) {
+		return j.digestInRoot(n)
+	}
 	var meta rowRefs
 	if json.Unmarshal(n.MetaJSON, &meta) != nil {
 		return false
@@ -298,6 +307,44 @@ func (j *bellJudge) inRoot(n *model.Notification) bool {
 	// folder name); alone, nothing says where they are.
 	if !placed && (meta.Path != nil || meta.FailedPaths != nil || meta.TrashPath != nil || meta.Folder != nil) {
 		return false
+	}
+	return true
+}
+
+// digestInRoot is inRoot for a digest (notify digest.go): every folder it
+// names must lie inside the root, and so must the one row a digest of one
+// carries. ⚠ Fails CLOSED like the rest: a digest that also counts rows naming
+// no folder, or more folders than it names, says something about places the
+// root cannot place — a token confined to one folder does not read it.
+func (j *bellJudge) digestInRoot(n *model.Notification) bool {
+	var meta struct {
+		Groups []struct {
+			Storage string `json:"storage"`
+			Path    string `json:"path"`
+		} `json:"groups"`
+		Other       map[string]int `json:"other"`
+		MoreFolders int            `json:"more_folders"`
+		Item        *struct {
+			Event string          `json:"event"`
+			Meta  json.RawMessage `json:"meta"`
+		} `json:"item"`
+	}
+	if json.Unmarshal(n.MetaJSON, &meta) != nil {
+		return false
+	}
+	if len(meta.Other) > 0 || meta.MoreFolders > 0 {
+		return false
+	}
+	for _, g := range meta.Groups {
+		if g.Storage == "" || !j.root.Within(g.Storage, g.Path) {
+			return false
+		}
+	}
+	if meta.Item != nil {
+		if meta.Item.Event == string(notify.EventNotificationDigest) {
+			return false
+		}
+		return j.inRoot(&model.Notification{Event: meta.Item.Event, MetaJSON: meta.Item.Meta, UserID: n.UserID})
 	}
 	return true
 }
@@ -614,7 +661,7 @@ func (h *Notifications) GetSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	writeJSON(w, http.StatusOK, h.settingsAnswer(r.Context(), user.ID, st))
 }
 
 // UpdateSettings replaces the user's preferences.
@@ -634,6 +681,10 @@ func (h *Notifications) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		InAppEnabled bool     `json:"in_app_enabled"`
 		MutedEvents  []string `json:"muted_events"`
+		// The digest's urgent choices (notification_digest.go). Absent: the
+		// stored ones are kept — a client that knows nothing of them (an
+		// older desktop app) resends the two fields above only.
+		UrgentOverrides *map[string]bool `json:"urgent_overrides"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -653,11 +704,52 @@ func (h *Notifications) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		InAppEnabled:   body.InAppEnabled,
 		MutedEventsRaw: mutedJSON,
 	}
+	digests := h.digests()
+	if body.UrgentOverrides != nil {
+		raw, err := json.Marshal(cleanOverrides(*body.UrgentOverrides))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "marshal urgent_overrides: " + err.Error()})
+			return
+		}
+		st.UrgentOverridesRaw = raw
+		// What is held now was held under the choice being replaced: it is
+		// told first, so a kind that becomes urgent is not told twice and one
+		// that stops being urgent does not reach back into the past.
+		if digests != nil {
+			if _, err := digests.SettleDigest(r.Context(), user.ID, h.personView(r.Context(), user), true); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		}
+	}
 	if err := h.Service.UpsertSettings(r.Context(), st); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	if digests != nil {
+		digests.ForgetDigest(user.ID)
+		// ⚠ The digest point is made under the NEW choice, now. The settle
+		// above ran under the old one, and a person who held nothing before
+		// has no point: a broadcast written before their next read of the
+		// bell (an antivirus alert, a deleted file) fell at or below the
+		// point that read made, counted as told, and reached the badge on
+		// its own although they had just held its kind (#166). Settling
+		// once more is what a read of the bell does (quietFilter): it makes
+		// the point when something is quiet, and opens a window when held
+		// rows are already waiting. A failure only means those rows are
+		// told at once, the safe direction, so the save still answers 200.
+		if body.UrgentOverrides != nil {
+			if _, err := digests.SettleDigest(r.Context(), user.ID, h.personView(r.Context(), user), false); err != nil {
+				slog.Warn("notifications: digest point not made after a settings save",
+					slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
+			}
+		}
+	}
+	saved, err := h.Service.GetSettings(r.Context(), user.ID)
+	if err != nil || saved == nil {
+		saved = st
+	}
+	writeJSON(w, http.StatusOK, h.settingsAnswer(r.Context(), user.ID, saved))
 }
 
 // AdminList exposes the global view (broadcasts + every user's

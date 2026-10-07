@@ -38,6 +38,7 @@ vi.mock('@/api/storages', () => ({
 import Tools from '@/views/Tools.vue';
 import ThumbnailRepairTab from '@/components/tools/ThumbnailRepairTab.vue';
 import ThumbLimitsCard from '@/components/tools/ThumbLimitsCard.vue';
+import { pickOption } from '../helpers/choiceSelect';
 
 const SETTINGS = {
   folder_previews: true,
@@ -120,10 +121,9 @@ describe('Thumbnail repair', () => {
     await flushPromises();
     expect(api.thumbRepair).toHaveBeenLastCalledWith({ path: '', mode: 'fix' });
 
-    const storage = w.find('[data-testid="thumb-repair-storage"] select');
-    await storage.setValue('arsiv');
+    await pickOption(w.find('[data-testid="thumb-repair-storage"]'), 'arsiv');
     await w.find('[data-testid="thumb-repair-path"] input').setValue('/Tatil/2024');
-    await w.find('[data-testid="thumb-repair-mode"] select').setValue('rebuild');
+    await pickOption(w.find('[data-testid="thumb-repair-mode"]'), 'rebuild');
     await w.find('form[data-testid="thumb-repair-form"]').trigger('submit');
     await flushPromises();
     expect(api.thumbRepair).toHaveBeenLastCalledWith({ path: 'arsiv://Tatil/2024', mode: 'rebuild' });

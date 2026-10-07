@@ -32,7 +32,7 @@
 // The same blue is written out by hand in three static files that have no
 // token scope at all: web/public/favicon.svg, web/public/icons/icon.svg and
 // the `theme-color` meta in web/index.html (plus the PWA manifest's
-// theme_color in web/vite.config.ts). Change one, change all four.
+// theme_color in web/pwa.config.ts). Change one, change all four.
 </script>
 
 <template>

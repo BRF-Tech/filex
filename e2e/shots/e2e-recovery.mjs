@@ -1,7 +1,7 @@
 /**
  * Measure the folder-recovery flow in a real browser, and capture the
- * screenshots docs/screenshots/<release>/e2e-recovery/ shows (the release is
- * named once, in ./release.mjs; --out overrides it).
+ * screenshots into e2e/.artifacts/shots/capture/e2e-recovery/ (the capture
+ * folder is named once, in ./release.mjs; --out overrides it).
  *
  * This is the only place the feature is measured end to end. The unit suite
  * proves the crypto; this proves a person can actually get their folder back:
@@ -31,6 +31,7 @@ import { chromium } from '@playwright/test';
 // seeds has to be the same v1 folder the product makes, or the upgrade leg
 // measures a fixture instead of the feature.
 import * as e2ecrypto from '../../packages/core/dist/filex-core.js';
+import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
 import { shotsDir } from './release.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
@@ -317,9 +318,11 @@ async function main(expectedKid) {
   // A plaintext file that lives OUTSIDE the encrypted folder — the move
   // guard needs something to refuse.
   fs.writeFileSync(path.join(STORAGE_ROOT, 'plain.txt'), 'not a secret\n');
+  pinTimes(STORAGE_ROOT);
 
   browser = await chromium.launch();
   const ctx = await browser.newContext({
+    ...SCENE_CONTEXT,
     viewport: { width: 1280, height: 860 },
     deviceScaleFactor: 2,
     locale: 'en-US',
@@ -341,6 +344,8 @@ async function main(expectedKid) {
       /* storage blocked */
     }
   });
+  // The scene's clock (clock.mjs): the same dates in every run.
+  await stageClock(ctx);
   const page = await ctx.newPage();
   page.on('console', (m) => {
     if (m.type() === 'error') console.log('    [browser error]', m.text());

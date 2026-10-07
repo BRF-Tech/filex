@@ -94,10 +94,14 @@ func TestStateList_AJobStampedWithARootListsOnlyInsideIt(t *testing.T) {
 	assert.NotContains(t, msg, "secret", "a stamped job is told nothing outside its root")
 
 	// A stamp that does not read as a root confines the job to nothing, never
-	// to everything: the host wrote it, so it is a broken row.
-	msg = h.runJobWith(t, p, "listing", []string{"docs/b.txt"}, map[string]any{rootParamKey: 7}).Message
-	assert.NotContains(t, msg, "docs/a.txt")
-	assert.NotContains(t, msg, "secret")
+	// to everything: the host wrote it, so it is a broken row. Its own input
+	// is not inside that nothing either, so the job is refused before it runs
+	// (filex #185) and tells nobody anything.
+	broken, err := h.runStampedJob(t, p, "listing", []string{"docs/b.txt"}, map[string]any{rootParamKey: 7})
+	require.Error(t, err)
+	assert.Equal(t, model.AppPluginJobFailed, broken.Status)
+	assert.NotContains(t, broken.Message, "docs/a.txt")
+	assert.NotContains(t, broken.Message, "secret")
 
 	// No stamp, no root.
 	msg = h.runJobWith(t, p, "listing", []string{"docs/b.txt"}, map[string]any{}).Message

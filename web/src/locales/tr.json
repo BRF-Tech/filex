@@ -9,10 +9,11 @@
     "admin": "{name} Yönetim"
   },
   "install": {
-    "title": "filex'i yükle",
+    "title": "filex'i web uygulaması olarak kurun",
     "subtitle": "Uygulama gibi hızlı erişim için cihazınıza ekleyin.",
-    "install": "Yükle",
-    "iosInstructions": "Paylaş düğmesine dokunun, ardından “Ana Ekrana Ekle”yi seçin.",
+    "install": "Kur",
+    "menuInstructions": "Tarayıcınızın menüsünü açıp “Uygulamayı yükle” ya da “Ana ekrana ekle”yi seçin.",
+    "iosInstructions": "Paylaş'a dokunun (iOS 26'da önce ⋯, sonra Paylaş), ardından “Ana Ekrana Ekle” ve Ekle'ye dokunun.",
     "updateAvailable": "Yeni bir sürüm mevcut.",
     "reload": "Yenile",
     "desktopTitle": "filex masaüstü uygulamasını edinin",
@@ -163,6 +164,7 @@
     "loginSecurity": "Giriş güvenliği",
     "groups": "Gruplar",
     "tenants": "Kiracılar",
+    "tenancy": "Çok kiracılı mod",
     "myTenant": "Kiracım",
     "menu": "Menü",
     "adminMenu": "Yönetim menüsü",
@@ -199,6 +201,7 @@
       "roles": "Adlandırılmış izin kümeleri",
       "grants": "Kim hangi dosya ya da klasörü açabilir",
       "tenants": "Platformun tüm kiracıları",
+      "tenancy": "Tek kurulumda birden çok kiracı",
       "myTenant": "Kiracınızın oturum açma yolları ve alan adları",
       "authProviders": "Kim, nasıl oturum açabilir",
       "loginSecurity": "Hatalı parola sınırları ve kilitlenmeler",
@@ -339,6 +342,7 @@
       "smb": "SMB / CIFS (NAS)"
     },
     "advancedFields": "Gelişmiş ayarlar",
+    "secretKept": "Kayıtlı - değiştirmek için yazın",
     "driverFieldsUnavailable": "\"{driver}\" sürücüsünün ayar alanları yüklenemedi.",
     "fields": {
       "name": "Görünen ad",
@@ -750,7 +754,8 @@
       "public_url_loopback": "Doküman sunucusu belgeyi filex'ten çeker ve kaydı {publicUrl} adresine geri gönderir. Kendi container'ının içinde o adres filex değil, doküman sunucusunun kendisidir.",
       "public_url_bare_host": "filex'in genel adresi ({publicUrl}) container ağına ait bir ad. Doküman sunucusu ona erişebilir, ama bu adresten üretilen paylaşım bağlantıları ve e-postalar o ağın dışındaki bir tarayıcıda açılmaz.",
       "public_url_unresolved": "filex'in kendisi “{host}” adını çözemiyor. Doküman sunucunuz farklı bir DNS görünümü kullanıyorsa bu beklenen bir durumdur; değilse genel adres hiçbir yerde bulunamayan bir adı gösteriyor.",
-      "jwt_not_enforced": "Doküman sunucusu imzasız bir isteği kabul etti, yani üzerinde JWT kapalı. Yine de filex'in editör yapılandırmasındaki belirteci kendi sırrıyla doğrular ve reddeder; bu yüzden belgeler açılmaz (\"The document security token is not correctly formed\"). Ayrıca özel adreslerden indirmeyi reddeder ve kaydetme geri çağrılarını imzasız gönderir; filex bunları reddeder. Doküman sunucusunda JWT_ENABLED=true yapın ve JWT_SECRET'i aynı sırra ayarlayın."
+      "jwt_not_enforced": "Doküman sunucusu imzasız bir isteği kabul etti, yani üzerinde JWT kapalı. Yine de filex'in editör yapılandırmasındaki belirteci kendi sırrıyla doğrular ve reddeder; bu yüzden belgeler açılmaz (\"The document security token is not correctly formed\"). Ayrıca özel adreslerden indirmeyi reddeder ve kaydetme geri çağrılarını imzasız gönderir; filex bunları reddeder. Doküman sunucusunda JWT_ENABLED=true yapın ve JWT_SECRET'i aynı sırra ayarlayın.",
+      "editor_same_origin": "Editörün betiği (api.js) filex'in kendi sayfalarında, oturum açmış kişinin oturumuyla çalışıyor. FILEX_ONLYOFFICE_FRAME_ORIGIN değerini belge sunucusunun kendi adresine ayarlayın ve oradaki vekil sunucunun /filex-frame/ yolunu filex'e yönlendirmesini sağlayın: filex betiği o zaman orada, kendi çerçevesinde çalıştırır; oradan filex'in oturum depolamasına ve sayfalarına erişilemez."
     },
     "noSecret": {
       "title": "ONLYOFFICE için JWT secret tanımlı değil",
@@ -1101,6 +1106,7 @@
     "add": "Sağlayıcı ekle",
     "addTitle": "Başka bir oturum açma sağlayıcısı",
     "addHint": "Aynı türden ikinci bir sağlayıcı: başka bir dizin ya da yalnızca bazı kiracılar için bir SSO. Kapalı olarak oluşturulur: kartında doldurun, deneyin ve orada açın.",
+    "addHintSingle": "Aynı türden ikinci bir sağlayıcı, örneğin başka bir dizin. Kapalı olarak oluşturulur: kartında doldurun, deneyin ve orada açın.",
     "kind": "Tür",
     "label": "Görünen ad",
     "labelHint": "Oturum açma sayfasının ona verdiği ad. Boşsa türün kendi adı.",
@@ -1162,6 +1168,7 @@
       "label": "Ad",
       "usernames": "Kullanıcı adları",
       "scopes": "İzinler",
+      "comments": "Yorumlar",
       "root": "Kök dizin",
       "lastUsed": "Son kullanım",
       "expires": "Bitiş",
@@ -1172,6 +1179,8 @@
       "labelPlaceholder": "ör. claude-ajan",
       "scopes": "İzinler",
       "scopesHint": "En az bir izin seçin - hiçbir izni olmayan bir API anahtarı verilmez. “admin” yönetim panelinin tamamını verir ve siz seçmedikçe asla dahil edilmez; Dosya MCP’si için “mcp” gerekir.",
+      "comments": "Yorumlar",
+      "commentsHint": "Yorum eklemek ve silmek ayrı bir izindir: “Yazma” bunu kapsamaz. Her API anahtarı yorumları okur; yorum da yazacak bir anahtar için Okuma ve yazma seçin.",
       "root": "Kök dizin kısıtı (isteğe bağlı)",
       "rootNone": "- Tüm depolar -",
       "rootPathPlaceholder": "alt/klasör (boş = depo kökü)",
@@ -1196,6 +1205,14 @@
       "delete": "Silme",
       "mcp": "MCP",
       "admin": "Yönetim"
+    },
+    "commentsLevel": {
+      "read": "Okuma",
+      "rw": "Okuma ve yazma"
+    },
+    "commentsLevelHelp": {
+      "read": "Yorumları okur",
+      "rw": "Yorum da ekler ve kendi yorumlarını siler"
     }
   },
   "audit": {
@@ -1278,7 +1295,8 @@
       "tenant_domain": "Kendi alan adı",
       "file_association": "Varsayılan uygulamalar",
       "file_types": "Varsayılan uygulamalar",
-      "app_store": "Uygulama mağazası"
+      "app_store": "Uygulama mağazası",
+      "tenancy": "Çok kiracılı mod"
     },
     "verb": {
       "dismiss": "yok sayıldı",
@@ -1292,6 +1310,7 @@
       "create": "oluşturuldu",
       "delete": "silindi",
       "disable": "kapatıldı",
+      "enable": "açıldı",
       "empty": "boşaltıldı",
       "enroll": "kuruldu",
       "entry_available": "öğe yeniden kullanılabilir",
@@ -1365,13 +1384,18 @@
       "thumbnail_sent": "küçük resim çizerken dışarıya dosya gönderdi",
       "office_saved_beside": "başka biçimde yanına kaydedildi (ONLYOFFICE)",
       "office_save_refused": "kayıt yazılmadı (ONLYOFFICE)",
+      "office_saved_conflict": "düzenlenirken değiştiği için yanına kaydedildi (ONLYOFFICE)",
       "trust": "güvenildi",
       "untrust": "artık güvenilmiyor",
       "install": "kuruldu",
       "cancel": "iptal edildi",
       "license_set": "lisans anahtarı girildi",
       "license_held": "lisansı nedeniyle bekletiliyor",
-      "license_released": "lisansı yeniden geçerli"
+      "license_released": "lisansı yeniden geçerli",
+      "connect": "bağlandı",
+      "disconnect": "bağlantısı kesildi",
+      "view": "mağaza ekranı değiştirildi",
+      "intent_request": "kurulum bağlantısı istendi"
     },
     "target": {
       "permission_gap": "Eksik izin",
@@ -1406,7 +1430,8 @@
       "e2e_request": "Şifreleme isteği",
       "tenant_domain": "Kendi alan adı",
       "file_type": "Dosya türü",
-      "app_store": "Mağaza"
+      "app_store": "Mağaza",
+      "tenancy": "Çok kiracılı mod"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "Ne",
@@ -1529,6 +1554,51 @@
     "scopeName": "Ad",
     "scopeContent": "İçerik",
     "inContent": "İçerikte"
+  },
+  "adminSearch": {
+    "alias": {
+      "dashboard": "ana sayfa, genel bakış, durum",
+      "files": "dosya yöneticisi, gezgin, göz at",
+      "adminFiles": "dosya sürümleri, sürüm geçmişi",
+      "shares": "herkese açık bağlantılar, paylaşım bağlantıları",
+      "trash": "silinen dosyalar, geri dönüşüm",
+      "tagged": "etiketler",
+      "duplicates": "kopyalar, aynı dosyalar",
+      "search": "indeks, indeksi yeniden oluşturma",
+      "storages": "disk, kova, S3, birim",
+      "connections": "WebDAV, SFTP, FTP, S3, NFS, bağlama, masaüstü uygulaması",
+      "sync": "taramalar, tarama geçmişi",
+      "replica": "replikasyon, yedek, ayna",
+      "usage": "maliyet, fatura, kota",
+      "users": "hesaplar, kişiler, üyeler",
+      "groups": "ekipler, takımlar",
+      "roles": "izinler, RBAC",
+      "grants": "klasör izinleri, ACL",
+      "tenants": "müşteriler, kuruluşlar",
+      "myTenant": "alan adı, kendi oturum açma yolu",
+      "authProviders": "LDAP, Active Directory, SSO, OIDC, Keycloak, tek oturum açma",
+      "loginSecurity": "kaba kuvvet, kilitlenme, IP adresleri, güvenilir vekil sunucular",
+      "encryption": "uçtan uca, E2E",
+      "protection": "saklama, sürümler, antivirüs, ClamAV",
+      "apiMcp": "API anahtarları, MCP, yapay zekâ ajanları",
+      "plugins": "uygulamalar, uzantılar, mağaza",
+      "external": "ONLYOFFICE, draw.io, belge sunucusu, editörler",
+      "webhooks": "HTTP geri çağrıları, olaylar",
+      "notifications": "uyarılar, zil",
+      "settings": "e-posta, SMTP, site adı",
+      "branding": "logo, renkler, ad",
+      "appearance": "tema, karanlık mod, özel CSS",
+      "archives": "zip, 7z, tar, arşiv açma",
+      "queue": "işler, arka plan görevleri",
+      "tools": "bakım, onarım",
+      "audit": "kayıt, geçmiş, değişiklikler",
+      "updates": "yükseltme, yeni sürüm",
+      "about": "sürüm, derleme, lisans",
+      "smtp": "e-posta sunucusu, giden posta",
+      "twoFactor": "2FA, TOTP, iki adımlı doğrulama",
+      "allowlist": "IP adresleri",
+      "stores": "uygulama mağazası, mağaza"
+    }
   },
   "tagged": {
     "title": "Etiketli dosyalar",
@@ -1837,6 +1907,7 @@
       "delete": "Silme",
       "replica_retry": "Kopya yeniden deneme",
       "replica_report": "Kopya raporu",
+      "replica_initial_copy": "Replikasyon ilk kopyası",
       "reconcile": "Kopya eşitleme"
     }
   },
@@ -1855,6 +1926,7 @@
       "permDeniedHint": "Tarayıcı ayarlarından bu siteye bildirim iznini yeniden verin.",
       "permDefault": "İzin henüz istenmedi",
       "permUnsupported": "Bu tarayıcı bildirim gösteremiyor",
+      "iosHomeScreen": "iPhone ve iPad'de bildirimler tarayıcı sekmesinde değil, ana ekrana eklenmiş filex'te çalışır (iOS 16.4 ve sonrası).",
       "desktopHandled": "Masaüstü uygulaması bunları kendisi gösteriyor",
       "saved": "Tercih kaydedildi",
       "movedToSettings": "Kendi bildirim ayarlarınız - zil, tarayıcı bildirimleri, hangi olaylar - kullanıcı ayarlarınızda.",
@@ -1938,7 +2010,8 @@
       "webhook_test": "Webhook testi",
       "tenant_domain_suspended": "Kendi alan adı çalışmıyor",
       "tenant_domain_restored": "Kendi alan adı yeniden çalışıyor",
-      "permission_gaps": "Rolde izin düşmüş olabilir"
+      "permission_gaps": "Rolde izin düşmüş olabilir",
+      "notification_digest": "Bildirim özeti"
     },
     "scopeEveryone": "Herkes",
     "webhookStatus": {
@@ -1953,7 +2026,24 @@
     "unreadHere": "Bu listede {n} okunmamış",
     "scopeAdmins": "Yöneticiler",
     "scopeViewers": "Dosyayı görebilenler",
-    "scopeNobody": "Kimse (yalnızca geçmişte)"
+    "scopeNobody": "Kimse (yalnızca geçmişte)",
+    "digest": {
+      "title": "Bildirim özeti",
+      "intro": "Biri açmadıkça kapalıdır: kurulumda her bildirim türü hemen bildirilir. Aşağıda kapatılan bir tür kısa bir süre bekletilir ve klasör klasör tek bir özette bildirilir - her dosya için ayrı bir bildirim yerine tek bildirim. Herkes kendi bildirim ayarlarından bunu kendisi için değiştirebilir; bunlar varsayılanlardır.",
+      "scopeInstance": "Bu sunucudaki herkes için",
+      "scopeTenant": "{tenant} kiracısı için",
+      "window": "Bekletme süresi",
+      "windowUnit": "dakika",
+      "windowHint": "1 ile 15 dakika arası. Süre, bekletilen ilk bildirimle başlar.",
+      "urgentTitle": "Varsayılan olarak hemen bildirilenler",
+      "urgentHint": "Kurulumda her tür açıktır. Bir türü kapatırsanız, kendi seçimini yapmamış herkes için o tür özette toplanır.",
+      "adminAlerts": "Yönetici uyarıları",
+      "adminAlertsHint": "Güncellemeler, kopyalar, oturum açma sağlayıcıları, kiracı alan adları ve yöneticilere yönelik diğer uyarılar",
+      "restore": "Varsayılanlara dön",
+      "saved": "Özet ayarları kaydedildi",
+      "invalidWindow": "1 ile 15 dakika arasında bir değer seçin.",
+      "allUrgent": "Varsayılan: her tür hemen bildirilir. Özet için hiçbir şey bekletilmez."
+    }
   },
   "replica": {
     "title": "Replikasyon",
@@ -1972,7 +2062,32 @@
       "save": "Eşleştirmeyi kaydet",
       "savedOk": "Eşleştirme kaydedildi.",
       "noStorages": "Önce depo ekleyin (Depolar sayfası).",
-      "targetIs": "Hedef replika: {name}"
+      "targetIs": "Hedef replika: {name}",
+      "folderIs": "Hedefteki klasör: {folder}",
+      "savedCopying": "Eşleştirme kaydedildi. Depoda zaten olan dosyalar hedefe kopyalanıyor."
+    },
+    "initial": {
+      "title": "İlk kopya",
+      "phase": {
+        "pending": "Sırada",
+        "counting": "Sayılıyor",
+        "copying": "Kopyalanıyor",
+        "waiting": "Bekliyor",
+        "done": "Tamamlandı"
+      },
+      "pending": "Bu depoda zaten olan dosyalar hedefe kopyalanacak.",
+      "counting": "Depodaki dosyalar sayılıyor: şimdiye kadar {n}",
+      "progress": "{n} dosyanın {done} tanesi tamamlandı",
+      "finished": "İlk kopya tamamlandı: {n} dosya",
+      "copied": "{n} kopyalandı ({size})",
+      "present": "{n} zaten hedefteydi",
+      "excluded": "{n} kural gereği atlandı",
+      "failed": "{n} hata - “Hatalar” sekmesine bakın",
+      "waiting": "Bekliyor: hedef yanıt vermiyor ({error}). Kopya kendiliğinden devam edecek.",
+      "finishedAt": "Bitiş: {when}",
+      "restart": "Yeniden çalıştır",
+      "restartHint": "Bütün dosyalara yeniden bakar; hedefte zaten olan dosyalara dokunmaz.",
+      "restarted": "İlk kopya yeniden başlatıldı"
     },
     "targets": {
       "title": "Replika hedefleri",
@@ -2025,6 +2140,7 @@
       "nothingToFix": "Onarılacak bir şey yok",
       "fields": {
         "path": "Yol",
+        "storage": "Depo",
         "op": "İşlem",
         "errorCode": "Kod",
         "error": "Hata",
@@ -2171,7 +2287,7 @@
     "empty": "Henüz webhook hedefi yok. Yukarıdaki varsayılan webhook her olayı almaya devam eder.",
     "namePlaceholder": "örn. ops-alarmlari",
     "allEvents": "Tüm olaylar",
-    "eventsHint": "Hiçbirini işaretlemezseniz tüm olaylar gönderilir.",
+    "eventsHint": "Hiçbirini işaretlemezseniz tüm olaylar gönderilir; bildirim özeti ise yalnızca işaretlendiğinde gönderilir.",
     "events": {
       "file_uploaded": "Dosya yüklendi - yazma işlemi var olmayan bir dosyayı oluşturdu",
       "file_updated": "Dosya güncellendi - yazma işlemi var olan bir dosyanın içeriğini değiştirdi",
@@ -2189,7 +2305,8 @@
       "e2e_password_changed": "Şifreli bir klasörün parolası değiştirildi ya da kurtarma anahtarıyla sıfırlandı",
       "e2e_request_created": "Şifreleme isteği - onay politikasında biri bir klasörü ya da dosyayı şifrelemek istedi",
       "e2e_request_decided": "Şifreleme isteği bir yönetici tarafından onaylandı ya da reddedildi",
-      "plugin_notice": "Uygulama bildirimi - kurulu bir uygulama mesaj gönderdi (imza isteği, biten iş, …)"
+      "plugin_notice": "Uygulama bildirimi - kurulu bir uygulama mesaj gönderdi (imza isteği, biten iş, …)",
+      "notification_digest": "Bildirim özeti - bir kişinin bekletilen bildirimleri, bekleme süresinin sonunda birlikte (yalnızca bunu işaretleyen hedefe gönderilir)"
     },
     "secretSet": "Secret tanımlı",
     "secretUnset": "Secret yok",
@@ -2637,12 +2754,14 @@
       "superseded": "Kaynak değişti"
     },
     "source": {
-      "own": "Kendi güncelleme kaynağı"
+      "own": "Kendi güncelleme kaynağı",
+      "store": "{store} mağazası ({app})"
     },
     "actions": {
       "review": "İncele",
       "approve": "Onayla ve kur",
-      "reject": "Reddet"
+      "reject": "Reddet",
+      "approveStore": "Onayla: mağaza incelemesini aç"
     },
     "review": {
       "title": "Kurulum isteği: {name}",
@@ -2654,11 +2773,15 @@
       "rejectPlaceholder": "İsteği bırakan bunu okuyabilir.",
       "decided": "{status}: {who}, {when}",
       "decidedNobody": "{status}, {when}",
-      "note": "Not"
+      "note": "Not",
+      "fromStore": "Bu uygulamayı bir kişi mağaza ekranından istedi. Onaylamak, mağazadan bu filex için taze bir kurulum bağlantısı ister ve onu mağaza incelemesinde açar: herhangi bir kurulum bağlantısıyla aynı denetimler ve aynı izin incelemesi. Siz orada kurana kadar hiçbir şey kurulmaz.",
+      "storeLicense": "Lisans anahtarı (ücretli uygulamalar, isteğe bağlı)",
+      "storeLicenseHint": "Onayla birlikte mağazaya gönderilir. İncelemede de girebilirsiniz."
     },
     "approved": "{name} {version} kuruldu",
     "rejected": "{name} isteği reddedildi",
-    "superseded": "{name} kaynağı istek bırakıldıktan sonra değişti; hiçbir şey kurulmadı. İstek “Kaynak değişti” olarak kapatıldı."
+    "superseded": "{name} kaynağı istek bırakıldıktan sonra değişti; hiçbir şey kurulmadı. İstek “Kaynak değişti” olarak kapatıldı.",
+    "storeOpening": "Mağaza {name} için bir kurulum bağlantısı üretti; incelemesi açılıyor."
   },
   "plugins": {
     "logsTitle": "{name} günlüğü",
@@ -3362,7 +3485,8 @@
         "e2e_password_changed": "Şifreli klasörünüzün parolası değiştiğinde",
         "e2e_request_created": "Biri bir klasörü ya da dosyayı şifrelemek istediğinde",
         "e2e_request_decided": "Şifreleme isteğiniz yanıtlandığında",
-        "plugin_notice": "Kurulu bir uygulama size mesaj gönderdiğinde"
+        "plugin_notice": "Kurulu bir uygulama size mesaj gönderdiğinde",
+        "notification_digest": "Acil olarak işaretlemediğim bildirimlerin özeti"
       }
     },
     "security": {
@@ -4005,7 +4129,6 @@
     "search": "Kiracı ara…",
     "empty": "Henüz kiracı yok.",
     "noMatch": "Eşleşen kiracı yok.",
-    "modeOff": "Çok kiracılı kip kapalı (FILEX_MULTI_TENANT): yalnızca platformun kendi kiracısı oturum açabilir. Diğer kiracılar ve sahip oldukları her şey korunur; kip yeniden açılınca kişileri tekrar oturum açar.",
     "platform": "Platform",
     "platformHint": "Platformun kendi kiracısı: kişileri boş realm ile oturum açar, yöneticileri tüm kiracıları yönetir.",
     "signinColumn": "Oturum açma",
@@ -4148,6 +4271,33 @@
       "certificate_needs_secret_key": "Özel anahtar mühürlenerek saklanır ve bu kurulumda FILEX_SECRET_KEY yok."
     }
   },
+  "tenancy": {
+    "title": "Çok kiracılı mod",
+    "subtitle": "Tek kurulum birden çok kuruluşa hizmet verir; her kuruluş kendi oturum açma yöntemi, adresi, depoları ve kişileri olan bir kiracıdır. Kapalıyken kurulum tek bir kuruluşundur ve panelde kiracılarla ilgili hiçbir şey görünmez.",
+    "switchLabel": "Çok kiracılı mod",
+    "switchHelp": "Burada kaydedilir, filex bir sonraki açılışında devreye girer.",
+    "inForce": "Şu an geçerli",
+    "on": "Açık",
+    "off": "Kapalı",
+    "tenantsLabel": "Platformun kendi kiracısı dışındaki kiracılar",
+    "whatOn": "Açınca Kişiler ve erişim altına Kiracılar sayfası, oturum açma sayfasına Realm alanı, Kimlik sağlayıcılar ve Şifreleme sayfalarına kiracı ayarları eklenir. Çok kiracılı moddaki ilk açılış, bu kurulumun şifreleme politikasını platformun kendi kiracısına taşır.",
+    "whatOff": "Kapatınca kiracılarla ilgili her şey gizlenir. Var olan kiracılar korunur ve bakım moduna geçer: mod yeniden açılana kadar yalnızca platformun kendi kiracısı oturum açabilir.",
+    "openTenants": "Kiracıları yönet",
+    "lockedEnv": "{variable} ortam değişkeniyle ayarlanmış: orada değiştirip filex'i yeniden başlatın. Bu anahtar yalnızca durumu gösterir.",
+    "lockedFile": "Yapılandırma dosyasındaki {key} ile ayarlanmış: orada değiştirip filex'i yeniden başlatın. Bu anahtar yalnızca durumu gösterir.",
+    "restartTitle": "Değişikliğin geçerli olması için filex'i yeniden başlatın",
+    "restartToOn": "Kaydedildi. Çok kiracılı mod, filex yeniden başlatılınca açılır; o zamana kadar bu sunucu tek kiracılı bir kurulum olarak çalışır. Bir kümedeki her sunucunun yeniden başlatılması gerekir.",
+    "restartToOff": "Kaydedildi. Çok kiracılı mod, filex yeniden başlatılınca kapanır; o zamana kadar bu sunucu bütün kiracılara hizmet vermeyi sürdürür. Bir kümedeki her sunucunun yeniden başlatılması gerekir.",
+    "saved": "Kaydedildi",
+    "savedRestart": "Kaydedildi. Geçerli olması için filex'i yeniden başlatın.",
+    "confirmTitle": "Çok kiracılı mod kapatılsın mı?",
+    "confirmCount": "Bu kurulumda platformun kendi kiracısı dışında {n} kiracı var.",
+    "confirmMaintenance": "Yeniden başlatmadan sonra bakım moduna geçerler: yalnızca platformun kendi kiracısı oturum açabilir, bu kiracıların kişilerinin açık oturumları ve API anahtarları çalışmaz.",
+    "confirmKept": "Hiçbir şey silinmez: kişileri, depoları, dosyaları, oturum açma sağlayıcıları ve ayarları korunur. Mod yeniden açılınca her kiracı olduğu gibi geri gelir.",
+    "confirmRestart": "Değişiklik şimdi kaydedilir, filex yeniden başlatılınca devreye girer.",
+    "confirmLabel": "Onaylamak için kiracı sayısını ({n}) yazın",
+    "confirmAction": "Kapat"
+  },
   "appStore": {
     "title": "Mağazadan kur",
     "subtitle": "Bir uygulama mağazası sizi bir kurulum bağlantısıyla buraya gönderdi. İncelemeyi okuyup siz karar verirsiniz; Kur'a basmadan hiçbir şey kurulmaz.",
@@ -4254,9 +4404,100 @@
       "store_source_changed_direct": "Kurulu sürüm ({version}) bir mağazadan değil, doğrudan deposundan ({repo}) kuruldu. {store} mağazasının ücretli bağlantısı kurulu bir uygulamayı kendi lisansına almaz: mağazanın ücretli sürümüne geçmek için önce kurulu uygulamayı kaldırın (bu, ayarlarını ve sakladıklarını siler), sonra bağlantıyı yeniden açın.",
       "intent_version_rollback": "{installed} kurulu; bağlantı {link} sürümü için ve bu daha yeni değil. Mağaza bağlantısı kurar ya da yükseltir, asla geri götürmez.",
       "intent_session_unknown": "Bu inceleme artık açık değil: zaten kuruldu ya da kapatıldı veya süresi doldu. Mağazanın kurulum bağlantısını yeniden açın.",
-      "license_key_invalid": "Bu lisans anahtarı kullanılamaz: 4 ile 512 karakter arası, boşluksuz (sunucunun onu saklamak için FILEX_SECRET_KEY'e de ihtiyacı var)."
+      "license_key_invalid": "Bu lisans anahtarı kullanılamaz: 4 ile 512 karakter arası, boşluksuz (sunucunun onu saklamak için FILEX_SECRET_KEY'e de ihtiyacı var).",
+      "store_not_connected": "Bu filex mağazaya bağlı değil. Bir yönetici onu Eklentiler, Uygulamalar, Güvenilen mağazalar, Bağla altından, mağazanın \"My instances\" sayfasının ürettiği tek kullanımlık kodla bağlar.",
+      "store_connection_refused": "Mağaza bu filex'in imzalı isteğini reddetti. Mağaza bağlantıyı kestiyse yeni bir kodla yeniden bağlayın.",
+      "store_connect_code_invalid": "Mağaza bu bağlantı kodunu kabul etmedi: kod bilinmiyor, kullanılmış, süresi dolmuş ya da başka bir filex adresi için üretilmiş. Mağazanın \"My instances\" sayfasında bu filex için yeni bir kod üretin.",
+      "store_refused": "Mağaza reddetti: {message}",
+      "store_index_invalid": "Mağazanın kataloğu, mağazaya güvenilen anahtarla doğrulanmıyor, süresi dolmuş ya da bu filex'in okuduğu biçimde değil. Ondan hiçbir şey gösterilmiyor.",
+      "store_media_invalid": "Mağazanın kataloğunda böyle bir simge yok ya da simgenin baytları adının sabitlediği baytlar değil."
     },
     "malformed": "Bu adres, filex'in okuyabildiği bir mağaza kurulum bağlantısı değil. Mağazanın Kur bağlantısını yeniden açın.",
-    "framed": "Bir mağazanın kurulum bağlantısı bir çerçevenin içinde kullanılamaz. Kendi tarayıcı sekmesinde açın."
+    "framed": "Bir mağazanın kurulum bağlantısı bir çerçevenin içinde kullanılamaz. Kendi tarayıcı sekmesinde açın.",
+    "connection": {
+      "connected": "Bağlı",
+      "notConnected": "Bağlı değil",
+      "connect": "Bağla",
+      "reconnect": "Yeniden bağla",
+      "disconnect": "Bağlantıyı kes",
+      "confirmDisconnect": "Bu filex'in {store} ile bağlantısı kesilsin mi? Yeniden bağlanana kadar mağaza ekranından gelen istekler onaylanamaz.",
+      "done": "{store} ile bağlantı kuruldu.",
+      "intro": "Mağazada \"My instances\" sayfasını açın, bu filex'in adresini seçin ve bir bağlantı kodu üretin. Kod bir kez ve 30 dakika boyunca geçerlidir. filex bu mağaza için kendine ait bir anahtar üretir; mağaza yalnızca anahtarın açık yarısını saklar ve başka bir şey istemez.",
+      "code": "Bağlantı kodu",
+      "codeHint": "fxc_ ile başlar",
+      "detail": "Anahtar {key} · bağlayan {who}, {when}"
+    },
+    "view": {
+      "title": "Mağaza ekranı",
+      "intro": "filex içinde bir \"Uygulama Mağazası\" sayfası: burada seçilen mağazaların kataloğu, tarayıcı tarafından değil bu sunucu tarafından okunur ve doğrulanır. Burada seçilen kişiler bir uygulama isteyebilir; istek yukarıdaki Kurulum isteklerine düşer ve kurulum yine sizin incelemenizden geçer.",
+      "tenant": "Kiracı",
+      "tenantHint": "Her kiracının kendi ayarı vardır; ayarı olmayan kiracı ekranı görmez.",
+      "enabled": "Mağaza ekranını göster",
+      "enabledHelp": "Aşağıda seçilen kişilerin gezinti paneline \"Uygulama Mağazası\" satırını ekler.",
+      "stores": "Gösterdiği mağazalar",
+      "noStores": "Henüz güvenilen bir mağaza yok. Bir mağazaya kendi kurulum bağlantısından güvenilir.",
+      "connected": "Bağlı: istekler onaylanabilir",
+      "notConnected": "Bağlı değil: istekler bağlanana kadar bekler",
+      "unconnected": "Henüz bağlı değil: {stores}. Bu mağazadan istek bırakılabilir, ancak siz yukarıdan bağlayana kadar onaylanamaz.",
+      "audience": {
+        "title": "Kimler görür",
+        "everyone": "Herkes",
+        "everyoneHelp": "Bu kiracının oturum açmış her hesabı",
+        "roles": "Roller",
+        "rolesHelp": "Aşağıda seçilen rollerden birine sahip hesaplar",
+        "groups": "Gruplar",
+        "groupsHelp": "Aşağıda seçilen grupların üyeleri"
+      },
+      "roles": "Roller",
+      "role": {
+        "admin": "Yönetici",
+        "user": "Kullanıcı",
+        "viewer": "İzleyici"
+      },
+      "groups": "Gruplar",
+      "noGroups": "Bu kiracıda henüz grup yok.",
+      "saved": "Mağaza ekranı kaydedildi.",
+      "updated": "Değiştiren {who}, {when}"
+    }
+  },
+  "storeScreen": {
+    "title": "Uygulama mağazası",
+    "subtitle": "Yöneticinizin seçtiği mağazalardaki uygulamalar. Birini isteyin; bir yönetici karar verir ve kurar.",
+    "back": "Dosyalara dön",
+    "hidden": "Mağaza ekranı bu hesaba gösterilmiyor. Kimlerin göreceğine bir yönetici karar verir.",
+    "store": "Mağaza",
+    "search": "Uygulama ara",
+    "stale": "Mağazaya şu anda ulaşılamıyor: bu, filex'in son denetlediği haliyle kataloğudur ({when}).",
+    "empty": "Mağazada listelenen uygulama yok.",
+    "noMatch": "Aramaya uyan uygulama yok.",
+    "details": "Ayrıntılar",
+    "request": "Bu uygulamayı iste",
+    "requestIntro": "İsteğiniz aşağıdaki sözlerinizle yöneticilere gider. Karar onlarındır; uygulamayı kurduklarında uygulamalarınız arasında görünür.",
+    "reason": "Neden ihtiyacınız var?",
+    "reasonPlaceholder": "Ne için kullanacağınız",
+    "send": "İsteği gönder",
+    "sent": "{name} isteğiniz yöneticilere gönderildi.",
+    "alreadySent": "{name} isteğiniz zaten yöneticileri bekliyor.",
+    "tooMany": "Bekleyen birkaç isteğiniz var; yenisini istemeden önce bir karar verilmesini bekleyin.",
+    "alreadyInstalled": "Bu sürüm zaten kurulu.",
+    "mine": "İsteklerim",
+    "noRequests": "Henüz bir uygulama istemediniz.",
+    "verified": "Doğrulanmış",
+    "fields": {
+      "app": "Uygulama",
+      "version": "Sürüm",
+      "permissions": "İzinler",
+      "state": "Burada",
+      "publisher": "Yayıncı",
+      "store": "Mağaza",
+      "requested": "İstenme",
+      "status": "Durum",
+      "note": "Not"
+    },
+    "state": {
+      "installed": "Kurulu",
+      "pending": "İstendi",
+      "update": "{version} sürümü kurulu"
+    }
   }
 }

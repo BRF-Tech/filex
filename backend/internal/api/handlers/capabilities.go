@@ -163,6 +163,15 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 		redactExternalHosts(merged)
 	}
 
+	// The multi-tenant mode IN FORCE (internal/tenancy): the one answer every
+	// screen reads to decide whether anything about tenants or realms is
+	// drawn at all (web composables/useTenancy). Always present, true or
+	// false, so a client never has to guess from the absence of `realm`. A
+	// change saved on Admin → Multi-tenant mode shows here after the restart
+	// that puts it in force, never before: the screens follow what the server
+	// enforces.
+	merged["multi_tenant"] = h.MultiTenant
+
 	// Per-tenant branding: identify only the tenant this host belongs to.
 	if h.MultiTenant && h.Store != nil {
 		p, _ := h.Store.GetProviderByHost(r.Context(), multioidc.RequestHost(r))

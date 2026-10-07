@@ -4,7 +4,7 @@
 //
 //   node e2e/shots/apps.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/apps/ (the release named in ./release.mjs):
+// Writes e2e/.artifacts/shots/capture/apps/ (the capture folder, ./release.mjs):
 //
 //   apps-install-review-1440.png  Plugins → Apps → Install, stopped at the review
 //                                 of every permission filex-sign asks for
@@ -48,7 +48,7 @@
 //   SHOTS_ENGINES          auto (default) | host | container — where the engines come from
 //   SHOTS_ENGINES_IMAGE    the image for `container` (default ghcr.io/brf-tech/filex:full)
 //   SHOTS_LINUX_BIN        a linux build of this tree for the container (else built on demand)
-//   SHOTS_OUT              write here instead of the release folder
+//   SHOTS_OUT              write here instead of the capture folder
 //   SHOTS_DRY_RUN=1        walk every scene to its picture and write nothing
 //   SHOTS_KEEP=1           leave the instance running afterwards
 
@@ -293,6 +293,10 @@ async function main() {
     // ── 5. …its kind of file in New document ────────────────────────────
     // A fresh page: the explorer reads the New document rows from the
     // capabilities it loads, and this one loaded them before the install.
+    // ⚠ A window tall enough for the whole dialog: at 1000px its list scrolled
+    // to the app's row, and the picture opened on the bottom edges of the
+    // office cards above it, their names cut off (0.53.0, Liberation Sans).
+    await page.setViewportSize({ width: 1440, height: 1400 });
     await page.goto(`${inst.url}/admin/explore?storage=demo`);
     await page.getByTestId('sidenav-new').waitFor({ timeout: 25_000 });
     await page.getByTestId('sidenav-new').click();
@@ -307,6 +311,7 @@ async function main() {
     await shot(page.locator('.fe-modal__card').filter({ has: newdoc }), SET, 'app-new-document-1440.png');
     await page.keyboard.press('Escape');
     await sleep(300);
+    await page.setViewportSize({ width: 1440, height: 1000 });
 
     // ── 6. …and that interface open, as the viewer of its file type ─────
     await page.goto(`${inst.url}/admin/explore?storage=demo`);

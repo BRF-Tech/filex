@@ -86,6 +86,7 @@ describe('the core settings dialog, with only what an explorer can give it', () 
       '[data-testid^="user-settings-start-"]',
       '[data-testid^="user-settings-opentrigger-"]',
       '[data-testid="user-settings-desktop-app"]',
+      '[data-testid="user-settings-install-app"]',
     ]) {
       expect(w.find(sel).exists(), sel).toBe(false);
     }
@@ -367,5 +368,72 @@ describe('the settings dialog is a dialog in the page, not in the top layer', ()
     await w.setProps({ modelValue: false });
     await flushPromises();
     expect(document.activeElement).toBe(opener);
+  });
+});
+
+/* ── installing the web app on a phone (#190) ─────────────────────────────
+ *
+ * ⚠⚠ A phone had no install row: the downloads group is the desktop app's,
+ * drawn only for a PC (`desktopApp.platform` is null on a phone), and the
+ * reminder that does offer the web app was closed for good or never drawn.
+ * The host's `installApp` row is where the offer stays. */
+describe('the web app’s install row, when the host has one', () => {
+  async function preferences(installApp: UserSettingsHost['installApp'], extra: Partial<UserSettingsHost> = {}, locale = 'en') {
+    const { host } = plainHost({ installApp, ...extra }, locale);
+    const w = open(host);
+    await flushPromises();
+    await w.find('[data-testid="user-settings-tab-preferences"]').trigger('click');
+    return w;
+  }
+
+  it('a browser that offered an install: one button opens its dialog', async () => {
+    const install = vi.fn(async () => 'accepted' as const);
+    const w = await preferences({ state: 'prompt', install });
+    const row = w.find('[data-testid="user-settings-install-app"]');
+    expect(row.exists()).toBe(true);
+    expect(row.attributes('data-state')).toBe('prompt');
+    await w.find('[data-testid="user-settings-install-app-button"]').trigger('click');
+    await flushPromises();
+    expect(install).toHaveBeenCalledTimes(1);
+  });
+
+  it('an iPhone: the Share sheet, in words, and no button', async () => {
+    const w = await preferences({ state: 'ios', install: vi.fn() });
+    expect(w.find('[data-testid="user-settings-install-app-ios"]').text()).toBe(coreEn['install.iosInstructions']);
+    expect(w.find('[data-testid="user-settings-install-app-button"]').exists()).toBe(false);
+  });
+
+  it('a phone whose browser has not offered one: its own menu', async () => {
+    const w = await preferences({ state: 'menu', install: vi.fn() });
+    expect(w.find('[data-testid="user-settings-install-app-menu"]').text()).toBe(coreEn['install.menuInstructions']);
+  });
+
+  it('nothing to offer (a PC, the installed app): no row', async () => {
+    const w = await preferences({ state: null, install: vi.fn() });
+    expect(w.find('[data-testid="user-settings-install-app"]').exists()).toBe(false);
+  });
+
+  it('speaks Turkish with Turkish characters', async () => {
+    const w = await preferences({ state: 'ios', install: vi.fn() }, {}, 'tr');
+    const row = w.find('[data-testid="user-settings-install-app"]');
+    expect(row.text()).toContain(tr['userSettings.prefs.installApp']);
+    expect(row.text()).toContain('Ana Ekrana Ekle');
+  });
+
+  it('an iPhone’s browser tab is told where its notifications are: the Home Screen app', async () => {
+    const w = await preferences(
+      { state: 'ios', install: vi.fn() },
+      {
+        browserNotifications: {
+          desktopShell: false,
+          permission: () => 'unsupported',
+          enabled: () => false,
+          setEnabled: vi.fn(),
+          ask: vi.fn(async () => 'unsupported' as const),
+        },
+      },
+    );
+    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+    expect(w.find('[data-testid="user-settings-browser-ios"]').text()).toBe(coreEn['notifications.prefs.iosHomeScreen']);
   });
 });

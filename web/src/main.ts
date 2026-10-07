@@ -24,6 +24,7 @@ import { onPublicPageBase } from './router';
 import { useToastStore } from './stores/toast';
 import { installAxiosInterceptors } from './api/client';
 import { initRuntimeConfig } from './api/runtimeConfig';
+import { captureInstallPrompt } from './composables/useInstallPrompt';
 
 import './styles/main.css';
 // ⚠ The admin table's stylesheet used to be `./styles/table.css`, imported
@@ -46,6 +47,14 @@ import './styles/main.css';
 // ⚠ Repeat imports elsewhere are harmless (one module, resolved once) but
 // redundant — this is the line that guarantees it, not they.
 import '@brftech/filex-core/style.css';
+
+// ⚠⚠ The browser's install offer, caught before ANYTHING else (task #190).
+// Chromium fires `beforeinstallprompt` once per page load and replays it to
+// nobody, so it is caught here rather than by whichever component happens to
+// mount first; the banner and the settings row both read the one saved event
+// (composables/useInstallPrompt). Not on a public link: that page shows no
+// install offer of its own (App.vue), so it leaves the browser's alone.
+if (!onPublicPageBase()) captureInstallPrompt();
 
 // Pick up any injected runtime config (Electron preload sets the API base +
 // token before the bundle boots). No-op in the plain web build. Must run before

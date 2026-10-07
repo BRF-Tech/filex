@@ -600,7 +600,7 @@ func getInTx(ctx context.Context, tx *sql.Tx, id string) (queue.Op, error) {
 }
 
 // sqlTime renders a *time.Time for the `not_before` column the way SQLite's
-// own CURRENT_TIMESTAMP does: UTC, second resolution, "2006-01-02 15:04:05".
+// own CURRENT_TIMESTAMP does: UTC, whole seconds, "2006-01-02 15:04:05".
 //
 // ⚠⚠ This is not cosmetic. `not_before` is compared in SQL, as
 // `not_before <= CURRENT_TIMESTAMP`, and SQLite has no date type — the
@@ -619,11 +619,24 @@ func getInTx(ctx context.Context, tx *sql.Tx, id string) (queue.Op, error) {
 // Rows written by the old code still read back — the scan side accepts both
 // renderings — they merely compare wrongly until they are rewritten, and the
 // only ops that carry not_before are short-lived retries and save scans.
+//
+// ⚠ Rounded UP to the whole second, never down. The column holds whole
+// seconds, and a deadline cut down to its second made the op runnable up to a
+// second BEFORE the time it asked for (12:00:02.9 stored as 12:00:02).
+// TestNotBefore_HoldsThenReleases checks every Dequeue against the clock.
 func sqlTime(t *time.Time) any {
 	if t == nil {
 		return nil
 	}
-	return t.UTC().Format("2006-01-02 15:04:05")
+	return ceilSecond(t.UTC()).Format("2006-01-02 15:04:05")
+}
+
+// ceilSecond rounds t up to the next whole second unless it is on one.
+func ceilSecond(t time.Time) time.Time {
+	if r := t.Truncate(time.Second); !r.Equal(t) {
+		return r.Add(time.Second)
+	}
+	return t
 }
 
 // newID returns a 16-byte hex random string. Crockford-style would be

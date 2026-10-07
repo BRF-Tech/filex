@@ -1171,6 +1171,16 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		return crossStorage || n.StorageID == s.ID
 	}
 
+	// rootRows counts the nodes inside the root of a confined caller (a
+	// `root:` token, X-Filex-Root), every node for an unconfined one.
+	// ⚠ `truncated` is judged by these alone: a page or a window filled by
+	// hits outside the root told a confined caller that files outside its
+	// folder match (filex #185). Counted on a copy - confineNodesToRoot
+	// filters the slice it is given in place.
+	rootRows := func(in []*model.Node) int {
+		return len(confineNodesToRoot(r.Context(), h.Store, append([]*model.Node(nil), in...)))
+	}
+
 	truncated := false
 	switch {
 	case parsed.HasTagFilter() && parsed.Text == "":
@@ -1182,11 +1192,19 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		}
 	case h.Index != nil:
 		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, managerSearchPage, search.ScopeName, tagFilter)
-		// The index returns at most a page; a full page is a cut answer.
-		truncated = len(hits) >= managerSearchPage
+		// The index returns at most a page; a full page is a cut answer - a
+		// page full of hits inside the root, for a confined caller (rootRows).
+		pageNodes := make([]*model.Node, 0, len(hits))
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
-			if err != nil || !keep(n) {
+			if err != nil {
+				n = nil
+			}
+			pageNodes = append(pageNodes, n)
+		}
+		truncated = rootRows(pageNodes) >= managerSearchPage
+		for _, n := range pageNodes {
+			if n == nil || !keep(n) {
 				continue
 			}
 			nodes = append(nodes, n)
@@ -1207,8 +1225,12 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			if err != nil {
 				return nil, err
 			}
-			if len(rows) > size {
+			// Full when more rows came back than the window holds - rows
+			// inside the root, for a confined caller (rootRows).
+			if rootRows(rows) > size {
 				truncated = true
+			}
+			if len(rows) > size {
 				rows = rows[:size]
 			}
 			return rows, nil

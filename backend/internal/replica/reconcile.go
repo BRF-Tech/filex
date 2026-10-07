@@ -6,38 +6,113 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/queue"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
-// Service orchestrates reconciliation + cron status report. Wires
-// store, queue, notify and the live ReplicatedDriver.
+// ErrNotLinked is what Wrappers answers for a storage that does not replicate:
+// it has no replication target, its target is switched off or gone, or the
+// storage itself is gone.
+var ErrNotLinked = errors.New("replica: storage is not linked to an enabled replication target")
+
+// ErrNoReplica is what the repair calls answer when no storage replicates at
+// all (the admin endpoints turn it into 503 "no replica configured").
+var ErrNoReplica = errors.New("no replica configured")
+
+// Link is a storage's live replication: the wrapper the running process
+// writes through, and the target it fans out to.
+type Link struct {
+	StorageID int64
+	TargetID  int64
+	Driver    *storage.ReplicatedDriver
+}
+
+// Wrappers finds the live replication wrapper of a storage - the one the
+// server's resolver hands every writer (internal/server storage_cache.go).
+//
+// ⚠ Repairs and the initial copy go through THIS, not through a wrapper of
+// their own: the Service was once built with a nil wrapper ("v0.1 skips
+// that"), so every Fix all answered "no replica configured" whatever was
+// linked (#186).
+type Wrappers interface {
+	// Replicated answers ErrNotLinked for a storage that does not replicate.
+	Replicated(ctx context.Context, storageID int64) (Link, error)
+}
+
+// Service orchestrates reconciliation, the initial copy and the cron status
+// report. Wires store, queue, notify and the live wrappers.
 //
 // The queue handler for op type "replica_retry" should be Service.
-// HandleRetry — the bootstrap registers it on the queue Pool.
+// HandleRetry — the bootstrap registers it on the queue Pool; the initial
+// copy's is HandleInitialCopy (TypeInitialCopy).
 type Service struct {
 	store    db.Store
-	driver   *storage.ReplicatedDriver
+	wrappers Wrappers
 	queue    queue.Driver
 	notifier notify.Service
 
 	// stop coordinates shutdown of the cron goroutine.
 	stop chan struct{}
+
+	// The initial copy's clock and slice size (initial.go); tests shorten them.
+	now        func() time.Time
+	slice      time.Duration
+	sliceFiles int
+	retryAfter time.Duration
 }
 
-// New wires a Service.
-func New(store db.Store, driver *storage.ReplicatedDriver, q queue.Driver, n notify.Service) *Service {
+// New wires a Service. wrappers may be nil (tests of the report alone): then
+// nothing can be repaired or copied and those calls answer ErrNoReplica.
+func New(store db.Store, wrappers Wrappers, q queue.Driver, n notify.Service) *Service {
 	return &Service{
-		store:    store,
-		driver:   driver,
-		queue:    q,
-		notifier: n,
-		stop:     make(chan struct{}),
+		store:      store,
+		wrappers:   wrappers,
+		queue:      q,
+		notifier:   n,
+		stop:       make(chan struct{}),
+		now:        time.Now,
+		slice:      defaultSlice,
+		retryAfter: defaultRetryAfter,
 	}
+}
+
+// Linked returns the storages that replicate: linked to a replication target
+// that exists and is enabled.
+func (s *Service) Linked(ctx context.Context) ([]*model.Storage, error) {
+	storages, err := s.store.ListStorages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := s.store.ListReplicationTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enabled := map[int64]bool{}
+	for _, t := range targets {
+		if t.Enabled {
+			enabled[t.ID] = true
+		}
+	}
+	var out []*model.Storage
+	for _, st := range storages {
+		if st.ReplicaTargetID != nil && enabled[*st.ReplicaTargetID] {
+			out = append(out, st)
+		}
+	}
+	return out, nil
+}
+
+// HasLinked reports whether any storage replicates. The repair endpoints
+// answer 503 "no replica configured" only when none does.
+func (s *Service) HasLinked(ctx context.Context) (bool, error) {
+	linked, err := s.Linked(ctx)
+	return len(linked) > 0, err
 }
 
 // Reconciled is what one "Repair all" did: retries it queued, and retries it
@@ -53,21 +128,22 @@ type Reconciled struct {
 // ⚠ Every press of "Repair all" queued a full set again. The list looks the
 // same until a retry has run, which invites another press, and each one
 // doubled the queue and told the bell "retries queued" once more.
-func RetryDedupKey(path, op string) string {
-	return queue.TypeReplicaRetry + ":" + op + ":" + path
+func RetryDedupKey(storageID int64, path, op string) string {
+	return queue.TypeReplicaRetry + ":" + strconv.FormatInt(storageID, 10) + ":" + op + ":" + path
 }
 
 // enqueueRetry queues one retry, or reports it already waiting.
-func (s *Service) enqueueRetry(ctx context.Context, path, op string) (queued bool, err error) {
+func (s *Service) enqueueRetry(ctx context.Context, storageID int64, path, op string) (queued bool, err error) {
 	_, err = s.queue.Enqueue(ctx, queue.Op{
 		Type: queue.TypeReplicaRetry,
 		Payload: map[string]any{
-			"path": path,
-			"op":   op,
+			"storage_id": storageID,
+			"path":       path,
+			"op":         op,
 		},
 		Priority:    50,
 		MaxAttempts: 3,
-		DedupKey:    RetryDedupKey(path, op),
+		DedupKey:    RetryDedupKey(storageID, path, op),
 	})
 	if errors.Is(err, queue.ErrDuplicate) {
 		return false, nil
@@ -82,12 +158,12 @@ func (s *Service) ReconcileAll(ctx context.Context) (Reconciled, error) {
 	if s.queue == nil {
 		return out, fmt.Errorf("replica reconcile: queue not configured")
 	}
-	failures, _, err := s.store.ListReplicaFailures(ctx, true, 10000, 0)
+	failures, err := s.unresolved(ctx)
 	if err != nil {
 		return out, err
 	}
 	for _, f := range failures {
-		queued, err := s.enqueueRetry(ctx, f.Path, f.Op)
+		queued, err := s.enqueueRetry(ctx, f.StorageID, f.Path, f.Op)
 		switch {
 		case err != nil:
 			slog.Warn("replica reconcile: enqueue failed",
@@ -111,78 +187,96 @@ func (s *Service) ReconcileAll(ctx context.Context) (Reconciled, error) {
 	return out, nil
 }
 
-// FixOne enqueues a single retry for one (path, op) pair, unless one is
+// failurePage is the most rows the store hands out in one page.
+const failurePage = 1000
+
+// maxReconcile bounds one Fix all: a backlog larger than this is replayed by
+// pressing again once the first retries have run.
+const maxReconcile = 100000
+
+// unresolved reads every unresolved failure, page by page.
+//
+// ⚠ One call asking for 10,000 rows got 100: the store clamps a page above
+// 1,000 to 100, so Fix all replayed the newest hundred failures and said
+// nothing of the rest.
+func (s *Service) unresolved(ctx context.Context) ([]*model.ReplicaFailure, error) {
+	var out []*model.ReplicaFailure
+	for offset := 0; offset < maxReconcile; offset += failurePage {
+		page, _, err := s.store.ListReplicaFailures(ctx, true, failurePage, offset)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, page...)
+		if len(page) < failurePage {
+			break
+		}
+	}
+	return out, nil
+}
+
+// FixOne enqueues a single retry for one (storage, path, op), unless one is
 // waiting in the queue already (queued=false, no error).
-func (s *Service) FixOne(ctx context.Context, path, op string) (queued bool, err error) {
+func (s *Service) FixOne(ctx context.Context, storageID int64, path, op string) (queued bool, err error) {
 	if s.queue == nil {
 		return false, fmt.Errorf("replica reconcile: queue not configured")
 	}
-	return s.enqueueRetry(ctx, path, op)
+	return s.enqueueRetry(ctx, storageID, path, op)
+}
+
+// payloadInt reads an integer from a queue payload, which comes back from
+// JSON as a float64 (or a json.Number, or a string from an older writer).
+func payloadInt(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	case float64:
+		return int64(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return i
+	case string:
+		i, _ := strconv.ParseInt(n, 10, 64)
+		return i
+	}
+	return 0
 }
 
 // HandleRetry is the queue.Handler for op type "replica_retry". The
 // bootstrap calls Pool.Register(queue.TypeReplicaRetry, svc.HandleRetry).
 //
+// The retry goes through the storage's LIVE wrapper (Wrappers), so it writes
+// to the target the storage is linked to now. A storage that no longer
+// replicates - unlinked, its target switched off or deleted, the storage gone
+// - leaves nothing to repair: its failure is resolved and the op succeeds.
+//
 // The handler is structured to never panic and always either:
 //   - succeed (success → Ack on the queue side)
 //   - return an error so the queue requeues with backoff
 func (s *Service) HandleRetry(ctx context.Context, op queue.Op) error {
-	if s.driver == nil || !s.driver.HasReplica() {
-		return fmt.Errorf("replica retry: no replica configured")
+	if s.wrappers == nil {
+		return fmt.Errorf("replica retry: %w", ErrNoReplica)
 	}
+	storageID := payloadInt(op.Payload["storage_id"])
 	path, _ := op.Payload["path"].(string)
 	opName, _ := op.Payload["op"].(string)
 	if path == "" || opName == "" {
 		return fmt.Errorf("replica retry: missing path/op in payload")
 	}
-
 	switch opName {
-	case "write":
-		return s.retryWrite(ctx, path)
-	case "delete":
-		return s.retryDelete(ctx, path)
-	case "move":
-		// Retry is best-effort: we treat move as "write the dest path
-		// from primary" because we don't keep the move's src.
-		return s.retryWrite(ctx, path)
-	case "copy":
-		return s.retryWrite(ctx, path)
+	case "write", "delete", "move", "copy":
 	default:
 		return fmt.Errorf("replica retry: unknown op %q", opName)
 	}
-}
-
-func (s *Service) retryWrite(ctx context.Context, path string) error {
-	primary := s.driver.Primary()
-	replica := s.driver.Replica()
-	rc, err := primary.Read(ctx, path)
+	link, err := s.wrappers.Replicated(ctx, storageID)
+	if errors.Is(err, ErrNotLinked) {
+		return s.store.ResolveReplicaFailure(ctx, storageID, path, opName)
+	}
 	if err != nil {
-		return fmt.Errorf("read primary: %w", err)
+		return fmt.Errorf("replica retry: %w", err)
 	}
-	defer rc.Close()
-	stat, err := primary.Stat(ctx, path)
-	if err != nil {
-		return fmt.Errorf("stat primary: %w", err)
-	}
-	w, ok := replica.(storage.Writer)
-	if !ok {
-		return fmt.Errorf("replica driver lacks Writer interface")
-	}
-	if err := w.Write(ctx, path, rc, stat.Size); err != nil {
-		return fmt.Errorf("write replica: %w", err)
-	}
-	return s.store.ResolveReplicaFailure(ctx, path, "write")
-}
-
-func (s *Service) retryDelete(ctx context.Context, path string) error {
-	d, ok := s.driver.Replica().(storage.Deleter)
-	if !ok {
-		return fmt.Errorf("replica driver lacks Deleter interface")
-	}
-	if err := d.Delete(ctx, path); err != nil {
-		return fmt.Errorf("delete replica: %w", err)
-	}
-	return s.store.ResolveReplicaFailure(ctx, path, "delete")
+	return link.Driver.Repair(ctx, path, opName)
 }
 
 // GenerateReport computes the singleton replica_status_reports row

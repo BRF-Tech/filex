@@ -368,6 +368,24 @@ describe('item 1 — a home page with a menu of sections', () => {
     await flushPromises();
     expect(pluginView.mock.calls.length).toBe(calls);
   });
+
+  it('inside a host page the body is not a second main region; in a tab of its own it is the main', async () => {
+    // e2e 204 (0.53 round) found two <main> on an admin page, the panel's
+    // own and one drawn inside it: a document has one main landmark, and a
+    // main inside another is not valid HTML. The admin panel's Apps pages
+    // mount this screen embedded, inside the panel's <main>.
+    const pluginView = vi.fn(async () => ({ surface: home('to-sign') }));
+    const api = { pluginView, pluginViewEvent: vi.fn() } as never;
+    const inHost = mount(PluginPageView, {
+      props: { locale: 'en' as const, api, plugin: 'sign', view: 'envelopes', frame: 'embedded' as const },
+    });
+    await flushPromises();
+    expect(inHost.find('.fe-apppage__body').exists()).toBe(true);
+    expect(inHost.find('main').exists()).toBe(false);
+    const own = mount(PluginPageView, { props: { locale: 'en' as const, api, plugin: 'sign', view: 'envelopes' } });
+    await flushPromises();
+    expect(own.find('main.fe-apppage__body').exists()).toBe(true);
+  });
 });
 
 // The app's `sign` icon is in the shared catalogue (2026-09-21, a tester: the

@@ -12,7 +12,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [Configuration](CONFIGURATION.md) - every `FILEX_*` variable + `config.yaml`
 - [Admin panel](ADMIN-PANEL.md) - the administrator's menu: where every page
   lives (Files & storage, People & security, System), who is offered which
-  page, the keyboard, screen readers and the phone's drawer
+  page, the keyboard, screen readers and the phone's drawer; and the panel's
+  search (pages, settings, people, API keys, apps, storages, shares, files,
+  the `file:` / `user:` … prefixes, recent searches)
 - [Databases](DATABASES.md) - SQLite, PostgreSQL, MySQL/MariaDB: which to pick,
   what each needs, and what "supported" is checked to mean
 - [Releases](RELEASES.md) - every release with a plain-English summary
@@ -58,7 +60,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   outside participants: the four that ship (**e-Signature**,
   `BRF-Tech/filex-sign`, **Convert**, `BRF-Tech/filex-convert`, **filextext**,
   `BRF-Tech/filextext-app`, and **draw.io**, `BRF-Tech/filex-drawio`), installing
-  one from GitHub through the permission review,
+  one from GitHub through the permission review, or
+  [from a store](APP-PLUGINS.md#installing-from-a-store) - its
+  [paid apps](APP-PLUGINS.md#paid-apps), and
+  [the store screen](APP-PLUGINS.md#the-store-screen) where the people of
+  this filex browse a store's catalog and ask for an app (0.53) -
   [install requests](APP-PLUGINS.md#install-requests) (an API key asks, an
   administrator decides), what the administrator controls,
   [app permissions](APP-PLUGINS.md#app-permissions) handed out per role and per
@@ -141,7 +147,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   `FILEX_CORS_ALLOWED_ORIGINS` for a page of yours that needs it
 - [RBAC, folder access & API tokens](RBAC.md) - account roles, per-storage RBAC, per-item grants
   (**Admin → Folder access**), what an API token's verbs allow on every surface,
-  and the acts that need an administrator signed in
+  [comments, a permission with a level](RBAC.md#permissions-with-a-level-comments)
+  (`comments:rw` to add and delete one, since 0.53), and the acts that need an
+  administrator signed in
 - [Roles & per-user permissions](PERMISSIONS.md) - what an account may do: 29
   permissions, built-in and custom roles, per-person exceptions, delegated
   admins, the permissions installed apps declare, public links that follow
@@ -159,15 +167,24 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   off, and [what "Download failed" was](ONLYOFFICE.md#failure-editor-shows-download-failed)
   (the editor says which of its two failures it was), and
   [CSV files](ONLYOFFICE.md#csv-files): a `.csv` opens in ONLYOFFICE's
-  spreadsheet and is saved back as the same kind of CSV (0.51)
+  spreadsheet and is saved back as the same kind of CSV (0.51);
+  [when the document changes while it is open](ONLYOFFICE.md#when-the-document-changes-while-it-is-open)
+  (never saved over: reloaded, or a question) and
+  [the editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)
+  (`FILEX_ONLYOFFICE_FRAME_ORIGIN`: the editor's script on the Document
+  Server's origin, not in filex's pages) (0.53)
 
 ## Features
 
 - [Desktop app](DESKTOP.md) - Windows/Linux/macOS app: multiple accounts, background sync,
   [dragging files out onto the desktop](DESKTOP.md#dragging-files-out),
-  [opening Office documents off your own disk](DESKTOP.md#opening-documents-from-your-computer),
+  [opening Office documents off your own disk](DESKTOP.md#opening-documents-from-your-computer)
+  ([a save in another format](DESKTOP.md#a-save-in-another-format),
+  [when the file changes while it is open](DESKTOP.md#when-the-file-changes-while-it-is-open)),
+  [the App store in a window](DESKTOP.md#the-app-store),
   [a portable Windows copy that installs nothing](DESKTOP.md#portable-windows),
   [the notification bell and your account menu in the window](DESKTOP.md#notifications-and-your-account),
+  [the web app installed on a phone or a tablet](DESKTOP.md#on-a-phone-or-a-tablet-the-web-app),
   and on Linux [Chromium's sandbox](DESKTOP.md#appimage-on-recent-ubuntu)
   (the one-time AppArmor profile an AppImage needs on recent Ubuntu; the snap
   relies on [its strict confinement instead](DESKTOP.md#the-snap-and-the-sandbox))
@@ -192,9 +209,11 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   coalesced (and why a plain trailing debounce starves), and the 12 s polling
   fallback
 - [Notifications](NOTIFICATIONS.md) - webhook + in-app bell: the unread badge,
-  the full list inside the explorer for everybody, and where a click goes
+  the full list inside the explorer for everybody, where a click goes, and the
+  optional digest (kinds turned off are told once per window, folder by
+  folder; out of the box everything is told at once)
 - [Trash & versioning](TRASH-VERSIONING.md) - soft-delete/restore + file history
-- [Replication](REPLICATION.md) - primary→replica mirroring & reconcile
+- [Replication](REPLICATION.md) - primary→replica mirroring, the initial copy of a linked storage & reconcile
 - [Quotas](QUOTAS.md) - per-user ceilings: what counts, when it is
   released, and how a public drop link is billed
 - [Protection & antivirus](PROTECTION.md) - ClamAV scanning, through a local
@@ -215,8 +234,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
 - [End-to-end encryption roadmap](E2E-ROADMAP.md) - what is built
   (`filex encrypt` and large files in an in-place conversion since 0.50) and
   the design of the vault level, what is left, with open questions and estimates
-- [Multi-tenancy](MULTI-TENANCY.md) - provider/tenant mode, per-tenant isolation
-  on one instance, and [realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for):
+- [Multi-tenancy](MULTI-TENANCY.md) - provider/tenant mode and its switch on
+  Admin → Multi-tenant mode, per-tenant isolation on one instance, and [realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for):
   the tenant's sign-in name - the Realm field, `realm/name` over SFTP, the
   tenant's own address on WebDAV and FTPS, and the handoff to a tenant's address
 - [Tenant self-service](TENANT-ADMIN.md) - the Tenants screen, sign-in providers

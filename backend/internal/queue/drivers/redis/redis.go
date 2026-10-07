@@ -523,7 +523,7 @@ func (d *Driver) Enqueue(ctx context.Context, op queue.Op) (string, error) {
 	}
 	scheduledScore := ""
 	if scheduled {
-		scheduledScore = strconv.FormatInt(op.NotBefore.Unix(), 10)
+		scheduledScore = strconv.FormatInt(unixCeil(*op.NotBefore), 10)
 	}
 
 	argv := []any{
@@ -577,6 +577,18 @@ func clampPriority(p int) int {
 		return -priorityClamp
 	}
 	return p
+}
+
+// unixCeil is t in Unix seconds, rounded UP. The scheduled ZSET is scored in
+// whole seconds and swept with `score <= now` (promoteOnce), so a deadline
+// cut down to its second was promoted up to a second before the time it
+// asked for.
+func unixCeil(t time.Time) int64 {
+	s := t.Unix()
+	if t.Nanosecond() != 0 {
+		s++
+	}
+	return s
 }
 
 // dedupTTL bounds how long a coalescing claim survives. It covers the wait
@@ -759,7 +771,7 @@ func (d *Driver) Fail(ctx context.Context, id, errMsg string, retry bool) error 
 			"not_before", formatTime(notBefore),
 		)
 		pipe.ZAdd(ctx, d.scheduledKey(), goredis.Z{
-			Score:  float64(notBefore.Unix()),
+			Score:  float64(unixCeil(notBefore)),
 			Member: id,
 		})
 		if _, err := pipe.Exec(ctx); err != nil {

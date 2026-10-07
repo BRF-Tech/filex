@@ -189,8 +189,16 @@ func TestAdvisories_PublicURLReversePath(t *testing.T) {
 		}
 	})
 	t.Run("a resolvable public hostname says nothing", func(t *testing.T) {
+		// The editor runs in a frame on the document server's origin: without
+		// one, the card says where the editor runs instead (#92,
+		// TestAdvisories_SayWhereTheEditorRuns), which is not about the public
+		// URL this case is about.
 		always := func(string) bool { return false }
-		got := external.Advisories(external.OnlyOffice, "https://office.example.com", "https://files.example.com", true, always)
+		got := external.Advise(external.AdvisoryInput{
+			Service: external.OnlyOffice, ServiceURL: "https://office.example.com",
+			PublicURL: "https://files.example.com", PublicURLSet: true, Lookup: always,
+			OfficeFrameOrigin: "https://office.example.com",
+		})
 		if len(got) != 0 {
 			t.Fatalf("nothing to say, got %+v", got)
 		}
@@ -263,5 +271,50 @@ func TestAdvisories_JudgeTheCallbackAddress(t *testing.T) {
 	})
 	if !external.HasWarning(adv) {
 		t.Errorf("a loopback callback cannot reach filex from another container, got %+v", adv)
+	}
+}
+
+// TestAdvisories_SayWhereTheEditorRuns (task #92): without an origin of its
+// own for app interfaces (FILEX_APP_UI_ORIGIN) the ONLYOFFICE card says the
+// editor's api.js runs in filex's own pages - a note, never a warning, because
+// that setup works. With one, nothing. draw.io is not an api.js in the page,
+// so it never gets the note. Red before #92: the code did not exist.
+func TestAdvisories_SayWhereTheEditorRuns(t *testing.T) {
+	in := external.AdvisoryInput{
+		Service:      external.OnlyOffice,
+		ServiceURL:   "https://office.example.com",
+		PublicURL:    "https://files.example.com",
+		PublicURLSet: true,
+	}
+	got := codes(external.Advise(in))
+	if got[external.CodeEditorSameOrigin] != external.SeverityNote {
+		t.Fatalf("no origin of their own: want the %s note, got %v", external.CodeEditorSameOrigin, got)
+	}
+	if external.HasWarning(external.Advise(in)) {
+		t.Errorf("a working setup got a warning: %v", got)
+	}
+
+	in.AppUIOrigin = "https://apps.usercontent.example"
+	if _, ok := codes(external.Advise(in))[external.CodeEditorSameOrigin]; ok {
+		t.Errorf("the editor runs in a frame on %s: no note", in.AppUIOrigin)
+	}
+
+	// The document server's own origin (FILEX_ONLYOFFICE_FRAME_ORIGIN) is
+	// enough on its own.
+	in.AppUIOrigin = ""
+	in.OfficeFrameOrigin = "https://office.example.com"
+	if _, ok := codes(external.Advise(in))[external.CodeEditorSameOrigin]; ok {
+		t.Errorf("the editor runs in a frame on %s: no note", in.OfficeFrameOrigin)
+	}
+
+	in = external.AdvisoryInput{Service: external.Drawio, ServiceURL: "https://draw.example.com", PublicURL: "https://files.example.com", PublicURLSet: true}
+	if _, ok := codes(external.Advise(in))[external.CodeEditorSameOrigin]; ok {
+		t.Errorf("draw.io got the editor note")
+	}
+
+	// Nothing configured, nothing to say.
+	in = external.AdvisoryInput{Service: external.OnlyOffice, PublicURL: "https://files.example.com", PublicURLSet: true}
+	if len(external.Advise(in)) != 0 {
+		t.Errorf("no document server, yet: %+v", external.Advise(in))
 	}
 }

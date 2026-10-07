@@ -83,6 +83,15 @@ const props = defineProps<{
   lockMessage?: string;
   /** A failure outside the conversation, in the server's words. */
   failure?: string;
+  /**
+   * Drawn INSIDE another page that has a main region of its own - the
+   * admin's Corporate identity preview (PublicLinkPreview), or an embedder's
+   * page. The card is then a plain block, not a `<main>`: a document has one
+   * main landmark, and a `<main>` inside another is not valid HTML (the
+   * panel's page and the preview's card were two of them, e2e 204). The link
+   * page itself, which IS the whole page, keeps its `<main>`.
+   */
+  embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -183,7 +192,7 @@ function pluginNote(plugin: string): string {
       <span class="fe-ppage__brandname">{{ brandName }}</span>
     </header>
 
-    <main class="fe-ppage__card">
+    <component :is="embedded ? 'div' : 'main'" class="fe-ppage__card">
       <!-- The badge the card opens with. The shell draws the one its state
            calls for; a READY body names `file` or `folder` and gets the same
            circle in the same place, so a document, a folder and a locked
@@ -311,7 +320,7 @@ function pluginNote(plugin: string): string {
       </div>
 
       <slot name="extra" />
-    </main>
+    </component>
 
     <footer class="fe-ppage__foot">
       <PublicLanguagePicker

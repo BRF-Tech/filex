@@ -120,7 +120,22 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 		if len(grants) == 0 {
 			continue
 		}
-		sharedStorages = append(sharedStorages, st.Name)
+		// ⚠ The storage is named AFTER the root's filter, not before: a
+		// caller confined to a folder (a `root:` token, X-Filex-Root) was told
+		// the name of every storage it held a grant on, another storage's
+		// included, while every row of those storages was held back (filex
+		// #185). Confined, a storage is named only when one of the grants on
+		// it survives the root - it lies inside the root, or covers it (a
+		// grant on the whole storage or on a folder above the root) - which
+		// can only be a grant on the root's own storage.
+		named := !confined
+		for i := 0; !named && i < len(grants); i++ {
+			rel := acl.CleanRel(grants[i].PathPrefix)
+			named = root.Within(st.Name, rel) || confine.Root{Adapter: st.Name, Rel: rel}.Within(root.Adapter, root.Rel)
+		}
+		if named {
+			sharedStorages = append(sharedStorages, st.Name)
+		}
 
 		// One row per item: the same folder shared with the person and with
 		// one of their groups is still one folder shared with them — at the

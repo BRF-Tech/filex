@@ -35,6 +35,8 @@ const ADMIN_ENDPOINTS: { method: 'GET'; path: string; description: string }[] = 
   { method: 'GET', path: '/api/admin/replica/failures',           description: 'replica failures' },
   { method: 'GET', path: '/api/admin/replica/failures/count',     description: 'replica failures count' },
   { method: 'GET', path: '/api/admin/replica/settings',           description: 'replica settings' },
+  { method: 'GET', path: '/api/admin/replica/initial-copies',     description: 'replica initial copies (#186)' },
+  { method: 'GET', path: '/api/admin/replica/links',              description: 'replica folders on the targets (#186)' },
 ];
 
 describe('admin endpoint sweep', () => {

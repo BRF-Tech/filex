@@ -49,7 +49,16 @@ describe('connections + API keys from the navigation panel', () => {
     cy.get('[data-testid="guide-protocol"]').should('be.visible');
     // Whatever protocols this build offers, the picker must have some, and
     // choosing one must produce instructions rather than an empty card.
-    cy.get('[data-testid="guide-protocol"] option').should('have.length.greaterThan', 0);
+    //
+    // ⚠ The picker is core's ChoiceSelect since #160, not a native select:
+    // the testid is on the combobox button, and its options are drawn only
+    // while the list is open, teleported out of the control (into
+    // `<testid>-list`). So the spec does what a person does - opens the list,
+    // counts its options, picks one - instead of looking for <option>.
+    cy.get('[data-testid="guide-protocol"]').should('have.attr', 'role', 'combobox').click();
+    cy.get('[data-testid="guide-protocol-list"] [role="option"]').should('have.length.greaterThan', 0);
+    cy.get('[data-testid="guide-protocol-list"] [role="option"]').first().click();
+    cy.get('[data-testid="guide-protocol"]').should('have.attr', 'aria-expanded', 'false');
     cy.get('[data-testid="guide-facts"]').should('exist');
   });
 

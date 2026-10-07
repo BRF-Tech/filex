@@ -17,7 +17,8 @@ that lets you assemble the stack you actually need.
 
 ## Images
 
-Sizes are what you download (the compressed layers). On disk after
+Sizes are what you download: the compressed layers the registry serves for
+v0.52.0 on linux/amd64 (arm64: **~60 MB** slim, **~235 MB** full). On disk after
 `docker pull` they unpack to more - **164 MB** for `slim` (`docker images`,
 v0.31.0) and **~550 MB** for `full`. Both numbers are real; the compressed one
 is what a registry page shows you and the other is what your disk loses, so
@@ -33,11 +34,11 @@ filesystem, built from `docker/Dockerfile` on 2026-10-02).
 
 | Tag | Size | Includes |
 |---|---|---|
-| `ghcr.io/brf-tech/filex:latest` | ~225 MB | The full toolchain. Alias for `full`. |
-| `ghcr.io/brf-tech/filex:full` | ~225 MB | + ffmpeg, ghostscript, poppler-utils, ImageMagick with `imagemagick-heic` and libheif's HEVC decoder `libheif-libde265` (HEIC, HEIF and AVIF thumbnails through libheif, since 0.50; +3 MB), rsvg-convert (the SVG fallback; SVG thumbnails are built in on every image since 0.50), fonts. No LibreOffice and no JRE since 0.50: office documents are the connected ONLYOFFICE's on every tag. On `:slim` a file whose tool is missing is listed under Admin → Tools → Thumbnail repair with the tool it needs. |
-| `ghcr.io/brf-tech/filex:slim` | **~43 MB** | The Go binary and the embedded admin UI. Nothing else. |
-| `:vX.Y.Z` / `:full-vX.Y.Z` | ~225 MB | Pinned full. |
-| `:slim-vX.Y.Z` | ~43 MB | Pinned slim. |
+| `ghcr.io/brf-tech/filex:latest` | ~241 MB | The full toolchain. Alias for `full`. |
+| `ghcr.io/brf-tech/filex:full` | ~241 MB | + ffmpeg, ghostscript, poppler-utils, ImageMagick with `imagemagick-heic` and libheif's HEVC decoder `libheif-libde265` (HEIC, HEIF and AVIF thumbnails through libheif, since 0.50; +3 MB), rsvg-convert (the SVG fallback; SVG thumbnails are built in on every image since 0.50), fonts. No LibreOffice and no JRE since 0.50: office documents are the connected ONLYOFFICE's on every tag. On `:slim` a file whose tool is missing is listed under Admin → Tools → Thumbnail repair with the tool it needs. |
+| `ghcr.io/brf-tech/filex:slim` | **~62 MB** | The Go binary and the embedded admin UI. Nothing else. |
+| `:vX.Y.Z` / `:full-vX.Y.Z` | ~241 MB | Pinned full. |
+| `:slim-vX.Y.Z` | ~62 MB | Pinned slim. |
 
 The Go binary is identical in both - `slim` simply has none of the programs the
 thumbnailer shells out to.
@@ -58,7 +59,9 @@ as a design choice rather than a missing program.
 
 > ⚠ **`slim` was not slim before v0.30.x.** The tag was built from the full
 > recipe, so this table promised ~40 MB while the registry served 511 MB. The
-> number above is measured, not aspirational: `docker save … | gzip | wc -c`.
+> numbers above are measured, not aspirational: the sum of the layers the
+> registry serves for the tag (v0.52.0, 2026-10-07; the slim image's grew from
+> ~43 MB as the binary did).
 
 ### Build locally
 

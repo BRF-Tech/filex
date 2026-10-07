@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/api"
+	"github.com/brf-tech/filex/backend/internal/config"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/onlyoffice"
@@ -70,7 +71,14 @@ func ooSign(t *testing.T, secret string, claims map[string]any) string {
 // an OnlyOffice service whose JWT secret is "onlyoffice-test-secret".
 func editorFixture(t *testing.T, root string) (*httptest.Server, db.Store) {
 	t.Helper()
-	srv, _, store := testutil.NewTestServerWith(t, nil, func(d *api.Deps) {
+	return editorFixtureWith(t, root, nil)
+}
+
+// editorFixtureWith is editorFixture with the server's configuration adjusted
+// first (FILEX_APP_UI_ORIGIN, for the editor's frame - task #92).
+func editorFixtureWith(t *testing.T, root string, cfgMutate func(*config.Config)) (*httptest.Server, db.Store) {
+	t.Helper()
+	srv, _, store := testutil.NewTestServerWith(t, cfgMutate, func(d *api.Deps) {
 		d.StorageResolver = func(id int64) (storage.Driver, error) {
 			drv := &local.Driver{}
 			if err := drv.Init(context.Background(), map[string]any{"root": root}); err != nil {

@@ -83,16 +83,24 @@ await sleep(900);
 check('…and the Link options section is reachable', onLink);
 
 // ── the control itself ───────────────────────────────────────────────
-const found = await win.evaluate(() => {
-  const labels = [...document.querySelectorAll('.fx-perm-modal label')];
-  const el = labels.find((l) => /ndirme limiti|Download limit/.test(l.textContent || ''));
-  if (!el) return null;
-  const sel = el.querySelector('select');
-  return {
-    options: sel ? [...sel.options].map((o) => o.textContent.trim()) : [],
-    value: sel?.value ?? null,
-  };
-});
+// The limit is core's own list (ChoiceSelect, #160): a combobox and the list
+// it opens, read the way a person reads it - open, look, close.
+const limit = win.locator('.fx-perm-modal [data-testid="share-max-downloads"]');
+let found = null;
+if (await limit.count()) {
+  await limit.click();
+  await sleep(300);
+  found = await win.evaluate(() => {
+    const box = document.querySelector('.fx-perm-modal [data-testid="share-max-downloads"]');
+    const list = box ? document.getElementById(box.getAttribute('aria-controls') || '') : null;
+    return {
+      options: list ? [...list.querySelectorAll('[role="option"] .fe-select__text')].map((o) => o.textContent.trim()) : [],
+      value: box?.getAttribute('data-value') ?? null,
+    };
+  });
+  await limit.click();
+  await sleep(200);
+}
 check('the link tab offers a download limit', !!found,
   found ? `${found.options.length} seçenek` : 'MISSING — the field never made it into the permissions panel');
 check('…including a 3-download option', !!found?.options.some((o) => /^3 /.test(o)),
@@ -100,15 +108,15 @@ check('…including a 3-download option', !!found?.options.some((o) => /^3 /.tes
 check('…defaulting to unlimited', found?.value === '0', String(found?.value));
 
 // ── pick 3, create the link, ask the SERVER what it stored ───────────
-const picked = await win.evaluate(() => {
-  const el = [...document.querySelectorAll('.fx-perm-modal label')]
-    .find((l) => /ndirme limiti|Download limit/.test(l.textContent || ''));
-  const sel = el?.querySelector('select');
-  if (!sel) return false;
-  sel.value = '3';
-  sel.dispatchEvent(new Event('change', { bubbles: true }));
-  return true;
-});
+let picked = false;
+if (await limit.count()) {
+  await limit.click();
+  const three = win.locator('[role="listbox"] [role="option"][data-value="3"]');
+  if (await three.count()) {
+    await three.click();
+    picked = (await limit.getAttribute('data-value')) === '3';
+  }
+}
 check('the limit can be set to 3', picked);
 await sleep(300);
 await clickText(/Ba[gğ]lant[iı] olu[sş]tur|Create link/);

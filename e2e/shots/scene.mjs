@@ -32,6 +32,7 @@ import { goBuild } from '../../scripts/lib/go-build.mjs';
 import { RUN_MARKER } from '../../scripts/lib/procs.mjs';
 import { documentServerFor } from '../../scripts/lib/shot-scripts.mjs';
 import { APP_LOCATIONS, locateApp } from '../helpers/app-locations.mjs';
+import { SCENE_CONTEXT, stageClock } from './clock.mjs';
 import { SHOTS_LDFLAGS, shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,24 @@ export function freePort() {
       srv.close(() => resolvePort(port));
     });
   });
+}
+
+/*
+ * The port of the next instance. SHOTS_PORT is what `pnpm shots` hands each
+ * script: one port it just proved free, for ONE instance. A script that boots
+ * two at once (tenancy.mjs: the switch, and the switch FILEX_MULTI_TENANT
+ * pins) gets a free port for the second: on the same port the second could
+ * not bind, and its health check was answered by the first, so its pictures
+ * showed the first instance (0.53.0).
+ */
+let shotsPortGiven = false;
+async function instancePort() {
+  const given = Number(process.env.SHOTS_PORT);
+  if (given && !shotsPortGiven) {
+    shotsPortGiven = true;
+    return given;
+  }
+  return freePort();
 }
 
 async function waitForHealth(url, proc, deadlineMs = 45_000) {
@@ -210,7 +229,7 @@ async function bootInContainer({ name, admin, env }) {
   }
   const image = process.env.SHOTS_ENGINES_IMAGE || ENGINES_IMAGE;
   ensureImage(image, log);
-  const port = Number(process.env.SHOTS_PORT) || (await freePort());
+  const port = await instancePort();
   const url = `http://127.0.0.1:${port}`;
   const work = mkdtempSync(join(tmpdir(), `filex-shots-${name}-container-`));
   const binary = linuxBinary(docker.arch, work);
@@ -277,9 +296,9 @@ async function bootInContainer({ name, admin, env }) {
 async function bootOnHost({ name, admin, env, office = null }) {
   const bin = process.env.FILEX_BIN ?? defaultBin();
   if (!bin) throw new Error('no filex binary — run `pnpm run build:all` or set FILEX_BIN');
-  // SHOTS_PORT is what `pnpm shots` hands each script: a port it just proved
-  // free. Run by hand, a script finds its own.
-  const port = Number(process.env.SHOTS_PORT) || (await freePort());
+  // SHOTS_PORT (instancePort) for the script's first instance; run by hand,
+  // or for a second instance, a free port.
+  const port = await instancePort();
   const url = `http://127.0.0.1:${port}`;
   // ⚠ With a real document server, filex listens on every address: the
   // document server downloads the file from filex and posts the save back, at
@@ -508,9 +527,15 @@ export async function installApp(admin, app) {
  * A browser context pinned to English three ways over — the browser locale,
  * the stored preference and (on the instance) the server default. Getting a
  * half-Turkish dialog into the repo took one of those being unset.
+ *
+ * ⚠ And to the scene's clock (clock.mjs, task #176): SCENE_NOW in UTC, the
+ * API's times moved into it, what a person reads snapped to the hour - the
+ * same picture tonight and next month. Every context a shot script makes goes
+ * through stageClock, here or beside its own newContext.
  */
 export async function newContext(browser, { scheme = 'light', width = 1440, height = 900 } = {}) {
   const ctx = await browser.newContext({
+    ...SCENE_CONTEXT,
     viewport: { width, height },
     deviceScaleFactor: 2,
     locale: 'en-US',
@@ -535,6 +560,7 @@ export async function newContext(browser, { scheme = 'light', width = 1440, heig
       /* storage blocked — the defaults will show */
     }
   });
+  await stageClock(ctx);
   return ctx;
 }
 
@@ -553,9 +579,10 @@ export async function signIn(page, url, { email, password }) {
 }
 
 /**
- * Writes one picture into this release's folder for `set` (docs/screenshots/
- * <release>/<set>/<file>). A Page is shot as the viewport; a Locator as that
- * element, after it is visible.
+ * Writes one picture into the capture folder for `set`
+ * (e2e/.artifacts/shots/capture/<set>/<file>; `pnpm shots` compares it with the
+ * published one). A Page is shot as the viewport; a Locator as that element,
+ * after it is visible.
  *
  * `SHOTS_DRY_RUN=1` walks a scene all the way to each picture — every wait,
  * every guard before it — and writes nothing: the target must still be
@@ -663,7 +690,9 @@ export async function layoutProblems(page, { frames = [] } = {}) {
         if (r.right > view + 0.5 || r.left < -0.5) problems.push(`${id} sticks out: ${Math.round(r.left)}..${Math.round(r.right)} of ${view}`);
       }
     }
-    const boxes = [...document.querySelectorAll('main input, main select, main button')]
+    // A list's hidden form input (core ChoiceSelect) lies exactly under its
+    // field by design; it is not a control of its own.
+    const boxes = [...document.querySelectorAll('main input:not(.fe-select__native), main select, main button')]
       .filter((e) => !inTable(e))
       .map((e) => ({ e, r: e.getBoundingClientRect() }))
       .filter(({ r }) => r.width > 0 && r.height > 0);

@@ -11,7 +11,7 @@
  * surface (this form, the storage editor, the replication dialog) renders
  * the same thing.
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import { useStorageDriversStore } from '@/stores/storageDrivers';
@@ -98,6 +98,47 @@ function num(f: StorageField): number | null {
 function bool(f: StorageField): boolean {
   return value(f) === true;
 }
+
+/* A saved credential is never sent back: the server answers it as "***"
+ * (storage.MaskSecrets). The field then stays empty and says it is kept - type
+ * to change it. Left empty, or emptied again, it goes back as "***", which the
+ * server reads as "keep the saved one". ⚠ Shown as a value, the mask would be
+ * saved as the password the first time somebody typed one character into it. */
+const SECRET_MASK = '***';
+const kept = reactive(new Set<string>());
+
+// Every key the server answered masked - a field its descriptor marks secret,
+// or one it knows by name - whether or not the descriptors have loaded yet.
+watch(
+  () => props.modelValue,
+  (mv) => {
+    for (const [k, v] of Object.entries(mv ?? {})) {
+      if (v === SECRET_MASK) kept.add(k);
+    }
+  },
+  { immediate: true },
+);
+
+function isKept(f: StorageField): boolean {
+  return value(f) === SECRET_MASK;
+}
+
+function text(f: StorageField): string {
+  return isKept(f) ? '' : str(f);
+}
+
+function placeholderOf(f: StorageField): string | undefined {
+  return isKept(f) ? t('storages.secretKept') : f.placeholder;
+}
+
+function setText(f: StorageField, v: unknown) {
+  const s = v === undefined || v === null ? '' : String(v);
+  if (s === '' && kept.has(f.key)) {
+    set(f.key, SECRET_MASK);
+    return;
+  }
+  set(f.key, s);
+}
 </script>
 
 <template>
@@ -128,14 +169,14 @@ function bool(f: StorageField): boolean {
       />
       <Textarea
         v-else-if="f.multiline"
-        :model-value="str(f)"
+        :model-value="text(f)"
         :label="label(f)"
         :hint="help(f)"
-        :placeholder="f.placeholder"
-        :required="f.required"
+        :placeholder="placeholderOf(f)"
+        :required="f.required && !isKept(f)"
         :monospace="f.monospace"
         :rows="4"
-        @update:model-value="(v) => set(f.key, v)"
+        @update:model-value="(v) => setText(f, v)"
       />
       <Input
         v-else-if="f.type === 'int'"
@@ -151,15 +192,16 @@ function bool(f: StorageField): boolean {
       />
       <Input
         v-else
-        :model-value="str(f)"
+        :model-value="text(f)"
         :label="label(f)"
         :hint="help(f)"
-        :placeholder="f.placeholder"
-        :required="f.required"
+        :placeholder="placeholderOf(f)"
+        :required="f.required && !isKept(f)"
         :monospace="f.monospace"
         :type="f.type === 'password' ? 'password' : 'text'"
         :autocomplete="f.secret ? 'new-password' : 'off'"
-        @update:model-value="(v) => set(f.key, v)"
+        :data-secret-kept="isKept(f) ? 'true' : undefined"
+        @update:model-value="(v) => setText(f, v)"
       />
     </template>
 
@@ -193,14 +235,15 @@ function bool(f: StorageField): boolean {
           />
           <Input
             v-else
-            :model-value="str(f)"
+            :model-value="text(f)"
             :label="label(f)"
             :hint="help(f)"
-            :placeholder="f.placeholder"
+            :placeholder="placeholderOf(f)"
             :monospace="f.monospace"
             :type="f.type === 'password' ? 'password' : 'text'"
             :autocomplete="f.secret ? 'new-password' : 'off'"
-            @update:model-value="(v) => set(f.key, v)"
+            :data-secret-kept="isKept(f) ? 'true' : undefined"
+            @update:model-value="(v) => setText(f, v)"
           />
         </template>
       </div>

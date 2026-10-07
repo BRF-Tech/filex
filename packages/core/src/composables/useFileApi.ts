@@ -680,6 +680,29 @@ export function useFileApi(config: ExplorerConfig) {
     }
   }
 
+  /**
+   * #162 - `GET /api/app-store` → `{visible, stores}`: whether the server shows
+   * this person the store screen (handlers/app_store_view.go: the tenant's
+   * setting, the person's role and groups; a browser session or the desktop
+   * app's pairing, never another API key). The navigation panel's "App store"
+   * row asks it (lib/appStoreRow).
+   *
+   * ⚠ Null on ANY failure, for the reason `quotaMe()` is: a server without the
+   * route (older than 0.53) or a refusal leaves the panel as it was - no row.
+   */
+  async function appStoreStatus(): Promise<{ visible: boolean; stores: string[] } | null> {
+    const root = endpoints.manager.replace(/\/api\/files\/manager(\?.*)?$/, '').replace(/\/$/, '');
+    try {
+      const body = await jsonFetch<{ visible?: unknown; stores?: unknown }>(`${root}/api/app-store`);
+      return {
+        visible: body?.visible === true,
+        stores: Array.isArray(body?.stores) ? (body.stores as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async function subfolders(path: string): Promise<{ folders: FileNode[] }> {
     return jsonFetch<{ folders: FileNode[] }>(managerUrl('subfolders', { path }));
   }
@@ -1707,6 +1730,7 @@ export function useFileApi(config: ExplorerConfig) {
     globalSearch /* bul:s3 */,
     quotaMe /* surucu:d1 */,
     storageUsage /* surucu:d1 */,
+    appStoreStatus /* #162 */,
     subfolders,
     newFolder,
     newFile,

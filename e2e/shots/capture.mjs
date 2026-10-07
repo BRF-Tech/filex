@@ -16,8 +16,8 @@
 //   SHOTS_STORAGE    where to write the demo fixtures (this machine's view)
 //   SHOTS_MOUNT      the same directory as the SERVER sees it (differs when the
 //                    server runs in a VM/WSL/container; defaults to SHOTS_STORAGE)
-//   SHOTS_OUT        output directory (default: docs/screenshots/<release>/,
-//                    the release named in ./release.mjs)
+//   SHOTS_OUT        output directory (default: e2e/.artifacts/shots/capture/,
+//                    the capture folder named in ./release.mjs)
 //   SHOTS_KEEP=1     leave the instance running for poking around
 //   SHOTS_PLUGIN_BIN a prebuilt example plugin (else: go build, then WSL)
 //   SHOTS_ALLOW_SKIP=1  do not fail when a shot could not be taken
@@ -40,6 +40,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { goBuild } from '../../scripts/lib/go-build.mjs';
+import { SCENE_CONTEXT, stageClock } from './clock.mjs';
 import { seedFixtures, syncAndWait } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
@@ -286,6 +287,7 @@ async function waitForThumbs(token, tries = 60) {
 // ── the shots ─────────────────────────────────────────────────────────────
 async function newContext(browser, scheme, height = 940) {
   const ctx = await browser.newContext({
+    ...SCENE_CONTEXT,
     viewport: { width: 1600, height },
     deviceScaleFactor: 2,
     locale: 'en-US',
@@ -310,6 +312,8 @@ async function newContext(browser, scheme, height = 940) {
     // the bottom of every explorer shot.
     localStorage.setItem('filex.installPrompt.dismissed', '1');
   });
+  // The scene's clock (clock.mjs): the same dates in every run.
+  await stageClock(ctx);
   return ctx;
 }
 
@@ -618,7 +622,9 @@ async function run() {
     // real commands below.
     await page.goto(`${URL}/admin/connections`);
     await page.waitForSelector('[data-testid="guide-protocol"]', { timeout: 15_000 });
-    await page.locator('[data-testid="guide-protocol"]').selectOption('sftp');
+    // The protocol is core's own list (ChoiceSelect, #160): click it, click SFTP.
+    await page.locator('[data-testid="guide-protocol"]').click();
+    await page.locator('[role="listbox"] [role="option"][data-value="sftp"]').click();
     await page.waitForSelector('[data-testid="guide-facts"]', { timeout: 15_000 });
     await sleep(800);
     await shot(page, 'connections-guide.png');
@@ -641,16 +647,9 @@ async function run() {
     // one-line curl live under "Link options". (It used to be a `Link` tab.)
     await page.locator('[data-testid="share-options-toggle"]').click();
     await sleep(400);
-    await page.evaluate(() => {
-      const label = [...document.querySelectorAll('.fx-perm-modal label')].find((l) =>
-        /Download limit/i.test(l.textContent ?? ''),
-      );
-      const sel = label?.querySelector('select');
-      if (sel) {
-        sel.value = '3';
-        sel.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
+    // The download limit is core's own list (ChoiceSelect, #160).
+    await page.getByTestId('share-max-downloads').click();
+    await page.locator('[role="listbox"] [role="option"][data-value="3"]').click();
     await page.locator('.fx-perm-create').click();
     await page.waitForSelector('.fx-perm-cli', { timeout: 10_000 });
     await sleep(600);

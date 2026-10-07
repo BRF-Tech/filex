@@ -1057,9 +1057,10 @@ func opDestPerm(kind string) perm.Perm {
 func (o *Ops) opAllow(w http.ResponseWriter, r *http.Request, storageID int64, rel string, p perm.Perm, legacyMsg string) bool {
 	// The token's `root:` first. Every source and every destination of the
 	// three per-verb doors and of POST /ops is asked here, so this holds them
-	// to the root however the body was sent: confine.Middleware rewrites the
-	// per-verb `source`/`target` only in a body labelled JSON, and the same
-	// body as text/plain reached the queue untouched (GHSA-8gvc-6w52-6c7j).
+	// to the root however the body was sent: up to 0.52 confine.Middleware
+	// rewrote the per-verb `source`/`target` only in a body labelled JSON,
+	// and the same body as text/plain reached the queue untouched
+	// (GHSA-8gvc-6w52-6c7j).
 	if !rootAllows(r.Context(), o.Store, storageID, rel) {
 		confine.Refuse(w)
 		return false

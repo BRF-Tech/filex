@@ -1,0 +1,34 @@
+# The browser round of scripts/chain/run.sh, run one line at a time, in this
+# order, next to the Go and -race jobs.
+#
+#   name   kind   engines   ds   e2e/run.mjs arguments...
+#
+# kind     cypress (web/cypress), local (Playwright), nopub (Playwright with
+#          filex started without FILEX_PUBLIC_URL) or s3 (Playwright against
+#          a local S3 gateway)
+# engines  E2E_BROWSERS, comma-separated; `-` for Cypress
+# ds       1: an ONLYOFFICE Document Server is connected; 0: none
+#
+# The rest goes to `node e2e/run.mjs <local|cypress>` as it is written, one
+# word per argument (no quoting: a word holds no space). CHAIN_E2E_LIST
+# replaces this file (a path, or `cmd:<command>` whose output is a list in
+# this format).
+#
+# A Playwright line may be one part of a split run (e2e/run.mjs --shard,
+# docs/CONTRIBUTING.md -> Shards): write one line per part, for example
+#
+#   chromium-1  local  chromium  1   --shard 1/4
+#   chromium-2  local  chromium  1   --shard 2/4      (and so on to 4/4)
+#
+# Each part keeps its output in e2e/test-results/shard-i-of-N and
+# e2e/.artifacts/shard-i-of-N and clears only those, and each line gets a
+# port of its own (CHAIN_E2E_PORT + its place in the list) for the Document
+# Server to call back on. The lines still run one at a time.
+
+cypress   cypress  -                        0
+chromium  local    chromium                 1
+firefox   local    firefox                  1
+webkit    local    webkit                   1
+nods      local    chromium                 0   --grep (195-office-thumbnails|196-app-plugin-convert-office|96-app-plugin-convert|90-deployment-smoke|91-rounds-4-6-regression|180-thumbnails|100-viewer-audit|199-csv-onlyoffice|200-office-saved-beside)\.spec
+nopub     nopub    chromium,firefox,webkit  0   --grep 202-store-install
+s3        s3       chromium,firefox,webkit  0   --grep (26-s3|70-multi-storage)\.spec

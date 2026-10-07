@@ -38,6 +38,7 @@
               <uap:FileType>.ods</uap:FileType>
               <uap:FileType>.odp</uap:FileType>
               <uap:FileType>.rtf</uap:FileType>
+              <uap:FileType>.csv</uap:FileType>
             </uap:SupportedFileTypes>
           </uap3:FileTypeAssociation>
         </uap3:Extension>

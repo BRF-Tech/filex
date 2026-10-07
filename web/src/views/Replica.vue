@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { GitBranch, RefreshCcw, Wrench, Plus, Save, Trash2, FileText, Settings as SettingsIcon, ListTree, ArrowRightLeft, Database, X } from 'lucide-vue-next';
 
@@ -12,6 +12,7 @@ import { ReplicationTargetsApi } from '@/api/replicationTargets';
 import type { StorageRef, ReplicationTarget, StorageDriver } from '@/api/types';
 import Modal from '@/components/ui/Modal.vue';
 import StorageDriverFields from '@/components/StorageDriverFields.vue';
+import ReplicaInitialCopy from '@/components/ReplicaInitialCopy.vue';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
 import type {
@@ -68,10 +69,44 @@ async function setPrimaryTarget(prim: StorageRef, replicaId: number) {
       ...prim,
       replica_target_id: replicaId > 0 ? replicaId : null,
     });
-    toast.success(t('replica.pair.savedOk'));
-    await storages.fetch();
+    // A link starts the storage's initial copy on the server: say so, and
+    // show it on the row.
+    toast.success(replicaId > 0 ? t('replica.pair.savedCopying') : t('replica.pair.savedOk'));
+    await Promise.all([storages.fetch(), replica.fetchInitialCopies(), replica.fetchLinks()]);
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
+  }
+}
+
+// ── Initial copies (#186) ────────────────────────────────────────
+// Read again every few seconds while one is on its way, and only then.
+const restarting = ref<number | null>(null);
+let copyTimer: ReturnType<typeof setInterval> | null = null;
+
+function followCopies(on: boolean) {
+  if (on && !copyTimer) {
+    copyTimer = setInterval(() => {
+      void replica.fetchInitialCopies();
+    }, 5000);
+  } else if (!on && copyTimer) {
+    clearInterval(copyTimer);
+    copyTimer = null;
+  }
+}
+
+watch(() => replica.copying, (on) => followCopies(on));
+onBeforeUnmount(() => followCopies(false));
+
+async function restartCopy(storageId: number) {
+  if (restarting.value !== null) return;
+  restarting.value = storageId;
+  try {
+    await replica.restartInitialCopy(storageId);
+    toast.success(t('replica.initial.restarted'));
+  } catch (e: unknown) {
+    toast.error(extractError(e, t('errors.actionFailed')));
+  } finally {
+    restarting.value = null;
   }
 }
 
@@ -166,6 +201,8 @@ async function loadAll() {
   try {
     await Promise.all([
       replica.fetchRules(), replica.fetchFailures(), replica.fetchReport(), replica.fetchSettings(),
+      replica.fetchInitialCopies(),
+      replica.fetchLinks(),
       storages.fetch(),
       loadReplicaTargets(),
       drivers.fetch(),
@@ -253,9 +290,9 @@ async function fixAll() {
   }
 }
 
-async function fixOne(path: string, op: string) {
+async function fixOne(storageId: number | undefined, path: string, op: string) {
   try {
-    const r = await replica.fixOne(path, op);
+    const r = await replica.fixOne(storageId, path, op);
     if (r.queued === false) toast.info(t('replica.failures.alreadyQueuedOne'));
     else toast.success(t('replica.failures.queuedOne'));
   } catch (e: unknown) {
@@ -360,6 +397,14 @@ const ruleColumns = computed<DataColumn<ReplicaRule>[]>(() => [
    re-ordering one page and calling that sorted. */
 const failureColumns = computed<DataColumn<ReplicaFailure>[]>(() => [
   { id: 'path', label: t('replica.failures.fields.path'), sortable: true, width: 240 },
+  {
+    id: 'storage_id',
+    label: t('replica.failures.fields.storage'),
+    sortable: true,
+    width: 160,
+    format: (r) => storageNameById(r.storage_id),
+    sortValue: (r) => storageNameById(r.storage_id),
+  },
   { id: 'op', label: t('replica.failures.fields.op'), sortable: true, width: 100 },
   { id: 'error_code', label: t('replica.failures.fields.errorCode'), sortable: true, width: 130 },
   { id: 'error_msg', label: t('replica.failures.fields.error'), width: 240 },
@@ -421,7 +466,13 @@ function failureActions(row: ReplicaFailure): ContextAction[] {
 }
 
 function onFailureAction(key: string, row: ReplicaFailure) {
-  if (key === 'fix') fixOne(row.path, row.op);
+  if (key === 'fix') fixOne(row.storage_id, row.path, row.op);
+}
+
+/** A failure's storage by name; a row from before 0.53 has none. */
+function storageNameById(id: number | undefined): string {
+  if (!id) return '-';
+  return storages.items.find((s) => s.id === id)?.name ?? `#${id}`;
 }
 </script>
 
@@ -508,6 +559,7 @@ function onFailureAction(key: string, row: ReplicaFailure) {
             v-for="prim in primaryStorages"
             :key="prim.id"
             class="flex flex-wrap items-center gap-3 rounded-lg p-3 row-box"
+            :data-testid="`replica-pair-row-${prim.id}`"
           >
             <div class="flex-1 min-w-[160px]">
               <div class="flex items-center gap-2">
@@ -524,12 +576,30 @@ function onFailureAction(key: string, row: ReplicaFailure) {
                   </template>
                 </i18n-t>
               </p>
+              <p
+                v-if="prim.replica_target_id && replica.links[prim.id]"
+                class="text-[11px] text-zinc-500 mt-0.5"
+                :data-testid="`replica-pair-folder-${prim.id}`"
+              >
+                <i18n-t keypath="replica.pair.folderIs" tag="span">
+                  <template #folder>
+                    <span class="tbl-mono">{{ replica.links[prim.id].folder }}/</span>
+                  </template>
+                </i18n-t>
+              </p>
+              <ReplicaInitialCopy
+                v-if="prim.replica_target_id && replica.initialCopies[prim.id]"
+                :copy="replica.initialCopies[prim.id]"
+                :busy="restarting === prim.id"
+                @restart="restartCopy(prim.id)"
+              />
             </div>
             <Select
               :model-value="prim.replica_target_id ?? 0"
               :options="[{ value: 0, label: '-' }, ...replicaTargets.map((rt) => ({ value: rt.id, label: rt.name }))]"
               size="sm"
               class="min-w-[180px]"
+              :data-testid="`replica-pair-${prim.id}`"
               @update:model-value="(v) => setPrimaryTarget(prim, Number(v))"
             />
           </li>

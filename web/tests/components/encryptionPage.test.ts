@@ -88,6 +88,7 @@ vi.mock('@/stores/toast', () => ({
 
 import Encryption from '@/views/Encryption.vue';
 import { useCapabilitiesStore } from '@/stores/capabilities';
+import { chosenValue, pickOption } from '../helpers/choiceSelect';
 
 if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function () {
@@ -120,10 +121,13 @@ function waiting(): Record<string, unknown> {
  * it once per document, so after an in-page password sign-in it is the answer
  * given while nobody was signed in. Unless a test says otherwise, the two agree.
  */
-async function page(opts: { operator?: boolean; held?: boolean; locale?: 'en' | 'tr' } = {}) {
+async function page(opts: { operator?: boolean; held?: boolean; locale?: 'en' | 'tr'; multiTenant?: boolean } = {}) {
   const caps = useCapabilitiesStore();
-  capabilities = { caller_admin: opts.operator === true };
-  caps.data = { ...caps.data, caller_admin: opts.held ?? opts.operator === true };
+  // A multi-tenant install unless a test says otherwise: the server's one
+  // answer the page follows (composables/useTenancy, #167).
+  const multi = opts.multiTenant ?? true;
+  capabilities = { caller_admin: opts.operator === true, multi_tenant: multi };
+  caps.data = { ...caps.data, caller_admin: opts.held ?? opts.operator === true, multi_tenant: multi };
   const i18n = createI18n({ legacy: false, locale: opts.locale ?? 'en', fallbackLocale: 'en', messages: { en, tr } });
   const w = mount(Encryption, { global: { plugins: [i18n] }, attachTo: document.body });
   await flushPromises();
@@ -151,10 +155,10 @@ describe('Admin → Encryption — the policy', () => {
   it('shows the tenant’s policy and saves a new one with the body the server reads', async () => {
     const w = await page();
     expect(w.find('[data-testid="encryption-policy"]').text()).toContain('Applies to acme.');
-    const select = w.find('select[name="encryption-policy"]');
-    expect((select.element as HTMLSelectElement).value).toBe('permitted');
+    const select = w.find('#encryption-policy');
+    expect(chosenValue(select)).toBe('permitted');
     expect(w.find('[data-testid="encryption-policy-save"]').attributes('disabled'), 'nothing to save yet').toBeDefined();
-    await select.setValue('approval');
+    await pickOption(select, 'approval');
     expect(w.text()).toContain('anyone who is not an administrator needs an approval here first');
     await w.find('[data-testid="encryption-policy-save"]').trigger('click');
     await flushPromises();
@@ -168,7 +172,7 @@ describe('Admin → Encryption — the policy', () => {
   // below the one asked about.
   it('says what an approval opens: its own kind, in the folder asked about, never below it', async () => {
     const w = await page();
-    await w.find('select[name="encryption-policy"]').setValue('approval');
+    await pickOption(w.find('#encryption-policy'), 'approval');
     const hint = w.find('[data-testid="encryption-policy"]').text();
     expect(hint).toContain('is used once');
     expect(hint).toContain('one folder encrypted where it is');
@@ -185,7 +189,7 @@ describe('Admin → Encryption — the policy', () => {
     // policy but off and admins. "Each encryption needs an approval" read as if
     // theirs did too.
     let w = await page();
-    await w.find('select[name="encryption-policy"]').setValue('approval');
+    await pickOption(w.find('#encryption-policy'), 'approval');
     let hint = w.find('[data-testid="encryption-policy"]').text();
     expect(hint).toContain('anyone who is not an administrator needs an approval here first. Administrators are never asked.');
     expect(hint).not.toContain('each encryption needs an approval');
@@ -194,7 +198,7 @@ describe('Admin → Encryption — the policy', () => {
     closeRowMenus();
     unmountAll();
     w = await page({ locale: 'tr' });
-    await w.find('select[name="encryption-policy"]').setValue('approval');
+    await pickOption(w.find('#encryption-policy'), 'approval');
     hint = w.find('[data-testid="encryption-policy"]').text();
     expect(hint).toContain('yönetici olmayan herkesin şifrelemeden önce burada onay alması gerekir. Yöneticilerden onay istenmez.');
     w.unmount();
@@ -206,7 +210,7 @@ describe('Admin → Encryption — the policy', () => {
       message: 'policy must be one of off, admins, permitted, approval',
     });
     const w = await page();
-    await w.find('select[name="encryption-policy"]').setValue('off');
+    await pickOption(w.find('#encryption-policy'), 'off');
     await w.find('[data-testid="encryption-policy-save"]').trigger('click');
     await flushPromises();
     // The server's own sentence, through the real extractError.
@@ -214,19 +218,19 @@ describe('Admin → Encryption — the policy', () => {
       'policy must be one of off, admins, permitted, approval',
     );
     expect(toasts, 'nothing was saved, so nothing is announced as saved').toEqual([]);
-    expect((w.find('select[name="encryption-policy"]').element as HTMLSelectElement).value).toBe('off');
+    expect(chosenValue(w.find('#encryption-policy'))).toBe('off');
     w.unmount();
   });
 
   it('a refused save’s message is taken down when the choice changes: it was about the other choice', async () => {
     failures['patch /admin/e2e'] = refused(400, { error: 'invalid_policy', message: 'policy must be one of off, admins, permitted, approval' });
     const w = await page();
-    const select = w.find('select[name="encryption-policy"]');
-    await select.setValue('off');
+    const select = w.find('#encryption-policy');
+    await pickOption(select, 'off');
     await w.find('[data-testid="encryption-policy-save"]').trigger('click');
     await flushPromises();
     expect(w.find('[data-testid="encryption-policy"] [role="alert"]').exists()).toBe(true);
-    await select.setValue('admins');
+    await pickOption(select, 'admins');
     expect(w.find('[data-testid="encryption-policy"] [role="alert"]').exists()).toBe(false);
     w.unmount();
   });
@@ -236,7 +240,7 @@ describe('Admin → Encryption — the policy', () => {
     const w = await page({ locale: 'tr' });
     expect(w.find('[data-testid="encryption-unavailable"]').text()).toContain('Platform işletmecisi');
     // The choice stays: it takes effect when encryption is switched on again.
-    expect(w.find('select[name="encryption-policy"]').exists()).toBe(true);
+    expect(w.find('#encryption-policy').exists()).toBe(true);
     w.unmount();
   });
 
@@ -790,4 +794,21 @@ describe('Admin → Encryption — the route', () => {
     expect(meta.breadcrumb).toBe('nav.encryption');
     expect(router.resolve({ name: 'encryption' }).path).toBe('/encryption');
   }, 20_000);
+});
+
+// #167: with multi-tenant mode off nothing about tenants is drawn - even for
+// the instance's administrator (caller_admin), and even if a row says
+// otherwise - and the tenants' list is not asked for.
+describe('Admin → Encryption - multi-tenant mode off', () => {
+  it('no ceilings, no tenant column, no "its tenant decides"', async () => {
+    policy = { available: true, policy: 'permitted', scope: 'instance', pending: 1 };
+    requests = [{ ...waiting(), decidable: false }];
+    const w = await page({ operator: true, multiTenant: false });
+    expect(w.find('[data-testid="encryption-tenants"]').exists()).toBe(false);
+    expect(asked('get', '/admin/e2e/tenants')).toEqual([]);
+    expect(w.find('[data-testid="e2e-request-tenant-7"]').exists()).toBe(false);
+    expect(w.find('[data-testid="e2e-request-elsewhere-7"]').exists()).toBe(false);
+    expect(w.text()).not.toMatch(/tenant/i);
+    w.unmount();
+  });
 });

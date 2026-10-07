@@ -97,6 +97,7 @@ describe('every admin page has one place in the menu', () => {
       webhooks: '/webhooks',
       notifications: '/notifications',
       settings: '/settings',
+      tenancy: '/tenancy',
       branding: '/branding',
       appearance: '/appearance',
       archives: '/archives',
@@ -132,7 +133,7 @@ describe('the owner’s grouping', () => {
         'system',
         [
           ['integrations', ['plugins', 'external', 'webhooks', 'notifications']],
-          ['customize', ['settings', 'branding', 'appearance', 'archives']],
+          ['customize', ['settings', 'tenancy', 'branding', 'appearance', 'archives']],
           ['maintenance', ['queue', 'tools', 'audit', 'updates', 'about']],
         ],
       ],
@@ -198,14 +199,24 @@ function drawn(entries: MegaMenuEntry[]): Record<string, string[]> {
 }
 
 describe('who sees what - the router guard’s rule, per page', () => {
-  it('an administrator: the dashboard and every page but the multi-tenant two', () => {
+  it('an administrator: the dashboard and every page but the multi-tenant two and the switch', () => {
     const d = drawn(buildAdminNav(ctx()));
     expect(Object.keys(d)).toEqual(['dashboard', 'files', 'people', 'system']);
     const all = Object.values(d).flat();
     expect(all).toContain('encryption');
     expect(all).not.toContain('tenants');
     expect(all).not.toContain('tenant-self');
-    expect(all).toHaveLength(1 + 36 - 2 + 0); // dashboard link + 36 pages - the two tenant pages
+    expect(all).not.toContain('tenancy');
+    expect(all).toHaveLength(1 + 37 - 3 + 0); // dashboard link + 37 pages - the two tenant pages - the switch
+  });
+
+  it('Multi-tenant mode to whoever may configure the instance (#167), under System', () => {
+    const d = drawn(buildAdminNav(ctx({ platform: true })));
+    expect(d.system).toContain('tenancy');
+    expect(adminNavSectionOf('tenancy')?.section.id).toBe('customize');
+    // A delegated administrator is not offered it: the route names no admin.* permission.
+    const theirs = Object.values(drawn(buildAdminNav(ctx({ isAdmin: false, perms: ['admin.users'], platform: true })))).flat();
+    expect(theirs).not.toContain('tenancy');
   });
 
   it('a delegated administrator holding admin.users: Files, Users and Groups - nothing else', () => {

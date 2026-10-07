@@ -19,8 +19,8 @@
 filex 是单个 Go 二进制文件，自带功能完整的 Web 界面、可插拔的存储、认证和数据库驱动、**实时协作**、**可嵌入的 Web 组件**、**文件夹同步实时进行的桌面应用**（任何一边的修改大约一秒就到另一边）、让 AI 智能体可以原生驱动它的**内置 MCP 服务器**，以及**应用**：教会 filex 对文件做新事情的插件，可以是沙箱化的 WebAssembly 模块，可以是放在沙箱 iframe 里的自带界面，也可以两者兼有。第一个应用是与组织内外的人一起**签署文档**。**语言包**也是一种应用，所以翻译 filex 不必等新的发行版；对于从右到左书写的语言，filex 还会按**从右到左**排布界面。大家用已有的账户登录：SSO、LDAP，或者运行 filex 的那台机器上的 **Windows 或 Linux 账户**；在多租户实例上，**每个租户自己管理自己**：有自己的登录提供方，有自己的域名和证书。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.51.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.51.0/explorer-grid-light.png" alt="filex 资源管理器 - 缩略图网格" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.5ddafe2dac64.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.484fb070ca19.png" alt="filex 资源管理器 - 缩略图网格" width="900">
 </picture>
 
 </div>
@@ -67,7 +67,7 @@ docker run -p 5212:5212 \
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
+│  filex (Go binary; image ~62 MB slim / ~241 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -118,117 +118,117 @@ Dana 请同一个 filex 上的一位同事和 filex 之外的一位合作伙伴�
 
 | 定义填写框：给每个填写框命名，并说明它是谁的；下一步是文档 | 放置填写框：选一个填写框，在页面上轻点要放的位置 |
 |---|---|
-| ![定义签名请求的填写框](docs/screenshots/v0.51.0/signing/sign-define-1440.png) | ![在文档上放置填写框](docs/screenshots/v0.51.0/signing/sign-place-1440.png) |
+| ![定义签名请求的填写框](https://filex.sh/shots/signing/sign-define-1440.4a966ffefa4f.png) | ![在文档上放置填写框](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
 
 | 合作伙伴的链接：filex 仅有的一个公开页面，以你的实例的名义出现，凭 PIN 才能打开 | …以及链接打开的内容：只有对方自己的填写框，这里是一个用发起人选定的字体键入的姓名（另外两种是绘制和上传） |
 |---|---|
-| ![外部签署人的 PIN 验证页](docs/screenshots/v0.51.0/signing/sign-outside-pin-1440.png) | ![外部签署人正在填写自己的填写框](docs/screenshots/v0.51.0/signing/sign-outside-fill-1440.png) |
+| ![外部签署人的 PIN 验证页](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![外部签署人正在填写自己的填写框](https://filex.sh/shots/signing/sign-outside-fill-1440.54632da00ef4.png) |
 
 | 等待签署期间：文档对每个人都是冻结的，谁已签署，在文档的详细信息里可以看到 | 安装应用：在任何东西运行之前，先用直白的文字列出它请求的每一项权限 |
 |---|---|
-| ![文档已锁定，Signatures 面板已打开](docs/screenshots/v0.51.0/signing/sign-status-1440.png) | ![安装向导的权限审核](docs/screenshots/v0.51.0/apps/apps-install-review-1440.png) |
+| ![文档已锁定，Signatures 面板已打开](https://filex.sh/shots/signing/sign-status-1440.518a3bd6651f.png) | ![安装向导的权限审核](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
 
 | 已安装的应用：它从哪里来、指纹是什么，以及它持有的每一项权限，用直白的文字写明（它的设置和操作接在后面，在页面更靠下的地方） | 转换器，另一个应用：每种目标格式都列在各自的类别下，共三步 |
 |---|---|
-| ![已安装应用的详情](docs/screenshots/v0.51.0/apps/apps-detail-1440.png) | ![转换器的向导](docs/screenshots/v0.51.0/apps/convert-wizard-1440.png) |
+| ![已安装应用的详情](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png) | ![转换器的向导](https://filex.sh/shots/apps/convert-wizard-1440.231ada006fd6.png) |
 
 | 自带界面的应用：审核时会显示应用包的指纹、应用包之外的每个地址（实时加载的地址是一项权限，以黄色显示），以及浏览器无法保证的事 | …以及这个界面，打开的是它自己的文件类型，就在 filex 预览本来所在的位置。它在沙箱 iframe 中通过 filex 读取和保存文件（一个小型示例应用，为这些截图而写） |
 |---|---|
-| ![自带界面的应用的安装审核](docs/screenshots/v0.51.0/apps/app-interface-review-1440.png) | ![应用自带的界面作为文件查看器打开](docs/screenshots/v0.51.0/apps/app-interface-viewer-1440.png) |
+| ![自带界面的应用的安装审核](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png) | ![应用自带的界面作为文件查看器打开](https://filex.sh/shots/apps/app-interface-viewer-1440.519b23618156.png) |
 
 | 实例上的每个应用，其中有一个**语言包**：一份没有任何可运行内容的清单，会说明自己翻译了这个 filex 的多少内容；语言包一走，它的语言也跟着走 |
 |---|
-| ![Apps 列表，其中有一个语言包](docs/screenshots/v0.51.0/langpack/apps-list-1440.png) |
+| ![Apps 列表，其中有一个语言包](https://filex.sh/shots/langpack/apps-list-1440.c0b6a723e725.png) |
 
 ### 你自己的内容，随处可达
 
 | 铃铛：未读数就在铃铛上，每一行都通向它所说的地方 | 你的全部通知，都在资源管理器里：每个人都可以用，而不只是管理员 |
 |---|---|
-| ![带未读角标的铃铛，已展开](docs/screenshots/v0.51.0/signing/bell-badge-1440.png) | ![覆盖在资源管理器之上的完整通知列表](docs/screenshots/v0.51.0/signing/notifications-list-1440.png) |
+| ![带未读角标的铃铛，已展开](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![覆盖在资源管理器之上的完整通知列表](https://filex.sh/shots/signing/notifications-list-1440.cb8cc10769dc.png) |
 
 | My shares（我的共享）：你创建的链接，以及这些链接的 PIN，需要转告别人时用得上 | 管理面板里的每张表格：每行一个固定的 **Actions**（操作）菜单，与资源管理器的 ⋮ 打开的是同一个菜单 |
 |---|---|
-| ![My shares，其中一行的 Actions 菜单已打开](docs/screenshots/v0.51.0/signing/my-shares-1440.png) | ![Admin → Shares，其中一行的 Actions 菜单已打开](docs/screenshots/v0.51.0/signing/admin-table-actions-1440.png) |
+| ![My shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/my-shares-1440.3cdfc7ee8ef3.png) | ![Admin → Shares，其中一行的 Actions 菜单已打开](https://filex.sh/shots/signing/admin-table-actions-1440.401d5cbfacf8.png) |
 
 ### 你的品牌
 
 | Appearance（外观）：用你自己的颜色组合出一个主题，边输入边预览 | 设为默认之后，每个人的资源管理器套用的就是它… |
 |---|---|
-| ![主题编辑器](docs/screenshots/v0.51.0/appearance/theme-editor-1440.png) | ![套用了运维人员主题的资源管理器](docs/screenshots/v0.51.0/appearance/themed-explorer-1440.png) |
+| ![主题编辑器](https://filex.sh/shots/appearance/theme-editor-1440.7cf3d997f7b1.png) | ![套用了运维人员主题的资源管理器](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png) |
 
 | …登录页也是，这时还没有任何人登录 | filex 不会跟随的符号链接会明确说明：既在列表里，也在它的详细信息里用文字写明 |
 |---|---|
-| ![套用了运维人员主题的登录页](docs/screenshots/v0.51.0/appearance/themed-signin-1440.png) | ![指向存储之外的符号链接，带有标记](docs/screenshots/v0.51.0/symlinks/symlink-badge-1440.png) |
+| ![套用了运维人员主题的登录页](https://filex.sh/shots/appearance/themed-signin-1440.84197bec297e.png) | ![指向存储之外的符号链接，带有标记](https://filex.sh/shots/symlinks/symlink-badge-1440.f85936372113.png) |
 
 ### 文件管理器
 
 | 共享：PIN、过期时间、下载次数上限、单行 `curl` 命令 | Markdown 查看器 |
 |---|---|
-| ![共享对话框](docs/screenshots/v0.51.0/share-modal.png) | ![Markdown 查看器](docs/screenshots/v0.51.0/viewer-markdown.png) |
+| ![共享对话框](https://filex.sh/shots/share-modal.eaf11836828a.png) | ![Markdown 查看器](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
 
 | …以及另一端的人打开的内容。filex 只有唯一一个对外页面：一个共享的文件、一个文件夹、一个文件请求、应用的签署页面，以及挡在其中任何一个前面的 PIN，全都是这个页面，都以你的实例的名义出现 |
 |---|
-| ![接收者看到的公开共享链接](docs/screenshots/v0.51.0/public-share.png) |
+| ![接收者看到的公开共享链接](https://filex.sh/shots/public-share.0e3ba07f7c88.png) |
 
 | 管理面板 | 演示首页 |
 |---|---|
-| ![管理仪表盘](docs/screenshots/v0.51.0/admin-dashboard.png) | ![演示首页](docs/screenshots/v0.51.0/demo-landing.png) |
+| ![管理仪表盘](https://filex.sh/shots/admin-dashboard.7c334e824b3c.png) | ![演示首页](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
 
 | 管理菜单：所有页面分在 **Files & storage**（文件与存储）、**People & security**（人员与安全）和 **System**（系统）三个菜单面板里，每个页面下面都有一行简短说明；在手机上，同一批页面放在抽屉里（[docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)） |
 |---|
-| ![管理菜单的 People & security 面板已打开，覆盖在 Admin → Users 之上](docs/screenshots/v0.51.0/megamenu/people-panel-1440.png) |
+| ![管理菜单的 People & security 面板已打开，覆盖在 Admin → Users 之上](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) |
 
 | Roles（角色）：Administrator（管理员）、User（用户）、Viewer（查看者）以及你自己的角色，每个角色由谁持有、允许什么、在哪些文件夹上有所不同、有哪些限制（[docs/PERMISSIONS.md](docs/PERMISSIONS.md)） |
 |---|
-| ![Admin → Roles：内置角色和两个自定义角色](docs/screenshots/v0.51.0/roles/roles-list-1440.png) |
+| ![Admin → Roles：内置角色和两个自定义角色](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png) |
 
 | Groups（群组）：具名的一组人，带有文件夹访问权限和一个角色；成员手动添加，或者与登录带来的群组保持一致（[docs/GROUPS.md](docs/GROUPS.md)） | 与群组共享文件夹，群组和人并列：Owner（所有者）要经对话框询问后才授予，而不是点一下就授予 |
 |---|---|
-| ![Admin → Groups](docs/screenshots/v0.51.0/groups/groups-list-1440.png) | ![与群组共享文件夹](docs/screenshots/v0.51.0/groups/share-group-1440.png) |
+| ![Admin → Groups](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png) | ![与群组共享文件夹](https://filex.sh/shots/groups/share-group-1440.31c2a81e1eeb.png) |
 
 | Sign-in security（登录安全）：尝试次数限制、允许的地址、受信任的代理、锁定，以及登录记录（[登录尝试次数限制](docs/CONFIGURATION.md#sign-in-attempt-limits)） | …以及账户被锁定时登录表单显示的内容，锁定的倒计时就在按钮上 |
 |---|---|
-| ![Admin → Sign-in security](docs/screenshots/v0.51.0/loginsecurity/login-security-1440.png) | ![账户被锁定时的登录表单](docs/screenshots/v0.51.0/loginsecurity/login-locked-1440.png) |
+| ![Admin → Sign-in security](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png) | ![账户被锁定时的登录表单](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png) |
 
 | 谁可以加密：关闭、仅限管理员、角色允许的每个人，或者经管理员批准之后；还有等待处理的请求，注明是谁提出的、为什么提出（[谁可以加密](docs/E2E-ENCRYPTION.md#who-may-encrypt)） | …以及提出请求的人这一侧：New folder（新建文件夹）对话框向管理员请求一个加密文件夹，并附上理由 |
 |---|---|
-| ![Admin → Encryption：策略设为须经批准，三个请求等待处理](docs/screenshots/v0.51.0/encryption/admin-encryption-1440.png) | ![在 New folder 对话框中请求一个加密文件夹](docs/screenshots/v0.51.0/encryption/request-new-folder.png) |
+| ![Admin → Encryption：策略设为须经批准，三个请求等待处理](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png) | ![在 New folder 对话框中请求一个加密文件夹](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png) |
 
 | Default apps（默认应用）：每一种由 filex 之外的东西处理的文件，谁来打开它、谁来绘制它的缩略图，按你设定的顺序（[默认应用](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)） | 文件夹预览：每个文件夹用最近进入其中的三个文件绘制；这些 SVG 由 filex 的内置引擎绘制（[docs/thumbnails.md](docs/thumbnails.md#folder-previews)） |
 |---|---|
-| ![Plugins → Default apps](docs/screenshots/v0.51.0/defaultapps/default-apps-1440.png) | ![用最新文件绘制的文件夹](docs/screenshots/v0.51.0/thumbnails/folders-grid-1440.png) |
+| ![Plugins → Default apps](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png) | ![用最新文件绘制的文件夹](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png) |
 
 | 连接了 ONLYOFFICE 时，`.csv` 在 ONLYOFFICE 的电子表格中打开，先是查看，而且没有分隔符对话框：文件自己的分隔符会一并传过去（[CSV 文件](docs/ONLYOFFICE.md#csv-files)） | …以及它的编辑器，其中会说明保存为 CSV 时保留什么；文件写回去时仍是同一种 CSV |
 |---|---|
-| ![以分号分隔的 CSV，在 ONLYOFFICE 的电子表格中打开](docs/screenshots/v0.51.0/csvoffice/csv-view-1440.png) | ![ONLYOFFICE 编辑器中的 CSV，附有保存时保留什么的说明](docs/screenshots/v0.51.0/csvoffice/csv-edit-1440.png) |
+| ![以分号分隔的 CSV，在 ONLYOFFICE 的电子表格中打开](https://filex.sh/shots/csvoffice/csv-view-1440.83237ba55d3d.png) | ![ONLYOFFICE 编辑器中的 CSV，附有保存时保留什么的说明](https://filex.sh/shots/csvoffice/csv-edit-1440.4efc379a293d.png) |
 
 | 外壳：每个人进入后看到的界面 | 在这个文件夹中搜索；`⌘K` / `Ctrl K` 把查询交给命令面板 |
 |---|---|
-| ![filex 外壳](docs/screenshots/v0.51.0/driveshell/driveshell-hero-1440.png) | ![在文件夹中搜索](docs/screenshots/v0.51.0/driveshell/driveshell-search-1440.png) |
+| ![filex 外壳](https://filex.sh/shots/driveshell/driveshell-hero-1440.d8c44de4f498.png) | ![在文件夹中搜索](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
 
 | 导航面板：Home（主页）、Shared with me（与我共享）、My shares、Recent（最近）、Starred（已加星标）、Trash（回收站），以及你能访问的存储 | 折叠为图标栏 |
 |---|---|
-| ![导航面板](docs/screenshots/v0.51.0/sidenav/sidenav-expanded-1440.png) | ![折叠为图标栏](docs/screenshots/v0.51.0/sidenav/sidenav-rail-1440.png) |
+| ![导航面板](https://filex.sh/shots/sidenav/sidenav-expanded-1440.ef235f94c521.png) | ![折叠为图标栏](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
 
 | 标签：你自己的，或者你团队的；一个标签会打开带这个标签的每个文件，无论这些文件在哪个文件夹里 | Trash：删除了什么、原本在哪里，以及离清除还剩多久 |
 |---|---|
-| ![个人标签和团队标签](docs/screenshots/v0.51.0/tags/tags-kinds-1440.png) | ![回收站视图](docs/screenshots/v0.51.0/sidenav/view-trash-1440.png) |
+| ![个人标签和团队标签](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png) | ![回收站视图](https://filex.sh/shots/sidenav/view-trash-1440.c7438b1e66a8.png) |
 
 | Shared with me：其他人授予你访问权限的文件夹，无需挂载说明 | 嵌入在另一个产品的页面中 |
 |---|---|
-| ![Shared with me](docs/screenshots/v0.51.0/sidenav/view-shared-1440.png) | ![嵌入的 Web 组件](docs/screenshots/v0.51.0/sidenav/embed-webcomponent-1440.png) |
+| ![Shared with me](https://filex.sh/shots/sidenav/view-shared-1440.6f68fd5b581d.png) | ![嵌入的 Web 组件](https://filex.sh/shots/sidenav/embed-webcomponent-1440.2dc86ba73804.png) |
 
 | How to connect（如何连接）：各份指南，都根据*你的*部署生成 | API keys（API 密钥）：在资源管理器或嵌入端里签发你自己的密钥（凭某个人的会话或令牌；用一个共享的*应用*令牌做代理的嵌入端没有这个条目） |
 |---|---|
-| ![How to connect](docs/screenshots/v0.51.0/sidenav/connect-1440.png) | ![API keys](docs/screenshots/v0.51.0/sidenav/apikeys-minted-1440.png) |
+| ![How to connect](https://filex.sh/shots/sidenav/connect-1440.ade9043dddde.png) | ![API keys](https://filex.sh/shots/sidenav/apikeys-minted-1440.14eb6d484613.png) |
 
 | 用什么都能访问 filex：S3、SFTP、FTPS、NFS、WebDAV。每条命令都根据*你的*部署生成 |
 |---|
-| ![连接指南](docs/screenshots/v0.51.0/connections-guide.png) |
+| ![连接指南](https://filex.sh/shots/connections-guide.cf9a135724c9.png) |
 
 | filex 未内置的一个存储：在 **Plugins → Storage plugins**（插件 > 存储插件）中以插件形式安装，配置表单由插件自己描述 |
 |---|
-| ![Plugins](docs/screenshots/v0.51.0/admin-plugins.png) |
+| ![Plugins](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png) |
 
 ## 快速开始 - 二进制文件
 
@@ -314,7 +314,7 @@ import { FileManager } from '@brftech/filex-react';
 - **把文件拖出去**：把所选内容拖到桌面上或拖进其他程序，文件夹和多选内容拖出后就是一个个独立的真实文件和文件夹。已经保留在此电脑上的内容立即就能拖出；其余内容获取一次后就缓存下来（[docs/DESKTOP.md](docs/DESKTOP.md#dragging-files-out)）。
 - **Keep on this computer**（保留在此电脑上）：右键点击任意文件夹、文件或整个存储，即可把它镜像到机器上的一个 filex 文件夹下（该文件夹可在 Settings（设置）中移动）；其余内容都保持仅在线，每一行都会标明自己是哪一种（✓ ◐ ⟳ ☁）。“Keep online only”（仅在线保留）会把本地副本移入回收站，或者留在原处（[docs/DESKTOP.md](docs/DESKTOP.md#keeping-folders-on-this-computer)）。
 - **文件夹同步**：把一个本地文件夹和一个服务器文件夹配对，只要应用待在系统托盘里，两者就双向保持一致，而且是**实时**的：在浏览器里保存的内容大约一秒就落到磁盘上，本地保存的内容到服务器也一样快（引擎监听服务器的变更流和文件系统，并以每 30 s 一次的完整检查兜底）；两边同时修改时两个版本都保留；传输和获取列表都并行进行；首次运行中断后会从中断处继续；本地回收站保留 30 天；引擎不会把一个不见了的文件夹当成一次批量删除来执行（[docs/SYNC.md](docs/SYNC.md)）。
-- **直接打开你本地磁盘上的 Office 文档**：双击一个 `.docx`/`.xlsx`/`.pptx` 文件（或十种 Office 类型中的任意一种），它就在你的服务器运行的编辑器里打开，这台机器上不必安装 Office。文档如果位于你保留在此电脑上的文件夹里，打开的就是它本身；其余文档则先复制上去，编辑后再写回，覆盖原文件（[docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)）。
+- **直接打开你本地磁盘上的 Office 文档**：双击一个 `.docx`/`.xlsx`/`.pptx` 文件（或十种 Office 类型中的任意一种，或一个 `.csv` 文件），它就在你的服务器运行的编辑器里打开，这台机器上不必安装 Office。文档如果位于你保留在此电脑上的文件夹里，打开的就是它本身；其余文档则先复制上去，编辑后再写回，覆盖原文件；如果编辑器以另一种格式保存（旧的 `.doc` 会以 `.docx` 返回），则写在原文件旁边（[docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)）。
 - **挂载为驱动器**：Settings 中的一个按钮通过 WebDAV 把服务器挂载为操作系统的驱动器，另一个按钮把它卸载；凭据就是账户自己的令牌，绝不会出现在命令行中。已在 Windows 上实测；macOS 和 Linux 的代码路径已经有了，但尚未验证（[docs/DESKTOP.md](docs/DESKTOP.md#mounting-the-server-as-a-drive)）。
 - **⌘K 搜索所有账户**，即图标栏上的每一个账户，结果按账户分组，每个账户一个标记，搜索、下载和拖出都用各账户自己的登录（[docs/SEARCH.md](docs/SEARCH.md)）。
 - **通知和账户都在窗口里**：顶栏的末尾和 Web 应用的一样，是**铃铛**（未读数、最新的几条、*Mark all read*（全部标为已读）、完整列表）和**头像**，头像下有 *User settings*（用户设置），也就是 Web 应用自己的设置对话框，**在窗口内**打开；管理员还有 *Admin panel*（管理面板）。点击一条通知，就会在窗口里进入对应的文件夹，并选中该文件。退出登录仍在应用自己的 *Settings → Accounts*（设置 > 账户）中（[docs/DESKTOP.md](docs/DESKTOP.md#notifications-and-your-account)）。

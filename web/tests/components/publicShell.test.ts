@@ -393,6 +393,9 @@ describe('the public shell — one frame for every link', () => {
     const card = w.find('.fe-ppage__card').element;
     expect(card.contains(brand)).toBe(false);
     expect(brand.parentElement).toBe(w.find('[data-testid="public-page"]').element);
+    // The link page IS the whole page: its card is the document's one main
+    // region (the admin's preview draws the same shell `embedded`, without it).
+    expect(card.tagName).toBe('MAIN');
   });
 
   it('the card is as wide as the body needs, and a gate is always the narrow one', async () => {

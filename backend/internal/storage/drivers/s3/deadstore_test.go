@@ -431,21 +431,56 @@ func TestDeadStore_MovingUploadIsNeverCut(t *testing.T) {
 
 // …and the same for a download, including a reader who stops reading for a
 // while: the stall timer runs only while a Read waits on the network.
+//
+// ⚠ Nothing here waits for the store against a clock (#159). The store sends
+// each piece the moment the reader asks for it and holds the next until then,
+// so a Read waits only for a store that is already sending, and nothing piles
+// up in the sockets while the reader is away. All the time the download takes
+// is spent by the reader BETWEEN Reads, where a slower machine only makes the
+// claim stronger. The old version had the store send by the clock (~6 MB/s)
+// straight through the reader's pause: the reader came back to sockets that
+// had been full for seconds, its next piece came only when the connection got
+// going again, and on a loaded GitHub runner that once took longer than the
+// attempt timeout ("the download was cut after 6.0s: the answer stopped
+// arriving for 1s", ci.yml run 37210570850) - red for nothing the driver did.
+// TestDeadStore_StalledDownloadIsCut is the other half: the same Read IS cut
+// when the store stops sending.
 func TestDeadStore_SlowDownloadAndSlowReaderAreNeverCut(t *testing.T) {
-	const size = 32 << 20
-	payload := bytes.Repeat([]byte("z"), size)
+	const (
+		piece  = 256 << 10
+		pieces = 32
+		size   = piece * pieces
+		// After each piece the reader dawdles: 31 x 125 ms, about 4 s, so the
+		// download keeps moving for longer than the whole 3 s budget.
+		dawdle = 125 * time.Millisecond
+		// Once, halfway, it walks away for 2.5 attempt timeouts.
+		away = 2500 * time.Millisecond
+	)
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i / piece) // a piece lost, repeated or swapped shows
+	}
+	ask := make(chan struct{}, pieces)
+	quit := make(chan struct{})
 	fs := newFakeStore(t, func(w http.ResponseWriter, r *http.Request, _ int32) {
 		w.Header().Set("Content-Length", fmt.Sprint(size))
 		w.WriteHeader(http.StatusOK)
-		const chunk = 256 << 10
-		for off := 0; off < size; off += chunk {
-			if _, err := w.Write(payload[off : off+chunk]); err != nil {
+		w.(http.Flusher).Flush() // the answer starts at once; each piece waits to be asked for
+		for off := 0; off < size; off += piece {
+			select {
+			case <-ask:
+			case <-quit:
+				return
+			case <-r.Context().Done():
+				return
+			}
+			if _, err := w.Write(payload[off : off+piece]); err != nil {
 				return
 			}
 			w.(http.Flusher).Flush()
-			time.Sleep(40 * time.Millisecond) // ~6 MB/s
 		}
 	})
+	t.Cleanup(func() { close(quit) }) // after newFakeStore: runs before srv.Close, which waits for the handler
 	d := deadStoreDriver(t, fs.srv.URL)
 	start := time.Now()
 	rc, err := d.Read(context.Background(), "/big.bin")
@@ -453,20 +488,84 @@ func TestDeadStore_SlowDownloadAndSlowReaderAreNeverCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rc.Close()
-	half := make([]byte, size/2)
-	if _, err := io.ReadFull(rc, half); err != nil {
-		t.Fatalf("first half: %v", err)
+	got := make([]byte, 0, size)
+	buf := make([]byte, piece)
+	for i := range pieces {
+		ask <- struct{}{} // the store sends this piece now: the Read below waits on the network, under the stall timer
+		if _, err := io.ReadFull(rc, buf); err != nil {
+			t.Fatalf("piece %d of %d: the download was cut after %.1fs: %v", i+1, pieces, time.Since(start).Seconds(), err)
+		}
+		got = append(got, buf...)
+		if i == pieces/2-1 {
+			time.Sleep(away) // no Read waits: the stall timer must not run
+		} else {
+			time.Sleep(dawdle)
+		}
 	}
-	time.Sleep(2500 * time.Millisecond) // the reader walks away for 2.5 attempt timeouts
-	rest, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("the download was cut after %.1fs: %v", time.Since(start).Seconds(), err)
+	if rest, err := io.ReadAll(rc); err != nil || len(rest) != 0 {
+		t.Fatalf("after the last piece: %d more bytes, err=%v", len(rest), err)
 	}
 	if took := time.Since(start); took < 5*time.Second {
 		t.Fatalf("the download took only %.1fs — it did not outlast the budget", took.Seconds())
 	}
-	if sha256.Sum256(append(half, rest...)) != sha256.Sum256(payload) {
+	if sha256.Sum256(got) != sha256.Sum256(payload) {
 		t.Fatal("the download arrived altered")
+	}
+}
+
+// The other half of the claim above: a download whose store stops sending
+// midway IS cut, one attempt timeout into the Read that waits for it, on the
+// very path the test above reads. Without this, that test would also pass
+// with no stall guard on a download at all.
+func TestDeadStore_StalledDownloadIsCut(t *testing.T) {
+	const size = 1 << 20
+	release := make(chan struct{})
+	fs := newFakeStore(t, func(w http.ResponseWriter, r *http.Request, _ int32) {
+		w.Header().Set("Content-Length", fmt.Sprint(size))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("h"), size/2))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	t.Cleanup(func() { close(release) }) // after newFakeStore: runs before srv.Close, which waits for the handler
+	d := deadStoreDriver(t, fs.srv.URL)
+	rc, err := d.Read(context.Background(), "/half.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	if _, err := io.ReadFull(rc, make([]byte, size/2)); err != nil {
+		t.Fatalf("the half the store sent: %v", err)
+	}
+	type result struct {
+		n    int64
+		err  error
+		took time.Duration
+	}
+	done := make(chan result, 1)
+	go func() {
+		start := time.Now()
+		n, err := io.Copy(io.Discard, rc)
+		done <- result{n, err, time.Since(start)}
+	}()
+	select {
+	case res := <-done:
+		t.Logf("stalled download: cut after %.1fs, %d more bytes, err=%v", res.took.Seconds(), res.n, res.err)
+		var se *stall.Error
+		if !errors.As(res.err, &se) || se.Kind != stall.Body {
+			t.Fatalf("want the download cut as an answer that stopped arriving, got %d more bytes and err=%v", res.n, res.err)
+		}
+		if !strings.Contains(res.err.Error(), "the answer stopped arriving for 1s") {
+			t.Errorf("the error does not say what stopped: %v", res.err)
+		}
+		if res.took < time.Second {
+			t.Errorf("cut after %.1fs, before the 1 s attempt timeout ran out", res.took.Seconds())
+		}
+	case <-time.After(deadStoreCap):
+		t.Fatalf("a download whose store stopped sending was not cut in %s", deadStoreCap)
 	}
 }
 

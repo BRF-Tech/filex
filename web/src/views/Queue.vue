@@ -103,6 +103,7 @@ const QUEUE_TYPES = [
   'delete',
   'replica_retry',
   'replica_report',
+  'replica_initial_copy',
   'reconcile',
 ] as const;
 

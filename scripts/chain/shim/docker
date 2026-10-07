@@ -1,0 +1,54 @@
+#!/bin/bash
+# A `docker` for `node e2e/run.mjs local --s3` inside a job container, which
+# has no Docker. The harness (e2e/lib/s3server.mjs) asks for the Versity S3
+# Gateway on a free port P with `-p P:7070`; run.mjs already runs the gateway
+# in the job's network namespace on :7070 (posix root /w/run/vgw-data here),
+# so:
+#   run ... -p P:7070 --name N ...   forwards 127.0.0.1:P to :7070
+#   exec N mkdir -p /data/B           makes the bucket directory in the root
+#   rm -f -v N                        stops the forwarder
+# `version`, `image inspect` and `pull` answer as a Docker that has the image.
+# The run arguments are checked against what the harness must send, so a
+# change there is a red here, not a silent pass.
+
+echo "$(date -Is) docker $*" >> "/w/run/out/${JOB:-s3}/docker-shim.log"
+case "$1" in
+  version|pull|image) exit 0 ;;
+  run)
+    shift
+    port=""; cport=""; name=""; image=""; envs=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -p) port="${2%%:*}"; cport="${2##*:}"; shift 2 ;;
+        --name) name="$2"; shift 2 ;;
+        -e) envs="$envs $2"; shift 2 ;;
+        -v) shift 2 ;;
+        -d|--rm) shift ;;
+        *) image="$1"; shift ;;
+      esac
+    done
+    [ -n "$port" ] && [ -n "$name" ] || { echo "docker shim: run without -p or --name" >&2; exit 1; }
+    [ "$cport" = 7070 ] || { echo "docker shim: container port $cport, expected 7070" >&2; exit 1; }
+    case "$image" in versity/versitygw:*) ;; *) echo "docker shim: image $image is not versitygw" >&2; exit 1 ;; esac
+    for want in VGW_BACKEND=posix VGW_BACKEND_ARG=/data VGW_HEALTH=/health ROOT_ACCESS_KEY=filexe2e ROOT_SECRET_KEY=filexe2esecret; do
+      case " $envs " in *" $want "*) ;; *) echo "docker shim: missing -e $want" >&2; exit 1 ;; esac
+    done
+    nohup node /w/chain/job/forward.mjs "127.0.0.1:$port" 127.0.0.1:7070 > /dev/null 2>&1 &
+    echo $! > "/tmp/docker-shim-$name.pid"
+    echo "$name"
+    exit 0 ;;
+  exec)
+    shift; name="$1"; shift
+    if [ "$1" = mkdir ]; then
+      shift; [ "$1" = -p ] && shift
+      case "$1" in /data/*) ;; *) echo "docker shim: mkdir outside /data: $1" >&2; exit 1 ;; esac
+      mkdir -p "/w/run/vgw-data/${1#/data/}"
+      exit $?
+    fi
+    exit 1 ;;
+  rm)
+    name="${*: -1}"
+    [ -f "/tmp/docker-shim-$name.pid" ] && kill "$(cat "/tmp/docker-shim-$name.pid")" 2>/dev/null
+    exit 0 ;;
+esac
+exit 1

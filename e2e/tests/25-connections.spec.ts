@@ -33,6 +33,7 @@ import { BASE_PATH } from '../helpers/base';
 // holding what used to be loose `Revoke` / `Remove` buttons. The menu
 // teleports to <body>, so it cannot be reached through the row at all.
 import { confirmRowAction } from '../helpers/rowMenu';
+import { listedOptions, pickOption } from '../helpers/choiceSelect';
 
 const STORAGE_NAME = 'conn-e2e';
 const USER_EMAIL = 'conn-viewer@local';
@@ -296,7 +297,7 @@ test.describe('storage connections', () => {
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
     await expect(page.getByTestId('connections-panel')).toBeVisible();
-    await page.getByTestId('guide-protocol').selectOption('s3');
+    await pickOption(page.getByTestId('guide-protocol'), 's3');
 
     const keys = page.getByTestId('s3-keys');
     await expect(keys).toBeVisible();
@@ -354,7 +355,7 @@ test.describe('storage connections', () => {
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
     await expect(page.getByTestId('connections-panel')).toBeVisible();
-    await page.getByTestId('guide-protocol').selectOption('sftp');
+    await pickOption(page.getByTestId('guide-protocol'), 'sftp');
 
     const keys = page.getByTestId('ssh-keys');
     await expect(keys).toBeVisible();
@@ -421,7 +422,7 @@ test.describe('storage connections', () => {
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
     await expect(page.getByTestId('connections-panel')).toBeVisible();
-    await page.getByTestId('guide-protocol').selectOption('ftps');
+    await pickOption(page.getByTestId('guide-protocol'), 'ftps');
 
     const facts = page.getByTestId('guide-facts');
     await expect(facts).toContainText(ftpsPort);
@@ -459,7 +460,7 @@ test.describe('storage connections', () => {
     await page.goto('/admin/connections');
     await dismissInstallBanner(page);
     await expect(page.getByTestId('connections-panel')).toBeVisible();
-    await page.getByTestId('guide-protocol').selectOption('nfs');
+    await pickOption(page.getByTestId('guide-protocol'), 'nfs');
 
     const panel = page.getByTestId('nfs-exports');
     await expect(panel).toBeVisible();
@@ -579,7 +580,7 @@ test.describe('storage connections', () => {
     // the admin panel — so this user read "use an API token as the password"
     // and had nowhere to go. Being an admin hid the gap completely.
     await expect(page.getByTestId('connections-panel')).toBeVisible();
-    await page.getByTestId('guide-protocol').selectOption('ftps');
+    await pickOption(page.getByTestId('guide-protocol'), 'ftps');
     await expect(page.getByTestId('api-tokens')).toBeVisible();
 
     await page.getByTestId('token-mint').click();
@@ -642,7 +643,7 @@ test.describe('storage connections', () => {
 
     // …and the credential the guide sends them for is mintable from here too,
     // which is why the door matters rather than just the page.
-    await page.getByTestId('guide-protocol').selectOption('ftps');
+    await pickOption(page.getByTestId('guide-protocol'), 'ftps');
     await expect(page.getByTestId('api-tokens')).toBeVisible();
 
     // It closes again and puts them back where they were, rather than trapping
@@ -671,8 +672,8 @@ test.describe('storage connections', () => {
     // ⚠ The picker shows a NAME, not the id upper-cased — "MOUNT" would be a
     // label for a thing that is not a protocol, in a list where the rest are.
     const picker = page.getByTestId('guide-protocol');
-    await expect(picker.locator('option[value="mount"]')).toHaveText('filex mount');
-    await picker.selectOption('mount');
+    expect((await listedOptions(picker)).find((o) => o.value === 'mount')?.label).toBe('filex mount');
+    await pickOption(picker, 'mount');
 
     const facts = page.getByTestId('guide-facts');
     await expect(facts).toContainText(/API key/i);
@@ -724,17 +725,17 @@ test.describe('storage connections', () => {
 
     // Present on the three that sign in with a token…
     for (const proto of ['ftps', 'webdav', 'mount']) {
-      await picker.selectOption(proto);
+      await pickOption(picker, proto);
       await expect(panel, `token panel missing on ${proto}`).toBeVisible();
     }
     // …and absent on the three that have a credential of their own, where it
     // would only invite minting one nobody needs.
     for (const proto of ['s3', 'sftp', 'nfs']) {
-      await picker.selectOption(proto);
+      await pickOption(picker, proto);
       await expect(panel, `token panel should not be on ${proto}`).toHaveCount(0);
     }
 
-    await picker.selectOption('ftps');
+    await pickOption(picker, 'ftps');
     const label = `e2e-token-${Date.now()}`;
     await page.getByTestId('token-label').fill(label);
     await page.getByTestId('token-mint').click();

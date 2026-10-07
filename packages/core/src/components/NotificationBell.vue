@@ -45,7 +45,7 @@ import { Popover, PopoverButton, PopoverPanel } from '@headlessui/vue';
 import { useLocale } from '../composables/useLocale';
 import type { NotificationFeed, NotificationRowData } from '../composables/useNotificationFeed';
 import { actionIconSvg } from '../lib/actionIcons';
-import { anchorUnderEndEdge, refElement } from '../lib/anchoredPanel';
+import { anchorUnderEndEdge, fixedViewport, refElement } from '../lib/anchoredPanel';
 import { dirOfElement } from '../lib/direction';
 // ⚠ The row and the badge are components, not markup written here: the same
 // row is drawn by the full-list screen and the same badge by that screen's
@@ -107,7 +107,7 @@ function syncPos() {
   if (!r) return;
   const at = anchorUnderEndEdge(
     r,
-    { width: window.innerWidth, height: window.innerHeight },
+    fixedViewport(),
     // The list scrolls inside the panel; 520 keeps ~6 rows on a laptop and
     // the head + foot visible on a phone. ⚠ RTL: flush with the bell's END
     // edge — its left one in a right-to-left header.

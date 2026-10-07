@@ -37,6 +37,13 @@ const (
 	CodeSourceChanged    = "store_source_changed"    // the app installed came from another store or repository: remove it first
 	CodeIntentNotFound   = "intent_session_unknown"  // no reviewed intent under that handle
 	CodeLicenseKey       = "license_key_invalid"
+	// The embedded store (#162, instance.go, catalog.go).
+	CodeNotConnected   = "store_not_connected"        // this filex is not connected to the store: an administrator connects it with a code
+	CodeConnectRefused = "store_connection_refused"   // the store refused this filex's signed request: connect it again
+	CodeConnectCode    = "store_connect_code_invalid" // the connection code is unknown, used, expired or for another filex
+	CodeStoreRefusal   = "store_refused"              // the store refused what was asked (detail.store_error says why)
+	CodeIndexInvalid   = "store_index_invalid"        // the store's signed index does not verify, has expired or is not one filex reads
+	CodeMediaInvalid   = "store_media_invalid"        // an icon the catalog does not name, or bytes that are not it
 )
 
 // Error is a refusal with a code; Detail carries what the panel draws (the
@@ -137,6 +144,20 @@ func NewClient(policy netguard.Policy, userAgent string) *Client {
 
 // do sends one request to origin+path and answers the status and the body.
 func (c *Client) do(ctx context.Context, method, origin, path string, body any, limit int64) (int, []byte, error) {
+	var raw []byte
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, err
+		}
+		raw = b
+	}
+	return c.doRaw(ctx, method, origin, path, raw, nil, limit)
+}
+
+// doRaw is do with the body's bytes as they go (nil: no body) and extra
+// headers (a connected filex's signature, instance.go).
+func (c *Client) doRaw(ctx context.Context, method, origin, path string, body []byte, hdr map[string]string, limit int64) (int, []byte, error) {
 	u := origin + path
 	parsed, err := url.Parse(u)
 	if err != nil {
@@ -149,11 +170,7 @@ func (c *Client) do(ctx context.Context, method, origin, path string, body any, 
 	}
 	var rdr io.Reader
 	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return 0, nil, err
-		}
-		rdr = bytes.NewReader(b)
+		rdr = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, rdr)
 	if err != nil {
@@ -165,6 +182,9 @@ func (c *Client) do(ctx context.Context, method, origin, path string, body any, 
 	}
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	for k, v := range hdr {
+		req.Header.Set(k, v)
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {

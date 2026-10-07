@@ -3,7 +3,7 @@
 //
 //   node e2e/shots/groups.mjs       (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/groups/ (or SHOTS_OUT):
+// Writes e2e/.artifacts/shots/capture/groups/ (or SHOTS_OUT):
 //
 //   groups-list-1440.png    Admin → Groups in the explorer's table: each
 //                           group's role and priority, members, folders and
@@ -203,7 +203,8 @@ async function main() {
     await dialog.waitFor({ timeout: 15_000 });
     const people = page.getByTestId('share-people-toggle');
     if ((await people.getAttribute('aria-expanded')) !== 'true') await people.click();
-    await page.getByTestId('share-add-person').locator('select').selectOption('owner');
+    // The level is three buttons side by side (#160).
+    await page.getByTestId('share-add-level-owner').click();
     await page.getByTestId('share-add-person').locator('input').fill('fin');
     await page.getByTestId('share-suggest-group').first().waitFor({ timeout: 10_000 });
     await page.getByTestId('share-suggest-group').first().dispatchEvent('mousedown');

@@ -112,6 +112,14 @@ const { t } = useLocale(() => props.locale);
 /** Drawn inside a host's page rather than in a tab of its own. */
 const embedded = computed(() => props.frame === 'embedded');
 
+/**
+ * The body's element: the page's `<main>` in a tab of its own, a plain block
+ * inside a host's page - the host already has the main region (the admin
+ * panel's layout), and a document has one; a `<main>` inside another is not
+ * valid HTML (the same rule as PublicShell's `embedded`).
+ */
+const bodyTag = computed(() => (embedded.value ? 'div' : 'main'));
+
 type PageState = 'loading' | 'surface' | 'queued' | 'done' | 'error';
 const state = ref<PageState>('loading');
 const loadError = ref('');
@@ -421,7 +429,7 @@ const showsDocument = computed(() => {
       </a>
     </header>
 
-    <main v-if="uiRef" class="fe-apppage__body fe-apppage__body--ui">
+    <component :is="bodyTag" v-if="uiRef" class="fe-apppage__body fe-apppage__body--ui">
       <AppFrame
         :api="api"
         :app="plugin"
@@ -439,13 +447,13 @@ const showsDocument = computed(() => {
         @op="(op) => emit('op', op)"
       />
       <p v-if="toast" class="fe-surface__text" role="status">{{ toast }}</p>
-    </main>
-    <main v-else-if="!uiChecked" class="fe-apppage__body">
+    </component>
+    <component :is="bodyTag" v-else-if="!uiChecked" class="fe-apppage__body">
       <p class="fe-surface__text fe-surface__text--muted" data-testid="plugin-page-loading">
         {{ t('plugin.view.loading') }}
       </p>
-    </main>
-    <main v-else class="fe-apppage__body">
+    </component>
+    <component :is="bodyTag" v-else class="fe-apppage__body">
       <SurfaceSections
         v-if="state === 'surface' && sections.length"
         :sections="sections"
@@ -510,7 +518,7 @@ const showsDocument = computed(() => {
           <a v-if="backHref" class="fe-btn" :href="backHref">{{ t('plugin.page_view.back') }}</a>
         </div>
       </div>
-    </main>
+    </component>
 
     <footer v-if="state === 'surface' && conv.footer.value.length" class="fe-apppage__foot">
       <SurfaceFooterButtons :conv="conv" :locale="locale" testid-prefix="plugin-page" />

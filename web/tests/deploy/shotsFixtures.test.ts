@@ -12,9 +12,31 @@
 // does not run the scripts, it checks that the values they hardcode are still
 // values the server accepts, which is the only way they have ever broken.
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import vm from 'node:vm';
+import { afterAll, describe, expect, it } from 'vitest';
+
+import {
+  SCENE_CONTEXT,
+  SCENE_NOW,
+  SCENE_TZ,
+  TIME_KEY,
+  UNTOUCHED,
+  WINDOW,
+  fixtureTime,
+  installSceneDisplay,
+  pinTimes,
+  sceneAnswer,
+  sceneRequest,
+  sceneShift,
+  shiftJson,
+  shiftQuery,
+  shiftValue,
+  snapForDisplay,
+} from '../../../e2e/shots/clock.mjs';
+import { seedFixtures, writeOfficeFile } from '../../../e2e/shots/fixtures.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
 
@@ -124,20 +146,36 @@ function sourceFiles(dir: string): string[] {
 /** Every test id the interface can write, as a pattern. */
 function emittedTestIds(): Array<{ decl: string; re: RegExp }> {
   // `data-testid="x"`, `:data-testid="`a-${b}`"`, the `'data-testid':` key of
-  // a row-attrs object, and the `testid-prefix` a component hands to a child
-  // that appends to it.
+  // a row-attrs object, the `testid` a page hands to one of core's controls,
+  // and the `testid-prefix` a component hands to a child that appends to it.
+  //
+  // ⚠ Since #160 every list and every row of choice buttons is core's
+  // (ChoiceSelect, ChoiceButtons), and a page names one by a PROP: `testid="x"`
+  // is the combobox's `data-testid="x"` (its list `x-list`, an option
+  // `x-option-<value>`), `testid-prefix="p"` is each button's `p-<value>`.
+  // Read as plain attributes they were invisible, and three scenes that were
+  // right (guide-protocol, share-max-downloads, share-add-level-owner) read as
+  // waiting for an id nothing writes.
   const attr =
-    /['"]?(?::?data-testid|:?testid-prefix|testidPrefix)['"]?\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g;
+    /['"]?(:?data-testid|:?testid-prefix|testidPrefix|(?<![\w-]):?testid)['"]?\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g;
   const decls = new Set<string>();
   for (const root of UI_ROOTS) {
     for (const file of sourceFiles(root)) {
       const src = readFileSync(file, 'utf8');
       for (const m of src.matchAll(attr)) {
-        let v = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+        const name = m[1]!.replace(/^:/, '');
+        let v = (m[2] ?? m[3] ?? m[4] ?? '').trim();
         // A Vue dynamic attribute quotes an expression, which is usually a
         // template literal: `:data-testid="`a-${b}`"` captures the backticks.
         if (v.length > 1 && v.startsWith('`') && v.endsWith('`')) v = v.slice(1, -1);
-        if (v) decls.add(v);
+        if (!v) continue;
+        decls.add(v);
+        if (name === 'testid') {
+          decls.add(`${v}-list`);
+          decls.add(`${v}-option-\${value}`);
+        } else if (name !== 'data-testid') {
+          decls.add(`${v}-\${value}`);
+        }
       }
       // A DataTable row's Actions control: `:row-actions-test-id="(row) =>
       // `x-${row.id}`"` names the control, and core RowActions names each
@@ -208,4 +246,280 @@ describe('the screenshot scripts can still find what they photograph', () => {
       ).toBe(true);
     },
   );
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// …and take every picture at one clock (task #176, the owner's decision of
+// 2026-10-06)
+//
+// ⚠⚠ Why. `pnpm shots` compares every picture with the published one pixel
+// by pixel and shows a person only the ones that moved. A picture with a date
+// on it moved every night: each upload's time, the day in a date picker, a
+// notification's "2 minutes ago". e2e/shots/clock.mjs puts every scene on one
+// clock - the browser starts at SCENE_NOW in UTC, the API's times are moved
+// into it, what a person reads is snapped to the hour, the fixtures' files
+// carry fixed dates. These tests hold each part without a browser; the first
+// one fails on a script that makes a browser context off the clock.
+
+const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
+const SHOTS = path.join(REPO, 'e2e', 'shots');
+
+describe('the scenes run on one clock', () => {
+  it('is Tuesday, September 15, 2026, 10:30 UTC, and every browser context of every shot script is on it', () => {
+    expect(SCENE_NOW).toBe(Date.parse('2026-09-15T10:30:00Z'));
+    expect(SCENE_TZ).toBe('UTC');
+    expect(SCENE_CONTEXT).toEqual({ timezoneId: 'UTC' });
+    let contexts = 0;
+    for (const name of readdirSync(SHOTS).filter((f) => f.endsWith('.mjs') && f !== 'clock.mjs')) {
+      const src = readFileSync(path.join(SHOTS, name), 'utf8');
+      const made = (src.match(/\bbrowser\.newContext\(/g) ?? []).length;
+      const staged = (src.match(/\bawait stageClock\(/g) ?? []).length;
+      const zoned = (src.match(/\bbrowser\.newContext\(\{\s*\.\.\.SCENE_CONTEXT\b/g) ?? []).length;
+      expect(staged, `e2e/shots/${name} makes ${made} browser context(s) and puts ${staged} on the scene clock (stageClock)`).toBe(made);
+      expect(zoned, `e2e/shots/${name}: a browser context without ...SCENE_CONTEXT is in the machine's time zone`).toBe(made);
+      contexts += made;
+    }
+    expect(contexts, 'no shot script makes a browser context any more - has the scan broken?').toBeGreaterThan(8);
+  });
+
+  it('starts the browser at SCENE_NOW and lets it run - a frozen clock swallows every click after the first open', () => {
+    // FilePane's open guard ignores a click within 500 ms of an open, measured
+    // with Date.now(): on a clock that never moves that is every later click.
+    const clock = readFileSync(path.join(SHOTS, 'clock.mjs'), 'utf8');
+    expect(clock).toContain('await context.clock.setSystemTime(now);');
+    expect(clock).not.toMatch(/clock\.setFixedTime\(/);
+    expect(clock).toContain("await context.route('**/api/**', (route) => sceneRoute(route, move));");
+    expect(clock).toContain('await context.addInitScript(installSceneDisplay, now);');
+    const pane = readFileSync(path.join(REPO, 'packages', 'core', 'src', 'components', 'FilePane.vue'), 'utf8');
+    expect(pane).toMatch(/return Date\.now\(\) - openedAt < OPEN_GUARD_MS;/);
+  });
+
+  describe('the server times move into scene time, and the page time back', () => {
+    const start = Date.parse('2026-10-07T01:30:00Z');
+    const move = sceneShift(start);
+
+    it('by the distance between SCENE_NOW and the moment the context started', () => {
+      expect(move.toScene(start)).toBe(SCENE_NOW);
+      expect(move.toScene(start - 5 * 60_000)).toBe(SCENE_NOW - 5 * 60_000);
+      expect(move.toScene(start + 365 * DAY_MS)).toBe(SCENE_NOW + 365 * DAY_MS);
+      expect(move.toReal(SCENE_NOW + 7 * DAY_MS)).toBe(start + 7 * DAY_MS);
+      expect(move.toReal(SCENE_NOW - 30 * DAY_MS)).toBe(start - 30 * DAY_MS);
+      // A calendar day moves by whole days.
+      expect(move.toScene(Date.UTC(2026, 9, 7), { day: true })).toBe(Date.UTC(2026, 8, 15));
+      expect(move.toReal(Date.UTC(2026, 8, 15), { day: true })).toBe(Date.UTC(2026, 9, 7));
+    });
+
+    it('and not a time that is not this run: a fixture date, the zero time, years away', () => {
+      expect(move.toScene(fixtureTime('Photos/aurora.png'))).toBeNull();
+      expect(move.toScene(Date.parse('0001-01-01T00:00:00Z'))).toBeNull();
+      expect(move.toScene(start - WINDOW.realBefore - 1)).toBeNull();
+      expect(move.toScene(start + WINDOW.after + 1)).toBeNull();
+      expect(move.toReal(Date.parse('2020-01-01T00:00:00Z'))).toBeNull();
+    });
+
+    it('in an API answer: date-time strings anywhere, numbers and days only under a time key', () => {
+      const answer = {
+        files: [
+          {
+            name: 'report.pdf',
+            size: 1_790_000_000_000,
+            last_modified: start - 60_000,
+            created_at: '2026-10-07T01:29:00.123456789Z',
+            indexed: '2026-10-07 01:29:00',
+            folder: '2026-10-07',
+          },
+        ],
+        expires_at: Math.floor((start + 7 * DAY_MS) / 1000),
+        day: '2026-10-07',
+        count: Math.floor(start / 1000),
+        taken: '2026-09-12T08:30:00Z',
+      };
+      const moved = shiftJson(answer, move.toScene);
+      expect(moved.files[0]).toEqual({
+        name: 'report.pdf',
+        size: 1_790_000_000_000,
+        last_modified: SCENE_NOW - 60_000,
+        created_at: new Date(SCENE_NOW - 60_000 + 123).toISOString(),
+        indexed: '2026-09-15 10:29:00',
+        folder: '2026-10-07',
+      });
+      expect(moved.expires_at).toBe(Math.floor((SCENE_NOW + 7 * DAY_MS) / 1000));
+      expect(moved.day).toBe('2026-09-15');
+      expect(moved.count).toBe(answer.count);
+      expect(moved.taken).toBe('2026-09-12T08:30:00Z');
+      expect(TIME_KEY.test('size')).toBe(false);
+      expect(TIME_KEY.test('updatedAt')).toBe(true);
+      expect(TIME_KEY.test('format')).toBe(false);
+      expect(shiftValue('2026-10-07T04:29:00+03:00', move.toScene)).toBe(new Date(SCENE_NOW - 60_000).toISOString());
+    });
+
+    it('in a query: only what is a time, and the same URL when nothing is', () => {
+      const url = 'http://127.0.0.1:5212/api/admin/audit?since=2026-09-08T10:30:00.000Z&path=demo%3A%2F%2FDocuments&page=007';
+      const real = new URL(shiftQuery(url, move.toReal));
+      expect(real.searchParams.get('since')).toBe(new Date(start - 7 * DAY_MS).toISOString());
+      expect(real.searchParams.get('path')).toBe('demo://Documents');
+      expect(real.searchParams.get('page')).toBe('007');
+      const plain = 'http://127.0.0.1:5212/api/files/manager?action=index&path=demo%3A%2F%2F&limit=500';
+      expect(shiftQuery(plain, move.toReal)).toBe(plain);
+    });
+
+    it("moves the page's request out of scene time, and passes the signed and session doors untouched", () => {
+      const req = (url: string, over: Record<string, unknown> = {}) => ({
+        resourceType: () => 'fetch',
+        url: () => url,
+        method: () => 'POST',
+        headers: () => ({ 'content-type': 'application/json', 'content-length': '99', 'if-none-match': '"x"', authorization: 'Bearer t' }),
+        postData: () => JSON.stringify({ expires_at: new Date(SCENE_NOW + 7 * DAY_MS).toISOString(), name: 'Q3' }),
+        ...over,
+      });
+      const plan = sceneRequest(req('http://127.0.0.1:5212/api/shares'), move);
+      expect(plan.idempotent).toBe(false);
+      expect(plan.options.timeout).toBe(0);
+      expect(plan.options.headers).toEqual({ 'content-type': 'application/json', authorization: 'Bearer t' });
+      expect(JSON.parse(plan.options.postData)).toEqual({ expires_at: new Date(start + 7 * DAY_MS).toISOString(), name: 'Q3' });
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/auth/login'), move)).toBeNull();
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/files/onlyoffice/config?path=a'), move)).toBeNull();
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/files/thumb?path=a', { resourceType: () => 'image' }), move)).toBeNull();
+      // A host only the browser resolves (realm.mjs): sending it again from Node would not find it.
+      expect(sceneRequest(req('http://files.acme.test:5212/api/shares'), move)).toBeNull();
+      expect(sceneRequest(req('http://localhost:5212/api/shares'), move)).not.toBeNull();
+      // A body that is not JSON goes on untouched: Chromium gives the route a
+      // multipart body without its files' bytes, and route.fetch would send
+      // an empty part (defaultapps.mjs's install review, "manifest: EOF", 0.53).
+      const multipart = { 'content-type': 'multipart/form-data; boundary=x' };
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/admin/app-plugins?dry_run=1', { headers: () => multipart }), move)).toBeNull();
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/files/upload', { headers: () => ({ 'content-type': 'application/octet-stream' }) }), move)).toBeNull();
+      // A JSON body, and a request with none, are still moved.
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/shares', { headers: () => ({}), postData: () => null }), move)).not.toBeNull();
+      // Of E2E, only the signed and session-bound doors: the requests and the
+      // policy carry times a picture prints (Admin → Encryption, 0.53).
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/files/e2e/escrow/challenge'), move)).toBeNull();
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/files/e2e/cleanup'), move)).toBeNull();
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/admin/e2e/requests', { method: () => 'GET', postData: () => null }), move)).not.toBeNull();
+      expect(sceneRequest(req('http://127.0.0.1:5212/api/files/e2e/requests'), move)).not.toBeNull();
+      expect(UNTOUCHED.length).toBeGreaterThan(2);
+    });
+
+    it("moves the server's answer into scene time, with headers that fit the new body", async () => {
+      const body = Buffer.from(JSON.stringify({ created_at: new Date(start - 120_000).toISOString(), name: 'x' }));
+      const res = {
+        status: () => 200,
+        headers: () => ({
+          'content-type': 'application/json; charset=utf-8',
+          'content-length': String(body.length),
+          'content-encoding': 'gzip',
+          'set-cookie': 'a=b',
+          etag: '"1"',
+          'x-request-id': 'r1',
+        }),
+        body: async () => body,
+      };
+      const out = await sceneAnswer(res, move);
+      expect(out.status).toBe(200);
+      expect(out.headers).toEqual({ 'content-type': 'application/json; charset=utf-8', 'x-request-id': 'r1' });
+      expect(JSON.parse(String(out.body))).toEqual({ created_at: new Date(SCENE_NOW - 120_000).toISOString(), name: 'x' });
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      const image = await sceneAnswer({ status: () => 200, headers: () => ({ 'content-type': 'image/png' }), body: async () => png }, move);
+      expect(image.body).toBe(png);
+    });
+  });
+
+  describe('what a person reads is snapped to the hour around SCENE_NOW', () => {
+    const DATE_TIME = "{ timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }";
+    const native = (ms: number) =>
+      new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
+    // ⚠ formatToParts is held to formatToParts, not to format: V8 turns the
+    // narrow no-break space ICU 72+ puts before "AM" into a plain space in
+    // format() only, so the two differ by that one character on the same Node
+    // (the chain's Node, 2026-10-06: format() had the plain space, formatToParts the other).
+    const nativeParts = (ms: number) =>
+      new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+        .formatToParts(new Date(ms))
+        .map((p) => p.value)
+        .join('');
+    const page = (before = '') => {
+      const ctx = vm.createContext({});
+      vm.runInContext(`${before};(${installSceneDisplay.toString()})(${SCENE_NOW});`, ctx);
+      return (code: string) => vm.runInContext(code, ctx);
+    };
+    // How Playwright's clock replaces Intl (playwright-core 1.59.1, clockSource
+    // createIntl): a DateTimeFormat that hands out plain objects.
+    const PLAYWRIGHT_CLOCK = `(() => {
+      const N = Intl; const C = {};
+      for (const k of Object.getOwnPropertyNames(N)) C[k] = N[k];
+      C.DateTimeFormat = function (...a) {
+        const r = new N.DateTimeFormat(...a);
+        return { format: (d) => r.format(d || Date.now()), formatToParts: (d) => r.formatToParts(d || Date.now()), resolvedOptions: () => r.resolvedOptions() };
+      };
+      C.DateTimeFormat.prototype = Object.create(N.DateTimeFormat.prototype);
+      globalThis.Intl = C;
+    })()`;
+
+    for (const [label, before] of [['on its own', ''], ["under Playwright's clock", PLAYWRIGHT_CLOCK]] as const) {
+      it(`prints a date within half an hour of SCENE_NOW as SCENE_NOW (${label})`, () => {
+        const run = page(before);
+        for (const minutes of [-25, -4, 0, 9, 29]) {
+          expect(run(`new Intl.DateTimeFormat('en-US', ${DATE_TIME}).format(new Date(${SCENE_NOW + minutes * 60_000}))`), `${minutes} min`).toBe(native(SCENE_NOW));
+        }
+        expect(run(`new Intl.DateTimeFormat('en-US', ${DATE_TIME}).format(new Date(${SCENE_NOW + 7 * DAY_MS + 3 * 60_000}))`)).toBe(native(SCENE_NOW + 7 * DAY_MS));
+        const parts = run(`new Intl.DateTimeFormat('en-US', ${DATE_TIME}).formatToParts(new Date(${SCENE_NOW + 11 * 60_000})).map((p) => p.value).join('')`);
+        expect(parts).toBe(nativeParts(SCENE_NOW));
+      });
+    }
+
+    it('in Date#toLocaleString too, and "x seconds/minutes ago" under half an hour reads "now"', () => {
+      const run = page();
+      expect(run(`new Date(${SCENE_NOW + 9 * 60_000}).toLocaleString('en-US', { timeZone: 'UTC' })`)).toBe(new Date(SCENE_NOW).toLocaleString('en-US', { timeZone: 'UTC' }));
+      const now = new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(0, 'second');
+      expect(run(`new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(-12, 'second')`)).toBe(now);
+      expect(run(`new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(-25, 'minutes')`)).toBe(now);
+      expect(run(`new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(-3, 'day')`)).toBe(new Intl.RelativeTimeFormat('en', { numeric: 'auto' }).format(-3, 'day'));
+      expect(run(`new Date('nope').toLocaleString('en-US')`)).toBe('Invalid Date');
+    });
+
+    it("leaves the fixtures' dates as they are: whole hours from SCENE_NOW", () => {
+      for (const rel of ['README.md', 'Photos/aurora.png', 'Documents/Q3 budget.xlsx', '.']) {
+        const t = fixtureTime(rel);
+        expect(snapForDisplay(t)).toBe(t);
+        expect((SCENE_NOW - t) % HOUR_MS).toBe(0);
+      }
+    });
+  });
+
+  describe("the fixtures' files are dated the same in every run", () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'filex-shots-clock-'));
+    afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+    it('by their path, 1 to 40 days and 1 to 9 hours before SCENE_NOW', () => {
+      const t = fixtureTime('Documents/budget.csv');
+      expect(fixtureTime('Documents/budget.csv')).toBe(t);
+      expect(fixtureTime('Documents\\budget.csv')).toBe(t);
+      for (const rel of ['a', 'b/c.txt', 'Photos/ocean.png', 'notes.txt']) {
+        const before = SCENE_NOW - fixtureTime(rel);
+        expect(before).toBeGreaterThanOrEqual(DAY_MS + HOUR_MS);
+        expect(before).toBeLessThanOrEqual(40 * DAY_MS + 9 * HOUR_MS);
+      }
+    });
+
+    it('pinTimes dates every file and folder; seedFixtures and writeOfficeFile date their own', () => {
+      const own = path.join(root, 'own');
+      mkdirSync(path.join(own, 'Docs'), { recursive: true });
+      writeFileSync(path.join(own, 'Docs', 'a.txt'), 'a');
+      writeFileSync(path.join(own, 'b.txt'), 'b');
+      pinTimes(own);
+      expect(statSync(path.join(own, 'Docs', 'a.txt')).mtimeMs).toBe(fixtureTime('Docs/a.txt'));
+      expect(statSync(path.join(own, 'b.txt')).mtimeMs).toBe(fixtureTime('b.txt'));
+      expect(statSync(path.join(own, 'Docs')).mtimeMs).toBe(fixtureTime('Docs'));
+      expect(statSync(own).mtimeMs).toBe(fixtureTime('.'));
+
+      const seeded = path.join(root, 'seeded');
+      seedFixtures(seeded);
+      expect(statSync(path.join(seeded, 'README.md')).mtimeMs).toBe(fixtureTime('README.md'));
+      expect(statSync(path.join(seeded, 'Photos', 'aurora.png')).mtimeMs).toBe(fixtureTime('Photos/aurora.png'));
+      const docx = path.join(seeded, 'Documents', 'Proposal.docx');
+      writeOfficeFile(docx);
+      expect(statSync(docx).mtimeMs).toBe(fixtureTime('Proposal.docx'));
+    });
+  });
 });

@@ -123,6 +123,8 @@ export const FileManager = createComponent({
     onFileOpened: 'file-opened',
     onUploadProgress: 'upload-progress',
     onSelectionChange: 'selection-change',
+    // #162 - the "App store" row (config.appStorePage).
+    onOpenAppStore: 'open-app-store',
   },
 });
 

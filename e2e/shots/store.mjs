@@ -3,7 +3,7 @@
 //
 //   node e2e/shots/store.mjs       (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/store/ (the release named in ./release.mjs):
+// Writes e2e/.artifacts/shots/capture/store/ (the capture folder, ./release.mjs):
 //
 //   store-trust-1440.png       the first link from a store: "This store is not
 //                              trusted yet", its address and the fingerprints
@@ -18,6 +18,15 @@
 //   store-license-held-1440.png the same page after the store revoked the
 //                              license: the app held (Unlicensed), the band
 //                              every admin page carries while it lasts
+//   store-connected-1440.png   #162: Trusted stores with the store connected
+//                              (its key's fingerprint) and the Store screen
+//                              settings under it
+//   store-screen-1440.png      #162: the App store page a person opens from
+//                              the navigation panel - the catalog filex read
+//                              and verified, one app installed, one to ask for
+//   store-screen-request-1440.png #162: asking for an app, with a reason
+//   store-request-review-1440.png #162: that request on Install requests, its
+//                              review: from the store, "open the store review"
 //
 // The store is a small server here that signs exactly as a store must
 // (ed25519 over the lower-hex SHA-256 of the canonical JSON, as
@@ -39,7 +48,7 @@
 //
 // Environment: FILEX_BIN, SHOTS_OUT, SHOTS_KEEP (see apps.mjs), SHOTS_STORE_HOST.
 
-import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, randomUUID, sign } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { lookup } from 'node:dns/promises';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -57,6 +66,9 @@ const OWNER = 'example';
 const REPO = 'filex-board';
 const LICENSE_KEY = 'FXL-7Q4M-2KD9-H3XW';
 const LICENSEE = 'Northwind Traders';
+/** #162: the store's one-time connection code, and the app its catalog offers beside the board. */
+const CONNECT_CODE = 'fxc_' + 'S'.repeat(43);
+const OTHER_APP = 'pdf-tools';
 
 /* ── signing as a store must ─────────────────────────────────────────────── */
 
@@ -149,6 +161,11 @@ async function main() {
     const intents = new Map();
     const completions = [];
     let licenseResult = 'valid';
+    /* #162: the catalog (a signed index) and an icon, set once the origin is known. */
+    let indexBytes = Buffer.from('');
+    let indexSig = '';
+    const media = new Map();
+    const connected = { key: '', id: randomUUID() };
     const handler = (req, res) => {
       const url = req.url ?? '';
       const send = (code, body) => res.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
@@ -170,6 +187,32 @@ async function main() {
           const payload = intents.get(read[1]);
           if (!payload) return send(404, { error: 'not_found' });
           send(200, envelope(idx, payload));
+          return;
+        }
+        if (req.method === 'GET' && url === '/v1/index.json') {
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(indexBytes);
+          return;
+        }
+        if (req.method === 'GET' && url === '/v1/index.json.sig') {
+          res.writeHead(200, { 'Content-Type': 'text/plain' }).end(indexSig + '\n');
+          return;
+        }
+        const icon = url.match(/^\/v1\/media\/([0-9a-f]{64}\.png)$/);
+        if (req.method === 'GET' && icon) {
+          const body = media.get(icon[1]);
+          if (!body) return send(404, { error: 'not_found' });
+          res.writeHead(200, { 'Content-Type': 'image/png' }).end(body);
+          return;
+        }
+        if (req.method === 'POST' && url === '/v1/instances/connect') {
+          const b = JSON.parse(raw || '{}');
+          if (b.code !== CONNECT_CODE) return send(404, { error: 'not_found' });
+          if (b.filex_origin !== PUBLIC_URL) return send(409, { error: 'wrong_instance' });
+          connected.key = b.public_key;
+          send(200, envelope(idx, {
+            store: origin, instance_id: connected.id, filex_origin: PUBLIC_URL,
+            key_fingerprint: sha256hex(Buffer.from(b.public_key, 'hex')), connected_at: iso(new Date()),
+          }));
           return;
         }
         if (req.method === 'POST' && url === '/v1/licenses/verify') {
@@ -215,6 +258,34 @@ async function main() {
       origin = `http://127.0.0.1:${await listen(store, 0, '127.0.0.1')}`;
     }
     log(`store at ${origin}, its repository at http://127.0.0.1:${ghPort}`);
+
+    /* #162: the store's signed index - the board app (installed below) and one
+       to ask for, with an icon - signed over its bytes as served. */
+    const iconBytes = readFileSync(new URL('../../web/public/icons/icon-192.png', import.meta.url));
+    const iconName = `${sha256hex(iconBytes)}.png`;
+    media.set(iconName, iconBytes);
+    const indexApp = (name, label, summary, perms, withIcon) => ({
+      name, kind: 'app', publisher: 'example', repo: `${OWNER}/${name}`, categories: [],
+      label: { en: label, tr: label }, summary: { en: summary, tr: summary },
+      ...(withIcon ? { icon: { url: `${origin}/v1/media/${iconName}`, sha256: iconName.slice(0, 64) } } : {}),
+      screenshots: [], latest: version, revoked: null,
+      versions: [{
+        version, ref: `v${version}`, commit, filex: '>=0.52.0', published_at: '2026-10-01',
+        manifest: { url: 'https://example.invalid/m.json', sha256: sha256hex(manifestBytes), sig: '00' },
+        wasm: null, ui: { url: 'https://example.invalid/ui.zip', sha256: sha256hex(uiBytes), sig: '00' },
+        permissions: perms, languages: [], engines: [], security: false, yanked: null,
+      }],
+    });
+    const indexDoc = {
+      schema: 1, serial: 12, generated_at: iso(new Date()), expires_at: iso(new Date(Date.now() + 30 * 86400_000)),
+      keys: [], publishers: [{ id: 'example', name: 'Example Apps', github: 'example', verified: true, official: false }],
+      apps: [
+        indexApp(app, 'Board', 'A kanban board in a file', board.manifest.permissions, false),
+        indexApp(OTHER_APP, 'PDF tools', 'Merge, split and rotate PDFs', ['files:read', 'files:write'], true),
+      ],
+    };
+    indexBytes = Buffer.from(JSON.stringify(indexDoc, null, 2) + '\n', 'utf8');
+    indexSig = sign(null, Buffer.from(sha256hex(indexBytes), 'utf8'), idx.priv).toString('hex');
 
     const link = (token) => {
       intents.set(token, {
@@ -312,7 +383,66 @@ async function main() {
     await page.mouse.move(4, 4);
     await sleep(400);
     await shot(page, SET, 'store-license-held-1440.png');
-    log('a store link: trusting the store, its review, the trusted stores, a license valid and held');
+
+    // 6. #162: connect this filex to the store with its one-time code, and show
+    //    the store screen to everyone.
+    await admin.json('/api/admin/app-plugins/store-view', {
+      method: 'PUT',
+      body: JSON.stringify({ settings: { enabled: true, stores: [origin], audience: 'everyone', roles: [], groups: [] } }),
+    });
+    await page.goto(`${inst.url}/admin/plugins`);
+    await page.getByTestId('plugins-tab-apps').click();
+    await page.getByTestId('app-stores').waitFor({ timeout: 20_000 });
+    await page.getByTestId('app-store-connect-open').first().click();
+    await page.locator('input[name="app-store-connect-code"]').fill(CONNECT_CODE);
+    await page.getByTestId('app-store-connect').click();
+    await page.getByTestId('app-store-connection-detail').waitFor({ timeout: 20_000 });
+    if (!connected.key) throw new Error('the store was not sent a key');
+    await mustSay(page.getByTestId('app-stores'), 'the connected store', ['Connected']);
+    await page.getByTestId('app-store-view').waitFor({ timeout: 20_000 });
+    await dismissToasts(page);
+    await page.getByTestId('app-stores').scrollIntoViewIfNeeded();
+    await page.mouse.move(4, 4);
+    await sleep(400);
+    await shot(page, SET, 'store-connected-1440.png');
+
+    // 7. The App store page, as a person opens it from the navigation panel.
+    await page.goto(`${inst.url}/drive/app-store`);
+    const screen = page.getByTestId('store-screen');
+    await screen.waitFor({ timeout: 20_000 });
+    await page.getByTestId(`store-app-${OTHER_APP}`).waitFor({ timeout: 20_000 });
+    await mustSay(screen, 'the store screen', ['App store', 'PDF tools', 'Board', 'Installed']);
+    await page.mouse.move(4, 4);
+    await sleep(600);
+    await shot(page, SET, 'store-screen-1440.png');
+
+    // 8. Asking for an app.
+    await page.getByTestId(`store-app-actions-${OTHER_APP}`).click();
+    await page.locator(`.fe-ctx [data-testid="store-app-actions-${OTHER_APP}-request"]`).last().click();
+    await page.locator('textarea[name="store-request-reason"]').fill('The finance team merges the monthly statements into one PDF.');
+    await page.mouse.move(4, 4);
+    await sleep(400);
+    await shootWhole(page, page.locator('dialog[open] [role="dialog"]').last(), SET, 'store-screen-request-1440.png', {
+      restore: { width: 1440, height: 900 },
+    });
+    await page.getByTestId('store-request-send').click();
+    await page.getByTestId('store-request-status-1').waitFor({ timeout: 20_000 }).catch(() => undefined);
+
+    // 9. The request on Install requests: from the store, approved through its review.
+    await page.goto(`${inst.url}/admin/plugins`);
+    const reqs = page.getByTestId('plugin-requests');
+    await reqs.waitFor({ timeout: 20_000 });
+    await page.locator('[data-testid^="plugin-request-actions-"]').first().click();
+    await page.locator('.fe-ctx [data-testid$="-review"]').last().click();
+    const review = page.getByTestId('plugin-request-review');
+    await review.waitFor({ timeout: 20_000 });
+    await mustSay(review, 'the store request', ['PDF tools', origin, 'open the store review']);
+    await page.mouse.move(4, 4);
+    await sleep(400);
+    await shootWhole(page, page.locator('dialog[open] [role="dialog"]').last(), SET, 'store-request-review-1440.png', {
+      restore: { width: 1440, height: 900 },
+    });
+    log('a store link: trusting the store, its review, the trusted stores, a license valid and held, the store screen');
     await ctx.close();
   } finally {
     if (browser) await browser.close();

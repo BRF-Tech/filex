@@ -239,6 +239,9 @@ export interface StorageCreateRequest {
   name: string;
   driver: StorageDriver;
   config: Record<string, unknown>;
+  /** The saved storage a form edits: "Test connection" fills the credentials
+   *  it sends back masked ("***") from it. */
+  id?: number;
   read_only?: boolean;
   rbac_enabled?: boolean;
   sync_interval_s?: number;
@@ -333,6 +336,11 @@ export interface Capabilities {
   oidc_auto_redirect?: boolean;
   /** Password sign-in is off, but the bootstrap administrator may still use it (recovery). */
   auth_recovery_login?: boolean;
+  /** Multi-tenant mode IN FORCE on this server (0.53, Admin → Multi-tenant
+   *  mode). The one answer every screen reads (composables/useTenancy):
+   *  false, and nothing about tenants or realms is drawn. Absent on an older
+   *  server, where `realm` alone said it. */
+  multi_tenant?: boolean;
   /** The sign-in form's Realm field. Present on a multi-tenant install only
    *  (absent: no field). On a tenant's own address `locked_realm` is that
    *  tenant's realm and the field is filled in and read-only; on the
@@ -750,6 +758,41 @@ export interface NotificationSettings {
   user_id: number;
   in_app_enabled: boolean;
   muted_events: string[]; // raw JSON array name; backend exposes muted_events (json.RawMessage)
+  /** The digest's urgent choices (kind -> told at once?); see core
+   *  SettingsNotificationPrefs. */
+  urgent_overrides?: Record<string, boolean>;
+  /** The digest as the settings pane draws it; null when it is off. */
+  digest?: {
+    window_minutes: number;
+    urgent_events: string[];
+    default_urgent: string[];
+    events: string[];
+    admin_events: string[];
+  } | null;
+}
+
+/** The save of the person's own notification settings. ⚠ `urgent_overrides`
+ *  left out keeps the stored ones (backend handlers/notifications.go). */
+export interface NotificationSettingsPatch {
+  in_app_enabled: boolean;
+  muted_events: string[];
+  urgent_overrides?: Record<string, boolean>;
+}
+
+/** GET/PATCH /api/admin/notifications/digest - the digest's defaults for the
+ *  tenant (or the instance) the administrator runs. */
+export interface DigestPolicy {
+  window_minutes: number;
+  urgent_events: string[];
+  /** An administrator chose these; otherwise they are the built-in ones. */
+  saved: boolean;
+  scope: 'instance' | 'tenant';
+  tenant: { id: number; name: string } | null;
+  defaults: { window_minutes: number; urgent_events: string[] };
+  events: string[];
+  admin_events: string[];
+  window_min: number;
+  window_max: number;
 }
 
 export interface WebhookConfig {
@@ -830,6 +873,8 @@ export interface ReplicaRuleInput {
 
 export interface ReplicaFailure {
   id: number;
+  /** The storage the path belongs to (0: a failure from before 0.53). */
+  storage_id?: number;
   path: string;
   op: string;
   error_code: string;
@@ -837,6 +882,45 @@ export interface ReplicaFailure {
   attempts: number;
   last_attempt_at: string;
   resolved_at?: string | null;
+}
+
+/** A storage's initial copy to its replication target (#186): what the
+ *  storage already held when it was linked, copied in the background. */
+export type ReplicaCopyPhase = 'pending' | 'counting' | 'copying' | 'waiting' | 'done';
+
+export interface ReplicaInitialCopy {
+  storage_id: number;
+  target_id: number;
+  storage_name: string;
+  target_name: string;
+  phase: ReplicaCopyPhase;
+  /** total is final once counted is true. */
+  counted: boolean;
+  total: number;
+  /** copied + present + excluded + failed. */
+  done: number;
+  copied: number;
+  /** Already on the target (same size and time). */
+  present: number;
+  /** Left out by a `skip` rule. */
+  excluded: number;
+  failed: number;
+  copied_bytes: number;
+  last_error?: string;
+  started_unix: number;
+  updated_unix: number;
+  finished_unix: number;
+}
+
+/** The folder a storage writes into on its replication target: chosen once
+ *  from its name, kept through a rename (#186). */
+export interface ReplicaLink {
+  storage_id: number;
+  target_id: number;
+  folder: string;
+  storage_name: string;
+  target_name: string;
+  created_unix: number;
 }
 
 export interface ReplicaFailureListResponse {

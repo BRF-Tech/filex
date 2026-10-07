@@ -33,7 +33,15 @@ export const WEBHOOK_EVENTS = [
   'e2e.request_created',
   'e2e.request_decided',
   'plugin.notice',
+  // One person's held notifications, told together (backend notify/digest.go).
+  // A target receives it only when it ticks it; the person's own switch mutes
+  // their digests, and it has no "urgent" switch of its own (DIGEST_EVENT).
+  'notification.digest',
 ] as const;
+
+/** The digest's own event: it is what tells the held ones, so it is never held
+ *  itself, and the settings pane offers it no "urgent" switch. */
+export const DIGEST_EVENT = 'notification.digest';
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 

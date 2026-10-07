@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.52.0"
+version: "0.53.0"
 releaseNotes: |-
-  filex v0.52.0 - 2026-10-05
-  • The README in five more languages
-  • Installing from an app store, and paid apps.
-  • LDAP groups
-  • LDAP directory sync
-  • Each LDAP directory keeps to its own
+  filex v0.53.0 - 2026-10-07
+  • The App store inside filex
+  • The whole test chain runs on GitHub, split into parts that run side by side.
+  • A tag run promotes what the dry run of its commit built.
+  • The release can be packaged off GitHub.
+  • The Playwright and Go suites run in parts, side by side.
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-
@@ -33,7 +33,7 @@ description: >-
   into the binary, so nothing here needs LibreOffice installed. Select a dozen
   files and Download hands back one ZIP, streamed rather than assembled, so a
   large archive costs the server almost no memory. Every file records its
-  owner, so the listing has an Owner column, the filter row a People entry,
+  owner, so the listing has an Owner column, the filter row an Owner entry,
   and quota counts against the owner rather than whoever touched the file
   last.
 

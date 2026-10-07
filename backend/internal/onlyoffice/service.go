@@ -23,10 +23,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
-	"crypto/md5"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,11 +36,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/memcache"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -115,6 +115,15 @@ type Service struct {
 	// document in their name.
 	openersMu sync.Mutex
 	openers   map[string]map[int64]time.Time
+
+	// basesV records, per editing session (the document key), the version of
+	// the file it opened on (session_base.go, #184): a save is written over
+	// the file only while the file is still that version. The database, with
+	// the in-process cache in front of it (internal/memcache); built on first
+	// use. prunedAt is when its expired rows were last swept (UnixNano).
+	basesOnce sync.Once
+	basesV    *memcache.Through[string, sessionBase]
+	prunedAt  atomic.Int64
 
 	// Body resolves where a document's bytes are: the driver, or filex's
 	// staging area while a staged upload is still transferring. It is the
@@ -248,6 +257,12 @@ func (s *Service) EnabledCtx(ctx context.Context) bool {
 type EditorConfig struct {
 	DocumentServerURL string         `json:"documentServerUrl"`
 	Config            map[string]any `json:"config"`
+	// Frame is the address of the editor's frame on another origin (task #92):
+	// FrameHostPath on FILEX_ONLYOFFICE_FRAME_ORIGIN (normally the document
+	// server's own), else FramePath under FILEX_APP_UI_ORIGIN. The explorer
+	// frames it and hands it Config, and api.js runs there instead of in
+	// filex's page. Absent: neither is set, and api.js runs in the page.
+	Frame string `json:"frame,omitempty"`
 }
 
 // ConfigOption adds to an editor config what only the caller knows.
@@ -290,16 +305,7 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 		return nil, fmt.Errorf("onlyoffice: unsupported file type %q", fileType)
 	}
 
-	mtime := int64(0)
-	if node.BackendMtime != nil {
-		mtime = node.BackendMtime.Unix()
-	}
-	keyInput := fmt.Sprintf("%d|%s|%d|%d", node.ID, node.PathHash, mtime, node.Size)
-	if n := s.refusals(node.ID); n > 0 {
-		keyInput += "|refused-" + strconv.Itoa(n)
-	}
-	hash := md5.Sum([]byte(keyInput))
-	key := hex.EncodeToString(hash[:])
+	key := s.keyFor(node)
 
 	exp := time.Now().Add(s.FetchTTL).Unix()
 	base := s.callbackBase(ctx)
@@ -363,6 +369,10 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 	s.noteOpened(node.ID)
 	if canEdit && user != nil {
 		s.noteOpener(key, user.ID)
+	}
+	// The version this editing session stands on (#184, session_base.go).
+	if canEdit {
+		s.noteBase(ctx, key, node)
 	}
 
 	return &EditorConfig{
@@ -511,9 +521,12 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		return nil, errors.New("token: the callback is not signed")
 	}
 
-	// Status 1 (being edited) and 4 (closed no change) are no-ops.
+	// Status 1 (being edited) and 4 (closed no change) are no-ops - 4 ends
+	// the session, and its record goes with it (session_base.go).
 	if p.Status != StatusReadyForSaving && p.Status != StatusForceSave {
-		return map[string]any{"error": 0}, nil
+		answer := map[string]any{"error": 0}
+		s.sessionOver(r.Context(), p, answer)
+		return answer, nil
 	}
 	if p.URL == "" {
 		return map[string]any{"error": 1, "message": "missing url"}, nil
@@ -564,6 +577,16 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	if !ok {
 		return map[string]any{"error": 1, "message": "storage not writable"}, nil
 	}
+	// #184: the person chose the outside version over this session's edits
+	// (session_base.go). Nothing is written, and the document server is told
+	// the save went well - it was answered.
+	if s.dropped(r.Context(), node, keyOf(p)) {
+		slog.Info("onlyoffice callback: save dropped, the person kept the outside version",
+			slog.Int64("storage", node.StorageID), slog.String("path", node.Path))
+		answer := map[string]any{"error": 0}
+		s.sessionOver(r.Context(), p, answer)
+		return answer, nil
+	}
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	req, _ := http.NewRequestWithContext(r.Context(), "GET", p.URL, nil)
@@ -605,6 +628,22 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 			s.refuseSave(r.Context(), node, s.sessionEditors(keyOf(p), p.Users), got, nw)
 			return map[string]any{"error": 1, "message": "the saved document is not what it says it is"}, nil
 		}
+		s.sessionOver(r.Context(), p, answer)
+		return answer, nil
+	}
+
+	// ⚠⚠ #184: never over a version this session did not see. The file
+	// changed since the session opened it (another save, a sync client, an
+	// agent): the save goes BESIDE it as a conflict copy and the editors are
+	// told (session_base.go). Asked here, right before the write, with the
+	// bytes in hand.
+	if s.verdict(r.Context(), drv, node, keyOf(p)) == SaveStale {
+		answer, err := s.saveConflict(r.Context(), drv, writer, node, saved, savedSize, keyOf(p), p.Users)
+		if nw, ok := asNotWritten(err); ok {
+			s.refuseSave(r.Context(), node, s.sessionEditors(keyOf(p), p.Users), got, nw)
+			return map[string]any{"error": 1, "message": "the document changed while it was edited"}, nil
+		}
+		s.sessionOver(r.Context(), p, answer)
 		return answer, nil
 	}
 
@@ -646,11 +685,16 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	if obj, err := drv.Stat(r.Context(), node.Path); err == nil {
 		_ = s.Store.UpdateNodeMeta(r.Context(), node.ID, obj.Size, obj.Mime, obj.Etag, obj.Mtime)
 		size, mime = obj.Size, obj.Mime
+		// The session's own save is the version it stands on now: a second
+		// save of it (a force save, then the last) is not "stale".
+		s.advanceBase(r.Context(), keyOf(p), node, obj)
 	}
 
 	s.announceSave(r.Context(), node, size, mime, p.Status)
 
-	return map[string]any{"error": 0}, nil
+	answer := map[string]any{"error": 0}
+	s.sessionOver(r.Context(), p, answer)
+	return answer, nil
 }
 
 // announceSave runs the shared post-write gate for a revision that has just

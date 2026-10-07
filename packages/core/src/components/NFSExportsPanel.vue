@@ -17,6 +17,7 @@ import type { ExplorerConfig, LocaleCode } from '../types/ExplorerConfig';
 import type { NFSExport } from '../types/NFSExports';
 import { useLocale } from '../composables/useLocale';
 import DataTable, { type DataColumn } from './DataTable.vue';
+import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
 import type { ContextAction } from './ContextMenu.vue';
 import { useNFSExports } from '../composables/useNFSExports';
 import { resolveLocale } from '../locales/resolve';
@@ -51,6 +52,11 @@ const {
 
 const label = ref('');
 const storage = ref('');
+/* Which storage the export is limited to (#160: the shared list, no native select). */
+const storageChoices = computed<SelectOption[]>(() => [
+  { value: '', label: t('conn.nfs.everyStorage') },
+  ...props.storages.map((s) => ({ value: s, label: s })),
+]);
 const prefix = ref('');
 const readOnly = ref(true);
 const allowCidrs = ref('');
@@ -250,10 +256,13 @@ function scopeOf(e: NFSExport): string {
         :placeholder="t('conn.nfs.label')"
         data-testid="nfs-label"
       />
-      <select v-model="storage" class="fe-cfield__input" data-testid="nfs-storage">
-        <option value="">{{ t('conn.nfs.everyStorage') }}</option>
-        <option v-for="s in storages" :key="s" :value="s">{{ s }}</option>
-      </select>
+      <ChoiceSelect
+        :model-value="storage"
+        :options="storageChoices"
+        :aria-label="t('conn.nfs.col.scope')"
+        testid="nfs-storage"
+        @update:model-value="(v) => (storage = String(v))"
+      />
       <input
         v-model="prefix"
         class="fe-cfield__input"

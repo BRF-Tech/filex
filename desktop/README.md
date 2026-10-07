@@ -37,8 +37,9 @@ app adds the five things a browser tab cannot do:
 4. **It keeps itself up to date, quietly.** See *Updates* below.
 5. **It can be the app that opens a document.** Double-click a `.docx` on the
    disk and it opens in the server's ONLYOFFICE editor, with the edits written
-   back over the local file - see *Open with filex* below. A browser tab cannot
-   be a file handler at all.
+   back over the local file (or beside it, when the editor saves another
+   format) - see *Open with filex* below. A browser tab cannot be a file
+   handler at all.
 
 The top bar ends as the web app's does, in the **notification bell** and the
 **avatar** - the web app's own components, which the explorer draws itself
@@ -53,7 +54,11 @@ does (the explorer's `revealNotification`). The avatar carries *User settings*
 .settings`), *Admin panel ↗* for an administrator and the file list's shortcut
 and tour rows. It carries no *Sign out*: signing an account out of the app is
 an app setting, in Settings → Accounts, beside the language, sync and the
-other accounts.
+other accounts. When the server shows a person the **App store** screen
+(0.53), the navigation panel's *Apps → App store* is drawn under the same rule
+as in the web app (core `lib/appStoreRow`) and opens the server's page in a
+window of its own ([docs/DESKTOP.md → The App
+store](../docs/DESKTOP.md#the-app-store)).
 
 Settings also opens a full-screen **Connections** surface, and that too is the
 shared component (`<filex-connections>`) rather than an app-specific screen: it
@@ -413,6 +418,21 @@ matters when working on this code:
   across drives (EXDEV), never resurrecting a document the user deleted while it
   was open, and a failure that is shown rather than logged. `keptAt` on the
   error is where the edit went instead.
+- **A save in another format goes beside the document, never over it**
+  (#151). ONLYOFFICE writes no `.doc`, `.xls` or `.ppt`, so the edit of
+  `rapor.doc` comes back as DOCX and lands beside it as `rapor.docx`
+  (`rapor (2).docx` when that name is taken), with a notification; every later
+  save of the session goes to that same file, and `rapor.doc` is never written
+  ([docs/DESKTOP.md → A save in another
+  format](../docs/DESKTOP.md#a-save-in-another-format)).
+- **The open document is watched, and every save is held to the version it
+  read** (#184). The app watches the document's folder (a temp-file-and-rename
+  save is seen too) and compares by content: a change made outside the editor
+  is handed to the viewer as an `OutsideChange` (core `lib/outsideChange`),
+  which reloads or asks, and nothing is written over anything until the person
+  answers; a save the file has moved on from goes to a conflict copy beside it
+  ([docs/DESKTOP.md → When the file changes while it is
+  open](../docs/DESKTOP.md#when-the-file-changes-while-it-is-open)).
 - **The grace period after the window closes is not optional.** ONLYOFFICE posts
   its save callback ~10 s *after* the last editor disconnects, so deleting the
   scratch copy on close would discard the last edit of every session.

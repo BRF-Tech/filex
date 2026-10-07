@@ -5,6 +5,7 @@ import ArchiveCreateModal from '@brftech/filex-core/src/modals/ArchiveCreateModa
 import ArchivePasswordModal from '@brftech/filex-core/src/modals/ArchivePasswordModal.vue';
 import OperationsCenter from '@brftech/filex-core/src/components/OperationsCenter.vue';
 import { archiveFormatLabel } from '@brftech/filex-core/src/lib/archiveFormats';
+import { chosenValue, optionLabels, pickOption } from '../helpers/choiceSelect';
 
 // One way to write a format, in the dialog and on the admin page alike: the
 // admin page wrote "7Z" where the dialog wrote "7z".
@@ -23,15 +24,15 @@ describe('ArchiveCreateModal', () => {
     await nextTick();
 
     const name = wrapper.find<HTMLInputElement>('input[autocomplete="off"]');
-    const format = wrapper.find<HTMLSelectElement>('select');
+    const format = wrapper.find('[data-testid="archive-format"]');
     expect(name.element.value).toBe('backup.7z');
-    expect(format.findAll('option').map((option) => option.text())).toEqual([
+    expect(await optionLabels(format)).toEqual([
       'ZIP', '7z', 'TAR', 'TAR.GZ', 'TAR.BZ2', 'TAR.XZ',
     ]);
 
-    await format.setValue('zip');
+    await pickOption(format, 'zip');
     expect(name.element.value).toBe('backup.zip');
-    await format.setValue('7z');
+    await pickOption(format, '7z');
     expect(name.element.value).toBe('backup.7z');
 
     const passwords = wrapper.findAll<HTMLInputElement>('input[type="password"]');
@@ -50,8 +51,8 @@ describe('ArchiveCreateModal', () => {
     await passwords[1].setValue('secret');
     const checks = wrapper.findAll<HTMLInputElement>('input[type="checkbox"]');
     await checks[0].setValue(true);
-    const selects = wrapper.findAll<HTMLSelectElement>('select');
-    await selects[1].setValue('128');
+    // The dictionary size is a list of numbers; the number itself comes back.
+    await pickOption(wrapper.find('[data-testid="archive-dictionary"]'), 128);
     await wrapper.find('.fe-btn--primary').trigger('click');
 
     expect(wrapper.emitted('submit')?.at(-1)?.[0]).toEqual({
@@ -72,8 +73,7 @@ describe('ArchiveCreateModal', () => {
     await wrapper.setProps({ open: true });
     await nextTick();
 
-    const format = wrapper.find<HTMLSelectElement>('select');
-    await format.setValue('tar.gz');
+    await pickOption(wrapper.find('[data-testid="archive-format"]'), 'tar.gz');
     expect(wrapper.find<HTMLInputElement>('input[autocomplete="off"]').element.value).toBe('backup.tar.gz');
     expect(wrapper.findAll('input[type="password"]')).toHaveLength(0);
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(0);
@@ -120,7 +120,7 @@ describe('ArchiveCreateModal', () => {
     expect(wrapper.find('.fe-form__error').text()).toContain('7z');
     expect(wrapper.find('.fe-form__error').text()).toContain('ç, ğ, ı, İ, ö, ş, ü');
 
-    await wrapper.find<HTMLSelectElement>('select').setValue('7z');
+    await pickOption(wrapper.find('[data-testid="archive-format"]'), '7z');
     await nextTick();
     const again = wrapper.findAll<HTMLInputElement>('input[type="password"]');
     await again[0].setValue('şifre');
@@ -143,9 +143,9 @@ describe('ArchiveCreateModal', () => {
     await wrapper.setProps({ open: true });
     await nextTick();
 
-    const format = wrapper.find<HTMLSelectElement>('select');
-    expect(format.findAll('option').map((option) => option.text())).toEqual(['TAR', 'TAR.XZ']);
-    expect(format.element.value).toBe('tar.xz');
+    const format = wrapper.find('[data-testid="archive-format"]');
+    expect(await optionLabels(format)).toEqual(['TAR', 'TAR.XZ']);
+    expect(chosenValue(format)).toBe('tar.xz');
     expect(wrapper.find<HTMLInputElement>('input[autocomplete="off"]').element.value).toBe('backup.tar.xz');
   });
 
@@ -164,7 +164,7 @@ describe('ArchiveCreateModal', () => {
     await nextTick();
 
     expect(wrapper.find<HTMLInputElement>('input[autocomplete="off"]').element.value).toBe('backup.zip');
-    expect(wrapper.find<HTMLSelectElement>('select').element.value).toBe('zip');
+    expect(chosenValue(wrapper.find('[data-testid="archive-format"]'))).toBe('zip');
   });
 });
 

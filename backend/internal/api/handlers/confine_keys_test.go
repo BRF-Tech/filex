@@ -44,6 +44,13 @@ var pathishKey = regexp.MustCompile(`(?i)^(?:path|paths|item|items|source|source
 // handler unconfined unless the handler checks the root itself.
 var notConfinedByTheMiddleware = map[string]string{
 	"Settings.SMTPTest.req.to": "an e-mail address (Admin, Settings, the SMTP test), not a storage path",
+	// PUT /api/admin/replica/links/{storage_id} and its /api/ai/admin twin
+	// (#186): the name of the folder a storage writes into on its REPLICATION
+	// TARGET, a sink no `root:` scope can name, reduced to one safe segment by
+	// replica.FolderName. The route is supertenant-only behind RequireAdmin /
+	// RequireAdminToken, and both refuse a `root:` token outright
+	// (auth.TokenMayAdminister), so no confined caller ever reaches it.
+	"Replica.SetLinkFolder.body.folder": "a folder name on a replication target (admin-only, a root: token is refused before it), not a path in a storage",
 }
 
 // decodedBody is one request body a handler decodes: its type (or the

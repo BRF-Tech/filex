@@ -3,6 +3,8 @@ package model
 import (
 	"strings"
 	"time"
+
+	"github.com/brf-tech/filex/backend/internal/tokenperm"
 )
 
 // Role names — also stored in DB roles table.
@@ -280,10 +282,16 @@ type APIToken struct {
 	// Source is which door minted the token (migration 00060): TokenSourceDesktop
 	// for a desktop pairing, "" for every other. It decides which permission
 	// USING the token falls under — access.desktop or access.api (package perm).
-	Source     string     `json:"source,omitempty"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+	Source string `json:"source,omitempty"`
+	// Permissions is the level this token holds of each permission of the
+	// catalogue (package tokenperm): the level its Scopes name, the
+	// permission's default for the rest. Never stored - the token lists and
+	// mint answers fill it (WithPermissions), so a screen draws a token's
+	// levels without a copy of the default rule.
+	Permissions map[string]tokenperm.Level `json:"permissions,omitempty"`
+	LastUsedAt  *time.Time                 `json:"last_used_at,omitempty"`
+	ExpiresAt   *time.Time                 `json:"expires_at,omitempty"`
+	CreatedAt   time.Time                  `json:"created_at"`
 }
 
 // Token kinds. A token declares what it is, because "who is calling" and
@@ -399,6 +407,25 @@ func (t *APIToken) HasScope(want string) bool {
 		}
 	}
 	return false
+}
+
+// PermLevel is the level this token holds of the permission key (package
+// tokenperm): the level its list names, else the permission's default - the
+// level of every token minted before the permission existed. A nil token
+// holds nothing; so does an empty list (HasScope).
+func (t *APIToken) PermLevel(key string) tokenperm.Level {
+	if t == nil {
+		return tokenperm.None
+	}
+	return tokenperm.LevelIn(t.Scopes, key)
+}
+
+// WithPermissions fills Permissions from Scopes and returns t.
+func (t *APIToken) WithPermissions() *APIToken {
+	if t != nil {
+		t.Permissions = tokenperm.LevelsIn(t.Scopes)
+	}
+	return t
 }
 
 // Role definition (DB row).

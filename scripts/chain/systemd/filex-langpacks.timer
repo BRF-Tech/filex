@@ -1,0 +1,15 @@
+# When the language packs' nightly translation starts. A template:
+# scripts/chain/install-langpacks.sh fills @AT@ (default "03:30
+# Europe/Istanbul": after the nightly test run has started, which it waits
+# for). Not Persistent: a host that was off at that hour does not start a
+# translation in the morning, when the release work wants the host.
+[Unit]
+Description=filex language packs: the nightly translation at @AT@
+
+[Timer]
+OnCalendar=*-*-* @AT@
+Persistent=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

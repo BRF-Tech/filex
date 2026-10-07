@@ -12,8 +12,9 @@
  *   · the account endpoints through this app's axios client (its CSRF header,
  *     its 401 redirect), and its toast;
  *   · the rows only this app has: the language (i18n), the start page (the
- *     router's front door), one click or two, the desktop-app downloads and
- *     the browser's own notifications.
+ *     router's front door), one click or two, the desktop-app downloads, the
+ *     web app's own install on a phone or a tablet, and the browser's own
+ *     notifications.
  *
  * Mounted from the admin panel's top nav, the explorer page's avatar and the
  * admin Notifications page, exactly as before.
@@ -55,7 +56,7 @@ import { getStartPage, setStartPage, type StartPage } from '@/lib/startPage';
 // reminder (`InstallPrompt.vue`) can be closed for good, so the downloads need
 // a home that is always there; the platform detection and the per-platform
 // entries live in the composable and are RENDERED twice.
-import { useDesktopDownloads } from '@/composables/useInstallPrompt';
+import { useAppInstall, useDesktopDownloads } from '@/composables/useInstallPrompt';
 import {
   browserNotifyEnabled,
   browserNotifyPermission,
@@ -77,6 +78,10 @@ const caps = useCapabilitiesStore();
 const notif = useNotificationsStore();
 const toast = useToastStore();
 const desktop = useDesktopDownloads();
+// #190 - the web app's own install, for a phone or a tablet: the same saved
+// browser event the reminder on the file list reads (useInstallPrompt), so
+// the row here keeps working after that reminder is closed for good.
+const appInstall = useAppInstall();
 
 const host: UserSettingsHost = {
   get locale() {
@@ -164,6 +169,14 @@ const host: UserSettingsHost = {
       return desktop.downloads.value;
     },
     releasesUrl: desktop.releasesUrl,
+  },
+  installApp: {
+    // Null on a PC (the desktop app above is its answer), inside the desktop
+    // shell and in the installed app itself - the dialog then draws no row.
+    get state() {
+      return appInstall.state.value;
+    },
+    install: () => appInstall.promptInstall(),
   },
   browserNotifications: {
     get desktopShell() {

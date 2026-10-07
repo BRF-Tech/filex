@@ -15,7 +15,7 @@ import Select from '@/components/ui/Select.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Modal from '@/components/ui/Modal.vue';
 import CopyButton from '@/components/ui/CopyButton.vue';
-import { DataTable, splitList, type ContextAction, type DataColumn } from '@brftech/filex-core';
+import { ChoiceButtons, DataTable, splitList, type ChoiceOption, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import { driverName } from '@/lib/storageWords';
 import { getServerRoot } from '@/api/runtimeConfig';
 
@@ -27,6 +27,26 @@ const loading = ref(false);
 
 const SCOPES = ['read', 'write', 'delete', 'mcp', 'admin'] as const;
 type Scope = (typeof SCOPES)[number];
+
+/*
+ * ⚠ Comments are a permission of their own, with a level (task #157): `read`
+ * - what every API key holds unless it says otherwise - or `rw`, sent as
+ * `comments:rw` in the list. "Write" does not include it. The server answers
+ * each key's levels in `permissions`; nothing here repeats the default rule
+ * beyond reading an answer from an older server, which has none.
+ */
+const COMMENT_LEVELS = ['read', 'rw'] as const;
+type CommentLevel = (typeof COMMENT_LEVELS)[number];
+const commentOptions = computed<ChoiceOption[]>(() =>
+  COMMENT_LEVELS.map((l) => ({
+    value: l,
+    label: t(`apiMcp.commentsLevel.${l}`),
+    help: t(`apiMcp.commentsLevelHelp.${l}`),
+  })),
+);
+function commentLevel(tok: AIToken): CommentLevel {
+  return tok.permissions?.comments === 'rw' ? 'rw' : 'read';
+}
 
 const showCreate = ref(false);
 const showDelete = ref<AIToken | null>(null);
@@ -41,16 +61,19 @@ const newScopes = ref<Record<Scope, boolean>>({
   mcp: true,
   admin: false,
 });
+const newComments = ref<CommentLevel>('read');
 const newExpiry = ref<number | null>(null);
 const newUsernames = ref('');
 const newRootStorage = ref('');
 const newRootPath = ref('');
 const createdToken = ref<string | null>(null);
 
-// Edit modal (label + username allow-list; the credential itself is immutable).
+// Edit modal (label, username allow-list and the comments level; the
+// credential itself and its verbs are immutable).
 const showEdit = ref<AIToken | null>(null);
 const editLabel = ref('');
 const editUsernames = ref('');
+const editComments = ref<CommentLevel>('read');
 const savingEdit = ref(false);
 
 const storages = ref<{ value: string; label: string }[]>([]);
@@ -79,9 +102,11 @@ function scopeList(s: string): string[] {
 }
 
 // A token's scope string mixes verb scopes (read/write/…) with at most one
-// `root:<adapter>://<rel>` confinement scope. Split them for display.
+// `root:<adapter>://<rel>` confinement scope and the levels of its
+// permissions (`comments:rw`). Split them for display: the verbs are every
+// entry without a colon.
 function verbScopes(s: string): string[] {
-  return scopeList(s).filter((x) => !x.startsWith('root:'));
+  return scopeList(s).filter((x) => !x.includes(':'));
 }
 /** A scope by name; one this build does not know is shown as its id. */
 function scopeName(s: string): string {
@@ -116,6 +141,7 @@ function openCreate() {
   createFailure.value = '';
   newLabel.value = '';
   newScopes.value = { read: true, write: true, delete: false, mcp: true, admin: false };
+  newComments.value = 'read';
   newExpiry.value = null;
   newRootStorage.value = '';
   newRootPath.value = '';
@@ -158,6 +184,8 @@ async function submitCreate() {
       const rel = newRootPath.value.trim().replace(/^\/+|\/+$/g, '');
       parts.push(`root:${newRootStorage.value}://${rel}`);
     }
+    // `read` is every key's level unless it says otherwise: only `rw` is sent.
+    if (newComments.value === 'rw') parts.push('comments:rw');
     const res = await AITokensApi.create({
       label: newLabel.value.trim(),
       scopes: parts.join(','),
@@ -221,6 +249,13 @@ const columns = computed<DataColumn<AIToken>[]>(() => [
     sortValue: (tok) => (scopeList(tok.scopes).length ? verbScopes(tok.scopes).join(',') : ''),
   },
   {
+    id: 'comments',
+    label: t('apiMcp.cols.comments'),
+    sortable: true,
+    width: 140,
+    sortValue: (tok) => commentLevel(tok),
+  },
+  {
     id: 'root',
     label: t('apiMcp.cols.root'),
     sortable: true,
@@ -256,6 +291,7 @@ function openEdit(tok: AIToken) {
   showEdit.value = tok;
   editLabel.value = tok.label;
   editUsernames.value = usernameList(tok).join(', ');
+  editComments.value = commentLevel(tok);
 }
 
 async function submitEdit() {
@@ -265,6 +301,7 @@ async function submitEdit() {
     await AITokensApi.update(showEdit.value.id, {
       label: editLabel.value.trim(),
       usernames: parseUsernames(editUsernames.value),
+      permissions: { comments: editComments.value },
     });
     toast.success(t('apiMcp.updatedOk'));
     showEdit.value = null;
@@ -410,6 +447,10 @@ function onRowAction(key: string, row: AIToken) {
         </div>
       </template>
 
+      <template #cell-comments="{ row }">
+        <span data-testid="ai-token-comments-cell">{{ t(`apiMcp.commentsLevel.${commentLevel(row)}`) }}</span>
+      </template>
+
       <template #cell-root="{ row }">
         <span v-if="rootScope(row.scopes)" class="tbl-mono tbl-clamp text-violet-600 dark:text-violet-400">
           📁 {{ rootScope(row.scopes) }}
@@ -470,6 +511,19 @@ function onRowAction(key: string, row: AIToken) {
             :class="noScope ? 'error-text mt-1' : 'help-text mt-1'"
             data-testid="ai-token-scopes-required"
           >{{ t('apiMcp.fields.scopesHint') }}</p>
+        </div>
+
+        <!-- Comments: a permission of its own, read unless chosen (#157). -->
+        <div>
+          <p id="ai-token-comments-label" class="label-base mb-1">{{ t('apiMcp.fields.comments') }}</p>
+          <ChoiceButtons
+            :model-value="newComments"
+            :options="commentOptions"
+            aria-labelledby="ai-token-comments-label"
+            testid-prefix="ai-token-comments"
+            @update:model-value="(v: string | string[]) => (newComments = v as CommentLevel)"
+          />
+          <p class="help-text mt-1">{{ t('apiMcp.fields.commentsHint') }}</p>
         </div>
 
         <!-- Root confinement (optional) -->
@@ -543,7 +597,8 @@ function onRowAction(key: string, row: AIToken) {
       </template>
     </Modal>
 
-    <!-- Edit modal (label + usernames; the credential is immutable) -->
+    <!-- Edit modal (label, usernames and the comments level; the credential
+         and its verbs are immutable) -->
     <Modal
       :model-value="showEdit !== null"
       :title="t('apiMcp.editToken')"
@@ -560,6 +615,17 @@ function onRowAction(key: string, row: AIToken) {
           :hint="t('apiMcp.fields.usernamesHint')"
           monospace
         />
+        <div>
+          <p id="ai-token-edit-comments-label" class="label-base mb-1">{{ t('apiMcp.fields.comments') }}</p>
+          <ChoiceButtons
+            :model-value="editComments"
+            :options="commentOptions"
+            aria-labelledby="ai-token-edit-comments-label"
+            testid-prefix="ai-token-edit-comments"
+            @update:model-value="(v: string | string[]) => (editComments = v as CommentLevel)"
+          />
+          <p class="help-text mt-1">{{ t('apiMcp.fields.commentsHint') }}</p>
+        </div>
       </form>
       <template #footer>
         <Button variant="ghost" @click="showEdit = null">{{ t('common.cancel') }}</Button>

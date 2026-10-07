@@ -1,0 +1,15 @@
+# The nightly run's morning report (scripts/chain/report.mjs): one
+# notification for the night. A template: scripts/chain/install-nightly.sh
+# fills @NODE@, @BIN@ and @ENV@. It waits for a run still going (at most
+# NIGHTLY_REPORT_WAIT_MIN minutes) and then reports it as it stands.
+[Unit]
+Description=filex nightly test run: the morning report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# git, docker and the export read their settings from a home directory.
+Environment=HOME=/root
+ExecStart=@NODE@ @BIN@/report.mjs --env @ENV@
+TimeoutStartSec=4h

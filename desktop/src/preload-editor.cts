@@ -32,3 +32,40 @@ contextBridge.exposeInMainWorld('filexWin', {
   toggleMaximize: () => ipcRenderer.invoke('win:toggleMaximize'),
   close: () => ipcRenderer.invoke('win:close'),
 });
+
+// #184 — the document this window edits changed OUTSIDE filex (an agent, an
+// editor, a sync client rewrote it on the computer). The app watches the file
+// and tells the page; the page's editor (packages/core PreviewModal) decides:
+// nothing unsaved → it loads the new version, else it asks which version
+// stays. The page answers here, and says whether its editor holds an edit.
+//
+// ⚠ Data only, and only about THIS window's document: no path on this
+// computer, no token, nothing to read. Each message acts on the session of the
+// window that sent it (main.ts, by webContents), and the app ignores it from a
+// window that is not an "Open with filex" one. What a page could do with it -
+// answer a question about its own document - it can already do by saving.
+// Values are copied out of the page's objects, never passed through.
+type OutsideMessage = { seq: number; path?: string | null; pending?: boolean };
+let outsideListener: ((m: OutsideMessage) => void) | null = null;
+ipcRenderer.on('outside:change', (_e, m: OutsideMessage) => {
+  if (outsideListener && m && typeof m.seq === 'number') {
+    outsideListener({ seq: m.seq, path: typeof m.path === 'string' ? m.path : null, pending: m.pending === true });
+  }
+});
+contextBridge.exposeInMainWorld('filexOutside', {
+  /** The page can take outside changes (protocol version). */
+  hello: (version: number) => ipcRenderer.send('outside:hello', Number(version) || 0),
+  /** Whether the page's editor holds an edit of its own. */
+  report: (state: { edited?: boolean }) => ipcRenderer.send('outside:state', { edited: state?.edited === true }),
+  /** What became of a change: 'reloaded', or the person's answer. */
+  answer: (a: { seq?: number; choice?: string; path?: string }) =>
+    ipcRenderer.send('outside:answer', {
+      seq: Number(a?.seq) || 0,
+      choice: String(a?.choice ?? ''),
+      path: typeof a?.path === 'string' ? a.path : '',
+    }),
+  /** One listener: the page's. A second call replaces the first. */
+  on: (cb: (m: OutsideMessage) => void) => {
+    outsideListener = typeof cb === 'function' ? cb : null;
+  },
+});

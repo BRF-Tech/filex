@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -143,7 +144,7 @@ func TestDesktopPairing_SessionMintsAPersonalToken(t *testing.T) {
 
 	row := onlyDesktopToken(t, store, uid)
 	assert.Equal(t, model.TokenKindUser, row.Kind, "a desktop pairing is a person's credential")
-	assert.Equal(t, "read,write,delete", row.Scopes, "the desktop reads and writes its owner's files, and nothing more")
+	assert.Equal(t, "read,write,delete,comments:rw", row.Scopes, "the desktop reads and writes its owner's files and comments, and nothing more")
 	assert.Equal(t, "filex desktop — test", row.Label)
 
 	// What the desktop window actually does with it: its own API keys panel,
@@ -156,6 +157,47 @@ func TestDesktopPairing_SessionMintsAPersonalToken(t *testing.T) {
 	var caps map[string]any
 	require.NoError(t, json.Unmarshal([]byte(body), &caps))
 	assert.Equal(t, model.TokenKindUser, caps["caller_kind"], "the explorer must draw Recent, Starred and Shared with me")
+}
+
+// TestDesktopPairing_TheDesktopComments - task #157, the maintainer's decision
+// (2026-10-06): the desktop is the person's own app, like their browser, so
+// its token comments (`comments:rw`); an API key the same person mints holds
+// comments at `read`, the default every API key and agent token keeps.
+func TestDesktopPairing_TheDesktopComments(t *testing.T) {
+	srv, _, store := testutil.NewTestServer(t)
+	cfg, err := json.Marshal(map[string]string{"root": t.TempDir()})
+	require.NoError(t, err)
+	st, err := store.CreateStorage(context.Background(), &model.Storage{
+		Name: "dcom", Driver: "local", MountPath: "/dcom", ConfigJSON: cfg,
+		SyncMode: model.SyncModeOnDemand, Enabled: true,
+	})
+	require.NoError(t, err)
+	node := seedNode(t, store, st, "a.txt", false)
+	client, uid, _ := desktopSession(t, srv.URL, store, model.RoleUser, "desk-comments@test.local")
+
+	code, body, tok := desktopPair(t, srv.URL, postWith(t, client))
+	require.Equal(t, http.StatusOK, code, body)
+	row := onlyDesktopToken(t, store, uid)
+	assert.Equal(t, "rw", string(row.PermLevel("comments")), "a pairing holds comments at rw")
+
+	comment := fmt.Sprintf(`{"node_id":%d,"body":"masaüstünden"}`, node.ID)
+	code, body = callWithToken(t, http.MethodPost, srv.URL+"/api/files/comments", tok, comment)
+	assert.Equal(t, http.StatusOK, code, "the desktop comments, as the browser does: %s", body)
+
+	// An API key the same person mints keeps the default.
+	code, body = postWith(t, client)(srv.URL+"/api/tokens", `{"label":"cli","scopes":"read,write,delete"}`)
+	require.Equal(t, http.StatusCreated, code, body)
+	var minted struct {
+		Token string `json:"token"`
+		Row   struct {
+			Permissions map[string]string `json:"permissions"`
+		} `json:"row"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &minted), body)
+	assert.Equal(t, "read", minted.Row.Permissions["comments"], "an API key holds comments at read")
+	code, body = callWithToken(t, http.MethodPost, srv.URL+"/api/files/comments", minted.Token, comment)
+	assert.Equal(t, http.StatusForbidden, code, "an API key comments only with comments:rw: %s", body)
+	assert.Contains(t, body, "token missing scope: comments:write")
 }
 
 // TestDesktopPairing_SessionBearerIsStillASession — the SPA sends its login
@@ -212,7 +254,7 @@ func TestDesktopPairing_ViewerDesktopActsLikeTheViewersBrowser(t *testing.T) {
 	require.Equal(t, http.StatusOK, st, body)
 	row := onlyDesktopToken(t, store, uid)
 	assert.Equal(t, model.TokenKindUser, row.Kind)
-	assert.Equal(t, "read,write", row.Scopes, "a viewer's desktop carries write for the account, and never delete")
+	assert.Equal(t, "read,write,comments:rw", row.Scopes, "a viewer's desktop carries write for the account, comments as the browser does, and never delete")
 
 	// Reading works, and catalogues the folder for the requests below.
 	status, body := callWithToken(t, http.MethodGet, srv.URL+"/api/files/manager?action=index&path=vdesk://", tok, "")

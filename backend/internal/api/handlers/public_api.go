@@ -539,6 +539,9 @@ func (h *PublicAPI) Event(w http.ResponseWriter, r *http.Request) {
 	}
 	in := wire.ViewEventInput{Event: req.Event, ActionID: req.ActionID, State: req.State, Data: req.Data,
 		Context: wire.CallContext{Locale: locale}}
+	// ⚠ PageEvent holds the screen (this call and the gate's above) to the
+	// root the link recorded (model.Share.AppRoot), as enqueueAsCreator holds
+	// the job it queues.
 	s, err := h.Apps.Registry.PageEvent(r.Context(), sh, p, in, clientIP(r))
 	if err != nil {
 		h.Apps.callFail(w, err)
@@ -592,6 +595,19 @@ func (h *PublicAPI) enqueueAsCreator(w http.ResponseWriter, r *http.Request, sh 
 	// reason; this is the one that survives a future edit to it.)
 	creator, live := linkCreator(r.Context(), h.Store, sh)
 	if !live || creator == nil {
+		h.jobRefused(w, http.StatusForbidden, "no_access")
+		return
+	}
+	// ⚠⚠ The link's document where it lies NOW, held to the root the link
+	// recorded (model.Share.AppRoot). A link a `root:` token's job opened
+	// outlives the day it was opened, and its document may be moved out of
+	// that root afterwards: the visitor's job then went on reading and writing
+	// it there (filex #185). Refused with the sentence a creator who lost
+	// their access gets - the obstacle is on the creator's side of the link -
+	// and before anything else is asked about the action or the file. The job
+	// is held to the root again when it runs (wasmplugin runJob), and the
+	// visitor's screen is never handed the document (Scope.file).
+	if !h.Apps.Registry.LinkHolds(r.Context(), sh, storageID, rel) {
 		h.jobRefused(w, http.StatusForbidden, "no_access")
 		return
 	}

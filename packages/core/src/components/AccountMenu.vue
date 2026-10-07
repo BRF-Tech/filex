@@ -42,7 +42,7 @@ import { localeTag } from '../composables/useLocale';
  * are drawn from the explorer's own vocabulary (stroked, 24×24,
  * `currentColor`), and never from an emoji or a second icon library. */
 import { actionIconSvg } from '../lib/actionIcons';
-import { anchorUnderEndEdge, refElement } from '../lib/anchoredPanel';
+import { anchorUnderEndEdge, fixedViewport, refElement } from '../lib/anchoredPanel';
 import type { AccountAction, AccountPerson } from '../lib/accountMenu';
 import { dirOfElement } from '../lib/direction';
 import { personName } from '../lib/personName';
@@ -110,7 +110,7 @@ function syncPos() {
   // ⚠ RTL: flush with the avatar's END edge — its left one in RTL.
   const { top, right, left } = anchorUnderEndEdge(
     r,
-    { width: window.innerWidth, height: window.innerHeight },
+    fixedViewport(),
     { dir: dirOfElement(el) },
   );
   pos.value = { top, right, left };

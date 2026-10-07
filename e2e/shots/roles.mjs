@@ -4,7 +4,7 @@
 //
 //   node e2e/shots/roles.mjs       (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/roles/:
+// Writes e2e/.artifacts/shots/capture/roles/:
 //
 //   roles-list-1440.png     Admin → Roles: the three built-in roles and two
 //                           custom ones in the explorer's table — how many

@@ -32,6 +32,7 @@ import { useLocale } from '../composables/useLocale';
 import { useTokens } from '../composables/useTokens';
 import DataTable, { type DataColumn } from './DataTable.vue';
 import type { ContextAction } from './ContextMenu.vue';
+import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
 import { resolveLocale } from '../locales/resolve';
 
 const props = defineProps<{
@@ -64,7 +65,7 @@ const emit = defineEmits<{
 const locale = computed<LocaleCode>(() => resolveLocale(props.config.locale));
 const { t, formatDate } = useLocale(locale);
 
-const { tokens, loading, error, canMint, revealed, load, create, remove, dismiss } = useTokens(
+const { tokens, loading, error, canMint, revealed, load, create, remove, setPermissions, dismiss } = useTokens(
   props.config,
 );
 
@@ -91,6 +92,23 @@ const scopeState = ref<Record<string, boolean>>({
 const rootPath = ref('');
 const expiresInDays = ref<number | null>(null);
 
+/*
+ * ⚠ Comments are a permission of their own, with a level (task #157): every
+ * key reads them unless it says otherwise, and adding and deleting them is
+ * `comments:rw` - `write` does not include it. Only `rw` is sent; the server
+ * answers each key's levels in `permissions`, so the list below reads them
+ * from there instead of a copy of the default rule.
+ */
+type CommentLevel = 'read' | 'rw';
+const commentLevel = ref<CommentLevel>('read');
+const commentOptions = computed<ChoiceOption[]>(() => [
+  { value: 'read', label: t('conn.tokens.commentsRead') },
+  { value: 'rw', label: t('conn.tokens.commentsRw') },
+]);
+function commentsOf(row: ApiToken): string {
+  return row.permissions?.comments === 'rw' ? t('conn.tokens.commentsRw') : t('conn.tokens.commentsRead');
+}
+
 /**
  * ⚠⚠ Nothing ticked is not a request (owner's decision, v0.43.0): no door
  * mints a token without an explicit list, and this form used to paper over
@@ -103,6 +121,7 @@ function buildScopes(): string {
   const parts = FULL_SCOPES.filter((s) => scopeState.value[s]) as string[];
   const root = rootPath.value.trim();
   if (root) parts.push('root:' + root);
+  if (commentLevel.value === 'rw') parts.push('comments:rw');
   return parts.join(',');
 }
 
@@ -154,6 +173,7 @@ async function mint(): Promise<void> {
       emit('active', { hasToken: tokens.value.length > 0 });
       label.value = '';
       rootPath.value = '';
+      commentLevel.value = 'read';
       return;
     }
     // ⚠ `read,write,delete` and nothing more. `share` is a web-surface verb
@@ -180,6 +200,13 @@ const columns = computed<DataColumn<ApiToken>[]>(() => [
   },
   { id: 'scopes', label: t('conn.tokens.col.scopes'), sortable: true, width: 200 },
   {
+    id: 'comments',
+    label: t('conn.tokens.col.comments'),
+    sortable: true,
+    width: 140,
+    format: commentsOf,
+  },
+  {
     id: 'used',
     label: t('conn.tokens.col.used'),
     sortable: true,
@@ -190,12 +217,20 @@ const columns = computed<DataColumn<ApiToken>[]>(() => [
   },
 ]);
 
-/** The row's one verb, behind its one `Actions` control. ⚠ It keeps the
- *  two-step confirmation it had as a loose button: the first pick arms it and
- *  the label becomes "Confirm", the second pick revokes the token — which
- *  also ends any session already open on it. */
+/** The row's verbs, behind its one `Actions` control: the comments level
+ *  (task #157 - the one thing about a key that can change after it is made),
+ *  and revoking. ⚠ Revoke keeps the two-step confirmation it had as a loose
+ *  button: the first pick arms it and the label becomes "Confirm", the second
+ *  pick revokes the token — which also ends any session already open on it. */
 function rowActions(row: ApiToken): ContextAction[] {
+  const writes = row.permissions?.comments === 'rw';
   return [
+    {
+      key: 'comments',
+      label: writes ? t('conn.tokens.commentsToRead') : t('conn.tokens.commentsToRw'),
+      icon: 'rename',
+      disabled: busy.value,
+    },
     {
       key: 'revoke',
       label: confirming.value === row.id ? t('conn.tokens.confirm') : t('conn.tokens.revoke'),
@@ -211,6 +246,16 @@ function rowActions(row: ApiToken): ContextAction[] {
 
 function onRowAction(key: string, row: ApiToken) {
   if (key === 'revoke') void revoke(row);
+  else if (key === 'comments') void toggleComments(row);
+}
+
+async function toggleComments(row: ApiToken): Promise<void> {
+  busy.value = true;
+  try {
+    await setPermissions(row.id, { comments: row.permissions?.comments === 'rw' ? 'read' : 'rw' });
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function revoke(row: ApiToken): Promise<void> {
@@ -296,6 +341,18 @@ function usedLabel(row: ApiToken): string {
           {{ t('conn.tokens.scopesRequired') }}
         </p>
       </fieldset>
+
+      <div class="fe-tokform__field">
+        <span id="token-comments-label" class="fe-tokform__label">{{ t('conn.tokens.comments') }}</span>
+        <ChoiceButtons
+          :model-value="commentLevel"
+          :options="commentOptions"
+          aria-labelledby="token-comments-label"
+          testid-prefix="token-comments"
+          @update:model-value="(v: string | string[]) => (commentLevel = v as CommentLevel)"
+        />
+        <p class="fe-s3keys__hint">{{ t('conn.tokens.commentsHint') }}</p>
+      </div>
 
       <label class="fe-tokform__field">
         <span class="fe-tokform__label">{{ t('conn.tokens.root') }}</span>

@@ -21,6 +21,7 @@ import type { StorageField, StorageFieldOption } from '../types/Connections';
 import { useLocale } from '../composables/useLocale';
 import { actionIconSvg } from '../lib/actionIcons'; /* ikon:emoji */
 import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
+import ChoiceSelect from './ChoiceSelect.vue';
 
 const props = defineProps<{
   fields: StorageField[];
@@ -199,18 +200,17 @@ function toggleReveal(key: string) {
           @update:model-value="(v: string | string[]) => setChoice(f, v)"
         />
 
-        <select
+        <!-- A long or open-ended list (a region, a storage class): core's
+             own list, never the browser's dropdown (#160). -->
+        <ChoiceSelect
           v-else-if="f.type === 'select'"
           :id="`fe-cf-${f.key}`"
-          class="fe-cfield__input"
-          :value="str(f)"
+          :model-value="str(f)"
+          :options="choiceOptions(f)"
           :disabled="disabled"
-          @change="set(f.key, ($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="o in f.options ?? []" :key="o.value" :value="o.value">
-            {{ optionLabel(o) }}
-          </option>
-        </select>
+          :invalid="isInvalid(f)"
+          @update:model-value="(v) => set(f.key, String(v))"
+        />
 
         <textarea
           v-else-if="f.multiline"

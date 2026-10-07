@@ -8,6 +8,8 @@
 // is written next to the rule, so nobody deletes one as "too strict" without
 // reading what it cost the last time.
 
+import { createHash } from 'node:crypto';
+
 import { headingLines } from '../../docs-site/scripts/markdown-headings.mjs';
 
 // ── versions ────────────────────────────────────────────────────────────────
@@ -229,6 +231,50 @@ export function privateHostLines(grepLines, { allow = [], forbid = [] }) {
     for (const a of allow) rest = rest.split(a).join('');
     return forbid.some((re) => new RegExp(re.source, re.flags.replace('g', '')).test(rest));
   });
+}
+
+const NUL = String.fromCharCode(0);
+const REGULAR = new Set(['100644', '100755']);
+
+/**
+ * `git ls-tree -r -z` or `git ls-files -s -z` output as a Map of path → mode.
+ * Both put the mode first and the path after a tab; -z means no quoting.
+ */
+export function gitModes(z) {
+  const out = new Map();
+  for (const rec of String(z ?? '').split(NUL)) {
+    const tab = rec.indexOf('\t');
+    if (tab < 0) continue;
+    out.set(rec.slice(tab + 1), rec.slice(0, tab).split(' ')[0]);
+  }
+  return out;
+}
+
+/**
+ * The files whose executable bit the public tree lost (`lost`: 100755 in the
+ * private tree, 100644 in the public index) or gained (`gained`). Only regular
+ * files both trees hold are compared: .github/workflows is the public
+ * checkout's own, a withheld file is not in the public tree, a symlink is
+ * neither mode.
+ *
+ * ⚠ Lesson #1108: on Windows, where git cannot see the bit, the export's
+ * `git add -A` staged every new file 100644, so e2e/realenv/run.sh - a script
+ * docs/CONTRIBUTING.md tells a reader to run as it is - reached the public
+ * repository unrunnable, and nothing said so.
+ */
+export function execBitDrift(privateTreeZ, publicIndexZ) {
+  const priv = gitModes(privateTreeZ);
+  const lost = [];
+  const gained = [];
+  let checked = 0;
+  for (const [p, mode] of gitModes(publicIndexZ)) {
+    const want = priv.get(p);
+    if (!want || !REGULAR.has(mode) || !REGULAR.has(want)) continue;
+    checked++;
+    if (want === '100755' && mode !== '100755') lost.push(p);
+    else if (want !== '100755' && mode === '100755') gained.push(p);
+  }
+  return { lost: lost.sort(), gained: gained.sort(), checked };
 }
 
 /**
@@ -480,6 +526,61 @@ export function runVerdict(runs) {
   return { state: 'failure', run: list[0] };
 }
 
+/**
+ * A run's parts, read one by one (#174): ci.yml's matrix is a job per part,
+ * and the gate stage waits for every part it expects (`expected`, job names)
+ * rather than for the run's one conclusion. `jobs` are the run's latest
+ * attempt ({ name, status, conclusion, url }); `finished` says whether the
+ * run itself has completed - before that, a matrix job GitHub has not
+ * created yet (it expands a matrix once its plan job is done) is `waiting`,
+ * after it a part with no job is `missing`.
+ *
+ * A part that ended any way but success - failure, cancelled, timed out,
+ * skipped - is `failure`: a part the full matrix leaves out did not pass.
+ * The state: failure when any part failed (at once, whatever is still
+ * running), else incomplete when one is missing, else running while any runs
+ * or waits, else success.
+ */
+export function partsVerdict(jobs, expected, { finished = false } = {}) {
+  const byName = new Map();
+  for (const j of jobs ?? []) byName.set(j.name, j);
+  const parts = (expected ?? []).map((name) => {
+    const j = byName.get(name);
+    if (!j) return { name, state: finished ? 'missing' : 'waiting' };
+    if (j.status !== 'completed') return { name, state: 'running', url: j.url };
+    return { name, state: j.conclusion === 'success' ? 'success' : 'failure', conclusion: j.conclusion ?? 'none', url: j.url };
+  });
+  const of = (...states) => parts.filter((p) => states.includes(p.state));
+  const failed = of('failure');
+  const missing = of('missing');
+  const running = of('running', 'waiting');
+  const green = of('success');
+  const state = failed.length ? 'failure' : missing.length ? 'incomplete' : running.length ? 'running' : 'success';
+  return { state, parts, failed, missing, running, green };
+}
+
+/** "41/52 parts green, 11 running" - one line for the log. */
+export function partsLine(v) {
+  const bits = [`${v.green.length}/${v.parts.length} parts green`];
+  if (v.running.length) bits.push(`${v.running.length} running`);
+  if (v.failed.length) bits.push(`${v.failed.length} red`);
+  if (v.missing.length) bits.push(`${v.missing.length} missing`);
+  return bits.join(', ');
+}
+
+/**
+ * Whether a dry run kept what the tag run promotes (#174): `names` are its
+ * artifacts; every one of `required` must be there, and one of `optional`
+ * (the macOS row, left out of a macOS-less dry run) may be absent and is
+ * named as such.
+ */
+export function promotionVerdict(names, { required = [], optional = [] } = {}) {
+  const have = new Set(names ?? []);
+  const lacking = required.filter((n) => !have.has(n));
+  const without = optional.filter((n) => !have.has(n));
+  return { ok: lacking.length === 0, lacking, without };
+}
+
 // ── README ──────────────────────────────────────────────────────────────────
 
 /** Every relative image a markdown/HTML page shows. */
@@ -488,4 +589,284 @@ export function readmeImages(markdown) {
   for (const m of String(markdown).matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)) out.add(m[1]);
   for (const m of String(markdown).matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi)) out.add(m[1]);
   return [...out].filter((u) => !/^(?:[a-z]+:)?\/\//i.test(u) && !u.startsWith('data:')).map((u) => u.replace(/^\.\//, '').split('#')[0]);
+}
+
+// ── profiles: which gates run where (task #172) ────────────────────────────
+
+/**
+ * What `pnpm release X.Y.Z --profile <name>` runs, and where.
+ *
+ *   minor  (the default) here, before the export: the builds and vue-tsc, the
+ *          unit suites in UTC, the desktop and the Store copy, both images and
+ *          the shop window (plan.pretag). The heavy suites (plan.heavy) are
+ *          not run here first: those GitHub runs on the export commit (ci.yml)
+ *          are read at the gate stage, and those it does not run yet run on
+ *          this machine DURING the gate stage, beside GitHub's wait.
+ *   patch  X.Y.Z+1 only. The builds and the packaging always (#76: two ghost
+ *          releases died building, not testing), every other gate only when
+ *          something it reads changed since the last release, the Go suite
+ *          on the changed packages and their importers; GitHub still runs
+ *          every suite on the export commit (#165, decision 5).
+ *   full   everything here, before the export, as every release did up to
+ *          0.52: for a day GitHub cannot be trusted with the heavy suites.
+ *
+ * ⚠ Why the heavy suites left this machine (#165): from 0.50 to 0.52 the
+ * pretag here found no product fault the build host and GitHub had not, ran
+ * the Go suite a fifth and vitest an eighth time per release, and started
+ * over after every red - 935 minutes lost over seven releases.
+ */
+export const PROFILES = ['minor', 'patch', 'full'];
+
+const PROFILE_RANK = { patch: 0, minor: 1, full: 2 };
+
+/**
+ * True when a pretag that passed in profile `was` answers for `want` too. A
+ * run recorded before profiles existed ran the whole chain: `full`.
+ */
+export function profileCovers(was, want) {
+  return (PROFILE_RANK[was ?? 'full'] ?? -1) >= (PROFILE_RANK[want] ?? Infinity);
+}
+
+/**
+ * Whether `file` is one of a gate's inputs: it matches a glob and no "!glob"
+ * takes it back out (globMatch's grammar; the order does not matter).
+ */
+export function matchesInputs(globs, file) {
+  let hit = false;
+  for (const g of globs ?? []) {
+    if (g.startsWith('!')) {
+      if (globMatch(g.slice(1), file)) return false;
+    } else if (!hit && globMatch(g, file)) {
+      hit = true;
+    }
+  }
+  return hit;
+}
+
+/**
+ * Where the gate stage reads the heavy suites from (task #181): GitHub
+ * Actions (ci.yml and the release dry run), or CircleCI when Actions is down
+ * (`pnpm release X.Y.Z --resume --gate circleci`). The name is also the field
+ * a heavy gate of the plan sets when that CI runs the same suite.
+ */
+export const GATE_SOURCES = ['github', 'circleci'];
+
+/**
+ * The gates of a profile, sorted by where they run:
+ *   pretag   here, before the export
+ *   local    here, during the gate stage, while the CI tests the export
+ *            (with the builds they are `after`, built again there)
+ *   remote   by the CI `source` names, on the export commit; the gate stage
+ *            waits for it (`github`: the same list, its name before #181)
+ *   skipped  nowhere this time, each with why ({ gate, why })
+ *
+ * `changed` is the list of files changed since the last release (a patch
+ * decides with it), or null when there is none to compare with - then
+ * everything runs: in doubt, a gate runs.
+ *
+ * `source` is where the gate stage reads the export commit's suites
+ * (GATE_SOURCES). A heavy gate the plan does not give that source runs here
+ * at the gate stage instead: with `circleci`, the Cypress suite and this
+ * machine's clock run here, the suites CircleCI runs are read from it.
+ *
+ * A gate says, in the plan:
+ *   always      runs in a patch too, whatever changed (builds, packaging)
+ *   inputs      the files its verdict depends on (the gate cache's key)
+ *   patchWhen   what makes a patch run it, when narrower than `inputs`
+ *   github      (heavy) the workflow that runs the same suite on GitHub
+ *   circleci    (heavy) the CircleCI job that runs the same suite
+ *               (.circleci/config.yml, workflow `ci`)
+ *   patch       (heavy) 'changed': a patch runs it here when touched
+ *   patchOnly   (heavy) only a patch runs it (the targeted Go suite)
+ *   patchSkip   (heavy) why a patch does not run it here
+ */
+export function selectGates({ pretag = [], heavy = [] }, profile, changed = null, { source = 'github' } = {}) {
+  if (!GATE_SOURCES.includes(source)) throw new Error(`gate source ${source}: the sources are ${GATE_SOURCES.join(', ')}`);
+  const touched = (g) => changed == null || changed.some((f) => matchesInputs(g.patchWhen ?? g.inputs ?? ['**'], f));
+  const remote = (g) => !!g[source];
+  const out = { pretag: [], local: [], remote: [], skipped: [] };
+  out.github = out.remote;
+  const skip = (gate, why) => out.skipped.push({ gate, why });
+  const unchanged = 'nothing it reads changed since the last release';
+  for (const g of pretag) {
+    if (profile !== 'patch' || g.always || touched(g)) out.pretag.push(g);
+    else skip(g, unchanged);
+  }
+  for (const g of heavy) {
+    if (profile === 'full') {
+      if (g.patchOnly) skip(g, 'the whole suite runs here instead');
+      else out.pretag.push(g);
+    } else if (profile === 'minor') {
+      if (g.patchOnly) skip(g, 'only a patch runs it; the whole suite runs on GitHub');
+      else if (remote(g)) out.remote.push(g);
+      else out.local.push(g);
+    } else if ((g.patchOnly || g.patch === 'changed') && touched(g)) {
+      out.pretag.push(g);
+    } else if (remote(g) && !g.patchOnly) {
+      out.remote.push(g);
+    } else if (source !== 'github' && g.github && !g.patchOnly) {
+      // GitHub would run it for a patch, and the CI read in its place does
+      // not: here, at the gate stage, like a minor's.
+      out.local.push(g);
+    } else {
+      skip(g, g.patchOnly || g.patch === 'changed' ? unchanged : (g.patchSkip ?? `a patch runs it only on ${source === 'circleci' ? 'CircleCI' : 'GitHub'}`));
+    }
+  }
+  // The gates that run at the gate stage take along the builds they are
+  // `after`, transitively: the binary they test is built again there, from
+  // the release commit, beside GitHub's wait - never trusted to be still on
+  // disk, and still current, from a pretag hours earlier.
+  if (out.local.length) {
+    const byName = new Map([...pretag, ...heavy].map((g) => [g.name, g]));
+    const need = new Set();
+    const visit = (g) => {
+      for (const n of g.after ?? []) {
+        const d = byName.get(n);
+        if (d && !need.has(n)) {
+          need.add(n);
+          visit(d);
+        }
+      }
+    };
+    out.local.forEach(visit);
+    const local = new Set(out.local.map((g) => g.name));
+    out.local = [...pretag, ...heavy].filter((g) => local.has(g.name) || need.has(g.name));
+  }
+  return out;
+}
+
+// ── the gate cache (task #172) ──────────────────────────────────────────────
+//
+// A gate that passed is not run again while nothing it reads has changed.
+// The key is a digest of the gate's own recipe and the CONTENT of its inputs
+// (blob ids from `git ls-tree`), never the commit: a fix in e2e/ leaves the
+// Go suite's key alone, and the stamp reaches only the gates that read what it
+// writes. Only green is kept. Anything that cannot be read - a working tree
+// that differs from HEAD, an entry that does not parse - is a miss, and the
+// gate runs: the cache may cost a run, never pass one.
+//
+// ⚠ "The stamp is normalised" means exactly that scoping, and no rewriting of
+// file contents: a test that reads the version or the newest CHANGELOG
+// section must run after the stamp (0.44.1: two such tests went red on the
+// tag run), so a gate whose inputs hold what the stamp writes runs again.
+
+export const GATE_CACHE_SCHEMA = 1;
+
+/** `git ls-tree -r -z` output → [{ mode, type, id, path }], in its order. */
+export function parseLsTree(z) {
+  const out = [];
+  for (const rec of String(z ?? '').split(NUL)) {
+    const tab = rec.indexOf('\t');
+    if (tab < 0) continue;
+    const [mode, type, id] = rec.slice(0, tab).split(' ');
+    out.push({ mode, type, id, path: rec.slice(tab + 1) });
+  }
+  return out;
+}
+
+/** The tree entries a gate reads, by its `inputs` globs. */
+export function inputEntries(entries, globs) {
+  return entries.filter((e) => matchesInputs(globs, e.path));
+}
+
+/**
+ * The cache key of one gate: its name, what it runs (`recipe`: the command
+ * with its environment and working directory, as the gate resolved them),
+ * what else it reads (`recipe.extra`), the machine (`facts`) and every input
+ * file's path, mode and blob id.
+ */
+export function gateCacheKey({ name, recipe, files, facts }) {
+  const h = createHash('sha256');
+  h.update(JSON.stringify({ schema: GATE_CACHE_SCHEMA, name, recipe: recipe ?? null, facts: facts ?? null }));
+  const rows = files.map((f) => `${f.mode} ${f.id} ${f.path}`).sort();
+  h.update(`\n${rows.length}\n`);
+  for (const r of rows) h.update(`${r}\n`);
+  return h.digest('hex');
+}
+
+/**
+ * Whether the text of a cache entry says this gate passed on this key. A
+ * file that does not parse, names another gate or key, or does not say green
+ * is a miss with a reason, never an error: the gate then runs.
+ */
+export function cacheEntryHit(text, { key, name }) {
+  let e;
+  try {
+    e = JSON.parse(text);
+  } catch {
+    return { hit: false, why: 'it does not parse' };
+  }
+  if (!e || typeof e !== 'object') return { hit: false, why: 'it is not an object' };
+  if (e.schema !== GATE_CACHE_SCHEMA) return { hit: false, why: `schema ${e.schema ?? 'missing'}, not ${GATE_CACHE_SCHEMA}` };
+  if (e.key !== key || e.name !== name) return { hit: false, why: 'it is for another gate or other inputs' };
+  if (e.ok !== true) return { hit: false, why: 'it does not say green' };
+  return { hit: true, entry: e };
+}
+
+// ── a patch's Go packages ───────────────────────────────────────────────────
+
+/**
+ * The Go package directories a patch changed, relative to the module
+ * (`./internal/foo`), for scripts/release/gates/go-targeted.sh - which adds
+ * every package that imports one of them. `all` (the whole module) when it
+ * cannot place a change: no previous release to compare with, a file at the
+ * module root (go.mod, go.sum), or a file no package directory holds.
+ *
+ * `hasGoFiles(dir)` says whether a directory (relative to the module) holds a
+ * .go file today. A file under testdata/ (or a directory go ignores, `_x` or
+ * `.x`) belongs to the package above it: wasmplugin's tests build their
+ * fixture from testdata/echo. A deleted package belongs to its parent.
+ */
+export function goPackageDirs(changed, hasGoFiles, module = 'backend') {
+  if (changed == null) return { all: true, dirs: [], why: 'no previous release to compare with' };
+  const prefix = `${module}/`;
+  const dirs = new Set();
+  for (const f of changed) {
+    if (!f.startsWith(prefix)) continue;
+    const rel = f.slice(prefix.length);
+    if (!rel.includes('/')) return { all: true, dirs: [], why: `${f} is at the module root` };
+    let parts = rel.split('/').slice(0, -1);
+    const cut = parts.findIndex((p) => p === 'testdata' || p.startsWith('_') || p.startsWith('.'));
+    if (cut >= 0) parts = parts.slice(0, cut);
+    while (parts.length && !hasGoFiles(parts.join('/'))) parts.pop();
+    if (!parts.length) return { all: true, dirs: [], why: `no Go package holds ${f}` };
+    dirs.add(`./${parts.join('/')}`);
+  }
+  return { all: false, dirs: [...dirs].sort() };
+}
+
+// ── what the stamp writes ───────────────────────────────────────────────────
+
+/**
+ * Whether `file` is one the stamp writes: CHANGELOG.md, a workspace
+ * package.json (`pkgDirs`), anything under deploy/.
+ */
+export function stampWrites(file, pkgDirs) {
+  return file === 'CHANGELOG.md' || file.startsWith('deploy/') || pkgDirs.some((p) => file === `${p}/package.json`);
+}
+
+// ── a scripts/chain run as evidence (task #170's result.json) ───────────────
+
+/**
+ * Whether a scripts/chain result (schema 1: `schema`, `profile`, `sha`,
+ * `finished`, `ok`, `stopped`, `dirty_files`) proves the heavy gates for this
+ * release: a finished green run of an accepted profile, on a clean checkout of
+ * a commit this release contains, with nothing changed since but what the
+ * stamp writes (`since`: the files changed from its commit to the release
+ * commit, or null when the release does not contain that commit).
+ */
+export function chainVerdict(result, { accepted = [], since = null, stampFile = () => false } = {}) {
+  if (!result || typeof result !== 'object') return { ok: false, problems: ['it is not a chain result (scripts/chain writes result.json)'] };
+  const problems = [];
+  if (result.schema !== 1) problems.push(`schema ${result.schema ?? 'missing'}; this release reads schema 1`);
+  if (!result.finished) problems.push('the run never finished');
+  else if (result.ok !== true) problems.push(`the run was ${result.stopped ? 'stopped' : 'red'}`);
+  if (!accepted.includes(result.profile)) problems.push(`profile ${result.profile ?? 'missing'}; this release takes ${accepted.join(' or ') || 'none'}`);
+  if (result.dirty_files) problems.push(`it ran with ${result.dirty_files} uncommitted file(s)`);
+  if (since === null) problems.push(`it ran on ${String(result.sha ?? 'no commit').slice(0, 10)}, which this release does not contain`);
+  else {
+    const other = since.filter((f) => !stampFile(f));
+    if (other.length) problems.push(`${other.length} file(s) changed since it ran, beyond the stamp: ${other.slice(0, 8).join(', ')}`);
+  }
+  return { ok: problems.length === 0, problems };
 }

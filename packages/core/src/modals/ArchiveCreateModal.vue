@@ -5,6 +5,7 @@ import type { ArchiveCreateFormat } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
 import Modal from './Modal.vue';
 import { archiveFormatLabel } from '../lib/archiveFormats';
+import ChoiceSelect, { type SelectOption } from '../components/ChoiceSelect.vue';
 
 const props = withDefaults(defineProps<{
   open: boolean;
@@ -43,6 +44,14 @@ const availableFormats = computed<ArchiveCreateFormat[]>(() => {
   );
   return formats.length ? formats : allFormats;
 });
+/* The two lists as core's own list takes them (#160: no native select). */
+const formatChoices = computed<SelectOption[]>(() =>
+  availableFormats.value.map((value) => ({ value, label: archiveFormatLabel(value) })),
+);
+const DICTIONARY_SIZES_MB = [4, 8, 16, 32, 64, 128, 256];
+const dictionaryChoices = computed<SelectOption[]>(() =>
+  DICTIONARY_SIZES_MB.map((n) => ({ value: n, label: t('archive.dictionary_size_value', { n }) })),
+);
 const supportsEncryption = computed(() => props.encryption !== false && (format.value === 'zip' || format.value === '7z'));
 
 function formatFromName(value: string): ArchiveCreateFormat | null {
@@ -131,11 +140,12 @@ function submit() {
       </label>
       <label class="fe-field">
         <span class="fe-field__label">{{ t('archive.format') }}</span>
-        <select v-model="format" class="fe-input">
-          <option v-for="option in availableFormats" :key="option" :value="option">
-            {{ archiveFormatLabel(option) }}
-          </option>
-        </select>
+        <ChoiceSelect
+          :model-value="format"
+          :options="formatChoices"
+          testid="archive-format"
+          @update:model-value="(v) => (format = v as ArchiveCreateFormat)"
+        />
       </label>
       <label v-if="supportsEncryption" class="fe-field">
         <span class="fe-field__label">{{ t('archive.password_optional') }}</span>
@@ -176,9 +186,12 @@ function submit() {
         </label>
         <label class="fe-field">
           <span class="fe-field__label">{{ t('archive.dictionary_size') }}</span>
-          <select v-model.number="dictionarySizeMB" class="fe-input">
-            <option v-for="size in [4, 8, 16, 32, 64, 128, 256]" :key="size" :value="size">{{ t('archive.dictionary_size_value', { n: size }) }}</option>
-          </select>
+          <ChoiceSelect
+            :model-value="dictionarySizeMB"
+            :options="dictionaryChoices"
+            testid="archive-dictionary"
+            @update:model-value="(v) => (dictionarySizeMB = Number(v))"
+          />
           <span class="fe-field__hint">{{ t('archive.dictionary_hint') }}</span>
         </label>
       </template>

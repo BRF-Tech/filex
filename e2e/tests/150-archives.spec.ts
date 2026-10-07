@@ -19,6 +19,7 @@ import { loginAs } from '../helpers/auth';
 import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
 import { setAccountViewMode } from '../helpers/prefs';
 import { settled } from '../helpers/stable';
+import { listedOptions, pickOption } from '../helpers/choiceSelect';
 
 const STAMP = Date.now();
 const STORAGE = `e2e-arc-${STAMP}`;
@@ -106,11 +107,11 @@ test.describe('Archives', () => {
     // By name: the operations panel that opens on Create is a dialog too.
     const dialog = page.getByRole('dialog', { name: /^(Create archive|Arşiv oluştur)$/ });
     await expect(dialog).toBeVisible();
-    const format = dialog.locator('select').first();
-    const offered = await format.locator('option').evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
+    const format = dialog.getByTestId('archive-format');
+    const offered = (await listedOptions(format)).map((o) => o.value);
     expect(offered, 'the dialog offers exactly the server\'s formats').toEqual(archive.allowed_formats);
 
-    await format.selectOption('zip');
+    await pickOption(format, 'zip');
     await expect(dialog.locator('input[type="password"]')).toHaveCount(archive.encryption ? 2 : 0);
 
     await dialog.getByRole('button', { name: /^(Create|Oluştur)$/ }).click();

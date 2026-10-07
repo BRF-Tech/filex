@@ -1,5 +1,6 @@
 // What the release asks GitHub Actions, through the `gh` CLI: the runs of a
-// workflow on one commit, and starting a workflow by hand.
+// workflow on one commit, the jobs of a run (ci.yml's matrix, read part by
+// part), the artifacts a run kept, and starting a workflow by hand.
 //
 // The gate stage (stages.mjs → gate) takes this from the plan as
 // `plan.github`, so the release's own test (web/tests/deploy/releaseCli.test.ts)
@@ -44,6 +45,39 @@ export function githubActions(repo) {
           .filter((x) => x.headSha === sha && x.event === event)
           .map((x) => ({ id: x.databaseId, status: x.status, conclusion: x.conclusion, headSha: x.headSha, event: x.event, title: x.displayTitle, url: x.url })),
       };
+    },
+
+    /**
+     * The jobs of one run, its latest attempt (a re-run's jobs replace the
+     * ones they re-ran): { id, name, status, conclusion, url }. The gate
+     * stage reads ci.yml's matrix this way, part by part (#174).
+     */
+    jobs({ runId }) {
+      const r = run('gh', [
+        'api', '-X', 'GET', `repos/${repo}/actions/runs/${runId}/jobs`, '-f', 'filter=latest', '-f', 'per_page=100', '--paginate',
+        '--jq', '.jobs[] | [(.id | tostring), .name, .status, (.conclusion // ""), .html_url] | @tsv',
+      ]);
+      if (r.status !== 0) return { error: (r.stderr || r.stdout).trim() || `gh exited ${r.status}` };
+      const jobs = [];
+      for (const line of String(r.stdout).split(/\r?\n/).filter(Boolean)) {
+        const [id, name, status, conclusion, url] = line.split('\t');
+        if (!name || !status) return { error: `gh api .../jobs did not answer id, name, status: ${line.slice(0, 200)}` };
+        jobs.push({ id: Number(id), name, status, conclusion: conclusion || null, url });
+      }
+      return { jobs };
+    },
+
+    /**
+     * The names of a run's artifacts that have not expired: what a release
+     * candidate kept for its tag run to promote.
+     */
+    artifacts({ runId }) {
+      const r = run('gh', [
+        'api', '-X', 'GET', `repos/${repo}/actions/runs/${runId}/artifacts`, '-f', 'per_page=100', '--paginate',
+        '--jq', '.artifacts[] | select(.expired == false) | .name',
+      ]);
+      if (r.status !== 0) return { error: (r.stderr || r.stdout).trim() || `gh exited ${r.status}` };
+      return { names: String(r.stdout).split(/\r?\n/).map((s) => s.trim()).filter(Boolean) };
     },
 
     /** Starts `workflow` on `ref` with `inputs`. */

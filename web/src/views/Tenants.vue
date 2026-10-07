@@ -5,6 +5,11 @@
  * new tenant gets a name, a slug and a realm here, and everything else on its
  * own page. The realm is suggested from the slug while the tenant is being
  * created and never changes afterwards, so it is shown before it is given.
+ *
+ * ⚠ Only while the server runs multi-tenant mode (composables/useTenancy):
+ * the router sends a reader of a server without it to the dashboard, and the
+ * page itself draws and asks nothing then (task #167). The switch is Admin ->
+ * Multi-tenant mode.
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
@@ -15,6 +20,7 @@ import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-c
 import { TenantsApi, tenantRefusal, type Tenant } from '@/api/tenants';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
+import { useTenancy } from '@/composables/useTenancy';
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Input from '@/components/ui/Input.vue';
@@ -26,16 +32,16 @@ const toast = useToastStore();
 const router = useRouter();
 
 const tenants = ref<Tenant[]>([]);
-const multiTenant = ref(true);
+const { enabled: multiTenant } = useTenancy();
 const loading = ref(true);
 const q = ref('');
 
 async function load() {
+  if (!multiTenant.value) return;
   loading.value = true;
   try {
     const list = await TenantsApi.list();
     tenants.value = list.providers;
-    multiTenant.value = list.multi_tenant;
   } catch (e) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
@@ -157,7 +163,7 @@ async function create() {
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div v-if="multiTenant" class="space-y-5">
     <div class="flex items-start justify-between gap-3 flex-wrap">
       <div>
         <h1 class="text-xl font-semibold flex items-center gap-2">
@@ -166,10 +172,6 @@ async function create() {
         <p class="text-sm text-zinc-500 dark:text-zinc-400 max-w-2xl">{{ t('tenants.subtitle') }}</p>
       </div>
       <Button data-testid="tenant-new" @click="openNew"><Plus class="h-4 w-4" /> {{ t('tenants.add') }}</Button>
-    </div>
-
-    <div v-if="!loading && !multiTenant" class="card card-body text-sm" role="note" data-testid="tenants-mode-off">
-      {{ t('tenants.modeOff') }}
     </div>
 
     <div v-if="loading" class="card card-body text-center text-zinc-500"><Spinner /></div>

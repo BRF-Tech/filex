@@ -820,10 +820,10 @@ func TestE2ERequests_TheKindIsWhatIsThere(t *testing.T) {
 	assert.Equal(t, "allowed", body["answer"])
 }
 
-// A token confined to a folder (`root:`) asks only under it. The explorer's
-// JSON body is confined on the way in (confine.Middleware); a body sent as
-// anything else is not, so the handler reads the root itself — and answers as
-// the middleware does.
+// A token confined to a folder (`root:`) asks only under it. Its body is
+// confined on the way in whatever its Content-Type (confine.Middleware; up to
+// 0.52 only a body labelled JSON was), and the handler reads the root itself
+// too - and answers as the middleware does.
 func TestE2ERequests_ARootConfinedTokenAsksOnlyUnderItsRoot(t *testing.T) {
 	f := newE2EFix(t)
 	useProductionAuthChain(t, f.store)
@@ -854,10 +854,10 @@ func TestE2ERequests_ARootConfinedTokenAsksOnlyUnderItsRoot(t *testing.T) {
 	for _, outside := range []string{st + "://Baska", st + "://Proje2", f.b.storage.Name + "://Proje"} {
 		refused(outside, "text/plain")
 		refused(outside, "application/json")
+		refused(outside, "")
 	}
-	// The storage itself: a JSON body's is read as the token's root folder
-	// (confine.Middleware), a plain one's is not rewritten, and is outside.
-	refused(st+"://", "text/plain")
+	// (The storage itself is read as the token's root folder in every
+	// Content-Type: confine.Middleware rewrites it before the handler sees it.)
 	assert.Empty(t, e2eAuditRows(t, f.store, e2epolicy.AuditActionRequestCreate), "a request was filed outside the root")
 
 	f.ensure(t, f.a, "Proje/Alt", model.E2ERequestFolder)

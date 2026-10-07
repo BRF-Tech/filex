@@ -314,6 +314,18 @@ func TestDriverContract_NotBeforeIsZoneIndependent(t *testing.T) {
 	}
 }
 
+// Delayed dispatch holds, releases, and is never early, on every configured
+// driver (assertHoldsThenReleases in not_before_test.go). The deadline is
+// stored in whole seconds by SQLite, MySQL and the Redis scheduled set; each
+// rounded it down until 0.53, which released an op up to a second early.
+func TestDriverContract_NotBeforeHoldsThenReleases(t *testing.T) {
+	for name, mk := range configuredDrivers(t) {
+		t.Run(name, func(t *testing.T) {
+			assertHoldsThenReleases(t, mk(t))
+		})
+	}
+}
+
 // Priority, on every configured driver.
 //
 // The SQL drivers claim with `ORDER BY priority DESC, enqueued_at ASC`. The

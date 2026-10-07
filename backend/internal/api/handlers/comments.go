@@ -10,6 +10,13 @@
 // other file handlers use) may read and write its thread; delete is
 // author-or-admin regardless of node level (enforced in internal/comments).
 // Trashed/missing nodes 404 on both read and write.
+//
+// An API token is held to its `comments` permission besides (task #157):
+// reading asks auth.CommentsRead, adding and deleting auth.CommentsWrite -
+// `comments:rw` in the token's list; the verb `write` does not stand in for
+// it. The question is asked HERE, first thing, because this handler is every
+// door's: the explorer's route, and /api/ai and the MCP tools, which run it in
+// process (ai_doors_people.go). A browser session is judged by the account.
 package handlers
 
 import (
@@ -97,6 +104,9 @@ func (h *Comments) visibleNode(w http.ResponseWriter, r *http.Request, nodeID in
 //
 //	GET /api/files/comments?node_id=N → {comments: […], node_id: N}
 func (h *Comments) List(w http.ResponseWriter, r *http.Request) {
+	if !auth.AllowTokenPerm(w, r, auth.CommentsRead) {
+		return
+	}
 	nodeID, _ := strconv.ParseInt(r.URL.Query().Get("node_id"), 10, 64)
 	if h.visibleNode(w, r, nodeID) == nil {
 		return
@@ -124,6 +134,9 @@ type commentCreateReq struct {
 //
 //	POST /api/files/comments {node_id, body} → {comment: {…}}
 func (h *Comments) Create(w http.ResponseWriter, r *http.Request) {
+	if !auth.AllowTokenPerm(w, r, auth.CommentsWrite) {
+		return
+	}
 	var req commentCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -179,6 +192,9 @@ func (h *Comments) Create(w http.ResponseWriter, r *http.Request) {
 //
 //	DELETE /api/files/comments/{id} → {ok: true}
 func (h *Comments) Delete(w http.ResponseWriter, r *http.Request) {
+	if !auth.AllowTokenPerm(w, r, auth.CommentsWrite) {
+		return
+	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})

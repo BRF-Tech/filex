@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/appearance.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/appearance/:
+// Writes e2e/.artifacts/shots/capture/appearance/:
 //
 //   theme-editor-1440.png     Admin → Appearance: a theme being composed, its
 //                             live preview painted by the draft

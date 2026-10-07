@@ -9,7 +9,8 @@ Easiest path (no store needed): CasaOS UI → **App Store** → **⋮** →
 **Install a customized app** → paste `docker-compose.yml`.
 
 For a store submission, copy this directory to `Apps/Filex/` in a CasaOS
-app-store repo (icon/screenshot URLs already point at the filex GitHub repo).
+app-store repo (the icon URL already points at the filex GitHub repo, the screenshot URLs at
+filex.sh, where the published screenshots live).
 
 ## Required / notable settings
 

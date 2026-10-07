@@ -29,7 +29,15 @@ their own). Two things follow for the page that embeds the explorer:
 
 - A `frame-src` in **your** page's Content-Security-Policy must allow that
   origin (filex's, or the interface origin) - otherwise the interface is
-  refused.
+  refused. The same holds for the ONLYOFFICE editor: with
+  `FILEX_ONLYOFFICE_FRAME_ORIGIN` it opens in a frame on the Document Server's
+  own origin, so your `frame-src` must allow that origin (and nothing of the
+  Document Server's runs in your page); with only an interface origin, in a
+  frame there
+  ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own));
+  with neither, its `api.js` is a script in your page and its editor a frame
+  of the Document Server's, so your policy must allow that server as a
+  `script-src` and a `frame-src`.
 - ⚠ Give your page a `frame-src` at all. It is what stops an interface from
   navigating its own frame away - to its author's server, or to a document
   of its own making where filex's WebRTC countermeasure never ran (measured:
@@ -185,7 +193,7 @@ const config = {
   // one console line naming it - the 'drive' profile was REMOVED after v0.40.0,
   // so pass 'simple' if that is what you were asking for.
   // ⚠⚠ It does NOT decide the look. The shell - one "+ New" menu, one search
-  // field in the header with its ⌘K/Ctrl+K chip, the Type/People/Modified/Size
+  // field in the header with its ⌘K/Ctrl+K chip, the Type/Owner/Modified/Size
   // filter row, Folders and Files as sections in grid view (replaced by date
   // headings while the listing is sorted by Modified), Details/Activity in the
   // info panel, the storage line under the navigation, and the Home view - used
@@ -578,24 +586,51 @@ empty or absent path snaps to the confined folder, so listings open there. This
 covers manager / move / copy / delete / upload / download / share / archive /
 trash, the operations queue and its listing, the text editor's save, item
 permissions and invitations, comments, encrypted folders, the live socket
-(a ticket's, and one opened with the token itself) and apps: the files an app
+(a ticket's, and one opened with the token itself), **Shared with me** (its
+rows and the storages it names: only the root's own, and only when a grant
+there reaches into the root or covers it), search (both boxes; their
+`truncated` flag says "cut" only when the hits inside the root filled the page
+or the window), the administrator's thumbnail repair (a run, the list of
+files without a thumbnail and the generator counts; of a run outside the
+folder only that one is going) and apps: the files an app
 runs on, what its screens and jobs are told about the files it keeps state on
 (`state_list`), the files a job may name by path (a lock, a notice, a page
 link), a folder chosen for an app's result, an app's home page (only on the
-root's own storage), and the job a visitor starts on a link the token's job
-opened (the link records the root). Outside the root a folder or a storage
+root's own storage), and the visitor's screen and the job a visitor starts on
+a link the token's job opened (the link records the root). Such a link's
+document is judged where it lies now: moved out of the root after the link
+was opened, the visitor's screen is not handed it and the visitor's submit is
+refused (`403 no_access`). Outside the root a folder or a storage
 answers the same `403` whether or not it exists, and the operations queue
 answers it byte for byte as the JSON body is answered, whatever the
 `Content-Type`. A path is inside the root
 only when it is inside with `\` read as a separator too, the same on every
 host (a Windows host's storage reads it as one).
 
+A confined call's body is read as JSON whatever its `Content-Type`, as the
+handlers read it: when its first value is an object, every path in it is held
+to the root before any handler runs, and a path outside answers that same
+`403`. An object that does not parse answers `400 {"error":"bad json"}`, and
+one larger than 8 MiB `413 {"error":"request body too large"}` - neither is
+passed on, since the keys this layer cannot read it cannot hold. The bytes of
+a file pass untouched, at any size and under any label: a staged upload's part
+(`PUT /api/files/upload/{id}`), an app interface's save
+(`PUT /api/files/plugins/ui/{plugin}/{view}/save`) and a multipart form. (Up to
+0.52 only a body labelled JSON was read, cut at 8 MiB and re-encoded - a
+`.json` file saved through one of those two routes with a JSON label was stored
+re-ordered, or cut.)
+
 ⚠ The token's **verbs** bound the embed too: a token with `read` alone gives a
 read-only explorer (uploads, renames and moves answer `403 token missing scope:
 write`, deletes `…: delete`), and one without `write` opens documents
 read-only in the editor. Give the proxy's token the verbs the embed is meant to
 have - `read,write,delete` for a full file manager
-([RBAC.md → API tokens](RBAC.md#api-tokens-verbs-on-every-surface)).
+([RBAC.md → API tokens](RBAC.md#api-tokens-verbs-on-every-surface)) - and
+`comments:rw` if its people comment: since 0.53 `write` does not include it,
+and a token without it reads comments only
+([RBAC.md → Permissions with a level](RBAC.md#permissions-with-a-level-comments)).
+An existing token gets it with `PATCH /api/admin/ai-tokens/{id}`
+`{"permissions": {"comments": "rw"}}`.
 
 Recommended: one root-scoped token **per tenant/folder** (or a single service
 token + a per-request `X-Filex-Root`), injected by your proxy.

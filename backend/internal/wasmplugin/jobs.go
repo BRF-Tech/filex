@@ -555,6 +555,16 @@ func (r *Registry) runJob(ctx context.Context, job *model.AppPluginJob, live fun
 	}
 	for _, rel := range paths {
 		rel = strings.TrimPrefix(rel, "/")
+		// ⚠⚠ A job held to a root runs only on files inside it, judged again
+		// HERE, when it runs, and before the file is looked at: the job writes
+		// a version onto its input and a sibling beside it (below) by path,
+		// not through a ref. A visitor's job on a link is queued on the link's
+		// document where it lies now, and the document may have been moved
+		// out of the root since the link was opened (filex #185); a root that
+		// does not read as one holds the job to nothing (JobRoot).
+		if !scope.inOwnRoot(rel) {
+			return nil, "", &CallError{Code: CodeRefused, Message: path.Base(rel) + " is not inside the folder this job is held to"}
+		}
 		obj, err := drv.Stat(ctx, rel)
 		if err != nil {
 			return nil, "", fmt.Errorf("%s: %w", path.Base(rel), err)
@@ -806,11 +816,31 @@ func JobRoot(params map[string]any) (confine.Root, bool) {
 		return confine.Root{}, false
 	}
 	s, _ := raw.(string)
-	root, ok := confine.ParseRoot(s)
-	if !ok {
-		return confine.Root{}, true
+	return recordedRoot(s), true
+}
+
+// linkRoot reads the root a link recorded (model.Share.AppRoot), ok=false for
+// a link opened with no root ("", what StampJobRoot stamps nothing for). The
+// public page holds the visitor's screen to it (PageEvent), as the door holds
+// the job the visitor's submit queues.
+//
+// ⚠ Fails CLOSED like JobRoot: a recorded root that does not read as one
+// confines the screen to no folder at all.
+func linkRoot(spec string) (confine.Root, bool) {
+	if spec == "" {
+		return confine.Root{}, false
 	}
-	return root, true
+	return recordedRoot(spec), true
+}
+
+// recordedRoot is a root the host recorded, read back; the zero Root - which
+// holds no path on any storage - when it does not read as one.
+func recordedRoot(spec string) confine.Root {
+	root, ok := confine.ParseRoot(spec)
+	if !ok {
+		return confine.Root{}
+	}
+	return root
 }
 
 // StripHostParams is params without the host's own keys, never nil.

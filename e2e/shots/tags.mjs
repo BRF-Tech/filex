@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/tags.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/tags/:
+// Writes e2e/.artifacts/shots/capture/tags/:
 //
 //   tags-kinds-1440.png   Tagged files: the person's OWN tags and their TEAM's,
 //                         under their own headings, with a team tag opened and

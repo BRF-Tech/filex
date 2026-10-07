@@ -132,6 +132,10 @@ services:
       # hostname that does not resolve on the compose network, say). Empty
       # keeps the public URL, which is right for this stack as written.
       FILEX_ONLYOFFICE_CALLBACK_URL: ${FILEX_ONLYOFFICE_CALLBACK_URL:-}
+      # The editor's api.js in a frame on the document server's own origin
+      # instead of in filex's pages: https://${ONLYOFFICE_DOMAIN} (the Caddyfile
+      # sends /filex-frame/* there to filex). Empty keeps it in filex's pages.
+      FILEX_ONLYOFFICE_FRAME_ORIGIN: ${FILEX_ONLYOFFICE_FRAME_ORIGIN:-}
       FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
       # ── Zero-touch config (fill in .env) ────────────────────────────────
       # SSO: set FILEX_AUTH_DRIVERS=local,oidc + the FILEX_OIDC_* vars. These

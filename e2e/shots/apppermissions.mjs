@@ -3,7 +3,7 @@
 //
 //   node e2e/shots/apppermissions.mjs     (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/apppermissions/:
+// Writes e2e/.artifacts/shots/capture/apppermissions/:
 //
 //   role-user.png            Admin → Roles → "Edit the User role": the Apps
 //                            group under the permission groups, the signing

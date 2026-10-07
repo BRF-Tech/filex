@@ -87,8 +87,14 @@ func TestAIDoors_TheBellIsTheCallersAndItsRoots(t *testing.T) {
 // TestAIDoors_StarAndComments - file_star stars a file in the explorer's own
 // list; a comment is added, read and deleted by its author only, and each
 // write is the audit row its REST twin leaves.
+//
+// Commenting asks the token's `comments:rw` (task #157), which the fixture's
+// tokens do not name: the comment calls run on tokens that do
+// (token_comments_test.go holds the refusal).
 func TestAIDoors_StarAndComments(t *testing.T) {
 	f := newDoorFix(t)
+	c1 := testutil.NewAPIToken(t, f.Store, f.MemberID, "read,write,delete,mcp,comments:rw")
+	c2 := testutil.NewAPIToken(t, f.Store, f.Member2, "read,write,delete,mcp,comments:rw")
 	f.put(t, f.Tok, "main://docs/a.txt", "x")
 	f.put(t, f.Tok, "main://docs/b.txt", "y")
 
@@ -105,7 +111,7 @@ func TestAIDoors_StarAndComments(t *testing.T) {
 	require.False(t, tl.IsError, tl.Text)
 
 	before := len(mcpAuditRows(t, f.Store))
-	tl = f.tool(t, f.Tok, "file_comment_add", map[string]any{"path": "main://docs/a.txt", "text": "ilk yorum"})
+	tl = f.tool(t, c1, "file_comment_add", map[string]any{"path": "main://docs/a.txt", "text": "ilk yorum"})
 	require.False(t, tl.IsError, tl.Text)
 	rows := newRows(t, f.Store, before)
 	require.Len(t, rows, 1, "%+v", rows)
@@ -113,14 +119,14 @@ func TestAIDoors_StarAndComments(t *testing.T) {
 	assert.Equal(t, "mcp", rows[0].Metadata["via"])
 
 	before = len(mcpAuditRows(t, f.Store))
-	code, out := f.rest(t, f.Tok, http.MethodPost, "/api/ai/comments", map[string]any{"path": "main://docs/b.txt", "text": "rest yorumu"})
+	code, out := f.rest(t, c1, http.MethodPost, "/api/ai/comments", map[string]any{"path": "main://docs/b.txt", "text": "rest yorumu"})
 	require.Less(t, code, 300, "%v", out)
 	rows = newRows(t, f.Store, before)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "ai.file.comment_add", rows[0].Action, "the REST twin's row is the tool's")
 	assert.Equal(t, "api", rows[0].Metadata["via"])
 
-	tl = f.tool(t, f.Tok2, "file_comments", map[string]any{"path": "main://docs/a.txt"})
+	tl = f.tool(t, c2, "file_comments", map[string]any{"path": "main://docs/a.txt"})
 	require.False(t, tl.IsError, tl.Text)
 	_, res := doorResult(t, tl)
 	list, _ := res["comments"].([]any)
@@ -128,11 +134,11 @@ func TestAIDoors_StarAndComments(t *testing.T) {
 	cid := list[0].(map[string]any)["id"].(float64)
 	assert.Equal(t, "ilk yorum", list[0].(map[string]any)["body"])
 
-	tl = f.tool(t, f.Tok2, "file_comment_delete", map[string]any{"id": cid})
+	tl = f.tool(t, c2, "file_comment_delete", map[string]any{"id": cid})
 	require.True(t, tl.IsError, "only its author deletes a comment: %s", tl.Raw)
-	tl = f.tool(t, f.Tok, "file_comment_delete", map[string]any{"id": cid})
+	tl = f.tool(t, c1, "file_comment_delete", map[string]any{"id": cid})
 	require.False(t, tl.IsError, tl.Text)
-	tl = f.tool(t, f.Tok, "file_comments", map[string]any{"path": "main://docs/a.txt"})
+	tl = f.tool(t, c1, "file_comments", map[string]any{"path": "main://docs/a.txt"})
 	_, res = doorResult(t, tl)
 	list, _ = res["comments"].([]any)
 	assert.Empty(t, list, "deleted")

@@ -43,7 +43,7 @@ const REPO = 'https://github.com/BRF-Tech/filex';
 const PRODUCT_CODE = 'af48dd76-2015-5c31-806d-7410b4687915';
 // The Office types "Open with filex" registers (src/openwith.ts OFFICE_EXTENSIONS;
 // test/pkg-manifests.test.ts keeps the two equal).
-export const FILE_EXTENSIONS = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'rtf'];
+export const FILE_EXTENSIONS = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'rtf', 'csv'];
 /**
  * The oldest macOS the bundled Electron runs on, as a Homebrew symbol — read
  * from the Electron in package.json at render time, so an upgrade cannot leave

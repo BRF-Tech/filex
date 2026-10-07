@@ -36,6 +36,7 @@ import {
 import { AppearanceApi, type ThemeDocument } from '@/api/appearance';
 import { useSettingsStore } from '@/stores/settings';
 import { useToastStore } from '@/stores/toast';
+import { useTenancy } from '@/composables/useTenancy';
 import { extractError } from '@/api/client';
 import { applyInstanceThemes } from '@/lib/instanceThemes';
 import { formatBytes } from '@/lib/format';
@@ -70,6 +71,7 @@ const DEFAULT_THEME_KEY = 'ui.default_theme';
 const CUSTOM_CSS_MAX_BYTES = 64 * 1024;
 
 const { t, locale } = useI18n();
+const { enabled: tenancyOn } = useTenancy();
 const settings = useSettingsStore();
 const toast = useToastStore();
 
@@ -81,7 +83,7 @@ const saving = ref(false);
 const draft = reactive<ThemeDraft>(newDraft());
 const editingExisting = ref(false);
 /** Which variant the editor is showing. A segmented control, not a native
- *  <select> — the panel's rule, and two options never wanted a dropdown. */
+ *  dropdown — the panel's rule, and two options never wanted a dropdown. */
 const variant = ref<'light' | 'dark'>('light');
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -640,7 +642,9 @@ onBeforeUnmount(() => {
             <li>{{ t('appearance.css.warnScope') }}</li>
             <li>{{ t('appearance.css.warnNetwork') }}</li>
             <li>{{ t('appearance.css.warnLie') }}</li>
-            <li>{{ t('appearance.css.warnOperator') }}</li>
+            <!-- A tenant's administrator exists only on a multi-tenant install
+                 (composables/useTenancy, #167). -->
+            <li v-if="tenancyOn">{{ t('appearance.css.warnOperator') }}</li>
           </ul>
         </div>
 

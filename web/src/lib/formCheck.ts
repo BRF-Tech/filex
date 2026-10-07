@@ -13,7 +13,7 @@ import { t } from '@/i18n';
  * say it under the box themselves; the bubble is suppressed. One definition,
  * so every form in the panel refuses the same way.
  */
-export function validityMessage(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): string {
+export function validityMessage(el: HTMLInputElement | HTMLTextAreaElement): string {
   const v = el.validity;
   if (v.valueMissing) return t('forms.required');
   if (v.typeMismatch) {

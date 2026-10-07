@@ -10,18 +10,21 @@
 // directory to work in.
 
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import type {
   ArgvIntent,
+  BesideTarget,
+  LocalVersion,
   OpenWithSession,
   RemoteStat,
   SyncPairView,
   SyncTwin,
 } from '../src/openwith.ts';
 
-/** The six functions under measurement. */
+/** The functions under measurement. */
 export interface Impl {
   classifyArgv(argv: readonly string[], opts?: { defaultApp?: boolean; scheme?: string }): ArgvIntent;
   resolveSyncTwin(
@@ -33,8 +36,8 @@ export interface Impl {
   writeBackAtomic(
     target: string,
     bytes: Buffer | Uint8Array,
-    opts?: { fallbackDir?: string; now?: Date },
-  ): Promise<void>;
+    opts?: { fallbackDir?: string; now?: Date; expect?: LocalVersion | null },
+  ): Promise<LocalVersion | void>;
   staleSessions(
     sessions: readonly OpenWithSession[],
     opts: { currentPid: number; now?: number; maxAgeMs?: number },
@@ -44,6 +47,14 @@ export interface Impl {
     known: ReadonlySet<string>,
     opts?: { now?: number; maxAgeMs?: number },
   ): string[];
+  // #151 — a save that came back in another format, beside the document.
+  writeBesideSave(
+    localPath: string,
+    ext: string,
+    bytes: Buffer | Uint8Array,
+    target: BesideTarget | null,
+    opts?: { fallbackDir?: string; now?: Date },
+  ): Promise<{ target: BesideTarget; outcome: string }>;
 }
 
 export interface Case {
@@ -68,6 +79,25 @@ function session(over: Partial<OpenWithSession>): OpenWithSession {
     ownerPid: 1234,
     ...over,
   };
+}
+
+/**
+ * The version of a local file as filex records it after reading or writing it
+ * (openwith.ts LocalVersion), built here from first principles so the case
+ * does not lean on the code it measures. `at` is when it was recorded.
+ */
+export function versionOf(p: string, at = Date.now()): LocalVersion {
+  const st = fs.statSync(p);
+  const sha256 = crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  return { size: st.size, mtimeMs: st.mtimeMs, sha256, at };
+}
+
+/** How an agent (or most editors) writes a file: a temp file beside it, then
+ *  a rename over it. The document's inode changes; its name does not. */
+export function writeByRename(p: string, data: string | Buffer): void {
+  const tmp = path.join(path.dirname(p), '.agent-' + crypto.randomBytes(3).toString('hex') + '.tmp');
+  fs.writeFileSync(tmp, data);
+  fs.renameSync(tmp, p);
 }
 
 export const CASES: Case[] = [
@@ -297,6 +327,129 @@ export const CASES: Case[] = [
       const kept = (err as { keptAt?: string }).keptAt;
       assert.ok(kept, 'the edit was not kept anywhere');
       assert.equal(await fs.promises.readFile(kept!, 'utf8'), 'NEW');
+    },
+  },
+  // ⚠⚠ Issue #184: the save that came AFTER somebody else rewrote the file.
+  // An agent rewrote the spreadsheet on disk while it was open in filex, the
+  // next save landed over it, and everything the agent wrote was gone.
+  {
+    group: 'write-back',
+    name: 'a document rewritten outside filex since filex last read it is NOT overwritten by the next save',
+    async run(impl, dir) {
+      const target = path.join(dir, 'Bütçe.xlsx');
+      await fs.promises.writeFile(target, 'ORIGINAL');
+      const seen = versionOf(target);
+      writeByRename(target, 'WHAT-THE-AGENT-WROTE');
+
+      let err: unknown = null;
+      try {
+        await impl.writeBackAtomic(target, Buffer.from('FILEX-EDIT'), { expect: seen });
+      } catch (e) {
+        err = e;
+      }
+      assert.equal(
+        await fs.promises.readFile(target, 'utf8'),
+        'WHAT-THE-AGENT-WROTE',
+        'the save went over a version filex never saw - the outside change is gone',
+      );
+      assert.ok(err, 'a save that was not written reported success');
+      assert.equal((err as Error).name, 'LocalChangedError', 'the refusal does not say why: ' + String(err));
+      assert.deepEqual(await fs.promises.readdir(dir), ['Bütçe.xlsx'], 'leftovers in the directory');
+    },
+  },
+  {
+    group: 'write-back',
+    name: 'an outside change with the same size AND the same timestamp is still caught (by content)',
+    async run(impl, dir) {
+      // A file system that keeps whole seconds (FAT, SMB, some FUSE mounts)
+      // gives two writes inside one second the same mtime; same-length
+      // rewrites of a cell are common. Size+mtime alone would call it
+      // unchanged and the save would land over it.
+      const target = path.join(dir, 'rapor.docx');
+      const t = new Date(Math.floor(Date.now() / 1000) * 1000);
+      await fs.promises.writeFile(target, 'AAAA');
+      await fs.promises.utimes(target, t, t);
+      // Recorded half a second after the write: inside the window where a
+      // second write can keep the timestamp.
+      const seen = versionOf(target, t.getTime() + 500);
+      writeByRename(target, 'BBBB');
+      await fs.promises.utimes(target, t, t);
+      assert.equal(fs.statSync(target).mtimeMs, seen.mtimeMs, 'the rig did not reproduce the same timestamp');
+
+      let err: unknown = null;
+      try {
+        await impl.writeBackAtomic(target, Buffer.from('CCCC'), { expect: seen });
+      } catch (e) {
+        err = e;
+      }
+      assert.equal(await fs.promises.readFile(target, 'utf8'), 'BBBB', 'the outside change was overwritten');
+      assert.ok(err, 'a save that was not written reported success');
+    },
+  },
+  {
+    group: 'write-back',
+    name: "filex's own save is the new baseline: the save after it goes through",
+    async run(impl, dir) {
+      const target = path.join(dir, 'Bütçe.xlsx');
+      await fs.promises.writeFile(target, 'ORIGINAL');
+      const seen = versionOf(target);
+      const mine = await impl.writeBackAtomic(target, Buffer.from('EDIT-1'), { expect: seen });
+      assert.ok(mine && typeof mine === 'object' && mine.sha256, 'the write did not say what it left on disk');
+      assert.equal(
+        mine.sha256,
+        crypto.createHash('sha256').update('EDIT-1').digest('hex'),
+        'the recorded version is not the bytes filex wrote',
+      );
+      // Its own write is not an outside change: the next save lands.
+      await impl.writeBackAtomic(target, Buffer.from('EDIT-2'), { expect: mine });
+      assert.equal(await fs.promises.readFile(target, 'utf8'), 'EDIT-2');
+    },
+  },
+
+  // ── a save in another format (#151) ────────────────────────────────
+  // ONLYOFFICE writes no .doc: the edit of Rapor.doc comes back as DOCX, and
+  // goes beside it as Rapor.docx. The first draft writes it to that name and
+  // stops thinking - over whatever is already there.
+  {
+    group: 'beside',
+    name: 'an earlier Rapor.docx beside the .doc is NOT overwritten: the save takes Rapor (2).docx',
+    async run(impl, dir) {
+      const doc = path.join(dir, 'Rapor.doc');
+      await fs.promises.writeFile(doc, 'OLD-DOC');
+      // Yesterday's session saved one; today the unchanged .doc was opened again.
+      const yesterday = path.join(dir, 'Rapor.docx');
+      await fs.promises.writeFile(yesterday, 'YESTERDAYS-EDIT');
+      const got = await impl.writeBesideSave(doc, 'docx', Buffer.from('TODAYS-EDIT'), null);
+      assert.equal(
+        await fs.promises.readFile(yesterday, 'utf8'),
+        'YESTERDAYS-EDIT',
+        "yesterday's edit was overwritten by today's",
+      );
+      assert.equal(got.target.path, path.join(dir, 'Rapor (2).docx'), 'not the next free name, the way the server numbers it');
+      assert.equal(await fs.promises.readFile(got.target.path, 'utf8'), 'TODAYS-EDIT');
+      assert.equal(await fs.promises.readFile(doc, 'utf8'), 'OLD-DOC', 'the .doc itself was touched');
+    },
+  },
+  {
+    group: 'beside',
+    name: 'the .xlsx this session made, rewritten outside filex since, is NOT overwritten by the next save',
+    async run(impl, dir) {
+      const doc = path.join(dir, 'Bütçe.xls');
+      await fs.promises.writeFile(doc, 'OLD-XLS');
+      const first = await impl.writeBesideSave(doc, 'xlsx', Buffer.from('EDIT-1'), null);
+      const made = path.join(dir, 'Bütçe.xlsx');
+      // The person opened it in another program and saved it there.
+      writeByRename(made, 'PERSON-EDIT');
+      const second = await impl.writeBesideSave(doc, 'xlsx', Buffer.from('EDIT-2'), first.target);
+      assert.equal(
+        await fs.promises.readFile(made, 'utf8'),
+        'PERSON-EDIT',
+        'the save went over a version filex never saw - the outside change is gone',
+      );
+      assert.notEqual(second.target.path, made, 'the session still says its saves go over the changed file');
+      assert.match(path.basename(second.target.path), /^Bütçe\.filex-conflict-\d{8}T\d{6}\.xlsx$/);
+      assert.equal(await fs.promises.readFile(second.target.path, 'utf8'), 'EDIT-2');
+      assert.equal(await fs.promises.readFile(doc, 'utf8'), 'OLD-XLS', 'the .xls itself was touched');
     },
   },
 

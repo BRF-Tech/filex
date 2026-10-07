@@ -33,8 +33,8 @@ installation multilocataire, **chaque locataire s’administre lui-même** : se
 fournisseurs de connexion, son domaine personnalisé et son propre certificat.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.51.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.51.0/explorer-grid-light.png" alt="Explorateur filex - grille de miniatures" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.5ddafe2dac64.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.484fb070ca19.png" alt="Explorateur filex - grille de miniatures" width="900">
 </picture>
 
 </div>
@@ -237,7 +237,7 @@ déploie pour son onglet de fichiers). filex vise l’entre-deux :
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
+│  filex (Go binary; image ~62 MB slim / ~241 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -291,117 +291,117 @@ partage ordinaire.
 
 | Définissez les zones - nommez chacune et dites à qui elle appartient ; le document vient ensuite | Placez-les - choisissez une zone, appuyez sur la page à l’endroit où elle doit aller |
 |---|---|
-| ![Définition des zones d’une demande de signature](docs/screenshots/v0.51.0/signing/sign-define-1440.png) | ![Placement des zones sur le document](docs/screenshots/v0.51.0/signing/sign-place-1440.png) |
+| ![Définition des zones d’une demande de signature](https://filex.sh/shots/signing/sign-define-1440.4a966ffefa4f.png) | ![Placement des zones sur le document](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
 
 | Le lien du partenaire - le seul écran public de filex, au nom de votre instance, protégé par un PIN | …et ce qu’il ouvre : uniquement ses propres zones - ici un nom saisi au clavier dans la police choisie par le demandeur (dessiné et téléversé sont les deux autres possibilités) |
 |---|---|
-| ![L’écran de saisie du PIN du signataire externe](docs/screenshots/v0.51.0/signing/sign-outside-pin-1440.png) | ![Le signataire externe remplissant ses zones](docs/screenshots/v0.51.0/signing/sign-outside-fill-1440.png) |
+| ![L’écran de saisie du PIN du signataire externe](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![Le signataire externe remplissant ses zones](https://filex.sh/shots/signing/sign-outside-fill-1440.54632da00ef4.png) |
 
 | Tant que la demande est en cours - le document gelé pour tout le monde et, dans ses détails, qui a signé | Installation d’une application - chaque autorisation qu’elle demande, en termes simples, avant que rien ne s’exécute |
 |---|---|
-| ![Le document verrouillé, son panneau Signatures ouvert](docs/screenshots/v0.51.0/signing/sign-status-1440.png) | ![La vérification des autorisations dans l’assistant d’installation](docs/screenshots/v0.51.0/apps/apps-install-review-1440.png) |
+| ![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.518a3bd6651f.png) | ![La vérification des autorisations dans l’assistant d’installation](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
 
 | Une application installée - d’où elle vient, son empreinte, et chaque autorisation qu’elle détient, en termes simples (ses paramètres et ses actions suivent, plus bas dans la page) | Le convertisseur, une autre application - chaque cible sous sa catégorie, trois étapes |
 |---|---|
-| ![Le détail d’une application installée](docs/screenshots/v0.51.0/apps/apps-detail-1440.png) | ![L’assistant du convertisseur](docs/screenshots/v0.51.0/apps/convert-wizard-1440.png) |
+| ![Le détail d’une application installée](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png) | ![L’assistant du convertisseur](https://filex.sh/shots/apps/convert-wizard-1440.231ada006fd6.png) |
 
 | Une application qui apporte sa propre interface - la vérification montre l’empreinte du paquet, chaque adresse hors du paquet (une adresse en direct est une autorisation, en jaune) et ce qu’un navigateur ne peut pas promettre | …et cette interface ouverte sur son propre type de fichier, là où se trouverait l’aperçu de filex. Elle lit et enregistre le fichier en passant par filex, dans un cadre en bac à sable (une petite application d’exemple, écrite pour ces images) |
 |---|---|
-| ![La vérification à l’installation d’une application dotée de sa propre interface](docs/screenshots/v0.51.0/apps/app-interface-review-1440.png) | ![L’interface propre à une application, ouverte comme visionneuse d’un fichier](docs/screenshots/v0.51.0/apps/app-interface-viewer-1440.png) |
+| ![La vérification à l’installation d’une application dotée de sa propre interface](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png) | ![L’interface propre à une application, ouverte comme visionneuse d’un fichier](https://filex.sh/shots/apps/app-interface-viewer-1440.519b23618156.png) |
 
 | Toutes les applications de l’instance, et parmi elles un **pack de langue** - un manifeste qui n’exécute rien, qui dit quelle part de ce filex il traduit et dont la langue s’en va avec lui |
 |---|
-| ![La liste Applications, un pack de langue parmi les applications](docs/screenshots/v0.51.0/langpack/apps-list-1440.png) |
+| ![La liste Applications, un pack de langue parmi les applications](https://filex.sh/shots/langpack/apps-list-1440.c0b6a723e725.png) |
 
 ### Ce qui est à vous, où que vous soyez
 
 | La cloche - le nombre de notifications non lues affiché dessus, chaque ligne menant là où elle le dit | Toutes vos notifications, dans l’explorateur - pour tout le monde, pas seulement pour les administrateurs |
 |---|---|
-| ![La cloche ouverte, avec son badge de notifications non lues](docs/screenshots/v0.51.0/signing/bell-badge-1440.png) | ![La liste complète des notifications par-dessus l’explorateur](docs/screenshots/v0.51.0/signing/notifications-list-1440.png) |
+| ![La cloche ouverte, avec son badge de notifications non lues](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![La liste complète des notifications par-dessus l’explorateur](https://filex.sh/shots/signing/notifications-list-1440.cb8cc10769dc.png) |
 
 | Mes partages - les liens que vous avez créés, et leurs PIN quand vous devez en transmettre un | Chaque tableau d’administration - un menu **Actions** épinglé par ligne, le même menu qu’ouvre le ⋮ de l’explorateur |
 |---|---|
-| ![Mes partages, le menu Actions d’une ligne ouvert](docs/screenshots/v0.51.0/signing/my-shares-1440.png) | ![Admin → Partages, le menu Actions d’une ligne ouvert](docs/screenshots/v0.51.0/signing/admin-table-actions-1440.png) |
+| ![Mes partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/my-shares-1440.3cdfc7ee8ef3.png) | ![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.401d5cbfacf8.png) |
 
 ### Votre marque
 
 | Apparence - composez un thème à vos couleurs, prévisualisé au fil de la saisie | Défini comme thème par défaut, c’est ce que porte l’explorateur de tout le monde… |
 |---|---|
-| ![L’éditeur de thèmes](docs/screenshots/v0.51.0/appearance/theme-editor-1440.png) | ![L’explorateur portant le thème de l’opérateur](docs/screenshots/v0.51.0/appearance/themed-explorer-1440.png) |
+| ![L’éditeur de thèmes](https://filex.sh/shots/appearance/theme-editor-1440.7cf3d997f7b1.png) | ![L’explorateur portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png) |
 
 | …et la page de connexion, avant que quiconque ne se soit connecté | Un lien symbolique que filex ne suit pas le dit - dans la liste, et en toutes lettres dans ses détails |
 |---|---|
-| ![La page de connexion portant le thème de l’opérateur](docs/screenshots/v0.51.0/appearance/themed-signin-1440.png) | ![Un lien symbolique qui sort du stockage, signalé par un badge](docs/screenshots/v0.51.0/symlinks/symlink-badge-1440.png) |
+| ![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.84197bec297e.png) | ![Un lien symbolique qui sort du stockage, signalé par un badge](https://filex.sh/shots/symlinks/symlink-badge-1440.f85936372113.png) |
 
 ### Le gestionnaire de fichiers
 
 | Partage - PIN, expiration, limite de téléchargements, `curl` en une ligne | Visionneuse Markdown |
 |---|---|
-| ![Boîte de dialogue de partage](docs/screenshots/v0.51.0/share-modal.png) | ![Visionneuse Markdown](docs/screenshots/v0.51.0/viewer-markdown.png) |
+| ![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.eaf11836828a.png) | ![Visionneuse Markdown](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
 
 | …et ce qu’ouvre la personne à l’autre bout. filex n’a qu’UN écran tourné vers l’extérieur - un fichier partagé, un dossier, une demande de fichiers, la page de signature d’une application et le PIN placé devant n’importe lequel d’entre eux sont tous cette même page, au nom de votre instance |
 |---|
-| ![Un lien de partage public, tel que le voit son destinataire](docs/screenshots/v0.51.0/public-share.png) |
+| ![Un lien de partage public, tel que le voit son destinataire](https://filex.sh/shots/public-share.0e3ba07f7c88.png) |
 
 | Panneau d’administration | Page d’accueil de la démo |
 |---|---|
-| ![Tableau de bord d’administration](docs/screenshots/v0.51.0/admin-dashboard.png) | ![Page d’accueil de la démo](docs/screenshots/v0.51.0/demo-landing.png) |
+| ![Tableau de bord d’administration](https://filex.sh/shots/admin-dashboard.7c334e824b3c.png) | ![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
 
 | Le menu d’administration - toutes les pages en trois panneaux, **Fichiers et stockage**, **Utilisateurs et sécurité** et **Système**, avec une courte ligne sous chacune ; un téléphone affiche les mêmes pages dans un tiroir ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)) |
 |---|
-| ![Le panneau Utilisateurs et sécurité du menu d’administration, ouvert par-dessus Admin → Utilisateurs](docs/screenshots/v0.51.0/megamenu/people-panel-1440.png) |
+| ![Le panneau Utilisateurs et sécurité du menu d’administration, ouvert par-dessus Admin → Utilisateurs](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) |
 
 | Rôles - Administrateur, Utilisateur, Lecteur et vos propres rôles : qui détient chacun d’eux, ce qu’il autorise, où il diffère selon le dossier, ses limites ([docs/PERMISSIONS.md](docs/PERMISSIONS.md)) |
 |---|
-| ![Admin → Rôles : les rôles intégrés et deux rôles personnalisés](docs/screenshots/v0.51.0/roles/roles-list-1440.png) |
+| ![Admin → Rôles : les rôles intégrés et deux rôles personnalisés](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png) |
 
 | Groupes - des ensembles nommés de personnes, dotés d’un accès aux dossiers et d’un rôle ; des membres gérés à la main ou gardés synchronisés avec les groupes que transmet une connexion ([docs/GROUPS.md](docs/GROUPS.md)) | Partage d’un dossier avec un groupe, à côté des personnes - le niveau Propriétaire est soumis à confirmation dans la boîte de dialogue, pas accordé d’un clic |
 |---|---|
-| ![Admin → Groupes](docs/screenshots/v0.51.0/groups/groups-list-1440.png) | ![Partage d’un dossier avec un groupe](docs/screenshots/v0.51.0/groups/share-group-1440.png) |
+| ![Admin → Groupes](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png) | ![Partage d’un dossier avec un groupe](https://filex.sh/shots/groups/share-group-1440.31c2a81e1eeb.png) |
 
 | Sécurité de connexion - la limite de tentatives, les adresses autorisées, les proxys de confiance, les verrouillages et le journal des connexions ([limites de tentatives de connexion](docs/CONFIGURATION.md#sign-in-attempt-limits)) | …et ce que dit le formulaire de connexion d’un compte verrouillé, avec le compte à rebours du verrouillage sur son bouton |
 |---|---|
-| ![Admin → Sécurité de connexion](docs/screenshots/v0.51.0/loginsecurity/login-security-1440.png) | ![Le formulaire de connexion d’un compte verrouillé](docs/screenshots/v0.51.0/loginsecurity/login-locked-1440.png) |
+| ![Admin → Sécurité de connexion](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png) | ![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png) |
 
 | Qui peut chiffrer - désactivé, administrateurs uniquement, toutes les personnes dont le rôle le permet, ou après l’approbation d’un administrateur ; les demandes en attente, avec leur auteur et leur motif ([qui peut chiffrer](docs/E2E-ENCRYPTION.md#who-may-encrypt)) | …et du côté de la personne : la boîte de dialogue Nouveau dossier demande à un administrateur un seul dossier chiffré, avec un motif |
 |---|---|
-| ![Admin → Chiffrement : la politique d’approbation et trois demandes en attente](docs/screenshots/v0.51.0/encryption/admin-encryption-1440.png) | ![Demande d’un dossier chiffré depuis la boîte de dialogue Nouveau dossier](docs/screenshots/v0.51.0/encryption/request-new-folder.png) |
+| ![Admin → Chiffrement : la politique d’approbation et trois demandes en attente](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png) | ![Demande d’un dossier chiffré depuis la boîte de dialogue Nouveau dossier](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png) |
 
 | Applications par défaut - chaque type de fichier pris en charge par autre chose que filex : qui l’ouvre et qui génère sa miniature, dans l’ordre que vous définissez ([Applications par défaut](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)) | Aperçus de dossiers - chaque dossier illustré par les trois derniers fichiers qui y sont arrivés ; les SVG sont rendus par le moteur intégré de filex ([docs/thumbnails.md](docs/thumbnails.md#folder-previews)) |
 |---|---|
-| ![Extensions → Applications par défaut](docs/screenshots/v0.51.0/defaultapps/default-apps-1440.png) | ![Dossiers illustrés par leurs fichiers les plus récents](docs/screenshots/v0.51.0/thumbnails/folders-grid-1440.png) |
+| ![Extensions → Applications par défaut](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png) | ![Dossiers illustrés par leurs fichiers les plus récents](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png) |
 
 | Un `.csv` s’ouvre dans le tableur d’ONLYOFFICE quand celui-ci est connecté - un coup d’œil d’abord, et pas de boîte de dialogue pour le délimiteur : le séparateur propre au fichier est transmis ([fichiers CSV](docs/ONLYOFFICE.md#csv-files)) | …et son éditeur, qui dit ce que conserve un enregistrement en CSV ; le fichier revient en CSV du même type |
 |---|---|
-| ![Un CSV à points-virgules ouvert dans le tableur d’ONLYOFFICE](docs/screenshots/v0.51.0/csvoffice/csv-view-1440.png) | ![Le CSV dans l’éditeur d’ONLYOFFICE, avec la note sur ce que conserve un enregistrement](docs/screenshots/v0.51.0/csvoffice/csv-edit-1440.png) |
+| ![Un CSV à points-virgules ouvert dans le tableur d’ONLYOFFICE](https://filex.sh/shots/csvoffice/csv-view-1440.83237ba55d3d.png) | ![Le CSV dans l’éditeur d’ONLYOFFICE, avec la note sur ce que conserve un enregistrement](https://filex.sh/shots/csvoffice/csv-edit-1440.4efc379a293d.png) |
 
 | L’interface commune - là où tout le monde arrive | Recherche dans ce dossier ; `⌘K` / `Ctrl K` transmet la requête à la palette |
 |---|---|
-| ![L’interface commune de filex](docs/screenshots/v0.51.0/driveshell/driveshell-hero-1440.png) | ![Recherche dans un dossier](docs/screenshots/v0.51.0/driveshell/driveshell-search-1440.png) |
+| ![L’interface commune de filex](https://filex.sh/shots/driveshell/driveshell-hero-1440.d8c44de4f498.png) | ![Recherche dans un dossier](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
 
 | Panneau de navigation - Accueil, Partagés avec moi, Mes partages, Récents, Favoris, Corbeille, et les stockages auxquels vous avez accès | Réduit à la barre d’icônes |
 |---|---|
-| ![Panneau de navigation](docs/screenshots/v0.51.0/sidenav/sidenav-expanded-1440.png) | ![Réduit à une barre d’icônes](docs/screenshots/v0.51.0/sidenav/sidenav-rail-1440.png) |
+| ![Panneau de navigation](https://filex.sh/shots/sidenav/sidenav-expanded-1440.ef235f94c521.png) | ![Réduit à une barre d’icônes](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
 
 | Étiquettes - les vôtres, ou celles de votre équipe ; une étiquette ouvre tous les fichiers qui la portent, quel que soit le dossier où ils se trouvent | Corbeille - ce qui a été supprimé, d’où cela venait, et combien de temps il reste avant que cela ne disparaisse |
 |---|---|
-| ![Étiquettes personnelles et d’équipe](docs/screenshots/v0.51.0/tags/tags-kinds-1440.png) | ![La vue Corbeille](docs/screenshots/v0.51.0/sidenav/view-trash-1440.png) |
+| ![Étiquettes personnelles et d’équipe](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png) | ![La vue Corbeille](https://filex.sh/shots/sidenav/view-trash-1440.c7438b1e66a8.png) |
 
 | Partagés avec moi - les dossiers auxquels d’autres personnes vous ont accordé l’accès, sans instructions de montage | Intégré à la page d’un autre produit |
 |---|---|
-| ![Partagés avec moi](docs/screenshots/v0.51.0/sidenav/view-shared-1440.png) | ![Composant web intégré](docs/screenshots/v0.51.0/sidenav/embed-webcomponent-1440.png) |
+| ![Partagés avec moi](https://filex.sh/shots/sidenav/view-shared-1440.6f68fd5b581d.png) | ![Composant web intégré](https://filex.sh/shots/sidenav/embed-webcomponent-1440.2dc86ba73804.png) |
 
 | Guide de connexion - les guides, construits à partir de *votre* déploiement | Clés d’API - créez les vôtres, dans l’explorateur ou dans une intégration (la session ou la clé d’une personne ; une intégration relayée par un proxy avec une seule clé partagée de type *app* n’a pas cette entrée) |
 |---|---|
-| ![Guide de connexion](docs/screenshots/v0.51.0/sidenav/connect-1440.png) | ![Clés d’API](docs/screenshots/v0.51.0/sidenav/apikeys-minted-1440.png) |
+| ![Guide de connexion](https://filex.sh/shots/sidenav/connect-1440.ade9043dddde.png) | ![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.14eb6d484613.png) |
 
 | Accéder à filex depuis n’importe quoi - S3, SFTP, FTPS, NFS, WebDAV. Chaque commande est construite à partir de *votre* déploiement |
 |---|
-| ![Guide de connexion](docs/screenshots/v0.51.0/connections-guide.png) |
+| ![Guide de connexion](https://filex.sh/shots/connections-guide.cf9a135724c9.png) |
 
 | Un stockage qui n’est pas livré avec filex - installé comme extension dans **Extensions → Extensions de stockage**, il décrit son propre formulaire de configuration |
 |---|
-| ![Extensions](docs/screenshots/v0.51.0/admin-plugins.png) |
+| ![Extensions](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png) |
 
 ## Démarrage rapide - binaire
 
@@ -543,11 +543,12 @@ le même composant que dans l’interface web et les intégrations, pas une demi
   corbeille locale de 30 jours, et un moteur qui refuse de transformer un dossier manquant
   en suppression massive ([docs/SYNC.md](docs/SYNC.md)).
 - **Ouvre les documents Office depuis votre propre disque** - double-cliquez sur un
-  `.docx`/`.xlsx`/`.pptx` (ou sur n’importe lequel des dix types Office) et il s’ouvre
+  `.docx`/`.xlsx`/`.pptx` (ou sur n’importe lequel des dix types Office, ou sur un `.csv`) et il s’ouvre
   dans l’éditeur que fait tourner votre serveur, sur une machine où Office n’est pas
   installé. Quand le document se trouve dans un dossier que vous conservez sur cet
   ordinateur, c’est lui-même qui s’ouvre ; tout autre document est copié sur le serveur,
-  modifié, puis réécrit par-dessus l’original
+  modifié, puis réécrit par-dessus l’original - ou à côté, quand l’éditeur l’enregistre dans un
+  autre format (un ancien `.doc` revient en `.docx`)
   ([docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)).
 - **Monter comme lecteur** - un bouton des Paramètres attache le serveur comme lecteur du
   système d’exploitation via WebDAV, et un autre le détache ; le jeton du compte sert

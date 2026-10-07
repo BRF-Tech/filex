@@ -73,6 +73,7 @@ vi.mock('@/stores/settings', () => ({
 vi.mock('@/lib/instanceThemes', () => ({ applyInstanceThemes: vi.fn() }));
 
 import Appearance from '@/views/Appearance.vue';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 
 const i18n = createI18n({
   legacy: false,
@@ -323,6 +324,9 @@ describe('the saved themes list', () => {
 
 describe('the raw-CSS panel', () => {
   it('is off by default and says what it can and cannot do', async () => {
+    // A multi-tenant install, where a tenant's administrator exists (#167).
+    const caps = useCapabilitiesStore();
+    caps.data = { ...caps.data, multi_tenant: true };
     const wrapper = await mountPage();
     const panel = wrapper.find('[data-testid="custom-css-panel"]');
     expect(panel.exists()).toBe(true);
@@ -340,6 +344,18 @@ describe('the raw-CSS panel', () => {
       .not.toContain("{'@'}");
     expect(panel.text()).toContain(en.appearance.css.warnLie);
     expect(panel.text()).toContain(en.appearance.css.warnOperator);
+  });
+
+  // #167: with multi-tenant mode off there is no tenant administrator to warn
+  // about, and the page says no word of tenants.
+  it('says nothing about a tenant administrator while multi-tenant mode is off', async () => {
+    const caps = useCapabilitiesStore();
+    caps.data = { ...caps.data, multi_tenant: false };
+    const wrapper = await mountPage();
+    const panel = wrapper.find('[data-testid="custom-css-panel"]');
+    expect(panel.text()).toContain(en.appearance.css.warnScope);
+    expect(panel.text()).not.toContain(en.appearance.css.warnOperator);
+    expect(panel.text()).not.toMatch(/tenant/i);
   });
 
   it('writes the sheet and the switch together', async () => {

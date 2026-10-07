@@ -176,9 +176,9 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown adapter: " + adapter})
 		return
 	}
-	// The token's `root:`. confine.Middleware rewrites `path` only in a body
-	// labelled JSON, and the decoder above reads it whatever the label: the
-	// same body as text/plain wrote a file anywhere in the storage
+	// The token's `root:`. Up to 0.52 confine.Middleware rewrote `path` only
+	// in a body labelled JSON, and the decoder above reads it whatever the
+	// label: the same body as text/plain wrote a file anywhere in the storage
 	// (GHSA-8gvc-6w52-6c7j). Asked before anything about the storage or the
 	// entry is told.
 	if !rootAllowsIn(r.Context(), stRow, rel) {

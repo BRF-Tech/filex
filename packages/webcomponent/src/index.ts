@@ -215,6 +215,9 @@ const FilexExplorerWrapper = defineCustomElement({
     'error',
     'upload-progress',
     'selection-change',
+    // #162 - the navigation panel's "App store" row (config.appStorePage):
+    // the desktop app opens its store window on it.
+    'open-app-store',
   ],
   setup(props, { emit, expose }) {
     injectStylesOnce();
@@ -316,6 +319,7 @@ const FilexExplorerWrapper = defineCustomElement({
             onError: (e: unknown) => emit('error', e),
             onUploadProgress: (p: unknown) => emit('upload-progress', p),
             onSelectionChange: (s: unknown) => emit('selection-change', s),
+            onOpenAppStore: () => emit('open-app-store'),
           });
   },
 }, { shadowRoot: false });

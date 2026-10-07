@@ -76,7 +76,16 @@ func validateLazySettings(st *model.Storage) error {
 // keeps the plain `error` it always had.
 func refuseStorageConfig(w http.ResponseWriter, r *http.Request, err error) {
 	var bad *scanrule.InvalidError
+	var secret *storage.SecretAddressError
 	switch {
+	case errors.As(err, &secret):
+		// A credential sent back masked while the address (or the driver)
+		// changed: filex will not send a saved password somewhere new.
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "SECRET_NEEDED",
+			"field":   secret.Field,
+			"message": srvtext.Text(langOf(r), "server.storage.secret_address_changed", srvtext.Vars{"field": secret.Field}),
+		})
 	case errors.Is(err, storage.ErrRootPathForbidden):
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":   "ROOT_PATH_FORBIDDEN",
@@ -116,6 +125,10 @@ type Storages struct {
 	// ForgetStorage drops the cached driver the resolver built for a storage.
 	// Set by the server; nil where nothing caches.
 	ForgetStorage func(int64)
+	// ReplicaLinks is told when a storage's replication link changes (it was
+	// linked, relinked, unlinked, or the storage was created linked or
+	// deleted), so its initial copy starts or stops. Nil: nothing replicates.
+	ReplicaLinks ReplicaLinks
 	// DemoMode marks a public playground, where "admin" is whoever read the
 	// credentials off the landing page. See denyOnDemo.
 	DemoMode bool
@@ -163,6 +176,24 @@ func NewStorages(store db.Store, worker *syncpkg.Worker) *Storages {
 	return &Storages{Store: store, Worker: worker}
 }
 
+// storageShown is a storage as an admin surface may see it: every credential
+// in its configuration masked (storage.MaskSecrets - the same helper the
+// replication targets use).
+//
+// ⚠ Every read of a storage went out with its S3 secret key, its SMB, SFTP,
+// WebDAV or FTP password or its private key in clear: the Storages page, a
+// tenant administrator's storage settings, an admin API key on /api/ai/admin
+// and the admin_storages_* MCP tools all read these handlers. A save that
+// sends the mask back keeps the stored value (Update, storage.KeepSecrets).
+func storageShown(st *model.Storage) *model.Storage {
+	if st == nil {
+		return nil
+	}
+	cp := *st
+	cp.ConfigJSON = storage.MaskSecrets(st.Driver, st.ConfigJSON)
+	return &cp
+}
+
 // List returns all configured storages. Each entry carries a `stats`
 // blob with the file count + total byte sum so the admin Storages list
 // page can render real "12 files, 4.2 MB" labels instead of static
@@ -171,8 +202,14 @@ func NewStorages(store db.Store, worker *syncpkg.Worker) *Storages {
 // Accepts `?role=primary` / `?role=replica` so the Depolar page can
 // hide replica targets (operators never write to them directly) and
 // the Replikasyon page can list replica candidates separately.
+//
+// `?stats=none` answers the rows alone - no file counts, last sync run or
+// catalogue coverage, each a query per storage. The admin panel's search
+// (panel_search.go, task #168) reads this list on every few keystrokes and
+// draws none of them.
 func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 	roleFilter := r.URL.Query().Get("role")
+	bare := r.URL.Query().Get("stats") == "none"
 	out, err := h.Store.ListStorages(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -213,7 +250,11 @@ func (h *Storages) List(w http.ResponseWriter, r *http.Request) {
 		if roleFilter != "" && role != roleFilter {
 			continue
 		}
-		row := storageWithStats{Storage: st}
+		row := storageWithStats{Storage: storageShown(st)}
+		if bare {
+			enriched = append(enriched, row)
+			continue
+		}
 		if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
 			row.Stats.FileCount = c
 			row.Stats.TotalSize = sz
@@ -261,7 +302,7 @@ func (h *Storages) Get(w http.ResponseWriter, r *http.Request) {
 		Catalogue *syncpkg.CatalogueCoverage `json:"catalogue,omitempty"`
 		Coverage  *syncpkg.CatalogueCoverage `json:"coverage,omitempty"`
 	}
-	out := storageWithStats{Storage: st}
+	out := storageWithStats{Storage: storageShown(st)}
 	if c, sz, err := h.Store.StorageStats(r.Context(), st.ID); err == nil {
 		out.Stats.FileCount = c
 		out.Stats.TotalSize = sz
@@ -315,6 +356,8 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and driver required"})
 		return
 	}
+	// A mask with nothing stored behind it is not a password.
+	st.ConfigJSON, _ = storage.KeepSecrets(st.Driver, st.ConfigJSON, "", nil)
 	if err := validateStorageRootPath(&st); err != nil {
 		refuseStorageConfig(w, r, err)
 		return
@@ -343,6 +386,13 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 	if st.SyncIntervalS == 0 {
 		st.SyncIntervalS = 900
 	}
+	if err := h.checkReplicaTarget(r.Context(), &st); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if st.ReplicaTargetID != nil && !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	// ⚠⚠ A storage on a PLUGIN is verified against this exact configuration
 	// before the row exists. The plugin passed its own selftest at install,
 	// which proves the code works; this proves it works with the credentials,
@@ -365,8 +415,13 @@ func (h *Storages) Create(w http.ResponseWriter, r *http.Request) {
 		// would otherwise abort the in-flight worker.
 		_ = h.Worker.AddStorage(context.Background(), created)
 	}
+	// Created already linked to a replication target: what it holds is
+	// copied there (the resolver wraps it on first use).
+	if created.ReplicaTargetID != nil && h.ReplicaLinks != nil {
+		h.ReplicaLinks.StorageLinkChanged(r.Context(), created.ID)
+	}
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(created.ID, 10), created.Name)
-	writeJSON(w, http.StatusOK, created)
+	writeJSON(w, http.StatusOK, storageShown(created))
 }
 
 // Update modifies a storage row.
@@ -388,6 +443,13 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 	// ConfigJSON is copied: decoding reuses a RawMessage's backing array.
 	before := *cur
 	before.ConfigJSON = append(json.RawMessage(nil), cur.ConfigJSON...)
+	// The link too: decoding a body into cur writes a new target id INTO the
+	// int64 the old one points at, and a relink from one target to another
+	// would then read as no change at all.
+	if cur.ReplicaTargetID != nil {
+		was := *cur.ReplicaTargetID
+		before.ReplicaTargetID = &was
+	}
 	// The form sends the row back whole, sort_order included; UpdateStorage
 	// never writes it (SetOrder does), so the answer keeps the stored one.
 	place := cur.SortOrder
@@ -397,6 +459,14 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	cur.ID = id
 	cur.SortOrder = place
+	// The form shows credentials masked and sends them back as shown: those
+	// are the stored ones - while they still go where they were saved.
+	kept, err := storage.KeepSecrets(cur.Driver, cur.ConfigJSON, before.Driver, before.ConfigJSON)
+	if err != nil {
+		refuseStorageConfig(w, r, err)
+		return
+	}
+	cur.ConfigJSON = kept
 	if err := h.denyOnDemo(cur.Driver); err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
 		return
@@ -425,12 +495,39 @@ func (h *Storages) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := h.checkReplicaTarget(r.Context(), cur); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// The link points a storage at an instance-wide backup sink: changing it
+	// is the platform operator's, like everything on the Replication page.
+	if replicaPairingChanged(&before, cur) && !requireSupertenant(w, r, "replication fans every tenant's writes at a shared sink") {
+		return
+	}
 	if err := h.Store.UpdateStorage(r.Context(), cur); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.applyLive(&before, cur)
-	writeJSON(w, http.StatusOK, cur)
+	h.applyLive(r.Context(), &before, cur)
+	writeJSON(w, http.StatusOK, storageShown(cur))
+}
+
+// checkReplicaTarget refuses a link to a replication target that does not
+// exist: saved, it would point nowhere and replicate nothing, which is the
+// silence #186 was about. 0 is "no link", the way the Replication page's
+// picker says it.
+func (h *Storages) checkReplicaTarget(ctx context.Context, st *model.Storage) error {
+	if st.ReplicaTargetID == nil {
+		return nil
+	}
+	if *st.ReplicaTargetID <= 0 {
+		st.ReplicaTargetID = nil
+		return nil
+	}
+	if _, err := h.Store.GetReplicationTarget(ctx, *st.ReplicaTargetID); err != nil {
+		return fmt.Errorf("replication target %d does not exist", *st.ReplicaTargetID)
+	}
+	return nil
 }
 
 // SetOrder writes the order storages are listed in (issue #57):
@@ -519,14 +616,27 @@ func (h *Storages) SetOrder(w http.ResponseWriter, r *http.Request) {
 // (scanSettingsChanged). Every save used to rebuild, so renaming a storage,
 // switching it read-only or pairing a replica (which saves the row) cut a
 // running scan off as "aborted" for nothing.
-func (h *Storages) applyLive(before, st *model.Storage) {
-	if before != nil && !scanSettingsChanged(before, st) {
+//
+// ⚠⚠ The replica pairing is part of the driver, NOT of the scan: a storage
+// linked to a target is handed out wrapped (internal/server
+// storage_cache.go), so a save that links, relinks or unlinks it drops the
+// driver - the next request gets it wrapped for the new target, or bare -
+// and leaves the syncer alone (the scan walks the same storage either way).
+// This comment used to say the pairing was "read from the row where used";
+// nothing read it, and a link saved here replicated nothing (#186).
+func (h *Storages) applyLive(ctx context.Context, before, st *model.Storage) {
+	scan := before == nil || scanSettingsChanged(before, st)
+	pair := before != nil && replicaPairingChanged(before, st)
+	if !scan && !pair {
 		return
 	}
 	if h.ForgetStorage != nil {
 		h.ForgetStorage(st.ID)
 	}
-	if h.Worker == nil {
+	if pair && h.ReplicaLinks != nil {
+		h.ReplicaLinks.StorageLinkChanged(ctx, st.ID)
+	}
+	if !scan || h.Worker == nil {
 		return
 	}
 	h.Worker.RemoveStorage(st.ID)
@@ -542,15 +652,29 @@ func (h *Storages) applyLive(before, st *model.Storage) {
 }
 
 // scanSettingsChanged reports whether a save touched what the syncer and the
-// resolver's driver were built from. The name, read-only, access control,
-// the mount path and the replica pairing are read from the row where they
-// are used, and none of them changes what a scan walks.
+// resolver's driver were built from. The name, read-only, access control and
+// the mount path are read from the row where they are used, and none of them
+// changes what a scan walks. The replica pairing changes the driver but not
+// the scan: replicaPairingChanged.
 func scanSettingsChanged(a, b *model.Storage) bool {
 	return a.Driver != b.Driver ||
 		!sameJSON(a.ConfigJSON, b.ConfigJSON) ||
 		a.SyncMode != b.SyncMode ||
 		a.SyncIntervalS != b.SyncIntervalS ||
 		a.Enabled != b.Enabled
+}
+
+// replicaPairingChanged reports whether a save linked, relinked or unlinked
+// the storage's replication target.
+func replicaPairingChanged(a, b *model.Storage) bool {
+	switch {
+	case a.ReplicaTargetID == nil && b.ReplicaTargetID == nil:
+		return false
+	case a.ReplicaTargetID == nil || b.ReplicaTargetID == nil:
+		return true
+	default:
+		return *a.ReplicaTargetID != *b.ReplicaTargetID
+	}
 }
 
 // sameJSON reports whether two JSON documents say the same thing, however
@@ -613,6 +737,10 @@ func (h *Storages) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	// A storage that replicated leaves no initial copy behind.
+	if gone.ReplicaTargetID != nil && h.ReplicaLinks != nil {
+		h.ReplicaLinks.StorageLinkChanged(r.Context(), id)
 	}
 	// The row is gone once the log is read: keep its name.
 	auth.SetAuditTarget(r.Context(), "", gone.Name)

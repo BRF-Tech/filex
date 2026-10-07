@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/langpack.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/langpack/:
+// Writes e2e/.artifacts/shots/capture/langpack/:
 //
 //   apps-list-1440.png   Plugins → Apps: the two apps filex ships alongside
 //                        itself and the THREE language packs that ship with

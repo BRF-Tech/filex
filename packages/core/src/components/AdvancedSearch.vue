@@ -76,6 +76,8 @@ import Modal from '../modals/Modal.vue';
 import { actionIconSvg } from '../lib/actionIcons';
 import { tagKey, type TagItem, type TagKind } from '../lib/tags';
 import TagKindIcon from './TagKindIcon.vue';
+import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
+import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
 import {
   EMPTY_FILTERS,
   type AroundSpan,
@@ -217,6 +219,17 @@ const TYPE_OPTIONS: TypeFilter[] = [
 const MODIFIED_OPTIONS: ModifiedFilter[] = ['any', 'today', '7d', '30d', 'year', 'around'];
 const SIZE_OPTIONS: SizeFilter[] = ['any', 'lt1', '1to10', '10to100', 'gt100', 'range'];
 const SPAN_OPTIONS: AroundSpan[] = ['h1', 'd1', 'w1'];
+/* The lists as the shared controls take them (#160: no native select). A
+   computed, so the labels follow the dialog's language. The unit is three
+   short answers beside two numbers: a segmented strip, not a list. */
+const modifiedChoices = computed<SelectOption[]>(() =>
+  MODIFIED_OPTIONS.map((o) => ({ value: o, label: t(`filter.modified.${o}`) })),
+);
+const typeChoices = computed<SelectOption[]>(() => TYPE_OPTIONS.map((o) => ({ value: o, label: t(`filter.type.${o}`) })));
+const sizeChoices = computed<SelectOption[]>(() => SIZE_OPTIONS.map((o) => ({ value: o, label: t(`filter.size.${o}`) })));
+const unitChoices = computed<ChoiceOption[]>(() =>
+  (['kb', 'mb', 'gb'] as const).map((u) => ({ value: u, label: t(`unit.${u}`) })),
+);
 const UNIT_FACTOR: Record<'kb' | 'mb' | 'gb', number> = {
   kb: 1024,
   mb: 1024 ** 2,
@@ -486,13 +499,17 @@ function peopleLabel(o: PeopleOption): string {
 
 /**
  * ⚠ A member can leave the menu — a later count over different rows may not
- * contain that account at all — and a `<select>` whose value is no longer one
- * of its options renders BLANK while it goes on filtering. Falling back to
- * `any` keeps what is shown and what is applied the same thing.
+ * contain that account at all — and a list whose value is no longer one of
+ * its options shows no choice (a native one rendered BLANK) while it goes on
+ * filtering. Falling back to `any` keeps what is shown and what is applied
+ * the same thing.
  */
 watch(peopleOptions, (opts) => {
   if (!opts.some((o) => o.value === people.value)) people.value = 'any';
 });
+const peopleChoices = computed<SelectOption[]>(() =>
+  peopleOptions.value.map((o) => ({ value: o.value, label: peopleLabel(o) })),
+);
 let timer: ReturnType<typeof setTimeout> | null = null;
 /** Only the newest run may write the answer — a slow early query landing after
  *  a fast later one would print a count for a search nobody is looking at. */
@@ -670,11 +687,12 @@ function submit() {
           <div class="fe-advsearch__group">
             <label class="fe-advsearch__field">
               <span class="fe-advsearch__label">{{ t('filter.modified') }}</span>
-              <select v-model="modified" class="fe-input" data-testid="advsearch-modified">
-                <option v-for="o in MODIFIED_OPTIONS" :key="o" :value="o">
-                  {{ t(`filter.modified.${o}`) }}
-                </option>
-              </select>
+              <ChoiceSelect
+                :model-value="modified"
+                :options="modifiedChoices"
+                testid="advsearch-modified"
+                @update:model-value="(v) => (modified = v as ModifiedFilter)"
+              />
             </label>
             <div v-if="modified === 'around'" class="fe-advsearch__field">
               <span class="fe-advsearch__sublabel">{{ t('advsearch.around.label') }}</span>
@@ -705,9 +723,12 @@ function submit() {
 
           <label class="fe-advsearch__field">
             <span class="fe-advsearch__label">{{ t('filter.type') }}</span>
-            <select v-model="type" class="fe-input" data-testid="advsearch-type">
-              <option v-for="o in TYPE_OPTIONS" :key="o" :value="o">{{ t(`filter.type.${o}`) }}</option>
-            </select>
+            <ChoiceSelect
+              :model-value="type"
+              :options="typeChoices"
+              testid="advsearch-type"
+              @update:model-value="(v) => (type = v as TypeFilter)"
+            />
           </label>
 
           <!-- Whose it is. Same union and same predicate as the filter row's
@@ -717,16 +738,13 @@ function submit() {
           <div class="fe-advsearch__group">
             <label class="fe-advsearch__field">
               <span class="fe-advsearch__label">{{ t('filter.people') }}</span>
-              <select
-                v-model="people"
-                class="fe-input"
+              <ChoiceSelect
+                :model-value="people"
+                :options="peopleChoices"
                 :disabled="!ownerFilterable"
-                data-testid="advsearch-people"
-              >
-                <option v-for="o in peopleOptions" :key="o.value" :value="o.value">
-                  {{ peopleLabel(o) }}
-                </option>
-              </select>
+                testid="advsearch-people"
+                @update:model-value="(v) => (people = v as PeopleFilter)"
+              />
             </label>
             <p v-if="!ownerFilterable" class="fe-advsearch__hint fe-advsearch__hint--block">
               {{ t('advsearch.people.name_only') }}
@@ -787,9 +805,12 @@ function submit() {
           <div class="fe-advsearch__group">
             <label class="fe-advsearch__field">
               <span class="fe-advsearch__label">{{ t('filter.size') }}</span>
-              <select v-model="size" class="fe-input" data-testid="advsearch-size">
-                <option v-for="o in SIZE_OPTIONS" :key="o" :value="o">{{ t(`filter.size.${o}`) }}</option>
-              </select>
+              <ChoiceSelect
+                :model-value="size"
+                :options="sizeChoices"
+                testid="advsearch-size"
+                @update:model-value="(v) => (size = v as SizeFilter)"
+              />
             </label>
             <div v-if="size === 'range'" class="fe-advsearch__field">
               <span class="fe-advsearch__sublabel">{{ t('advsearch.size.range_label') }}</span>
@@ -813,11 +834,15 @@ function submit() {
                   :aria-label="t('advsearch.size.to')"
                   data-testid="advsearch-size-to"
                 />
-                <select v-model="sizeUnit" class="fe-input fe-advsearch__unit" :aria-label="t('filter.size')">
-                  <option value="kb">{{ t('unit.kb') }}</option>
-                  <option value="mb">{{ t('unit.mb') }}</option>
-                  <option value="gb">{{ t('unit.gb') }}</option>
-                </select>
+                <ChoiceButtons
+                  :options="unitChoices"
+                  :model-value="sizeUnit"
+                  segmented
+                  :aria-label="t('filter.size')"
+                  testid="advsearch-unit"
+                  testid-prefix="advsearch-unit"
+                  @update:model-value="(v: string | string[]) => (sizeUnit = v as 'kb' | 'mb' | 'gb')"
+                />
               </div>
             </div>
           </div>

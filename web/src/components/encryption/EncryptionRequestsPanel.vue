@@ -35,6 +35,7 @@ import { extractError } from '@/api/client';
 import { E2EPolicyApi, e2ePolicyRefusal, type E2ERequest, type E2ERequestStatus } from '@/api/e2ePolicy';
 import { formatDate } from '@/lib/format';
 import { useToastStore } from '@/stores/toast';
+import { useTenancy } from '@/composables/useTenancy';
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
@@ -138,9 +139,12 @@ function approveBody(r: E2ERequest): string {
   return t('encryption.requests.approve.body', vars);
 }
 
+/* "Its tenant's administrators answer it" is a sentence about tenants: said
+   only while the server runs multi-tenant mode (composables/useTenancy, #167). */
+const { enabled: tenancyOn } = useTenancy();
 /** A waiting request this administrator does not answer: its tenant does. */
 function decidedElsewhere(r: E2ERequest): boolean {
-  return r.status === 'pending' && r.decidable === false;
+  return tenancyOn.value && r.status === 'pending' && r.decidable === false;
 }
 
 /** The tenant a row belongs to, for the operator's Tenant column. */

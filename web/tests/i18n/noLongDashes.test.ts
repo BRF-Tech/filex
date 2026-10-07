@@ -175,12 +175,14 @@ const AREAS: Array<{ area: string; files: () => string[]; atLeast: number }> = [
     atLeast: 20,
   },
   {
-    // The installed web app's name comes from its manifest (vite.config.ts);
-    // the desktop package's description is what a package manager shows.
+    // The installed web app's name comes from its manifest (web/pwa.config.ts
+    // since #190, read by vite.config.ts); the desktop package's description
+    // is what a package manager shows.
     area: 'pages (web shell, app manifest, service worker, desktop windows, desktop package)',
     files: () => [
       path.join(ROOT, 'web/index.html'),
       path.join(ROOT, 'web/vite.config.ts'),
+      path.join(ROOT, 'web/pwa.config.ts'),
       ...sourceFiles(path.join(ROOT, 'web/public'), /\.(js|svg|html)$/),
       ...sourceFiles(path.join(ROOT, 'desktop/ui'), /\.(html|js|css)$/),
       path.join(ROOT, 'desktop/package.json'),

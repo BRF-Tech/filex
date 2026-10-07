@@ -76,7 +76,7 @@ in its own shape:
 | **Gallery** | The same folder large behind, and up to three prints fanned out in front of it from their foot. |
 | **List** | The row's small folder, with the newest file rising out of its mouth. |
 
-![The grid: each folder drawn with the files that came into it last](screenshots/v0.52.0/thumbnails/folders-grid-1440.png)
+![The grid: each folder drawn with the files that came into it last](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png)
 
 **Which files.** The three files directly in the folder that came in last:
 for each file, the later of when it entered the catalogue and its own
@@ -968,7 +968,7 @@ SVG limit, after restoring the cache from elsewhere), use the repair.
 
 ### Admin → Tools → Thumbnail repair
 
-![Admin → Tools → Thumbnail repair after a Fix run: the counts, the thumbnail settings and the files without a thumbnail, with the reason](screenshots/v0.52.0/thumbnails/thumbnail-repair-1440.png)
+![Admin → Tools → Thumbnail repair after a Fix run: the counts, the thumbnail settings and the files without a thumbnail, with the reason](https://filex.sh/shots/thumbnails/thumbnail-repair-1440.c13a17556be7.png)
 
 Pick **all storages**, one storage, or a file or folder inside a storage (the
 folder with everything in it), and a mode:
@@ -1019,6 +1019,18 @@ version?, count}]}`, the most first), and
 (`office_max_mb`, `office_slots`; platform administrators only; audited as
 `thumbnail.settings_update`). A run is cancelled with
 `POST /api/files/ops/{op_id}/cancel`.
+
+A caller held to a folder - a `root:` token, or a session narrowed by
+`X-Filex-Root` - repairs inside that folder (`""` is the folder itself, and a
+path outside it is refused with `403`), and its list of files without a
+thumbnail names only the files inside it, with `truncated` judged by those
+alone. The list is read from the folder's storage, the most recent 5,000
+problems of it at most. The generators are counted on the folder's storage
+only. The latest run - `GET …/repair`, and the `job` a `409 BUSY` carries - is
+told in full when it is a run of that folder (or of a folder inside it), its
+refused storages narrowed to the folder's; of any other run the caller learns
+only that one is going (`{"running": true, "queued": …}`), and of one that has
+ended nothing (`{"running": false}`, as if none had been asked for).
 
 ### `filex thumb backfill`
 

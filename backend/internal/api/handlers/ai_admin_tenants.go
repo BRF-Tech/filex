@@ -88,7 +88,7 @@ func registerTenantTools(r *adminReg, a *AIAdmin) {
 	base := "/api/ai/admin/providers"
 	regAdminTool(r, "admin_tenants_list", "List the tenants (providers): slug, name, realm, address (host), whether the tenant is the "+
 		"platform's own (is_supertenant) and enabled, the storages linked to it (storage_ids) and its number of accounts "+
-		"(user_count); multi_tenant says whether FILEX_MULTI_TENANT is on (off: only the platform's own tenant can sign in)."+tenantModel,
+		"(user_count); multi_tenant says whether multi-tenant mode is in force (FILEX_MULTI_TENANT, or the Multi-tenant mode page of the admin panel; off: only the platform's own tenant can sign in)."+tenantModel,
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.tenants.List, method: http.MethodGet, path: base}
 		})

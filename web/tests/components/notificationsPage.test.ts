@@ -51,6 +51,19 @@ vi.mock('@/api/notifications', () => ({
   NotificationsApi: {
     adminList: vi.fn(async () => ({ items: rows, total: rows.length })),
     getSettings: vi.fn(async () => ({ in_app_enabled: true, muted_events: [] })),
+    // The digest's defaults card on the same page (components/DigestPolicyCard).
+    getDigestPolicy: vi.fn(async () => ({
+      window_minutes: 1,
+      urgent_events: ['file.infected'],
+      saved: false,
+      scope: 'instance',
+      tenant: null,
+      defaults: { window_minutes: 1, urgent_events: ['file.infected'] },
+      events: ['file.uploaded', 'file.infected'],
+      admin_events: [],
+      window_min: 1,
+      window_max: 15,
+    })),
   },
 }));
 

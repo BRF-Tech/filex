@@ -14,6 +14,7 @@
     "server.mail.drop_invite.": "Email: a file-request (upload) link somebody sent from the Share dialog - the recipient is asked to upload files. In the sender's language.",
     "server.mail.grant.": "Email: an existing account was given access to a file or folder (Permissions panel → Invite). In the recipient's account language.",
     "server.mail.account.": "Email: an administrator created an account for the recipient while inviting them; it carries a temporary password. In the language the inviting administrator's screen is in (the new account starts in it too).",
+    "server.mail.digest.": "The email of a notification digest, to a person who asked to be told by email (a file request's owner, today): the kinds they did not mark urgent were held, and this one email tells what changed, folder by folder, in their account language. The subject is also the digest's stored title.",
     "server.mail.drop_received.": "Email AND notification to the owner of a folder when somebody uploads files through its file-request link. In the folder owner's account language. The subject is also the notification's stored title.",
     "server.mail.smtp_test.": "Email: the administrator's \"Send test\" in the mail settings. In that administrator's language.",
     "server.mail.cloud_verify.": "Email (filex cloud sign-up only): the verification token for a new tenant. In the visitor's browser language.",
@@ -42,6 +43,7 @@
     "server.login.wait_": "A length of time inside a server.login.* sentence, slotted into {wait}: \"3 minutes\". Just the amount and its unit, no full stop.",
     "server.origin.": "API refusal when a page on another site sent a change (an upload, a delete, a sign-in) through the visitor's browser with their session, and filex refused it. Read mostly by whoever built that page, sometimes by the visitor. Keep `FILEX_CORS_ALLOWED_ORIGINS` exactly as written, between its backticks. Plain text; two sentences.",
     "server.notify.": "A notification - the bell, the browser's pop-up and the desktop app's - about one event. Composed by the READER's screen in their language from what happened. Title: what happened, to what. Body: where, or the detail. Placeholders the event does not carry are removed together with the dash, arrow or colon next to them.",
+    "server.notify.digest.": "One line of a notification DIGEST - the single notification that tells a person, folder by folder, what changed while the kinds they did not mark urgent were held (one minute by default). Each is a count of one kind of change, joined after the folder name with commas: \"Reports: 12 files added, 1 comment\". Short, no full stop; the bell, the browser's pop-up, the desktop app and the digest email all say it.",
     "server.notify.word.": "A word a notification OR an email uses when the event does not say it (an upload with no name typed, a file with no name). One word, both surfaces - they were written twice until v0.43.0.",
     "server.account.": "Admin panel (Users → Add / Edit) and the profile form: why an email address or a username was refused. Shown under the field it is about, in the reader's language. One sentence with a final full stop.",
     "server.token.": "Admin panel (API / MCP) and a person's own API tokens: why the list of scopes (permissions) for a new token was refused. The scope names themselves (read, write, delete, mcp, admin, root:…) are typed by the person and stay in English.",
@@ -136,7 +138,8 @@
     "policy": "the update policy's name, one of the server.update.policy.* words",
     "saved": "the name the edit was saved under, beside the file, e.g. report.docx",
     "format": "a file format's name in capitals, e.g. DOCX",
-    "why": "one sentence that says why a save was not written (one of the server.onlyoffice.refused_* sentences, already in the reader's language)"
+    "why": "one sentence that says why a save was not written (one of the server.onlyoffice.refused_* sentences, already in the reader's language)",
+    "minutes": "a number of minutes"
   },
   "key_vars": {
     "server.login.failed_remaining": { "count": "how many wrong attempts the person has left before the lock", "limit": "the number of the failed attempt at which the lock falls, e.g. 5" },
@@ -200,6 +203,7 @@
     "server.storage.scan_exclude_syntax": { "pattern": "the pattern (one line of the setting) as the administrator typed it" },
     "server.storage.scan_exclude_everything": { "pattern": "the pattern (one line of the setting) as the administrator typed it" },
     "server.storage.scan_exclude_limit": { "max": "the most patterns one storage may have (200)", "length": "the most characters one pattern may have (512)" },
+    "server.storage.secret_address_changed": { "field": "the setting's key as the driver names it (password, secret_key, private_key), shown as written" },
     "server.auth_provider.legacy_elsewhere_title": { "account": "the login name the person signed in with, e.g. alex (the older account's email)", "account_tenant": "the short name (sub-domain) of the tenant the older account belongs to", "login_tenant": "the short name (sub-domain) of the tenant the sign-in was for" },
     "server.auth_provider.legacy_elsewhere_body": { "account": "the login name the person signed in with, e.g. alex (the older account's email)", "account_tenant": "the short name (sub-domain) of the tenant the older account belongs to", "login_tenant": "the short name (sub-domain) of the tenant the sign-in was for" },
     "server.onlyoffice.saved_beside_body": { "ext": "the extension of the file that was edited, without the dot, e.g. doc" },

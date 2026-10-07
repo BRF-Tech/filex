@@ -69,7 +69,18 @@ type Config struct {
 	// tenant, per-provider storage confinement, scoped user directory). OFF by
 	// default — a single-tenant install behaves exactly as before. See
 	// docs/MULTI-TENANCY.md.
+	//
+	// Since 0.53 it is also a switch on Admin → Multi-tenant mode
+	// (internal/tenancy): when neither FILEX_MULTI_TENANT nor the config
+	// file's `multi_tenant` names it, the switch's saved setting decides at
+	// start (server.New puts that answer here before anything reads it).
 	MultiTenant bool `yaml:"multi_tenant"`
+	// MultiTenantFrom names what pinned MultiTenant: "FILEX_MULTI_TENANT",
+	// "file:<path>" (the config file's `multi_tenant`), or "" when neither
+	// did and the panel's switch decides. A pinned value wins over the
+	// switch, and the switch says so instead of offering a change. Not
+	// serialised, like BasePathFrom.
+	MultiTenantFrom string `yaml:"-"`
 	// TenantDomain (FILEX_TENANT_DOMAIN) gives every tenant an address of
 	// its own: `<realm>.<tenant domain>` (`acme.tenants.files.example`), the
 	// name a tenant's own domain points its CNAME at (docs/TENANT-ADMIN.md).
@@ -795,6 +806,14 @@ type OnlyOfficeConfig struct {
 	// resolve the public hostname had no way to express the difference and its
 	// saves were silently lost (issue #17).
 	CallbackURL string `yaml:"callback_url"`
+	// FrameOrigin is where the editor's frame is served (task #92,
+	// FILEX_ONLYOFFICE_FRAME_ORIGIN): normally the document server's own
+	// origin, whose reverse proxy sends /filex-frame/* to filex. The editor's
+	// api.js then runs on that origin instead of in filex's page - another
+	// origin, so out of reach of filex's session storage and pages. Empty: the
+	// interface origin (AppUIOrigin) when there is one, else filex's page.
+	// Read at start (the router dispatches on its host).
+	FrameOrigin string `yaml:"frame_origin"`
 }
 
 // DrawioConfig — embed URL.
@@ -1015,9 +1034,17 @@ func Load(path string) (Config, error) {
 				Auth struct {
 					Drivers []string `yaml:"drivers"`
 				} `yaml:"auth"`
+				// A pointer, so a file that says `multi_tenant: false` is
+				// told apart from one that does not mention it.
+				MultiTenant *bool `yaml:"multi_tenant"`
 			}
-			if yaml.Unmarshal(data, &probe) == nil && probe.Auth.Drivers != nil {
-				cfg.Auth.DriversFrom = "file:" + expanded
+			if yaml.Unmarshal(data, &probe) == nil {
+				if probe.Auth.Drivers != nil {
+					cfg.Auth.DriversFrom = "file:" + expanded
+				}
+				if probe.MultiTenant != nil {
+					cfg.MultiTenantFrom = "file:" + expanded
+				}
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return Config{}, fmt.Errorf("config: read %s: %w", expanded, err)
@@ -1030,6 +1057,10 @@ func Load(path string) (Config, error) {
 	applyEnv(&cfg)
 	if os.Getenv("FILEX_AUTH_DRIVERS") != "" {
 		cfg.Auth.DriversFrom = "FILEX_AUTH_DRIVERS"
+	}
+	// The environment pins the mode over the file, and over the panel's switch.
+	if strings.TrimSpace(os.Getenv("FILEX_MULTI_TENANT")) != "" {
+		cfg.MultiTenantFrom = "FILEX_MULTI_TENANT"
 	}
 	if strings.TrimSpace(os.Getenv("FILEX_BASE_PATH")) != "" {
 		basePathFrom = "FILEX_BASE_PATH"
@@ -1061,6 +1092,12 @@ func Load(path string) (Config, error) {
 	cfg.FrameAncestors = fa
 	// Where apps' interfaces are served from: an origin, never filex's own.
 	if cfg.AppUIOrigin, err = normalizeAppUIOrigin(cfg.AppUIOrigin, cfg.PublicURL); err != nil {
+		return Config{}, fmt.Errorf("config: %w", err)
+	}
+	// Where the ONLYOFFICE editor's frame is served (task #92): an origin,
+	// never filex's own and never the interface origin.
+	if cfg.ExternalServices.OnlyOffice.FrameOrigin, err = normalizeOfficeFrameOrigin(
+		cfg.ExternalServices.OnlyOffice.FrameOrigin, cfg.PublicURL, cfg.AppUIOrigin); err != nil {
 		return Config{}, fmt.Errorf("config: %w", err)
 	}
 	// Default the OIDC redirect to <public_url>/api/auth/oidc/callback so an
@@ -1205,8 +1242,11 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("FILEX_DEFAULT_LOCALE"); v != "" {
 		c.DefaultLocale = v
 	}
-	if v := os.Getenv("FILEX_MULTI_TENANT"); v == "1" || v == "true" {
-		c.MultiTenant = true
+	// Given at all, it pins the mode both ways: "1" or "true" (any case) is
+	// on, any other value is off (the Booleans rule of docs/CONFIGURATION.md),
+	// and the panel's switch shows it locked (Load sets MultiTenantFrom).
+	if v := strings.TrimSpace(os.Getenv("FILEX_MULTI_TENANT")); v != "" {
+		c.MultiTenant = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("FILEX_TENANT_DOMAIN"); v != "" {
 		c.TenantDomain = strings.Trim(strings.ToLower(strings.TrimSpace(v)), ".")
@@ -1477,6 +1517,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_CALLBACK_URL"); v != "" {
 		c.ExternalServices.OnlyOffice.CallbackURL = v
+	}
+	if v := os.Getenv("FILEX_ONLYOFFICE_FRAME_ORIGIN"); strings.TrimSpace(v) != "" {
+		c.ExternalServices.OnlyOffice.FrameOrigin = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_JWT"); v != "" {
 		c.ExternalServices.OnlyOffice.JWTSecret = v

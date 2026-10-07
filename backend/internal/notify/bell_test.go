@@ -26,6 +26,7 @@ var everyEvent = []notify.EventType{
 	notify.EventShareCreated, notify.EventDropReceived, notify.EventFileInfected,
 	notify.EventCommentAdded, notify.EventE2EEscrowUsed, notify.EventPluginNotice,
 	notify.EventAdminTest, notify.EventE2ERequestCreated, notify.EventE2ERequestDecided,
+	notify.EventNotificationDigest,
 }
 
 // Bell.Admits is the Go twin of the SQL a bell reads with: "mark read" judges

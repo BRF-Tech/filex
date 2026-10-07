@@ -29,6 +29,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import { loginAs } from '../helpers/auth';
 import { rowMenu } from '../helpers/rowMenu';
 import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
+import { pickOption } from '../helpers/choiceSelect';
 
 /**
  * ⚠ A storage, because the DOOR needs one. The dialogs under test are opened
@@ -162,7 +163,7 @@ test.describe('a row menu opened inside a dialog', () => {
     // ── 1. "How to connect" → the credential panel the guides need ────────
     await page.getByTestId('sidenav-connect').click();
     await expect(page.getByTestId('connections-panel')).toBeVisible();
-    await page.getByTestId('guide-protocol').selectOption('webdav');
+    await pickOption(page.getByTestId('guide-protocol'), 'webdav');
 
     const tokens = page.getByTestId('api-tokens');
     await expect(tokens).toBeVisible();

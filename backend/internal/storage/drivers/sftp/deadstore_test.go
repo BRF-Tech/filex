@@ -125,9 +125,11 @@ type fakeSFTP struct {
 	silent atomic.Bool // accept, never send the SSH banner: a hung process
 	hung   atomic.Bool // the SFTP subsystem stops answering, on every session
 
-	storRate, retrRate int          // bytes per second; 0 = at once
-	storStall          atomic.Int64 // stop reading after this many bytes on a session
-	retrStall          atomic.Int64 // stop sending after this many bytes on a session
+	// storRate: bytes per second an upload is read at; 0 = at once. A download
+	// has no rate: SFTP sends what the reader asks for, at its pace (#159).
+	storRate  int
+	storStall atomic.Int64 // stop reading after this many bytes on a session
+	retrStall atomic.Int64 // stop sending after this many bytes on a session
 
 	mu    sync.Mutex
 	conns []net.Conn
@@ -277,19 +279,12 @@ func (k *knob) Write(p []byte) (int, error) {
 			<-s.release
 			return written, io.EOF
 		}
-		chunk := p
-		if s.retrRate > 0 && len(chunk) > 16<<10 {
-			chunk = chunk[:16<<10]
-		}
-		n, err := k.Channel.Write(chunk)
+		n, err := k.Channel.Write(p)
 		written += n
 		k.written += int64(n)
 		p = p[n:]
 		if err != nil {
 			return written, err
-		}
-		if s.retrRate > 0 {
-			time.Sleep(time.Duration(n) * time.Second / time.Duration(s.retrRate))
 		}
 	}
 	return written, nil
@@ -460,14 +455,38 @@ func TestDeadStore_RefusedLoginIsNotRetried(t *testing.T) {
 
 // ── moving and stalled transfers ─────────────────────────────────────
 
-// ⚠ The limits are on silence, not length: 4 MB each way at 512 KB/s is
-// eight attempt timeouts, and the download's reader also walks away for 2.5 of
-// them in the middle.
+// ⚠ The limits are on silence, not length: 4 MB up at 512 KB/s is eight
+// attempt timeouts, and the download, read a piece at a time by a reader who
+// dawdles between pieces and once walks away for 2.5 attempt timeouts, keeps
+// moving for longer than the whole budget.
+//
+// ⚠ The download waits on nothing but its reader (#159, the S3 driver's
+// SlowDownloadAndSlowReaderAreNeverCut). SFTP sends only what is asked for:
+// the next megabyte goes out when the driver's read-ahead asks for it, inside
+// the reader's Read, and the server answers at once. So a Read waits only for
+// a server that is already sending, nothing is in flight while the reader is
+// away, and all the time the download takes is spent by the reader BETWEEN
+// Reads, where a slower machine only makes the claim stronger. It used to be
+// sent by the clock (512 KB/s): the shape that cut the S3 copy of this test on
+// a loaded GitHub runner.
 func TestDeadStore_MovingTransfersAreNeverCut(t *testing.T) {
-	const size = 4 << 20
-	payload := bytes.Repeat([]byte("m"), size)
+	const (
+		piece  = 128 << 10
+		pieces = 32
+		size   = piece * pieces
+		// After each piece the reader dawdles: 31 x 125 ms, about 4 s, so the
+		// download keeps moving for longer than the whole 3 s budget.
+		dawdle = 125 * time.Millisecond
+		// Once, halfway, it walks away for 2.5 attempt timeouts. Halfway is a
+		// read-ahead boundary (1 MB), so the next piece is a Read on the network.
+		away = 2500 * time.Millisecond
+	)
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i / piece) // a piece lost, repeated or swapped shows
+	}
 	s := newFakeSFTP(t)
-	s.storRate, s.retrRate = 512<<10, 512<<10
+	s.storRate = 512 << 10
 	d := sftpDriver(t, s.addr(), map[string]any{"max_attempts": 1})
 
 	took, err := timeCall(context.Background(), func(ctx context.Context) error {
@@ -485,19 +504,29 @@ func TestDeadStore_MovingTransfersAreNeverCut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	half := make([]byte, size/2)
-	if _, err := io.ReadFull(rc, half); err != nil {
-		t.Fatalf("first half: %v", err)
+	got := make([]byte, 0, size)
+	buf := make([]byte, piece)
+	for i := range pieces {
+		if _, err := io.ReadFull(rc, buf); err != nil {
+			t.Fatalf("piece %d of %d: the download was cut after %.1fs: %v", i+1, pieces, time.Since(start).Seconds(), err)
+		}
+		got = append(got, buf...)
+		if i == pieces/2-1 {
+			time.Sleep(away) // no Read waits: the stall limit must not run
+		} else {
+			time.Sleep(dawdle)
+		}
 	}
-	time.Sleep(2500 * time.Millisecond)
-	rest, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("the download was cut after %.1fs: %v", time.Since(start).Seconds(), err)
+	if rest, err := io.ReadAll(rc); err != nil || len(rest) != 0 {
+		t.Fatalf("after the last piece: %d more bytes, err=%v", len(rest), err)
 	}
 	if err := rc.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if sha256.Sum256(append(half, rest...)) != sha256.Sum256(payload) {
+	if took := time.Since(start); took < 5*time.Second {
+		t.Fatalf("the download took only %.1fs - it did not outlast the budget", took.Seconds())
+	}
+	if sha256.Sum256(got) != sha256.Sum256(payload) {
 		t.Fatal("the download arrived altered")
 	}
 }

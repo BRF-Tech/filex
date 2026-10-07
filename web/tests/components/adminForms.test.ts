@@ -54,9 +54,10 @@ vi.mock('@/api/webhooks', () => ({
 }));
 
 const tokenCreate = vi.fn();
+const tokenList = vi.fn(async (): Promise<unknown[]> => []);
 vi.mock('@/api/ai-tokens', () => ({
   AITokensApi: {
-    list: vi.fn(async () => []),
+    list: () => tokenList(),
     create: (...a: unknown[]) => tokenCreate(...a),
     update: vi.fn(),
     remove: vi.fn(),
@@ -462,6 +463,45 @@ describe('New API / MCP token', () => {
     expect(tokenCreate).toHaveBeenCalledTimes(1);
     const scopes = String(tokenCreate.mock.calls[0][0].scopes).split(',');
     expect(scopes).toEqual(['read', 'write', 'mcp']);
+  });
+
+  // Task #157: comments are a permission of their own. Every key reads them
+  // unless it says otherwise, so `read` is chosen and sends nothing; Read and
+  // write sends `comments:rw`, and "Write" alone does not.
+  it('comments are read unless chosen, and Read and write sends comments:rw', async () => {
+    tokenCreate.mockResolvedValue({ token: 'fx_secret', id: 1 });
+    const w = await open();
+    expect(w.find('[data-testid="ai-token-comments-read"]').attributes('aria-checked')).toBe('true');
+    expect(w.find('[data-testid="ai-token-comments-rw"]').attributes('aria-checked')).toBe('false');
+    // A choice of two is buttons that show both answers, never a native select.
+    expect(w.find('[aria-labelledby="ai-token-comments-label"]').attributes('role')).toBe('radiogroup');
+    await w.find('input[type="text"], input:not([type])').setValue('ci');
+    await w.find('[data-testid="ai-token-create"]').trigger('click');
+    await flushPromises();
+    expect(String(tokenCreate.mock.calls[0][0].scopes).split(',')).toEqual(['read', 'write', 'mcp']);
+
+    tokenCreate.mockClear();
+    const again = await open();
+    await again.find('[data-testid="ai-token-comments-rw"]').trigger('click');
+    expect(again.find('[data-testid="ai-token-comments-rw"]').attributes('aria-checked')).toBe('true');
+    await again.find('input[type="text"], input:not([type])').setValue('yorumcu');
+    await again.find('[data-testid="ai-token-create"]').trigger('click');
+    await flushPromises();
+    expect(String(tokenCreate.mock.calls[0][0].scopes).split(',')).toEqual(['read', 'write', 'mcp', 'comments:rw']);
+  });
+
+  it("the table says each key's comments level, in the panel's language", async () => {
+    tokenList.mockResolvedValueOnce([
+      { id: 1, user_id: 1, label: 'eski', scopes: 'read,write,delete,mcp', usernames: '', created_at: '2026-10-06T00:00:00Z', permissions: { comments: 'read' } },
+      { id: 2, user_id: 1, label: 'yorumcu', scopes: 'read,mcp,comments:rw', usernames: '', created_at: '2026-10-06T00:00:00Z', permissions: { comments: 'rw' } },
+    ]);
+    const w = mountView(ApiMcp, 'tr');
+    await flushPromises();
+    const cells = w.findAll('[data-testid="ai-token-comments-cell"]').map((c) => c.text());
+    expect(cells.sort()).toEqual([tr.apiMcp.commentsLevel.read, tr.apiMcp.commentsLevel.rw].sort());
+    // The level is not a verb: no chip prints `comments:rw`.
+    const chips = w.findAll('[data-testid="ai-token-scope-chip"]').map((c) => c.attributes('title'));
+    expect(chips).not.toContain('comments:rw');
   });
 
   it("the server's refusal is said inside the dialog", async () => {

@@ -128,7 +128,18 @@ beforeEach(() => {
   setActivePinia(createPinia());
 });
 
-describe('the app page', () => {
+// ⚠ 30s for every case, like pluralCategories' COLD. Nothing here waits on a
+// clock or the network (every request is the mock above, the log panel's poll
+// included): the file takes about half a second in a quiet run (0.5-0.6s in
+// the 0.53 runs full-20261006-164410Z and the targeted ones after it). In
+// full-20261006-204443Z the web job started with the Cypress, docs and Go jobs
+// while the host's memory was short (PSI memory and io "full" about 0.5 for
+// the minute at 20:48). The files that ran in that minute were twenty to sixty
+// times slower than in the run before (dateGroups 0.35s, then 20s; this one
+// 0.6s, then 20s), and the detail page's case took 9.1s against the default 5s.
+const UNDER_LOAD = { timeout: 30_000 };
+
+describe('the app page', UNDER_LOAD, () => {
   it('is a route of the panel, addressed by the app’s name', async () => {
     const { default: router } = await import('@/router');
     const r = router.resolve({ name: 'plugins.app', params: { name: 'sign' } });

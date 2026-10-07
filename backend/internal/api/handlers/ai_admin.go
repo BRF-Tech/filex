@@ -123,6 +123,12 @@ type AIAdminDeps struct {
 	ReplicaService  *replica.Service
 	ReplicaCron     *replica.CronScheduler
 	ReplicaReloader *replica.RulesReloader
+	// ForgetStorage and ReplicaLinks: what the native /admin routes are
+	// given, so a storage or target edited over the token surface is applied
+	// to the running process the same way (the driver rebuilt, replication
+	// relinked, the initial copy started). Nil is legal.
+	ForgetStorage func(int64)
+	ReplicaLinks  ReplicaLinks
 	// External + EnvManagedExternal mirror what the native /admin routes get,
 	// so the MCP admin surface reports and applies external-service changes the
 	// same way the UI does.
@@ -138,6 +144,12 @@ type AIAdminDeps struct {
 	// giving (issue #17).
 	PublicURL    string
 	PublicURLSet bool
+	// AppUIOrigin is FILEX_APP_UI_ORIGIN, for the same advisories: whether the
+	// editor's api.js runs in a frame of its own (task #92).
+	AppUIOrigin string
+	// OfficeFrameOrigin is FILEX_ONLYOFFICE_FRAME_ORIGIN, for the same
+	// advisories (task #92).
+	OfficeFrameOrigin string
 	// ReversePath is the panel's third-leg check (ExternalAdmin.ReversePath),
 	// so admin_external_test measures the document server's route back to
 	// filex and its JWT the way the page's Test does. Nil = not measured.
@@ -195,8 +207,8 @@ func NewAIAdmin(d AIAdminDeps) *AIAdmin {
 		searchAdm:   NewSearchAdmin(d.Index, d.Store),
 		authProv:    newDemoAwareAuthProviders(d),
 		external:    newExternalAdminWithPublicURL(d),
-		replica:     NewReplica(d.Store, d.ReplicaService, d.ReplicaCron, d.ReplicaReloader),
-		repTargets:  NewReplicationTargets(d.Store),
+		replica:     &Replica{Store: d.Store, Service: d.ReplicaService, Cron: d.ReplicaCron, Reloader: d.ReplicaReloader, Links: d.ReplicaLinks},
+		repTargets:  &ReplicationTargets{Store: d.Store, Links: d.ReplicaLinks},
 		queue:       newQueueWithStore(d.Queue, d.Store),
 		notif:       NewNotifications(d.Notify, d.Store, acl.New(d.Store)),
 		audit:       newDemoAwareAudit(d),
@@ -363,6 +375,10 @@ func (a *AIAdmin) Register(r chi.Router) {
 		})
 		r.Post("/fix", a.replica.FixAll)
 		r.Post("/fix-one", a.replica.FixOne)
+		r.Get("/initial-copies", a.replica.InitialCopies)
+		r.Post("/initial-copies/{storage_id}/restart", a.replica.RestartInitialCopy)
+		r.Get("/links", a.replica.ListLinks)
+		r.Put("/links/{storage_id}", a.replica.SetLinkFolder)
 		r.Get("/report", a.replica.GetReport)
 		r.Post("/report/run-now", a.replica.RunReportNow)
 		r.Get("/settings", a.replica.GetSettings)
@@ -798,7 +814,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		})
 
 	// ── storages ──
-	regAdminTool(r, "admin_storages_list", "List configured storages with stats. filters: {role: primary|replica}.",
+	regAdminTool(r, "admin_storages_list", "List configured storages with stats. Credentials in config are answered as *** (never in clear). filters: {role: primary|replica}.",
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.storages.List, method: http.MethodGet, path: "/api/ai/admin/storages", query: filtersToQuery(in.Filters)}
 		})
@@ -811,7 +827,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.storages.Create, method: http.MethodPost, path: "/api/ai/admin/storages", body: in.Body}
 		})
-	regAdminTool(r, "admin_storages_update", "Update a storage by id. body: the full storage object.",
+	regAdminTool(r, "admin_storages_update", "Update a storage by id. body: the full storage object. A credential sent back as *** keeps the saved one, while the driver and the address (host, endpoint, url) stay the same; otherwise it has to be typed again (400 SECRET_NEEDED).",
 		func(in adminIDBodyIn) reqSpec {
 			return reqSpec{handler: a.storages.Update, method: http.MethodPatch, path: "/api/ai/admin/storages/" + itoa(in.ID),
 				urlParams: idParam(in.ID), body: in.Body}
@@ -845,7 +861,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 			return reqSpec{handler: a.storages.SetOrder, method: http.MethodPut, path: "/api/ai/admin/storages/order",
 				body: map[string]any{"ids": in.IDs}}
 		})
-	regAdminTool(r, "admin_storages_test", "Test a driver+config connection without saving. body: {driver, config}.",
+	regAdminTool(r, "admin_storages_test", "Test a driver+config connection without saving. body: {driver, config, id?} - with the id of a saved storage, credentials sent as *** are that storage's (same driver and address only).",
 		func(in adminBodyIn) reqSpec {
 			return reqSpec{handler: a.storagesAdm.Test, method: http.MethodPost, path: "/api/ai/admin/storages/test", body: in.Body}
 		})
@@ -993,10 +1009,21 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.replica.FixAll, method: http.MethodPost, path: "/api/ai/admin/replica/fix"}
 		})
-	regAdminTool(r, "admin_replica_fix_one", "Queue a retry for one replica failure: {path, op} as admin_replica_failures_list names it (op: write | delete | move | copy). queued: false = a retry of it was already waiting.",
+	regAdminTool(r, "admin_replica_fix_one", "Queue a retry for one replica failure: {storage_id, path, op} as admin_replica_failures_list names it (op: write | delete | move | copy). storage_id may be left out when only one storage has an unresolved failure at that path. queued: false = a retry of it was already waiting.",
 		func(in adminReplicaFixOneIn) reqSpec {
-			return reqSpec{handler: a.replica.FixOne, method: http.MethodPost, path: "/api/ai/admin/replica/fix-one",
-				body: map[string]any{"path": in.Path, "op": in.Op}}
+			body := map[string]any{"path": in.Path, "op": in.Op}
+			if in.StorageID != 0 {
+				body["storage_id"] = in.StorageID
+			}
+			return reqSpec{handler: a.replica.FixOne, method: http.MethodPost, path: "/api/ai/admin/replica/fix-one", body: body}
+		})
+	regAdminTool(r, "admin_replica_links", "The folder each replicating storage writes into on its replication target: {storage_id, storage_name, target_id, target_name, folder}.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.replica.ListLinks, method: http.MethodGet, path: "/api/ai/admin/replica/links"}
+		})
+	regAdminTool(r, "admin_replica_initial_copies", "Each replicating storage's initial copy (the files it held when it was linked, copied to its target): phase pending | counting | copying | waiting | done, total, copied, present (already on the target), excluded (a skip rule), failed, last_error.",
+		func(_ adminVoidIn) reqSpec {
+			return reqSpec{handler: a.replica.InitialCopies, method: http.MethodGet, path: "/api/ai/admin/replica/initial-copies"}
 		})
 	regAdminTool(r, "admin_replica_report_get", "Get the latest replica status report.",
 		func(_ adminVoidIn) reqSpec {
@@ -1362,8 +1389,9 @@ func queuedQuery(queued bool) url.Values {
 
 // adminReplicaFixOneIn names one replica failure.
 type adminReplicaFixOneIn struct {
-	Path string `json:"path" jsonschema:"the failure's path, as admin_replica_failures_list names it"`
-	Op   string `json:"op" jsonschema:"the failure's operation: write | delete | move | copy"`
+	StorageID int64  `json:"storage_id,omitempty" jsonschema:"the failure's storage_id, as admin_replica_failures_list names it"`
+	Path      string `json:"path" jsonschema:"the failure's path, as admin_replica_failures_list names it"`
+	Op        string `json:"op" jsonschema:"the failure's operation: write | delete | move | copy"`
 }
 
 // adminAppUnlockIn names one app lock.
@@ -1423,6 +1451,8 @@ func filtersToQuery(m map[string]any) url.Values {
 func newExternalAdminWithPublicURL(d AIAdminDeps) *ExternalAdmin {
 	h := NewExternalAdmin(d.Store, d.Caps, d.External, d.EnvManagedExternal)
 	h.AttachPublicURL(d.PublicURL, d.PublicURLSet)
+	h.AttachAppUIOrigin(d.AppUIOrigin)
+	h.AttachOfficeFrameOrigin(d.OfficeFrameOrigin)
 	h.ReversePath = d.ReversePath
 	return h
 }

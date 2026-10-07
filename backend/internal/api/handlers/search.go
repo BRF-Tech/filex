@@ -333,6 +333,23 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		// safe direction for an authorization check.
 		return root.Within(name, p)
 	}
+	// rootRows counts the nodes inside the root, every node for an
+	// unconfined caller. ⚠ `truncated` is judged by these alone: a page or a
+	// window filled by hits outside the root told a confined caller that
+	// files outside its folder match (filex #185). Rows the root holds back
+	// do not make an answer "cut", any more than the tenant's or the ACL's.
+	rootRows := func(nodes []*model.Node) int {
+		if !confined {
+			return len(nodes)
+		}
+		n := 0
+		for _, node := range nodes {
+			if node != nil && withinRoot(node.StorageID, node.Path) {
+				n++
+			}
+		}
+		return n
+	}
 	// `tag:` is a FILTER, not a search term (issue #15). It is parsed out
 	// of the query string here and resolved against the database, which
 	// is the only place tags are current — a tag copied into the search
@@ -368,17 +385,29 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			}
 			results = append(results, searchResult{Node: n, Matched: search.MatchedName})
 			if len(results) >= req.Limit {
-				truncated = i < len(tagged)-1
+				// Cut when a tagged node is left over - inside the root
+				// (rootRows): one outside it is not this caller's to hint at.
+				truncated = rootRows(tagged[i+1:]) > 0
 				break
 			}
 		}
 	case h.Index != nil:
 		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, req.Limit, sc, tagFilter)
-		// The index returns at most `limit` hits; a full page is a cut answer.
-		truncated = len(hits) >= req.Limit
+		// The index returns at most `limit` hits; a full page is a cut answer
+		// - a page full of hits inside the root, for a confined caller
+		// (rootRows).
+		pageNodes := make([]*model.Node, 0, len(hits))
 		for _, hit := range hits {
 			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
-			if err == nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
+			if err != nil {
+				n = nil
+			}
+			pageNodes = append(pageNodes, n)
+		}
+		truncated = rootRows(pageNodes) >= req.Limit
+		for i, hit := range hits {
+			n := pageNodes[i]
+			if n != nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
 				/* wiring:e2 — the marker file stays hidden in name search too, and so
 				   does everything in filex's own directories (syspath.Hidden: the
 				   desktop's open-with working copies were found by name, 2026-09-21) */
@@ -412,8 +441,10 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		// One row past the window: a row beyond it is the proof it was full.
 		fallback, err := plan.Candidates(r.Context(), h.Store, req.StorageID, window+1)
 		if err == nil {
+			// Full when more rows came back than the window holds - rows
+			// inside the root, for a confined caller (rootRows).
+			truncated = rootRows(fallback) > window
 			if len(fallback) > window {
-				truncated = true
 				fallback = fallback[:window]
 			}
 			for _, n := range fallback {

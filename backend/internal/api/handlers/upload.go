@@ -131,11 +131,10 @@ func (u *Upload) Init(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The token's `root:`, on the TARGET as it will be written. The middleware
-	// confines `path` (in a body labelled JSON), but not the storage a
-	// non-zero `storage_id` picks over it, nor `filename`, which path.Join has
-	// already folded into the target (`../disari/x.bin` beside a confined
-	// `path`), nor a body sent under another Content-Type
-	// (GHSA-8gvc-6w52-6c7j).
+	// confines `path`, but not the storage a non-zero `storage_id` picks over
+	// it, nor `filename`, which path.Join has already folded into the target
+	// (`../disari/x.bin` beside a confined `path`), nor - up to 0.52 - a body
+	// sent under another Content-Type than JSON (GHSA-8gvc-6w52-6c7j).
 	if !rootAllows(r.Context(), u.Store, storageID, target) {
 		refuseOutsideRoot(w)
 		return

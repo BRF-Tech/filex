@@ -52,6 +52,31 @@ export interface SettingsQuota {
 export interface SettingsNotificationPrefs {
   in_app_enabled: boolean;
   muted_events: string[];
+  /**
+   * The digest's urgent choices: kind -> told at once? A kind it does not name
+   * follows the administrator's default (`digest.default_urgent`). ⚠ Sent only
+   * when an urgent switch changes: a save without it keeps what is stored, and
+   * a save WITH it first tells what is held under the old choice (backend
+   * handlers/notifications.go UpdateSettings).
+   */
+  urgent_overrides?: Record<string, boolean>;
+  /** What the server says of the digest - read only; null when it is off. */
+  digest?: SettingsNotificationDigest | null;
+}
+
+/** The notification digest as the settings pane draws it (backend notify
+ *  digest.go PersonDigestView). */
+export interface SettingsNotificationDigest {
+  /** How long the kinds that are not urgent are held, in minutes. */
+  window_minutes: number;
+  /** The kinds told at once: the person's choices over the defaults. */
+  urgent_events: string[];
+  /** The administrator's urgent list. */
+  default_urgent: string[];
+  /** Every kind a choice can be made about. */
+  events: string[];
+  /** The administrator alerts among them - one switch in the pane. */
+  admin_events: string[];
 }
 
 /** What the server says it can do — the fields the dialog reads. ⚠ Not
@@ -137,6 +162,20 @@ export interface UserSettingsHost {
       other?: { arch: string; label: string; href: string };
     }>;
     readonly releasesUrl: string;
+  };
+  /**
+   * Installing the web app itself on this device - a phone or a tablet in a
+   * browser (task #190). The permanent home of the offer the app's reminder
+   * makes once, as `desktopApp` is the desktop app's.
+   *
+   * `state`: `prompt` - the browser offers an install, `install()` opens its
+   * dialog; `ios` - Safari's Share → Add to Home Screen; `menu` - the
+   * browser's own menu; `null` - nothing to offer (already installed, or a PC,
+   * which is offered the desktop app). Absent or `null` → not drawn.
+   */
+  readonly installApp?: {
+    readonly state: 'prompt' | 'ios' | 'menu' | null;
+    install(): Promise<'accepted' | 'dismissed' | 'unavailable'>;
   };
   /** The browser's own notifications (the admin app in a browser tab). */
   readonly browserNotifications?: {

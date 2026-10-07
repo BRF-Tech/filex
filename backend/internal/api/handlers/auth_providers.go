@@ -267,6 +267,13 @@ func (h *AuthProviders) views(r *http.Request) ([]providerView, error) {
 		if row.Origin == model.AuthOriginEnvironment || authsetup.PrimarySlug(row.Slug, row.Driver) {
 			continue
 		}
+		// A tenant's own provider belongs to a tenant, and with multi-tenant
+		// mode off nothing about tenants is shown (internal/tenancy): its
+		// row stays, for when the mode is back on, and the page does not list
+		// it. Its people cannot sign in meanwhile (maintenance mode).
+		if row.Origin == model.AuthOriginTenant && !h.multiTenant() {
+			continue
+		}
 		d := authsetup.Canonical(row.Driver)
 		v := providerView{Name: row.Slug, Driver: d, State: "off", ConfigRedacted: map[string]any{}, SecretsSet: map[string]bool{},
 			Origin: authsetup.OriginPage, Managed: h.Live != nil, Fields: authsetup.Schema[d], Enabled: row.Enabled, Legacy: row.Legacy}
@@ -312,8 +319,13 @@ func (h *AuthProviders) instanceTraits(v *providerView, row *model.AuthInstance,
 	if row == nil {
 		return
 	}
-	v.InstanceID, v.Label, v.OwnerProviderID = row.ID, row.Label, row.OwnerProviderID
-	if h.multiTenant() && set != nil {
+	v.InstanceID, v.Label = row.ID, row.Label
+	if !h.multiTenant() {
+		// No owner and no bindings: a single-tenant answer names no tenant.
+		return
+	}
+	v.OwnerProviderID = row.OwnerProviderID
+	if set != nil {
 		v.Tenants = set.Bindings().TenantsOf(row.ID)
 		if v.Tenants == nil {
 			v.Tenants = []int64{}

@@ -17,6 +17,9 @@
  * ⚠ Inert: a preview is looked at, not used. The page's controls (the
  * download button, the language picker) must not act from inside the admin
  * panel.
+ *
+ * ⚠ `embedded`: the admin page around it already has the document's <main>,
+ * so the shell's card is a plain block here, not a second one.
  */
 import { computed, ref } from 'vue';
 import type { LocaleCode } from '../../types/ExplorerConfig';
@@ -78,6 +81,7 @@ const name = computed(() => props.brandName?.trim() || DEFAULT_BRAND_NAME);
       :layout="publicLayoutFor('file')"
       badge="file"
       :title="file.name"
+      embedded
     >
       <PublicShareBody :link="link" :locale="locale" :theme="theme ?? 'light'" />
     </PublicShell>

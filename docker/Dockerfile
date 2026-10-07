@@ -1,4 +1,4 @@
-# filex default image (~225 MB compressed, ~550 MB on disk) - published as :latest and :full
+# filex default image (~241 MB compressed on amd64 for v0.52.0, ~550 MB on disk) - published as :latest and :full
 # - Pure Go binary (CGO=0, modernc.org/sqlite)
 # - + ffmpeg (video thumbs)
 # - + ghostscript + poppler-utils (PDF → JPEG, page 1)
@@ -23,7 +23,7 @@
 #   live: connect ONLYOFFICE and it is there.
 #
 # Trade-off accepted: every advertised thumbnail format actually works at runtime.
-# The lean variant IS kept, and is built from docker/Dockerfile.slim (~43 MB,
+# The lean variant IS kept, and is built from docker/Dockerfile.slim (~62 MB,
 # frontend + Go binary only) — from v0.31.0, when the :slim TAG stopped being
 # built from this recipe. The older docker/Dockerfile.full is what was merged
 # into this one.

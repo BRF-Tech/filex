@@ -23,6 +23,7 @@ import net from 'node:net';
 
 import { test, expect, type Page } from '@playwright/test';
 import { apiLogin, loginAs } from '../helpers/auth';
+import { pickOption } from '../helpers/choiceSelect';
 
 const STAMP = Date.now();
 const TR_ADMIN = `time-limits-${STAMP}@example.com`;
@@ -47,7 +48,7 @@ async function silentServer(): Promise<{ port: number; close: () => Promise<void
 
 async function openForm(page: Page, driver: string, driverLabel: string, advanced: string) {
   await page.goto('/admin/storages/new');
-  await page.getByLabel(driverLabel, { exact: true }).selectOption(driver);
+  await pickOption(page.getByLabel(driverLabel, { exact: true }), driver);
   await page.getByRole('button', { name: new RegExp(advanced) }).click();
 }
 

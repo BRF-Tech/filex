@@ -159,6 +159,7 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/files/save-text":            inHandler("files.modify, or files.create for a new file"),
 	"POST /api/files/onlyoffice/config":    inHandler("files.modify for edit mode; without it the document opens read-only"),
 	"POST /api/files/onlyoffice/callback":  exemptBecause(whyDocServer),
+	"POST /api/files/onlyoffice/session":   inHandler("files.modify for an answer (mine / theirs); asking whether the session is current needs view"),
 	"POST /api/files/copy":                 inHandler("files.create at the destination"),
 	"POST /api/files/move":                 inHandler("files.move at the source and the destination"),
 	"POST /api/files/delete":               inHandler("files.delete"),

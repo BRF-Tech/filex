@@ -131,16 +131,28 @@ type Scope struct {
 	// root is the confinement of the API token the call was made with
 	// (`root:<adapter>://<rel>`, narrowed by X-Filex-Root), rooted=false when
 	// there is none. A screen reads it off its request (screenScope), a job off
-	// the stamp its door wrote on the job row (rootParamKey); the wake-up, a
-	// public page and a thumbnail have none.
+	// the stamp its door wrote on the job row (rootParamKey), a public page off
+	// its link, which recorded the root of the job that opened it
+	// (model.Share.AppRoot, PageEvent); the wake-up and a thumbnail have none.
 	//
 	// ⚠⚠ What a call is TOLD about files it was not handed (state_list) and
 	// what it may NAME by path (handedPath: a lock, a notice, a page link) is
 	// held to it. The inputs were held to it at the door; these are not inputs,
 	// and until 0.52.0 a `root:` token's screen and jobs were told about, and
 	// could lock, a file the app keeps state on anywhere (filex #154).
+	//
+	// ⚠⚠ The inputs are judged again on EVERY use of their ref (Scope.file,
+	// Scope.Inputs), not only at the door: a public page's input is the link's
+	// document where it lies NOW, and a link outlives the day it was opened.
+	// A document moved out of the root afterwards was still read, written,
+	// locked and named through the ref by the page and by the visitor's job
+	// (filex #185).
 	root   confine.Root
 	rooted bool
+	// rootStorage is the name of the call's storage for the root alone, on a
+	// scope that has no storageName: a public page's (its inputs carry no
+	// adapter-qualified path), whose root is still judged by a storage's name.
+	rootStorage string
 }
 
 // inRoot reports whether rel on the storage called storageName lies inside
@@ -153,9 +165,26 @@ func (s *Scope) inRoot(storageName, rel string) bool {
 	return storageName != "" && s.root.Within(storageName, strings.Trim(rel, "/"))
 }
 
+// inOwnRoot is inRoot for a path on the call's own storage.
+func (s *Scope) inOwnRoot(rel string) bool {
+	name := s.storageName
+	if name == "" {
+		name = s.rootStorage
+	}
+	return s.inRoot(name, rel)
+}
+
 // confineTo holds the call to root (see Scope.root).
 func (s *Scope) confineTo(root confine.Root) {
 	s.root, s.rooted = root, true
+}
+
+// holds reports whether this call may use f: a file on the storage (an input,
+// Rel set) only inside the call's root, every spool file (an output, an engine
+// artefact, an asset, a public page's exposed copy) always - it is the call's
+// own.
+func (s *Scope) holds(f *scopeFile) bool {
+	return f.Rel == "" || s.inOwnRoot(f.Rel)
 }
 
 func newScope(plugin *Installed, reg *Registry, jobID string, storageID int64, drv storage.Driver, actor *model.User, locale string, writable bool) (*Scope, error) {
@@ -190,14 +219,15 @@ func (s *Scope) qualified(rel string) string {
 	return s.storageName + "://" + strings.TrimPrefix(rel, "/")
 }
 
-// Inputs lists the registered inputs in order.
+// Inputs lists the registered inputs in order: those the call may use (holds),
+// so an input outside the call's root is not even named to the app.
 func (s *Scope) Inputs() []wire.FileRef {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]wire.FileRef, 0, len(s.order))
 	for _, ref := range s.order {
 		f := s.files[ref]
-		if f == nil || f.Output || f.Asset {
+		if f == nil || f.Output || f.Asset || !s.holds(f) {
 			continue
 		}
 		out = append(out, wire.FileRef{Ref: f.Ref, Name: f.Name, Size: f.Size, Mime: f.Mime, PathRel: f.Rel, Path: s.qualified(f.Rel), ReadOnly: s.readOnly && f.Rel != ""})
@@ -231,11 +261,18 @@ func (s *Scope) Close() {
 	}
 }
 
+// file resolves a ref of this call. Every use of a ref goes through here - a
+// read, a spool for an engine or an exposed copy, per-file state, a lock, a
+// notice, a link - so an input outside the call's root (holds) is answered as
+// no such ref at all, on every use and whatever the file is (filex #185).
 func (s *Scope) file(ref string) (*scopeFile, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.files[ref]
-	return f, ok
+	if !ok || !s.holds(f) {
+		return nil, false
+	}
+	return f, true
 }
 
 // Output returns a plugin-created file by ref, for committing.

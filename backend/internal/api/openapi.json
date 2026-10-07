@@ -3,7 +3,7 @@
   "info": {
     "title": "filex - files and agents API",
     "version": "0.50.0",
-    "description": "The routes under `/api/files` (what the web explorer, the desktop app, embeds and `filex client` call) and `/api/ai` (the agent surface: REST and the MCP endpoint). Every operation here is a route the server registers: `web/tests/docs/openapiRoutes.test.ts` holds this file to `backend/internal/api/routes.go` in both directions - no operation the server does not serve, no `/api/files` or `/api/ai` route left out. The admin API (`/api/admin`, `/api/ai/admin`) is not described here; see docs/BACKEND.md.\n\nPaths of files are `<storage>://<path>`. A change sent by a browser with only the session cookie from another origin is refused (`403 cross_origin_refused`); a Bearer or `X-Filex-Token` header is not affected. An API token is held to its verbs (`x-filex-token-verb` on `/api/files`, `x-filex-token-scope` on `/api/ai`).",
+    "description": "The routes under `/api/files` (what the web explorer, the desktop app, embeds and `filex client` call) and `/api/ai` (the agent surface: REST and the MCP endpoint). Every operation here is a route the server registers: `web/tests/docs/openapiRoutes.test.ts` holds this file to `backend/internal/api/routes.go` in both directions - no operation the server does not serve, no `/api/files` or `/api/ai` route left out. The admin API (`/api/admin`, `/api/ai/admin`) is not described here; see docs/BACKEND.md.\n\nPaths of files are `<storage>://<path>`. A change sent by a browser with only the session cookie from another origin is refused (`403 cross_origin_refused`); a Bearer or `X-Filex-Token` header is not affected. An API token is held to its verbs (`x-filex-token-verb` on `/api/files`, `x-filex-token-scope` on `/api/ai`), and where an operation also asks a permission with a level, to that (`x-filex-token-permission`: `comments:read`, `comments:write` - the token's `comments:rw`; docs/RBAC.md).",
     "license": {
       "name": "MIT",
       "identifier": "MIT"
@@ -1519,7 +1519,8 @@
         "externalDocs": {
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/MCP.md"
         },
-        "x-filex-token-scope": "read"
+        "x-filex-token-scope": "read",
+        "x-filex-token-permission": "comments:read"
       },
       "post": {
         "operationId": "aiCommentAdd",
@@ -1579,7 +1580,8 @@
         "externalDocs": {
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/MCP.md"
         },
-        "x-filex-token-scope": "write"
+        "x-filex-token-scope": "read",
+        "x-filex-token-permission": "comments:write"
       }
     },
     "/api/ai/comments/{id}/delete": {
@@ -1627,7 +1629,8 @@
         "externalDocs": {
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/MCP.md"
         },
-        "x-filex-token-scope": "write"
+        "x-filex-token-scope": "read",
+        "x-filex-token-permission": "comments:write"
       }
     },
     "/api/ai/permissions": {
@@ -3019,7 +3022,8 @@
         "externalDocs": {
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#get-apifilescomments"
         },
-        "x-filex-token-verb": "read"
+        "x-filex-token-verb": "read",
+        "x-filex-token-permission": "comments:read"
       },
       "post": {
         "operationId": "addComment",
@@ -3069,7 +3073,8 @@
         "externalDocs": {
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilescomments"
         },
-        "x-filex-token-verb": "write"
+        "x-filex-token-verb": "read",
+        "x-filex-token-permission": "comments:write"
       }
     },
     "/api/files/comments/{id}": {
@@ -3107,7 +3112,9 @@
         },
         "externalDocs": {
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#delete-apifilescommentsid"
-        }
+        },
+        "x-filex-token-verb": "read",
+        "x-filex-token-permission": "comments:write"
       }
     },
     "/api/files/copy": {
@@ -4909,6 +4916,72 @@
                     "verdict",
                     "scope"
                   ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
+    "/api/files/onlyoffice/session": {
+      "post": {
+        "operationId": "onlyofficeSession",
+        "summary": "Whether an open editing session is still on the document's current version, and the person's answer when it is not",
+        "tags": [
+          "Documents"
+        ],
+        "description": "For an office editor whose document changed outside it (#184). `action` `state` (the default) asks: `stale` true means a save of the session would be written beside the document as a conflict copy (`<name>.filex-conflict-<time>.<ext>`), not over it. `mine` is the answer \"write my version over the outside one\" (the session's save is written over the version there now), `theirs` \"keep the outside version\" (the session's save is not written). `known` is false when filex has no record of the session (one opened before the record existed, or whose record expired); the record is kept in the database, so every instance behind it answers alike. Asking needs what opening the document needs; an answer needs files.modify and a token that may write.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "key"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The file, as `<storage>://<path>`."
+                  },
+                  "key": {
+                    "type": "string",
+                    "description": "The editor's ONLYOFFICE `document.key`."
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "state",
+                      "mine",
+                      "theirs"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stale": {
+                      "type": "boolean"
+                    },
+                    "known": {
+                      "type": "boolean"
+                    }
+                  }
                 }
               }
             }

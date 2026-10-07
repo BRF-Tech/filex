@@ -26,6 +26,10 @@ export interface PluginRequestSource {
   source?: string;
   /** An upgrade from the installed plugin's own source. */
   from_source?: boolean;
+  /** A request from the store screen (#162): the store, the app there, the version its catalog offered. */
+  store?: string;
+  store_app?: string;
+  store_version?: string;
 }
 
 export interface PluginRequest {
@@ -38,7 +42,7 @@ export interface PluginRequest {
   label?: PluginText;
   /** An upgrade: the installed plugin it replaces. */
   plugin_id?: number;
-  source_kind: 'github' | 'url' | 'source' | 'from_source' | string;
+  source_kind: 'github' | 'url' | 'source' | 'from_source' | 'store' | string;
   source: PluginRequestSource;
   version: string;
   /** An upgrade: the version it replaces. */
@@ -82,6 +86,15 @@ export interface PluginRequest {
   association_errors?: string[];
 }
 
+/** A fresh install link an approval asked a store for: opened in the store review. */
+export interface StoreIntentLink {
+  store: string;
+  token: string;
+  app: string;
+  version: string;
+  expires_at: string;
+}
+
 export interface PluginRequestList {
   requests: PluginRequest[];
   /** How many days a request waits before it expires. */
@@ -118,6 +131,22 @@ export const PluginRequestsApi = {
       { timeout: PLUGIN_REQUEST_APPROVE_TIMEOUT_MS },
     );
     return data.request;
+  },
+
+  /**
+   * Approve a request from the store screen (#162): the connected store makes
+   * a FRESH install link for this filex, which the panel opens in the store
+   * review (`keepStoreLink` + the `store-install` route) - the install is that
+   * review's, and it closes the request. `licenseKey` (optional) goes to the
+   * store with the approval; it can also be given at the install.
+   */
+  async approveFromStore(id: number, licenseKey = ''): Promise<{ request: PluginRequest; store_intent: StoreIntentLink }> {
+    const { data } = await api.post<{ request: PluginRequest; store_intent: StoreIntentLink }>(
+      `/admin/plugin-requests/${id}/approve`,
+      licenseKey.trim() ? { license_key: licenseKey.trim() } : {},
+      { timeout: PLUGIN_REQUEST_APPROVE_TIMEOUT_MS },
+    );
+    return data;
   },
 
   async reject(id: number, reason: string): Promise<PluginRequest> {

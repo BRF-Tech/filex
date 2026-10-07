@@ -25,6 +25,14 @@ export { resolveE2eName, registerE2eNameResolver, type E2eNameResolver } from '.
 // fullscreen editor route (e.g. /files/edit) without re-implementing
 // the viewer dispatch logic.
 export { default as PreviewModal } from './modals/PreviewModal.vue';
+// #184 - what a host hands the viewer when the open document changed outside
+// it, and the answer it gets back (the desktop app, the editor tab, the web).
+export {
+  outsideAction,
+  type OutsideAnswer,
+  type OutsideChange,
+  type OutsideChoice,
+} from './lib/outsideChange';
 
 // ——— Phase-2 standalone components (consumers can mount these
 //      independently of the FileExplorer host, e.g. a sidebar tray).
@@ -132,6 +140,7 @@ export {
   userSettingsApi,
   type BrowserNotifyPermission,
   type SettingsCapabilities,
+  type SettingsNotificationDigest,
   type SettingsNotificationPrefs,
   type SettingsQuota,
   type SettingsThemeMode,
@@ -140,6 +149,7 @@ export {
   type UserSettingsHost,
 } from './lib/userSettingsHost';
 export {
+  DIGEST_EVENT,
   WEBHOOK_EVENTS,
   eventOffReason,
   eventPossible,
@@ -186,6 +196,33 @@ export {
   type MegaMenuItem,
   type MegaMenuSection,
 } from './lib/megaMenu';
+/* #168 - the admin panel's search: one box for pages, settings, people, API
+ * keys, apps, storages, shares and files. The host passes what may be found
+ * and does the navigating (web/src/components/AdminSearch.vue). `foldText` is
+ * the one rule a typed word is compared with a name or a label by. */
+export { default as PanelSearch } from './components/PanelSearch.vue';
+export {
+  PANEL_SEARCH_FILES_CAP,
+  PANEL_SEARCH_GROUP_CAP,
+  PANEL_SEARCH_KINDS,
+  PANEL_SEARCH_PREFIXED_CAP,
+  PANEL_SEARCH_PREFIXES,
+  PANEL_SEARCH_PREFIX_ORDER,
+  panelExact,
+  panelScore,
+  panelSearchGroups,
+  panelSearchRows,
+  panelWords,
+  parsePanelQuery,
+  withPanelPrefix,
+  type PanelRecentSearch,
+  type PanelRecentStore,
+  type PanelSearchGroup,
+  type PanelSearchItem,
+  type PanelSearchKind,
+  type PanelSearchQuery,
+} from './lib/panelSearch';
+export { foldText } from './lib/fileFilters';
 export { default as RecentlyOpened } from './components/RecentlyOpened.vue';
 // belge:n1 — the "New document" picker. Exported because the entry belongs
 // on every surface, not just the admin app: a host that draws its own
@@ -277,10 +314,17 @@ export type { SurfaceOpenOptions, SurfaceOpenTarget } from './lib/surfaceOpen';
 export { jobOpenOf } from './lib/jobOpen';
 export type { JobOpen } from './lib/jobOpen';
 export type { StepFooter } from './lib/surfaceSteps';
-/* v3 §2 — a choice you can read without clicking. The replacement for
- * `<select>` in every surface, and available to a host that draws its own. */
+/* v3 §2 — a choice you can read without clicking: the replacement for a
+ * dropdown in every surface, and available to a host that draws its own.
+ * `segmented` draws it as one strip (two to four short answers inline). */
 export { default as ChoiceButtons } from './components/ChoiceButtons.vue';
 export type { ChoiceOption } from './components/ChoiceButtons.vue';
+/* #160 — one answer from a longer list, without the browser's native
+ * dropdown (filex draws none: web/tests/ui/noNativeSelect.test.ts). The admin
+ * panel's `ui/Select` is a labelled frame around this same component, and the
+ * Apps store's `FaSelect` is where it came from. */
+export { default as ChoiceSelect } from './components/ChoiceSelect.vue';
+export type { SelectOption } from './components/ChoiceSelect.vue';
 // M3 — public pages for outside participants + the sign track's components.
 export { usePublicPage, publicPageClient, publicPageUrl, PublicPageError } from './composables/usePublicPage';
 export type { PublicPageStore, PublicPageClient, PublicPageStatus, PinFailure } from './composables/usePublicPage';

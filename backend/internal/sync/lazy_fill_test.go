@@ -48,8 +48,7 @@ func itoa(i int) string { return string(rune('a'+i/26)) + string(rune('a'+i%26))
 // last-synced time when it is done, computes folder sizes, and coverage says
 // complete. Scan exclusions stay out.
 func TestLazyFill_ConvergesOnTheWholeTree(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	l := newLazyLab(t, map[string]any{"scan_exclude": "gizli"})
 	makeTree(t, l, 8, 6)
 	l.write(t, "gizli/sir.txt", "x")
@@ -79,8 +78,7 @@ func TestLazyFill_ConvergesOnTheWholeTree(t *testing.T) {
 // where it was on the next start — it does not start over, and it does not
 // lose the folders it had discovered.
 func TestLazyFill_ResumesAfterARestart(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	l := newLazyLab(t, nil)
 	makeTree(t, l, 10, 2)
 
@@ -115,8 +113,7 @@ func TestLazyFill_ResumesAfterARestart(t *testing.T) {
 // While somebody uses the storage the filler slows to LazyFillBusyPause, and
 // a queued open always runs before its next folder.
 func TestLazyFill_YieldsToPeople(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	LazyFillBusyPause = 200 * time.Millisecond
 	l := newLazyLab(t, nil)
 	makeTree(t, l, 6, 1)
@@ -136,8 +133,19 @@ func TestLazyFill_YieldsToPeople(t *testing.T) {
 	// (Nobody is active any more, so no busy pause hides the difference.)
 	l.lc.lastActivity.Store(0)
 	l.lc.request("/dae", reasonOpen)
+	paceCtx, stopPace := context.WithCancel(l.ctx)
 	done := make(chan bool, 1)
-	go func() { done <- l.lc.pace(l.ctx) }()
+	paced := make(chan struct{})
+	go func() {
+		defer close(paced)
+		done <- l.lc.pace(paceCtx)
+	}()
+	// pace reads the pauses setFastLazy puts back: on a failure below it is
+	// stopped and waited for first.
+	defer func() {
+		stopPace()
+		<-paced
+	}()
 	select {
 	case <-done:
 		t.Fatal("the filler went ahead of a queued open")
@@ -158,8 +166,7 @@ func TestLazyFill_YieldsToPeople(t *testing.T) {
 // list without touching any catalogue row; a folder whose listing fails is
 // retried later instead of pinning the filler.
 func TestLazyFill_WorkListCleansItself(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	l := newLazyLab(t, nil)
 	l.write(t, "kalacak/a.txt", "a")
 	l.write(t, "gidecek/b.txt", "b")
@@ -180,8 +187,7 @@ func TestLazyFill_WorkListCleansItself(t *testing.T) {
 //
 // Break: store "idle" unconditionally in fillLoop's empty-batch branch.
 func TestLazyFill_ConvergedAndNothingDueReadsConverged(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	l := newLazyLab(t, nil)
 	makeTree(t, l, 3, 1)
 	ctx, cancel := context.WithCancel(l.ctx)
@@ -208,19 +214,23 @@ func TestLazyFill_ConvergedAndNothingDueReadsConverged(t *testing.T) {
 //
 // Break: drop the handledSince check in fillLoop — 22 listings, not 21.
 func TestLazyFill_DoesNotListAFolderAnOpenAlreadyCatalogued(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	LazyFillBusyPause = 40 * time.Millisecond
 	l := newLazyLab(t, nil)
 	makeTree(t, l, 10, 1) // root + 10 folders + 10 subfolders = 21
 
 	l.lc.noteActivity()
 	ctx, cancel := context.WithTimeout(l.ctx, 20*time.Second)
-	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		l.lc.fillLoop(ctx)
+	}()
+	// Stopped and waited for on a failure too, before setFastLazy puts the
+	// pauses the filler reads back.
+	defer func() {
+		cancel()
+		<-done
 	}()
 	// The root and the first top-level folder are in: the batch holding the
 	// other nine was read already.

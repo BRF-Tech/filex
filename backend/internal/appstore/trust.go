@@ -158,6 +158,8 @@ func (s *Service) Approve(ctx context.Context, origin string, fingerprints []str
 	if err := s.putJSON(ctx, keyTrustPrefix+origin, t); err != nil {
 		return nil, err
 	}
+	// A catalog read under the keys before is read again under these.
+	s.DropCatalog(origin)
 	meta := map[string]any{"store": origin, "fingerprints": Fingerprints(keys)}
 	if prev != nil {
 		meta["previous_fingerprints"] = Fingerprints(prev.Keys)
@@ -178,6 +180,7 @@ func (s *Service) Remove(ctx context.Context, origin string, actorID *int64) (bo
 		return false, err
 	}
 	if ok {
+		s.DropCatalog(origin)
 		s.audit(ctx, actorID, "app_store.untrust", "app_store", origin, map[string]any{"store": origin})
 	}
 	return ok, nil

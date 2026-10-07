@@ -19,6 +19,7 @@ import net from 'node:net';
 
 import { test, expect, type Page } from '@playwright/test';
 import { apiLogin, loginAs } from '../helpers/auth';
+import { pickOption } from '../helpers/choiceSelect';
 
 const STAMP = Date.now();
 const TR_ADMIN = `dead-store-${STAMP}@example.com`;
@@ -34,7 +35,7 @@ async function deadPort(): Promise<number> {
 
 async function openS3Form(page: Page, driverLabel: string, advanced: string) {
   await page.goto('/admin/storages/new');
-  await page.getByLabel(driverLabel, { exact: true }).selectOption('s3');
+  await pickOption(page.getByLabel(driverLabel, { exact: true }), 's3');
   await page.getByRole('button', { name: new RegExp(advanced) }).click();
 }
 

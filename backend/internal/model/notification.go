@@ -190,6 +190,58 @@ type BroadcastFilter struct {
 	// (notify.Service.ListVisible). Ignored by the admin-global read.
 	OwnOnly        bool
 	BroadcastsOnly bool
+	// Digest is the reader's notification digest (internal/notify digest.go,
+	// migration 00087): which of their rows are "quiet" — held for the digest
+	// rather than told one by one. Nil reads every row as it always was. Like
+	// Only and Except it narrows a per-user read and is ignored by the
+	// admin-global one, which is the audit.
+	Digest *DigestFilter
+}
+
+// DigestFilter says which rows of a reader's bell are QUIET: a row above the
+// reader's digest point (After) of one of the kinds they hold for the digest
+// (Quiet). A quiet row is in the reader's list, as read, and counted by
+// neither the unread list nor the badge — the digest that carries it is what
+// is unread. Applied in SQL, so the badge and the list agree.
+type DigestFilter struct {
+	// After is the reader's digest point (notify_digest_state.through_id):
+	// every row at or below it has been told, on its own or in a digest.
+	After int64
+	// Quiet is the event kinds this reader holds for the digest. Empty: no row
+	// is quiet.
+	Quiet []string
+	// Only reads the quiet rows alone, whatever their read state — what a
+	// digest is made of — and UpTo, when above zero, stops at that id.
+	Only bool
+	UpTo int64
+}
+
+// IsQuiet reports whether a row read through f is quiet for its reader — the
+// Go twin of the SQL predicate, for a row already in hand.
+func (f *DigestFilter) IsQuiet(n *Notification) bool {
+	if f == nil || n == nil || n.ID <= f.After {
+		return false
+	}
+	for _, e := range f.Quiet {
+		if e == n.Event {
+			return true
+		}
+	}
+	return false
+}
+
+// DigestPolicy is an administrator's defaults for the notification digest,
+// for the people of one scope: the instance (Scope 0, a single-tenant
+// install) or one tenant (its provider id). Table notify_digest_policy.
+type DigestPolicy struct {
+	Scope int64 `json:"-"`
+	// WindowMinutes is how long the non-urgent notifications are held before
+	// the digest that carries them is sent: 1-15.
+	WindowMinutes int `json:"window_minutes"`
+	// Urgent is the kinds that are told at once for everybody who did not
+	// choose otherwise. Nil: the built-in list (notify.DefaultUrgentEvents).
+	Urgent    []string  `json:"urgent_events"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // NotificationSettings captures per-user notification preferences. Stored
@@ -199,6 +251,32 @@ type NotificationSettings struct {
 	UserID         int64           `json:"user_id"`
 	InAppEnabled   bool            `json:"in_app_enabled"`
 	MutedEventsRaw json.RawMessage `json:"muted_events"`
+	// UrgentOverridesRaw is the person's own urgent choices (migration
+	// 00087): a JSON object {"<event>": true|false}; a kind it does not name
+	// follows the administrator's default. ⚠ Nil on a write keeps what is
+	// stored: a client that knows nothing of the digest (an older desktop
+	// app) resends the two fields above and must not wipe these.
+	UrgentOverridesRaw json.RawMessage `json:"urgent_overrides,omitempty"`
+}
+
+// UrgentOverrides decodes UrgentOverridesRaw. Malformed JSON reads as "no
+// choice made" — the administrator's defaults then apply, which is the
+// fail-open direction for a preference that only ever delays a notice.
+func (s *NotificationSettings) UrgentOverrides() map[string]bool {
+	if s == nil || len(s.UrgentOverridesRaw) == 0 {
+		return nil
+	}
+	var raw map[string]bool
+	if err := json.Unmarshal(s.UrgentOverridesRaw, &raw); err != nil {
+		return nil
+	}
+	out := make(map[string]bool, len(raw))
+	for k, v := range raw {
+		if k = strings.TrimSpace(k); k != "" {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // MutedList decodes MutedEventsRaw into trimmed, non-empty event names.

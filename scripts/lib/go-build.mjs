@@ -108,6 +108,43 @@ export function wslMirrorCd(dir) {
   ].join(' && ');
 }
 
+let toolchainSeen = null;
+
+/**
+ * Where Go runs on this machine: 'native', 'wsl' (the maintainer's Windows
+ * workstation) or 'none'. Asked once per process.
+ */
+export function goToolchain() {
+  if (toolchainSeen === null) toolchainSeen = nativeGo() ? 'native' : wslGo() ? 'wsl' : 'none';
+  return toolchainSeen;
+}
+
+/**
+ * [bin, ...args] that run the shell `script` in `dir` with this machine's Go:
+ * natively in `dir` itself, or under WSL in the mirror of `dir`'s Go module
+ * (wslMirrorCd - never on /mnt). `$FILEX_CHECKOUT` is the checkout as that
+ * shell reaches it: a script is read from it, or one built file written back
+ * into it; Go never runs on it. `more` is appended to the same `export`
+ * (` NAME=value ...`, already quoted): written into the command, never the
+ * environment, because a variable that fails to cross from Windows into WSL
+ * is a variable the command silently goes without.
+ *
+ * Under WSL GOFLAGS=-buildvcs=false: a worktree's `.git` file names a Windows
+ * path WSL's git cannot follow, and `go build` stamps VCS info by default
+ * (lesson #450).
+ *
+ * The release's Go gates (scripts/release/plan.mjs) and the train's merge
+ * queue (scripts/train/merge-queue.mjs) both run Go through this.
+ */
+export function goShellArgv({ dir, checkout, script, more = '', toolchain = goToolchain(), bash = 'bash' }) {
+  const fwd = (p) => String(p).split('\\').join('/');
+  if (toolchain === 'native') return [bash, '-c', `export FILEX_CHECKOUT=${shq(fwd(checkout))}${more} && cd ${shq(fwd(dir))} && ${script}`];
+  if (toolchain === 'wsl') {
+    return ['wsl', '-e', 'bash', '-lc', `${wslMirrorCd(dir)} && export PATH=/usr/local/go/bin:$PATH GOFLAGS=-buildvcs=false FILEX_CHECKOUT=${shq(toWslPath(checkout))}${more} && ${script}`];
+  }
+  return ['node', '-e', 'console.error("no Go toolchain: go is not on PATH, and WSL has none either"); process.exit(1)'];
+}
+
 /**
  * goBuild builds `pkg` (relative to `cwd`, e.g. `./cmd/filex`) into `out`.
  *

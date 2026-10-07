@@ -27,7 +27,7 @@ hero:
 features:
   - icon: ✍️
     title: Apps - things to do with a file
-    details: A second kind of plugin - a sandboxed WebAssembly module, an interface of its own that filex runs in a sandboxed frame, or both - adding actions to the file menu, screens and public pages for people with no account. Installed from a GitHub address through a review of every permission it asks for, with exactly that grant; the review also says plainly what a browser cannot promise about an interface. Apps say when their source has a newer version, nothing is installed until an administrator has reviewed what it changes, and the previous version is one click away. Four ship alongside filex as public repositories - e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, Convert, filextext (an end-to-end encrypted text workspace) and draw.io. Write your own in stock Go, against a test kit.
+    details: A second kind of plugin - a sandboxed WebAssembly module, an interface of its own that filex runs in a sandboxed frame, or both - adding actions to the file menu, screens and public pages for people with no account. Installed from a GitHub address or a trusted store's link through a review of every permission it asks for, with exactly that grant, and the people of your filex can browse a store's catalog on filex's own App store screen and ask for an app; the review also says plainly what a browser cannot promise about an interface. Apps say when their source has a newer version, nothing is installed until an administrator has reviewed what it changes, and the previous version is one click away. Four ship alongside filex as public repositories - e-Signature, which sends a document round for signature and seals the finished file with the installation's own seal, Convert, filextext (an end-to-end encrypted text workspace) and draw.io. Write your own in stock Go, against a test kit.
     link: /APP-PLUGINS
     linkText: Apps docs
   - icon: 🌍
@@ -42,7 +42,7 @@ features:
     linkText: Themes & appearance
   - icon: 🌐
     title: A browser client for your users
-    details: Give someone a user or viewer account and the address …/drive, and they land on their own Home - their storages, what they opened last, what they starred - one click from the file manager itself, with its uploads, sharing, search and editor, and with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application, and it opens on the same Home.
+    details: Give someone a user or viewer account and the address …/drive, and they land on their own Home - their storages, what they opened last, what they starred - one click from the file manager itself, with its uploads, sharing, search and editor, and with no admin panel around it and no separate frontend to deploy. …/admin is the operator's door to the same application, and it opens on the same Home. On a phone the same web app installs like an app, from a band that offers it on the first visit.
     link: /RBAC
     linkText: Roles and access
   - icon: 🖥️
@@ -102,7 +102,7 @@ features:
     linkText: CLI docs
   - icon: 🧭
     title: Navigation people already know
-    details: 'A left panel led by one "+ New" menu - upload files, a new folder, a new document, a file request; the destinations Home, My files, Shared with me, Recent, Starred, Drafts (a new document waits there, visible to nobody else, until you save it where it belongs) and Trash; your tags, each one opening the files carrying it; and the storages you can reach - a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for - unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail from the top bar when you want the width back. Everything around it is one shell, drawn by every embed with no string passed - one search field in the header with its palette shortcut, a Type/People/Modified/Size filter row, Folders and Files as sections, and Details/Activity in the info panel - and uiProfile ''simple'' reduces it for people who want a file drive rather than a file manager.'
+    details: 'A left panel led by one "+ New" menu - upload files, a new folder, a new document, a file request; the destinations Home, My files, Shared with me, Recent, Starred, Drafts (a new document waits there, visible to nobody else, until you save it where it belongs) and Trash; your tags, each one opening the files carrying it; and the storages you can reach - a storage somebody granted you simply appears there, one click, no mount instructions. It is also where "How to connect" and your own API keys live, so an embedded copy of the explorer can hand a user the credential WebDAV or FTPS asks for - unless the embed is proxied with one shared app token, in which case the surfaces that belong to a single person are left out. Collapse it to an icon rail from the top bar when you want the width back. Everything around it is one shell, drawn by every embed with no string passed - one search field in the header with its palette shortcut, a Type/Owner/Modified/Size filter row, Folders and Files as sections, and Details/Activity in the info panel - and uiProfile ''simple'' reduces it for people who want a file drive rather than a file manager.'
     link: /INTEGRATION
     linkText: Turning it on
   - icon: 🧩
@@ -120,6 +120,11 @@ features:
     details: Everyone has one role - Administrator, User, Viewer or a custom role that is its own list of 29 permissions, with limits and folder exceptions - given to the person or through a group they are in, plus per-person exceptions, per-file and per-folder grants with inheritance, and the permissions installed apps declare. Enforced in the backend on every door, from the web app and the agent API to WebDAV, SFTP, FTPS, S3 and NFS; an API key is held to its own verbs on each of them.
     link: /PERMISSIONS
     linkText: Roles & permissions docs
+  - icon: 🗂️
+    title: An admin panel you can find your way in
+    details: Every administrator page sits in one menu of three panels - Files & storage, People & security, System - two clicks away, and one search beside it (Ctrl+K, a button on a phone) finds a page, a single setting, a person, a group, an API key, an app, a storage or a share by its name in your language or in English, and only what you may open.
+    link: /ADMIN-PANEL
+    linkText: Admin panel docs
   - icon: 👥
     title: Groups
     details: Named sets of people, per tenant. Share a folder with a group as you would with a person, and give a group a role that everyone in it without a role of their own holds - a role priority decides between groups. People are added by hand, or follow the groups their sign-in carries - an OIDC claim, LDAP memberOf, the operating system's groups or a proxy header - joining and leaving at every sign-in as the identity provider says.
@@ -142,7 +147,7 @@ features:
     linkText: How it works
   - icon: 🏙️
     title: Tenants that run themselves
-    details: One instance, many tenants, each isolated, each with its own sign-in name (its realm). A tenant's administrator adds the tenant's own OIDC or LDAP, the operator binds shared sign-in providers to one tenant or several, every tenant gets a platform subdomain, and a tenant's own domain is proven by a CNAME and served with a certificate from your proxy, from filex itself through ACME, or its own.
+    details: One instance, many tenants, each isolated, each with its own sign-in name (its realm). A tenant's administrator adds the tenant's own OIDC or LDAP, the operator binds shared sign-in providers to one tenant or several, every tenant gets a platform subdomain, and a tenant's own domain is proven by a CNAME and served with a certificate from your proxy, from filex itself through ACME, or its own. Multi-tenant mode itself is one switch in the admin panel - off, no screen shows a tenant, and turning it off deletes none.
     link: /TENANT-ADMIN
     linkText: Tenant self-service
   - icon: 🏢
@@ -157,7 +162,7 @@ features:
     linkText: Realtime docs
   - icon: 🔔
     title: Webhooks
-    details: Any number of webhook targets, each with its own signing secret and its own list of events, plus a persistent in-app bell - all filled from the same single call. A file that arrived and a file somebody replaced are different events, and an infected upload, a failed one or an encrypted folder opened with its recovery key can each be subscribed to on their own.
+    details: Any number of webhook targets, each with its own signing secret and its own list of events, plus a persistent in-app bell - all filled from the same single call. An optional digest tells a busy folder in one notification - thirty files added is one badge step, not thirty - while every webhook still hears each event at once. A file that arrived and a file somebody replaced are different events, and an infected upload, a failed one or an encrypted folder opened with its recovery key can each be subscribed to on their own.
     link: /NOTIFICATIONS
     linkText: Notifications docs
   - icon: 🦠

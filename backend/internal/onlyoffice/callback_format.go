@@ -225,12 +225,37 @@ func (s *Service) refuseSave(ctx context.Context, node *model.Node, editors []in
 // with the format's extension, or the next free `name (2).ext` beside it.
 func (s *Service) besideTarget(ctx context.Context, drv storage.Driver, node *model.Node, got string) (string, error) {
 	base := strings.TrimSuffix(node.Name, path.Ext(node.Name))
-	want := path.Join(path.Dir(node.Path), base+"."+got)
+	return s.freeBeside(ctx, drv, node, path.Join(path.Dir(node.Path), base+"."+got))
+}
+
+// freeBeside is want, or the next free `name (2).ext` beside it when want is
+// taken on the storage or in the catalogue.
+func (s *Service) freeBeside(ctx context.Context, drv storage.Driver, node *model.Node, want string) (string, error) {
 	taken := func(rel string) bool {
 		n, err := s.Store.GetNodeByPath(ctx, node.StorageID, pathkey.Hash(node.StorageID, rel))
 		return err == nil && n != nil
 	}
 	return ops.UniqueDestNumbered(ctx, drv, want, taken)
+}
+
+// besideSave is one save written beside the document instead of over it:
+// where, in which format, what the editors are told and what the audit row
+// says. Two kinds: a save in another format (saveBeside) and a save of a
+// session the document moved on from (session_base.go saveConflict).
+type besideSave struct {
+	target string
+	// got is the format the bytes are in (the refusal's words).
+	got      string
+	mime     string
+	titleKey string
+	bodyKey  string
+	vars     srvtext.Vars
+	action   string
+	// why is the log line's reason.
+	why string
+	// noCreate, when set, is the reason said instead of refusedNoCreate when
+	// none of the editors may create the file there.
+	noCreate string
 }
 
 // saveBeside writes an edit the document server saved as got (not the
@@ -249,6 +274,24 @@ func (s *Service) saveBeside(ctx context.Context, drv storage.Driver, writer sto
 	if err != nil {
 		return map[string]any{"error": 1, "message": "no free name beside the document"}, nil
 	}
+	return s.writeBeside(ctx, drv, writer, node, br, length, key, users, besideSave{
+		target:   target,
+		got:      got,
+		mime:     assoc.MimeOf(got),
+		titleKey: savedBesideTitle,
+		bodyKey:  savedBesideBody,
+		vars:     srvtext.Vars{"name": node.Name, "saved": path.Base(target), "format": formatName(got), "ext": docExt(node.Name)},
+		action:   AuditActionSavedBeside,
+		why:      "saved in another format",
+	})
+}
+
+// writeBeside writes src at w.target, beside the document, which is left as it
+// was, for one of the session's editors who may create it there
+// (callback_identity.go), and tells them. The map is the callback's answer;
+// err an *errNotWritten for a save that must not be written.
+func (s *Service) writeBeside(ctx context.Context, drv storage.Driver, writer storage.Writer, node *model.Node, src io.Reader, length int64, key string, users []string, w besideSave) (map[string]any, error) {
+	target := w.target
 	// The same gate the document's own save went through, for the new name.
 	gate := writegate.Writes(target).As(syspath.PutWorkCopy)
 	if owner, ok := syspath.DraftOwner(node.Path); ok {
@@ -261,14 +304,17 @@ func (s *Service) saveBeside(ctx context.Context, drv storage.Driver, writer sto
 	}
 	// Who it is written for, and whether they may create it there - checked
 	// now, on the file's own name.
-	editors, why := s.creatorOf(ctx, node, key, users, target, got)
+	editors, why := s.creatorOf(ctx, node, key, users, target, w.got)
 	if why != nil {
+		if w.noCreate != "" && why.key == refusedNoCreate {
+			why = notWritten(w.noCreate, w.vars)
+		}
 		return nil, why
 	}
-	if err := writer.Write(ctx, target, br, length); err != nil {
+	if err := writer.Write(ctx, target, src, length); err != nil {
 		return map[string]any{"error": 1, "message": "write beside: " + err.Error()}, nil
 	}
-	mime := assoc.MimeOf(got)
+	mime := w.mime
 	var size int64
 	if obj, err := drv.Stat(ctx, target); err == nil {
 		size = obj.Size
@@ -276,10 +322,9 @@ func (s *Service) saveBeside(ctx context.Context, drv storage.Driver, writer sto
 			mime = obj.Mime
 		}
 	}
-	vars := srvtext.Vars{"name": node.Name, "saved": path.Base(target), "format": formatName(got), "ext": docExt(node.Name)}
-	meta, _, _ := noticeMeta(savedBesideTitle, savedBesideBody, vars)
+	meta, _, _ := noticeMeta(w.titleKey, w.bodyKey, w.vars)
 	meta["saved_beside"] = node.Path
-	meta["filetype"] = got
+	meta["filetype"] = w.got
 	var saved *model.Node
 	if st, err := s.Store.GetStorage(ctx, node.StorageID); err == nil && st != nil {
 		sy := s.syncer()
@@ -293,9 +338,9 @@ func (s *Service) saveBeside(ctx context.Context, drv storage.Driver, writer sto
 	s.newSessionKey(node.ID)
 	slog.Info("onlyoffice callback: saved beside the document",
 		slog.Int64("storage", node.StorageID), slog.String("path", node.Path),
-		slog.String("saved", target), slog.String("filetype", got))
-	s.audit(ctx, AuditActionSavedBeside, editors, saved.ID, map[string]any{
-		"target_name": target, "storage_id": node.StorageID, "original": node.Path, "filetype": got,
+		slog.String("saved", target), slog.String("filetype", w.got), slog.String("why", w.why))
+	s.audit(ctx, w.action, editors, saved.ID, map[string]any{
+		"target_name": target, "storage_id": node.StorageID, "original": node.Path, "filetype": w.got,
 	})
 	return map[string]any{"error": 0}, nil
 }

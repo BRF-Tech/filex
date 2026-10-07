@@ -632,6 +632,20 @@ func init() {
 					Step string `json:"step"`
 				}
 				_ = pluginkit.PublicPageState("", &st)
+				// event "probe": what the host tells the VISITOR's screen and
+				// lets it name - the files state_list lists for `runs`, and
+				// whether a notice may point at data.path (a path the app
+				// chose) and at the page's own file by ref. The screen is held
+				// to the root of the job that opened the link
+				// (page_root_test.go, app_page_root_test.go).
+				if in.Event == "probe" {
+					target, _ := in.Data["path"].(string)
+					_, byPath := pluginkit.NotifySend(pluginkit.Notice{Title: wire.Text{"en": "look"}, Target: &pluginkit.NoticeTarget{Path: target}})
+					_, byRef := pluginkit.NotifySend(pluginkit.Notice{Title: wire.Text{"en": "look"}, Target: &pluginkit.NoticeTarget{Ref: "in:0"}})
+					text := "listed=" + strings.Join(listedRuns(), ",") + " path=" + hostCode(byPath) + " ref=" + hostCode(byRef)
+					return &wire.Surface{Title: wire.Text{"en": "Probe", "tr": "Probe"},
+						Nodes: []wire.Node{{Type: "text", Props: map[string]any{"text": map[string]string{"en": text, "tr": text}}}}}, nil
+				}
 				if in.Event == "submit" {
 					_ = pluginkit.PublicPageStateSet("", map[string]any{"step": "signed"})
 					_ = pluginkit.StateSet("in:0", "signed_by", "visitor")

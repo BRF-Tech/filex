@@ -145,16 +145,40 @@ const lastLines = (s, n) => String(s ?? '').replace(/\s+$/, '').split(/\r?\n/).s
  * (a RegExp the command's output must match — for a runner that can exit 0
  * having run nothing).
  *
+ * For running gates side by side (`all(…, { jobs })`, task #172):
+ *   `lane`   gates of one lane run one at a time, in list order (two vitest
+ *            runs in one tree, everything in the one WSL mirror of the Go
+ *            module, the browser suites and their ports)
+ *   `after`  names of gates that must have finished first; when one of them
+ *            is red this gate is recorded red too, "not run", and never
+ *            started (a name not in the list is ignored)
+ * For the gate cache (see `cache` below):
+ *   `inputs`      globs of the repository files the verdict depends on; a
+ *                 gate without them is never cached (builds, images: they
+ *                 make what later gates use)
+ *   `cacheExtra`  (ctx) => what else it reads, outside this repository, as
+ *                 a string; null means "could not tell", and the gate runs
+ *
  * The runner never decides a gate may be skipped: a gate either ran and
- * passed, or the release stops.
+ * passed, passed on exactly these inputs before (and says so), or the
+ * release stops.
  */
 export class Gates {
-  constructor({ logsDir, bash, repo, onRecord = () => {} }) {
+  /**
+   * `cache`: { dir, read, write } or null. `dir` holds one JSON file per green
+   * key (<git dir>/filex-release/gate-cache, beside the run state); `read`
+   * lets a gate pass on a green entry for its key (`--no-cache` turns it
+   * off), `write` records a gate that just passed (off in a dry run, which
+   * writes nothing).
+   */
+  constructor({ logsDir, bash, repo, onRecord = () => {}, cache = null }) {
     this.logsDir = logsDir;
     this.bash = bash;
     this.repo = repo;
     this.onRecord = onRecord;
+    this.cache = cache;
     this.results = [];
+    this.tree = null;
     fs.mkdirSync(logsDir, { recursive: true });
   }
 
@@ -163,17 +187,108 @@ export class Gates {
     return path.join(this.logsDir, `${safe}.log`);
   }
 
-  /** Runs every spec (all of them, so one red run shows every problem). */
-  async all(stage, specs, ctx) {
-    const out = [];
-    for (const spec of specs) out.push(await this.one(stage, spec, ctx));
+  /**
+   * Runs every spec (all of them, so one red run shows every problem). With
+   * `jobs` above 1, or when a spec names a `lane` or an `after`, independent
+   * gates run side by side, at most `jobs` at a time.
+   */
+  async all(stage, specs, ctx, { jobs = 1 } = {}) {
+    if (jobs <= 1 && !specs.some((s) => s.lane || s.after?.length)) {
+      const out = [];
+      for (const spec of specs) out.push(await this.one(stage, spec, ctx));
+      return out.every((r) => r.ok);
+    }
+    const out = await this.#schedule(stage, specs, ctx, Math.max(1, jobs));
     return out.every((r) => r.ok);
+  }
+
+  /**
+   * The side-by-side runner. A gate starts when a slot is free, every gate
+   * it is `after` has finished green, and no earlier gate of its lane is
+   * unfinished. Gates are taken in list order, so the list is also the
+   * priority.
+   */
+  #schedule(stage, specs, ctx, jobs) {
+    const names = new Set(specs.map((s) => s.name));
+    const results = new Array(specs.length).fill(null);
+    const started = new Array(specs.length).fill(false);
+    const verdict = new Map();
+    const holder = new Map();
+    let running = 0;
+    return new Promise((resolve) => {
+      const finish = (i, rec) => {
+        results[i] = rec;
+        verdict.set(specs[i].name, rec.ok);
+        running--;
+        if (holder.get(specs[i].lane) === i) holder.delete(specs[i].lane);
+        pump();
+      };
+      const launch = (i, spec) => {
+        started[i] = true;
+        running++;
+        this.one(stage, spec, ctx).then(
+          (rec) => finish(i, rec),
+          (e) => finish(i, { stage, name: specs[i].name, ok: false, detail: `the gate itself crashed: ${e?.stack ?? e}` }),
+        );
+      };
+      const notRun = (i, why) => launch(i, { name: specs[i].name, check: () => ({ ok: false, detail: `not run: ${why}` }) });
+      const pump = () => {
+        for (let i = 0; i < specs.length; i++) {
+          if (started[i]) continue;
+          const s = specs[i];
+          const deps = (s.after ?? []).filter((n) => n !== s.name && names.has(n));
+          const red = deps.find((n) => verdict.get(n) === false);
+          if (red !== undefined) {
+            notRun(i, `it needs "${red}", which is red`);
+            continue;
+          }
+          if (running >= jobs) continue;
+          if (deps.some((n) => !verdict.has(n))) continue;
+          if (s.lane && (holder.has(s.lane) || specs.some((p, j) => j < i && p.lane === s.lane && !results[j]))) continue;
+          if (s.lane) holder.set(s.lane, i);
+          if (jobs > 1) console.log(`  ${dim('start ')}  ${dim(s.name)}`);
+          launch(i, s);
+        }
+        if (results.every(Boolean)) {
+          resolve(results);
+          return;
+        }
+        // Nothing running and nothing able to start: what is left waits on
+        // something that never finishes (`after` names make a cycle).
+        if (running === 0) {
+          for (let i = 0; i < specs.length; i++) if (!started[i]) notRun(i, 'what it waits for never finishes (its `after` names make a cycle)');
+        }
+      };
+      pump();
+    });
   }
 
   async one(stage, spec, ctx) {
     const log = this.logPath(stage, spec.name);
     const t0 = Date.now();
     let res;
+    let key = null;
+    let cached = null;
+    if (this.cache && spec.inputs && !spec.check) {
+      try {
+        key = await this.#cacheKey(spec, ctx);
+        if (key && this.cache.read) cached = await this.#cacheLookup(spec.name, key);
+      } catch (e) {
+        console.log(`  ${yellow('note  ')}  ${spec.name}: the gate cache could not be read (${e?.message ?? e}); the gate runs`);
+        key = null;
+        cached = null;
+      }
+    }
+    if (cached) {
+      const note = log.replace(/\.log$/, '.cached.log');
+      res = { ok: true, detail: `from the cache: green on exactly these inputs at ${cached.at}${cached.head ? ` (${String(cached.head).slice(0, 10)})` : ''}` };
+      fs.writeFileSync(note, `${res.detail}\nkey ${key}\nthe green run's log: ${cached.log ?? '-'}\n`);
+      const rec = { stage, name: spec.name, ok: true, cached: true, detail: res.detail, log: slash(note), secs: 0, at: new Date().toISOString() };
+      this.results.push(rec);
+      this.onRecord(rec);
+      console.log(`  ${green('ok    ')}  ${spec.name} ${dim('(cached)')}  ${dim(res.detail.slice(0, 110))}`);
+      return rec;
+    }
     try {
       res = await this.#execute(spec, ctx, log);
     } catch (e) {
@@ -182,6 +297,9 @@ export class Gates {
     const secs = (Date.now() - t0) / 1000;
     if (!fs.existsSync(log)) fs.writeFileSync(log, `${res.detail ?? ''}\n`);
     const rec = { stage, name: spec.name, ok: !!res.ok, detail: res.detail ?? '', log: slash(log), secs, at: new Date().toISOString() };
+    // Only for the HEAD the key was made from: a commit during the run makes
+    // the key describe something else.
+    if (rec.ok && key && this.cache?.write && revParse(this.repo, 'HEAD') === this.tree?.head) await this.#cacheStore(spec.name, key, { at: rec.at, head: this.tree?.head ?? null, secs, log: rec.log });
     this.results.push(rec);
     this.onRecord(rec);
     const time = dim(`(${secs < 10 ? secs.toFixed(1) : Math.round(secs)}s)`);
@@ -285,6 +403,77 @@ export class Gates {
         }
       });
     });
+  }
+
+  // ── the gate cache (task #172; the rules: scripts/release/checks.mjs) ─────
+  //
+  // ⚠ A key is made only from what HEAD holds, so it is made only when the
+  // working tree IS HEAD (untracked files included: vitest picks up a stray
+  // test file). Ignored build output is not part of it - each gate that needs
+  // a build either builds it itself or comes after the gate that does.
+
+  /** This gate's key, or null when it cannot be told (the gate then runs). */
+  async #cacheKey(spec, ctx) {
+    const { gateCacheKey, inputEntries, parseLsTree } = await import('./checks.mjs');
+    const head = revParse(this.repo, 'HEAD');
+    if (!head) return null;
+    const st = git(this.repo, 'status', '--porcelain', '--untracked-files=all');
+    if (st.status !== 0 || st.stdout.trim()) return null;
+    if (this.tree?.head !== head) {
+      const ls = git(this.repo, 'ls-tree', '-r', '-z', '--full-tree', head);
+      if (ls.status !== 0) return null;
+      this.tree = { head, entries: parseLsTree(ls.stdout) };
+    }
+    const val = (v) => (typeof v === 'function' ? v(ctx) : v);
+    const extra = spec.cacheExtra ? spec.cacheExtra(ctx) : undefined;
+    if (extra === null) return null;
+    const v = spec.vitest;
+    const recipe = {
+      sh: spec.sh ? val(spec.sh) : undefined,
+      cmd: spec.cmd ? val(spec.cmd) : undefined,
+      vitest: v ? { cwd: val(v.cwd), files: val(v.files), env: val(v.env), mustPass: val(v.mustPass) } : undefined,
+      env: val(spec.env),
+      cwd: val(spec.cwd),
+      expect: spec.expect ? String(spec.expect) : undefined,
+      extra,
+    };
+    const files = inputEntries(this.tree.entries, spec.inputs);
+    const facts = { platform: process.platform, arch: process.arch, node: process.version };
+    return gateCacheKey({ name: spec.name, recipe, files, facts });
+  }
+
+  #cacheFile(key) {
+    return path.join(this.cache.dir, `${key}.json`);
+  }
+
+  /** The green entry for this key, or null; an unusable entry is said out loud. */
+  async #cacheLookup(name, key) {
+    const { cacheEntryHit } = await import('./checks.mjs');
+    const file = this.#cacheFile(key);
+    let text;
+    try {
+      text = fs.readFileSync(file, 'utf8');
+    } catch {
+      return null;
+    }
+    const v = cacheEntryHit(text, { key, name });
+    if (v.hit) return v.entry;
+    console.log(`  ${yellow('note  ')}  ${name}: its cache entry is unusable (${v.why}); the gate runs`);
+    return null;
+  }
+
+  /** Records a green gate. A cache that cannot be written costs a run later, nothing now. */
+  async #cacheStore(name, key, entry) {
+    try {
+      const { GATE_CACHE_SCHEMA } = await import('./checks.mjs');
+      fs.mkdirSync(this.cache.dir, { recursive: true });
+      const file = this.#cacheFile(key);
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, `${JSON.stringify({ schema: GATE_CACHE_SCHEMA, name, key, ok: true, ...entry }, null, 2)}\n`);
+      fs.renameSync(tmp, file);
+    } catch (e) {
+      console.log(`  ${yellow('note  ')}  ${name}: green, but the gate cache could not record it (${e?.message ?? e})`);
+    }
   }
 }
 

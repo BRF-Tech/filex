@@ -1,6 +1,8 @@
 import { api } from './client';
 import type {
   ReplicaFailureListResponse,
+  ReplicaInitialCopy,
+  ReplicaLink,
   ReplicaRule,
   ReplicaRuleInput,
   ReplicaSettings,
@@ -48,9 +50,29 @@ export const ReplicaApi = {
     return data;
   },
 
-  /** `queued: false`: a retry of this failure was already waiting. */
-  async fixOne(path: string, op: string): Promise<{ ok: boolean; queued?: boolean }> {
-    const { data } = await api.post<{ ok: boolean; queued?: boolean }>('/admin/replica/fix-one', { path, op });
+  /** `queued: false`: a retry of this failure was already waiting.
+   *  storageId names the failure's storage (several storages replicate). */
+  async fixOne(storageId: number | undefined, path: string, op: string): Promise<{ ok: boolean; queued?: boolean }> {
+    const body: Record<string, unknown> = { path, op };
+    if (storageId) body.storage_id = storageId;
+    const { data } = await api.post<{ ok: boolean; queued?: boolean }>('/admin/replica/fix-one', body);
+    return data;
+  },
+
+  // Initial copies (#186)
+  async initialCopies(): Promise<ReplicaInitialCopy[]> {
+    const { data } = await api.get<{ items?: ReplicaInitialCopy[] }>('/admin/replica/initial-copies');
+    return data?.items ?? [];
+  },
+
+  // Each storage's folder on its target (#186)
+  async links(): Promise<ReplicaLink[]> {
+    const { data } = await api.get<{ items?: ReplicaLink[] }>('/admin/replica/links');
+    return data?.items ?? [];
+  },
+
+  async restartInitialCopy(storageId: number): Promise<ReplicaInitialCopy> {
+    const { data } = await api.post<ReplicaInitialCopy>(`/admin/replica/initial-copies/${storageId}/restart`);
     return data;
   },
 

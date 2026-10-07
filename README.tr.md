@@ -32,8 +32,8 @@ makinedeki **Windows ya da Linux hesabı** - ve çok kiracılı bir kurulumda
 ve sertifikası.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/v0.51.0/explorer-grid-dark.png">
-  <img src="docs/screenshots/v0.51.0/explorer-grid-light.png" alt="filex gezgini - küçük resim ızgarası" width="900">
+  <source media="(prefers-color-scheme: dark)" srcset="https://filex.sh/shots/explorer-grid-dark.5ddafe2dac64.png">
+  <img src="https://filex.sh/shots/explorer-grid-light.484fb070ca19.png" alt="filex gezgini - küçük resim ızgarası" width="900">
 </picture>
 
 </div>
@@ -219,7 +219,7 @@ bir grup çalışması paketi). filex aradaki boşluğu hedefler:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  filex (Go binary; image ~43 MB slim / ~225 MB full)        │
+│  filex (Go binary; image ~62 MB slim / ~241 MB full)        │
 ├─────────────────────────────────────────────────────────────┤
 │  HTTP API (chi)  │  Admin UI (Vue 3, embedded)              │
 │  Auth Drivers:   │  local · oidc · ldap · proxy-header      │
@@ -272,117 +272,117 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 
 | Kutuları tanımlayın - her birine ad verin ve kimin olduğunu söyleyin; belge sonra gelir | Kutuları yerleştirin - bir kutu seçin, sayfada gideceği yere dokunun |
 |---|---|
-| ![Bir imza isteğinin kutularını tanımlama](docs/screenshots/v0.51.0/signing/sign-define-1440.png) | ![Kutuları belgeye yerleştirme](docs/screenshots/v0.51.0/signing/sign-place-1440.png) |
+| ![Bir imza isteğinin kutularını tanımlama](https://filex.sh/shots/signing/sign-define-1440.4a966ffefa4f.png) | ![Kutuları belgeye yerleştirme](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
 
 | İş ortağının bağlantısı - filex'in herkese açık tek ekranı, kurulumunuzun adıyla, PIN arkasında | …ve açtığı şey: yalnızca kendi kutuları - burada, isteği gönderenin seçtiği yazı tipiyle yazılmış bir ad (öteki iki yol çizmek ve yüklemek) |
 |---|---|
-| ![Dış imzacının PIN ekranı](docs/screenshots/v0.51.0/signing/sign-outside-pin-1440.png) | ![Kutularını dolduran dış imzacı](docs/screenshots/v0.51.0/signing/sign-outside-fill-1440.png) |
+| ![Dış imzacının PIN ekranı](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![Kutularını dolduran dış imzacı](https://filex.sh/shots/signing/sign-outside-fill-1440.54632da00ef4.png) |
 
 | Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında | Uygulama kurulurken - istediği her izin, sade bir dille, hiçbir şey çalışmadan önce |
 |---|---|
-| ![Belge kilitli, İmzalar paneli açık](docs/screenshots/v0.51.0/signing/sign-status-1440.png) | ![Kurulum sihirbazının izin incelemesi](docs/screenshots/v0.51.0/apps/apps-install-review-1440.png) |
+| ![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.518a3bd6651f.png) | ![Kurulum sihirbazının izin incelemesi](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
 
 | Kurulu bir uygulama - nereden geldiği, parmak izi ve sahip olduğu her izin, sade bir dille (ayarları ve işlemleri sayfanın daha aşağısında gelir) | Dönüştürücü, bir başka uygulama - her hedef kendi kategorisinin altında, üç adım |
 |---|---|
-| ![Kurulu bir uygulamanın ayrıntıları](docs/screenshots/v0.51.0/apps/apps-detail-1440.png) | ![Dönüştürücünün sihirbazı](docs/screenshots/v0.51.0/apps/convert-wizard-1440.png) |
+| ![Kurulu bir uygulamanın ayrıntıları](https://filex.sh/shots/apps/apps-detail-1440.4e27b40c5ce7.png) | ![Dönüştürücünün sihirbazı](https://filex.sh/shots/apps/convert-wizard-1440.231ada006fd6.png) |
 
 | Kendi arayüzünü getiren bir uygulama - inceleme, paketin parmak izini, paketin dışındaki her adresi (canlı olanı bir izindir, sarı renkte) ve bir tarayıcının söz veremeyeceği şeyi gösterir | …ve o arayüz, filex'in önizlemesinin duracağı yerde, kendi dosya türü için açılmış. Dosyayı filex üzerinden, yalıtılmış bir çerçevede okur ve kaydeder (bu görüntüler için yazılmış küçük bir örnek uygulama) |
 |---|---|
-| ![Kendi arayüzü olan bir uygulamanın kurulum incelemesi](docs/screenshots/v0.51.0/apps/app-interface-review-1440.png) | ![Bir uygulamanın kendi arayüzü, bir dosyanın görüntüleyicisi olarak açık](docs/screenshots/v0.51.0/apps/app-interface-viewer-1440.png) |
+| ![Kendi arayüzü olan bir uygulamanın kurulum incelemesi](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png) | ![Bir uygulamanın kendi arayüzü, bir dosyanın görüntüleyicisi olarak açık](https://filex.sh/shots/apps/app-interface-viewer-1440.519b23618156.png) |
 
 | Kurulumdaki her uygulama ve aralarında bir **dil paketi** - çalışan hiçbir şeyi olmayan bir manifest; bu filex kurulumunun ne kadarını çevirdiğini söyler, paket gidince dili de gider |
 |---|
-| ![Uygulamalar listesi, uygulamaların arasında bir dil paketi](docs/screenshots/v0.51.0/langpack/apps-list-1440.png) |
+| ![Uygulamalar listesi, uygulamaların arasında bir dil paketi](https://filex.sh/shots/langpack/apps-list-1440.c0b6a723e725.png) |
 
 ### Size ait olanlar, nerede olursanız olun
 
 | Çan - üzerinde okunmamışların sayısı, her satır yazdığı yere götürür | Tüm bildirimleriniz, gezginin içinde - yalnızca yöneticiler için değil, herkes için |
 |---|---|
-| ![Okunmamış rozetini taşıyan çan, açık hâlde](docs/screenshots/v0.51.0/signing/bell-badge-1440.png) | ![Gezginin üzerinde bildirimlerin tam listesi](docs/screenshots/v0.51.0/signing/notifications-list-1440.png) |
+| ![Okunmamış rozetini taşıyan çan, açık hâlde](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![Gezginin üzerinde bildirimlerin tam listesi](https://filex.sh/shots/signing/notifications-list-1440.cb8cc10769dc.png) |
 
 | Paylaştıklarım - oluşturduğunuz bağlantılar ve birine iletmeniz gerektiğinde bunların PIN'leri | Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı |
 |---|---|
-| ![Paylaştıklarım, bir satırın Aksiyon menüsü açık](docs/screenshots/v0.51.0/signing/my-shares-1440.png) | ![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](docs/screenshots/v0.51.0/signing/admin-table-actions-1440.png) |
+| ![Paylaştıklarım, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/my-shares-1440.3cdfc7ee8ef3.png) | ![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.401d5cbfacf8.png) |
 
 ### Markanız
 
 | Görünüm - kendi renklerinizle bir tema oluşturun, siz yazdıkça önizlenir | Varsayılan yapıldığında herkesin gezgini onu taşır… |
 |---|---|
-| ![Tema düzenleyicisi](docs/screenshots/v0.51.0/appearance/theme-editor-1440.png) | ![İşletmecinin temasını taşıyan gezgin](docs/screenshots/v0.51.0/appearance/themed-explorer-1440.png) |
+| ![Tema düzenleyicisi](https://filex.sh/shots/appearance/theme-editor-1440.7cf3d997f7b1.png) | ![İşletmecinin temasını taşıyan gezgin](https://filex.sh/shots/appearance/themed-explorer-1440.dbe464fc39c7.png) |
 
 | …oturum açma sayfası da, henüz kimse oturum açmadan | filex'in izlemeyeceği bir sembolik bağ bunu söyler - listede, ayrıntılarında da sözle |
 |---|---|
-| ![İşletmecinin temasını taşıyan oturum açma sayfası](docs/screenshots/v0.51.0/appearance/themed-signin-1440.png) | ![Deponun dışına çıkan bir sembolik bağ, rozetli](docs/screenshots/v0.51.0/symlinks/symlink-badge-1440.png) |
+| ![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.84197bec297e.png) | ![Deponun dışına çıkan bir sembolik bağ, rozetli](https://filex.sh/shots/symlinks/symlink-badge-1440.f85936372113.png) |
 
 ### Dosya yöneticisi
 
 | Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl` | Markdown görüntüleyici |
 |---|---|
-| ![Paylaşım iletişim kutusu](docs/screenshots/v0.51.0/share-modal.png) | ![Markdown görüntüleyici](docs/screenshots/v0.51.0/viewer-markdown.png) |
+| ![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.eaf11836828a.png) | ![Markdown görüntüleyici](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
 
 | …ve karşı taraftaki kişinin açtığı şey. filex'in dışarıya dönük TEK bir ekranı vardır - paylaşılan bir dosya, bir klasör, bir dosya isteği, bir uygulamanın imzalama sayfası ve bunlardan herhangi birinin önündeki PIN, hepsi bu sayfadır, kurulumunuzun adıyla |
 |---|
-| ![Herkese açık bir paylaşım bağlantısı, alıcısının gördüğü hâliyle](docs/screenshots/v0.51.0/public-share.png) |
+| ![Herkese açık bir paylaşım bağlantısı, alıcısının gördüğü hâliyle](https://filex.sh/shots/public-share.0e3ba07f7c88.png) |
 
 | Yönetim paneli | Demo açılış sayfası |
 |---|---|
-| ![Yönetim paneli](docs/screenshots/v0.51.0/admin-dashboard.png) | ![Demo açılış sayfası](docs/screenshots/v0.51.0/demo-landing.png) |
+| ![Yönetim paneli](https://filex.sh/shots/admin-dashboard.7c334e824b3c.png) | ![Demo açılış sayfası](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
 
 | Yönetim menüsü - bütün sayfalar üç panelde, **Dosyalar ve depolama**, **Kişiler ve güvenlik** ve **Sistem**, her sayfanın altında kısa bir satırla; telefonda aynı sayfalar bir çekmecede yer alır ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)) |
 |---|
-| ![Yönetim menüsünün Kişiler ve güvenlik paneli, Yönetim → Kullanıcılar sayfasının üzerinde açık](docs/screenshots/v0.51.0/megamenu/people-panel-1440.png) |
+| ![Yönetim menüsünün Kişiler ve güvenlik paneli, Yönetim → Kullanıcılar sayfasının üzerinde açık](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) |
 
 | Roller - Yönetici, Kullanıcı, İzleyici ve kendi rolleriniz: her birinin kimde olduğu, neye izin verdiği, klasöre göre nerede farklılaştığı, sınırları ([docs/PERMISSIONS.md](docs/PERMISSIONS.md)) |
 |---|
-| ![Yönetim → Roller: yerleşik roller ve iki özel rol](docs/screenshots/v0.51.0/roles/roles-list-1440.png) |
+| ![Yönetim → Roller: yerleşik roller ve iki özel rol](https://filex.sh/shots/roles/roles-list-1440.77477a2c7001.png) |
 
 | Gruplar - klasör erişimi ve bir rolü olan adlandırılmış kişi kümeleri; üyeler elle eklenir ya da oturum açmanın taşıdığı gruplarla eşitlenir ([docs/GROUPS.md](docs/GROUPS.md)) | Bir klasörü kişilerin yanında bir grupla paylaşmak - Sahip seviyesi tek tıkla verilmez, iletişim kutusunda istenir |
 |---|---|
-| ![Yönetim → Gruplar](docs/screenshots/v0.51.0/groups/groups-list-1440.png) | ![Bir klasörü bir grupla paylaşmak](docs/screenshots/v0.51.0/groups/share-group-1440.png) |
+| ![Yönetim → Gruplar](https://filex.sh/shots/groups/groups-list-1440.73224b70e40b.png) | ![Bir klasörü bir grupla paylaşmak](https://filex.sh/shots/groups/share-group-1440.31c2a81e1eeb.png) |
 
 | Giriş güvenliği - giriş denemesi sınırı, izinli adresler, güvenilir vekil sunucular, kilitler ve oturum açma olayları ([giriş denemesi sınırları](docs/CONFIGURATION.md#sign-in-attempt-limits)) | …ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar |
 |---|---|
-| ![Yönetim → Giriş güvenliği](docs/screenshots/v0.51.0/loginsecurity/login-security-1440.png) | ![Kilitli bir hesapta oturum açma formu](docs/screenshots/v0.51.0/loginsecurity/login-locked-1440.png) |
+| ![Yönetim → Giriş güvenliği](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png) | ![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png) |
 
 | Kim şifreleyebilir - kapalı, yalnız yöneticiler, rolü izin veren herkes ya da yönetici onayıyla; bekleyen istekler, kimin neden istediğiyle birlikte ([kim şifreleyebilir](docs/E2E-ENCRYPTION.md#who-may-encrypt)) | …ve isteyen kişinin tarafı: Yeni klasör iletişim kutusu, bir gerekçeyle birlikte, bir yöneticiden tek bir şifreli klasör ister |
 |---|---|
-| ![Yönetim → Şifreleme: onay politikası ve bekleyen üç istek](docs/screenshots/v0.51.0/encryption/admin-encryption-1440.png) | ![Yeni klasör iletişim kutusundan şifreli bir klasör istemek](docs/screenshots/v0.51.0/encryption/request-new-folder.png) |
+| ![Yönetim → Şifreleme: onay politikası ve bekleyen üç istek](https://filex.sh/shots/encryption/admin-encryption-1440.b74163acb93c.png) | ![Yeni klasör iletişim kutusundan şifreli bir klasör istemek](https://filex.sh/shots/encryption/request-new-folder.e74894fba30f.png) |
 
 | Varsayılan uygulamalar - filex dışında bir şeyin işlediği her dosya türü: onu kimin açtığı ve küçük resmini kimin çizdiği, sizin belirlediğiniz sırayla ([Varsayılan uygulamalar](docs/APP-PLUGINS.md#default-apps-which-app-opens-a-file-and-which-draws-its-thumbnail)) | Klasör önizlemeleri - her klasör, içine en son gelen üç dosyayla çizilir; SVG'leri filex'in yerleşik motoru çizer ([docs/thumbnails.md](docs/thumbnails.md#folder-previews)) |
 |---|---|
-| ![Eklentiler → Varsayılan uygulamalar](docs/screenshots/v0.51.0/defaultapps/default-apps-1440.png) | ![En yeni dosyalarıyla çizilmiş klasörler](docs/screenshots/v0.51.0/thumbnails/folders-grid-1440.png) |
+| ![Eklentiler → Varsayılan uygulamalar](https://filex.sh/shots/defaultapps/default-apps-1440.27d3c64fe457.png) | ![En yeni dosyalarıyla çizilmiş klasörler](https://filex.sh/shots/thumbnails/folders-grid-1440.2b408fb54f7e.png) |
 
 | Bir `.csv` dosyası, ONLYOFFICE bağlıysa onun hesap tablosunda açılır - önce görüntülenir, ayırıcı soran iletişim kutusu da çıkmaz: dosyanın kendi ayırıcısı iletilir ([CSV dosyaları](docs/ONLYOFFICE.md#csv-files)) | …ve CSV olarak kaydedilince nelerin kaldığını söyleyen düzenleyicisi; dosya aynı türden bir CSV olarak geri döner |
 |---|---|
-| ![Noktalı virgülle ayrılmış bir CSV, ONLYOFFICE'in hesap tablosunda açık](docs/screenshots/v0.51.0/csvoffice/csv-view-1440.png) | ![CSV, ONLYOFFICE'in düzenleyicisinde, kaydedilince nelerin kaldığını söyleyen notla birlikte](docs/screenshots/v0.51.0/csvoffice/csv-edit-1440.png) |
+| ![Noktalı virgülle ayrılmış bir CSV, ONLYOFFICE'in hesap tablosunda açık](https://filex.sh/shots/csvoffice/csv-view-1440.83237ba55d3d.png) | ![CSV, ONLYOFFICE'in düzenleyicisinde, kaydedilince nelerin kaldığını söyleyen notla birlikte](https://filex.sh/shots/csvoffice/csv-edit-1440.4efc379a293d.png) |
 
 | Kabuk - herkesin karşılaştığı düzen | Bu klasörde arama; `⌘K` / `Ctrl K` sorguyu palete devreder |
 |---|---|
-| ![filex kabuğu](docs/screenshots/v0.51.0/driveshell/driveshell-hero-1440.png) | ![Bir klasörde arama](docs/screenshots/v0.51.0/driveshell/driveshell-search-1440.png) |
+| ![filex kabuğu](https://filex.sh/shots/driveshell/driveshell-hero-1440.d8c44de4f498.png) | ![Bir klasörde arama](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
 
 | Gezinti paneli - Ana sayfa, Benimle paylaşılanlar, Paylaştıklarım, Son kullanılanlar, Yıldızlılar, Çöp kutusu ve erişebildiğiniz depolar | Simge şeridine daraltılmış |
 |---|---|
-| ![Gezinti paneli](docs/screenshots/v0.51.0/sidenav/sidenav-expanded-1440.png) | ![Bir şeride daraltılmış](docs/screenshots/v0.51.0/sidenav/sidenav-rail-1440.png) |
+| ![Gezinti paneli](https://filex.sh/shots/sidenav/sidenav-expanded-1440.ef235f94c521.png) | ![Bir şeride daraltılmış](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
 
 | Etiketler - kendi etiketleriniz ya da ekibinizinkiler; bir etiket, onu taşıyan her dosyayı hangi klasörde durursa dursun açar | Çöp kutusu - neyin silindiği, nereden geldiği ve gitmesine ne kadar kaldığı |
 |---|---|
-| ![Kişisel etiketler ve ekip etiketleri](docs/screenshots/v0.51.0/tags/tags-kinds-1440.png) | ![Çöp kutusu görünümü](docs/screenshots/v0.51.0/sidenav/view-trash-1440.png) |
+| ![Kişisel etiketler ve ekip etiketleri](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png) | ![Çöp kutusu görünümü](https://filex.sh/shots/sidenav/view-trash-1440.c7438b1e66a8.png) |
 
 | Benimle paylaşılanlar - başkalarının size yetki verdiği klasörler, bağlama talimatı yok | Başka bir ürünün sayfasına gömülü |
 |---|---|
-| ![Benimle paylaşılanlar](docs/screenshots/v0.51.0/sidenav/view-shared-1440.png) | ![Gömülü web bileşeni](docs/screenshots/v0.51.0/sidenav/embed-webcomponent-1440.png) |
+| ![Benimle paylaşılanlar](https://filex.sh/shots/sidenav/view-shared-1440.6f68fd5b581d.png) | ![Gömülü web bileşeni](https://filex.sh/shots/sidenav/embed-webcomponent-1440.2dc86ba73804.png) |
 
 | Nasıl bağlanılır - kılavuzlar, *sizin* kurulumunuzdan üretilir | API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz) |
 |---|---|
-| ![Nasıl bağlanılır](docs/screenshots/v0.51.0/sidenav/connect-1440.png) | ![API anahtarları](docs/screenshots/v0.51.0/sidenav/apikeys-minted-1440.png) |
+| ![Nasıl bağlanılır](https://filex.sh/shots/sidenav/connect-1440.ade9043dddde.png) | ![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.14eb6d484613.png) |
 
 | filex'e her şeyden erişmek - S3, SFTP, FTPS, NFS, WebDAV. Her komut *sizin* kurulumunuzdan üretilir |
 |---|
-| ![Bağlantı kılavuzu](docs/screenshots/v0.51.0/connections-guide.png) |
+| ![Bağlantı kılavuzu](https://filex.sh/shots/connections-guide.cf9a135724c9.png) |
 
 | filex'le birlikte gelmeyen bir depo - **Eklentiler → Depolama eklentileri** sayfasında eklenti olarak kurulur, yapılandırma formunu kendisi tanımlar |
 |---|
-| ![Eklentiler](docs/screenshots/v0.51.0/admin-plugins.png) |
+| ![Eklentiler](https://filex.sh/shots/admin-plugins.c25fa69cfc7c.png) |
 
 ## Hızlı başlangıç - ikili dosya
 
@@ -520,10 +520,11 @@ bir kopya değil, web arayüzünün ve gömülü gezginlerin gösterdiği bileş
   çalıştırma, 30 günlük yerel çöp kutusu ve eksik bir klasörü toplu silmeye çevirmeyi
   reddeden bir motor ([docs/SYNC.md](docs/SYNC.md)).
 - **Office belgelerini kendi diskinizden açar** - bir `.docx`/`.xlsx`/`.pptx` dosyasına
-  (ya da on Office türünden herhangi birine) çift tıklayın; belge, Office kurulu olmayan
+  (ya da on Office türünden herhangi birine veya bir `.csv` dosyasına) çift tıklayın; belge, Office kurulu olmayan
   bir makinede, sunucunuzun çalıştırdığı düzenleyicide açılır. Bu bilgisayarda tuttuğunuz
   bir klasörün içindeki belgenin kendisi açılır; bunun dışındaki her şey sunucuya
-  kopyalanır, düzenlenir ve özgün dosyanın üzerine geri yazılır
+  kopyalanır, düzenlenir ve özgün dosyanın üzerine geri yazılır - düzenleyici onu başka bir
+  biçimde kaydederse (eski bir `.doc` `.docx` olarak döner) yanına yazılır
   ([docs/DESKTOP.md](docs/DESKTOP.md#opening-documents-from-your-computer)).
 - **Sürücü olarak bağla** - Ayarlar'daki bir düğme sunucuyu WebDAV üzerinden işletim
   sisteminin bir sürücüsü olarak bağlar, bir başkası ayırır; kimlik bilgisi hesabın kendi
@@ -805,7 +806,7 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
 - **Sekmeler, temalar ve derin bağlantılar** - yan yana açık birkaç klasör, aydınlık/karanlık/otomatik tema ve açık klasörü izleyen bir adres çubuğu, böylece yapıştırılan bir bağlantı o klasöre götürür. Tema galerisinde sekiz palet hazır gelir; her biri ikinci bir stil dosyası değil, `--fe-*` değişkenlerinin bir eşlemesidir, böylece barındıran bir sayfa ya da gömülü bir gezgin birini seçebilir - ya da kendi değerlerini verebilir - ve bunun için hiçbir CSS'i çatallaması gerekmez; işletmeci kendi paletlerini ekleyebilir (bkz. *Görünüm*).
 - **Görünüm: sizin renkleriniz, her yerde** - yönetim panelindeki **Görünüm** ekranı, siz yazdıkça önizlenen adlandırılmış temalar oluşturur - açık ve koyu için on iki renk, köşe yarıçapı, yazı tipi yığını - ve birini **kurulum varsayılanı** yapar. Renkli bir düğmenin üzerindeki metin beyaz varsayılmaz, kontrasta göre seçilir; paletin geri kalanı sunucuda türetilir ve tema, oturum açma sayfasına ve herkese açık her bağlantıya ulaşır - kendi tonlarıyla ya da bu iki sayfaya özel olarak verdiğiniz renklerle - çünkü oturum açma sayfasına gelince duran bir marka, marka değildir: oturum açılmamış bir sayfa kurulum varsayılanını taşır, o tarayıcıyı en son kullanan kişinin paletini asla taşımaz ve oturum açmış kişinin kendi seçimi önceliklidir. Temalar tek bir JSON dosyası olarak dışa ve içe aktarılır. Onun yanındaki tehlikeli araç **özel CSS**'tir; artık siz açana kadar kapalıdır, oturum açmamış hiç kimseye sunulmaz, hiçbir şey çekemez ve onu kapatan ekrana ulaşamaz ([docs/INTEGRATION.md](docs/INTEGRATION.md#themes)).
 - **Her yerde tek tablo** - filex'te geriye tek bir tablo kaldı, gezgininki; diğer her liste de o tablodur: yönetim panelinin menüleri, **Paylaştıklarım**, bir uygulamanın kendi ekranları. Her biri ilk sütununu solda, işlemlerini sağda dondurur, aynı biçimde boyutlandırılır, yeniden dizilir ve sıralanır, her satırı da o satırda yapılabilecek her şeyi içeren **sabitlenmiş tek bir Aksiyon menüsü** ile bitirir - gezgindeki ⋮ ile açılan menünün aynısı, böylece ikinci bir tablo birincisinden ayrışamaz. Ana ekranı olan kurulu bir uygulama, panelin gezintisinde **Uygulamalar** altında kendi satırıyla yer alır.
-- **İçinde yolunuzu bulabileceğiniz bir yönetim paneli** - yöneticinin sayfaları üst çubuktaki bir mega menüde durur: önce Panel sayfası, ardından **Dosyalar ve depolama**, **Kişiler ve güvenlik** ve **Sistem**; bunların her biri adlandırılmış bölümlerden oluşan bir paneldir, her sayfanın altında da kısa bir satır bulunur. Her sayfa iki tık uzakta ve her zamanki adresindedir; yetki devredilen bir yöneticiye yalnızca izinlerinin açtığı sayfalar sunulur, klavye ve ekran okuyucular desteklenir, telefonda ise aynı sayfalar bir çekmecede liste olarak yer alır ([Yönetim paneli](docs/ADMIN-PANEL.md)).
+- **İçinde yolunuzu bulabileceğiniz bir yönetim paneli** - yöneticinin sayfaları üst çubuktaki bir mega menüde durur: önce Panel sayfası, ardından **Dosyalar ve depolama**, **Kişiler ve güvenlik** ve **Sistem**; bunların her biri adlandırılmış bölümlerden oluşan bir paneldir, her sayfanın altında da kısa bir satır bulunur. Her sayfa iki tık uzakta ve her zamanki adresindedir; yetki devredilen bir yöneticiye yalnızca izinlerinin açtığı sayfalar sunulur, klavye ve ekran okuyucular desteklenir, telefonda ise aynı sayfalar bir çekmecede liste olarak yer alır. Menünün yanındaki **arama** (Ctrl+K, telefonda bir düğme) bir sayfayı, tek bir ayarı, bir kişiyi, grubu, API anahtarını, uygulamayı, depoyu ya da paylaşımı arayüzün dilindeki ya da İngilizce adıyla bulur; dosyaları istendiğinde (`file:`), ve yalnızca açabildiklerinizi ([Yönetim paneli](docs/ADMIN-PANEL.md), [Arama](docs/ADMIN-PANEL.md#search)).
 - **Sembolik bağlar, depo sınırında** - `local` bir deponun içindeki, yine o deponun içini gösteren bir bağ izlenir ve gösterdiği şey olarak açılır; deponun dışına çıkan bir bağ ise **bir rozetle ve nedeniyle listelenir**, okuma, yazma ve silmede reddedilir - o depo için *Bu klasörün dışına çıkan sembolik bağları izle* seçeneğini açmadığınız sürece ([docs/STORAGE.md](docs/STORAGE.md#symlinks)).
 - **Her cihazda alışıldığı gibi açılır** - **fareyle** tek tık seçer, **çift tık açar** (Enter seçili olanı açar) - klasik dosya yöneticisi hareketi ve kişiye özel bir tercih (`ExplorerConfig.openTrigger`, varsayılan `'double'`; masaüstü uygulaması bunu **Ayarlar → Dosyaları açma** olarak sunar, `'single'` değeri ise tek tıkla açmayı geri getirir). **Dokunmatik ekranda** tek dokunuş her zaman açar - üzerine gelince seçme yoktur. Her cihazda seçim yapan tek tık ya da dokunuş **onay kutusundadır** (Shift aralığı genişletir), sağ tık ya da uzun basma ise menüyü açar; liste satırları, ızgara kartları ve galeri karoları, hepsi bu kutuyu taşır.
 - **Klavyeyle kullanılır, tuşunu da yazar** - sağ tık menüsündeki ve araç çubuğundaki her eylem, kendisini çalıştıran tuşu yazar; tuş kısayol kaydından okunduğu için yeniden atamaya uyar. Otuz iki işlemin tuşu *Kısayol ayarları* üzerinden yeniden atanabilir (her tarayıcıda ayrı saklanır); tarayıcının kendine ayırdığı, `Ctrl+W` gibi bir avuç kombinasyon, hiç çalışmayacak bir tuş olarak saklanmak yerine nedeni belirtilerek reddedilir.

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { createNotificationFeed } from '@brftech/filex-core';
 import { NotificationsApi } from '@/api/notifications';
-import type { NotificationItem, NotificationSettings, WebhookConfig } from '@/api/types';
+import type { NotificationItem, NotificationSettings, NotificationSettingsPatch, WebhookConfig } from '@/api/types';
 import { extractError } from '@/api/client';
 import { t } from '@/i18n';
 
@@ -83,7 +83,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     }
   }
 
-  async function updateSettings(payload: { in_app_enabled: boolean; muted_events: string[] }): Promise<void> {
+  async function updateSettings(payload: NotificationSettingsPatch): Promise<void> {
     settings.value = await NotificationsApi.updateSettings(payload);
   }
 

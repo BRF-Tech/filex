@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/newdoc.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/newdoc/:
+// Writes e2e/.artifacts/shots/capture/newdoc/:
 //
 //   newdoc-any-name-1280.png     the dialog with Plain text chosen and the name
 //                                field holding `LICENSE` — the whole name, no
@@ -30,6 +30,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { pinTimes } from './clock.mjs';
 import { addLocalStorage, bootInstance, client, newContext, shot, signIn, sleep } from './scene.mjs';
 
 const SET = 'newdoc';
@@ -127,6 +128,7 @@ async function main() {
     writeFileSync(join(root, 'Makefile'), 'build:\n\tgo build ./...\n');
     writeFileSync(join(root, 'config.yaml'), 'port: 8080\n');
     writeFileSync(join(root, 'src', 'main.go'), 'package main\n\nfunc main() {}\n');
+    pinTimes(root);
     await addLocalStorage(admin, 'projects', root);
     await admin.post('/api/notifications/read-all', {});
 

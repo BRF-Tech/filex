@@ -15,6 +15,7 @@ import { createI18n } from 'vue-i18n';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import type { AuthProvider } from '@/api/types';
+import { pickOption } from '../helpers/choiceSelect';
 
 const api = vi.hoisted(() => ({
   setTenants: vi.fn(async () => null),
@@ -57,6 +58,7 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
 
 import AuthProviders from '@/views/AuthProviders.vue';
 import AuthProviderEdit from '@/views/AuthProviderEdit.vue';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 
 function p(id: string, extra: Partial<AuthProvider> = {}): AuthProvider {
   return {
@@ -95,6 +97,9 @@ async function mountPage(slug = '', locale: 'en' | 'tr' = 'en') {
 
 beforeEach(() => {
   setActivePinia(createPinia());
+  // A multi-tenant install: the server's one answer the page follows (#167).
+  const caps = useCapabilitiesStore();
+  caps.data = { ...caps.data, multi_tenant: true };
   vi.clearAllMocks();
   fx.review = true;
   fx.providers = [
@@ -157,9 +162,7 @@ describe('Identity providers - tenants', () => {
     await flushPromises();
     await w.get('[data-testid="auth-provider-add"]').trigger('click');
     await flushPromises();
-    const kind = document.querySelector('[data-testid="auth-provider-add-kind"] select') as HTMLSelectElement;
-    kind.value = 'oidc';
-    kind.dispatchEvent(new Event('change'));
+    await pickOption(document.querySelector('[data-testid="auth-provider-add-kind"]')!, 'oidc');
     const label = document.querySelector('[data-testid="auth-provider-add-label"] input') as HTMLInputElement;
     label.value = 'Partner SSO';
     label.dispatchEvent(new Event('input'));
@@ -186,5 +189,36 @@ describe('Identity providers - tenants', () => {
     expect(api.remove).toHaveBeenCalledWith('corp-sso', false);
     expect(router.currentRoute.value.name).toBe('auth-providers');
     expect(router.currentRoute.value.query.tab).toBe('oidc');
+  });
+});
+
+// #167: with multi-tenant mode off nothing about tenants is drawn - not the
+// bindings, not the upgrade notice, not a card's tenant count, not the add
+// dialog's "for some tenants only" - and the page follows the server's one
+// answer (capabilities `multi_tenant`), not its own reading of its list.
+describe('Identity providers - multi-tenant mode off', () => {
+  beforeEach(() => {
+    const caps = useCapabilitiesStore();
+    caps.data = { ...caps.data, multi_tenant: false };
+  });
+
+  it('a provider page shows no tenant bindings', async () => {
+    const { w } = await mountPage('ldap');
+    await flushPromises();
+    expect(w.find('[data-testid="auth-provider-tenants-ldap"]').exists()).toBe(false);
+    expect(w.text()).not.toContain(en.authProviders.tenantsTitle);
+    expect(w.text()).not.toContain(en.authProviders.platformTenant);
+  });
+
+  it('the list shows no notice, no tenant count, and the add dialog speaks of no tenant', async () => {
+    const { w } = await mountPage();
+    await flushPromises();
+    expect(w.find('[data-testid="auth-providers-review"]').exists()).toBe(false);
+    expect(w.find('[data-testid="auth-card-tenants-ldap"]').exists()).toBe(false);
+    await w.get('[data-testid="auth-provider-add"]').trigger('click');
+    await flushPromises();
+    const form = document.querySelector('[data-testid="auth-provider-add-form"]') as HTMLElement;
+    expect(form.textContent).toContain(en.authProviders.addHintSingle);
+    expect(form.textContent ?? '').not.toMatch(/tenant/i);
   });
 });

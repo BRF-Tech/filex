@@ -2,7 +2,7 @@
 //
 //   node e2e/shots/realm.mjs       (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/realm/ (or SHOTS_OUT):
+// Writes e2e/.artifacts/shots/capture/realm/ (or SHOTS_OUT):
 //
 //   login-realm-1440.png         the platform's sign-in page: the Realm field,
 //                                empty and free (empty = the platform's own

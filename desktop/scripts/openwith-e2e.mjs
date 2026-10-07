@@ -8,7 +8,20 @@
 //   • the scratch round trip — upload, editor window, poll, atomic write-back,
 //     cleanup of the copy after the window closes;
 //   • the SYNCED-TWIN route — a document inside a kept folder opens against its
-//     remote twin and creates no copy at all.
+//     remote twin and creates no copy at all;
+//   • #184 — the document changing OUTSIDE filex while it is open: an agent
+//     renames new bytes over it, the open editor moves to them (a new working
+//     copy, a note on the page), a late save of the old editor lands BESIDE
+//     the document, and the next save goes over the agent's version only
+//     because filex now stands on it. The question for an editor WITH edits
+//     needs ONLYOFFICE's edit events and is measured in the browser tests
+//     (web/tests/components/officeOutsideChange.test.ts) and by hand;
+//   • #151 — a save in another format: an old .doc whose save comes back as
+//     DOCX (beside the working copy, as a 0.51+ server writes it, or over it,
+//     as an older one did) lands beside the document as Rapor.docx, the next
+//     save of the session goes to the same file, and the copies go with the
+//     session; a .csv opens too, saved as CSV over itself, saved as a
+//     spreadsheet beside it.
 //
 // ⚠ OnlyOffice itself is NOT in the loop, and cannot honestly be: the document
 // server is a separate ~2 GB service that has to reach the filex instance over
@@ -42,6 +55,23 @@ const STORAGE = 'docs';
 const DOC_NAME = 'Bütçe Özeti.docx';
 const ORIGINAL = Buffer.from('ORIGINAL-DOCUMENT-BYTES-' + 'x'.repeat(64));
 const EDITED = Buffer.from('EDITED-ON-THE-SERVER-' + 'y'.repeat(200));
+// #151: an old Word 97 file as far as anything reading its first bytes can
+// tell (an OLE compound file)…
+const OLE_DOC = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504, 0x20)]);
+
+/** …and a zip that begins the way every OOXML package does
+ *  (`[Content_Types].xml` first), tagged so two saves differ. */
+function ooxmlBytes(tag) {
+  const name = Buffer.from('[Content_Types].xml', 'latin1');
+  const body = Buffer.from(`<Types>${tag}</Types>`, 'latin1');
+  const head = Buffer.alloc(30);
+  head.writeUInt32LE(0x04034b50, 0);
+  head.writeUInt16LE(20, 4);
+  head.writeUInt32LE(body.length, 18);
+  head.writeUInt32LE(body.length, 22);
+  head.writeUInt16LE(name.length, 26);
+  return Buffer.concat([head, name, body, Buffer.from([0x50, 0x4b, 0x01, 0x02])]);
+}
 
 let adminToken = null;
 
@@ -247,6 +277,49 @@ async function main() {
     check('no half-written leftovers next to the document',
       fs.readdirSync(docsDir).length === 1, fs.readdirSync(docsDir).join(', '));
 
+    // ── 2b. the document changes OUTSIDE filex (#184) ─────────────────
+    // The way agents write: a temp file renamed over the document.
+    const AGENT = Buffer.from('WRITTEN-BY-AN-AGENT-' + 'z'.repeat(150));
+    const firstCopy = `${STORAGE}://.filex-open/${scratch.basename}`;
+    const agentTmp = path.join(docsDir, '.agent-write.tmp');
+    fs.writeFileSync(agentTmp, AGENT);
+    fs.renameSync(agentTmp, docPath);
+    const moved = await waitUntil('the editor to move to the outside version', async () => {
+      const ow = await win.evaluate(() => window.filexApp.openWith());
+      const s = (ow.sessions ?? []).find((x) => x.localPath === docPath);
+      return s && s.remote !== firstCopy && !s.outside ? s : null;
+    }, 30_000, 400).catch(() => null);
+    check('the outside version went up as a NEW working copy and the editor took it in',
+      Boolean(moved), JSON.stringify(moved));
+    const pageNote = await waitUntil('the page to say so', async () => {
+      const t = await editor.evaluate(() => document.querySelector('[data-testid="outside-note"]')?.textContent ?? '');
+      return t.trim() || null;
+    }, 10_000, 300).catch(() => '');
+    check('the editor page says the file was updated outside filex', /updated outside filex/i.test(pageNote), pageNote);
+    check("the agent's bytes are untouched", fs.readFileSync(docPath).equals(AGENT));
+    const pagePath = new URL(editor.url()).searchParams.get('path');
+    check('the page address follows the new working copy (a reload opens it)',
+      Boolean(moved) && pagePath === moved.remote, String(pagePath));
+
+    // What ONLYOFFICE would post for the OLD session after it was closed.
+    await serverSideSave(scratch.basename, Buffer.from('A-LATE-SAVE-OF-THE-OLD-EDITOR'));
+    const besideName = await waitUntil('the late save to land beside the document', async () =>
+      fs.readdirSync(docsDir).find((n) => n.includes('.filex-conflict-')) ?? null, 20_000, 400).catch(() => null);
+    check("a late save of the old editor is kept BESIDE the document, not over the agent's version",
+      Boolean(besideName) && fs.readFileSync(docPath).equals(AGENT), String(besideName));
+
+    // A save on the new working copy goes over the agent's version: filex
+    // stands on it now.
+    const EDITED2 = Buffer.from('EDITED-AFTER-THE-AGENT-' + 'w'.repeat(90));
+    if (moved) {
+      await serverSideSave(moved.remote.slice(moved.remote.lastIndexOf('/') + 1), EDITED2);
+      const landed = await waitUntil('the save on the new copy to be written back', async () =>
+        fs.readFileSync(docPath).equals(EDITED2), 30_000, 300).catch(() => false);
+      check('the next save lands on the document (filex now stands on the agent\'s version)', landed === true);
+    }
+    const finalBytes = moved ? EDITED2 : EDITED;
+    if (besideName) fs.rmSync(path.join(docsDir, besideName), { force: true });
+
     // ── 3. closing the window cleans the copy up ─────────────────────
     await editor.close();
     const gone = await waitUntil('the scratch copy to be removed', async () =>
@@ -262,7 +335,107 @@ async function main() {
       .catch(() => {});
     const left = leftover();
     check('the session record is gone too', left.length === 0, left.join(', '));
-    check('the document still holds the edit', fs.readFileSync(docPath).equals(EDITED));
+    check('the document still holds the edit', fs.readFileSync(docPath).equals(finalBytes));
+
+    // ── 3b. an old .doc whose save comes back as DOCX (#151) ──────────
+    // ONLYOFFICE writes no .doc: a 0.51+ server leaves the working copy as it
+    // is and writes the edit beside it, `<session>-Rapor.docx`
+    // (callback_format.go saveBeside), then `<session>-Rapor (2).docx` for the
+    // next save of the session. The desktop used to watch the copy alone:
+    // Rapor.doc never changed and the edit went with the working folder.
+    const oldDir = path.join(home, 'Eski Belgeler');
+    fs.mkdirSync(oldDir, { recursive: true });
+    const oldDoc = path.join(oldDir, 'Rapor.doc');
+    fs.writeFileSync(oldDoc, OLE_DOC);
+    const oldEditorPromise = app.waitForEvent('window', { timeout: 60_000 });
+    await openViaSecondInstance(profile, home, oldDoc);
+    const oldEditor = await arrived(await oldEditorPromise, /\/files\/edit/);
+    const oldCopy = await waitUntil('the .doc working copy to appear', async () =>
+      (await listScratch()).find((f) => /^[0-9a-f]{12}-Rapor\.doc$/.test(f.basename)) ?? null);
+    const oldStem = oldCopy.basename.slice(0, -'.doc'.length);
+    const besideDoc = path.join(oldDir, 'Rapor.docx');
+
+    const DOCX_1 = ooxmlBytes('FIRST-SAVE');
+    await serverSideSave(`${oldStem}.docx`, DOCX_1);
+    const landedBeside = await waitUntil('the save to land beside the .doc', async () =>
+      fs.existsSync(besideDoc) && fs.readFileSync(besideDoc).equals(DOCX_1), 30_000, 300).catch(() => false);
+    check('a .doc saved as DOCX lands BESIDE it as Rapor.docx', landedBeside === true,
+      fs.readdirSync(oldDir).join(', '));
+    check('Rapor.doc itself is untouched', fs.readFileSync(oldDoc).equals(OLE_DOC));
+    const oldSession = await win.evaluate(() => window.filexApp.openWith())
+      .then((ow) => (ow.sessions ?? []).find((s) => s.localPath === oldDoc));
+    check('the session says where its saves go now', oldSession?.beside === besideDoc, JSON.stringify(oldSession));
+    const oldBanner = await waitUntil('the strip to name the new file', async () => {
+      const t = await oldEditor.evaluate(() => document.getElementById('filex-openwith-banner')?.textContent ?? '');
+      return t.includes(besideDoc) ? t : null;
+    }, 10_000, 300).catch(() => '');
+    check('the strip under the editor names Rapor.docx', Boolean(oldBanner), String(oldBanner));
+
+    // The next save of the session: the server finds its first name taken.
+    const DOCX_2 = ooxmlBytes('SECOND-SAVE');
+    await serverSideSave(`${oldStem} (2).docx`, DOCX_2);
+    const sameFile = await waitUntil('the next save to reach Rapor.docx', async () =>
+      fs.readFileSync(besideDoc).equals(DOCX_2), 30_000, 300).catch(() => false);
+    check('the next save goes to the SAME Rapor.docx', sameFile === true);
+    check('and makes no new file on this computer',
+      JSON.stringify(fs.readdirSync(oldDir).sort()) === JSON.stringify(['Rapor.doc', 'Rapor.docx']),
+      fs.readdirSync(oldDir).join(', '));
+
+    // A server before 0.51 wrote ONLYOFFICE's DOCX over the working copy
+    // itself: the bytes say what it is, and it goes the same way.
+    const DOCX_3 = ooxmlBytes('THIRD-SAVE-OVER-THE-COPY');
+    const overCopy = await serverSideSave(oldCopy.basename, DOCX_3).then(() => '', (e) => String(e?.message ?? e));
+    const sniffed = !overCopy && await waitUntil('the DOCX written over the copy to reach Rapor.docx', async () =>
+      fs.readFileSync(besideDoc).equals(DOCX_3), 30_000, 300).catch(() => false);
+    check('a DOCX written over the .doc working copy goes to Rapor.docx, never over Rapor.doc',
+      sniffed === true && fs.readFileSync(oldDoc).equals(OLE_DOC),
+      overCopy || `Rapor.doc starts ${fs.readFileSync(oldDoc).subarray(0, 4).toString('hex')}`);
+
+    await oldEditor.close();
+    const oldGone = await waitUntil('the session\'s copies to be removed', async () =>
+      (await listScratch()).length === 0, 40_000, 500).catch(() => false);
+    check('the working copy and the saves beside it are removed with the session', oldGone === true,
+      (await listScratch()).map((f) => f.basename).join(', '));
+    check('Rapor.docx keeps the last save',
+      fs.existsSync(besideDoc) && fs.readFileSync(besideDoc).equals(sniffed === true ? DOCX_3 : DOCX_2));
+
+    // ── 3c. a .csv (#151, the maintainer's addition) ──────────────────
+    // Saved as CSV, the server writes it over the working copy in the file's
+    // own dialect (KeepCSV): it goes over the .csv. Saved as anything else,
+    // beside it.
+    const csvDoc = path.join(oldDir, 'Tablo.csv');
+    const CSV_0 = Buffer.from('ad;adet\nelma;3\n');
+    fs.writeFileSync(csvDoc, CSV_0);
+    // ⚠ Waited for with a catch: an app that refuses the type opens no
+    // window, and that is a failed check here, not the end of the suite.
+    const csvEditorPromise = app.waitForEvent('window', { timeout: 30_000 }).catch(() => null);
+    await openViaSecondInstance(profile, home, csvDoc);
+    const csvWindow = await csvEditorPromise;
+    const csvEditor = csvWindow ? await arrived(csvWindow, /\/files\/edit/) : null;
+    const csvCopy = csvEditor && await waitUntil('the .csv working copy to appear', async () =>
+      (await listScratch()).find((f) => /^[0-9a-f]{12}-Tablo\.csv$/.test(f.basename)) ?? null, 30_000, 400).catch(() => null);
+    check('a .csv opens with filex: a working copy and an editor window', Boolean(csvEditor && csvCopy),
+      (await listScratch()).map((f) => f.basename).join(', ') || '(no working copy, no window)');
+    if (csvCopy) {
+      const CSV_1 = Buffer.from('ad;adet\nelma;4\n');
+      await serverSideSave(csvCopy.basename, CSV_1);
+      const csvOver = await waitUntil('the CSV save to be written back', async () =>
+        fs.readFileSync(csvDoc).equals(CSV_1), 30_000, 300).catch(() => false);
+      check('a save as CSV is written over the .csv itself', csvOver === true, fs.readFileSync(csvDoc, 'utf8'));
+
+      const csvStem = csvCopy.basename.slice(0, -'.csv'.length);
+      const XLSX = ooxmlBytes('SHEET');
+      await serverSideSave(`${csvStem}.xlsx`, XLSX);
+      const besideCsv = path.join(oldDir, 'Tablo.xlsx');
+      const xlsxBeside = await waitUntil('the spreadsheet save to land beside the .csv', async () =>
+        fs.existsSync(besideCsv) && fs.readFileSync(besideCsv).equals(XLSX), 30_000, 300).catch(() => false);
+      check('a save in another format lands beside the .csv as Tablo.xlsx', xlsxBeside === true,
+        fs.readdirSync(oldDir).join(', '));
+      check('and the .csv keeps its CSV', fs.readFileSync(csvDoc).equals(CSV_1));
+    }
+    if (csvEditor) await csvEditor.close();
+    await waitUntil('the .csv session to be cleaned up', async () => (await listScratch()).length === 0, 40_000, 500)
+      .catch(() => {});
 
     // ── 4. what Settings tells the user ──────────────────────────────
     // ⚠ Read off the rendered panel, not off the IPC answer. A card that is
@@ -270,8 +443,9 @@ async function main() {
     // repo has been caught calling a UI "done" on the strength of a green
     // non-UI test before.
     const ow = await win.evaluate(() => window.filexApp.openWith());
-    check('the app reports exactly the ten office types it handles',
-      ow.extensions.length === 10 && ow.extensions.includes('docx') && !ow.extensions.includes('pdf'),
+    check('the app reports exactly the eleven types it handles (the ten office ones and .csv)',
+      ow.extensions.length === 11 && ow.extensions.includes('docx') && ow.extensions.includes('csv') &&
+        !ow.extensions.includes('pdf'),
       ow.extensions.join(' '));
     check('a run from source says it is NOT registered with the system',
       ow.registered === false, String(ow.registered));

@@ -72,6 +72,12 @@ type ExternalAdmin struct {
 	// http://localhost:5212. Worth saying out loud: an operator who never set
 	// it does not know a default is in play.
 	PublicURLSet bool
+	// AppUIOrigin is FILEX_APP_UI_ORIGIN and OfficeFrameOrigin
+	// FILEX_ONLYOFFICE_FRAME_ORIGIN. With either the editor's api.js runs in a
+	// frame on another origin; with neither, in filex's own page - which the
+	// ONLYOFFICE card says (external.CodeEditorSameOrigin, task #92).
+	AppUIOrigin       string
+	OfficeFrameOrigin string
 	// ReversePath measures the third leg — the document server's route BACK to
 	// filex — by asking it to download a one-shot URL of ours, through the same
 	// signed fetch endpoint a document uses, and watching for the request. It
@@ -89,6 +95,18 @@ func (h *ExternalAdmin) AttachPublicURL(publicURL string, set bool) {
 	h.PublicURLSet = set
 }
 
+// AttachAppUIOrigin wires FILEX_APP_UI_ORIGIN into the advisories, beside the
+// public URL and for the same two call sites.
+func (h *ExternalAdmin) AttachAppUIOrigin(origin string) {
+	h.AppUIOrigin = origin
+}
+
+// AttachOfficeFrameOrigin wires FILEX_ONLYOFFICE_FRAME_ORIGIN into the same
+// advisories.
+func (h *ExternalAdmin) AttachOfficeFrameOrigin(origin string) {
+	h.OfficeFrameOrigin = origin
+}
+
 // advisories runs the shape checks for one row. The DNS note is only worth a
 // lookup when an operator is waiting (Test); List passes nil so opening the
 // admin page never blocks on a resolver.
@@ -97,6 +115,7 @@ func (h *ExternalAdmin) advisories(ctx context.Context, name, url, callbackURL s
 		Service: name, ServiceURL: url,
 		PublicURL: h.PublicURL, PublicURLSet: h.PublicURLSet,
 		CallbackURL: callbackURL, Lookup: lookup,
+		AppUIOrigin: h.AppUIOrigin, OfficeFrameOrigin: h.OfficeFrameOrigin,
 	})
 }
 

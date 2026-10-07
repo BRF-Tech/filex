@@ -126,7 +126,10 @@ func TestFullScanBesideTheFillerLosesNothing(t *testing.T) {
 
 	pause := filexsync.LazyFillIdlePause
 	filexsync.LazyFillIdlePause = 0
-	defer func() { filexsync.LazyFillIdlePause = pause }()
+	// A cleanup registered before t.Cleanup(w.Stop) runs after it: the pause
+	// comes back once the filler that reads it has stopped. A defer would put
+	// it back under the running filler (-race; setFastLazy says the same).
+	t.Cleanup(func() { filexsync.LazyFillIdlePause = pause })
 	w := filexsync.New(store)
 	require.NoError(t, w.AddStorage(ctx, st))
 	t.Cleanup(w.Stop)

@@ -602,8 +602,8 @@ filemanager/
 ├── web/                            # Vue 3 admin SPA (embedded)
 ├── demo/                           # standalone HTML demos
 ├── docker/
-│   ├── Dockerfile                  # the :latest / :full image, ~225 MB
-│   ├── Dockerfile.slim             # the :slim image, ~43 MB, binary only
+│   ├── Dockerfile                  # the :latest / :full image, ~241 MB
+│   ├── Dockerfile.slim             # the :slim image, ~62 MB, binary only
 │   └── Dockerfile.local            # local hot-fix builds from a host dist
 │
 ├── scripts/
@@ -612,7 +612,7 @@ filemanager/
 ├── docs/                           # this directory
 │
 ├── .gitlab/                        # CI helpers (placeholders)
-├── .gitlab-ci.yml                  # pipeline
+├── .gitlab-ci.yml                  # private pipeline: the test chain (CONTRIBUTING)
 ├── .goreleaser.yml                 # release matrix
 ├── docker-compose.yml              # full stack with profiles
 ├── package.json                    # workspace root

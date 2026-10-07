@@ -1,0 +1,23 @@
+# The language packs' nightly translation (scripts/langpacks-nightly.mjs,
+# task #177). A template: scripts/chain/install-langpacks.sh fills @NODE@,
+# @BIN@ and @ENV@ and installs it as /etc/systemd/system/filex-langpacks.service.
+# Started by filex-langpacks.timer; `systemctl start filex-langpacks.service`
+# runs a night by hand (it waits for a nightly test run still going).
+[Unit]
+Description=filex language packs: the nightly translation (scripts/langpacks-nightly.mjs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# git reads its settings from a home directory; the agent gets one of its own.
+Environment=HOME=/root
+ExecStart=@NODE@ @BIN@/scripts/langpacks-nightly.mjs run --env @ENV@
+# 1 is a night with something left or red: recorded and notified, not a failed unit.
+SuccessExitStatus=1
+# The run ends itself within LANGPACKS_BUDGET_MIN (330); this is only the backstop.
+TimeoutStartSec=6h
+# A stop ends the agent session too: it is in this unit's control group.
+KillSignal=SIGTERM
+TimeoutStopSec=2min
+Nice=10

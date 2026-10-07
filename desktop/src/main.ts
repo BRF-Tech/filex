@@ -95,6 +95,8 @@ import { DesktopNotifier, opensInWindow, type NotificationRow } from './notifica
 // a counter that disagrees with itself. Same boundary, same reason.
 import { unreadBadgeCount, unreadBadgeLabel } from '../../packages/core/src/lib/unreadBadge.ts';
 import {
+  LocalChangedError,
+  LocalDocMonitor,
   OFFICE_EXTENSIONS,
   OpeningDocs,
   OFFICE_MIME_TYPES,
@@ -102,6 +104,7 @@ import {
   WriteBackError,
   classifyArgv,
   extensionOf,
+  fingerprint,
   hasChanged,
   isOfficeDocument,
   needsRecovery,
@@ -113,9 +116,22 @@ import {
   scratchBasename,
   scratchRemoteDir,
   scratchRemotePath,
+  readLocalVersion,
   staleSessions,
   writeBackAtomic,
+  writeConflictCopy,
+  besidePathFor,
+  besideSaves,
+  savedFormatOf,
+  statIn,
+  unseenBesideSaves,
+  writeBesideSave,
+  type BesideCopy,
+  type BesideTarget,
+  type LocalVersion,
   type OpenWithSession,
+  type RemoteStat,
+  type ScratchEntry,
 } from './openwith.js';
 import {
   deleteRemote,
@@ -2036,6 +2052,54 @@ interface LiveOpenWith {
   hardUntil: number;
   /** At least one edit reached the local file. */
   wroteBack: boolean;
+  /** #184 — the person's file, watched for changes made outside filex. Its
+   *  baseline is the version filex last read or wrote: what a save may
+   *  replace. */
+  monitor: LocalDocMonitor;
+  /** Working copies the editor moved on from, watched for a late save. */
+  retired: RetiredCopy[];
+  /** An outside change waiting for the editor's (or the person's) answer. */
+  outside: OutsidePending | null;
+  /** After "Keep both" (or a question the closed window can no longer
+   *  answer): saves go to a conflict copy beside the document, never over
+   *  it. `path` is null until the first one is written. */
+  fork: { path: string | null; version: LocalVersion | null } | null;
+  /** #151 — where this session's saves in another format go: `rapor.docx`
+   *  beside `rapor.doc`, made by the first one (openwith.ts writeBesideSave),
+   *  and the version filex wrote there. null until then. */
+  beside: BesideTarget | null;
+  /** The page in the window: whether it takes outside changes (it said
+   *  hello), and whether its editor holds an edit. */
+  page: { speaks: boolean; edited: boolean };
+  /** Rising number of outside changes (the page's OutsideChange.seq). */
+  seq: number;
+  /** Outside changes and answers are taken one at a time. */
+  outsideBusy: Promise<void>;
+}
+
+/** A working copy the editor moved on from (#184), and what a save that still
+ *  lands on it becomes: kept beside the document, or dropped (the person
+ *  chose the outside version). */
+interface RetiredCopy {
+  remote: string;
+  seen: RemoteStat | null;
+  fate: 'beside' | 'drop';
+  until: number;
+}
+
+/** The document changed outside filex while it was open (#184). */
+interface OutsidePending {
+  seq: number;
+  /** The outside version on the computer. */
+  version: LocalVersion;
+  /** That version, uploaded as the next working copy (the editor moves to it
+   *  if the answer is to take it). */
+  next: { remote: string; seen: RemoteStat | null } | null;
+  /** A save of filex's that came in meanwhile: held, written nowhere yet. */
+  held: Buffer | null;
+  heldSeen: RemoteStat | null;
+  /** The app's own question is up (a page that does not take changes). */
+  asking: boolean;
 }
 
 let sessionStore: SessionStore | null = null;
@@ -2109,6 +2173,43 @@ const OPEN_WITH_STRINGS: Bilingual = {
   bannerTwin: [
     'Synced folder - saving goes to the server, and sync brings it back to {file}',
     'Eşitlenen klasör - kayıt sunucuya gider, eşitleme {file} dosyasına geri getirir',
+  ],
+  // #184 — the document changed outside filex while it was open.
+  bannerFork: [
+    'Keeping both versions - your saves go to {file}',
+    'İki sürüm de tutuluyor - kayıtların {file} dosyasına gidiyor',
+  ],
+  bannerForkPending: [
+    'Keeping both versions - your next save goes beside {file} as a separate copy',
+    'İki sürüm de tutuluyor - bir sonraki kaydın {file} dosyasının yanına ayrı bir kopya olarak gider',
+  ],
+  outsideTitle: ['{name} changed outside filex', '{name} filex dışında değişti'],
+  outsideMessage: [
+    '{name} was changed by another program while it was open in filex. Which version should stay?',
+    '{name}, filex’te açıkken başka bir program tarafından değiştirildi. Hangi sürüm kalsın?',
+  ],
+  outsideDetail: [
+    'Keep the outside version: the changes made in filex are dropped and the new version is loaded.\nWrite mine: your version replaces the outside one when it is saved.\nKeep both: the outside version stays, and yours is saved beside it as a separate copy.\n\nUntil you choose, nothing is written over either version.',
+    'Dışarıdakini koru: filex’te yapılan değişiklikler atılır, yeni sürüm yüklenir.\nBenimkini yaz: kaydedildiğinde senin sürümün dışarıdakinin üstüne yazılır.\nİkisini de tut: dışarıdaki yerinde kalır, seninki yanına ayrı bir kopya olarak kaydedilir.\n\nSen seçene kadar hiçbir sürümün üstüne yazılmaz.',
+  ],
+  outsideTheirs: ['Keep the outside version', 'Dışarıdakini koru'],
+  outsideMine: ['Write mine', 'Benimkini yaz'],
+  outsideBoth: ['Keep both', 'İkisini de tut'],
+  // #151 — a save that came back in another format (a .doc as DOCX): beside
+  // the document, never over it.
+  bannerBeside: [
+    'Saved as {format} beside the document - every save goes to {file}',
+    '{format} olarak belgenin yanına kaydediliyor - her kayıt {file} dosyasına gider',
+  ],
+  savedBesideTitle: ['Your edit was saved as {saved}', 'Düzenlemen {saved} olarak yanına kaydedildi'],
+  savedBesideBody: [
+    'The editor saved {name} as {format}, which a .{ext} file cannot hold, so your edit is in {saved}, in the same folder. {name} did not change.',
+    'Düzenleyici {name} dosyasını {format} biçiminde kaydetti; bir .{ext} dosyası bunu tutamadığı için düzenlemen aynı klasörde {saved} adıyla duruyor. {name} değişmedi.',
+  ],
+  keptBesideTitle: ['filex kept your version beside {name}', 'filex senin sürümünü {name} dosyasının yanına koydu'],
+  keptBesideBody: [
+    '{name} changed outside filex, so your edit was not written over it. It is in {kept}.',
+    '{name} filex dışında değiştiği için düzenlemen onun üstüne yazılmadı. {kept} dosyasında duruyor.',
   ],
   savedBackTitle: ['filex saved your changes', 'filex değişikliklerini kaydetti'],
   savedBackBody: ['{name} on this computer is up to date.', 'Bu bilgisayardaki {name} güncel.'],
@@ -2341,7 +2442,12 @@ async function scratchStorageFor(acc: Account, ctx: RemoteContext): Promise<stri
 
 async function openViaScratch(acc: Account, localPath: string): Promise<void> {
   const ctx = remoteCtx(acc);
-  const bytes = await fs.promises.readFile(localPath);
+  // The bytes AND the version they are (#184): the version is what every
+  // later save is held to - a save goes over the document only while it is
+  // still what filex read here, or what filex itself wrote last.
+  const read = await readLocalVersion(localPath);
+  if (!read) throw new Error('the document is not there any more');
+  const bytes = read.bytes;
   const storage = await scratchStorageFor(acc, ctx);
   const dir = scratchRemoteDir(storage);
   const id = newSessionId();
@@ -2360,6 +2466,8 @@ async function openViaScratch(acc: Account, localPath: string): Promise<void> {
     updatedAt: now,
     seen,
     ownerPid: process.pid,
+    retired: [],
+    beside: [],
   };
   // ⚠ On disk BEFORE the window opens. A crash between the upload and the first
   // save must still leave something the next start can find, clean up and — if
@@ -2377,8 +2485,25 @@ async function openViaScratch(acc: Account, localPath: string): Promise<void> {
     until: 0,
     hardUntil: 0,
     wroteBack: false,
+    monitor: new LocalDocMonitor({
+      path: localPath,
+      baseline: read.version,
+      onChange: (version, changed) => {
+        const l = liveOpenWith.get(id);
+        if (l) void queueOutside(l, () => takeOutsideChange(l, { version, bytes: changed }));
+      },
+      onError: (err) => log('openwith', 'watching the document', String((err as Error)?.message ?? err)),
+    }),
+    retired: [],
+    outside: null,
+    fork: null,
+    beside: null,
+    page: { speaks: false, edited: false },
+    seq: 0,
+    outsideBusy: Promise.resolve(),
   };
   liveOpenWith.set(id, live);
+  live.monitor.start();
   win.on('closed', () => void beginOpenWithGrace(id));
   live.timer = setInterval(() => void pollOpenWith(id), openWithPollMs());
 }
@@ -2562,6 +2687,42 @@ function makeDocumentWindow(
   return win;
 }
 
+/** The store window's own words (#162). */
+const STORE_STRINGS: Bilingual = {
+  title: ['App store', 'Uygulama mağazası'],
+};
+
+/** #162 - the store screen's address: the people's door of the SPA, its
+ *  `app-store` route (web/src/router, views/AppStoreScreen.vue). */
+function storeRouteUrl(acc: Account): string {
+  return serverUrl(acc.serverUrl, '/drive/app-store').toString();
+}
+
+/** One store window per account: a second press brings it forward. */
+const storeWindows = new Map<string, BrowserWindow>();
+
+/**
+ * #162 - the store screen in a window of its own: the server's `app-store`
+ * page in the document window's shell (makeDocumentWindow: our window bar,
+ * the credential from the header injector, no `filexApp` bridge, links to the
+ * browser) - the same page the web app opens, so the catalog, the request and
+ * "My requests" are one screen on both. The server answers this app's pairing
+ * as the person it is (handlers/app_store_view.go personCaller).
+ */
+function openStoreWindow(acc: Account): BrowserWindow {
+  const open = storeWindows.get(acc.id);
+  if (open && !open.isDestroyed()) {
+    focusWindow(open);
+    return open;
+  }
+  const win = makeDocumentWindow(acc, storeRouteUrl(acc), bilingual(STORE_STRINGS, 'title', effectiveLocale()));
+  storeWindows.set(acc.id, win);
+  win.on('closed', () => {
+    if (storeWindows.get(acc.id) === win) storeWindows.delete(acc.id);
+  });
+  return win;
+}
+
 /**
  * A document window — every in-app "open" lands here (host-owned open: the
  * explorer's `config.openInHost` + the app page's `file-opened` listener). It
@@ -2587,12 +2748,33 @@ function openEditorWindow(
   mode: 'scratch' | 'twin',
 ): BrowserWindow {
   return makeDocumentWindow(acc, editRouteUrl(acc, remote), path.basename(localPath), () =>
-    bannerScript(
-      mode === 'twin'
-        ? openText('bannerTwin', { file: localPath })
-        : openText('bannerScratch', { file: localPath }),
-    ),
+    bannerScript(openWithBanner(localPath, mode)),
   );
+}
+
+/** What the strip says: where a save goes. After "Keep both" (#184) that is
+ *  the conflict copy, not the document; after a save in another format
+ *  (#151), the file beside it that the saves go to. */
+function openWithBanner(localPath: string, mode: 'scratch' | 'twin'): string {
+  if (mode === 'twin') return openText('bannerTwin', { file: localPath });
+  const live = [...liveOpenWith.values()].find((l) => !l.closing && l.record.localPath === localPath);
+  if (live?.beside) {
+    return openText('bannerBeside', { format: live.beside.ext.toUpperCase(), file: live.beside.path });
+  }
+  if (live?.fork) {
+    return live.fork.path
+      ? openText('bannerFork', { file: live.fork.path })
+      : openText('bannerForkPending', { file: localPath });
+  }
+  return openText('bannerScratch', { file: localPath });
+}
+
+/** The strip again, now: what it says changed under an open page. */
+function refreshBanner(live: LiveOpenWith): void {
+  if (live.window.isDestroyed()) return;
+  void live.window.webContents
+    .executeJavaScript(bannerScript(openWithBanner(live.record.localPath, 'scratch')), true)
+    .catch(() => undefined);
 }
 
 /** The persistent strip along the bottom of the editor window. Self-contained
@@ -2653,6 +2835,19 @@ function bannerScript(text: string): string {
   })();`;
 }
 
+/** The last segment of a wire path: a working copy's name in its folder. */
+function remoteBase(remote: string): string {
+  return remote.slice(remote.lastIndexOf('/') + 1);
+}
+
+/** The session record on disk, brought up to date. */
+async function persistOpenWith(live: LiveOpenWith): Promise<void> {
+  live.record.updatedAt = new Date().toISOString();
+  await sessionStore?.put(live.record).catch((err) =>
+    log('openwith', 'could not write the session record', String((err as Error)?.message ?? err)),
+  );
+}
+
 /** One look at the scratch copy: newer than what we hold means an edit to bring
  *  home. */
 async function pollOpenWith(id: string): Promise<void> {
@@ -2663,41 +2858,26 @@ async function pollOpenWith(id: string): Promise<void> {
     const acc = state.accounts.find((a) => a.id === live.record.accountId);
     if (!acc) return;
     const ctx = remoteCtx(acc);
+    // #184 — the person's file, changed outside filex: the folder watch's
+    // safety net, for file systems that send it no events.
+    if (!live.closing && !live.fork) await live.monitor.check();
+    // One listing of the working folder per tick: the copy in use, the ones
+    // the editor moved on from, and (#151) the saves written beside them in
+    // another format are all read off it.
     const dir = scratchRemoteDir(live.record.storage);
-    const basename = live.record.remote.slice(live.record.remote.lastIndexOf('/') + 1);
-    const current = await statRemote(ctx, dir, basename);
+    const entries = await listDir(ctx, dir);
+    await pollRetired(live, acc, entries);
+    const besideLanded = await pollBeside(live, acc, entries);
+    const current = statIn(entries, remoteBase(live.record.remote));
     if (!hasChanged(live.record.seen, current)) {
-      if (live.closing && Date.now() >= live.until) await finishOpenWith(id);
+      if (!besideLanded && live.closing && Date.now() >= live.until && !live.retired.length) await finishOpenWith(id);
       return;
     }
+    // A save already held for the open question is not fetched again.
+    const held = live.outside?.heldSeen;
+    if (held && fingerprint(held) === fingerprint(current)) return;
     const bytes = await downloadFile(ctx, live.record.remote);
-    try {
-      await writeBackAtomic(live.record.localPath, bytes, { fallbackDir: openWithRecoveryDir() });
-      live.wroteBack = true;
-      log('openwith', 'wrote back', { localPath: live.record.localPath, bytes: bytes.length });
-      // A save that lands after the window is gone shortens the wait: the thing
-      // the grace period exists for has happened.
-      if (live.closing) live.until = Math.min(live.hardUntil, Date.now() + openWithQuietMs());
-    } catch (err) {
-      if (!(err instanceof WriteBackError)) throw err;
-      openWithError = err.message;
-      log('openwith', 'write-back FAILED', { error: err.message, keptAt: err.keptAt });
-      // ⚠ Loud, not logged. The user pressed save, saw no error, and their
-      // document did not change — the one outcome this feature must never
-      // deliver quietly.
-      const title = openText('writeFailedTitle', { name: path.basename(live.record.localPath) });
-      const where = err.keptAt
-        ? openText('writeFailedKept', { kept: err.keptAt })
-        : openText('writeFailedLost');
-      openWithNotify(title, where);
-      await tellUser('error', title, err.message, where);
-    }
-    // Recorded either way. Retrying the same failing write every two seconds
-    // would bury the machine in notifications and never succeed; the next
-    // genuine save produces a new fingerprint and gets its own attempt.
-    live.record.seen = current;
-    live.record.updatedAt = new Date().toISOString();
-    await sessionStore?.put(live.record);
+    await landSave(live, bytes, current);
   } catch (err) {
     // Network hiccup, server restart, expired token. Keep watching — the
     // document is still on the server and the next tick may well succeed.
@@ -2707,11 +2887,576 @@ async function pollOpenWith(id: string): Promise<void> {
   }
 }
 
+/**
+ * A save the editor made, brought home.
+ *
+ * ⚠⚠ #184: never over a version filex did not see. The write-back is held to
+ * the version filex last read from the document or wrote to it (the
+ * monitor's baseline); something else rewrote it since (an agent, another
+ * editor, a sync client) and the save is NOT written: with the window open
+ * the editor is told and the person asked, with it closed the save is kept
+ * beside the document as a conflict copy. While a question is open the save
+ * is held, written nowhere.
+ */
+async function landSave(live: LiveOpenWith, bytes: Buffer, current: RemoteStat | null): Promise<void> {
+  if (live.outside) {
+    // ⚠ `seen` does not move: a crash now finds the copy ahead of the record
+    // and recovers the held save beside the document.
+    live.outside.held = bytes;
+    live.outside.heldSeen = current;
+    log('openwith', 'save held - the document changed outside filex and the question is open', {
+      localPath: live.record.localPath,
+    });
+    sendOutside(live);
+    return;
+  }
+  // #151 — the bytes are not the document's format (a server before 0.51
+  // wrote ONLYOFFICE's DOCX over the working copy of a .doc): beside the
+  // document, never over it.
+  const other = savedFormatOf(live.record.localPath, bytes);
+  if (other) {
+    await landBeside(live, other, bytes);
+  } else if (live.fork) {
+    await writeFork(live, bytes);
+  } else {
+    try {
+      await live.monitor.ownWrite(() =>
+        writeBackAtomic(live.record.localPath, bytes, {
+          fallbackDir: openWithRecoveryDir(),
+          expect: live.monitor.baseline,
+        }),
+      );
+      live.wroteBack = true;
+      log('openwith', 'wrote back', { localPath: live.record.localPath, bytes: bytes.length });
+    } catch (err) {
+      if (err instanceof LocalChangedError) {
+        live.monitor.markSeen(err.current);
+        if (!live.closing) {
+          // Found by the write-back before the watch said so: the same
+          // question, with this save held. ⚠ Queued, not awaited: this can
+          // run inside a queued step (an answer's held save), and waiting on
+          // the queue from inside it would wait forever.
+          void queueOutside(live, () => takeOutsideChange(live, { held: { bytes, seen: current } }));
+          return;
+        }
+        // Nobody left to ask: beside the document, never over it.
+        await keepBeside(live, bytes);
+      } else if (err instanceof WriteBackError) {
+        await shoutWriteFailed(err, path.basename(live.record.localPath));
+      } else {
+        throw err;
+      }
+    }
+  }
+  // A save that lands after the window is gone shortens the wait: the thing
+  // the grace period exists for has happened.
+  if (live.closing) live.until = Math.min(live.hardUntil, Date.now() + openWithQuietMs());
+  // Recorded either way. Retrying the same failing write every two seconds
+  // would bury the machine in notifications and never succeed; the next
+  // genuine save produces a new fingerprint and gets its own attempt.
+  live.record.seen = current;
+  await persistOpenWith(live);
+}
+
+/**
+ * filex's version beside the document, as a conflict copy
+ * (`<name>.filex-conflict-<time>.<ext>`, openwith.ts writeConflictCopy), and
+ * the person told where. The app's own recovery folder when the document's
+ * folder takes no new file; said out loud when neither does.
+ *
+ * #151 — a save in another format (`ext`, or what the bytes are) is named for
+ * its own format: `rapor.filex-conflict-<time>.docx` beside `rapor.doc`.
+ */
+async function keepBeside(live: LiveOpenWith, bytes: Buffer, ext?: string): Promise<string | null> {
+  const name = path.basename(live.record.localPath);
+  const other = ext ?? savedFormatOf(live.record.localPath, bytes);
+  const doc = other ? besidePathFor(live.record.localPath, other) : live.record.localPath;
+  for (const target of [doc, path.join(openWithRecoveryDir(), path.basename(doc))]) {
+    try {
+      if (target !== doc) await fs.promises.mkdir(path.dirname(target), { recursive: true });
+      const kept = await writeConflictCopy(target, bytes);
+      log('openwith', 'kept beside the document - it changed outside filex', { localPath: live.record.localPath, kept });
+      openWithNotify(openText('keptBesideTitle', { name }), openText('keptBesideBody', { name, kept }));
+      return kept;
+    } catch (err) {
+      log('openwith', 'could not keep a conflict copy', { target, error: String((err as Error)?.message ?? err) });
+    }
+  }
+  openWithError = 'could not keep the edit to ' + live.record.localPath + ' anywhere';
+  const title = openText('writeFailedTitle', { name });
+  openWithNotify(title, openText('writeFailedLost'));
+  await tellUser('error', title, openWithError, openText('writeFailedLost'));
+  return null;
+}
+
+/** A save after "Keep both": to the conflict copy (the same one each time,
+ *  held to the version filex wrote there), or a new one the first time. */
+async function writeFork(live: LiveOpenWith, bytes: Buffer): Promise<void> {
+  const fork = live.fork;
+  if (!fork) return;
+  // #151 — a save in another format is already a separate file: beside the
+  // document, where the session's other saves in that format go.
+  const other = savedFormatOf(live.record.localPath, bytes);
+  if (other) {
+    await landBeside(live, other, bytes);
+    return;
+  }
+  if (fork.path && fork.version) {
+    try {
+      fork.version = await writeBackAtomic(fork.path, bytes, {
+        fallbackDir: openWithRecoveryDir(),
+        expect: fork.version,
+      });
+      log('openwith', 'wrote the conflict copy', { kept: fork.path, bytes: bytes.length });
+      return;
+    } catch (err) {
+      if (!(err instanceof LocalChangedError) && !(err instanceof WriteBackError)) throw err;
+      log('openwith', 'the conflict copy changed or went away - a new one beside the document', { kept: fork.path });
+    }
+  }
+  const kept = await keepBeside(live, bytes);
+  if (!kept) return;
+  fork.path = kept;
+  fork.version = (await readLocalVersion(kept).catch(() => null))?.version ?? null;
+  refreshBanner(live);
+}
+
+/** Working copies the editor moved on from: a late save on one is kept beside
+ *  the document (or dropped, if the person chose the outside version), and
+ *  the copy goes once its grace is over. Read off the tick's one listing of
+ *  the working folder (`entries`). */
+async function pollRetired(live: LiveOpenWith, acc: Account, entries: readonly ScratchEntry[]): Promise<void> {
+  if (!live.retired.length) return;
+  const ctx = remoteCtx(acc);
+  const dir = scratchRemoteDir(live.record.storage);
+  const done = new Set<RetiredCopy>();
+  let noted = false;
+  for (const r of [...live.retired]) {
+    const current = statIn(entries, remoteBase(r.remote));
+    if (hasChanged(r.seen, current)) {
+      if (r.fate === 'beside') {
+        // An editor that was thought to hold nothing saved after all: an
+        // edit nobody chose to drop.
+        await keepBeside(live, await downloadFile(ctx, r.remote));
+      } else {
+        log('openwith', 'a late save of an editor whose edits were dropped - not kept', { remote: r.remote });
+      }
+      r.seen = current;
+      for (const rec of live.record.retired ?? []) if (rec.remote === r.remote) rec.seen = current;
+    }
+    // #151 — that editor's late save in another format, which the server
+    // wrote beside the copy (a .doc's DOCX): the same fate, under its own
+    // format's name.
+    const late = unseenBesideSaves(r.remote, entries, live.record.beside);
+    if (late.length) {
+      const newest = late[late.length - 1]!;
+      if (r.fate === 'beside') {
+        await keepBeside(live, await downloadFile(ctx, scratchFile(live, newest.basename)), newest.ext);
+      } else {
+        log('openwith', 'a late save of an editor whose edits were dropped - not kept', { remote: newest.basename });
+      }
+      noteBeside(live, late);
+      noted = true;
+    }
+    if (Date.now() < r.until) continue;
+    await deleteRemote(ctx, dir, [r.remote]).catch((err) =>
+      log('openwith', 'could not remove an earlier working copy', String((err as Error)?.message ?? err)),
+    );
+    await dropBesideCopies(acc, live, besideSaves(remoteBase(r.remote), entries).map((b) => scratchFile(live, b.basename)));
+    done.add(r);
+  }
+  if (!done.size) {
+    if (noted) await persistOpenWith(live);
+    return;
+  }
+  live.retired = live.retired.filter((r) => !done.has(r));
+  const gone = new Set([...done].map((r) => r.remote));
+  live.record.retired = (live.record.retired ?? []).filter((r) => !gone.has(r.remote));
+  await persistOpenWith(live);
+}
+
+/** A file in the session's working folder, by its name there. */
+function scratchFile(live: LiveOpenWith, basename: string): string {
+  return scratchRemotePath(live.record.storage, basename);
+}
+
+/** #151 — these beside saves are dealt with: the session brings none of them
+ *  home again unless the server writes it anew. */
+function noteBeside(live: LiveOpenWith, saves: readonly BesideCopy[]): void {
+  if (!live.record.beside) live.record.beside = [];
+  const list = live.record.beside;
+  for (const b of saves) {
+    const remote = scratchFile(live, b.basename);
+    const rec = list.find((x) => x.remote === remote);
+    if (rec) rec.seen = b.stat;
+    else list.push({ remote, seen: b.stat });
+  }
+}
+
+/** #151 — removes beside saves from the working folder, one by one (one
+ *  already gone must not keep the others), and forgets the ones removed. */
+async function dropBesideCopies(acc: Account, live: LiveOpenWith, remotes: readonly string[]): Promise<void> {
+  const gone = new Set<string>();
+  for (const remote of remotes) {
+    try {
+      await deleteRemote(remoteCtx(acc), scratchRemoteDir(live.record.storage), [remote]);
+      gone.add(remote);
+    } catch (err) {
+      log('openwith', 'could not remove a save beside a working copy', String((err as Error)?.message ?? err));
+    }
+  }
+  if (gone.size) live.record.beside = (live.record.beside ?? []).filter((b) => !gone.has(b.remote));
+}
+
+/**
+ * #151 — the saves the server wrote beside the working copy in another format
+ * (`<session>-rapor.docx` beside `<session>-rapor.doc`, callback_format.go
+ * saveBeside), brought home beside the person's document. True when one was.
+ *
+ * The newest is the one taken: they are saves of one document, one after
+ * another. While an outside change's question is open (#184) nothing is
+ * written - they stay unseen on the server until it is answered, and are then
+ * taken as this copy's (the editor stayed on it) or as the copy the editor
+ * left (kept beside the document, or dropped: pollRetired).
+ */
+async function pollBeside(live: LiveOpenWith, acc: Account, entries: readonly ScratchEntry[]): Promise<boolean> {
+  if (live.outside) return false;
+  const fresh = unseenBesideSaves(live.record.remote, entries, live.record.beside);
+  if (!fresh.length) return false;
+  const newest = fresh[fresh.length - 1]!;
+  const bytes = await downloadFile(remoteCtx(acc), scratchFile(live, newest.basename));
+  await landBeside(live, newest.ext, bytes);
+  // Recorded either way, as a save of the copy itself is (landSave): a write
+  // that failed was said out loud, and is not retried every tick.
+  noteBeside(live, fresh);
+  // The save the grace period waits for has come.
+  if (live.closing) live.until = Math.min(live.hardUntil, Date.now() + openWithQuietMs());
+  await persistOpenWith(live);
+  return true;
+}
+
+/**
+ * #151 — a save in another format (`ext`), beside the person's document and
+ * never over it (openwith.ts writeBesideSave). The session's first one makes
+ * `rapor.docx` beside `rapor.doc` (`rapor (2).docx` when that name is taken),
+ * the person is told, and the strip says where saves go now; the next ones go
+ * to the same file, held to the version filex wrote there - rewritten outside
+ * filex since, to a conflict copy beside it, and the person is told.
+ */
+async function landBeside(live: LiveOpenWith, ext: string, bytes: Buffer): Promise<void> {
+  const name = path.basename(live.record.localPath);
+  const before = live.beside;
+  try {
+    const { target, outcome } = await writeBesideSave(live.record.localPath, ext, bytes, before, {
+      fallbackDir: openWithRecoveryDir(),
+    });
+    live.beside = target;
+    live.wroteBack = true;
+    log('openwith', 'saved beside the document, in another format', {
+      localPath: live.record.localPath,
+      saved: target.path,
+      outcome,
+      bytes: bytes.length,
+    });
+    if (outcome === 'created') {
+      const vars = {
+        name,
+        saved: path.basename(target.path),
+        format: target.ext.toUpperCase(),
+        ext: extensionOf(live.record.localPath),
+      };
+      openWithNotify(openText('savedBesideTitle', vars), openText('savedBesideBody', vars));
+    } else if (outcome === 'conflict') {
+      const was = path.basename(before?.path ?? target.path);
+      openWithNotify(openText('keptBesideTitle', { name: was }), openText('keptBesideBody', { name: was, kept: target.path }));
+    }
+    refreshBanner(live);
+  } catch (err) {
+    if (!(err instanceof WriteBackError)) throw err;
+    await shoutWriteFailed(err, path.basename(besidePathFor(live.record.localPath, ext)));
+  }
+}
+
+/**
+ * A save that did not land where it was going (`name`), said out loud.
+ *
+ * ⚠ Loud, not logged. The user pressed save, saw no error, and their
+ * document did not change — the one outcome this feature must never deliver
+ * quietly. The message names where the edit was kept instead.
+ */
+async function shoutWriteFailed(err: WriteBackError, name: string): Promise<void> {
+  openWithError = err.message;
+  log('openwith', 'write-back FAILED', { name, error: err.message, keptAt: err.keptAt });
+  const title = openText('writeFailedTitle', { name });
+  const where = err.keptAt ? openText('writeFailedKept', { kept: err.keptAt }) : openText('writeFailedLost');
+  openWithNotify(title, where);
+  await tellUser('error', title, err.message, where);
+}
+
+/** Outside changes and their answers, one at a time per session. */
+function queueOutside(live: LiveOpenWith, step: () => Promise<void>): Promise<void> {
+  const run = live.outsideBusy.then(step).catch((err) =>
+    log('openwith', 'outside change failed', String((err as Error)?.message ?? err)),
+  );
+  live.outsideBusy = run;
+  return run;
+}
+
+/** The outside version, put on the server as a working copy of its own. */
+async function uploadWorkingCopy(
+  acc: Account,
+  live: LiveOpenWith,
+  bytes: Buffer,
+): Promise<{ remote: string; seen: RemoteStat | null }> {
+  const ctx = remoteCtx(acc);
+  const storage = live.record.storage;
+  const dir = scratchRemoteDir(storage);
+  const basename = scratchBasename(live.record.localPath, newSessionId());
+  await uploadFile(ctx, dir, basename, bytes);
+  const seen = await statRemote(ctx, dir, basename);
+  const remote = scratchRemotePath(storage, basename);
+  // On the record at once: a crash now must not leave a copy nothing knows of.
+  live.record.retired = [...(live.record.retired ?? []), { remote, seen }];
+  return { remote, seen };
+}
+
+async function dropCopy(acc: Account, live: LiveOpenWith, remote: string): Promise<void> {
+  await deleteRemote(remoteCtx(acc), scratchRemoteDir(live.record.storage), [remote]).catch((err) =>
+    log('openwith', 'could not remove a working copy', String((err as Error)?.message ?? err)),
+  );
+  live.record.retired = (live.record.retired ?? []).filter((r) => r.remote !== remote);
+}
+
+/**
+ * The document changed outside filex while it was open (#184): the monitor
+ * saw it, or the write-back found it (then with the save it held back).
+ *
+ * The new bytes go to the server as a NEW working copy - never over the one
+ * the editor has open, so a late save of that editor can never land on them -
+ * and the page is told (sendOutside): its editor loads them when it holds
+ * nothing unsaved, or asks the person which version stays.
+ */
+async function takeOutsideChange(
+  live: LiveOpenWith,
+  what: { version?: LocalVersion; bytes?: Buffer; held?: { bytes: Buffer; seen: RemoteStat | null } },
+): Promise<void> {
+  if (liveOpenWith.get(live.record.id) !== live || live.fork) return;
+  if (live.closing) {
+    // Nobody to ask any more: beside the document, never over it.
+    if (what.held) {
+      await keepBeside(live, what.held.bytes);
+      live.record.seen = what.held.seen;
+      await persistOpenWith(live);
+    }
+    return;
+  }
+  let version = what.version;
+  let bytes = what.bytes;
+  if (!version || !bytes) {
+    const read = await readLocalVersion(live.record.localPath);
+    if (!read) {
+      // Gone: the write-back's own "the document is not there" path speaks.
+      if (what.held) await landSave(live, what.held.bytes, what.held.seen);
+      return;
+    }
+    version = read.version;
+    bytes = read.bytes;
+  }
+  const o = live.outside;
+  if (o && o.version.sha256 === version.sha256) {
+    // The same outside version, found twice (the watch and the write-back).
+    if (what.held) {
+      o.held = what.held.bytes;
+      o.heldSeen = what.held.seen;
+      sendOutside(live);
+    }
+    return;
+  }
+  if (!o && version.sha256 === live.monitor.baseline.sha256) {
+    // Back to what filex has (an outside undo): nothing to ask.
+    if (what.held) await landSave(live, what.held.bytes, what.held.seen);
+    return;
+  }
+  const acc = state.accounts.find((a) => a.id === live.record.accountId);
+  if (!acc) return;
+  const next = await uploadWorkingCopy(acc, live, bytes);
+  // The copy offered for the previous change: the page may already be on it
+  // (its answer still on the way), so it is watched like any copy the editor
+  // left - a save on it is kept beside the document - not deleted under it.
+  if (o?.next) {
+    live.retired.push({ remote: o.next.remote, seen: o.next.seen, fate: 'beside', until: Date.now() + openWithGraceMs() });
+  }
+  live.seq += 1;
+  live.outside = {
+    seq: live.seq,
+    version,
+    next,
+    held: what.held?.bytes ?? o?.held ?? null,
+    heldSeen: what.held ? what.held.seen : (o?.heldSeen ?? null),
+    asking: false,
+  };
+  live.monitor.markSeen(version);
+  log('openwith', 'the document changed outside filex', {
+    localPath: live.record.localPath,
+    next: next.remote,
+    held: !!live.outside.held,
+  });
+  await persistOpenWith(live);
+  sendOutside(live);
+}
+
+/** How long a page that has not said hello yet gets before the app asks the
+ *  question itself (a server whose editor page is older than this app). */
+const OUTSIDE_HELLO_WAIT_MS = 4000;
+
+/** Tells the page about the open outside change; a page that does not take
+ *  changes gets the app's own question instead. */
+function sendOutside(live: LiveOpenWith): void {
+  const o = live.outside;
+  if (!o?.next || live.window.isDestroyed()) return;
+  if (live.page.speaks) {
+    live.window.webContents.send('outside:change', { seq: o.seq, path: o.next.remote, pending: !!o.held });
+    return;
+  }
+  if (o.asking) return;
+  o.asking = true;
+  setTimeout(() => void askNatively(live, o), OUTSIDE_HELLO_WAIT_MS);
+}
+
+/**
+ * The question, asked by the app: the page in the window is from a server
+ * whose editor does not take outside changes. It cannot say whether its
+ * editor holds an edit, so the app asks every time rather than reload over
+ * what might be one. Escape is "Keep both", the answer that loses nothing.
+ */
+async function askNatively(live: LiveOpenWith, o: OutsidePending): Promise<void> {
+  if (live.outside !== o || live.window.isDestroyed() || live.page.speaks) {
+    o.asking = false;
+    if (live.page.speaks) sendOutside(live);
+    return;
+  }
+  // An unattended run cannot answer a dialog: the question stays open and
+  // nothing is written over anything (the log says so).
+  if (process.env.FILEX_NO_BROWSER === '1') {
+    log('openwith', 'outside change: question left open (no dialogs in this run)', { seq: o.seq });
+    return;
+  }
+  const name = path.basename(live.record.localPath);
+  const res = await dialog
+    .showMessageBox(live.window, {
+      type: 'question',
+      title: openText('outsideTitle', { name }),
+      message: openText('outsideMessage', { name }),
+      detail: openText('outsideDetail'),
+      buttons: [openText('outsideTheirs'), openText('outsideMine'), openText('outsideBoth')],
+      defaultId: 2,
+      cancelId: 2,
+      noLink: true,
+    })
+    .catch(() => null);
+  o.asking = false;
+  if (!res) return;
+  const choice = (['theirs', 'mine', 'both'] as const)[res.response] ?? 'both';
+  await queueOutside(live, () => applyOutsideAnswer(live, o.seq, choice, { reloadWindow: true }));
+}
+
+/**
+ * What became of an outside change: the page's answer (or the app's own
+ * question's).
+ *
+ *   reloaded / theirs — the editor is on the new working copy; the old one is
+ *     watched a while longer for a late save (kept beside the document after
+ *     'reloaded', dropped after 'theirs': the person chose to drop it);
+ *   mine — the outside version is acknowledged: the next save goes over it
+ *     (only over it - a change after this answer is a new question);
+ *   both — the outside version stays; this session's saves go to a conflict
+ *     copy beside it from now on.
+ */
+async function applyOutsideAnswer(
+  live: LiveOpenWith,
+  seq: number,
+  choice: string,
+  opts: { reloadWindow?: boolean } = {},
+): Promise<void> {
+  const o = live.outside;
+  if (!o || o.seq !== seq) return;
+  if (choice !== 'reloaded' && choice !== 'theirs' && choice !== 'mine' && choice !== 'both') return;
+  const acc = state.accounts.find((a) => a.id === live.record.accountId);
+  if (!acc) return;
+  live.outside = null;
+  log('openwith', 'outside change answered', { localPath: live.record.localPath, choice, held: !!o.held });
+  if ((choice === 'reloaded' || choice === 'theirs') && o.next) {
+    // The held save (if any) is of the old copy: it is dealt with here, so
+    // the old copy's watch starts past it.
+    live.retired.push({
+      remote: live.record.remote,
+      seen: o.heldSeen ?? live.record.seen,
+      fate: choice === 'theirs' ? 'drop' : 'beside',
+      until: Date.now() + openWithGraceMs(),
+    });
+    live.record.retired = [
+      ...(live.record.retired ?? []).filter((r) => r.remote !== o.next!.remote),
+      { remote: live.record.remote, seen: o.heldSeen ?? live.record.seen },
+    ];
+    live.record.remote = o.next.remote;
+    live.record.seen = o.next.seen;
+    live.monitor.adopt(o.version);
+    // #151 — the editor is on the outside version now. Its saves in another
+    // format are not the ones the earlier file beside the document holds, so
+    // they go to a new one (`rapor (2).docx`) rather than over those edits.
+    live.beside = null;
+    if (o.held && choice === 'reloaded') await keepBeside(live, o.held);
+    if (opts.reloadWindow && !live.window.isDestroyed()) {
+      void live.window.loadURL(editRouteUrl(acc, o.next.remote)).catch(() => undefined);
+    }
+  } else if (choice === 'mine') {
+    if (o.next) await dropCopy(acc, live, o.next.remote);
+    live.monitor.adopt(o.version);
+    if (o.held) await landSave(live, o.held, o.heldSeen);
+  } else {
+    if (o.next) await dropCopy(acc, live, o.next.remote);
+    live.monitor.stop();
+    live.fork = { path: null, version: null };
+    if (o.held) {
+      await writeFork(live, o.held);
+      live.record.seen = o.heldSeen;
+    }
+    refreshBanner(live);
+  }
+  await persistOpenWith(live);
+}
+
+/** The open-with session whose window sent an IPC message, or null. */
+function liveForSender(sender: Electron.WebContents): LiveOpenWith | null {
+  for (const l of liveOpenWith.values()) {
+    if (!l.window.isDestroyed() && l.window.webContents.id === sender.id) return l;
+  }
+  return null;
+}
+
 /** The editor window closed. Keep watching — see openWithGraceMs(). */
 async function beginOpenWithGrace(id: string): Promise<void> {
   const live = liveOpenWith.get(id);
   if (!live || live.closing) return;
   live.closing = true;
+  live.monitor.stop();
+  // #184 — a question the closed window can no longer answer: nothing is
+  // written over the document, and filex's version goes beside it (a save
+  // held now, and the session's last save, which comes after the close).
+  await queueOutside(live, async () => {
+    const o = live.outside;
+    if (!o) return;
+    live.outside = null;
+    live.fork = { path: null, version: null };
+    const acc = state.accounts.find((a) => a.id === live.record.accountId);
+    if (acc && o.next) await dropCopy(acc, live, o.next.remote);
+    if (o.held) {
+      await writeFork(live, o.held);
+      live.record.seen = o.heldSeen;
+    }
+    await persistOpenWith(live);
+    log('openwith', 'window closed with the outside-change question open - keeping both', { id });
+  });
   const grace = openWithGraceMs();
   live.hardUntil = Date.now() + grace;
   live.until = live.hardUntil;
@@ -2728,22 +3473,64 @@ async function finishOpenWith(id: string): Promise<void> {
   // notifications.
   liveOpenWith.delete(id);
   if (live.timer) clearInterval(live.timer);
+  live.monitor.stop();
   const acc = state.accounts.find((a) => a.id === live.record.accountId);
   if (acc) {
-    try {
-      await deleteRemote(remoteCtx(acc), scratchRemoteDir(live.record.storage), [live.record.remote]);
-    } catch (err) {
-      log('openwith', 'could not remove the scratch copy', String((err as Error)?.message ?? err));
+    // The copy in use, any earlier one still on the server (#184), and the
+    // saves the server wrote beside them in another format (#151). One by
+    // one: a copy already gone must not keep the others.
+    const copies = [
+      live.record.remote,
+      ...(live.record.retired ?? []).map((r) => r.remote),
+      ...(live.record.beside ?? []).map((b) => b.remote),
+    ];
+    for (const remote of new Set(copies)) {
+      try {
+        await deleteRemote(remoteCtx(acc), scratchRemoteDir(live.record.storage), [remote]);
+      } catch (err) {
+        log('openwith', 'could not remove the scratch copy', String((err as Error)?.message ?? err));
+      }
     }
   }
   await sessionStore?.remove(id);
-  log('openwith', 'session done', { id, wroteBack: live.wroteBack });
+  log('openwith', 'session done', { id, wroteBack: live.wroteBack, beside: live.beside?.path ?? null });
   if (live.wroteBack) {
+    // #151 — the file the edit is in: rapor.docx, when the saves went beside
+    // rapor.doc.
     openWithNotify(
       openText('savedBackTitle'),
-      openText('savedBackBody', { name: path.basename(live.record.localPath) }),
+      openText('savedBackBody', { name: path.basename(live.beside?.path ?? live.record.localPath) }),
     );
   }
+}
+
+/** An edit recovered from a previous run, beside `target` as
+ *  `<name>.filex-recovered-<time>.<ext>` (a second one in the same second
+ *  `…-<time>-2.<ext>`): never over a file. */
+async function keepRecovered(target: string, bytes: Buffer): Promise<string> {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
+  for (let n = 1; n < 100; n++) {
+    const p = recoveryPathFor(target, n > 1 ? stamp + '-' + n : stamp);
+    try {
+      await fs.promises.writeFile(p, bytes, { flag: 'wx' });
+      return p;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') continue;
+      throw err;
+    }
+  }
+  throw new Error('no free name for a recovered edit beside ' + target);
+}
+
+/** An edit a previous run left on the server, put beside `target` (the
+ *  document, or the file its format is named for) and the person told. */
+async function recoverEdit(s: OpenWithSession, target: string, bytes: Buffer): Promise<void> {
+  const kept = await keepRecovered(target, bytes);
+  log('openwith', 'recovered an edit from a previous run', { localPath: s.localPath, kept });
+  openWithNotify(
+    openText('recoveredTitle'),
+    openText('recoveredBody', { name: path.basename(s.localPath), kept: path.basename(kept) }),
+  );
 }
 
 /**
@@ -2760,7 +3547,8 @@ async function finishOpenWith(id: string): Promise<void> {
 async function sweepOpenWith(): Promise<void> {
   if (!sessionStore) return;
   const all = await sessionStore.list();
-  const known = new Set(all.map((s) => s.remote.slice(s.remote.lastIndexOf('/') + 1)));
+  const copyBases = all.flatMap((s) => [s.remote, ...(s.retired ?? []).map((r) => r.remote)]).map(remoteBase);
+  const known = new Set([...copyBases, ...all.flatMap((s) => (s.beside ?? []).map((b) => remoteBase(b.remote)))]);
 
   for (const s of staleSessions(all, { currentPid: process.pid })) {
     const acc = state.accounts.find((a) => a.id === s.accountId);
@@ -2770,21 +3558,41 @@ async function sweepOpenWith(): Promise<void> {
     }
     const ctx = remoteCtx(acc);
     const dir = scratchRemoteDir(s.storage);
-    const basename = s.remote.slice(s.remote.lastIndexOf('/') + 1);
     try {
-      const current = await statRemote(ctx, dir, basename);
-      if (needsRecovery(s, current)) {
-        const bytes = await downloadFile(ctx, s.remote);
-        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
-        const kept = recoveryPathFor(s.localPath, stamp);
-        await fs.promises.writeFile(kept, bytes);
-        log('openwith', 'recovered an edit from a previous run', { localPath: s.localPath, kept });
-        openWithNotify(
-          openText('recoveredTitle'),
-          openText('recoveredBody', { name: path.basename(s.localPath), kept: path.basename(kept) }),
-        );
+      const entries = await listDir(ctx, dir);
+      // The copy in use and the earlier ones of the session (#184): an edit
+      // on any of them is recovered BESIDE the document, never over it.
+      const copies = [{ remote: s.remote, seen: s.seen }, ...(s.retired ?? [])];
+      for (const c of copies) {
+        const current = statIn(entries, remoteBase(c.remote));
+        if (needsRecovery({ ...s, remote: c.remote, seen: c.seen }, current)) {
+          const bytes = await downloadFile(ctx, c.remote);
+          // #151 — bytes in another format are named for it.
+          const other = savedFormatOf(s.localPath, bytes);
+          await recoverEdit(s, other ? besidePathFor(s.localPath, other) : s.localPath, bytes);
+        }
+        if (current) await deleteRemote(ctx, dir, [c.remote]);
+        // #151 — the newest save the server wrote beside that copy in another
+        // format, when the session never brought it home: recovered beside
+        // the document under its own format's name (rapor.filex-recovered-
+        // <time>.docx), never over anything. Then those saves go too.
+        const late = unseenBesideSaves(c.remote, entries, s.beside);
+        if (late.length) {
+          const newest = late[late.length - 1]!;
+          const bytes = await downloadFile(ctx, scratchRemotePath(s.storage, newest.basename));
+          await recoverEdit(s, besidePathFor(s.localPath, newest.ext), bytes);
+          // On the record before the copies go: a sweep deferred after this
+          // (the server went away mid-way) must not recover it a second time.
+          s.beside = [
+            ...(s.beside ?? []),
+            ...late.map((b) => ({ remote: scratchRemotePath(s.storage, b.basename), seen: b.stat })),
+          ];
+          await sessionStore.put(s);
+        }
+        for (const b of besideSaves(remoteBase(c.remote), entries)) {
+          await deleteRemote(ctx, dir, [scratchRemotePath(s.storage, b.basename)]);
+        }
       }
-      if (current) await deleteRemote(ctx, dir, [s.remote]);
     } catch (err) {
       // Server unreachable at boot is normal. Keep the record — the next start
       // will try again rather than leaking the copy forever.
@@ -2800,7 +3608,11 @@ async function sweepOpenWith(): Promise<void> {
     try {
       const dir = scratchRemoteDir(storage);
       const entries = (await listDir(remoteCtx(acc), dir)).filter((e) => e.type === 'file');
-      const dead = orphanScratchEntries(entries, known);
+      // #151 — a save written beside a copy a record names belongs to that
+      // session, recorded yet or not.
+      const keep = new Set(known);
+      for (const base of copyBases) for (const b of besideSaves(base, entries)) keep.add(b.basename);
+      const dead = orphanScratchEntries(entries, keep);
       if (!dead.length) continue;
       await deleteRemote(remoteCtx(acc), dir, dead.map((n) => scratchRemotePath(storage, n)));
       log('openwith', 'removed orphaned scratch copies', { account: acc.id, count: dead.length });
@@ -2916,6 +3728,14 @@ function openWithPublicState() {
       remote: l.record.remote,
       closing: l.closing,
       wroteBack: l.wroteBack,
+      // #184
+      outside: l.outside ? { seq: l.outside.seq, path: l.outside.next?.remote ?? null, held: !!l.outside.held } : null,
+      fork: l.fork ? (l.fork.path ?? '') : null,
+      // #151 — where saves in another format go (`rapor.docx` beside
+      // `rapor.doc`), once one has.
+      beside: l.beside?.path ?? null,
+      retired: l.retired.length,
+      page: { ...l.page },
     })),
     lastError: openWithError,
   };
@@ -3070,6 +3890,16 @@ function wireIpc(): void {
     // the page hands over: this opens the system browser.
     const sub = page === 'notifications' ? 'notifications' : '';
     void shell.openExternal(serverUrl(acc.serverUrl, `/admin/${sub}`).toString());
+  });
+
+  // #162 - the navigation panel's "App store" row (the explorer decides it:
+  // core lib/appStoreRow, the same rule as the web app). The screen is the
+  // server's own page, opened the way a document is: a window of the app,
+  // the credential from the header injector, no bridge into the page.
+  ipcMain.handle('account:openStore', (_e, id: string) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    if (!acc) throw new Error('unknown account');
+    openStoreWindow(acc);
   });
 
   // The window's bell marked something read: ask the bell again now, so the
@@ -4042,6 +4872,27 @@ function wireIpc(): void {
   // the OS's own default.
   ipcMain.handle('openwith:state', () => openWithPublicState());
   ipcMain.handle('openwith:setDefault', () => makeFilexTheDefault());
+
+  // #184 — an "Open with filex" window's page (preload-editor `filexOutside`).
+  // Each message acts on the session of the window that sent it; from any
+  // other window it is ignored.
+  ipcMain.on('outside:hello', (e, version: unknown) => {
+    const live = liveForSender(e.sender);
+    if (!live) return;
+    live.page = { speaks: Number(version) >= 1, edited: false };
+    if (live.outside) sendOutside(live);
+  });
+  ipcMain.on('outside:state', (e, st: { edited?: unknown } | null) => {
+    const live = liveForSender(e.sender);
+    if (live) live.page.edited = st?.edited === true;
+  });
+  ipcMain.on('outside:answer', (e, a: { seq?: unknown; choice?: unknown } | null) => {
+    const live = liveForSender(e.sender);
+    if (!live) return;
+    const seq = Number(a?.seq);
+    const choice = String(a?.choice ?? '');
+    void queueOutside(live, () => applyOutsideAnswer(live, seq, choice));
+  });
 
   // Test-only: feed a deep link straight in. Guarded by the same env flag that
   // suppresses the browser, so it cannot be reached in a normal run.

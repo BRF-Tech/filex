@@ -91,6 +91,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.NodeDeletedBySQL = &db.NodeDeletedBySQL{Pool: sqlDB}
 	// Drafts (00064), the same way.
 	s.DraftSQL = &db.DraftSQL{Pool: sqlDB}
+	// Recent searches (00090), the same way.
+	s.RecentSearchSQL = &db.RecentSearchSQL{Pool: sqlDB}
 	// Rows deleted where they stood (issue #74), the same way.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB}
@@ -105,6 +107,14 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.PluginRequestSQL = &db.PluginRequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	// Sign-in attempt counters (00072), the same way and for the same reason.
 	s.LoginThrottleSQL = &db.LoginThrottleSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// Office editing sessions (00092), the same way; nothing in it is a
+	// timestamp.
+	s.OfficeSessionSQL = &db.OfficeSessionSQL{Pool: sqlDB}
+	// Replication initial copies (00094), the same way; nothing in it is a
+	// timestamp.
+	s.ReplicaInitialCopySQL = &db.ReplicaInitialCopySQL{Pool: sqlDB}
+	// The folder each storage writes into on its target (00095), the same way.
+	s.ReplicaLinkSQL = &db.ReplicaLinkSQL{Pool: sqlDB}
 	// Groups (00074), the same way.
 	s.GroupSQL = db.NewGroupSQL(sqlDB, false)
 	// Tenant self-service (00076), the same way.
@@ -118,6 +128,9 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	s.E2ERequestSQL = &db.E2ERequestSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	// The app store's state (00081), the same way.
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// The notification digest (00087), the same way and with the same
+	// timestamp spelling.
+	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Time: db.CatalogueTime}
 	return s
 }
 
@@ -136,6 +149,9 @@ type Store struct {
 	*db.NodeDeletedBySQL
 	// The drafts methods (internal/db drafts_sql.go).
 	*db.DraftSQL
+	// A person's recent searches (internal/db recent_searches_sql.go,
+	// migration 00090).
+	*db.RecentSearchSQL
 	// ListVanishedNodeIDs, CountChildRows (internal/db vanished_sql.go).
 	*db.VanishedSQL
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
@@ -150,6 +166,15 @@ type Store struct {
 	*db.AppStoreSQL
 	// The sign-in attempt counters (internal/db login_throttle_sql.go).
 	*db.LoginThrottleSQL
+	// The office editing sessions (internal/db office_session_sql.go,
+	// migration 00092).
+	*db.OfficeSessionSQL
+	// The replication initial copies (internal/db replica_initial_copy_sql.go,
+	// migration 00094).
+	*db.ReplicaInitialCopySQL
+	// The replication folders (internal/db replica_link_sql.go, migration
+	// 00095).
+	*db.ReplicaLinkSQL
 	// The group methods (internal/db group_sql.go, migration 00074).
 	*db.GroupSQL
 	// Sign-in instances, their bindings, own domains (internal/db
@@ -163,6 +188,8 @@ type Store struct {
 	*db.OIDCIdentitySQL
 	// The encryption requests (internal/db e2e_requests_sql.go).
 	*db.E2ERequestSQL
+	// The notification digest (internal/db digest_sql.go, migration 00087).
+	*db.DigestSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -236,10 +263,14 @@ func (s *Store) CreateStorage(ctx context.Context, st *model.Storage) (*model.St
 	if st.UID == "" {
 		st.UID = model.NewStorageUID()
 	}
+	// ⚠ replica_target_id is written here too, not only by UpdateStorage: a
+	// storage created already linked (POST /api/admin/storages, the MCP and
+	// /api/ai/admin twins, with replica_target_id) otherwise came back
+	// unlinked, and nothing written to it ever reached the target (#186).
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled, uid)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled), st.UID)
+		`INSERT INTO storages (name, driver, mount_path, config_json, sync_mode, sync_interval_s, enabled, read_only, rbac_enabled, uid, replica_target_id)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		st.Name, st.Driver, st.MountPath, string(cfg), st.SyncMode, st.SyncIntervalS, btoi(st.Enabled), btoi(st.ReadOnly), btoi(st.RBACEnabled), st.UID, st.ReplicaTargetID)
 	if err != nil {
 		return nil, err
 	}
@@ -1900,6 +1931,12 @@ func (s *Store) UpdateAPITokenMeta(ctx context.Context, id int64, label, usernam
 		}
 	}
 	return nil
+}
+
+// UpdateAPITokenScopes writes a token's whole scope list.
+func (s *Store) UpdateAPITokenScopes(ctx context.Context, id int64, scopes string) error {
+	_, err := s.conn(ctx).ExecContext(ctx, `UPDATE api_tokens SET scopes=? WHERE id=?`, scopes, id)
+	return err
 }
 
 func (s *Store) DeleteAPIToken(ctx context.Context, id int64) error {
@@ -4112,6 +4149,31 @@ func hiddenBodiesClause(patterns []string) (string, []any) {
 	return "(" + strings.Join(parts, " AND ") + ")", args
 }
 
+// quietClause is the reader's digest predicate (model.DigestFilter): a row
+// above their digest point, of a kind they hold for the digest. f.Only keeps
+// the quiet rows alone (and stops at f.UpTo); otherwise, on an unread read,
+// they are left out — the digest that carries them is what is unread. Empty
+// when the read has no digest. Placeholders, never literals, like the mutes.
+func quietClause(f *model.DigestFilter, unread bool) (string, []any) {
+	if f == nil || len(f.Quiet) == 0 || (!f.Only && !unread) {
+		return "", nil
+	}
+	args := make([]any, 0, len(f.Quiet)+2)
+	args = append(args, f.After)
+	for _, e := range f.Quiet {
+		args = append(args, e)
+	}
+	quiet := "(n.id > ? AND n.event IN (" + qmarks(len(f.Quiet)) + "))"
+	if !f.Only {
+		return "NOT " + quiet, args
+	}
+	if f.UpTo > 0 {
+		quiet += " AND n.id <= ?"
+		args = append(args, f.UpTo)
+	}
+	return quiet, args
+}
+
 // bellClause builds the per-user predicate over `notifications n`: the
 // reader's own rows, plus the broadcasts (user_id NULL) the filter admits. The
 // zero filter admits every broadcast, the predicate this read always had.
@@ -4245,6 +4307,12 @@ func (s *Store) ListNotifications(ctx context.Context, userID *int64, onlyUnread
 	if clause, hideArgs := hiddenBodiesClause(hiddenBodies); clause != "" {
 		whereC = append(whereC, clause)
 		args = append(args, hideArgs...)
+	}
+	if userID != nil {
+		if clause, quietArgs := quietClause(broadcasts.Digest, onlyUnread); clause != "" {
+			whereC = append(whereC, clause)
+			args = append(args, quietArgs...)
+		}
 	}
 	from := " FROM notifications n" + join
 	if len(whereC) > 0 {
@@ -4441,6 +4509,12 @@ func (s *Store) UnreadNotificationCount(ctx context.Context, userID *int64, mute
 		q += ` AND ` + clause
 		args = append(args, hideArgs...)
 	}
+	if userID != nil {
+		if clause, quietArgs := quietClause(broadcasts.Digest, true); clause != "" {
+			q += ` AND ` + clause
+			args = append(args, quietArgs...)
+		}
+	}
 	var n int64
 	if err := s.conn(ctx).QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
 		return 0, err
@@ -4598,15 +4672,16 @@ func scanWebhookTarget(rs interface {
 // is treated as the default (in_app_enabled=true, no muted events).
 func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*model.NotificationSettings, error) {
 	row := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT user_id, in_app_enabled, muted_events
+		`SELECT user_id, in_app_enabled, muted_events, COALESCE(urgent_overrides, '')
 		 FROM notification_settings WHERE user_id=?`, userID)
 	out := &model.NotificationSettings{UserID: userID, InAppEnabled: true, MutedEventsRaw: []byte("[]")}
 	var (
-		gotUser  int64
-		enabled  int
-		mutedRaw string
+		gotUser   int64
+		enabled   int
+		mutedRaw  string
+		urgentRaw string
 	)
-	if err := row.Scan(&gotUser, &enabled, &mutedRaw); err != nil {
+	if err := row.Scan(&gotUser, &enabled, &mutedRaw, &urgentRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return out, nil
 		}
@@ -4617,6 +4692,9 @@ func (s *Store) GetNotificationSettings(ctx context.Context, userID int64) (*mod
 	out.MutedEventsRaw = json.RawMessage(mutedRaw)
 	if len(out.MutedEventsRaw) == 0 {
 		out.MutedEventsRaw = []byte("[]")
+	}
+	if urgentRaw != "" {
+		out.UrgentOverridesRaw = json.RawMessage(urgentRaw)
 	}
 	return out, nil
 }
@@ -4634,14 +4712,21 @@ func (s *Store) UpsertNotificationSettings(ctx context.Context, st *model.Notifi
 	if st.InAppEnabled {
 		enabled = 1
 	}
+	// ⚠ A nil urgent_overrides keeps what is stored (db.Store): COALESCE
+	// against the row's own column.
+	var urgent any
+	if len(st.UrgentOverridesRaw) > 0 {
+		urgent = string(st.UrgentOverridesRaw)
+	}
 	_, err := s.conn(ctx).ExecContext(ctx,
-		s.upsert(`INSERT INTO notification_settings (user_id, in_app_enabled, muted_events, updated_at)
-		 VALUES (?,?,?, CURRENT_TIMESTAMP)
+		s.upsert(`INSERT INTO notification_settings (user_id, in_app_enabled, muted_events, urgent_overrides, updated_at)
+		 VALUES (?,?,?,?, CURRENT_TIMESTAMP)
 		 ON CONFLICT(user_id) DO UPDATE SET
-		   in_app_enabled = excluded.in_app_enabled,
-		   muted_events   = excluded.muted_events,
-		   updated_at     = CURRENT_TIMESTAMP`),
-		st.UserID, enabled, string(muted))
+		   in_app_enabled   = excluded.in_app_enabled,
+		   muted_events     = excluded.muted_events,
+		   urgent_overrides = COALESCE(excluded.urgent_overrides, urgent_overrides),
+		   updated_at       = CURRENT_TIMESTAMP`),
+		st.UserID, enabled, string(muted), urgent)
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert notif settings: %w", err)
 	}
@@ -4739,18 +4824,18 @@ func (s *Store) DeleteReplicaRule(ctx context.Context, id int64) error {
 
 // UpsertReplicaFailure either inserts a new failure or bumps attempts
 // + last_attempt_at + the latest error code/message for the existing
-// (path, op) row. Idempotent under retry.
-func (s *Store) UpsertReplicaFailure(ctx context.Context, path, op, errCode, errMsg string) error {
+// (storage, path, op) row. Idempotent under retry.
+func (s *Store) UpsertReplicaFailure(ctx context.Context, storageID int64, path, op, errCode, errMsg string) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
-		s.upsert(`INSERT INTO replica_failures (path, op, error_code, error_msg, attempts, last_attempt_at)
-		 VALUES (?,?,?,?,1, CURRENT_TIMESTAMP)
-		 ON CONFLICT(path, op) DO UPDATE SET
+		s.upsert(`INSERT INTO replica_failures (storage_id, path, op, error_code, error_msg, attempts, last_attempt_at)
+		 VALUES (?,?,?,?,?,1, CURRENT_TIMESTAMP)
+		 ON CONFLICT(storage_id, path, op) DO UPDATE SET
 		   error_code      = excluded.error_code,
 		   error_msg       = excluded.error_msg,
 		   attempts        = replica_failures.attempts + 1,
 		   last_attempt_at = CURRENT_TIMESTAMP,
 		   resolved_at     = NULL`),
-		path, op, errCode, errMsg)
+		storageID, path, op, errCode, errMsg)
 	if err != nil {
 		return fmt.Errorf("sqlite: upsert replica failure: %w", err)
 	}
@@ -4759,10 +4844,10 @@ func (s *Store) UpsertReplicaFailure(ctx context.Context, path, op, errCode, err
 
 // ResolveReplicaFailure stamps resolved_at on the matching row.
 // Missing rows are a no-op.
-func (s *Store) ResolveReplicaFailure(ctx context.Context, path, op string) error {
+func (s *Store) ResolveReplicaFailure(ctx context.Context, storageID int64, path, op string) error {
 	_, err := s.conn(ctx).ExecContext(ctx,
 		`UPDATE replica_failures SET resolved_at = CURRENT_TIMESTAMP
-		 WHERE path=? AND op=? AND resolved_at IS NULL`, path, op)
+		 WHERE storage_id=? AND path=? AND op=? AND resolved_at IS NULL`, storageID, path, op)
 	return err
 }
 
@@ -4786,7 +4871,7 @@ func (s *Store) ListReplicaFailures(ctx context.Context, onlyUnresolved bool, li
 	}
 
 	rows, err := s.conn(ctx).QueryContext(ctx,
-		`SELECT id, path, op, error_code, error_msg, attempts, last_attempt_at, resolved_at
+		`SELECT id, storage_id, path, op, error_code, error_msg, attempts, last_attempt_at, resolved_at
 		 FROM replica_failures `+whereSQL+`
 		 ORDER BY last_attempt_at DESC, id DESC
 		 LIMIT ? OFFSET ?`, limit, offset)
@@ -4799,7 +4884,7 @@ func (s *Store) ListReplicaFailures(ctx context.Context, onlyUnresolved bool, li
 	for rows.Next() {
 		f := &model.ReplicaFailure{}
 		var resolvedAt sql.NullTime
-		if err := rows.Scan(&f.ID, &f.Path, &f.Op, &f.ErrorCode, &f.ErrorMsg, &f.Attempts, &f.LastAttemptAt, &resolvedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.StorageID, &f.Path, &f.Op, &f.ErrorCode, &f.ErrorMsg, &f.Attempts, &f.LastAttemptAt, &resolvedAt); err != nil {
 			return nil, 0, err
 		}
 		if resolvedAt.Valid {

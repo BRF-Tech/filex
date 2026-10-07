@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/storage"
+	"github.com/brf-tech/filex/backend/internal/testutil/lives3"
 )
 
 // TestInit_BucketRequired returns an error when bucket is missing.
@@ -88,21 +89,9 @@ func TestInit_Integration(t *testing.T) {
 	if testing.Short() || os.Getenv("INTEGRATION") != "1" {
 		t.Skip("integration only — set INTEGRATION=1 to enable")
 	}
-	bucket := os.Getenv("FILEX_TEST_S3_BUCKET")
-	endpoint := os.Getenv("FILEX_TEST_S3_ENDPOINT")
-	access := os.Getenv("FILEX_TEST_S3_ACCESS_KEY")
-	secret := os.Getenv("FILEX_TEST_S3_SECRET_KEY")
-	if bucket == "" || access == "" || secret == "" {
-		t.Skip("missing FILEX_TEST_S3_* env vars")
-	}
+	cfg := lives3.Config(t, "reach a real S3 server")
 	d := &Driver{}
-	require.NoError(t, d.Init(context.Background(), map[string]any{
-		"bucket":     bucket,
-		"endpoint":   endpoint,
-		"access_key": access,
-		"secret_key": secret,
-		"path_style": true,
-	}))
+	require.NoError(t, d.Init(context.Background(), cfg))
 
 	// Smoke-check List doesn't immediately fail.
 	_, err := d.List(context.Background(), "/")

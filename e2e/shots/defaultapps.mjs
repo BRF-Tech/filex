@@ -3,7 +3,7 @@
 //
 //   node e2e/shots/defaultapps.mjs        (from the repo root; `pnpm shots` runs it)
 //
-// Writes docs/screenshots/<release>/defaultapps/ (the release named in ./release.mjs):
+// Writes e2e/.artifacts/shots/capture/defaultapps/ (the capture folder, ./release.mjs):
 //
 //   install-file-types-1440.png    Plugins → Apps → Install, the review of the
 //                                  example app pkglist: its permission per kind
@@ -31,7 +31,7 @@
 //
 // Environment:
 //   FILEX_BIN       binary to run (default bin/filex[.exe])
-//   SHOTS_OUT       write here instead of the release folder
+//   SHOTS_OUT       write here instead of the capture folder
 //   SHOTS_DRY_RUN=1 walk every scene to its picture and write nothing
 //   SHOTS_KEEP=1    leave the instance running afterwards
 

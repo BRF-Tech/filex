@@ -57,4 +57,16 @@ export const NAIVE: Impl = {
   orphanScratchEntries(entries, known) {
     return entries.filter((e) => !known.has(e.basename)).map((e) => e.basename);
   },
+
+  // Trap (#151): "the DOCX of Rapor.doc goes to Rapor.docx" - written straight
+  // over whatever is there: yesterday's edit, a file of the person's own, the
+  // one they have open in another program right now.
+  async writeBesideSave(localPath, ext, bytes) {
+    const p = localPath.replace(/\.[^.\\/]*$/, '') + '.' + ext;
+    await fs.promises.writeFile(p, bytes as never);
+    return {
+      target: { ext, path: p, version: { size: bytes.length, mtimeMs: 0, sha256: '', at: 0 } },
+      outcome: 'updated',
+    };
+  },
 };

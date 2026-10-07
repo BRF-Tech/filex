@@ -1,9 +1,11 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import { appBase } from '@brftech/filex-core';
 import { useAuthStore } from '@/stores/auth';
+import { useCapabilitiesStore } from '@/stores/capabilities';
 import { stashDesktopHandoff } from '@/lib/desktopHandoff';
 import { applyDocumentTitle } from '@/lib/documentTitle';
 import { startRouteName } from '@/lib/startPage';
+import { tenancyOn } from '@/lib/tenancy';
 import { captureStoreFragment, captureStoreLink, dropStoreFragment, hasStoreLink, isStoreInstallPath, takeStoreLink } from '@/lib/storeLink';
 
 import AdminLayout from '@/components/AdminLayout.vue';
@@ -261,6 +263,23 @@ const routes: RouteRecordRaw[] = [
   },
   {
     /**
+     * #162 - the store screen ("Uygulama mağazası" / "App store"): the
+     * catalog of the trusted stores an administrator turned on for this
+     * person, drawn by filex itself, and a Request on the Install requests
+     * list (views/AppStoreScreen.vue).
+     *
+     * ⚠⚠ OUTSIDE the AdminLayout block, for the reason My shares is: the
+     * panel is admin-only, and this screen is for whoever the administrator
+     * chose (the server answers who: GET /api/app-store). ⚠ NOT `public`:
+     * every call it makes is an authenticated one.
+     */
+    path: '/app-store',
+    name: 'app-store',
+    component: () => import('@/views/AppStoreScreen.vue'),
+    meta: { layout: 'blank', breadcrumb: 'storeScreen.title' },
+  },
+  {
+    /**
      * An app plugin's `home` view as a page of ITS OWN, in the same tab —
      * the explorer's "Apps" rows open here (`config.appHomePage` →
      * `open-app-home`). `?section=` is the section of the page on screen
@@ -390,6 +409,15 @@ const routes: RouteRecordRaw[] = [
         meta: { breadcrumb: 'nav.settings' },
       },
       {
+        // Multi-tenant mode (task #167): the platform operator's switch. The
+        // one page about tenants a single-tenant install shows - it is where
+        // the mode is turned on - so it carries no `tenancy` meta.
+        path: 'tenancy',
+        name: 'tenancy',
+        component: () => import('@/views/TenancyMode.vue'),
+        meta: { breadcrumb: 'nav.tenancy' },
+      },
+      {
         // wiring:e1 — settings-driven branding (public pages + login).
         path: 'branding',
         name: 'branding',
@@ -428,20 +456,20 @@ const routes: RouteRecordRaw[] = [
         path: 'tenants',
         name: 'tenants',
         component: () => import('@/views/Tenants.vue'),
-        meta: { breadcrumb: 'nav.tenants' },
+        meta: { breadcrumb: 'nav.tenants', tenancy: true },
       },
       {
         // My tenant: a tenant's administrator runs their own tenant.
         path: 'my-tenant',
         name: 'tenant-self',
         component: () => import('@/views/TenantSelf.vue'),
-        meta: { breadcrumb: 'nav.myTenant' },
+        meta: { breadcrumb: 'nav.myTenant', tenancy: true },
       },
       {
         path: 'tenants/:id',
         name: 'tenants.edit',
         component: () => import('@/views/TenantEdit.vue'),
-        meta: { breadcrumb: 'tenants.editTitle', parent: 'tenants' },
+        meta: { breadcrumb: 'tenants.editTitle', parent: 'tenants', tenancy: true },
       },
       {
         path: 'auth-providers/:name',
@@ -838,6 +866,16 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAdmin && !auth.isAdmin && typeof to.meta.adminPerm === 'string' && auth.can(to.meta.adminPerm)) {
     return true;
   }
+  // A page about tenants on a server that runs no multi-tenant mode has
+  // nothing to show (lib/tenancy): the dashboard instead, before any of it is
+  // drawn. ⚠ Only once the server has answered - a capabilities fetch that
+  // failed decides nothing, and the server refuses what it must anyway.
+  if (to.meta.tenancy === true) {
+    const caps = useCapabilitiesStore();
+    if (!caps.loaded) await caps.fetch();
+    if (caps.loaded && !tenancyOn(caps.data)) return { name: 'dashboard', replace: true };
+  }
+
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     if (!onUserBase()) {
       // ⚠ A real navigation, not a router redirect. vue-router prefixes every

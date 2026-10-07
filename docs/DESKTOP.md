@@ -203,6 +203,48 @@ way: `browser-support` connected by itself, nothing was left to connect for
 the app to open, and its browser, zygote, renderer, GPU and utility processes
 all ran as `snap.filex-app.filex-app (enforce)` with a seccomp filter.
 
+### On a phone or a tablet: the web app
+
+There is no desktop app for a phone. On Android, an iPhone or an iPad, filex
+is the web app, and it installs like an app: an icon on the home screen, a
+window of its own with no address bar (the manifest's `standalone` display),
+and its notifications.
+
+A phone gets the same band at the bottom of the screen that a computer's
+sign-in page uses for the desktop app - on the sign-in page and on the file
+list - offering the web app instead; a phone is never offered the desktop
+app. The file list makes room for the band rather than standing under it.
+
+- **Android** (Chrome, Edge, Samsung Internet): **Install filex as a web app
+  → Install** opens the browser's own install dialog. A browser offers the
+  install to a page only once it judges the site worth it (Chrome: a tap and
+  about 30 seconds on the site, on any visit); until then the band says where
+  the browser's own menu has it (*Install app* or *Add to Home screen*), and
+  it turns into the **Install** button the moment the browser offers one. A
+  browser that never offers it to a page (Firefox) keeps the menu's way.
+- **iPhone and iPad** (iOS 16.4 or later, any browser): no browser offers an
+  install to a page there, so the band says how: **Share** (on iOS 26: **⋯**
+  first, then **Share**) → **Add to Home Screen** → **Add**. On iOS 26 leave
+  **Open as Web App** on: without it the icon opens a Safari tab, and a tab
+  cannot show notifications.
+- **Closed for good.** **×** on the band closes it on every device you sign
+  in on. It is a reminder of its own: closing the desktop app's reminder on a
+  computer does not close it, nor the other way round. The same offer stays
+  in the account menu's **Settings → Preferences → Install as a web app** for
+  as long as the browser can install.
+- **Installed**, nothing is offered: not in the installed app, and not in a
+  browser tab on that device once the app has been installed there (the
+  browser stops offering it, and filex remembers the install in that
+  browser until the browser offers it again).
+
+**Notifications on a phone.** While filex is open - a tab or the installed
+app - a new row in the bell raises a notification once you allow it in
+**Settings → Notifications** ([browser notifications](NOTIFICATIONS.md#browser-notifications)).
+On an iPhone or iPad that works only in the app added to the Home Screen,
+never in a Safari tab, and the permission is asked there, from that button.
+⚠ There is no Web Push yet: with filex closed, nothing arrives until it is
+opened again.
+
 ## Signing in
 
 You are **not** asked for a password in the app. It opens your server's own
@@ -274,6 +316,16 @@ Signing in gives the app a **personal** API token (kind `user`, see
 scopes are `read,write,delete`, or `read,write` for a **viewer** account - never
 `admin`. It appears in your token list labelled *filex desktop - &lt;platform&gt;*;
 revoking it there signs that copy of the app out.
+
+It also carries **`comments:rw`**: the app reads, adds and deletes comments
+as the browser does (the account's own `comments.write` still decides). Since
+0.53 that is a permission of its own, which an API key or an agent's token
+holds only at `read` unless it is given more
+([RBAC.md → Permissions with a level](RBAC.md#permissions-with-a-level-comments));
+the desktop pairing is the one token minted with it without being asked, and
+the upgrade to 0.53 (migration `00091`) gave it to the pairings made before.
+Taking it away - the token's **Actions → Comments: read only** on the API keys
+page in your browser - makes that desktop read comments only.
 
 Changing the account itself - the profile, the password, two-factor - needs a
 token's `write` since 0.49
@@ -385,18 +437,24 @@ Recent and Starred are in the left panel, as on the web.
 
 ## Opening documents from your computer
 
-A Word, Excel or PowerPoint file **on your own disk** can be opened with filex.
-Double-click it and it opens in the editor your filex server runs - with no
-Office installed on this computer.
+A Word, Excel or PowerPoint file **on your own disk** - or a CSV - can be
+opened with filex. Double-click it and it opens in the editor your filex
+server runs - with no Office installed on this computer.
 
 That is the point of it. Most Linux desktops have no Microsoft Office, many Macs
 have none, and plenty of Windows machines have none either; filex already had a
 perfectly good editor, and the documents on your desktop had no way into it.
 
 **Types filex will handle:** `.docx` `.doc` `.xlsx` `.xls` `.pptx` `.ppt`
-`.odt` `.ods` `.odp` `.rtf`. Deliberately nothing else - images, PDFs and code
-already open in something on every OS, and taking a file type away from an app
-that handles it better is not an improvement.
+`.odt` `.ods` `.odp` `.rtf`, and `.csv` (since 0.53). Deliberately nothing
+else - images, PDFs and code already open in something on every OS, and
+taking a file type away from an app that handles it better is not an
+improvement. `.csv` is in the list for what the editor does with it: with
+ONLYOFFICE on the server it opens in the spreadsheet editor, and a save as
+CSV comes back in the file's own dialect - its delimiter, its byte order
+mark, its line ends, the text of every cell nobody changed
+([ONLYOFFICE.md → CSV files](ONLYOFFICE.md#csv-files)) - which neither a text
+editor nor a spreadsheet app without import settings gives you.
 
 **Your server needs OnlyOffice** for the editing itself
 ([OnlyOffice](ONLYOFFICE.md)). Without it the document still opens, in whatever
@@ -409,7 +467,7 @@ Two things can happen, and filex picks the right one per document:
 | The document is… | What filex does |
 |---|---|
 | inside a folder you **keep on this computer** | Opens its twin on the server directly. Nothing is copied. Saving goes to the server, and sync brings it back down to that same file - the one on your disk. |
-| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file**. When you close the window the copy is deleted. (Among filex's own folders the server lets a person write only there - and only these requests: create it at the root, upload `<session>-<name>` into it, save it from the editor, delete it - and into their own drafts. See [BACKEND.md](BACKEND.md#names-filex-keeps-for-itself).) |
+| anywhere else | Copies it to a hidden working folder on your account (`<storage>://.filex-open`), opens that, and **writes every save back over your original file** - as long as it is still the version filex last read or wrote ([below](#when-the-file-changes-while-it-is-open)); a save in another format - an old `.doc` saved as DOCX - goes beside it instead ([below](#a-save-in-another-format)). When you close the window the copy is deleted. (Among filex's own folders the server lets a person write only there - and only these requests: create it at the root, upload `<session>-<name>` into it, save it from the editor, delete it - and into their own drafts. See [BACKEND.md](BACKEND.md#names-filex-keeps-for-itself).) |
 
 In the second case a strip along the bottom of the editor window names the file
 on your disk that saves are landing on, for as long as the window is open. It is
@@ -433,6 +491,74 @@ the meantime.
 program, or its folder turned read-only - filex says so with a notification and
 a dialog, and names the file it kept your edit in. A save that silently fails is
 the one outcome this feature must never produce.
+
+### A save in another format
+
+ONLYOFFICE saves no Word 97, Excel 97 or PowerPoint 97 file: an edited
+`rapor.doc` comes back as **DOCX**, an `.xls` as XLSX, a `.ppt` as PPTX (and a
+Document Server set to `assemblyFormatAsOrigin: false` saves an ODF file as
+OOXML too). Your `rapor.doc` is **never written** with them - a DOCX under a
+`.doc` name is a file some programs open and some refuse. Instead:
+
+| | |
+|---|---|
+| **The first save** | goes **beside** the document as `rapor.docx`, in the same folder. When that name is taken - an earlier edit (you opened the unchanged `rapor.doc` again), a file of your own - it is `rapor (2).docx`, the next free name; an existing file is never replaced. A notification says *Your edit was saved as rapor.docx*, and the strip under the editor names the file saves go to from now on. |
+| **Every later save** of that window | goes to **the same** `rapor.docx` - not a new file each time - as long as it is still what filex wrote there. Opened and changed in another program meanwhile, it is not written over: the save goes beside it as `rapor.filex-conflict-<time>.docx`, and the saves after it go there. |
+| **A `.csv`** | saved as CSV goes over the `.csv` itself, like any save over its document. Saved as a spreadsheet (a server that sends one back), it goes beside it as `Tablo.xlsx`. |
+
+When the window closes, the notification names the file the edit is in
+(`rapor.docx`). The copies on the server - the working copy and the saves
+beside it - go with the session, and a crash leaves nothing the next start
+does not recover: a save that never came home is put beside the document as
+`rapor.filex-recovered-<time>.docx`.
+
+The server writes such a save beside its working copy
+(`.filex-open/<session>-rapor.docx`, [ONLYOFFICE.md → A save in another format](ONLYOFFICE.md#a-save-in-another-format));
+a server before 0.51 wrote it over the working copy, and the desktop app
+tells it by its bytes (a zip under a `.doc` name) and puts it in the same
+place. A desktop app before 0.53 did not: against a 0.51 or later server the
+edit stayed in the working folder on the server and was removed with it, and
+against an older one the DOCX was written over `rapor.doc`.
+
+### When the file changes while it is open
+
+Something else may rewrite the document while filex has it open: an agent, a
+script, another editor, a sync client. filex watches the file (its folder, so
+a program that saves through a temporary file renamed over the document is
+seen too; on a drive that sends no change events the check every 2.5 seconds
+finds it), and **never writes a save over a version it did not see**:
+
+| In the filex window… | What happens |
+|---|---|
+| nothing unsaved | The new version is loaded into the editor, and a note says *The file was updated outside filex; the new version is loaded.* |
+| changes of your own (or a save filex is holding) | You are asked which version stays: **Keep the outside version** - your changes in filex are dropped and the new version is loaded; **Write mine** - your version replaces it when it is saved; **Keep both** - it stays where it is, and your saves go beside it as `report.filex-conflict-<time>.docx`. |
+
+Until you answer, nothing is written over either version; a save that arrives
+meanwhile waits. Escape puts the question away - a line under the editor's bar
+brings it back. If you close the window without answering, both are kept: your
+version goes beside the document as a conflict copy, and you are told. A save
+that arrives after the window closed and finds the document changed goes
+beside it too, never over it.
+
+What is compared is the **content**: filex's own saves are never taken for a
+change from outside, and a file whose timestamp moved with the same bytes in
+it (a backup tool, `touch`) is not a change either. A same-size rewrite within
+the file system's timestamp precision (FAT keeps two-second times) is caught
+by the content as well.
+
+The new version goes to your account as a new working copy, so a late save of
+the editor you were in can never land on it; such a late save is kept beside
+the document, unless you chose to drop your changes. Working copies are
+cleaned up with the session, and a crash leaves nothing behind that the next
+start does not recover (beside the document) and remove.
+
+> A server older than this app serves an editor page that cannot say whether
+> it holds unsaved changes. With such a server the app asks the same question
+> in a dialog of its own, every time the file changes.
+
+A document inside a folder you keep on this computer is the server's file: the
+change reaches the server through sync, and the editor hears it from the server
+([ONLYOFFICE.md → When the document changes while it is open](ONLYOFFICE.md#when-the-document-changes-while-it-is-open)).
 
 ### Making filex the app that opens them
 
@@ -498,6 +624,16 @@ interface's. The app's own settings are behind ⚙ at the bottom of the rail.
 | *Shortcuts*, *Restart the tour* | The file list's own settings that are not in the dialog, which used to sit behind the **"..."** at the top right (a narrow window keeps a "..." for the folder's own verbs only). The view modes and the details panel are not here either: their switches are on screen at the end of the folder bar. |
 
 The server's version sits at the foot, as it does on the web.
+
+### The App store
+
+When an administrator shows the **store screen** to you (0.53,
+[APP-PLUGINS.md → The store screen](APP-PLUGINS.md#the-store-screen)), the
+navigation panel has **Apps → App store** here exactly as in the web app -
+the same row, under the same rule, decided by the file list and the server,
+not by this app - and it opens the server's own App store page in a window of
+its own, the way a document opens: the catalog of the stores chosen for you,
+**Ask for this app** and **My requests**. **Back to files** closes that window.
 
 **Signing out is not in the avatar.** Signing an account out of *this app* is a
 setting of the app, so it is done in *Settings → Accounts*, beside every other

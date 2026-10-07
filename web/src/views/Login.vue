@@ -27,6 +27,7 @@ import { useCapabilitiesStore } from '@/stores/capabilities';
 import { AuthApi } from '@/api/auth';
 import type { LoginMethods, LoginSSO } from '@/api/types';
 import { useLoginRefusal } from '@/composables/useLoginRefusal';
+import { useTenancy } from '@/composables/useTenancy';
 import { ssoRefusalKey, ssoRefusalKeyOf } from '@/lib/ssoRefusal';
 import { BrandingApi, type BrandingConfig } from '@/api/branding'; /* wiring:e1 */
 import { accentButtonStyle } from '@/lib/accentButton';
@@ -56,11 +57,13 @@ const caps = useCapabilitiesStore();
 const email = ref('');
 const password = ref('');
 // The tenant realm (docs/MULTI-TENANCY.md, Realms). The server says whether
-// there is one at all (a multi-tenant install) and, on a tenant's own address,
-// which: the field then arrives filled in and read-only.
+// there is one at all (a multi-tenant install, composables/useTenancy - with
+// the mode off there is no field and no realm is sent) and, on a tenant's own
+// address, which: the field then arrives filled in and read-only.
 const realm = ref('');
-const realmEnabled = computed(() => caps.data.realm?.enabled === true);
-const lockedRealm = computed(() => caps.data.realm?.locked_realm ?? null);
+const tenancy = useTenancy();
+const realmEnabled = computed(() => tenancy.realm.value !== null);
+const lockedRealm = computed(() => tenancy.realm.value?.locked_realm ?? null);
 const realmLocked = computed(() => realmEnabled.value && !!lockedRealm.value);
 watch(
   lockedRealm,

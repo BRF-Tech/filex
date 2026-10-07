@@ -24,8 +24,20 @@
 # OnlyOffice Document Server (onlyoffice profile). The browser loads its iframe
 # from here and filex calls it server-to-server, so it needs a real HTTPS host.
 # Delete this block if you don't run OnlyOffice.
+#
+# /filex-frame/* goes to filex: the page the editor's api.js runs in, on the
+# document server's own origin instead of in filex's pages
+# (docs/ONLYOFFICE.md "The editor in a frame of its own"). Set
+# FILEX_ONLYOFFICE_FRAME_ORIGIN=https://<this host> on the filex service to use
+# it; filex answers that one path on this host and nothing else. Every other
+# path stays the document server's.
 {$ONLYOFFICE_DOMAIN} {
-	reverse_proxy onlyoffice:80
+	handle /filex-frame/* {
+		reverse_proxy filex:5212
+	}
+	handle {
+		reverse_proxy onlyoffice:80
+	}
 }
 
 # Drawio / diagrams.net editor (drawio profile) — embedded as an iframe, so it
@@ -41,7 +53,9 @@
 # (apps.example-usercontent.com for files.example.com), so no cookie of filex's
 # can ever be sent to it. Then set FILEX_APP_UI_ORIGIN=https://<that host> on
 # the filex service. Left commented: without it, interfaces are served from
-# filex's own origin, opaque by sandbox (the default).
+# filex's own origin, opaque by sandbox (the default). For OnlyOffice, use
+# FILEX_ONLYOFFICE_FRAME_ORIGIN and the /filex-frame/* rule in its block below;
+# without it the editor's frame is served on this host.
 #
 # {$FILEX_APP_UI_DOMAIN} {
 # 	reverse_proxy filex:5212 {

@@ -17,6 +17,7 @@ import StorageNew from '@/views/StorageNew.vue';
 import StorageEdit from '@/views/StorageEdit.vue';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
+import { chosenValue, listOffering, optionLabels, optionValues, pickOption } from '../helpers/choiceSelect';
 
 const calls: Array<{ method: string; url: string; body: Record<string, unknown> }> = [];
 
@@ -112,15 +113,13 @@ async function mountPage(component: unknown, path: string, locale = 'en') {
   return w;
 }
 
+/** The sync mode list (core ChoiceSelect, #160) inside its block. */
 function modeSelect(w: ReturnType<typeof mount>) {
-  return w.find('[data-testid="storage-sync-mode"] select');
+  return w.find('[data-testid="storage-sync-mode"]');
 }
 
-function modeValues(w: ReturnType<typeof mount>): string[] {
-  return modeSelect(w)
-    .findAll('option')
-    .map((o) => (o.element as HTMLOptionElement).value)
-    .filter((v) => v !== '');
+async function modeValues(w: ReturnType<typeof mount>): Promise<string[]> {
+  return (await optionValues(modeSelect(w))).filter((v) => v !== '');
 }
 
 describe('the lazy catalog on the storage forms (issue #45)', () => {
@@ -135,27 +134,27 @@ describe('the lazy catalog on the storage forms (issue #45)', () => {
 
   it('offers `lazy` only for a driver whose descriptor carries its settings', async () => {
     const w = await mountNew();
-    expect(modeValues(w)).toEqual(['poll', 'fsnotify', 'ondemand', 'lazy']);
-    const driver = w.findAll('select').find((s) => s.findAll('option').some((o) => o.attributes('value') === 's3'));
+    expect(await modeValues(w)).toEqual(['poll', 'fsnotify', 'ondemand', 'lazy']);
+    const driver = await listOffering('s3', w.element);
     expect(driver, 'the driver picker').toBeTruthy();
-    await modeSelect(w).setValue('lazy');
-    await driver!.setValue('s3');
+    await pickOption(modeSelect(w), 'lazy');
+    await pickOption(driver!, 's3');
     await flushPromises();
-    expect(modeValues(w)).toEqual(['poll', 'fsnotify', 'ondemand']);
-    expect((modeSelect(w).element as HTMLSelectElement).value, 'a refused mode is not kept').toBe('poll');
+    expect(await modeValues(w)).toEqual(['poll', 'fsnotify', 'ondemand']);
+    expect(chosenValue(modeSelect(w)), 'a refused mode is not kept').toBe('poll');
   });
 
   it('draws the behavior choice in Turkish and sends mode + settings on create', async () => {
     const w = await mountNew('tr');
     expect(w.find('[data-testid="storage-lazy-fields"]').exists()).toBe(false);
-    await modeSelect(w).setValue('lazy');
+    await pickOption(modeSelect(w), 'lazy');
     await flushPromises();
     const box = w.find('[data-testid="storage-lazy-fields"]');
     expect(box.exists(), 'the lazy settings appear with the mode').toBe(true);
     expect(box.text()).toContain('Kataloglama davranışı');
-    const behavior = box.find('select');
-    expect(behavior.findAll('option').map((o) => o.text())).toContain('Yalnız açıldıkça');
-    await behavior.setValue('on_open');
+    const behavior = box.get('.fe-select__trigger');
+    expect(await optionLabels(behavior)).toContain('Yalnız açıldıkça');
+    await pickOption(behavior, 'on_open');
     await w.find('input[required]').setValue('arsiv');
     await w.find('form').trigger('submit');
     await flushPromises();
@@ -182,7 +181,7 @@ describe('the lazy catalog on the storage forms (issue #45)', () => {
     expect(w.find('[data-testid="storage-catalog-summary"]').text()).toContain('%75');
     expect(w.find('[data-testid="storage-catalog-filler"]').text()).toBe('Yavaşladı, depo kullanılıyor');
     expect(w.find('[data-testid="storage-catalog-watched"]').text()).toBe('12 / 1.024');
-    await modeSelect(w).setValue('ondemand');
+    await pickOption(modeSelect(w), 'ondemand');
     await w.find('form').trigger('submit');
     await flushPromises();
     const patch = calls.find((c) => c.method === 'patch');
@@ -192,7 +191,7 @@ describe('the lazy catalog on the storage forms (issue #45)', () => {
   it('a storage that is not lazy has no catalog block', async () => {
     const w = await mountEdit();
     expect(w.find('[data-testid="storage-catalog-status"]').exists()).toBe(false);
-    expect((modeSelect(w).element as HTMLSelectElement).value).toBe('poll');
+    expect(chosenValue(modeSelect(w))).toBe('poll');
   });
 });
 

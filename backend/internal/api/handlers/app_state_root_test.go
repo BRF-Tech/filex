@@ -182,8 +182,10 @@ func TestAppState_RootToken_AScreenOnAStorageOutsideTheRootDoesNotOpen(t *testin
 	code, body = event(f.st.ID)
 	require.Equal(t, http.StatusOK, code, body)
 
-	// What a run naming a file on that storage is answered.
-	code, want := confRaw(t, f.srv.URL, tok, http.MethodPost, "/api/files/plugins/actions/echo/upper/run", "text/plain", []byte(`{"paths":["yan://x.txt"]}`))
+	// What an app door answers a storage outside the root named by id, one
+	// that is not there. (A storage named in a path is answered before any
+	// door, by confine.Middleware, whatever the body's Content-Type.)
+	code, want := event(yan.ID + 1000)
 	require.Equal(t, http.StatusForbidden, code, want)
 	for _, id := range []int64{yan.ID, yan.ID + 1000} {
 		code, body = open(id)

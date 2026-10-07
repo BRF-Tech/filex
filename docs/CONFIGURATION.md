@@ -43,8 +43,9 @@ they're database records; see [STORAGE.md](STORAGE.md).
 - [Gotchas](#gotchas)
 
 > **Booleans** are true only for `"1"` or (case-insensitive) `"true"`. Any other
-> non-empty value is treated as false. Write `1` or `true` (`FILEX_MULTI_TENANT`
-> reads exactly `1` or lower-case `true`; `TRUE` leaves it off). The exceptions,
+> non-empty value is treated as false. Write `1` or `true`. (`FILEX_MULTI_TENANT`
+> follows this rule since 0.53 - before, it read only `1` or lower-case `true` -
+> and, set to any value at all, it pins Admin → Multi-tenant mode.) The exceptions,
 > each of which is **on unless switched off**: the first-sign-in switch of each
 > provider - `FILEX_OIDC_AUTO_CREATE`, `FILEX_LDAP_AUTO_CREATE` and
 > `FILEX_HEADER_AUTO_CREATE` - and `FILEX_AUTH_RECOVERY_LOGIN` are false only
@@ -183,7 +184,7 @@ and what makes losing the private key unrecoverable.
 | `FILEX_BASE_PATH` | - (the path of `FILEX_PUBLIC_URL`, usually none) | **Serve filex under a sub-path** behind a reverse proxy, e.g. `/filex` for `https://example.com/filex/`. Unset: the path of `FILEX_PUBLIC_URL` is used, so `FILEX_PUBLIC_URL=https://example.com/filex` alone is enough. Empty/unset with a root public URL = served at the root, exactly as before. Validated at startup; the proxy must pass the **full** path. See [Base path](#base-path) and [DEPLOYMENT.md → Serving filex under a sub-path](DEPLOYMENT.md#serving-filex-under-a-sub-path). |
 | `FILEX_DATA_DIR` | `~/.filex` (`/data` in Docker) | Holds the SQLite DB, search index, thumbnail cache, first-run secret. |
 | `FILEX_DEFAULT_LOCALE` | - | Pin the initial UI language (`en` / `tr`) for users who haven't chosen one, overriding browser detection. A user's explicit language switch still wins. |
-| `FILEX_MULTI_TENANT` | `false` | Turn on native multi-tenancy - one install serves N tenants, each a host-bound auth realm (provider) confined to its own storage(s). **Off = a normal single-tenant install, behaviour unchanged.** On, a sign-in names its tenant by the tenant's own address or its **realm** (the sign-in form's Realm field, `realm/name` over SFTP); a bare name is the platform's own tenant. See [MULTI-TENANCY.md](./MULTI-TENANCY.md) and [its Realms section](./MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for). |
+| `FILEX_MULTI_TENANT` | - (the switch) | Native multi-tenancy - one install serves N tenants, each a host-bound auth realm (provider) confined to its own storage(s). **Off = a normal single-tenant install, behaviour unchanged.** Since 0.53 the mode is a switch on **Admin → Multi-tenant mode** (the platform operator's; a change takes effect when filex is restarted). Set, this variable **pins** it both ways - `1`/`true` on, any other value off - and the switch shows it locked; config file `multi_tenant` does the same when the variable is unset. Unset in both, the switch decides, and it is off until somebody turns it on. On, a sign-in names its tenant by the tenant's own address or its **realm** (the sign-in form's Realm field, `realm/name` over SFTP); a bare name is the platform's own tenant. See [MULTI-TENANCY.md](./MULTI-TENANCY.md) and [its Realms section](./MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for). |
 | `FILEX_COOKIE_DOMAIN` | - (host-only) | `Domain` attribute for the `filex_session` cookie, e.g. `.example.com` - subdomains of that domain then share the session. Applied on **both** set and clear, so logout removes the same cookie it created. Empty = host-only cookie (unchanged behaviour). `Secure`/`SameSite`/`HttpOnly` are unaffected. **Multi-tenant:** this is only the last-resort fallback - the cookie Domain resolves per tenant: the provider's `cookie_domain` field wins, else it is derived from the provider host by dropping its first label (`files.example.com` → `.example.com`), else this global value. ⚠ A tenant served on its bare apex, or whose derivation would land on a public suffix (`tenant.com.tr` → `.com.tr`, which browsers reject), must set `cookie_domain` explicitly. See [MULTI-TENANCY.md](./MULTI-TENANCY.md). |
 | `FILEX_TENANT_DOMAIN` | - | **Multi-tenant:** gives every tenant an address of its own, `<realm>.<tenant domain>` (`tenants.files.example` → `acme.tenants.files.example`), and is the name a tenant's own domain points its CNAME at ([TENANT-ADMIN.md](TENANT-ADMIN.md#addresses-and-own-domains)). Needs a wildcard DNS record `*.<tenant domain>` of **address records** (A/AAAA) pointing at the platform: behind a wildcard CNAME every own domain's canonical name is that CNAME's target, and none can be proven. Empty = no platform subdomains and no own domains. On a platform subdomain or an own domain the session cookie is that address's alone. |
 | `FILEX_TLS_MODE` | `proxy` | Who issues the certificates of the tenants' addresses. `proxy`: the reverse proxy in front, which may ask filex first (`/api/tls/ask` for Caddy's on-demand TLS, `/api/tls/certificate` for a tenant's own certificate; both answer the proxy itself only). `acme`: filex terminates TLS itself and issues Let's Encrypt certificates (`x/crypto/acme/autocert`, cache in the data directory). A tenant's own certificate is served first either way. Any other value stops the server at start. [TENANT-ADMIN.md, TLS](TENANT-ADMIN.md#tls-an-installation-setting-plus-a-tenants-own-certificate). |
@@ -532,9 +533,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](screenshots/v0.52.0/loginsecurity/login-remaining-1440.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.0c6776745917.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](screenshots/v0.52.0/loginsecurity/login-locked-1440.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -604,7 +605,7 @@ a minute. A database read that fails keeps the last value known (the default whe
 there is none). A `login.*` key written through the generic settings API reaches
 the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](screenshots/v0.52.0/loginsecurity/login-security-1440.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png)
 
 | Key | Default | Range |
 |---|---|---|
@@ -705,6 +706,7 @@ key).
 | `FILEX_ONLYOFFICE_URL` | OnlyOffice Document Server URL (see [ONLYOFFICE.md](ONLYOFFICE.md)) |
 | `FILEX_ONLYOFFICE_JWT` | Shared JWT secret - must match the Document Server |
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | Address the Document Server uses to reach filex; empty means `FILEX_PUBLIC_URL`. Only needed when the browser's address and the container's address differ |
+| `FILEX_ONLYOFFICE_FRAME_ORIGIN` | The Document Server's own origin (`https://docs.example.com`), whose reverse proxy sends `/filex-frame/*` to filex: the editor's `api.js` then runs in a frame there instead of in filex's page ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). The same site as filex is fine. On that host filex answers `/filex-frame/editor` and nothing else. Read at start (not on the admin page); a value that is not an origin, filex's own or `FILEX_APP_UI_ORIGIN` stops the server. YAML: `external_services.onlyoffice.frame_origin` |
 
 The same Document Server draws the thumbnails of office documents (0.50,
 [thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice));
@@ -765,7 +767,7 @@ Drivers that live outside the binary - see [PLUGINS.md](PLUGINS.md).
 | `FILEX_APP_PLUGIN_MAX_INPUT_MB` | `256` | Per-file ceiling on what one app job may read. |
 | `FILEX_APP_PLUGIN_MAX_OUTPUT_MB` | `512` | Per-file ceiling on what one app job may produce. |
 | `FILEX_APP_PLUGIN_MAX_WASM_MB` | `64` | Largest module an app install accepts. `FILEX_PLUGIN_TRUSTED_KEYS` applies to app modules too. |
-| `FILEX_APP_UI_ORIGIN` | - | Serves apps' own interfaces from an [origin of their own](APP-PLUGINS.md#an-origin-of-their-own), e.g. `https://apps.example-usercontent.com` (a scheme and a host; another registrable domain than filex's). The proxy sends that host to filex too; filex answers only the interface route there and refuses it on its own host. Empty (the default): interfaces are served from filex's origin, opaque by sandbox. A value that is not an origin, or filex's own, stops the server. YAML: `app_ui_origin`. |
+| `FILEX_APP_UI_ORIGIN` | - | Serves apps' own interfaces from an [origin of their own](APP-PLUGINS.md#an-origin-of-their-own), e.g. `https://apps.example-usercontent.com` (a scheme and a host; another registrable domain than filex's). The proxy sends that host to filex too; filex answers only the interface route there and refuses it on its own host. With it and no `FILEX_ONLYOFFICE_FRAME_ORIGIN`, the ONLYOFFICE editor's frame is served there too ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). Empty (the default): interfaces are served from filex's origin, opaque by sandbox. A value that is not an origin, or filex's own, stops the server. YAML: `app_ui_origin`. |
 | `FILEX_APP_PLUGIN_MAX_UI_MB` | `128` | Largest [interface package](APP-PLUGINS.md#an-apps-own-interface) (the app's `ui` zip) an install accepts; the files inside it are capped too (512 MiB unpacked, 20 000 files, 64 MiB per file). |
 | `FILEX_APP_PLUGIN_UPDATE_CHECK` | `1` | The daily check that asks every installed app's source (its GitHub repository or address) for a newer version the running filex can run, and **tells the administrators** - it installs nothing: every newer version waits for an administrator's approval ([APP-PLUGINS.md → Updates](APP-PLUGINS.md#updates)). The same switch covers the storage plugins' [update sources](PLUGINS.md#updates-from-a-source). `0` = no request leaves the server for it - what an air-gapped install wants; **Check for updates** on the Apps tab still asks when pressed. A demo never checks. The time of the last check is stored, so a restart neither skips a day nor checks at every boot. YAML: `app_plugin_update_check`. |
 | `FILEX_APP_STORE_URLS` | - | Comma-separated app store **origins** (`https://store.example`, no path) trusted by configuration: their install links and license answers are accepted without an administrator approving the store first, signed with the keys in `FILEX_APP_STORE_KEYS` and no others. Set, it is an **allow list** (0.52.0): any other store is refused (`403 store_not_allowed`), not even trusted on first use. Unset, a store is trusted only by an administrator who compared its key fingerprints on its first install link ([APP-PLUGINS.md → Trusted stores](APP-PLUGINS.md#trusted-stores)). A configured store has no remove button in the panel. YAML: `app_store_urls`. |
@@ -1240,6 +1242,13 @@ is no environment variable for them.
 rather than `file.uploaded` - a behaviour change for anyone already subscribed
 to `file.uploaded` in order to see edits.
 
+The **notification digest** - optional, off out of the box (every kind is told
+at once) - is not an environment variable either: how long a held kind waits
+(1-15 minutes, default 1) and which kinds are held by default: an administrator sets it under **Admin →
+Notifications → Notification digest**, per tenant on a multi-tenant install,
+and each person chooses their own urgent kinds in their notification settings
+([The digest](NOTIFICATIONS.md#the-digest)).
+
 See [NOTIFICATIONS.md](NOTIFICATIONS.md).
 
 ---
@@ -1311,13 +1320,25 @@ These are refused:
   what they upload next would land there. The same holds for the tenant
   sign-in handoff.
 
-Two origins filex knows are deliberately **not** trusted:
+Three origins filex knows are deliberately **not** trusted:
 
+- `FILEX_ONLYOFFICE_FRAME_ORIGIN`, normally the Document Server's own origin:
+  the ONLYOFFICE editor's script runs there, in a frame of its own
+  ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)).
+  It is usually the same site as filex, so the browser sends the session
+  cookie with its requests - and filex refuses every write that names it
+  **even when a `FILEX_CORS_ALLOWED_ORIGINS` entry or wildcard covers it**,
+  and sends it no CORS answer, so nothing filex answers is readable there.
+  The editor never needs filex's API: the Document Server saves server to
+  server.
 - `FILEX_APP_UI_ORIGIN`: an app's interface runs sandboxed without
   `allow-same-origin`, so its requests say `Origin: null`, and it reaches filex
   through the explorer's bridge, never with the session. Trusting its host
   would change nothing today and would hand third-party app code the person's
-  session the day that sandbox loosened.
+  session the day that sandbox loosened. It is held like the frame origin -
+  never trusted, no CORS answer, whatever the CORS list says - because the
+  ONLYOFFICE editor's frame is served there when there is no frame origin, and
+  that frame keeps its origin.
 - `FILEX_FRAME_ANCESTORS`: a dashboard that frames filex needs nothing here.
   The framed page is filex's own, so its requests are same-origin; the
   dashboard's own page writing with the session is exactly what is refused.
@@ -1325,6 +1346,14 @@ Two origins filex knows are deliberately **not** trusted:
 A refused request that carried a live session writes an audit row,
 `auth.cross_origin_refused`, naming the account (at most one a minute per
 account), and a warning in the log.
+
+**Cookies.** Every cookie filex sets is `HttpOnly`, so no script on any host
+the browser sends one to can read it - the session (`filex_session`;
+`SameSite=Lax`, `Secure` behind TLS, and on a multi-tenant install `Domain`
+the parent domain, so every sibling host receives it), a share's PIN unlock,
+and an SSO sign-in's state and flow (host-only). filex sets no cookie a script
+must read; a sibling host can neither read the session nor, through the rules
+above, use it.
 
 ---
 

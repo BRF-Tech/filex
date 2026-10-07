@@ -1424,6 +1424,14 @@ filex-explorer {
   height: 78vh;
   background: var(--fe-bg);
 }
+/* Task #92: the editor's frame on the interface origin fills the mount (the
+   page in it gives api.js's own frame all of its room). */
+.fe-preview__officeframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
 /* CodeMirror 6 editor surface — V1.5 follow-up #4: the Monaco editor did
    not work, so CodeMirror replaced it. */
 .fe-preview__code-wrap {
@@ -7437,6 +7445,29 @@ filex-explorer {
 .fe-draftq__gap {
   flex: 1 1 auto;
 }
+
+/* ---- The document changed outside the editor (#184) ----
+   The three answers, each with what it does (OutsideChangeModal), and the
+   line under the viewer's bar: what happened (a note that goes away by
+   itself), or a question put away that is still open (with the button that
+   brings it back). */
+.fe-outsideq__list {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding-inline-start: 1.1em;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.fe-officenote--outside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+}
+.fe-officenote--outside .fe-btn {
+  margin-inline-start: auto;
+}
 /* A destructive answer that is not the dialog's point: the danger colour on
    the text, not a red slab beside the default. */
 .fe-btn--danger-quiet {
@@ -7931,10 +7962,6 @@ filex-explorer {
 }
 .fe-advsearch__num {
   width: 6.5rem;
-  flex: 0 0 auto;
-}
-.fe-advsearch__unit {
-  width: 5rem;
   flex: 0 0 auto;
 }
 
@@ -8598,7 +8625,6 @@ filex-explorer {
   font-weight: 500;
   color: var(--fe-text-muted);
 }
-.fe-share__select,
 .fe-share__input {
   width: 100%;
   box-sizing: border-box;
@@ -8611,24 +8637,28 @@ filex-explorer {
   font-family: inherit;
   font-size: var(--fe-text-md);
 }
-.fe-share__select:focus,
 .fe-share__input:focus {
   outline: none;
   border-color: var(--fe-primary);
 }
 /* Greyed with its reason above it (RBAC off on the storage): it has to LOOK
    unusable, not merely refuse the click. */
-.fe-share__select:disabled,
-.fe-share__input:disabled {
+.fe-share__input:disabled,
+.fe-share__pick .fe-select__trigger:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
-/* The per-row level select sits in a 34px row and takes that height rather
-   than stretching the row it lives in. */
-.fe-share__select--sm {
-  width: auto;
-  height: var(--fe-h-md);
-  font-size: var(--fe-text-sm);
+/* The dialog's lists (core ChoiceSelect, #160) wear the dialog's field shape:
+   its radius and type, at the height `size` gives them (lg beside the
+   40px boxes). */
+.fe-share__pick .fe-select__trigger {
+  border-radius: var(--fe-radius);
+  font-size: var(--fe-text-md);
+}
+/* The access level (a segmented ChoiceButtons, #160) keeps its own width.
+   Its strip is 34px tall, the height of the row it sits in. */
+.fe-share__level {
+  flex: 0 0 auto;
 }
 .fe-share__input--sm {
   flex: 0 0 140px;
@@ -8736,12 +8766,19 @@ filex-explorer {
 /* ---- people ---- */
 .fe-share__add {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--fe-gap-sm);
 }
-.fe-share__add .fe-share__select {
-  width: auto;
-  flex: 0 0 auto;
+/* The address takes the whole first line; the level and Add share the
+   second. Three levels side by side and a usable address box do not fit one
+   440px line (by the type sizes, ~190px of levels in English and ~245px in
+   Turkish; to be measured in a browser). */
+.fe-share__add > .fe-share__emailwrap {
+  flex: 1 1 100%;
+}
+.fe-share__add > .fe-share__btn {
+  margin-inline-start: auto;
 }
 .fe-share__emailwrap {
   position: relative;
@@ -8849,6 +8886,15 @@ filex-explorer {
 .fe-share__inviterow .fe-share__btn {
   flex: 1 1 auto;
 }
+/* "user / viewer" (a segmented ChoiceButtons) as tall as the button beside it. */
+.fe-share__inviterow .fe-choice--segmented .fe-choice__btn {
+  min-height: calc(var(--fe-h-lg) - 6px);
+}
+@media (pointer: coarse) {
+  .fe-share__inviterow .fe-choice--segmented .fe-choice__btn {
+    min-height: 44px;
+  }
+}
 
 /* ---- lists ---- */
 .fe-share__list {
@@ -8871,6 +8917,20 @@ filex-explorer {
 }
 .fe-share__row + .fe-share__row {
   border-top: 1px solid var(--fe-border-soft);
+}
+/* A grant's row: avatar, name, level, remove. When the name would get less
+   than 6rem beside the level (Turkish labels, a 390px screen) the level and
+   the remove button go to a second line rather than squeezing the name to
+   nothing. */
+.fe-share__row--grant {
+  flex-wrap: wrap;
+  row-gap: var(--fe-gap-xs);
+}
+.fe-share__row--grant > .fe-share__person {
+  flex: 1 1 6rem;
+}
+.fe-share__row--grant > .fe-share__del {
+  margin-inline-start: auto;
 }
 .fe-share__row > .fe-share__url {
   flex: 1 1 auto;
@@ -8970,7 +9030,7 @@ filex-explorer {
   .fe-share__add {
     flex-wrap: wrap;
   }
-  .fe-share__add .fe-share__select,
+  .fe-share__add .fe-share__level,
   .fe-share__add .fe-share__btn {
     flex: 1 1 auto;
   }
@@ -9399,16 +9459,20 @@ filex-explorer {
   height: 15px;
 }
 
-/* Controls take the shell's control height and radius so a select here and a
-   select in the filter row are the same object. */
+/* Controls take the shell's control height and radius so a field here and a
+   field in the filter row are the same object - the lists (core ChoiceSelect)
+   included. */
 .fe-advsearch .fe-input {
   height: var(--fe-h-md);
   padding: 0 var(--fe-gap-sm);
   border-radius: var(--fe-radius);
   font-size: var(--fe-text-sm);
 }
-.fe-advsearch .fe-advsearch__num,
-.fe-advsearch .fe-advsearch__unit {
+.fe-advsearch .fe-select__trigger {
+  border-radius: var(--fe-radius);
+  font-size: var(--fe-text-sm);
+}
+.fe-advsearch .fe-advsearch__num {
   flex: 1 1 0;
   width: auto;
   min-width: 0;
@@ -10154,7 +10218,11 @@ filex-explorer {
   align-items: center;
   flex: 0 0 auto;
 }
-.fe-toolbar__soon-tip {
+/* The same tip is a segmented ChoiceButtons cell's meaning (#160: the
+   sharing dialog's access levels): one look for a hover tip in the product.
+   Its own show rules sit with ChoiceButtons' (hover AND keyboard focus). */
+.fe-toolbar__soon-tip,
+.fe-choice__tip {
   position: absolute;
   top: calc(100% + var(--fe-gap-xs));
   inset-inline-end: 0;
@@ -10178,7 +10246,8 @@ filex-explorer {
 /* Someone who asked not to be moved at. The words are still in the button's
    accessible name, which is the door this rule cannot take away. */
 @media (prefers-reduced-motion: reduce) {
-  .fe-toolbar__soon-tip {
+  .fe-toolbar__soon-tip,
+  .fe-choice__tip {
     transition: none;
   }
 }
@@ -13730,6 +13799,288 @@ filex-explorer {
   color: var(--fe-text-muted);
   line-height: 1.4;
 }
+.fe-choice__icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+/* The strip and the cells wrap the buttons for the segmented look (a cell
+   holds its button's tip). In the default look they are not boxes at all:
+   the buttons lay out as the group's own children, as they always have
+   (and a host's `display: grid` on the group still reaches them). */
+.fe-choice__strip,
+.fe-choice__cell {
+  display: contents;
+}
+
+/* ChoiceButtons.vue, `segmented` — the same radio group drawn as ONE strip:
+   two to four short answers that sit inline beside other fields (a unit
+   after a number, "user" or "viewer" before a button, an access level).
+   Ported from the Apps store's FaSegmented (2026-10-04), which was written
+   to come here. The group is a column: the strip, then (on a screen that
+   cannot hover) the chosen cell's meaning under it. */
+.fe-choice--segmented {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+.fe-choice--segmented .fe-choice__strip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg-elev);
+}
+/* A cell is the box its tip hangs from. */
+.fe-choice--segmented .fe-choice__cell {
+  position: relative;
+  display: inline-flex;
+}
+.fe-choice--segmented .fe-choice__btn {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--fe-h-sm);
+  padding: 2px 10px;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.fe-choice--segmented .fe-choice__btn:hover:not(:disabled) {
+  color: var(--fe-text);
+  background: var(--fe-bg-hover);
+}
+/* ⚠ The chosen cell is marked by its ground AND a ring, not by colour alone
+   (the rule the default look follows too). */
+.fe-choice--segmented .fe-choice__btn.is-on {
+  color: var(--fe-primary-ink);
+  background: var(--fe-primary-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--fe-primary) 40%, transparent);
+}
+.fe-choice--segmented .fe-choice__label {
+  font-weight: inherit;
+}
+.fe-choice--segmented.is-invalid .fe-choice__strip {
+  border-color: var(--fe-danger);
+}
+/* Icons only: a pill of round cells. */
+.fe-choice--icons .fe-choice__strip {
+  flex-wrap: nowrap;
+  border-radius: 999px;
+}
+.fe-choice--icons .fe-choice__btn {
+  width: var(--fe-h-sm);
+  height: var(--fe-h-sm);
+  padding: 0;
+  border-radius: 999px;
+}
+@media (pointer: coarse) {
+  /* A finger needs a bigger target than a pointer (44px, WCAG 2.5.5). */
+  .fe-choice--segmented .fe-choice__btn {
+    min-height: 44px;
+  }
+  .fe-choice--icons .fe-choice__btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+/* A cell's tip shows on a resting pointer and on keyboard focus (its look is
+   the header's hover tip, `.fe-toolbar__soon-tip`, further down: one rule
+   for both). `:focus-visible`, not `:focus`: a click focuses the button too,
+   and a tip that stays up after the click is one nobody asked for. */
+.fe-choice__cell:hover .fe-choice__tip,
+.fe-choice__btn:focus-visible + .fe-choice__tip {
+  opacity: 1;
+}
+/* The chosen cell's meaning under the strip: one small line, only where a
+   tip cannot be hovered (a phone, a tablet). There the tips stay out: a tap
+   leaves `:hover` stuck on the tapped cell, and the line already says it. */
+.fe-choice__note {
+  display: none;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (hover: none) {
+  .fe-choice__note {
+    display: block;
+  }
+  .fe-choice__tip {
+    display: none;
+  }
+}
+
+/* ChoiceSelect.vue — one answer from a list, without the native dropdown.
+   The combobox looks like a field; the listbox is teleported to <body> (or
+   the open <dialog>) and placed by the component, along the inline axis, on
+   the layer lib/popupLayer measures. It carries the field's computed tokens
+   (see the component), so the rules below read the same `--fe-*` names in
+   either place. Ported from the Apps store's FaSelect (2026-10-04). */
+.fe-select {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.fe-select__trigger {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--fe-h-md);
+  padding-block: 6px;
+  padding-inline: 10px 8px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.fe-select--sm .fe-select__trigger {
+  min-height: var(--fe-h-sm);
+  padding-block: 2px;
+}
+.fe-select--lg .fe-select__trigger {
+  min-height: var(--fe-h-lg);
+}
+.fe-select__trigger:hover {
+  border-color: var(--fe-border-strong);
+}
+.fe-select__trigger:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fe-select.is-open .fe-select__trigger {
+  border-color: var(--fe-primary);
+  box-shadow: 0 0 0 3px var(--fe-primary-soft);
+}
+.fe-select.is-invalid .fe-select__trigger {
+  border-color: var(--fe-danger);
+}
+.fe-select__trigger:disabled {
+  cursor: not-allowed;
+  color: var(--fe-text-muted);
+  background: var(--fe-bg-elev);
+}
+.fe-select__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fe-select__value.is-placeholder {
+  color: var(--fe-text-muted);
+}
+.fe-select__chev {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--fe-text-muted);
+  transition: transform 0.16s ease;
+}
+.fe-select.is-open .fe-select__chev {
+  transform: rotate(180deg);
+}
+/* The hidden input that carries `required` and `name` for a form. */
+.fe-select__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.fe-select__panel {
+  position: fixed;
+  z-index: 80;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius);
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  box-shadow: var(--fe-shadow);
+}
+.fe-select__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: var(--fe-radius-sm);
+  cursor: pointer;
+}
+.fe-select__option.is-active {
+  background: var(--fe-bg-hover);
+}
+.fe-select__option.is-selected {
+  color: var(--fe-primary-ink);
+  font-weight: 600;
+}
+.fe-select__option[aria-disabled='true'] {
+  color: var(--fe-text-muted);
+  cursor: not-allowed;
+}
+.fe-select__label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fe-select__help {
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  font-weight: 400;
+}
+.fe-select__check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--fe-primary);
+}
+@media (pointer: coarse) {
+  /* A finger needs a bigger target (44px, WCAG 2.5.5), whatever the size. */
+  .fe-select__trigger,
+  .fe-select--sm .fe-select__trigger,
+  .fe-select__option {
+    min-height: 44px;
+  }
+}
 
 /* SurfaceFooterButtons.vue */
 /* Back sits at the far end of the row, away from the way forward: a step's
@@ -14737,3 +15088,306 @@ filex-explorer {
   margin-block-start: 0;
 }
 /* === /#82 === */
+
+/* === #168 - the admin panel's search (components/PanelSearch.vue) ===
+   ⚠ Here and not in the component, for MegaMenu's reason: a single-file
+   component's styles reach only a bundle that imports it. */
+.fx-psearch {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.fx-psearch__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* ⚠ Said outright, like the mega menu's buttons: a host's `button` rule
+     reaches this control (core lesson #639). */
+  height: var(--fe-h-md);
+  padding-block: 0;
+  padding-inline: 10px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-md);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text-muted);
+  font: inherit;
+  font-size: var(--fe-text-md);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fx-psearch__trigger:hover,
+.fx-psearch__trigger[aria-expanded="true"] {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fx-psearch__trigger:focus-visible,
+.fx-psearch__iconbtn:focus-visible,
+.fx-psearch__chip:focus-visible,
+.fx-psearch__clearall:focus-visible {
+  outline: 2px solid var(--fe-primary);
+  outline-offset: 1px;
+}
+.fx-psearch--compact .fx-psearch__trigger {
+  /* A phone: the glyph alone, the size of the bar's other buttons. */
+  border-color: transparent;
+  background: transparent;
+  padding-inline: 8px;
+}
+/* The box's word and key cap come in where the bar has room for them: below
+   1536px the mega menu, the quota, the bell and the account's name (from
+   1280px) leave room for the glyph alone, as they did for the old search
+   button (measured at 1024px by e2e 198, in English and Turkish). */
+.fx-psearch__trigger-text,
+.fx-psearch__kbd {
+  display: none;
+}
+@media (min-width: 1536px) {
+  .fx-psearch--box .fx-psearch__trigger {
+    min-width: 12rem;
+  }
+  .fx-psearch--box .fx-psearch__trigger-text {
+    display: inline;
+    flex: 1 1 auto;
+    text-align: start;
+  }
+  .fx-psearch--box .fx-psearch__kbd {
+    display: inline-block;
+  }
+}
+.fx-psearch__kbd {
+  padding-block: 2px;
+  padding-inline: 5px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg);
+  color: var(--fe-text-muted);
+  font-family: var(--fe-font-mono);
+  font-size: var(--fe-text-xs);
+  line-height: 1.2;
+}
+.fx-psearch__glyph,
+.fx-psearch__glyph svg,
+.fx-psearch__svg,
+.fx-psearch__svg > svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+.fx-psearch__glyph {
+  flex: 0 0 16px;
+}
+
+/* ── the panel: under the box, or over the whole window ── */
+.fx-psearch__layer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--fe-bg);
+  color: var(--fe-text);
+  font-family: var(--fe-font);
+  font-size: var(--fe-text-md);
+}
+.fx-psearch__layer--drop {
+  /* top / right (left in RTL) / width / max-height come from the box's place
+     (lib/anchoredPanel), set on the element. */
+  position: fixed;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-lg);
+  box-shadow: var(--fe-shadow);
+  overflow: hidden;
+}
+.fx-psearch__layer--full {
+  /* A phone: the whole window below the host's own strip (--fe-overlay-top,
+     web/tests/api/overlayTop.test.ts). */
+  position: fixed;
+  inset: var(--fe-overlay-top, 0px) 0 0;
+}
+.fx-psearch__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding-block: 8px;
+  padding-inline: 12px;
+  border-block-end: 1px solid var(--fe-border-soft);
+}
+.fx-psearch__glyph--field {
+  color: var(--fe-text-muted);
+}
+.fx-psearch__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--fe-h-md);
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fe-text);
+  font: inherit;
+  /* 16px: a smaller field makes Safari on a phone zoom the page in. */
+  font-size: 16px;
+}
+.fx-psearch__input::placeholder {
+  color: var(--fe-text-muted);
+}
+.fx-psearch__iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--fe-h-md);
+  height: var(--fe-h-md);
+  padding: 0;
+  border: 0;
+  border-radius: var(--fe-radius-md);
+  background: transparent;
+  color: var(--fe-text-muted);
+  cursor: pointer;
+}
+.fx-psearch__iconbtn:hover {
+  background: var(--fe-bg-hover);
+  color: var(--fe-text);
+}
+.fx-psearch__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block: 6px;
+  padding-inline: 6px;
+}
+.fx-psearch__layer--drop .fx-psearch__list {
+  max-height: 460px;
+}
+.fx-psearch__group + .fx-psearch__group {
+  margin-block-start: 6px;
+}
+.fx-psearch__heading {
+  padding-block: 6px 4px;
+  padding-inline: 10px;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.fx-psearch__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding-block: 6px;
+  padding-inline: 10px;
+  border-radius: var(--fe-radius-md);
+  cursor: pointer;
+}
+.fx-psearch__row.is-active {
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fx-psearch__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  /* The em a file tile sizes itself from (the command palette's 18px). */
+  font-size: 18px;
+  color: var(--fe-text-muted);
+}
+.fx-psearch__row.is-active .fx-psearch__icon {
+  color: var(--fe-primary-ink);
+}
+.fx-psearch__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.fx-psearch__label,
+.fx-psearch__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fx-psearch__label {
+  font-weight: 500;
+  line-height: 1.3;
+}
+.fx-psearch__detail {
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+  line-height: 1.35;
+}
+.fx-psearch__row.is-active .fx-psearch__detail {
+  color: var(--fe-primary-ink);
+}
+.fx-psearch__remove {
+  width: 28px;
+  height: 28px;
+}
+.fx-psearch__note {
+  margin: 0;
+  padding-block: 14px;
+  padding-inline: 12px;
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-sm);
+  text-align: center;
+}
+.fx-psearch__note--warn {
+  color: var(--fe-warning);
+}
+.fx-psearch__foot {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-block: 8px;
+  padding-inline: 12px;
+  border-block-start: 1px solid var(--fe-border-soft);
+  color: var(--fe-text-muted);
+  font-size: var(--fe-text-xs);
+}
+.fx-psearch__foot-label {
+  margin-inline-end: 2px;
+}
+.fx-psearch__chip {
+  height: auto;
+  padding-block: 2px;
+  padding-inline: 7px;
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+  background: var(--fe-bg-elev);
+  color: var(--fe-text);
+  font-family: var(--fe-font-mono);
+  font-size: var(--fe-text-xs);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.fx-psearch__chip:hover {
+  background: var(--fe-bg-hover);
+}
+.fx-psearch__chip.is-on {
+  border-color: var(--fe-primary);
+  background: var(--fe-primary-soft);
+  color: var(--fe-primary-ink);
+}
+.fx-psearch__clearall {
+  height: auto;
+  margin-inline-start: auto;
+  padding-block: 2px;
+  padding-inline: 6px;
+  border: 0;
+  border-radius: var(--fe-radius-sm);
+  background: transparent;
+  color: var(--fe-text-muted);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fx-psearch__clearall:hover {
+  color: var(--fe-text);
+}
+/* === /#168 === */

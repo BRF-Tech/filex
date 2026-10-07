@@ -75,17 +75,29 @@ func TestLazyWatch_TTLReleasesIdleWatches(t *testing.T) {
 // change (it reaches explorers and the desktop's tree_change watchers). The
 // first catalogue of a folder somebody opened is announced as derived only.
 func TestLazyWatch_AnOutsideChangeIsReconciledAndAnnounced(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	l := newLazyLab(t, nil)
 	fr := &frames{}
 	l.lc.emit = func() ChangeEmitter { return fr }
 	l.write(t, "izle/a.txt", "a")
 	l.write(t, "komsu/b.txt", "b")
 	ctx, cancel := context.WithCancel(l.ctx)
-	defer cancel()
-	go l.lc.watch.loop(ctx)
-	go l.lc.serve(ctx)
+	loopDone, serveDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		l.lc.watch.loop(ctx)
+	}()
+	go func() {
+		defer close(serveDone)
+		l.lc.serve(ctx)
+	}()
+	// Both are gone before setFastLazy puts the timings back: the loop reads
+	// LazyWatchQuiet and LazyWatchMaxWait for as long as it runs.
+	defer func() {
+		cancel()
+		<-loopDone
+		<-serveDone
+	}()
 
 	l.reconcile(t, "/")
 	l.reconcile(t, "/izle")
@@ -119,8 +131,7 @@ func TestLazyWatch_AnOutsideChangeIsReconciledAndAnnounced(t *testing.T) {
 // Break: drop the ResetCatalogueWatches call at the top of lazyCatalogue.run
 // — the folder still reads as watched by a process that is gone.
 func TestLazyWatch_ARestartForgetsEveryWatch(t *testing.T) {
-	restore := setFastLazy()
-	defer restore()
+	setFastLazy(t)
 	l := newLazyLab(t, map[string]any{"lazy_fill": "on_open"})
 	l.write(t, "izli/a.txt", "a")
 	l.reconcile(t, "/")

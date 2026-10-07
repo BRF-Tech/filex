@@ -645,9 +645,23 @@ func (h *Drop) notifyOwner(r *http.Request, sh *model.Share, node *model.Node, c
 			// several of them, so there is no single file to select.
 			Target: notify.DirTarget(node.Path),
 		}
+		if sh.CreatedBy != nil {
+			// The owner's email rides the event: when they hold file-request
+			// notices for their digest (internal/notify digest.go) it waits
+			// too and comes once for the window, as the digest's; otherwise
+			// it goes at once, these words and this link, as it always did.
+			link := ""
+			if base := h.Tenants.FromRequest(r); base != "" {
+				link = base + "/admin/"
+			}
+			ev.Mail = &notify.Mail{Lang: locale, Link: link}
+		}
 		c := context.WithoutCancel(ctx)
 		go func() { _, _ = h.Notify.Send(c, ev) }()
+		return
 	}
+	// Without notifications (FILEX_NOTIFY_ENABLED off) the owner still gets
+	// the email.
 	if h.Mailer != nil && sh.CreatedBy != nil {
 		if u, err := h.Store.GetUser(ctx, *sh.CreatedBy); err == nil && u != nil && strings.TrimSpace(u.Email) != "" {
 			mailBody := body

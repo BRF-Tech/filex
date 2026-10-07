@@ -14,6 +14,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/storage"
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 	_ "github.com/brf-tech/filex/backend/internal/storage/drivers/s3"
+	"github.com/brf-tech/filex/backend/internal/testutil/lives3"
 	"github.com/brf-tech/filex/backend/internal/usage"
 )
 
@@ -162,23 +163,16 @@ func TestB2_ToleratesReorderedAndExtraColumns(t *testing.T) {
 // exercises the path B2 would take.
 //
 //	FILEX_TEST_S3_ENDPOINT=http://127.0.0.1:9000 FILEX_TEST_S3_BUCKET=b2-reports-test \
-//	FILEX_TEST_S3_ACCESS_KEY=… FILEX_TEST_S3_SECRET_KEY=… go test ./internal/usage/
+//	FILEX_TEST_S3_ACCESS_KEY=… FILEX_TEST_S3_SECRET_KEY=… FILEX_TEST_S3_REGION=us-east-1 \
+//	  go test ./internal/usage/
+//
+// The server is read by internal/testutil/lives3, region included.
 func TestB2_OverRealS3(t *testing.T) {
-	bucket := os.Getenv("FILEX_TEST_S3_BUCKET")
-	endpoint := os.Getenv("FILEX_TEST_S3_ENDPOINT")
-	access := os.Getenv("FILEX_TEST_S3_ACCESS_KEY")
-	secret := os.Getenv("FILEX_TEST_S3_SECRET_KEY")
-	if bucket == "" || access == "" || secret == "" {
-		t.Skip("set FILEX_TEST_S3_* to run the reader against a real S3 server")
-	}
+	cfg := lives3.Config(t, "run the reader against a real S3 server")
 
 	drv, err := storage.Get("s3")
 	require.NoError(t, err)
-	require.NoError(t, drv.Init(context.Background(), map[string]any{
-		"bucket": bucket, "endpoint": endpoint,
-		"access_key": access, "secret_key": secret,
-		"path_style": true,
-	}))
+	require.NoError(t, drv.Init(context.Background(), cfg))
 
 	src := usage.B2{Driver: drv, AccountID: "abc123"}
 	day := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)

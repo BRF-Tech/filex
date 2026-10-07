@@ -31,6 +31,7 @@ import { Lock } from 'lucide-vue-next';
 import { extractError } from '@/api/client';
 import { E2EPolicyApi, type E2EPolicyState, type E2ETenantRow } from '@/api/e2ePolicy';
 import { useCapabilitiesStore } from '@/stores/capabilities';
+import { useTenancy } from '@/composables/useTenancy';
 import Spinner from '@/components/ui/Spinner.vue';
 import EncryptionPolicyCard from '@/components/encryption/EncryptionPolicyCard.vue';
 import EncryptionRequestsPanel from '@/components/encryption/EncryptionRequestsPanel.vue';
@@ -62,7 +63,8 @@ onMounted(async () => {
 });
 
 /** The platform operator of a multi-tenant install (see the header). */
-const operator = computed(() => caps.data.caller_admin === true && state.value?.scope === 'tenant');
+const tenancy = useTenancy();
+const operator = computed(() => tenancy.operator.value && state.value?.scope === 'tenant');
 
 /**
  * Tenant names by id, from the list the ceiling panel reads anyway. The

@@ -5,9 +5,10 @@ people, sign-in, plugins, settings and upkeep. It is served at `/admin/`
 (the people who use the files have their own door, `/drive/`).
 
 This page is the map: where every page of the panel lives in its menu, who
-is offered which page, and how the menu works with a keyboard, a screen
-reader and on a phone. What each page does is in the page's own guide,
-linked from the table below.
+is offered which page, how the menu works with a keyboard, a screen reader
+and on a phone, and how the panel's [search](#search) finds a page, a
+setting or a record by its name. What each page does is in the page's own
+guide, linked from the table below.
 
 ## The menu
 
@@ -23,13 +24,13 @@ line under every page saying what it is for:
 | | Storage | Storages, Connections, Sync runs, Replica, Usage & cost - see [Storage](STORAGE.md), [Protocols](PROTOCOLS.md), [Replication](REPLICATION.md), [Usage & cost](USAGE.md) |
 | **People & security** | People & access | Users, Groups, Roles, Folder access, Tenants or My tenant - see [Roles & permissions](PERMISSIONS.md), [Groups](GROUPS.md), [RBAC & folder access](RBAC.md), [Tenant self-service](TENANT-ADMIN.md) |
 | | Security | Identity providers, Sign-in security, Encryption, Protection, API / MCP - see [SSO](SSO.md), [LDAP](LDAP.md), [End-to-end encryption](E2E-ENCRYPTION.md), [Protection](PROTECTION.md), [MCP](MCP.md) |
-| **System** | Plugins & integrations | Plugins, External services, Webhooks, Notifications - see [Storage plugins](PLUGINS.md), [Apps](APP-PLUGINS.md), [OnlyOffice](ONLYOFFICE.md), [Notifications & webhooks](NOTIFICATIONS.md) |
-| | Customization | Settings, Branding, Appearance, Archives - see [Configuration](CONFIGURATION.md), [Archives](ARCHIVES.md) |
+| **System** | Plugins & integrations | Plugins (with Install requests, the trusted stores and, since 0.53, who sees [the store screen](APP-PLUGINS.md#the-store-screen)), External services, Webhooks, Notifications (the history and the [notification digest](NOTIFICATIONS.md#the-digest)'s defaults) - see [Storage plugins](PLUGINS.md), [Apps](APP-PLUGINS.md), [OnlyOffice](ONLYOFFICE.md), [Notifications & webhooks](NOTIFICATIONS.md) |
+| | Customization | Settings, Multi-tenant mode, Branding, Appearance, Archives - see [Configuration](CONFIGURATION.md), [Multi-tenancy](MULTI-TENANCY.md), [Archives](ARCHIVES.md) |
 | | Maintenance & records | Queue, Tools, Audit log, Updates, About - see [Updates](UPDATES.md) |
 
 | | |
 |---|---|
-| ![The People & security panel open over Admin → Users](screenshots/v0.52.0/megamenu/people-panel-1440.png) | ![The System panel in Turkish, in the dark theme](screenshots/v0.52.0/megamenu/system-dark-tr-1440.png) |
+| ![The People & security panel open over Admin → Users](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) | ![The System panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/system-dark-tr-1440.232f4348962d.png) |
 | *People & security* open over *Users*: two sections, a line under every page, the page you are on marked. | The same menu in Turkish and in the dark theme: *System*, three sections. |
 
 Every page is two clicks away: the panel's button, then the page. The
@@ -65,9 +66,22 @@ the same rule the server applies to each page's API:
   | `admin.audit` | Audit log |
 
 - On a **multi-tenant** install, *Tenants* is the platform operator's and *My
-  tenant* is a tenant administrator's; a single-tenant install shows neither
-  ([Multi-tenancy](MULTI-TENANCY.md)).
+  tenant* is a tenant administrator's; a single-tenant install shows neither,
+  and their addresses lead to the dashboard ([Multi-tenancy](MULTI-TENANCY.md)).
+- *Multi-tenant mode* is the administrator's who may configure the instance:
+  every administrator of a single-tenant install, the platform operator of a
+  multi-tenant one, never a tenant's administrator. It is the one page about
+  tenants a single-tenant install shows, because it is where the mode is
+  turned on.
 - An app's screen (the *Apps* section) is an administrator's.
+- The **App store** page (`/drive/app-store`, 0.53) is not the panel's: it
+  is filex's own page, beside *My shares*, for the people the store screen's
+  settings choose (*Plugins → Apps → Store screen*: everyone, some roles or
+  some groups, per tenant). It lists a trusted store's catalog and leaves
+  requests on *Plugins → Install requests*; approving one opens the store
+  review here, in the panel ([Apps → The store screen](APP-PLUGINS.md#the-store-screen)).
+  The desktop app opens the same page, under the same rule, in a window of
+  its own ([DESKTOP.md](DESKTOP.md#the-app-store)).
 
 A section with nothing left in it is not drawn, and neither is a panel with
 no section left: a delegated administrator holding only `admin.users` sees no
@@ -97,10 +111,80 @@ focus moves out of the menu.
 
 ## On a phone
 
-Below 1024 pixels wide the top bar has a **Menu** button instead. It opens a
-drawer with the same pages as a list - a heading per panel, a smaller heading
+Below 1024 pixels wide the top bar has a **Menu** button instead, and a
+search button that opens the [search](#search) over the whole window. The
+Menu button opens a drawer with the same pages as a list - a heading per panel, a smaller heading
 per section, and every section open - so a page is two taps away: *Menu*,
 then the page. The drawer opens scrolled to the page you are on, and closes
 when you choose one, tap outside it or press its close button.
 
-![The admin menu's drawer on a 390-pixel phone](screenshots/v0.52.0/megamenu/drawer-390.png)
+![The admin menu's drawer on a 390-pixel phone](https://filex.sh/shots/megamenu/drawer-390.507bf798ed16.png)
+
+## Search
+
+Beside the menu, the top bar has a search for the whole panel. Press it, or
+**Ctrl+K** (**⌘K** on a Mac - the explorer's palette key, so a key you
+remapped in the shortcut settings is the one that opens it), and type. The
+results come in groups:
+
+| Group | What is found |
+|---|---|
+| **Pages** | every page of the menu, with the short line it has there, and the tabs that have an address of their own: *Plugins → Apps*, *Identity providers → LDAP / Active Directory*, *Tools → Thumbnail repair* |
+| **Settings** | single settings by the name their page gives them - *Trash retention*, *Require two-factor authentication*, *Trusted proxies*, *Email (SMTP)*, *Trusted stores* - each opening its page |
+| **Apps** | the installed apps and what each does from the file menu, and the screens apps add to the menu |
+| **Users**, **Groups** | people by name, email address or username; groups by name |
+| **API keys** | keys by their name and the identities they act under. A key's value is never shown - filex keeps only its hash |
+| **Storages**, **Shares** | storages by name; links by the file or folder they share, never by the link itself |
+| **Files** | only on demand: without a prefix, the first three files whose name matches and a *Search files* row that searches every file |
+
+A name is found in the interface's language **and** in English, and by its
+synonyms: *LDAP* finds *Identity providers*, *2FA* the two-factor setting,
+*SMTP* the email settings. Turkish letters and capitals do not matter:
+`kullanici` finds *Kullanıcılar*, `guvenlik` finds *Güvenlik*. A group that
+holds a row NAMED what you typed comes first; otherwise pages and settings
+come before the records.
+
+A **prefix** keeps one kind. The prefixes are listed under the results, and
+pressing one puts it in the field:
+
+| Prefix | Finds |
+|---|---|
+| `file:` | files and folders, everything the file search lets you open (`file:rapor`) |
+| `user:` | people |
+| `app:` | installed apps and their actions |
+| `key:` | API keys |
+| `group:` | groups |
+| `storage:` | storages |
+| `setting:` | single settings |
+
+**You find only what you may open.** The pages and settings are the menu's
+own: a page the menu does not offer you is not found, and neither are its
+tabs or settings. People, groups, keys, apps, storages and shares come from
+the very lists their pages read, through the same permission: a delegated
+administrator holding `admin.users` finds people and groups and nothing else,
+and a tenant's administrator finds their own tenant's. The server's side is
+`GET /api/admin/panel-search` ([BACKEND.md](BACKEND.md#admin-routes-described-on-their-own-page)).
+
+**Recent searches.** With the field empty, the search lists the last things
+you searched for - kept on the server for your account, so they are there in
+another browser and on your phone. The newest 20 are kept; the same words
+searched again move to the top. Remove one with its **×** (or **Delete**
+while it is selected), or all of them with *Clear recent searches*. They are
+yours alone: not in the audit log, and gone with the account.
+
+| Key | In the search |
+|---|---|
+| Ctrl+K / ⌘K | opens it from anywhere in the panel - but not while you are typing in a field, where the key is the field's (as in the file manager) |
+| ↓ / ↑ | the next / previous row (from the last back to the first) |
+| Enter | opens the row - the first one when none is picked |
+| Esc | closes the search and returns to the box |
+| Delete | removes the selected recent search |
+
+For a screen reader the field is a combobox: the rows are options in groups
+named by their headings, the selected row is announced as you move, and a
+polite status says how many rows there are.
+
+On a wide screen the box shows the word *Search* and its key from 1536 pixels
+wide; narrower, beside the menu, the magnifier alone. On a phone it is a
+search button next to the Menu button, and it opens the search over the
+whole window, with a close button at the start of the field.

@@ -20,6 +20,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/protocolauth"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/tokenperm"
 )
 
 // AITokens is the admin handler for issuing / listing / revoking API tokens
@@ -71,9 +72,15 @@ func (h *AITokens) List(w http.ResponseWriter, r *http.Request) {
 // never null. The store hands back a nil slice for no rows, which encodes as
 // `"tokens": null`, and a client reading the list (`tokens.map(...)`, the
 // Cypress token-kinds spec) failed on an instance that simply had no tokens.
+//
+// Each row carries `permissions` - the level of every permission of package
+// tokenperm it holds (model.APIToken.WithPermissions).
 func tokenList(tokens []*model.APIToken) []*model.APIToken {
 	if tokens == nil {
 		return []*model.APIToken{}
+	}
+	for _, t := range tokens {
+		t.WithPermissions()
 	}
 	return tokens
 }
@@ -178,12 +185,13 @@ func (h *AITokens) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token": plain, // shown ONCE
-		"row":   created,
+		"row":   created.WithPermissions(),
 	})
 }
 
-// updateTokenBody is the PATCH body — display metadata only (the credential
-// is immutable). A nil field is left unchanged; usernames: [] clears the list
+// updateTokenBody is the PATCH body — display metadata, and the levels of the
+// permissions of package tokenperm; the credential, its verbs and its `root:`
+// are immutable. A nil field is left unchanged; usernames: [] clears the list
 // (back to label-only).
 type updateTokenBody struct {
 	Label     *string   `json:"label,omitempty"`
@@ -193,9 +201,60 @@ type updateTokenBody struct {
 	// token that predates it becomes a person's again with one PATCH.
 	// Admin-only on purpose; see SelfTokens.Update.
 	Kind *string `json:"kind,omitempty"`
+	// Permissions sets levels - {"comments": "rw"} lets the token add and
+	// delete comments, {"comments": "read"} takes that back (task #157). A
+	// permission it does not name keeps its level.
+	Permissions map[string]string `json:"permissions,omitempty"`
 }
 
-// Update edits a token's label / username allow-list.
+// parseLevelChanges reads a PATCH body's `permissions`: every key a
+// permission of package tokenperm, every level one it has (400 otherwise, in
+// words - an integration's typo must not pass for "no change").
+func parseLevelChanges(raw map[string]string) (map[string]tokenperm.Level, error) {
+	out := make(map[string]tokenperm.Level, len(raw))
+	for key, val := range raw {
+		d, ok := tokenperm.Lookup(key)
+		if !ok {
+			return nil, fmt.Errorf("unknown permission %q", key)
+		}
+		l, ok := tokenperm.ParseLevel(val)
+		if ok {
+			ok = false
+			for _, x := range d.Levels {
+				if x == l {
+					ok = true
+				}
+			}
+		}
+		if !ok {
+			return nil, &tokenperm.LevelError{Key: key, Level: val}
+		}
+		out[key] = l
+	}
+	return out, nil
+}
+
+// setTokenLevels writes changes into token id's list (tokenperm.Replace: the
+// verbs and the `root:` as they were). Nothing is written when nothing
+// changes - a live SFTP or FTPS session on the token is ended by a changed
+// list (protocolauth), and an unchanged one must not end it.
+func setTokenLevels(r *http.Request, store db.Store, id int64, changes map[string]tokenperm.Level) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	tok, err := store.GetAPITokenByID(r.Context(), id)
+	if err != nil || tok == nil {
+		return fmt.Errorf("token not found")
+	}
+	next := tokenperm.Replace(tok.Scopes, changes)
+	if next == tok.Scopes {
+		return nil
+	}
+	return store.UpdateAPITokenScopes(r.Context(), id, next)
+}
+
+// Update edits a token's label / username allow-list / kind and the levels
+// of its permissions (`permissions`, package tokenperm).
 //
 //	PATCH /api/admin/ai-tokens/{id}
 func (h *AITokens) Update(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +292,16 @@ func (h *AITokens) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		kind = &k
 	}
+	levels, lerr := parseLevelChanges(body.Permissions)
+	if lerr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": lerr.Error()})
+		return
+	}
 	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames, kind); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := setTokenLevels(r, h.store, id, levels); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -329,11 +397,11 @@ func normalizeTokenKind(raw, def string) (string, error) {
 // is empty anyway grants nothing (model.APIToken.HasScope).
 // token_scopes_doors_test.go holds both halves.
 func normalizeScopes(raw string) (string, error) {
-	verbs, roots, err := apitoken.ParseIssued(raw)
+	verbs, roots, perms, err := apitoken.ParseIssued(raw)
 	if err != nil {
 		return "", err
 	}
-	return apitoken.JoinScopes(verbs, roots), nil
+	return apitoken.JoinScopes(verbs, roots, perms), nil
 }
 
 // writeScopeRefusal answers a refused scope list in the reader's language:

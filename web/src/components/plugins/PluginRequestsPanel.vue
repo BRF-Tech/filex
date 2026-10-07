@@ -15,10 +15,18 @@
  * (AppPluginPermissionList: filex's label, the app's own reason) and asks for
  * the same "I understand" before an approval. The list is the explorer's
  * table (DataTable, `admin.pluginRequests`).
+ *
+ * A request from the store screen (#162, source `store`) is a person's, made
+ * from a trusted store's catalog. Its approval installs nothing here: the
+ * connected store makes a FRESH install link for this filex and the panel
+ * opens it in the store review (/admin/store-install) - the same review, the
+ * same pins and permissions as a magic link's; that install closes the
+ * request. The review page is opened in this tab, never in a frame.
  */
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Check, Inbox, RefreshCcw, TriangleAlert, X } from 'lucide-vue-next';
+import { useRouter } from 'vue-router';
+import { Check, Inbox, RefreshCcw, Store, TriangleAlert, X } from 'lucide-vue-next';
 
 import { extractError } from '@/api/client';
 import {
@@ -30,12 +38,16 @@ import {
 import type { AppPluginDryRun, AppPluginPlace } from '@/api/appPlugins';
 import { changedPlacements, defaultPlaces } from '@/lib/fileTypes';
 import { formatDate } from '@/lib/format';
+import { keepStoreLink } from '@/lib/storeLink';
+import { storeRefusal } from '@/api/appStore';
+import { storeSentence } from '@/lib/storeRefusal';
 import { useToastStore } from '@/stores/toast';
 import { DataTable, pluginLabelOf, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 import Badge from '@/components/ui/Badge.vue';
 import Button from '@/components/ui/Button.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
+import Input from '@/components/ui/Input.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Textarea from '@/components/ui/Textarea.vue';
 import AppPluginFileTypes from './AppPluginFileTypes.vue';
@@ -48,6 +60,7 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n();
 const toast = useToastStore();
+const router = useRouter();
 
 const requests = ref<PluginRequest[]>([]);
 const ttlDays = ref(14);
@@ -98,6 +111,7 @@ function statusTone(s: PluginRequestStatus): 'amber' | 'emerald' | 'rose' | 'zin
 /** Where the plugin comes from, in one line. */
 function sourceText(r: PluginRequest): string {
   const s = r.source ?? {};
+  if (s.store) return t('pluginRequests.source.store', { store: s.store, app: s.store_app || r.name });
   if (s.github_repo) return `github.com/${s.github_repo}${s.ref ? `@${s.ref}` : ''}`;
   if (s.manifest_url) return s.manifest_url;
   if (s.source) return s.source;
@@ -168,6 +182,10 @@ function rowActions(r: PluginRequest): ContextAction[] {
 // ── The review ─────────────────────────────────────────────────────────
 
 const open = ref<PluginRequest | null>(null);
+/** A request from the store screen: approved through the store review. */
+const fromStore = computed(() => open.value?.source_kind === 'store');
+/** The license key an approval of a store request may carry (optional). */
+const storeLicense = ref('');
 const opening = ref(false);
 const understood = ref(false);
 const rejecting = ref(false);
@@ -187,6 +205,7 @@ async function review(r: PluginRequest, reject = false) {
   understood.value = false;
   rejecting.value = reject;
   rejectReason.value = '';
+  storeLicense.value = '';
   try {
     open.value = await PluginRequestsApi.get(r.id);
     places.value = defaultPlaces(open.value.file_types);
@@ -254,6 +273,30 @@ async function approve() {
     } else {
       failure.value = err?.message || extractError(e, t('errors.generic'));
     }
+  } finally {
+    busy.value = false;
+  }
+}
+
+/**
+ * A request from the store screen: the store makes a fresh install link and
+ * the store review opens with it, the way a magic link opens it
+ * (lib/storeLink keeps it in this tab; the token goes into no address).
+ */
+async function approveStore() {
+  const r = open.value;
+  if (!r) return;
+  busy.value = true;
+  failure.value = '';
+  try {
+    const got = await PluginRequestsApi.approveFromStore(r.id, storeLicense.value);
+    keepStoreLink({ store: got.store_intent.store, token: got.store_intent.token });
+    open.value = null;
+    toast.info(t('pluginRequests.storeOpening', { name: labelOf(r) }));
+    await router?.push({ name: 'store-install' });
+  } catch (e: unknown) {
+    const sr = storeRefusal(e);
+    failure.value = (sr && storeSentence(sr, t)) || pluginRequestError(e)?.message || extractError(e, t('errors.generic'));
   } finally {
     busy.value = false;
   }
@@ -445,9 +488,30 @@ async function reject() {
         </p>
 
         <template v-if="open.status === 'pending'">
-          <p class="rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+          <p
+            v-if="!fromStore"
+            class="rounded-lg border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+          >
             {{ t('pluginRequests.review.frozen') }}
           </p>
+          <template v-else>
+            <p
+              class="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200"
+              data-testid="plugin-request-from-store"
+            >
+              <Store class="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{{ t('pluginRequests.review.fromStore') }}</span>
+            </p>
+            <Input
+              v-if="!rejecting"
+              v-model="storeLicense"
+              name="plugin-request-store-license"
+              :label="t('pluginRequests.review.storeLicense')"
+              :hint="t('pluginRequests.review.storeLicenseHint')"
+              autocomplete="off"
+              data-testid="plugin-request-store-license"
+            />
+          </template>
           <p v-if="lastError" class="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             {{ t('pluginRequests.review.lastError', { error: lastError }) }}
           </p>
@@ -461,7 +525,7 @@ async function reject() {
               :rows="3"
             />
           </div>
-          <Checkbox v-else v-model="understood" :label="t('appPlugins.wizard.understand')" name="plugin-request-understand" />
+          <Checkbox v-else-if="!fromStore" v-model="understood" :label="t('appPlugins.wizard.understand')" name="plugin-request-understand" />
 
           <p v-if="failure" class="rounded-lg bg-rose-50 p-3 text-xs text-rose-900 dark:bg-rose-950/40 dark:text-rose-200" role="alert" data-testid="plugin-request-error">
             {{ failure }}
@@ -493,7 +557,20 @@ async function reject() {
               {{ t('pluginRequests.actions.reject') }}
             </Button>
             <Button
-              v-if="!rejecting"
+              v-if="!rejecting && fromStore"
+              type="button"
+              size="sm"
+              variant="primary"
+              :disabled="busy"
+              :loading="busy"
+              data-testid="plugin-request-approve-store"
+              @click="approveStore"
+            >
+              <Store class="h-4 w-4" />
+              {{ t('pluginRequests.actions.approveStore') }}
+            </Button>
+            <Button
+              v-else-if="!rejecting"
               type="button"
               size="sm"
               variant="primary"

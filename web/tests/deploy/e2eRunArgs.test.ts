@@ -55,6 +55,8 @@ describe('e2e/run.mjs option checking', () => {
       '1000',
       '--close-after',
       'rand',
+      '--shard',
+      '2/4',
     ];
     expect(unknownOptions(argv)).toEqual([]);
   });

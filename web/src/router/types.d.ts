@@ -16,6 +16,12 @@ declare module 'vue-router' {
      * administrator. Absent, the page is the role's alone.
      */
     adminPerm?: string;
+    /**
+     * A page about tenants: opened only while the server runs multi-tenant
+     * mode (lib/tenancy); otherwise the guard sends the reader to the
+     * dashboard.
+     */
+    tenancy?: boolean;
   }
 }
 

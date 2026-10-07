@@ -1,7 +1,11 @@
 import { api } from './client';
 
 // AIToken mirrors backend model.APIToken (TokenHash is never serialized).
-// `scopes` is a comma-separated allow-list; "" means all scopes.
+// `scopes` is a comma-separated allow-list: the verbs, an optional `root:`
+// and the levels of the permissions that are not at their default
+// (`comments:rw`); an empty list grants nothing.
+// `permissions` is the server's answer for every permission's level -
+// {comments: "read" | "rw"} - so this screen never repeats the default rule.
 // `usernames` is the comma-separated identity allow-list a caller may act
 // under (X-Filex-Token-User); first entry = default, "" = label only.
 export interface AIToken {
@@ -9,6 +13,7 @@ export interface AIToken {
   user_id: number;
   label: string;
   scopes: string;
+  permissions?: Record<string, string>;
   usernames: string;
   last_used_at?: string | null;
   expires_at?: string | null;
@@ -17,7 +22,7 @@ export interface AIToken {
 
 export interface CreateTokenBody {
   label: string;
-  scopes: string; // comma-separated; "" == all
+  scopes: string; // comma-separated; at least one verb (`comments:rw` for comments)
   usernames?: string[]; // identity allow-list; first = default
   expires_in_days?: number;
 }
@@ -38,7 +43,11 @@ export const AITokensApi = {
     return data;
   },
 
-  async update(id: number, body: { label?: string; usernames?: string[] }): Promise<void> {
+  /** `permissions` sets levels ({comments: 'rw'}); the verbs never change. */
+  async update(
+    id: number,
+    body: { label?: string; usernames?: string[]; permissions?: Record<string, string> },
+  ): Promise<void> {
     await api.patch(`/admin/ai-tokens/${id}`, body);
   },
 

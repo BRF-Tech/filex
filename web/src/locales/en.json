@@ -9,10 +9,11 @@
     "admin": "{name} Admin"
   },
   "install": {
-    "title": "Install filex",
+    "title": "Install filex as a web app",
     "subtitle": "Add it to your device for quick, app-like access.",
     "install": "Install",
-    "iosInstructions": "Tap the Share button, then “Add to Home Screen”.",
+    "menuInstructions": "Open your browser's menu and choose “Install app” or “Add to Home screen”.",
+    "iosInstructions": "Tap Share (on iOS 26: ⋯, then Share), then “Add to Home Screen” and Add.",
     "updateAvailable": "A new version is available.",
     "reload": "Reload",
     "desktopTitle": "Get the filex desktop app",
@@ -163,6 +164,7 @@
     "loginSecurity": "Sign-in security",
     "groups": "Groups",
     "tenants": "Tenants",
+    "tenancy": "Multi-tenant mode",
     "myTenant": "My tenant",
     "menu": "Menu",
     "adminMenu": "Admin menu",
@@ -199,6 +201,7 @@
       "roles": "Named sets of permissions",
       "grants": "Who may open which file or folder",
       "tenants": "Every tenant of the platform",
+      "tenancy": "Serve several tenants from this instance",
       "myTenant": "Your tenant's sign-in and domains",
       "authProviders": "Who can sign in, and how",
       "loginSecurity": "Wrong-password limits and lockouts",
@@ -339,6 +342,7 @@
       "smb": "SMB / CIFS (NAS)"
     },
     "advancedFields": "Advanced settings",
+    "secretKept": "Saved - type to change it",
     "driverFieldsUnavailable": "Could not load the config fields for driver \"{driver}\".",
     "fields": {
       "name": "Display name",
@@ -750,7 +754,8 @@
       "public_url_loopback": "The document server fetches the document from filex and posts the save back to {publicUrl}. Inside its own container that address is the document server, not filex.",
       "public_url_bare_host": "filex's public URL ({publicUrl}) is a container-network name. The document server can reach it, but share links and emails built from it will not open in a browser outside that network.",
       "public_url_unresolved": "filex itself cannot resolve “{host}”. That is expected if your document server uses a different DNS view; otherwise the public URL points at a name nothing can look up.",
-      "jwt_not_enforced": "The document server accepted an unsigned request, so JWT is off on it. It still checks the token in filex's editor configuration, with its own secret, and refuses it, so documents do not open (\"The document security token is not correctly formed\"); it refuses to download from private addresses; and it sends its save callbacks unsigned, which filex refuses. Set JWT_ENABLED=true and JWT_SECRET to the same secret on the document server."
+      "jwt_not_enforced": "The document server accepted an unsigned request, so JWT is off on it. It still checks the token in filex's editor configuration, with its own secret, and refuses it, so documents do not open (\"The document security token is not correctly formed\"); it refuses to download from private addresses; and it sends its save callbacks unsigned, which filex refuses. Set JWT_ENABLED=true and JWT_SECRET to the same secret on the document server.",
+      "editor_same_origin": "The editor's script (api.js) runs inside filex's own pages, with the signed-in person's session. Set FILEX_ONLYOFFICE_FRAME_ORIGIN to the document server's own address, and have its reverse proxy send /filex-frame/ to filex: filex then runs the script in a frame there, out of reach of filex's session storage and pages."
     },
     "noSecret": {
       "title": "ONLYOFFICE has no JWT secret",
@@ -1101,6 +1106,7 @@
     "add": "Add a provider",
     "addTitle": "Another sign-in provider",
     "addHint": "A second provider of a kind: another directory, or an SSO for some tenants only. It is made switched off: fill it in on its card, test it and switch it on there.",
+    "addHintSingle": "A second provider of a kind, such as another directory. It is made switched off: fill it in on its card, test it and switch it on there.",
     "kind": "Kind",
     "label": "Shown as",
     "labelHint": "What the sign-in page calls it. Empty: the kind's own name.",
@@ -1162,6 +1168,7 @@
       "label": "Name",
       "usernames": "Usernames",
       "scopes": "Permissions",
+      "comments": "Comments",
       "root": "Root",
       "lastUsed": "Last used",
       "expires": "Expires",
@@ -1172,6 +1179,8 @@
       "labelPlaceholder": "e.g. claude-agent",
       "scopes": "Permissions",
       "scopesHint": "Choose at least one permission - an API key is never issued with none. “admin” grants the whole admin panel and is never included unless you choose it; File MCP needs “mcp”.",
+      "comments": "Comments",
+      "commentsHint": "Adding and deleting comments is a permission of its own: “Write” does not include it. Every API key reads comments; choose Read and write for one that should also comment.",
       "root": "Root confinement (optional)",
       "rootNone": "- Every storage -",
       "rootPathPlaceholder": "sub/folder (empty = storage root)",
@@ -1196,6 +1205,14 @@
       "delete": "Delete",
       "mcp": "MCP",
       "admin": "Administration"
+    },
+    "commentsLevel": {
+      "read": "Read",
+      "rw": "Read and write"
+    },
+    "commentsLevelHelp": {
+      "read": "Reads comments",
+      "rw": "Also adds comments and deletes its own"
     }
   },
   "audit": {
@@ -1278,7 +1295,8 @@
       "tenant_domain": "Own domain",
       "file_association": "Default apps",
       "file_types": "Default apps",
-      "app_store": "App store"
+      "app_store": "App store",
+      "tenancy": "Multi-tenant mode"
     },
     "verb": {
       "dismiss": "dismissed",
@@ -1292,6 +1310,7 @@
       "create": "created",
       "delete": "deleted",
       "disable": "turned off",
+      "enable": "turned on",
       "empty": "emptied",
       "enroll": "set up",
       "entry_available": "entry available again",
@@ -1365,13 +1384,18 @@
       "thumbnail_sent": "sent a file out while drawing a thumbnail",
       "office_saved_beside": "saved beside, in another format (ONLYOFFICE)",
       "office_save_refused": "save not written (ONLYOFFICE)",
+      "office_saved_conflict": "saved beside, changed while it was being edited (ONLYOFFICE)",
       "trust": "trusted",
       "untrust": "no longer trusted",
       "install": "installed",
       "cancel": "cancelled",
       "license_set": "license key set",
       "license_held": "held by its license",
-      "license_released": "license holds again"
+      "license_released": "license holds again",
+      "connect": "connected",
+      "disconnect": "disconnected",
+      "view": "store screen changed",
+      "intent_request": "install link asked for"
     },
     "target": {
       "permission_gap": "Missing permission",
@@ -1406,7 +1430,8 @@
       "e2e_request": "Encryption request",
       "tenant_domain": "Own domain",
       "file_type": "File type",
-      "app_store": "Store"
+      "app_store": "Store",
+      "tenancy": "Multi-tenant mode"
     },
     "viaAi": "{resource} (AI)",
     "filterResource": "What",
@@ -1529,6 +1554,51 @@
     "scopeName": "Name",
     "scopeContent": "Content",
     "inContent": "In content"
+  },
+  "adminSearch": {
+    "alias": {
+      "dashboard": "home, overview, status",
+      "files": "file manager, explorer, browse",
+      "adminFiles": "file versions, version history",
+      "shares": "public links, share links",
+      "trash": "deleted files, recycle bin",
+      "tagged": "tags, labels",
+      "duplicates": "copies, same files",
+      "search": "index, rebuild the index",
+      "storages": "disk, bucket, S3, volume",
+      "connections": "WebDAV, SFTP, FTP, S3, NFS, mount, desktop app",
+      "sync": "scans, scan history",
+      "replica": "replication, backup, mirror",
+      "usage": "cost, billing, quota",
+      "users": "accounts, people, members",
+      "groups": "teams",
+      "roles": "permissions, RBAC",
+      "grants": "folder permissions, ACL",
+      "tenants": "customers, organizations",
+      "myTenant": "domain, own sign-in",
+      "authProviders": "LDAP, Active Directory, SSO, OIDC, Keycloak, single sign-on",
+      "loginSecurity": "brute force, lockout, IP addresses, trusted proxies",
+      "encryption": "end-to-end, E2E",
+      "protection": "retention, versions, antivirus, ClamAV",
+      "apiMcp": "API keys, MCP, AI agents",
+      "plugins": "apps, extensions, store",
+      "external": "ONLYOFFICE, draw.io, document server, editors",
+      "webhooks": "HTTP callbacks, events",
+      "notifications": "alerts, bell",
+      "settings": "email, SMTP, site name",
+      "branding": "logo, colors, name",
+      "appearance": "theme, dark mode, custom CSS",
+      "archives": "zip, 7z, tar, extract",
+      "queue": "jobs, background tasks",
+      "tools": "maintenance, repair",
+      "audit": "log, history",
+      "updates": "upgrade, new version, release",
+      "about": "version, build, license",
+      "smtp": "email server, outgoing mail",
+      "twoFactor": "2FA, TOTP, two-factor",
+      "allowlist": "IP addresses",
+      "stores": "app store, store"
+    }
   },
   "tagged": {
     "title": "Tagged files",
@@ -1837,6 +1907,7 @@
       "delete": "Delete",
       "replica_retry": "Replica retry",
       "replica_report": "Replica report",
+      "replica_initial_copy": "Replica initial copy",
       "reconcile": "Replica reconcile"
     }
   },
@@ -1855,6 +1926,7 @@
       "permDeniedHint": "Re-allow notifications for this site in your browser settings.",
       "permDefault": "Permission not asked yet",
       "permUnsupported": "This browser cannot show notifications",
+      "iosHomeScreen": "On an iPhone or iPad, notifications work in filex added to the Home Screen (iOS 16.4 or later), not in a browser tab.",
       "desktopHandled": "The desktop app shows these itself",
       "saved": "Preference saved",
       "movedToSettings": "Your own notification settings - the bell, browser pop-ups, which events - are in your user settings.",
@@ -1938,7 +2010,8 @@
       "webhook_test": "Webhook test",
       "tenant_domain_suspended": "Own domain stopped working",
       "tenant_domain_restored": "Own domain works again",
-      "permission_gaps": "Role may have lost a permission"
+      "permission_gaps": "Role may have lost a permission",
+      "notification_digest": "Notification digest"
     },
     "scopeEveryone": "Everyone",
     "webhookStatus": {
@@ -1953,7 +2026,24 @@
     "unreadHere": "{n} unread in this list",
     "scopeAdmins": "Administrators",
     "scopeViewers": "Those who can see the file",
-    "scopeNobody": "No one (history only)"
+    "scopeNobody": "No one (history only)",
+    "digest": {
+      "title": "Notification digest",
+      "intro": "Off until somebody turns it on: out of the box every kind of notification is told at once. A kind turned off below is held for a short window and told in one summary, folder by folder - one notification instead of one per file. Each person can change this for themselves in their own notification settings; these are the defaults.",
+      "scopeInstance": "For everyone on this server",
+      "scopeTenant": "For the tenant {tenant}",
+      "window": "Hold for",
+      "windowUnit": "minutes",
+      "windowHint": "Between 1 and 15 minutes. The window starts with the first notification held.",
+      "urgentTitle": "Told at once by default",
+      "urgentHint": "Every kind is on out of the box. Turn a kind off to hold it for the digest, for everybody who has not chosen otherwise.",
+      "adminAlerts": "Administrator alerts",
+      "adminAlertsHint": "Updates, replicas, sign-in providers, tenant domains and the other alerts for administrators",
+      "restore": "Restore defaults",
+      "saved": "Digest settings saved",
+      "invalidWindow": "Choose between 1 and 15 minutes.",
+      "allUrgent": "Default: every kind is told at once. Nothing is held for a digest."
+    }
   },
   "replica": {
     "title": "Replication",
@@ -1972,7 +2062,32 @@
       "save": "Save pairing",
       "savedOk": "Pairing saved.",
       "noStorages": "Add a storage first (Storages page).",
-      "targetIs": "Replica target: {name}"
+      "targetIs": "Replica target: {name}",
+      "folderIs": "Folder on the target: {folder}",
+      "savedCopying": "Pairing saved. The files already on the storage are being copied to the target."
+    },
+    "initial": {
+      "title": "Initial copy",
+      "phase": {
+        "pending": "Queued",
+        "counting": "Counting",
+        "copying": "Copying",
+        "waiting": "Waiting",
+        "done": "Done"
+      },
+      "pending": "The files already on this storage will be copied to the target.",
+      "counting": "Counting the files on the storage: {n} so far",
+      "progress": "{done} of {n} file done | {done} of {n} files done",
+      "finished": "Initial copy done: {n} file | Initial copy done: {n} files",
+      "copied": "{n} copied ({size})",
+      "present": "{n} already on the target",
+      "excluded": "{n} left out by a rule",
+      "failed": "{n} failed - see “Failures”",
+      "waiting": "Waiting: the target does not answer ({error}). The copy goes on by itself.",
+      "finishedAt": "Finished {when}",
+      "restart": "Run again",
+      "restartHint": "Look at every file again; files the target already has are left alone.",
+      "restarted": "Initial copy started again"
     },
     "targets": {
       "title": "Replication targets",
@@ -2025,6 +2140,7 @@
       "nothingToFix": "Nothing to fix",
       "fields": {
         "path": "Path",
+        "storage": "Storage",
         "op": "Op",
         "errorCode": "Code",
         "error": "Error",
@@ -2171,7 +2287,7 @@
     "empty": "No webhook targets yet. The default webhook above still receives every event.",
     "namePlaceholder": "e.g. ops-alerts",
     "allEvents": "All events",
-    "eventsHint": "Leave everything unchecked to receive every event.",
+    "eventsHint": "Leave everything unchecked to receive every event - except the notification digest, which a target receives only when it is ticked.",
     "events": {
       "file_uploaded": "File uploaded - a write created a file that did not exist",
       "file_updated": "File updated - a write replaced the bytes of an existing file",
@@ -2189,7 +2305,8 @@
       "e2e_password_changed": "The password of an encrypted folder was changed, or reset with its recovery key",
       "e2e_request_created": "Encryption request - someone asked to encrypt a folder or a file under the approval policy",
       "e2e_request_decided": "Encryption request approved or rejected by an administrator",
-      "plugin_notice": "App notification - an installed app sent a message (signature request, finished job, …)"
+      "plugin_notice": "App notification - an installed app sent a message (signature request, finished job, …)",
+      "notification_digest": "Notification digest - one person's held notifications, told together at the end of their window (sent only to a target that ticks it)"
     },
     "secretSet": "Secret set",
     "secretUnset": "No secret",
@@ -2637,12 +2754,14 @@
       "superseded": "Source changed"
     },
     "source": {
-      "own": "Its own update source"
+      "own": "Its own update source",
+      "store": "The store {store} ({app})"
     },
     "actions": {
       "review": "Review",
       "approve": "Approve and install",
-      "reject": "Reject"
+      "reject": "Reject",
+      "approveStore": "Approve: open the store review"
     },
     "review": {
       "title": "Install request: {name}",
@@ -2654,11 +2773,15 @@
       "rejectPlaceholder": "The requester can read this.",
       "decided": "{status} by {who}, {when}",
       "decidedNobody": "{status}, {when}",
-      "note": "Note"
+      "note": "Note",
+      "fromStore": "A person asked for this app from the store screen. Approving asks the store for a fresh install link for this filex and opens it in the store review: the same checks and the same permission review as any install link. Nothing is installed until you install it there.",
+      "storeLicense": "License key (paid apps, optional)",
+      "storeLicenseHint": "Sent to the store with the approval. You can also give it in the review."
     },
     "approved": "{name} {version} installed",
     "rejected": "Request for {name} rejected",
-    "superseded": "The source of {name} has changed since the request was made, so nothing was installed. The request is closed as “Source changed”."
+    "superseded": "The source of {name} has changed since the request was made, so nothing was installed. The request is closed as “Source changed”.",
+    "storeOpening": "The store made an install link for {name}; its review is opening."
   },
   "plugins": {
     "logsTitle": "{name} log",
@@ -3362,7 +3485,8 @@
         "e2e_password_changed": "The password of your encrypted folder is changed",
         "e2e_request_created": "Someone asks to encrypt a folder or a file",
         "e2e_request_decided": "Your encryption request is answered",
-        "plugin_notice": "An installed app sends you a message"
+        "plugin_notice": "An installed app sends you a message",
+        "notification_digest": "A summary of the notifications I did not mark urgent"
       }
     },
     "security": {
@@ -4005,7 +4129,6 @@
     "search": "Search tenants…",
     "empty": "No tenants yet.",
     "noMatch": "No tenant matches.",
-    "modeOff": "Multi-tenant mode is off (FILEX_MULTI_TENANT): only the platform's own tenant can sign in. The other tenants and everything they have are kept, and their people sign in again when it is turned back on.",
     "platform": "Platform",
     "platformHint": "The platform's own tenant: its people sign in with an empty realm, and its administrators administer every tenant.",
     "signinColumn": "Sign-in",
@@ -4148,6 +4271,33 @@
       "certificate_needs_secret_key": "A private key is stored sealed, and this installation has no FILEX_SECRET_KEY."
     }
   },
+  "tenancy": {
+    "title": "Multi-tenant mode",
+    "subtitle": "One instance serving several organizations, each a tenant with its own sign-in, address, storages and people. Off, the instance is one organization's and the panel shows nothing about tenants.",
+    "switchLabel": "Multi-tenant mode",
+    "switchHelp": "Saved here and put in force the next time filex starts.",
+    "inForce": "In force now",
+    "on": "On",
+    "off": "Off",
+    "tenantsLabel": "Tenants besides the platform's own",
+    "whatOn": "Turning it on adds Tenants under People & access, a Realm field on the sign-in page and the tenant settings of Identity providers and Encryption. The first start in multi-tenant mode carries this instance's encryption policy over to the platform's own tenant.",
+    "whatOff": "Turning it off hides everything about tenants. The tenants that exist are kept and go into maintenance mode: only the platform's own tenant signs in until the mode is back on.",
+    "openTenants": "Manage the tenants",
+    "lockedEnv": "Set by the {variable} environment variable: change it there and restart filex. This switch only shows it.",
+    "lockedFile": "Set by {key} in the configuration file: change it there and restart filex. This switch only shows it.",
+    "restartTitle": "Restart filex to apply the change",
+    "restartToOn": "Saved. Multi-tenant mode turns on when filex is restarted; until then this server runs as a single-tenant install. Every server of a cluster needs the restart.",
+    "restartToOff": "Saved. Multi-tenant mode turns off when filex is restarted; until then this server keeps serving every tenant. Every server of a cluster needs the restart.",
+    "saved": "Saved",
+    "savedRestart": "Saved. Restart filex to apply it.",
+    "confirmTitle": "Turn multi-tenant mode off?",
+    "confirmCount": "This instance has {n} tenant besides the platform's own. | This instance has {n} tenants besides the platform's own.",
+    "confirmMaintenance": "After the restart they are in maintenance mode: only the platform's own tenant signs in, and the open sessions and API keys of their people stop working.",
+    "confirmKept": "Nothing is deleted: their people, storages, files, sign-in providers and settings are kept. Turning the mode back on brings every tenant back as it was.",
+    "confirmRestart": "The change is saved now and put in force when filex is restarted.",
+    "confirmLabel": "Type {n}, the number of tenants, to confirm",
+    "confirmAction": "Turn off"
+  },
   "appStore": {
     "title": "Install from a store",
     "subtitle": "An app store sent you here with an install link. You read the review and decide; nothing is installed until you press Install.",
@@ -4254,9 +4404,100 @@
       "store_source_changed_direct": "The installed version ({version}) was installed straight from its repository ({repo}), not from a store. The paid link of {store} does not take an installed app under its license: to move to the store's paid version, remove the installed app first (that deletes its settings and what it kept), then open the link again.",
       "intent_version_rollback": "{installed} is installed; the link is for {link}, which is not newer. A store link installs or upgrades, never goes back.",
       "intent_session_unknown": "This review is no longer open: it was installed or closed already, or it timed out. Open the store's install link again.",
-      "license_key_invalid": "That license key cannot be used: 4 to 512 characters, no spaces (and the server needs FILEX_SECRET_KEY to keep it)."
+      "license_key_invalid": "That license key cannot be used: 4 to 512 characters, no spaces (and the server needs FILEX_SECRET_KEY to keep it).",
+      "store_not_connected": "This filex is not connected to the store. An administrator connects it under Plugins, Apps, Trusted stores, Connect, with the one-time code the store's \"My instances\" page makes.",
+      "store_connection_refused": "The store refused this filex's signed request. If the store disconnected it, connect it again with a new code.",
+      "store_connect_code_invalid": "The store did not take this connection code: it is unknown, used, expired or made for another filex address. Make a new one on the store's \"My instances\" page for this filex.",
+      "store_refused": "The store refused: {message}",
+      "store_index_invalid": "The store's catalog does not verify with the key it is trusted with, has expired, or is not one this filex reads. Nothing from it is shown.",
+      "store_media_invalid": "The store's catalog names no such icon, or its bytes are not the ones its name pins."
     },
     "malformed": "This address is not a store's install link filex can read. Open the store's Install link again.",
-    "framed": "A store's install link cannot be used inside a frame. Open it in its own browser tab."
+    "framed": "A store's install link cannot be used inside a frame. Open it in its own browser tab.",
+    "connection": {
+      "connected": "Connected",
+      "notConnected": "Not connected",
+      "connect": "Connect",
+      "reconnect": "Connect again",
+      "disconnect": "Disconnect",
+      "confirmDisconnect": "Disconnect this filex from {store}? Requests from the store screen cannot be approved until it is connected again.",
+      "done": "Connected to {store}.",
+      "intro": "On the store, open \"My instances\", pick this filex's address and make a connection code. It works once, for 30 minutes. filex makes a key of its own for this store; the store keeps only its public half, and asks for nothing else.",
+      "code": "Connection code",
+      "codeHint": "Starts with fxc_",
+      "detail": "Key {key} · connected by {who}, {when}"
+    },
+    "view": {
+      "title": "Store screen",
+      "intro": "An \"App store\" page inside filex: the catalog of the stores chosen here, read and checked by this server, never by the browser. The people chosen here can ask for an app; the request lands on Install requests above, and an installation still goes through your review.",
+      "tenant": "Tenant",
+      "tenantHint": "Each tenant has its own setting; a tenant with none does not see the screen.",
+      "enabled": "Show the store screen",
+      "enabledHelp": "Adds \"App store\" to the navigation panel of the people chosen below.",
+      "stores": "Stores it shows",
+      "noStores": "No store is trusted yet. A store is trusted from its own install link.",
+      "connected": "Connected: requests can be approved",
+      "notConnected": "Not connected: requests wait until it is",
+      "unconnected": "Not connected yet: {stores}. Requests from it can be left, but not approved until you connect it above.",
+      "audience": {
+        "title": "Who sees it",
+        "everyone": "Everyone",
+        "everyoneHelp": "Every signed-in account of this tenant",
+        "roles": "Roles",
+        "rolesHelp": "The accounts with one of the roles chosen below",
+        "groups": "Groups",
+        "groupsHelp": "The members of the groups chosen below"
+      },
+      "roles": "Roles",
+      "role": {
+        "admin": "Administrator",
+        "user": "User",
+        "viewer": "Viewer"
+      },
+      "groups": "Groups",
+      "noGroups": "There is no group in this tenant yet.",
+      "saved": "Store screen saved.",
+      "updated": "Changed by {who}, {when}"
+    }
+  },
+  "storeScreen": {
+    "title": "App store",
+    "subtitle": "Apps from the stores your administrator chose. Ask for one; an administrator decides and installs it.",
+    "back": "Back to files",
+    "hidden": "The store screen is not shown to this account. An administrator decides who sees it.",
+    "store": "Store",
+    "search": "Search apps",
+    "stale": "The store cannot be reached right now: this is its catalog as filex last checked it ({when}).",
+    "empty": "The store lists no app.",
+    "noMatch": "No app matches the search.",
+    "details": "Details",
+    "request": "Ask for this app",
+    "requestIntro": "Your request goes to the administrators with your words below. They decide; when they install the app, it appears in your apps.",
+    "reason": "Why do you need it?",
+    "reasonPlaceholder": "What you would use it for",
+    "send": "Send the request",
+    "sent": "Your request for {name} was sent to the administrators.",
+    "alreadySent": "Your request for {name} is already waiting for the administrators.",
+    "tooMany": "You have several requests waiting; wait for a decision before asking for more.",
+    "alreadyInstalled": "This version is installed already.",
+    "mine": "My requests",
+    "noRequests": "You have not asked for an app yet.",
+    "verified": "Verified",
+    "fields": {
+      "app": "App",
+      "version": "Version",
+      "permissions": "Permissions",
+      "state": "Here",
+      "publisher": "Publisher",
+      "store": "Store",
+      "requested": "Asked",
+      "status": "Status",
+      "note": "Note"
+    },
+    "state": {
+      "installed": "Installed",
+      "pending": "Requested",
+      "update": "Version {version} installed"
+    }
   }
 }

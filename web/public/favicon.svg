@@ -2,7 +2,7 @@
      A file in public/ has no token scope, so the value is written out; it is
      the same mark as web/src/components/LogoMark.vue, which reads the token.
      Change one, change the other, plus icons/icon.svg and the theme-color
-     meta in index.html / the manifest theme_color in vite.config.ts. -->
+     meta in index.html / the manifest theme_color in pwa.config.ts. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <rect width="32" height="32" rx="6" fill="#2f6ceb" />
   <path d="M7 11a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11z"

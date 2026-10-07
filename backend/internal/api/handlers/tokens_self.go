@@ -74,7 +74,8 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 	scopes, err := h.cappedScopes(r.Context(), u, req.Scopes)
 	if err != nil {
 		var unknown *apitoken.UnknownScopeError
-		if errors.Is(err, apitoken.ErrScopesRequired) || errors.As(err, &unknown) {
+		var conflict *apitoken.ConflictingLevelsError
+		if errors.Is(err, apitoken.ErrScopesRequired) || errors.As(err, &unknown) || errors.As(err, &conflict) {
 			writeScopeRefusal(w, r, err)
 			return
 		}
@@ -128,12 +129,13 @@ func (h *SelfTokens) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"token": plain, // shown ONCE
-		"row":   created,
+		"row":   created.WithPermissions(),
 	})
 }
 
-// Update edits one of the caller's own tokens (label / usernames; ownership
-// enforced — the credential and scopes stay immutable here).
+// Update edits one of the caller's own tokens (label / usernames, and the
+// levels of its permissions - `permissions`, package tokenperm; ownership
+// enforced — the credential, its verbs and its `root:` stay immutable here).
 //
 //	PATCH /api/tokens/{id}
 func (h *SelfTokens) Update(w http.ResponseWriter, r *http.Request) {
@@ -169,11 +171,29 @@ func (h *SelfTokens) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		usernames = &un
 	}
+	levels, lerr := parseLevelChanges(body.Permissions)
+	if lerr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": lerr.Error()})
+		return
+	}
+	// A token caller raises none of its owner's tokens above itself - itself
+	// included: a `comments:read` token cannot PATCH its own id to `rw`
+	// (token_ceiling.go).
+	if c := ceilingOf(r); c != nil {
+		if why := c.allowsLevels(levels); why != "" {
+			refuseWider(w, why)
+			return
+		}
+	}
 	// Kind stays admin-only (/api/admin/ai-tokens): letting a token promote
 	// itself out of "app" would make the gate above a suggestion. body.Kind is
 	// simply ignored here — the shared updateTokenBody carries it for the
 	// admin surface.
 	if err := h.store.UpdateAPITokenMeta(r.Context(), id, label, usernames, nil); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := setTokenLevels(r, h.store, id, levels); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -246,8 +266,13 @@ func (h *SelfTokens) Delete(w http.ResponseWriter, r *http.Request) {
 //   - `write`/`delete` are rejected for viewer accounts (read-only).
 //   - each `root:<adapter>://<rel>` scope must be within the caller's own
 //     grants (≥viewer, or ≥editor when the token also carries write/delete).
+//
+// A permission at a level (`comments:rw`, package tokenperm) is not capped by
+// the role here: the account's own `comments.write` is asked each time a
+// comment is added, so a key never does more than its account may at that
+// moment.
 func (h *SelfTokens) cappedScopes(ctx context.Context, u *model.User, raw string) (string, error) {
-	verbs, roots, err := apitoken.ParseIssued(raw)
+	verbs, roots, perms, err := apitoken.ParseIssued(raw)
 	if err != nil {
 		return "", err
 	}
@@ -285,5 +310,5 @@ func (h *SelfTokens) cappedScopes(ctx context.Context, u *model.User, raw string
 			}
 		}
 	}
-	return apitoken.JoinScopes(verbs, roots), nil
+	return apitoken.JoinScopes(verbs, roots, perms), nil
 }

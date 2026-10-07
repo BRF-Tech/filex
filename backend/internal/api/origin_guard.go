@@ -7,6 +7,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	authlocal "github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/originguard"
@@ -50,6 +51,8 @@ var originGuardExempt = []string{
 // sandboxed without allow-same-origin, so its requests carry `Origin: null`,
 // and trusting the host would only matter if that sandbox were ever loosened,
 // which is when third-party app code must not be able to act as the person.
+// It is Untrusted outright, with the ONLYOFFICE frame origin (task #92), so a
+// CORS wildcard that happens to cover either changes nothing.
 func originGuard(d *Deps) func(http.Handler) http.Handler {
 	self := ""
 	if d.Cfg.PublicURLSet {
@@ -57,9 +60,97 @@ func originGuard(d *Deps) func(http.Handler) http.Handler {
 	}
 	return originguard.New(originguard.Config{
 		Trusted:       d.Cfg.CORS.AllowedOrigins,
+		Untrusted:     untrustedOrigins(d),
 		Self:          self,
 		Exempt:        originGuardExempt,
 		SessionCookie: authlocal.SessionCookieName,
 		Store:         d.Store,
 	}).Middleware
 }
+
+// untrustedOrigins are the origins filex knows run code it did not write: the
+// ONLYOFFICE editor's frame origin (FILEX_ONLYOFFICE_FRAME_ORIGIN, normally
+// the document server's own, task #92) and the app-interface origin. Neither
+// is ever trusted to change something with a person's session, nor to read
+// filex's answers, whatever FILEX_CORS_ALLOWED_ORIGINS says: a wildcard there
+// (`https://*.example.com`) can cover the document server's host by accident.
+//
+// ⚠ The frame origin is usually the SAME SITE as filex (docs.example.com
+// beside files.example.com), so SameSite=Lax sends the session cookie with its
+// requests; this list and the guard's Sec-Fetch-Site rule are what refuse
+// them. The cookie itself is HttpOnly, so no script there can read it.
+func untrustedOrigins(d *Deps) []string {
+	var out []string
+	for _, o := range []string{d.Cfg.ExternalServices.OnlyOffice.FrameOrigin, d.Cfg.AppUIOrigin} {
+		if o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// corsNever keeps the CORS layer's answer from the untrusted origins: their
+// Access-Control-* headers are taken off, so a browser lets no script there
+// read what filex answered - with credentials or without - and refuses their
+// preflights, whatever the CORS list says. Every other request passes with
+// its writer untouched (a WebSocket upgrade still finds its Hijacker).
+func corsNever(origins []string) func(http.Handler) http.Handler {
+	set := map[string]bool{}
+	for _, raw := range origins {
+		if o, ok := originguard.Canonical(raw); ok {
+			set[o] = true
+		}
+	}
+	return func(next http.Handler) http.Handler {
+		if len(set) == 0 {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			o, ok := originguard.Canonical(r.Header.Get("Origin"))
+			if !ok || !set[o] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(&noCORSWriter{ResponseWriter: w}, r)
+		})
+	}
+}
+
+// noCORSWriter drops the Access-Control-* headers at the moment the answer's
+// headers go out.
+type noCORSWriter struct {
+	http.ResponseWriter
+	done bool
+}
+
+func (w *noCORSWriter) strip() {
+	if w.done {
+		return
+	}
+	w.done = true
+	h := w.Header()
+	for k := range h {
+		if strings.HasPrefix(http.CanonicalHeaderKey(k), "Access-Control-") {
+			h.Del(k)
+		}
+	}
+}
+
+func (w *noCORSWriter) WriteHeader(code int) {
+	w.strip()
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *noCORSWriter) Write(p []byte) (int, error) {
+	w.strip()
+	return w.ResponseWriter.Write(p)
+}
+
+// FlushError and Unwrap: http.ResponseController reaches the writer
+// underneath, after the headers are decided.
+func (w *noCORSWriter) FlushError() error {
+	w.strip()
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+func (w *noCORSWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

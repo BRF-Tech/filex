@@ -23,6 +23,7 @@ import type { S3AccessKey } from '../types/S3Keys';
 import { useLocale } from '../composables/useLocale';
 import { useS3Keys } from '../composables/useS3Keys';
 import DataTable, { type DataColumn } from './DataTable.vue';
+import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
 import type { ContextAction } from './ContextMenu.vue';
 import { resolveLocale } from '../locales/resolve';
 
@@ -58,6 +59,11 @@ const {
 
 const label = ref('');
 const bucket = ref('');
+/* Which bucket the key is limited to (#160: the shared list, no native select). */
+const bucketChoices = computed<SelectOption[]>(() => [
+  { value: '', label: t('conn.s3keys.everyBucket') },
+  ...props.storages.map((s) => ({ value: s, label: s })),
+]);
 const prefix = ref('');
 const busy = ref(false);
 const confirmRevoke = ref<number | null>(null);
@@ -259,10 +265,13 @@ function scopeOf(k: S3AccessKey): string {
         :placeholder="t('conn.s3keys.label')"
         data-testid="s3-key-label"
       />
-      <select v-model="bucket" class="fe-cfield__input" data-testid="s3-key-bucket">
-        <option value="">{{ t('conn.s3keys.everyBucket') }}</option>
-        <option v-for="s in storages" :key="s" :value="s">{{ s }}</option>
-      </select>
+      <ChoiceSelect
+        :model-value="bucket"
+        :options="bucketChoices"
+        :aria-label="t('conn.s3keys.col.scope')"
+        testid="s3-key-bucket"
+        @update:model-value="(v) => (bucket = String(v))"
+      />
       <input
         v-model="prefix"
         class="fe-cfield__input"

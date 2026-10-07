@@ -8,6 +8,7 @@ import (
 	apitoken "github.com/brf-tech/filex/backend/internal/auth/drivers/apitoken"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/tokenperm"
 )
 
 // ── a credential minted by a token is never wider than that token ────────
@@ -55,6 +56,10 @@ func ceilingOf(r *http.Request) *tokenCeiling {
 			}
 			continue
 		}
+		if _, _, isPerm, _ := tokenperm.ParseEntry(s); isPerm {
+			// A permission's level, not a verb (allowsLevels reads it).
+			continue
+		}
 		c.verbs[s] = true
 	}
 	return c
@@ -91,7 +96,7 @@ func refuseWider(w http.ResponseWriter, why string) {
 // the canonical form cappedScopes returns). It returns "" when allowed, else
 // why not.
 func (c *tokenCeiling) allowsToken(scopes string) string {
-	verbs, roots, err := apitoken.ParseIssued(scopes)
+	verbs, roots, _, err := apitoken.ParseIssued(scopes)
 	if err != nil {
 		return err.Error()
 	}
@@ -99,6 +104,9 @@ func (c *tokenCeiling) allowsToken(scopes string) string {
 		if !c.verbs[v] {
 			return "it does not hold the `" + v + "` scope"
 		}
+	}
+	if why := c.allowsLevels(tokenperm.LevelsIn(scopes)); why != "" {
+		return why
 	}
 	if c.root == nil {
 		return ""
@@ -110,6 +118,24 @@ func (c *tokenCeiling) allowsToken(scopes string) string {
 		root, ok := confine.ParseRoot(strings.TrimSpace(strings.TrimPrefix(rs, apitoken.ScopeRootPrefix)))
 		if !ok || !c.root.Within(root.Adapter, root.Rel) {
 			return "it is confined to " + c.root.Adapter + "://" + c.root.Rel
+		}
+	}
+	return ""
+}
+
+// allowsLevels checks the levels of the permissions of package tokenperm that
+// a credential would hold - a new token's, or an existing one's after an edit
+// (PATCH /api/tokens/{id}): none above the calling token's own. A read-only
+// comments token cannot mint, or turn another of its owner's tokens into, one
+// that writes comments.
+func (c *tokenCeiling) allowsLevels(levels map[string]tokenperm.Level) string {
+	for _, d := range tokenperm.All() {
+		want, ok := levels[d.Key]
+		if !ok {
+			continue
+		}
+		if have := c.tok.PermLevel(d.Key); !have.Covers(want) {
+			return "it holds `" + d.Key + "` at `" + string(have) + "`, not `" + string(want) + "`"
 		}
 	}
 	return ""

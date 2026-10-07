@@ -376,5 +376,7 @@ func newDemoAwareAuthProviders(d AIAdminDeps) *AuthProviders {
 func newDemoAwareStorages(d AIAdminDeps) *Storages {
 	h := NewStorages(d.Store, d.Worker)
 	h.DemoMode = d.DemoMode
+	h.ForgetStorage = d.ForgetStorage
+	h.ReplicaLinks = d.ReplicaLinks
 	return h
 }

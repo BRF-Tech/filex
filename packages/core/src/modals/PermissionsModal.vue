@@ -48,6 +48,8 @@ import { actionIconSvg } from '../lib/actionIcons';
 import { fileIconTile } from '../lib/fileIcons';
 import { gateOnService } from '../lib/serviceGate';
 import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
+import ChoiceSelect, { type SelectOption } from '../components/ChoiceSelect.vue';
+import ChoiceButtons, { type ChoiceOption } from '../components/ChoiceButtons.vue';
 
 const props = defineProps<{
   api: FileApi;
@@ -169,6 +171,17 @@ const levels = computed<Array<{ v: 'viewer' | 'editor' | 'owner'; l: string; d: 
 function levelLabel(v: string): string {
   return levels.value.find((o) => o.v === v)?.l ?? v;
 }
+/* The access level: three answers side by side, each saying what it means
+   when the pointer rests on it or the keyboard reaches it (the owner,
+   2026-10-06: "yan yana düğmeler, üzerine gelince açıklaması yazar"); on a
+   touch screen the chosen one's meaning is a line under the strip
+   (ChoiceButtons `segmented`, #160). */
+const levelChoices = computed<ChoiceOption[]>(() => levels.value.map((o) => ({ value: o.v, label: o.l, help: o.d })));
+/* "Create the account as…": two answers beside one button, so a strip. */
+const createRoleChoices = computed<ChoiceOption[]>(() => [
+  { value: 'user', label: t('access.ui.user') },
+  { value: 'viewer', label: t('access.ui.viewer') },
+]);
 
 /**
  * Per-item access with RBAC OFF on the storage.
@@ -223,6 +236,7 @@ function expiryLabel(days: number): string {
   return days === 0 ? t('access.ui.never') : t('access.ui.days', { days });
 }
 const expiryOptions = computed(() => clampExpiryOptions(STOCK_EXPIRY_DAYS, props.shareMaxTtlDays, expiryLabel));
+const expiryChoices = computed<SelectOption[]>(() => expiryOptions.value.map((o) => ({ value: o.v, label: o.l })));
 const ttlHint = computed(() => ttlCeilingHint(props.shareMaxTtlDays, localeCode.value));
 watch(
   () => props.shareMaxTtlDays,
@@ -245,6 +259,7 @@ const maxDlOptions = computed(() => [
   { v: 0, l: t('access.ui.unlimited') },
   ...[1, 3, 5, 10, 25].map((count) => ({ v: count, l: t('access.ui.downloads', { count }) })),
 ]);
+const maxDlChoices = computed<SelectOption[]>(() => maxDlOptions.value.map((o) => ({ value: o.v, label: o.l })));
 
 // ⚠ The one-line curl went missing the same way the download cap did: it was
 // part of the old standalone share dialog, and link creation moved here
@@ -1032,15 +1047,25 @@ async function nativeShare(body: { title: string; text: string }) {
                 </label>
                 <label class="fe-share__field">
                   <span class="fe-share__fieldlabel">{{ t('access.ui.expiry') }}</span>
-                  <select v-model.number="shareExpiry" class="fe-share__select" data-testid="share-expiry">
-                    <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
-                  </select>
+                  <ChoiceSelect
+                    class="fe-share__pick"
+                    size="lg"
+                    :model-value="shareExpiry"
+                    :options="expiryChoices"
+                    testid="share-expiry"
+                    @update:model-value="(v) => (shareExpiry = Number(v))"
+                  />
                 </label>
                 <label class="fe-share__field">
                   <span class="fe-share__fieldlabel">{{ t('access.ui.download_limit') }}</span>
-                  <select v-model.number="shareMaxDl" class="fe-share__select">
-                    <option v-for="o in maxDlOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
-                  </select>
+                  <ChoiceSelect
+                    class="fe-share__pick"
+                    size="lg"
+                    :model-value="shareMaxDl"
+                    :options="maxDlChoices"
+                    testid="share-max-downloads"
+                    @update:model-value="(v) => (shareMaxDl = Number(v))"
+                  />
                 </label>
               </div>
               <p v-if="ttlHint" class="fe-share__hint" data-testid="share-ttl-hint">{{ ttlHint }}</p>
@@ -1159,9 +1184,16 @@ async function nativeShare(body: { title: string; text: string }) {
                       </li>
                     </ul>
                   </div>
-                  <select v-model="level" class="fe-share__select" :disabled="addBlocked" :title="levels.find(o => o.v === level)?.d">
-                    <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
-                  </select>
+                  <ChoiceButtons
+                    class="fe-share__level"
+                    :options="levelChoices"
+                    :model-value="level"
+                    segmented
+                    :disabled="addBlocked"
+                    testid="share-add-level"
+                    testid-prefix="share-add-level"
+                    @update:model-value="(v: string | string[]) => (level = v as 'viewer' | 'editor' | 'owner')"
+                  />
                   <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy || addBlocked" @click="submitEmail">
                     {{ t('access.ui.add') }}
                   </button>
@@ -1181,10 +1213,15 @@ async function nativeShare(body: { title: string; text: string }) {
                 <div v-if="noAccount" class="fe-share__invite">
                   <p class="fe-share__hint">{{ t('access.ui.no_account_for_this_email_what_next') }}</p>
                   <div class="fe-share__inviterow">
-                    <select v-model="createRole" class="fe-share__select">
-                      <option value="user">{{ t('access.ui.user') }}</option>
-                      <option value="viewer">{{ t('access.ui.viewer') }}</option>
-                    </select>
+                    <ChoiceButtons
+                      :options="createRoleChoices"
+                      :model-value="createRole"
+                      segmented
+                      :aria-label="t('access.ui.no_account_for_this_email_what_next')"
+                      testid="share-create-role"
+                      testid-prefix="share-create-role"
+                      @update:model-value="(v: string | string[]) => (createRole = v as 'user' | 'viewer')"
+                    />
                     <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy" @click="inviteCreateUser">
                       {{ t('access.ui.create_user_grant') }}
                     </button>
@@ -1203,13 +1240,19 @@ async function nativeShare(body: { title: string; text: string }) {
                   <p v-if="!direct.length && !inherited.length" class="fe-share__empty">
                     {{ t('access.ui.not_shared_with_anyone_yet') }}
                   </p>
-                  <div v-for="g in direct" :key="gkey('d', g)" class="fe-share__row">
+                  <div v-for="g in direct" :key="gkey('d', g)" class="fe-share__row fe-share__row--grant">
                     <span class="fe-share__av" :class="{ 'fe-share__av--group': isGroup(g) }">{{ ginitial(g) }}</span>
                     <span class="fe-share__person" :title="gtitle(g)">{{ glabel(g) }}<span v-if="isGroup(g)" class="fe-share__kind">{{ t('access.ui.group') }}</span></span>
-                    <select class="fe-share__select fe-share__select--sm" :value="g.level"
-                      @change="changeLevel(g, ($event.target as HTMLSelectElement).value)">
-                      <option v-for="o in levels" :key="o.v" :value="o.v">{{ o.l }}</option>
-                    </select>
+                    <ChoiceButtons
+                      class="fe-share__level"
+                      :options="levelChoices"
+                      :model-value="g.level"
+                      segmented
+                      :aria-label="glabel(g)"
+                      testid="share-row-level"
+                      testid-prefix="share-row-level"
+                      @update:model-value="(v: string | string[]) => changeLevel(g, String(v))"
+                    />
                     <button type="button" class="fe-share__del" :disabled="busy" :title="t('access.ui.remove')"
                       :aria-label="t('access.ui.remove')" @click="removeGrant(g)">
                       <span aria-hidden="true" v-html="actionIconSvg('close')"></span>
@@ -1261,9 +1304,14 @@ async function nativeShare(body: { title: string; text: string }) {
                 </label>
                 <label class="fe-share__field">
                   <span class="fe-share__fieldlabel">{{ t('access.ui.expiry') }}</span>
-                  <select v-model.number="dropExpiry" class="fe-share__select" data-testid="drop-expiry">
-                    <option v-for="o in expiryOptions" :key="o.v" :value="o.v">{{ o.l }}</option>
-                  </select>
+                  <ChoiceSelect
+                    class="fe-share__pick"
+                    size="lg"
+                    :model-value="dropExpiry"
+                    :options="expiryChoices"
+                    testid="drop-expiry"
+                    @update:model-value="(v) => (dropExpiry = Number(v))"
+                  />
                 </label>
               </div>
               <p v-if="ttlHint" class="fe-share__hint">{{ ttlHint }}</p>

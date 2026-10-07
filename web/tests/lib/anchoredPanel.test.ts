@@ -2,7 +2,7 @@
 // the notification bell (packages/core/src/lib/anchoredPanel.ts).
 import { describe, expect, it } from 'vitest';
 
-import { anchorUnderEndEdge, refElement } from '@brftech/filex-core/src/lib/anchoredPanel';
+import { anchorUnderEndEdge, fixedViewport, refElement } from '@brftech/filex-core/src/lib/anchoredPanel';
 
 describe('anchorUnderEndEdge', () => {
   it('hangs 6px under the button, flush with its right edge', () => {
@@ -60,5 +60,46 @@ describe('refElement', () => {
     expect(refElement({ $el: el })).toBe(el);
     expect(refElement(null)).toBeNull();
     expect(refElement({ $el: 'not an element' })).toBeNull();
+  });
+});
+
+// ⚠ The viewport a fixed panel is placed in is the window LESS a classic
+// scrollbar. With window.innerWidth, every header panel hung a scrollbar's
+// width left of its button's end edge where the scrollbar takes room (WebKit
+// on Linux in e2e 207, 0.53 round; Chrome and Edge on Windows).
+describe('fixedViewport', () => {
+  function withRoot(width: number, height: number, run: () => void) {
+    const root = document.documentElement;
+    const before = {
+      w: Object.getOwnPropertyDescriptor(root, 'clientWidth'),
+      h: Object.getOwnPropertyDescriptor(root, 'clientHeight'),
+    };
+    Object.defineProperty(root, 'clientWidth', { configurable: true, get: () => width });
+    Object.defineProperty(root, 'clientHeight', { configurable: true, get: () => height });
+    try {
+      run();
+    } finally {
+      if (before.w) Object.defineProperty(root, 'clientWidth', before.w);
+      else delete (root as unknown as Record<string, unknown>).clientWidth;
+      if (before.h) Object.defineProperty(root, 'clientHeight', before.h);
+      else delete (root as unknown as Record<string, unknown>).clientHeight;
+    }
+  }
+
+  it('is the root box, not the window, when a scrollbar takes room', () => {
+    withRoot(window.innerWidth - 10, window.innerHeight, () => {
+      expect(fixedViewport()).toEqual({ width: window.innerWidth - 10, height: window.innerHeight });
+      // …so a panel flush with a button 192px from the box's end edge is
+      // `right: 192px`, not 192 + the scrollbar.
+      const v = fixedViewport();
+      const at = anchorUnderEndEdge({ bottom: 45, right: v.width - 192 }, v, { width: 560 });
+      expect(at.right).toBe('192px');
+    });
+  });
+
+  it('falls back to the window where the document has no layout', () => {
+    withRoot(0, 0, () => {
+      expect(fixedViewport()).toEqual({ width: window.innerWidth, height: window.innerHeight });
+    });
   });
 });

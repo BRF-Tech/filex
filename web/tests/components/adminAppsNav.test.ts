@@ -164,6 +164,7 @@ async function router(at = '/dashboard'): Promise<Router> {
       { path: '/api-mcp', name: 'api-mcp', component: Blank },
       { path: '/login-security', name: 'login-security', component: Blank },
       { path: '/settings', name: 'settings', component: Blank },
+      { path: '/tenancy', name: 'tenancy', component: Blank },
       { path: '/branding', name: 'branding', component: Blank },
       // tema:v1 — the Appearance screen. ⚠ This stub must carry EVERY
       // route the real menu links to: vue-router throws on an unknown
@@ -363,6 +364,58 @@ describe('admin menu - Tenants', () => {
     const row = w.get('[data-testid="nav-tenants"]');
     expect(row.text()).toBe(en.nav.tenants);
     expect(row.attributes('href')).toBe('/admin/tenants');
+  });
+
+  // #167: the server's `multi_tenant` is the one answer (composables/useTenancy).
+  // Off, neither tenant page is offered, whatever else the answer carries.
+  it('follows the server’s multi_tenant: off hides both tenant pages', async () => {
+    signIn('admin');
+    const c = useCapabilitiesStore();
+    c.data = { ...c.data, multi_tenant: false, realm: { enabled: true, locked_realm: null }, caller_admin: true };
+    let w = await menu();
+    expect(w.find('[data-testid="nav-tenants"]').exists()).toBe(false);
+    expect(w.find('[data-testid="nav-tenant-self"]').exists()).toBe(false);
+    w.unmount();
+    c.data = { ...c.data, multi_tenant: false, caller_admin: false };
+    w = await menu();
+    expect(w.find('[data-testid="nav-tenant-self"]').exists()).toBe(false);
+    w.unmount();
+    c.data = { ...c.data, multi_tenant: true, realm: undefined, caller_admin: true };
+    w = await menu();
+    expect(w.find('[data-testid="nav-tenants"]').exists()).toBe(true);
+  });
+});
+
+// #167: Admin → Multi-tenant mode is the platform operator's switch - on a
+// single-tenant install too, where it is the way the mode is turned on - and
+// never a tenant administrator's.
+describe('admin menu - Multi-tenant mode', () => {
+  function caps(multi: boolean, callerAdmin: boolean) {
+    const c = useCapabilitiesStore();
+    c.data = { ...c.data, multi_tenant: multi, caller_admin: callerAdmin };
+  }
+
+  it('is under System for the administrator of a single-tenant install', async () => {
+    signIn('admin');
+    caps(false, true);
+    const w = await menu();
+    const row = w.get('[data-testid="nav-tenancy"]');
+    expect(row.text()).toBe(en.nav.tenancy);
+    expect(row.attributes('href')).toBe('/admin/tenancy');
+  });
+
+  it('is there for the platform operator of a multi-tenant install', async () => {
+    signIn('admin');
+    caps(true, true);
+    const w = await menu();
+    expect(w.find('[data-testid="nav-tenancy"]').exists()).toBe(true);
+  });
+
+  it('is absent for a tenant’s administrator', async () => {
+    signIn('admin');
+    caps(true, false);
+    const w = await menu();
+    expect(w.find('[data-testid="nav-tenancy"]').exists()).toBe(false);
   });
 });
 

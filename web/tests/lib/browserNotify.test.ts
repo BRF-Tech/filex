@@ -112,6 +112,33 @@ describe('the guards in front of a toast', () => {
     delete (navigator as any).serviceWorker;
   });
 
+  it('finds the worker by ITS scope, so a /drive/ page on a phone notifies too (#190)', async () => {
+    // ⚠⚠ The worker is scoped to /admin/, and `getRegistration()` with no
+    // argument answers for THIS page's address - which, under /drive/ (the
+    // whole product for a non-admin), no worker covers. On Android, where the
+    // constructor throws, every notification on such a page was dropped, in a
+    // tab and in the installed app alike.
+    stubNotification('granted', { throws: true });
+    const shown = vi.fn(async () => undefined);
+    const asked: Array<string | undefined> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (navigator as any).serviceWorker = {
+      getRegistration: async (url?: string) => {
+        asked.push(url);
+        // A browser answers by the longest scope that covers the address it
+        // is given, and the page's own address (/drive/…) has none.
+        return url !== undefined && new URL(url, 'https://files.example/').pathname.startsWith('/admin/')
+          ? { showNotification: shown }
+          : undefined;
+      },
+    };
+    await expect(raiseBrowserNotification({ title: 'x', url: '/drive/explore' }, 1)).resolves.toBe('sw');
+    expect(asked).toEqual(['/admin/']);
+    expect(shown).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (navigator as any).serviceWorker;
+  });
+
   it('prefers the page over the worker, so the click keeps its callback', async () => {
     const { calls } = stubNotification('granted');
     const shown = vi.fn(async () => undefined);

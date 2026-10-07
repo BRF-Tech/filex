@@ -39,6 +39,7 @@ import type {
   AuthProviderTestResult,
 } from '@/api/types';
 import { useToastStore } from '@/stores/toast';
+import { useTenancy } from '@/composables/useTenancy';
 import { extractError } from '@/api/client';
 import { providerCheckText, providerFieldLabel } from '@/lib/providerChecks';
 
@@ -66,7 +67,9 @@ interface Draft {
 const items = ref<AuthProvider[]>([]);
 const loading = ref(false);
 const secretKey = ref(true);
-const multiTenant = ref(false);
+// Whether the tenant bindings are drawn: the server's one answer
+// (composables/useTenancy), not this page's own reading of its list.
+const { enabled: multiTenant } = useTenancy();
 const tenantList = ref<AuthProviderTenant[]>([]);
 /** The tenants ticked, as the operator left them (multi-tenant). */
 const bound = reactive<Record<string, number[]>>({});
@@ -216,7 +219,6 @@ async function load() {
     const o = await AuthProvidersApi.overview();
     items.value = o.providers;
     secretKey.value = o.secretKey;
-    multiTenant.value = o.multiTenant === true;
     tenantList.value = o.tenants ?? [];
     for (const k of Object.keys(bound)) delete bound[k];
     for (const p of o.providers) if (p.tenants) bound[p.id] = [...p.tenants];

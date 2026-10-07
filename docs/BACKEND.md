@@ -324,8 +324,10 @@ actually asks.
 Signed-in callers see the payload above in full, because one consumer needs a
 real host in the browser: the draw.io iframe. OnlyOffice
 does not - the browser gets its document-server URL from the authenticated
-`POST /api/files/onlyoffice/config` (`documentServerUrl`) - so that host now
-travels only with a credential as well.
+`POST /api/files/onlyoffice/config` (`documentServerUrl`, and `frame` - the
+page on `FILEX_ONLYOFFICE_FRAME_ORIGIN`, else on `FILEX_APP_UI_ORIGIN`, the
+editor runs in, when there is one) - so that
+host now travels only with a credential as well.
 
 Measured before this changed (2026-09-07, demo.filex.sh): an unauthenticated
 `GET /api/files/capabilities` answered 200 with
@@ -736,7 +738,9 @@ whose `path` is adapter-qualified, so opening it navigates in the ordinary way.
 `storages` names the storages the caller reaches only through a grant: those are
 the "shared drives", and a storage-wide grant is reported there rather than as a
 row with an empty name. Results are filtered by tenant scope and by the caller's
-root confinement. See [RBAC.md](RBAC.md).
+root confinement - `storages` too: a caller confined to a folder is told only
+the root's own storage, and only when one of its grants there reaches into the
+root or covers it. See [RBAC.md](RBAC.md).
 
 ### `GET /api/files/search?q=…` ![user](https://img.shields.io/badge/-user-blue)
 Bleve full-text + metadata search. Same response shape as `/api/files/manager`
@@ -1698,8 +1702,11 @@ A flat, oldest-first thread on any file or folder - the **Comments** section of
 a file's details. Every route takes a raw `node_id`, so, as for versions, a node
 that does not exist, is in the trash, is another tenant's or lies outside a
 `root:` token's folder answers the same **404**, and a node the caller cannot
-see answers **403 `insufficient permission`**. A token needs `read` only: a
-comment is the person's own, not a change to the file.
+see answers **403 `insufficient permission`**. A token needs `read` to read
+them, and its own `comments` permission at `rw` - `comments:rw` in its list - to
+add or delete one; `write` does not include it, and a token without it gets
+`403 token missing scope: comments:write` (since 0.53;
+[RBAC.md → Permissions with a level](RBAC.md#permissions-with-a-level-comments)).
 
 ### `GET /api/files/comments` ![user](https://img.shields.io/badge/-user-blue)
 `?node_id=N` - the live comments. Needs viewer on the node.
@@ -1716,14 +1723,16 @@ administrator).
 
 ### `POST /api/files/comments` ![user](https://img.shields.io/badge/-user-blue)
 `{"node_id": N, "body": "…"}` → `200 {"comment": {…}}`. Needs viewer on the node
-and the `comments.write` permission ([PERMISSIONS.md](PERMISSIONS.md)). `body`
+and the `comments.write` permission ([PERMISSIONS.md](PERMISSIONS.md)); a token
+also `comments:rw`. `body`
 is 1-5000 characters after trimming, else `400`. Emits `comment.added`
 ([NOTIFICATIONS.md](NOTIFICATIONS.md)) with the first 200 characters.
 
 ### `DELETE /api/files/comments/{id}` ![user](https://img.shields.io/badge/-user-blue)
 Removes one comment → `200 {"ok": true}`. Its author or an administrator only
 (`403` for anybody else, `404` for an id that does not exist or, in a
-multi-tenant install, a comment on another tenant's file).
+multi-tenant install, a comment on another tenant's file). A token needs
+`comments:rw`.
 
 ---
 
@@ -2037,6 +2046,15 @@ Storages created on it are left in place.
 ]
 ```
 
+Credentials in `config` (every field the driver marks secret, and any key that
+is a credential by name) are answered as `***` - here, in `GET …/:id` and in
+the create and update answers; they are written, never read back.
+
+`?role=primary` / `?role=replica` keeps one kind. `?stats=none` answers the
+rows alone - no `stats`, last run or catalogue coverage, each a query per
+storage; the admin panel's search reads the list that way
+([ADMIN-PANEL.md → Search](ADMIN-PANEL.md#search)).
+
 ### `PUT /api/admin/storages/order` ![admin](https://img.shields.io/badge/-admin-red)
 The administrator's order - the one everybody's navigation panel starts from
 ([STORAGE.md → Ordering storages](STORAGE.md#ordering-storages)).
@@ -2089,7 +2107,11 @@ catalogue, `server.storage.*`). The same on `PATCH`.
 > See [PLUGINS.md → Conformance](PLUGINS.md#conformance-a-plugin-has-to-prove-its-claims).
 
 ### `PATCH /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
-Same body shape; partial updates allowed. A plugin storage is **re-probed on
+Same body shape; partial updates allowed. A credential sent as `***` keeps the
+saved one - while the driver and the address (`host`, `endpoint`, `url`, …)
+stay what they were; otherwise it has to be typed again: **400**
+`{"error": "SECRET_NEEDED", "field": "password", "message": "…"}` and nothing
+is saved. A plugin storage is **re-probed on
 every change** - the operator may have just pointed it at a different bucket,
 and a configuration that half works fails the same way a half-working plugin
 does: in the user's hands, looking like filex.
@@ -2101,6 +2123,13 @@ when the save changed something a scan reads: the driver, its configuration
 `POST …/sync`, and records it as `aborted`. Renaming the storage, switching it
 read-only, changing its access control or pairing a replica leaves a running
 scan alone.
+
+`replica_target_id` links the storage to a
+[replication target](REPLICATION.md) (`null` unlinks it). The storage's driver
+is rebuilt at once - wrapped so its writes fan out to the target, or bare - and
+its [initial copy](REPLICATION.md#initial-copy) starts (or is dropped). An id
+that names no target answers **400**; on a multi-tenant install a change of the
+link is the platform operator's (**403** `supertenant_only`).
 
 ### `DELETE /api/admin/storages/:id` ![admin](https://img.shields.io/badge/-admin-red)
 Removes the storage and its DB cache rows. Files in the underlying backend
@@ -2163,6 +2192,34 @@ the body - there is no `:id` in this path, because the usual caller is the
 create form, which has no storage to name yet.
 
 ---
+
+## Admin: replication
+
+Backup sinks a storage's writes fan out to, the rules that pick a mode per
+path, the failures and their repair, and each linked storage's initial copy.
+The full model is in [REPLICATION.md](REPLICATION.md); every route is the
+platform operator's on a multi-tenant install (**403** `supertenant_only`).
+
+| Method | Path | |
+|---|---|---|
+| `GET` `POST` | `/api/admin/replication-targets` | List / create targets (`{name, driver, config, mode, enabled}`) |
+| `GET` `PATCH` `DELETE` | `/api/admin/replication-targets/{id}` | One target. `PATCH` keeps the fields the body leaves out and rebuilds the storages linked to it; a new driver or configuration, or switching it back on, restarts their initial copies. `DELETE` unlinks them. Credentials in `config` are answered as `***` on every read; `***` sent back keeps the stored value. |
+| `GET` `POST` | `/api/admin/replica/rules` | List / create path rules (`{path_pattern, mode, priority, enabled, description}`) |
+| `PATCH` `DELETE` | `/api/admin/replica/rules/{id}` | One rule |
+| `GET` | `/api/admin/replica/failures?unresolved=true&limit=&offset=` | `{items: [{id, storage_id, path, op, error_code, error_msg, attempts, last_attempt_at, resolved_at}], total, limit, offset}` |
+| `GET` | `/api/admin/replica/failures/count` | `{count}` of unresolved failures |
+| `POST` | `/api/admin/replica/fix` | A retry for every unresolved failure → `{queued, already_queued}`; **503** `no replica configured` when no storage is linked to an enabled target |
+| `POST` | `/api/admin/replica/fix-one` | `{storage_id, path, op}` → `{ok, queued}`; without `storage_id` the one failure at that path and op is meant (**400** when there are several) |
+| `GET` | `/api/admin/replica/initial-copies` | `{items: [{storage_id, storage_name, target_id, target_name, phase, counted, total, done, copied, present, excluded, failed, copied_bytes, last_error, started_unix, updated_unix, finished_unix}]}` - `phase` is `pending`, `counting`, `copying`, `waiting` or `done` |
+| `POST` | `/api/admin/replica/initial-copies/{storage_id}/restart` | Begin the copy again → the copy's row; **409** when the storage is not linked to an enabled target |
+| `GET` | `/api/admin/replica/links` | `{items: [{storage_id, storage_name, target_id, target_name, folder, created_unix}]}` - the folder each linked storage writes into on its target |
+| `PUT` | `/api/admin/replica/links/{storage_id}` | `{folder}` → the link; changes the storage's folder (made safe), begins its initial copy again there; **409** when another storage on the target uses it or the storage is not linked |
+| `GET` | `/api/admin/replica/report` | The latest status report (**204** until the first) |
+| `POST` | `/api/admin/replica/report/run-now` | Make one now |
+| `GET` `PATCH` | `/api/admin/replica/settings` | `{report_cron, report_enabled, default_mode}` |
+
+The same routes answer under `/api/ai/admin/...` for an admin API key, and as
+the `admin_replica_*` MCP tools ([MCP.md](MCP.md)).
 
 ## Admin: plugin requests
 
@@ -2659,9 +2716,16 @@ admin-scoped key where its page says so.
 | `GET /api/admin/plugins/{id}/logs`, `GET /api/admin/app-plugins/{id}/logs` | a storage plugin's log, an app's log | [PLUGINS.md](PLUGINS.md#plugin-log), [APP-PLUGINS.md](APP-PLUGINS.md) |
 | `GET` · `POST /api/admin/app-plugins/stores`, `DELETE …/stores?store=` | the app stores this filex trusts (trust on first use names the key fingerprints shown, or `FILEX_APP_STORE_URLS`); a signed-in platform administrator only, an API key of any kind `403 session_required` | [APP-PLUGINS.md](APP-PLUGINS.md#trusted-stores), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#filexs-side-apiadminapp-plugins) |
 | `POST /api/admin/app-plugins/store-intent`, `POST …/store-intent/install`, `POST …/store-intent/cancel` | a store's install link: its review (or the trust question), the install of what it names, its cancellation; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#installing-from-a-store), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-store-contract-0520) |
+| `GET` · `POST /api/admin/app-plugins/stores/connection`, `DELETE …/stores/connection?store=` | the connection to a trusted store a one-time code makes (0.53): its state, connecting, disconnecting; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#connecting-a-store), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-embedded-store-053-162) |
+| `GET` · `PUT /api/admin/app-plugins/store-view` | who sees the store screen, per tenant (0.53); the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#the-store-screen) |
+| `GET /api/app-store`, `GET /api/app-store/catalog`, `GET /api/app-store/media`, `GET` · `POST /api/app-store/requests` | a person's store screen: whether it is shown, a trusted store's catalog as filex verified it, its icons, the requests this person left; a browser session or the desktop app's pairing (any other API key `403 session_required`; `GET /api/app-store` answers it `{visible: false}`) | [APP-PLUGINS.md](APP-PLUGINS.md#the-store-screen), [APP-PLUGINS-API.md](APP-PLUGINS-API.md#the-embedded-store-053-162) |
 | `GET /api/admin/app-plugins/licenses`, `GET` · `PUT /api/admin/app-plugins/{id}/license`, `POST …/{id}/license/verify` | paid apps' licenses: the status and the facts (never the key), a new key, a check now; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#paid-apps) |
 | `GET` · `PATCH /api/admin/archives`, `POST /api/admin/archives/test` | **Settings → Archives**: the live archive policy, the providers' status, an encrypted round trip (platform operator only) | [ARCHIVES.md](ARCHIVES.md#process-configuration) |
 | `GET /api/files/onlyoffice/diagnose?path=` (or `?id=`) | what filex last answered the document server for a document, and when its editor was last opened - this process only | [ONLYOFFICE.md](ONLYOFFICE.md#failure-editor-shows-download-failed) |
+| `POST /api/files/onlyoffice/session` `{path, key, action}` | whether an open editing session is still on the document's current version (`state`), and the person's answer when it is not (`mine`, `theirs`); answers need `files.modify`. Kept in the database (`office_sessions`), so every instance sees it | [ONLYOFFICE.md](ONLYOFFICE.md#when-the-document-changes-while-it-is-open) |
+| `GET` · `HEAD /filex-frame/editor` | only with `FILEX_ONLYOFFICE_FRAME_ORIGIN`, and only on that host (normally the Document Server's, whose proxy sends `/filex-frame/*` here), at its root whatever the base path; every other path there is a `404`, and `/filex-frame/` is a `404` on every other host: the page the ONLYOFFICE editor's `api.js` runs in, credential-free and `no-store`, under a policy naming the Document Server in force (`404` while there is none) | [ONLYOFFICE.md](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own) |
+| `GET` · `HEAD /_appui/_onlyoffice/editor` | the same page on `FILEX_APP_UI_ORIGIN`, only on that host, when there is no frame origin. The editor config (`POST /api/files/onlyoffice/config`) names the one in use in `frame` | [ONLYOFFICE.md](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own) |
+| `GET /api/admin/panel-search?q=&kinds=&limit=`, `GET` · `POST` · `DELETE /api/admin/panel-search/recent`, `DELETE …/recent/{id}` | the admin panel's search: the people, groups, API keys (by name), apps and their actions, storages and shares that match, each read through the list its page reads and behind that page's permission - a kind the caller may not open is left out of `searched`; the caller's own recent searches (the newest 20, never in the audit log). An administrator, or a signed-in session holding a delegated `admin.*` permission | [ADMIN-PANEL.md](ADMIN-PANEL.md#search) |
 
 ---
 

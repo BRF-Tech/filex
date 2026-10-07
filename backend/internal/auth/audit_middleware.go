@@ -320,6 +320,12 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 	// second row with neither.
 	case p == "/api/admin/e2e" || strings.HasPrefix(p, "/api/admin/e2e/"):
 		return "", "", ""
+	// ── the panel's search (task #168) ──
+	// A person's own recent searches: their bookkeeping, not a change to the
+	// instance - and the words they searched for are theirs, not the audit
+	// log's readers'.
+	case p == "/api/admin/panel-search" || strings.HasPrefix(p, "/api/admin/panel-search/"):
+		return "", "", ""
 
 	// ── groups (internal/group) ──
 	// Members first: /groups/{id}/members/… is under the /groups/{id} prefix.

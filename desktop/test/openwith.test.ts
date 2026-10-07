@@ -13,6 +13,7 @@ import test from 'node:test';
 
 import {
   OFFICE_EXTENSIONS,
+  OFFICE_MIME_TYPES,
   OpeningDocs,
   SessionStore,
   classifyArgv,
@@ -31,6 +32,7 @@ import {
   scratchRemotePath,
   staleSessions,
   writeBackAtomic,
+  writeBesideSave,
   type OpenWithSession,
 } from '../src/openwith.ts';
 import { CASES, type Impl } from './openwith-cases.ts';
@@ -42,6 +44,7 @@ const REAL: Impl = {
   writeBackAtomic,
   staleSessions,
   orphanScratchEntries,
+  writeBesideSave,
 };
 
 function tmp(): string {
@@ -69,6 +72,15 @@ test('types: office documents only — an image or a PDF is left to whatever ope
   assert.equal(isOfficeDocument('C:\\x\\REPORT.DOCX'), true, 'the extension is matched case-insensitively');
   assert.equal(isOfficeDocument('C:\\docx'), false, 'a folder named like an extension is not a document');
   assert.equal(extensionOf('/a/b/.docx'), '', 'a dotfile has no extension');
+});
+
+// #151 — the maintainer's call: a .csv opens with filex as well (a server with
+// ONLYOFFICE edits it as a spreadsheet and keeps its own dialect on save).
+test('types: a .csv is opened too, as text/csv', () => {
+  assert.equal(isOfficeDocument('C:\\Belgeler\\Tablo.csv'), true, 'a .csv is refused as "not an office document"');
+  assert.equal(isOfficeDocument('/home/ada/LİSTE.CSV'), true, 'the extension is matched case-insensitively');
+  assert.equal(OFFICE_MIME_TYPES.csv, 'text/csv', 'the type xdg-mime and the upload are given for it');
+  assert.equal(isOfficeDocument('a.tsv'), false, 'a .tsv stays with whatever opens it today');
 });
 
 test('change detection: an etag wins, size+mtime is the fallback, a vanished file is not an edit', () => {

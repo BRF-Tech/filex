@@ -53,6 +53,28 @@ export function refElement(r: unknown): HTMLElement | null {
   return typeof HTMLElement !== 'undefined' && el instanceof HTMLElement ? el : null;
 }
 
+/**
+ * The box a `position: fixed` panel is placed in: the window LESS a scrollbar
+ * that takes room. Pass it as `anchorUnderEndEdge`'s viewport.
+ *
+ * ⚠ Not `window.innerWidth`. A fixed panel's `right` is measured from the
+ * edge of the layout viewport, which stops where a classic scrollbar begins
+ * (Windows, macOS set to "always show", WebKit on Linux), while innerWidth
+ * counts the scrollbar too: every panel hung a scrollbar's width to the left
+ * of its button's end edge there - 10px in the e2e image's WebKit (0.53
+ * round), 15-17px in Chrome and Edge on Windows. Headless Chromium hides its
+ * scrollbars, which is why the suite never saw it. `clientWidth` of the root
+ * is that box; a document that reports none (no layout) falls back to the
+ * window.
+ */
+export function fixedViewport(): { width: number; height: number } {
+  if (typeof window === 'undefined') return { width: 0, height: 0 };
+  const root = typeof document !== 'undefined' ? document.documentElement : null;
+  const width = root && root.clientWidth > 0 ? root.clientWidth : window.innerWidth;
+  const height = root && root.clientHeight > 0 ? root.clientHeight : window.innerHeight;
+  return { width, height };
+}
+
 export function anchorUnderEndEdge(
   rect: { bottom: number; right: number; left?: number },
   viewport: { width: number; height: number },

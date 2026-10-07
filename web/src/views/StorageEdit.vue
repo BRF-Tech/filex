@@ -209,6 +209,9 @@ async function test() {
   testResult.value = null;
   try {
     testResult.value = await StoragesApi.testConnection({
+      // The saved storage: a password the form was shown masked is tested
+      // with the one the server keeps.
+      id: id.value,
       name: name.value,
       driver: item.value.driver,
       config: config.value,

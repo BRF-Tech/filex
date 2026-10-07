@@ -172,9 +172,14 @@ func TestConfineDoors_ATextSaveStaysInTheRoot(t *testing.T) {
 }
 
 // A comment is deleted by its own id, which the middleware never sees.
+//
+// Commenting asks the token's `comments:rw` (task #157): both tokens here name
+// it, so what is measured is the root, not the permission.
 func TestConfineDoors_ACommentOutsideTheRootIsNotDeleted(t *testing.T) {
-	f, tok := confinedFix(t)
+	f, _ := confinedFix(t)
 	ctx := context.Background()
+	author := testutil.NewAPIToken(t, f.Store, f.MemberID, "read,write,delete,mcp,comments:rw")
+	tok := testutil.NewAPIToken(t, f.Store, f.MemberID, "read,write,delete,comments:rw,root:main://kutu")
 
 	comment := func(rel string) int64 {
 		t.Helper()
@@ -182,7 +187,7 @@ func TestConfineDoors_ACommentOutsideTheRootIsNotDeleted(t *testing.T) {
 		require.NoError(t, err, rel)
 		require.NotNil(t, n, rel)
 		// Written by the same member, unconfined: the author may delete it.
-		code, raw := confRaw(t, f.URL, f.Tok, http.MethodPost, "/api/files/comments", "application/json",
+		code, raw := confRaw(t, f.URL, author, http.MethodPost, "/api/files/comments", "application/json",
 			[]byte(fmt.Sprintf(`{"node_id":%d,"body":"not"}`, n.ID)))
 		require.Equal(t, http.StatusOK, code, raw)
 		var out struct {

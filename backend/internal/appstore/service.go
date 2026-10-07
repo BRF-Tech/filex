@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/keylock"
+	"github.com/brf-tech/filex/backend/internal/memcache"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/plugin"
 	"github.com/brf-tech/filex/backend/internal/secretbox"
@@ -92,6 +93,13 @@ type Service struct {
 	licMu sync.Mutex // one license write at a time
 
 	appLocks keylock.Map // one store install per app name at a time
+
+	// The embedded store's catalogs (catalog.go): fresh for catalogTTL; the
+	// last one that verified, served stale while the store is unreachable;
+	// the icons, held to their names' sha256.
+	catalogs *memcache.Cache[string, *Catalog]
+	lastGood *memcache.Cache[string, *Catalog]
+	media    *memcache.Cache[string, []byte]
 }
 
 // New builds the service. Configured stores that do not parse are logged and
@@ -107,7 +115,11 @@ func New(o Options) *Service {
 		start := time.Now()
 		o.Mono = func() time.Duration { return time.Since(start) }
 	}
-	s := &Service{opts: o, log: o.Log, cfgStores: map[string]bool{}, pending: map[string]*Pending{}}
+	s := &Service{opts: o, log: o.Log, cfgStores: map[string]bool{}, pending: map[string]*Pending{},
+		catalogs: memcache.New[string, *Catalog](memcache.Options{MaxEntries: 64, TTL: catalogTTL, Now: o.Now}),
+		lastGood: memcache.New[string, *Catalog](memcache.Options{MaxEntries: 64}),
+		media:    memcache.New[string, []byte](memcache.Options{MaxEntries: 512, TTL: mediaTTL, Now: o.Now}),
+	}
 	// ⚠ Given at all, the list is in force: FILEX_APP_STORE_URLS=" , " names
 	// no store and admits none; it does not fall back to trust on first use
 	// (store review, second round, Y6).

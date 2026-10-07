@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -153,7 +154,46 @@ func (h *ThumbRepair) Status(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"running": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, h.statusOf(r, op))
+	writeJSON(w, http.StatusOK, h.statusFor(r, op))
+}
+
+// statusFor is a run as this caller may be told about it. Unconfined, it is
+// statusOf. A caller held to a folder (a `root:` token, a session narrowed by
+// X-Filex-Root) is told about a run inside its folder in full, the storages it
+// refused narrowed to the folder's; of any other run - another folder, the
+// whole storage, every storage - only that one is going (`running`, `queued`),
+// and of one that has ended nothing at all, as if none had been asked for: its
+// path, storage, counts, op and refusals are not this caller's (filex #185).
+func (h *ThumbRepair) statusFor(r *http.Request, op *ops.Op) any {
+	st := h.statusOf(r, op)
+	root, confined := confine.RootFrom(r.Context())
+	if !confined {
+		return st
+	}
+	job, _, _, _ := op.ThumbRepairOf()
+	inside := false
+	if job.StorageID != 0 {
+		if s, err := h.Store.GetStorage(r.Context(), job.StorageID); err == nil && s != nil {
+			inside = root.Within(s.Name, job.Path)
+		}
+	}
+	if !inside {
+		if !st.Running {
+			return map[string]any{"running": false}
+		}
+		return map[string]any{"running": true, "queued": st.Queued}
+	}
+	kept := st.Refused[:0]
+	for _, rf := range st.Refused {
+		if rf.Storage == root.Adapter {
+			kept = append(kept, rf)
+		}
+	}
+	st.Refused = kept
+	if len(st.Refused) == 0 {
+		st.Refused = nil
+	}
+	return st
 }
 
 // Start queues a repair (see the type comment) and watches it for a moment:
@@ -232,8 +272,11 @@ func (h *ThumbRepair) Start(w http.ResponseWriter, r *http.Request) {
 
 	op, err := h.Ops.SubmitThumbRepair(ctx, ops.ThumbRepairRequest{Job: job, Tenant: ops.TenantKey(ctx)})
 	if errors.Is(err, ops.ErrThumbRepairBusy) {
+		// The run that is going is told about as Status tells it (statusFor):
+		// a caller held to a folder learns another folder's run is going,
+		// not where.
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": "thumbnails are already being repaired", "code": "BUSY", "job": h.statusOf(r, op),
+			"error": "thumbnails are already being repaired", "code": "BUSY", "job": h.statusFor(r, op),
 		})
 		return
 	}
@@ -502,32 +545,64 @@ func attemptRows(raw string) []thumbAttemptRow {
 // storage is one press away for the rest.
 const problemLimit = 500
 
+// problemScanRows is how many of the root's storage's rows are read for a
+// caller held to a folder: the store narrows by storage, not by folder, so the
+// rows outside the folder are read and passed over (problemReach). A folder
+// whose problems lie past them, in an older part of a busy storage, is not
+// told about those - nor that the list was cut, which would be a fact about
+// the rows outside it.
+const problemScanRows = 10 * problemLimit
+
 // Problems lists the files whose thumbnail failed or was skipped, with the
-// reason (GET .../thumbnails/problems), inside the caller's reach.
+// reason (GET .../thumbnails/problems), inside the caller's reach - and inside
+// the folder of a caller held to one (a `root:` token, a session narrowed by
+// X-Filex-Root; confine.Middleware is mounted on /tools).
 func (h *ThumbRepair) Problems(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	rows, err := h.Store.ListThumbnailProblems(ctx, trash.Reach(ctx), problemLimit+1)
+	root, confined := confine.RootFrom(ctx)
+	reach, limit := trash.Reach(ctx), problemLimit+1
+	if confined {
+		reach, limit = h.problemReach(r, root, reach), problemScanRows
+	}
+	rows, err := h.Store.ListThumbnailProblems(ctx, reach, limit)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	names := map[int64]string{}
+	storageName := func(id int64) string {
+		name, ok := names[id]
+		if !ok {
+			if st, err := h.Store.GetStorage(ctx, id); err == nil && st != nil {
+				name = st.Name
+			}
+			names[id] = name
+		}
+		return name
+	}
+	if confined {
+		// ⚠⚠ Held to the folder BEFORE the list is cut: the rows outside
+		// it are not this caller's, and neither is the fact that there are
+		// more of them than the list shows (filex #185). An unreadable
+		// storage name is outside every root.
+		kept := rows[:0]
+		for _, p := range rows {
+			if root.Within(storageName(p.StorageID), p.Path) {
+				kept = append(kept, p)
+			}
+		}
+		rows = kept
 	}
 	truncated := len(rows) > problemLimit
 	if truncated {
 		rows = rows[:problemLimit]
 	}
-	names := map[int64]string{}
 	out := make([]thumbProblemRow, 0, len(rows))
 	for _, p := range rows {
 		if syspath.Hidden(p.Path) {
 			continue
 		}
-		name, ok := names[p.StorageID]
-		if !ok {
-			if st, err := h.Store.GetStorage(ctx, p.StorageID); err == nil && st != nil {
-				name = st.Name
-			}
-			names[p.StorageID] = name
-		}
+		name := storageName(p.StorageID)
 		row := thumbProblemRow{
 			NodeID: p.NodeID, StorageID: p.StorageID, Storage: name,
 			Path: joinAdapterPath(name, p.Path), Name: p.Name, Size: p.Size, State: p.State,
@@ -550,6 +625,18 @@ func (h *ThumbRepair) Problems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "truncated": truncated})
 }
 
+// problemReach is the storages a caller held to root may be told about: the
+// root's own storage, when it lies inside the caller's reach (trash.Reach: nil
+// is every storage); none otherwise - a root on a storage that does not
+// resolve, or outside the tenant, lists nothing.
+func (h *ThumbRepair) problemReach(r *http.Request, root confine.Root, reach []int64) []int64 {
+	st, err := h.Store.GetStorageByName(r.Context(), root.Adapter)
+	if err != nil || st == nil || (reach != nil && !slices.Contains(reach, st.ID)) {
+		return []int64{}
+	}
+	return []int64{st.ID}
+}
+
 func isNoTool(reason string) bool {
 	_, ok := thumb.ParseNoTool(reason)
 	return ok
@@ -566,9 +653,15 @@ type thumbGeneratorRow struct {
 }
 
 // Generators answers GET .../thumbnails/generators: the ready thumbnails in
-// the caller's reach, counted by who drew them, the most first.
+// the caller's reach, counted by who drew them, the most first. A caller held
+// to a folder is counted the root's own storage only (problemReach): the other
+// storages' counts are not its (filex #185).
 func (h *ThumbRepair) Generators(w http.ResponseWriter, r *http.Request) {
-	counts, err := h.Store.ThumbnailGenerators(r.Context(), trash.Reach(r.Context()))
+	reach := trash.Reach(r.Context())
+	if root, confined := confine.RootFrom(r.Context()); confined {
+		reach = h.problemReach(r, root, reach)
+	}
+	counts, err := h.Store.ThumbnailGenerators(r.Context(), reach)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

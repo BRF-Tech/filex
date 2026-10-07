@@ -16,6 +16,7 @@ import { createI18n } from 'vue-i18n';
 import Trash from '@/views/Trash.vue';
 import en from '@/locales/en.json';
 import { useToastStore } from '@/stores/toast';
+import { pickOption } from '../helpers/choiceSelect';
 
 type Body = Record<string, unknown>;
 
@@ -158,7 +159,8 @@ describe('Trash — empty trash', () => {
     listed = [entry(1)];
     postReply = async () => ({ data: { ok: true, running: false, total: 1, purged: 1, started_at: STARTED } });
     const w = await mountTrash();
-    await w.get('select').setValue('2');
+    // The storage filter: the only list on the page (core ChoiceSelect, #160).
+    await pickOption(w.get('.fe-select__trigger'), '2');
     await w.get('[data-testid="trash-empty-open"]').trigger('click');
     const days = w.get('[data-testid="trash-empty-days"]');
     await days.setValue('5');

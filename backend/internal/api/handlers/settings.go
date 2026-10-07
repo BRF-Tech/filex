@@ -143,6 +143,10 @@ func (h *Settings) Set(w http.ResponseWriter, r *http.Request) {
 	if !allowSettingWrite(w, r, key) {
 		return
 	}
+	// Multi-tenant mode has its own door (tenancy_admin.go).
+	if refuseTenancySetting(w, key) {
+		return
+	}
 	/* wiring:e1 — branding keys: validate + tenant-scope + cache bust */
 	if isBrandingSettingKey(key) {
 		if err := validateBrandingSetting(key, req.Value); err != nil {
@@ -263,6 +267,11 @@ func (h *Settings) Update(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if !allowSettingWrite(w, r, k) {
+			return
+		}
+		// Multi-tenant mode has its own door (tenancy_admin.go): refused
+		// before anything in the batch is written.
+		if refuseTenancySetting(w, k) {
 			return
 		}
 		/* tema:v1 — the operator stylesheet is guarded HERE, in the

@@ -25,20 +25,28 @@ import path from 'node:path';
 
 import {
   bumpKind,
+  chainVerdict,
   classifyDeletions,
   closingKeywords,
   dateChangelog,
   dryRunTitle,
+  execBitDrift,
   globMatch,
   hasContent,
   hasSection,
   localDate,
   newestTag,
   packageVersion,
+  partsLine,
+  partsVerdict,
   privateHostLines,
+  profileCovers,
+  promotionVerdict,
   runVerdict,
   sectionGroups,
+  selectGates,
   setPackageVersion,
+  stampWrites,
   unreleasedBody,
   versionProblems,
   workspacePackages,
@@ -58,10 +66,13 @@ export const STAGES = [
     id: 'stamp', title: 'stamp', what: 'CHANGELOG date, versions, deploy targets, release commit',
     builtin: ['[Unreleased] → [X.Y.Z] - today', 'every workspace package.json', 'sync-deploy-versions, then --check', 'the release page renders from the changelog', 'nothing else changed', 'commit "chore(release): vX.Y.Z" — by path'],
   },
-  { id: 'pretag', title: 'pretag', what: 'the whole test chain, on the release commit', builtin: ['(after the plan) the chain left the tree as it found it'] },
+  {
+    id: 'pretag', title: 'pretag', what: 'the fast gates (the profile says which), on the release commit',
+    builtin: ['gates side by side, in lanes (`jobs`)', 'a gate green on exactly these inputs before is not run again (--no-cache)', '(after the plan) the chain left the tree as it found it'],
+  },
   {
     id: 'export', title: 'export', what: 'the public tree, and what must not be in it',
-    builtin: ['public checkout gates again', 'scripts/export-public.sh', 'no deletion without a reason (deleted in source / withheld: --ack export-withheld)', 'no private host or module path', 'workflows untouched'],
+    builtin: ['public checkout gates again', 'scripts/export-public.sh', 'every executable bit kept (lesson #1108)', 'no deletion without a reason (deleted in source / withheld: --ack export-withheld)', 'no private host or module path', 'workflows untouched'],
   },
   {
     id: 'land', title: 'land', what: 'the export commit, then both mains pushed WITHOUT a tag — a person',
@@ -69,7 +80,14 @@ export const STAGES = [
   },
   {
     id: 'gate', title: 'gate', what: 'GitHub tests the export commit before anything is tagged',
-    builtin: ['ci.yml, started by the push of main, passed on the export commit', 'release.yml dry run (publish=false, started here) passed on the export commit', 'waits for both; red spends no number — fix main, resume, and it runs again'],
+    builtin: [
+      'ci.yml, started by the push of main, passed on the export commit as the full matrix: read part by part, every part green (the heavy suites are read here)',
+      'release.yml dry run (publish=false, started here) passed on the export commit',
+      'the dry run kept what the tag run promotes: both images by digest, the files of every desktop row',
+      'meanwhile, here: the heavy gates GitHub does not run (minor), or a green scripts/chain run (--chain)',
+      'waits for both; red spends no number — fix main, resume, and it runs again',
+      'GitHub Actions down (--gate circleci): the CircleCI workflow `ci` on the export commit instead, recorded as the source; no dry run',
+    ],
   },
   {
     id: 'sign', title: 'sign', what: 'signed tags on the commits that were tested — a person',
@@ -152,6 +170,36 @@ function inStepWithRemote(dir, remote, branch, label) {
   };
 }
 
+// The public checkout may be AHEAD of GitHub by workflow commits alone: the
+// packaging/ci patches are committed there after the first preflight and
+// before the pretag, and the land pushes them with the export - never on their
+// own (docs/CONTRIBUTING.md -> "The workflow patches, in order"). Anything
+// else between GitHub and this checkout is still "push (or pull) first".
+// v0.53.0 stopped here: the plain check refused the four patch commits the
+// documented order had just asked for.
+function exportInStep(dir, remote, branch, label) {
+  const plain = inStepWithRemote(dir, remote, branch, label);
+  return {
+    name: label,
+    check: () => {
+      const first = plain.check();
+      if (first.ok) return first;
+      const r = remoteRefs(dir, remote);
+      if (r.error) return first;
+      const there = r.map.get(`refs/heads/${branch}`);
+      const h = head(dir);
+      if (!there || git(dir, 'merge-base', '--is-ancestor', there, h).status !== 0) return first;
+      const files = gitOut(dir, 'diff', '--name-only', there, h).split('\n').filter(Boolean);
+      const other = files.filter((f) => !f.startsWith('.github/'));
+      if (other.length) {
+        return { ok: false, detail: `${first.detail}\n  ahead of ${remote} by more than workflow commits: ${other.slice(0, 10).join(', ')}` };
+      }
+      const n = gitOut(dir, 'rev-list', '--count', `${there}..${h}`);
+      return { ok: true, detail: `${branch} @ ${short(there)} + ${n} workflow commit(s) under .github/, pushed by the land` };
+    },
+  };
+}
+
 function tagFree(dir, remote, tag, where) {
   return {
     name: `${tag} is not tagged yet (${where})`,
@@ -206,7 +254,7 @@ function exportCheckoutGates(R) {
         };
       },
     },
-    inStepWithRemote(exp, R.plan.exportRemote, R.plan.branch, `export checkout in step with ${R.plan.exportRemote}/${R.plan.branch}`),
+    exportInStep(exp, R.plan.exportRemote, R.plan.branch, `export checkout in step with ${R.plan.exportRemote}/${R.plan.branch}`),
     tagFree(exp, R.plan.exportRemote, R.tag, 'public'),
   ];
 }
@@ -241,6 +289,19 @@ export async function preflight(R) {
         return { ok: true, detail: prev ? `${bumpKind(R.version, prev)} step from ${prev}` : 'first release' };
       },
     });
+    // A patch profile tests only what changed since the last release, so it
+    // is for X.Y.Z+1 alone (#172; memory rule of 2026-09-25: "a patch is a
+    // patch"). A minor or major always takes the minor profile or more.
+    if (R.profile === 'patch') {
+      gates.push({
+        name: `--profile patch: ${R.version} is a patch step`,
+        check: () => {
+          const kind = prev ? bumpKind(R.version, prev) : null;
+          if (kind === 'patch') return { ok: true, detail: `from ${prev}` };
+          return { ok: false, detail: `${R.version} is ${kind ? `a ${kind} step from ${prev}` : 'the first release'}: the patch profile is for X.Y.Z+1 alone. Drop --profile patch.` };
+        },
+      });
+    }
     gates.push(inStepWithRemote(R.repo, R.plan.remote, R.plan.branch, `${R.plan.branch} is pushed to ${R.plan.remote}`));
     gates.push(tagFree(R.repo, R.plan.remote, R.tag, 'private'));
     gates.push({
@@ -280,6 +341,11 @@ export async function preflight(R) {
         `  ${yellow('note  ')}  a PATCH release with an "### Added" section: installs with AUTO_UPGRADE take patches unasked (lesson #2). A feature is a minor.`,
       );
     }
+    if (prev && bumpKind(R.version, prev) === 'patch' && R.profile !== 'patch') {
+      console.log(
+        `  ${yellow('note  ')}  a patch step from ${prev}, cut with the ${R.profile ?? 'minor'} profile. --profile patch tests only what changed since ${prev} (unless ${prev} was never published: then this is a whole release).`,
+      );
+    }
   }
   return done({ head: head(R.repo) });
 }
@@ -305,8 +371,9 @@ export async function audit(R) {
     ``,
     `  1. README.md against what shipped since ${S.prev ?? 'the beginning'} — ${commits} commit(s):`,
     `       git log --oneline ${range}`,
-    `  2. Screenshots: if a screen changed, bump SHOTS_RELEASE in e2e/shots/release.mjs, run \`pnpm shots\``,
-    `     and OPEN the contact sheet — English, current, nothing covering them.`,
+    `  2. Screenshots: bump SHOTS_RELEASE in e2e/shots/release.mjs, run \`pnpm shots\` (only what changed is taken)`,
+    `     and OPEN the contact sheet — it lists only the changed and new pictures: English, current, nothing covering them.`,
+    `     Then: node scripts/shots-site.mjs upload && node scripts/shots-site.mjs accept --looked`,
     `  3. Every surface that describes the product, not a fixed list — and the old pages are still true.`,
     ...(surfaces.length
       ? [
@@ -355,8 +422,7 @@ function packageDirs(dir) {
 
 /** The files a stamp may change: anything else changing is a surprise. */
 function stampAllowed(pkgs) {
-  const exact = new Set(['CHANGELOG.md', ...pkgs.map((p) => `${p}/package.json`)]);
-  return (f) => exact.has(f) || f.startsWith('deploy/');
+  return (f) => stampWrites(f, pkgs);
 }
 
 /**
@@ -536,31 +602,71 @@ export async function stamp(R) {
 
 // ── 5. pretag ───────────────────────────────────────────────────────────────
 
+/**
+ * The files changed since the last release, for a patch's choice of gates;
+ * null when there is no release to compare with (then every gate runs).
+ */
+function changedSince(R, prev) {
+  if (!prev) return null;
+  const r = git(R.repo, 'diff', '--name-only', '--no-renames', prev, 'HEAD');
+  if (r.status !== 0) return null;
+  return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Where a gate the CI runs is read from, in words: `ci.yml`, `CircleCI go`. */
+function readFrom(g, source) {
+  return source === 'circleci' ? `CircleCI ${g.circleci}` : g.github;
+}
+
+/** The CI the gate stage reads, by name. */
+const ciName = (source) => (source === 'circleci' ? 'CircleCI' : 'GitHub');
+
+/** Says, before the gates run, which run here, which later and which nowhere. */
+function describeProfile(R, profile, sel, stage) {
+  const S = R.state;
+  const source = R.gateSource ?? 'github';
+  let changed = '';
+  if (stage === 'pretag' && profile === 'patch') changed = R.changed ? `, ${R.changed.length} file(s) changed since ${S.prev}` : ', nothing to compare with: every gate runs';
+  console.log(`  ${dim('profile ')}  ${bold(profile)}${dim(changed)}`);
+  if (stage !== 'pretag') return;
+  for (const g of sel.remote) console.log(`  ${dim(source.padEnd(8))}  ${g.name} ${dim(`- ${readFrom(g, source)} on the export commit, read at the gate stage`)}`);
+  for (const g of sel.local) console.log(`  ${dim('later   ')}  ${g.name} ${dim(`- here, at the gate stage, while ${ciName(source)} tests`)}`);
+  for (const s of sel.skipped) console.log(`  ${dim('skip    ')}  ${s.gate.name} ${dim(`- ${s.why}`)}`);
+}
+
 export async function pretag(R) {
   const S = R.state;
   const h = head(R.repo);
   const prevRun = S.stages.pretag;
-  if (!R.dry && prevRun?.status === 'done' && prevRun.head === h) return done({ head: h, note: 'already green on this commit' });
+  const profile = R.profile ?? 'minor';
+  // ⚠ A pretag recorded before profiles existed ran the whole chain (`full`).
+  if (!R.dry && prevRun?.status === 'done' && prevRun.head === h && profileCovers(prevRun.profile, profile)) {
+    return done({ head: h, profile: prevRun.profile ?? 'full', note: `already green on this commit (${prevRun.profile ?? 'full'})` });
+  }
   if (!R.dry && h !== S.releaseCommit) {
     console.log(`  ${bold('FAILED')}  HEAD ${short(h)} is not the release commit ${short(S.releaseCommit)}`);
     return red();
   }
   if (R.dry) console.log(`  ${dim('dry run: the chain runs on HEAD as it is — the stamp above was only a scratch copy')}`);
-  const specs = [
-    ...R.plan.pretag,
-    {
-      // A build that rewrites a tracked file is a commit nobody made.
-      name: 'the chain left the tree exactly as it found it',
-      check: () => {
-        const st = git(R.repo, 'status', '--porcelain', '--untracked-files=all').stdout.split('\n').filter(Boolean);
-        const now = head(R.repo);
-        if (now !== h) return { ok: false, detail: `HEAD moved during the run: ${short(h)} → ${short(now)}` };
-        return st.length ? { ok: false, detail: st.slice(0, 25).join('\n') } : { ok: true };
-      },
+  R.changed = profile === 'patch' ? changedSince(R, S.prev) : null;
+  const sel = selectGates(R.plan, profile, R.changed, { source: R.gateSource ?? 'github' });
+  describeProfile(R, profile, sel, 'pretag');
+  // ⚠ #172: a red gate no longer sends the next run back to the start. The
+  // gates that passed on exactly these inputs pass from the cache
+  // (engine.mjs), so a fix in e2e/ re-runs what reads e2e/ and the builds.
+  const ok = await R.gates.all('pretag', sel.pretag, R.ctx(), { jobs: R.plan.jobs ?? 1 });
+  // A build that rewrites a tracked file is a commit nobody made. Last, and
+  // whatever the gates said.
+  const tree = await R.gates.one('pretag', {
+    name: 'the chain left the tree exactly as it found it',
+    check: () => {
+      const st = git(R.repo, 'status', '--porcelain', '--untracked-files=all').stdout.split('\n').filter(Boolean);
+      const now = head(R.repo);
+      if (now !== h) return { ok: false, detail: `HEAD moved during the run: ${short(h)} → ${short(now)}` };
+      return st.length ? { ok: false, detail: st.slice(0, 25).join('\n') } : { ok: true };
     },
-  ];
-  const ok = await R.gates.all('pretag', specs, R.ctx());
-  return ok ? done({ head: h }) : red();
+  }, R.ctx());
+  return ok && tree.ok ? done({ head: h, profile }) : red({ profile });
 }
 
 // ── 6. export ───────────────────────────────────────────────────────────────
@@ -629,6 +735,28 @@ export async function exportStage(R) {
           : { ok: false, detail: `${R.plan.exportScript} is not in this tree — the public checkout is produced from the private repository only` },
     },
     { name: 'rebuild the public tree', cmd: [R.bash, slash(script), slash(target)], cwd: os.tmpdir() },
+    {
+      // ⚠ Lesson #1108: on Windows the export's `git add -A` staged every new
+      // file 100644, and e2e/realenv/run.sh - which CONTRIBUTING tells a reader
+      // to run as it is - went public unrunnable. The export copies the bits
+      // now; this reads them back, whatever the export did.
+      name: 'the public tree keeps every executable bit the private tree has',
+      check: () => {
+        const priv = git(R.repo, 'ls-tree', '-r', '-z', h);
+        const pub = git(target, 'ls-files', '-s', '-z');
+        if (priv.status !== 0 || pub.status !== 0) return { ok: false, detail: `could not read the modes: ${(priv.stderr || pub.stderr).trim()}` };
+        const d = execBitDrift(priv.stdout, pub.stdout);
+        if (!d.lost.length && !d.gained.length) return { ok: true, detail: `${d.checked} file(s) compared` };
+        return {
+          ok: false,
+          detail: [
+            ...d.lost.slice(0, 20).map((p) => `executable here, not in the public tree: ${p}`),
+            ...d.gained.slice(0, 20).map((p) => `executable in the public tree, not here: ${p}`),
+            `${d.lost.length + d.gained.length} file(s). The export copies the bit (scripts/export-public.sh, section 4b); check what it printed.`,
+          ].join('\n'),
+        };
+      },
+    },
     {
       name: 'the export deletes nothing it cannot explain',
       check: (c) => {
@@ -818,52 +946,188 @@ export async function land(R) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
+ * Whether a scripts/chain result (--chain <result.json>, task #170) stands in
+ * for the heavy gates this machine would run at the gate stage.
+ */
+function chainEvidence(R, profile) {
+  let result;
+  try {
+    result = JSON.parse(readText(R.chain));
+  } catch (e) {
+    return { ok: false, detail: `it cannot be read: ${e?.message ?? e}` };
+  }
+  const target = R.state.releaseCommit ?? head(R.repo);
+  const sha = typeof result?.sha === 'string' ? result.sha : '';
+  let since = null;
+  if (sha && git(R.repo, 'merge-base', '--is-ancestor', sha, target).status === 0) {
+    const d = git(R.repo, 'diff', '--name-only', '--no-renames', sha, target);
+    if (d.status === 0) since = d.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  }
+  let pkgs = [];
+  try {
+    pkgs = packageDirs(R.repo);
+  } catch {
+    /* no workspace to read: only CHANGELOG.md and deploy/ count as the stamp */
+  }
+  const v = chainVerdict(result, { accepted: R.plan.chainProfiles?.[profile] ?? [], since, stampFile: (f) => stampWrites(f, pkgs) });
+  if (!v.ok) return { ok: false, detail: v.problems.join('; ') };
+  return { ok: true, detail: `scripts/chain run ${result.run_id ?? '?'} (${result.profile}) passed on ${sha.slice(0, 10)}${since.length ? `; since then only the stamp: ${since.length} file(s)` : ''}` };
+}
+
+/**
+ * The heavy gates GitHub does not run (the profile's `local`), here, on the
+ * release commit, while GitHub tests the export commit - or a green
+ * scripts/chain run in their place. Resolves to whether they passed. Gates
+ * green on exactly these inputs before pass from the cache, so a resume after
+ * a GitHub flake does not run Playwright again.
+ */
+async function heavyHere(R) {
+  const profile = R.profile ?? 'minor';
+  const { local } = selectGates(R.plan, profile, null, { source: R.gateSource ?? 'github' });
+  if (!local.length) return true;
+  const h = head(R.repo);
+  if (!R.dry && h !== R.state.releaseCommit) {
+    const rec = await R.gates.one('gate', {
+      name: 'the heavy gates run on the release commit',
+      check: () => ({ ok: false, detail: `HEAD is ${short(h)}, not the release commit ${short(R.state.releaseCommit)}: a fix goes on main and the release resumes, and the chain runs again on it` }),
+    }, R.ctx());
+    return rec.ok;
+  }
+  if (R.chain) {
+    const ev = chainEvidence(R, profile);
+    if (ev.ok) {
+      const rec = await R.gates.one('gate', { name: `the ${local.length} heavy gate(s) ${ciName(R.gateSource)} does not run: a scripts/chain run`, check: () => ev }, R.ctx());
+      return rec.ok;
+    }
+    console.log(`  ${yellow('note  ')}  --chain ${slash(R.chain)} does not answer for this release (${ev.detail}); the heavy gates run here`);
+  }
+  console.log(`  ${dim('here    ')}  while ${ciName(R.gateSource)} tests: ${local.map((g) => g.name).join(dim(' · '))}`);
+  return R.gates.all('gate', local, R.ctx(), { jobs: R.plan.jobs ?? 1 });
+}
+
+/**
  * Waits until GitHub has run, on the export commit, the two things the tag
- * run's `verify` job will look for: ci.yml started by the push of main, and a
- * dry run of release.yml (publish=false: it builds, tests and packages every
- * artifact and publishes none). The dry run is started here, once per commit.
+ * run's `verify` job will look for: ci.yml started by the push of main - its
+ * full matrix, every part green (#173) - and a dry run of release.yml
+ * (publish=false: it builds and packages every artifact and publishes none).
+ * The dry run is started here, once per commit.
+ *
+ * ⚠ The push run is read PART BY PART when the plan names its parts
+ * (`githubMatrix`, scripts/ci-parts.mjs; #174): every job the full matrix
+ * has must have run and passed. A red part stops the wait at once, by its
+ * name; a run that ended green without one of them (an older ci.yml, a
+ * matrix that lost a part) is no full matrix and does not pass. A run's one
+ * conclusion said neither which part failed nor that one never ran. The
+ * heavy gates the profile reads from GitHub print the parts that stand for
+ * them (`githubJobs`).
+ *
+ * ⚠ And the dry run must have kept what the tag run promotes (`promotion`):
+ * a tag run builds no image and no desktop package, it publishes the ones
+ * this dry run built. A dry run without them is no release candidate, and its
+ * tag run would stop at `verify`.
  *
  * ⚠ A run is matched by its commit AND, for the dry run, by its name
  * (release.yml's `run-name`, dryRunTitle): GitHub's API does not give a run's
- * inputs, and a dry run of only=arm64, or of a tag, did not test this commit.
+ * inputs, and a dry run of only=arm64, only=macos or only=snap-arm64, or of a
+ * tag, did not test this commit.
+ *
+ * ⚠ #181: when GitHub Actions is down, `--gate circleci` reads the CircleCI
+ * workflow `ci` (.circleci/config.yml) on the export commit instead, and no
+ * dry run (gateOnCircleci below): the heavy suites CircleCI runs are read
+ * from it, the rest run here (selectGates), and the stage records
+ * `source: 'circleci'`. A person chooses it, never the tool: a GitHub that
+ * answers red is red, not "down". Nothing is promoted then, since no dry run
+ * ran: either the tag run builds the packages once Actions is back (its
+ * `verify` takes the same green CircleCI workflow, #181), or the release is
+ * packaged off GitHub (scripts/release/package-local.mjs).
  */
 export async function gate(R) {
   const S = R.state;
   const sha = S.exportHead;
+  const source = R.gateSource ?? 'github';
   const gh = R.plan.github;
   const wf = { ci: 'ci.yml', release: 'release.yml', ...(R.plan.gateWorkflows ?? {}) };
   const { exportRemote, branch } = R.plan;
   const dispatch = { workflow: wf.release, ref: branch, inputs: { publish: 'false' } };
   const title = dryRunTitle(sha ?? '<export commit>');
   const startCmd = gh?.command ? gh.command(dispatch) : `gh workflow run ${wf.release} --ref ${branch} -f publish=false`;
+  const covered = selectGates(R.plan, R.profile ?? 'minor', R.profile === 'patch' ? (R.changed ?? changedSince(R, S.prev)) : null, { source }).remote;
+  const matrix = R.plan.githubMatrix ?? null;
+  const promotion = R.plan.promotion ?? null;
+  if (covered.length) describeProfile(R, R.profile ?? 'minor', null, 'gate');
+  for (const g of covered) {
+    let parts = '';
+    try {
+      parts = g.githubJobs ? `, ${g.githubJobs(R.ctx()).length} part(s)` : '';
+    } catch {
+      /* said again, and judged, when the run is read */
+    }
+    console.log(`  ${dim(source.padEnd(8))}  ${g.name} ${dim(`- read from ${readFrom(g, source)}${source === 'github' ? parts : ''}`)}`);
+  }
+  if (source === 'circleci') return gateOnCircleci(R);
   if (R.dry) {
-    return waiting(
+    // The heavy gates that run here run in a dry run too: it is every gate.
+    const here = await heavyHere(R);
+    const w = waiting(
       [
         `GitHub tests the export commit; nothing is tagged until both of these passed on it:`,
-        `  - ${wf.ci}, started by the push of ${branch}`,
+        `  - ${wf.ci}, started by the push of ${branch}${matrix ? ': the full matrix, read part by part, every part green' : ''}`,
         `  - ${wf.release} as a dry run, started here:  ${startCmd}`,
-        `    (named "${title}": it builds, tests and packages everything, and publishes nothing)`,
+        `    (named "${title}": it builds and packages everything, and publishes nothing${promotion ? '; the tag run promotes what it keeps' : ''})`,
+        `  (GitHub Actions down: pnpm release ${R.version} --resume --gate circleci reads CircleCI instead)`,
       ],
       { dry: true },
     );
+    return here ? w : red();
   }
   if (!sha) {
     console.log(`  ${bold('FAILED')}  no export commit is recorded — the land stage records it`);
     return red();
   }
   const prevRun = S.stages.gate;
-  if (prevRun?.status === 'done' && prevRun.exportHead === sha) return done({ ...prevRun, note: `GitHub passed ${short(sha)}` });
+  if (prevRun?.status === 'done' && prevRun.exportHead === sha) return done({ ...prevRun, note: `${ciName(prevRun.source)} passed ${short(sha)}` });
   if (!gh) {
     console.log(`  ${bold('FAILED')}  the plan names no GitHub to ask (plan.github)`);
     return red();
   }
 
+  // ⚠ #172: the heavy gates GitHub does not run start now, here, and run
+  // beside the wait below. Every way out of this stage waits for them first
+  // (`settle`): a red one is a red stage, and a stage that returned while they
+  // ran would leave their processes behind.
+  let hereDone = false;
+  const here = heavyHere(R).then(
+    (ok) => {
+      hereDone = true;
+      return ok;
+    },
+    (e) => {
+      hereDone = true;
+      console.log(`  ${bold('FAILED')}  the heavy gates here crashed: ${e?.stack ?? e}`);
+      return false;
+    },
+  );
+  const settle = async (res) => {
+    if (!hereDone) console.log(`  ${dim('github  ')}  ${dim('GitHub has answered; waiting for the heavy gates running here')}`);
+    const ok = await here;
+    return res.status === 'red' || ok ? res : red();
+  };
+
   const wait = { pollMs: 60_000, timeoutMs: 4 * 3600_000, appearMs: 10 * 60_000, ...(R.plan.gateWait ?? {}) };
   const t0 = Date.now();
   const fail = async (name, detail) => {
     await R.gates.one('gate', { name, check: () => ({ ok: false, detail }) }, R.ctx());
-    return red();
+    return settle(red());
   };
+  let expected = null;
+  if (matrix) {
+    try {
+      expected = matrix.parts(R.ctx());
+    } catch (e) {
+      return fail(`the parts of ${wf.ci}'s matrix`, `could not list them: ${e?.message ?? e}`);
+    }
+    if (!expected?.length) return fail(`the parts of ${wf.ci}'s matrix`, 'the plan names none, so the run would be read as a whole');
+  }
   let shown = '';
   for (;;) {
     const ci = gh.runs({ workflow: wf.ci, sha, event: 'push' });
@@ -906,36 +1170,103 @@ export async function gate(R) {
     }
 
     const v = { ci: runVerdict(ci.runs), dry: runVerdict(dryRuns) };
-    const said = (x) => `${x.state}${x.run?.url ? ` ${x.run.url}` : ''}`;
-    const line = `${wf.ci}: ${said(v.ci)}  ·  dry run: ${said(v.dry)}`;
+    // The push run, part by part (#174).
+    let parts = null;
+    let jobs = [];
+    if (expected && v.ci.run) {
+      const jr = gh.jobs ? gh.jobs({ runId: v.ci.run.id }) : { error: "the plan's GitHub cannot read the jobs of a run" };
+      if (jr.error) {
+        return fail('GitHub answered', `could not read the jobs of ${wf.ci} run ${v.ci.run.id} (${jr.error}) — whether every part passed is unknown, and unknown does not pass`);
+      }
+      jobs = jr.jobs;
+      parts = partsVerdict(jobs, expected, { finished: v.ci.state !== 'running' });
+    }
+    const ciState = matrixState(v.ci.state, parts);
+    const said = (x, state = x.state) => `${state}${x.run?.url ? ` ${x.run.url}` : ''}`;
+    const line = `${wf.ci}: ${said(v.ci, ciState)}${parts ? ` (${partsLine(parts)})` : ''}  ·  dry run: ${said(v.dry)}`;
     if (line !== shown) {
       console.log(`  ${dim('github  ')}  ${line}`);
+      if (parts) {
+        for (const g of covered.filter((x) => x.githubJobs)) {
+          let own;
+          try {
+            own = partsLine(partsVerdict(jobs, g.githubJobs(R.ctx()), { finished: v.ci.state !== 'running' }));
+          } catch (e) {
+            own = `its parts cannot be listed: ${e?.message ?? e}`;
+          }
+          console.log(`  ${dim('        ')}  ${g.name}: ${own}`);
+        }
+      }
       shown = line;
     }
-    const finished = v.ci.state === 'failure' || v.dry.state === 'failure' || (v.ci.state === 'success' && v.dry.state === 'success');
+    const finished = ciState === 'failure' || ciState === 'incomplete' || v.dry.state === 'failure' || (ciState === 'success' && v.dry.state === 'success');
     if (finished) {
-      const verdict = (name, x, none) => ({
-        name,
+      const ciVerdict = {
+        name: `${wf.ci} (push) passed on ${short(sha)}`,
         check: () => {
+          if (ciState === 'success') return { ok: true, detail: `${v.ci.run.url}${parts ? ` - ${partsLine(parts)}` : ''}` };
+          if (ciState === 'incomplete') {
+            return {
+              ok: false,
+              detail:
+                `${v.ci.run.url ?? `run ${v.ci.run.id}`} passed, but it is not the full matrix: ${parts.missing.length} part(s) never ran - ` +
+                `${parts.missing.slice(0, 12).map((p) => p.name).join(', ')}. The full matrix runs on a push of ${branch} (scripts/ci-parts.mjs), ` +
+                `and a ${wf.ci} without these parts is a fault in the workflow (packaging/ci/ci-full-matrix.patch).`,
+            };
+          }
+          if (ciState === 'failure' && parts?.failed.length) {
+            const still = v.ci.state === 'running' ? ' The run is still going: re-run its red parts once it has finished.' : '';
+            return {
+              ok: false,
+              detail: `${parts.failed.length} part(s) red: ${parts.failed.slice(0, 12).map((p) => `${p.name} (${p.conclusion}${p.url ? `, ${p.url}` : ''})`).join('; ')}.${still}`,
+            };
+          }
+          if (ciState === 'failure') return { ok: false, detail: `${v.ci.run.url ?? `run ${v.ci.run.id}`} ended "${v.ci.run.conclusion}"` };
+          return { ok: false, detail: ciState === 'none' ? `no ${wf.ci} run was started by a push of ${short(sha)}` : `not finished (${ciState})` };
+        },
+      };
+      const dryVerdict = {
+        name: `${wf.release} dry run passed on ${short(sha)}`,
+        check: () => {
+          const x = v.dry;
           if (x.state === 'success') return { ok: true, detail: x.run.url };
           if (x.state === 'failure') return { ok: false, detail: `${x.run.url ?? `run ${x.run.id}`} ended "${x.run.conclusion}"` };
-          return { ok: false, detail: x.state === 'none' ? none : `not finished (${x.state})` };
+          return { ok: false, detail: x.state === 'none' ? `no run named "${title}"` : `not finished (${x.state})` };
         },
-      });
-      const ok = await R.gates.all(
-        'gate',
-        [
-          verdict(`${wf.ci} (push) passed on ${short(sha)}`, v.ci, `no ${wf.ci} run was started by a push of ${short(sha)}`),
-          verdict(`${wf.release} dry run passed on ${short(sha)}`, v.dry, `no run named "${title}"`),
-        ],
-        R.ctx(),
-      );
-      if (ok) return done({ exportHead: sha, ci: v.ci.run.url, dryRun: v.dry.run.url });
-      const failed = [v.ci, v.dry].find((x) => x.state === 'failure')?.run;
+      };
+      const kept = {
+        name: `the dry run kept what the ${R.tag} run promotes`,
+        check: () => {
+          if (!gh.artifacts) return { ok: false, detail: "the plan's GitHub cannot list the artifacts of a run" };
+          const ar = gh.artifacts({ runId: v.dry.run.id });
+          if (ar.error) return { ok: false, detail: `could not ask GitHub (${ar.error}) — whether the tag run has anything to promote is unknown, and unknown does not pass` };
+          const pv = promotionVerdict(ar.names, promotion);
+          if (!pv.ok) {
+            return {
+              ok: false,
+              detail:
+                `${v.dry.run.url ?? `run ${v.dry.run.id}`} kept no ${pv.lacking.join(', ')}: it is no release candidate, and the tag run would have nothing to promote ` +
+                `(its version was tagged already, it was no dry run of everything, or what it kept has expired). Start one again on ${short(sha)}: ${startCmd}`,
+            };
+          }
+          const without = pv.without.length
+            ? `; without ${pv.without.join(', ')}: ${R.tag} goes out without the macOS packages, and a run with only=macos adds them once GitHub has macOS runners (docs/CONTRIBUTING.md, Release process)`
+            : '';
+          return { ok: true, detail: `${ar.names.length} artifact(s)${without}` };
+        },
+      };
+      const verdicts = [ciVerdict, dryVerdict];
+      if (promotion && ciState === 'success' && v.dry.state === 'success') verdicts.push(kept);
+      const ok = await R.gates.all('gate', verdicts, R.ctx());
+      if (ok) {
+        return settle(done({ exportHead: sha, source: 'github', ci: v.ci.run.url, parts: parts ? partsLine(parts) : null, dryRun: v.dry.run.url, profile: R.profile ?? 'minor' }));
+      }
+      const failed = (ciState === 'failure' || ciState === 'incomplete' ? v.ci.run : null) ?? (v.dry.state === 'failure' ? v.dry.run : null);
+      const rerun = failed && gh.rerun ? gh.rerun(failed.id) : 'gh run rerun <id> --failed';
       for (const l of [
         '',
         `Nothing is tagged, and ${R.tag} is not spent. Then:`,
-        `  - a flake:  ${failed && gh.rerun ? gh.rerun(failed.id) : 'gh run rerun <id> --failed'}, then  pnpm release ${R.version} --resume`,
+        `  - a flake:  ${failed && v.ci.state === 'running' && failed === v.ci.run ? `once that run has finished, ${rerun}` : rerun}, then  pnpm release ${R.version} --resume`,
         `  - a fault in the code: fix it on ${branch} (a commit on top of the release commit), push, pnpm release ${R.version} --resume —`,
         `    the chain, the export, the landing and this gate run again on the fix`,
         `  - a fault in a workflow: fix it in ${slash(R.exp)}, commit, push ${branch}, pnpm release ${R.version} --resume —`,
@@ -943,15 +1274,177 @@ export async function gate(R) {
       ]) {
         console.log(`  ${l}`);
       }
-      return red();
+      return settle(red());
     }
     if (Date.now() - t0 >= wait.timeoutMs) {
-      return waiting([
-        `GitHub has not finished on ${short(sha)} yet (waited ${Math.round((Date.now() - t0) / 60_000)} min):`,
-        `  ${line}`,
+      return settle(
+        waiting([
+          `GitHub has not finished on ${short(sha)} yet (waited ${Math.round((Date.now() - t0) / 60_000)} min):`,
+          `  ${line}`,
+          '',
+          `Carry on waiting with:  pnpm release ${R.version} --resume`,
+        ]),
+      );
+    }
+    await sleep(wait.pollMs);
+  }
+}
+
+/**
+ * The push run's state with its parts read (#174): a red part is red at once,
+ * even while the run goes on; a run that passed without every part is
+ * `incomplete`, never success. Without parts, the run's own state.
+ */
+export function matrixState(runState, parts) {
+  if (!parts) return runState;
+  if (parts.failed.length) return 'failure';
+  if (runState === 'running') return 'running';
+  if (runState === 'success') return parts.state === 'success' ? 'success' : 'incomplete';
+  return runState;
+}
+
+/**
+ * The gate stage when GitHub Actions is down (#181, `--gate circleci`): the
+ * CircleCI workflow `ci` (plan.circleciWorkflow) on the export commit, and
+ * the heavy gates CircleCI does not run, here, beside the wait - with the
+ * settle, wait and give-up rules of GitHub's. Nothing is started on CircleCI:
+ * the push of the public main started the pipeline, and a person starts one
+ * again from CircleCI's page when it is missing.
+ *
+ * ⚠ What it does NOT test, and the log says so: the release dry run.
+ * GoReleaser's snapshot, the images and the desktop packages are built for
+ * the first time when the release is packaged off GitHub, and the tag run's
+ * `verify` job, once Actions is back, publishes nothing for a commit that has
+ * no ci.yml run and no dry run on it (CONTRIBUTING, Release process, "When
+ * GitHub Actions is down").
+ */
+async function gateOnCircleci(R) {
+  const S = R.state;
+  const sha = S.exportHead;
+  const cc = R.plan.circleci;
+  const workflow = R.plan.circleciWorkflow ?? 'ci';
+  const { branch } = R.plan;
+  const where = cc?.where ? cc.where({ branch }) : `CircleCI, ${branch}`;
+  const prevRun = S.stages.gate;
+  if (!R.dry && sha && prevRun?.status === 'done' && prevRun.exportHead === sha) return done({ ...prevRun, note: `${ciName(prevRun.source)} passed ${short(sha)}` });
+  const unseen = [
+    `GitHub Actions is not asked (--gate circleci): the release dry run does not run, and nothing is promoted - the packages are first built by the tag run, or when the release is packaged off GitHub.`,
+    `Once Actions is back, the tag run's verify job takes this CircleCI workflow too (no ci.yml run, no dry run on the commit), and that run builds the images and the desktop packages itself; it needs the CIRCLECI_TOKEN secret of the public repository.`,
+  ];
+  for (const l of unseen) console.log(`  ${yellow('note  ')}  ${l}`);
+  if (R.dry) {
+    const here = await heavyHere(R);
+    const w = waiting(
+      [
+        `CircleCI tests the export commit; nothing is tagged until this passed on it:`,
+        `  - the workflow "${workflow}" (.circleci/config.yml), started by the push of ${branch}: ${where}`,
+        ...unseen.map((l) => `  ${l}`),
+      ],
+      { dry: true, source: 'circleci' },
+    );
+    return here ? w : red();
+  }
+  if (!sha) {
+    console.log(`  ${bold('FAILED')}  no export commit is recorded — the land stage records it`);
+    return red();
+  }
+  if (!cc) {
+    console.log(`  ${bold('FAILED')}  the plan names no CircleCI to ask (plan.circleci)`);
+    return red();
+  }
+
+  // Started now, run beside the wait, waited for on every way out - as on
+  // GitHub (gate above).
+  let hereDone = false;
+  const here = heavyHere(R).then(
+    (ok) => {
+      hereDone = true;
+      return ok;
+    },
+    (e) => {
+      hereDone = true;
+      console.log(`  ${bold('FAILED')}  the heavy gates here crashed: ${e?.stack ?? e}`);
+      return false;
+    },
+  );
+  const settle = async (res) => {
+    if (!hereDone) console.log(`  ${dim('circleci')}  ${dim('CircleCI has answered; waiting for the heavy gates running here')}`);
+    const ok = await here;
+    return res.status === 'red' || ok ? res : red();
+  };
+  const wait = { pollMs: 60_000, timeoutMs: 4 * 3600_000, appearMs: 10 * 60_000, ...(R.plan.gateWait ?? {}) };
+  const t0 = Date.now();
+  const fail = async (name, detail) => {
+    await R.gates.one('gate', { name, check: () => ({ ok: false, detail }) }, R.ctx());
+    return settle(red());
+  };
+  let shown = '';
+  for (;;) {
+    let a;
+    try {
+      a = await cc.runs({ workflow, sha, branch });
+    } catch (e) {
+      a = { error: e?.message ?? String(e) };
+    }
+    if (a.error) return fail('CircleCI answered', `could not ask CircleCI (${a.error}) - whether ${short(sha)} passed is unknown, and unknown does not pass`);
+    const v = runVerdict(a.runs);
+    const line = `CircleCI ${workflow}: ${v.state}${v.run?.url ? ` ${v.run.url}` : ''}`;
+    if (line !== shown) {
+      console.log(`  ${dim('circleci')}  ${line}`);
+      shown = line;
+    }
+    if (v.state === 'success' || v.state === 'failure') {
+      const ok = await R.gates.all(
+        'gate',
+        [
+          {
+            name: `CircleCI ${workflow} passed on ${short(sha)}`,
+            check: () =>
+              v.state === 'success'
+                ? { ok: true, detail: `${v.run.url} (GitHub Actions not asked: --gate circleci)` }
+                : { ok: false, detail: `${v.run.url ?? `workflow ${v.run.id}`} ended "${v.run.conclusion}"` },
+          },
+        ],
+        R.ctx(),
+      );
+      if (ok) {
+        return settle(
+          done({
+            exportHead: sha,
+            source: 'circleci',
+            circleci: v.run.url,
+            profile: R.profile ?? 'minor',
+            note: `CircleCI passed ${short(sha)}; no GitHub run, no dry run (--gate circleci)`,
+          }),
+        );
+      }
+      for (const l of [
         '',
-        `Carry on waiting with:  pnpm release ${R.version} --resume`,
-      ]);
+        `Nothing is tagged, and ${R.tag} is not spent. Then:`,
+        `  - a flake: on CircleCI, "Rerun workflow from failed" on that workflow, then  pnpm release ${R.version} --resume --gate circleci`,
+        `  - a fault in the code: fix it on ${branch} (a commit on top of the release commit), push, pnpm release ${R.version} --resume --gate circleci -`,
+        `    the chain, the export, the landing and this gate run again on the fix`,
+      ]) {
+        console.log(`  ${l}`);
+      }
+      return settle(red());
+    }
+    if (v.state === 'none' && Date.now() - t0 >= wait.appearMs) {
+      return fail(
+        `CircleCI ran the workflow "${workflow}" on ${short(sha)}`,
+        `no pipeline of ${cc.project ?? 'the project'} on ${branch} ran "${workflow}" on the export commit within ${Math.round(wait.appearMs / 60_000)} min. ` +
+          `Is the project set up (CONTRIBUTING, Release process, "When GitHub Actions is down")? Start a pipeline on ${branch} by hand (${where}), then resume.`,
+      );
+    }
+    if (Date.now() - t0 >= wait.timeoutMs) {
+      return settle(
+        waiting([
+          `CircleCI has not finished on ${short(sha)} yet (waited ${Math.round((Date.now() - t0) / 60_000)} min):`,
+          `  ${line}`,
+          '',
+          `Carry on waiting with:  pnpm release ${R.version} --resume --gate circleci`,
+        ], { source: 'circleci' }),
+      );
     }
     await sleep(wait.pollMs);
   }
@@ -985,8 +1478,11 @@ export async function sign(R) {
   const backendTag = `${R.plan.backendTagPrefix}${tag}`;
   const releaseCommit = S.releaseCommit ?? '<release commit>';
   const exportCommit = S.exportHead ?? '<export commit>';
+  // The CI the gate stage read: its record says (a record from before #181
+  // has no source, and was GitHub's).
+  const tester = ciName(S.stages.gate?.source ?? R.gateSource);
   const commands = [
-    `# GitHub has tested the export commit: tag exactly what was tested.`,
+    `# ${tester} has tested the export commit: tag exactly what was tested.`,
     `# the private tree — the release commit the chain passed on:`,
     `git -C ${slash(R.repo)} tag -s ${tag} -m "${tag}" ${releaseCommit}`,
     `git -C ${slash(R.repo)} tag -v ${tag}`,
@@ -1019,14 +1515,14 @@ export async function sign(R) {
       },
     },
     {
-      name: `public ${tag}: signed, on the export commit GitHub tested`,
+      name: `public ${tag}: signed, on the export commit ${tester} tested`,
       check: () => {
         if (!exportTag) {
           todo.push('the public tag');
           return { ok: true, detail: 'not made yet' };
         }
         if (exportTag === S.releaseCommit) return { ok: false, detail: `${tag} in the public checkout names the PRIVATE release commit — that is the leak of lesson #55` };
-        if (exportTag !== S.exportHead) return { ok: false, detail: `${tag} is on ${short(exportTag)}, not the export commit GitHub tested, ${short(S.exportHead)}. Delete the LOCAL tag (git -C ${slash(exp)} tag -d ${tag}) and tag ${short(S.exportHead)}.` };
+        if (exportTag !== S.exportHead) return { ok: false, detail: `${tag} is on ${short(exportTag)}, not the export commit ${tester} tested, ${short(S.exportHead)}. Delete the LOCAL tag (git -C ${slash(exp)} tag -d ${tag}) and tag ${short(S.exportHead)}.` };
         const bad = verifyTag(exp, `refs/tags/${tag}`, R.plan.signingKeys);
         return bad ? { ok: false, detail: bad } : { ok: true };
       },

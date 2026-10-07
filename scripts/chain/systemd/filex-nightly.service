@@ -1,0 +1,24 @@
+# The nightly run of the test chain (scripts/chain/nightly.mjs, task #175).
+# A template: scripts/chain/install-nightly.sh fills @NODE@, @BIN@ and @ENV@
+# and installs it as /etc/systemd/system/filex-nightly.service. Started by
+# filex-nightly.timer; `systemctl start filex-nightly.service` runs a night
+# by hand (it does nothing when main has not moved: `nightly.mjs run --force`).
+[Unit]
+Description=filex nightly test run (scripts/chain/nightly.mjs)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# git, docker and the export read their settings from a home directory.
+Environment=HOME=/root
+ExecStart=@NODE@ @BIN@/nightly.mjs run --env @ENV@
+# 1 is a red night: recorded and reported in the morning, not a failed unit.
+SuccessExitStatus=1
+# The run stops itself before a NIGHTLY_QUIET window; this is only the backstop.
+TimeoutStartSec=10h
+# A stop reaches run.mjs, which removes the run's containers before it exits.
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+Nice=5

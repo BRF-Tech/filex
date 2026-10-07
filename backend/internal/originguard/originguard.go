@@ -107,6 +107,13 @@ type Config struct {
 	// it lets any page READ what filex answers without credentials, which says
 	// nothing about letting a page WRITE with somebody's session.
 	Trusted []string
+	// Untrusted are origins never trusted, whatever Trusted says: the origins
+	// where filex has code it did not write run - the ONLYOFFICE editor's
+	// frame origin, normally the document server's own (task #92), and the
+	// app-interface origin. A CORS wildcard such as `https://*.example.com`
+	// covers the document server's host too, and must not let the document
+	// server's script write with a person's session.
+	Untrusted []string
 	// Self is filex's own address (FILEX_PUBLIC_URL), trusted like an entry of
 	// Trusted. It is how the platform's own pages reach a tenant's host on a
 	// multi-tenant install, and how a proxy that rewrites Host still matches.
@@ -140,23 +147,29 @@ type Verdict struct {
 
 // Guard is a configured guard. Build it with New; it is safe for concurrent use.
 type Guard struct {
-	cfg    Config
-	self   string
-	exact  map[string]bool
-	wild   []wildcard
-	exempt []string
-	now    func() time.Time
-	limit  limiter
+	cfg       Config
+	self      string
+	exact     map[string]bool
+	wild      []wildcard
+	untrusted map[string]bool
+	exempt    []string
+	now       func() time.Time
+	limit     limiter
 }
 
 // New builds a guard from cfg.
 func New(cfg Config) *Guard {
-	g := &Guard{cfg: cfg, exact: map[string]bool{}, now: cfg.Now}
+	g := &Guard{cfg: cfg, exact: map[string]bool{}, untrusted: map[string]bool{}, now: cfg.Now}
 	if g.now == nil {
 		g.now = time.Now
 	}
 	if o, ok := canonicalOrigin(cfg.Self); ok {
 		g.self = o
+	}
+	for _, raw := range cfg.Untrusted {
+		if o, ok := canonicalOrigin(raw); ok {
+			g.untrusted[o] = true
+		}
 	}
 	for _, raw := range cfg.Trusted {
 		o := strings.ToLower(strings.TrimSpace(raw))
@@ -242,15 +255,19 @@ func (g *Guard) Judge(r *http.Request) Verdict {
 	}
 }
 
-// trusted reports whether src is filex's own address or a Trusted entry.
+// trusted reports whether src is filex's own address or a Trusted entry, and
+// not an Untrusted one.
 func (g *Guard) trusted(src string) bool {
 	if src == "" || src == "null" {
+		return false
+	}
+	c, ok := canonicalOrigin(src)
+	if g.untrusted[src] || (ok && g.untrusted[c]) {
 		return false
 	}
 	if g.exact[src] {
 		return true
 	}
-	c, ok := canonicalOrigin(src)
 	if ok && (c == g.self || g.exact[c]) {
 		return true
 	}
@@ -390,6 +407,12 @@ func sourceOrigin(r *http.Request) string {
 	}
 	return ""
 }
+
+// Canonical is an origin as the guard compares it: scheme://host[:port],
+// lower case, without a default port and without a path. false for anything
+// that is not an http(s) origin. The CORS layer's refusal of the Untrusted
+// origins (api.corsNever) compares the same way.
+func Canonical(raw string) (string, bool) { return canonicalOrigin(raw) }
 
 // canonicalOrigin is scheme://host[:port], lower case, without a default port
 // and without a path. false for anything that is not an http(s) origin.

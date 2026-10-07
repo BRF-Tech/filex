@@ -27,6 +27,7 @@
 // `title`/`body` fields, which are the same strings the bell shows.
 
 import { brandBadgeUrl, brandIconUrl, brandName } from './brand';
+import { swLocation } from './serviceWorker';
 
 const ENABLED_KEY = 'filex.notify.browser';
 const ASKED_KEY = 'filex.notify.browserAsked';
@@ -192,16 +193,24 @@ export function brandedNotification(opts: BrowserNotifyOptions): {
 }
 
 /**
- * The service worker that owns this page, when there is one.
+ * The app's service worker, when it is registered.
  *
- * ⚠ It is scoped to `/admin/` (vite.config.ts), so a page served from
- * `/drive/` legitimately has none — that is a narrower frame, never a missing
- * notification, because the constructor path still works there.
+ * ⚠⚠ Asked for by the WORKER's scope, not by this page's address (task #190).
+ * The worker is scoped to `/admin/` (vite.config.ts), and `getRegistration()`
+ * with no argument looks for one whose scope covers THIS page - which a page
+ * under `/drive/`, the whole product for a non-admin, never has. That used to
+ * be written off here as "a narrower frame, never a missing notification,
+ * because the constructor path still works there", and on a phone it does not:
+ * Android Chrome throws on the constructor, so every notification raised on a
+ * `/drive/` page was dropped - in a browser tab and in the installed app
+ * alike. A worker shows a notification for any page of its origin; only
+ * FINDING it depended on the page. (An iPhone's installed app is the same
+ * case: there the worker is the way to notify.)
  */
 async function swRegistration(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
   try {
-    const reg = await navigator.serviceWorker.getRegistration();
+    const reg = await navigator.serviceWorker.getRegistration(swLocation().scope);
     return reg && typeof reg.showNotification === 'function' ? reg : null;
   } catch {
     return null;

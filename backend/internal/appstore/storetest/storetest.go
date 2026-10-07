@@ -65,6 +65,10 @@ type Store struct {
 	// KeysHits counts the keys.json reads; IntentHits the install-link reads.
 	KeysHits   int
 	IntentHits int
+
+	// The embedded store's paths (embedded.go).
+	embOnce sync.Once
+	e       *embedded
 }
 
 // New starts a fake store on a loopback address (plain http: filex admits it
@@ -227,6 +231,9 @@ func (s *Store) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if s.serveEmbedded(w, r) {
+		return
+	}
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/keys.json":
 		s.mu.Lock()

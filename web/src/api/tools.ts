@@ -11,7 +11,10 @@ export type ThumbRefusalCode = 'sync_running' | 'sync_aborted' | 'never_synced';
 /**
  * One repair run, as `POST` and `GET /admin/tools/thumbnails/repair` report
  * it. `running: false` is the end. `GET` answers `{ running: false }` alone
- * when this tenant has not asked for one.
+ * when this tenant has not asked for one. A caller held to a folder
+ * (X-Filex-Root, a `root:` token) is told a run outside that folder as
+ * `{ running, queued }` alone while it goes and as `{ running: false }` once
+ * it has ended.
  */
 export interface ThumbRepairStatus {
   /** The ops row: it is in the tray, and `cancel` stops it. */

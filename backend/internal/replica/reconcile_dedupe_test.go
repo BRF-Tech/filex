@@ -81,11 +81,11 @@ func TestFixOne_ARetryAlreadyWaitingIsNotQueuedAgain(t *testing.T) {
 	q := &pendingQueue{pending: map[string]bool{}}
 	svc := New(&stubStore{}, nil, q, nil)
 
-	queued, err := svc.FixOne(context.Background(), "/a.txt", "write")
+	queued, err := svc.FixOne(context.Background(), 7, "/a.txt", "write")
 	if err != nil || !queued {
 		t.Fatalf("first = %v, %v; want queued", queued, err)
 	}
-	queued, err = svc.FixOne(context.Background(), "/a.txt", "write")
+	queued, err = svc.FixOne(context.Background(), 7, "/a.txt", "write")
 	if err != nil || queued {
 		t.Fatalf("second = %v, %v; want not queued and no error", queued, err)
 	}
