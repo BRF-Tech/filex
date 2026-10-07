@@ -124,6 +124,29 @@ export function holds(cond: string, env: Record<string, string>, matrix: Row): b
 /** Whatever makes something public from the desktop job. */
 export const PUBLISHES = /gh release upload|snapcraft upload|msstore-submit|microsoft-store-apppublisher|wingetcreate|winget-cla\.sh|winget-supersede\.sh|git push/;
 
+/**
+ * What marks a step of the desktop job that BUILDS something: a tag run that
+ * promotes runs none of them (releasePromote.test.ts), and neither do the
+ * windows and linux rows of only=stores (releaseStoresOnly.test.ts).
+ */
+export const BUILDS = [
+  /actions\/setup-go@/,
+  /pnpm install --frozen-lockfile/,
+  /pnpm -r --filter='\.\/packages\/\*' build/,
+  /npm version "\$VER"/,
+  /apt-get install -y -qq rpm/,
+  /gem install --no-document fpm/,
+  /pnpm --filter \.\/desktop run/,
+  /electron-builder/,
+  /fetch-cli\.mjs/,
+  /merge-latest-yml\.mjs/,
+  /--channel=8\.x\/stable/,
+  /AllowDevelopmentWithoutDevLicense/,
+  /makeappx/,
+  /arch-of\.mjs/,
+];
+export const builds = (text: string) => BUILDS.some((re) => re.test(text));
+
 /** The desktop job's env for one run, as plan's outputs set it. */
 export function desktopEnv(run: { publish: boolean; full: boolean; only: string }, row: Row, secrets: Record<string, string> = {}) {
   return {

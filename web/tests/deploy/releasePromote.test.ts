@@ -32,7 +32,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { completeName } from '../../../scripts/ci-parts.mjs';
-import { DIR, KEYS, TAG_SHA, bash, code, desktopEnv, desktopRuns, job, jobIf, jobNames, jq, matrices, stepsOf, verify, verifyRun, verifyScript, type Row } from '../helpers/releaseWorkflow';
+import { DIR, KEYS, TAG_SHA, bash, builds, code, desktopEnv, desktopRuns, job, jobIf, jobNames, jq, matrices, stepsOf, verify, verifyRun, verifyScript, type Row } from '../helpers/releaseWorkflow';
 
 const hasJq = !spawnSync('jq', ['--version'], { encoding: 'utf8' }).error;
 
@@ -41,25 +41,6 @@ const tagRun = (rows: Row[] = []) => ({ EVENT: 'push', SHA: TAG_SHA, ONLY: 'all'
 
 /** The full run's desktop rows, as plan writes them. */
 const fullRows = () => matrices(job(code(), 'plan'))[1].rows;
-
-/** The steps of the desktop job that BUILD something (a tag run runs none of them). */
-const BUILDS = [
-  /actions\/setup-go@/,
-  /pnpm install --frozen-lockfile/,
-  /pnpm -r --filter='\.\/packages\/\*' build/,
-  /npm version "\$VER"/,
-  /apt-get install -y -qq rpm/,
-  /gem install --no-document fpm/,
-  /pnpm --filter \.\/desktop run/,
-  /electron-builder/,
-  /fetch-cli\.mjs/,
-  /merge-latest-yml\.mjs/,
-  /--channel=8\.x\/stable/,
-  /AllowDevelopmentWithoutDevLicense/,
-  /makeappx/,
-  /arch-of\.mjs/,
-];
-const builds = (text: string) => BUILDS.some((re) => re.test(text));
 
 /** Runs release-files.mjs (from the public checkout) with `args`. */
 function releaseFiles(...args: string[]) {
@@ -159,7 +140,11 @@ describe('a tag run promotes what the dry run of its commit built', () => {
     const release = code();
     const desktop = job(release, 'desktop');
     // verify's word, not the event: a tag run with no dry run builds (#181).
-    expect(desktop).toContain("PROMOTE: ${{ needs.verify.outputs.promote == 'true' }}");
+    // (A run of only=stores builds nothing the Release has either:
+    // releaseStoresOnly.test.ts.)
+    expect(desktop).toContain(
+      "PROMOTE: ${{ needs.verify.outputs.promote == 'true' || (needs.plan.outputs.only == 'stores' && (matrix.label != 'store' || needs.verify.outputs.store_files != '')) }}",
+    );
     expect(desktop).toContain('CANDIDATE: ${{ needs.plan.outputs.candidate }}');
     expect(desktop).toContain('matrix: ${{ fromJSON(needs.verify.outputs.desktop || needs.plan.outputs.desktop) }}');
     const steps = stepsOf(desktop);

@@ -72,17 +72,20 @@ interface Run {
   event: string;
   outputs: Record<string, Record<string, string>>;
   results: Record<string, string>;
+  /** The desktop row a job-level env expression is read for (only=stores' PROMOTE names its label). */
+  matrix?: Record<string, string>;
 }
 
 /**
  * A job's condition (or an env expression) for one run: the references these
  * conditions use - github.event_name, needs.<job>.outputs.<name>,
- * needs.<job>.result, cancelled() - and nothing else. Anything more fails the
- * test instead of being guessed at.
+ * needs.<job>.result, matrix.<key>, cancelled() - and nothing else. Anything
+ * more fails the test instead of being guessed at.
  */
 function evaluate(cond: string, run: Run): boolean {
   let js = cond
     .replace(/\bgithub\.event_name\b/g, () => JSON.stringify(run.event))
+    .replace(/\bmatrix\.(\w+)/g, (_m, k: string) => JSON.stringify(run.matrix?.[k] ?? ''))
     .replace(/\bneeds\.([\w-]+)\.outputs\.(\w+)/g, (_m, j: string, o: string) => JSON.stringify(run.outputs[j]?.[o] ?? ''))
     .replace(/\bneeds\.([\w-]+)\.result\b/g, (_m, j: string) => JSON.stringify(run.results[j] ?? 'skipped'))
     .replace(/\bcancelled\(\)/g, 'false');
