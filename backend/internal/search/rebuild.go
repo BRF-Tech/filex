@@ -40,6 +40,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
@@ -56,6 +57,10 @@ var ErrRebuildInProgress = errors.New("search: rebuild already in progress")
 
 // ErrIndexDisabled is returned when there is no live index to rebuild.
 var ErrIndexDisabled = errors.New("search: index disabled")
+
+// errIndexClosed is a rebuild that finished after the index was closed: the
+// replacement is dropped and nothing is swapped in.
+var errIndexClosed = errors.New("search: rebuild: the index was closed while the rebuild ran")
 
 // ErrNoDiskSpace is returned when the filesystem holding the index cannot
 // hold a second copy of it. Failing loudly and continuing to serve the old
@@ -295,10 +300,11 @@ func (i *Index) rebuild(ctx context.Context, store NodeLister, opts RebuildOptio
 	if err := os.RemoveAll(pending); err != nil {
 		return fmt.Errorf("search: rebuild: clear %s: %w", pending, err)
 	}
-	fresh, err := bleve.New(pending, bleve.NewIndexMapping())
+	created, err := bleve.New(pending, bleve.NewIndexMapping())
 	if err != nil {
 		return fmt.Errorf("search: rebuild: create replacement index: %w", err)
 	}
+	fresh := &closeOnce{bleveIndex: created}
 	stampSchemaVersion(fresh)
 
 	// From here on every write lands in BOTH indexes, and every document
@@ -447,6 +453,9 @@ func (i *Index) swap(fresh bleve.Index) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.pending = nil
+	if i.closed {
+		return errIndexClosed
+	}
 
 	// Close the replacement first: on Windows an open index cannot be
 	// renamed, and a half-flushed one should not be swapped in anywhere.
@@ -574,4 +583,23 @@ func (i *Index) isDirty(id string) bool {
 	}
 	_, ok := i.dirty[id]
 	return ok
+}
+
+// closeOnce closes its index at most once. The replacement index has two
+// closers - swap closes it before the renames, and rebuild's deferred
+// cleanup closes it when the swap did not complete - and Bleve panics on a
+// second Close ("close of closed channel": GitHub's -race run of v0.53.0).
+type closeOnce struct {
+	// A named interface, not bleve.Index embedded directly: that field
+	// would be called Index and hide the interface's Index method.
+	bleveIndex
+	once sync.Once
+	err  error
+}
+
+type bleveIndex interface{ bleve.Index }
+
+func (c *closeOnce) Close() error {
+	c.once.Do(func() { c.err = c.bleveIndex.Close() })
+	return c.err
 }

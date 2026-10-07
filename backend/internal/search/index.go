@@ -57,6 +57,10 @@ type Index struct {
 	// moment the replacement was swapped in. See rebuild.go.
 	pending bleve.Index
 
+	// closed is set by Close. A rebuild still running then finishes into
+	// nothing: swap refuses to touch an index that was closed under it.
+	closed bool
+
 	// rebuilding is the single guard shared by the manual admin endpoint
 	// and the automatic schema repair. It lives here, not on the HTTP
 	// handler, because a handler-local flag can only see the rebuilds the
@@ -173,10 +177,15 @@ func (i *Index) NeedsRebuild() bool {
 func (i *Index) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	i.closed = true
 	if i.bleve == nil {
 		return nil
 	}
-	return i.bleve.Close()
+	err := i.bleve.Close()
+	// Forgotten, so a second Close and a rebuild that ends after this one
+	// never close it again: Bleve panics on a second Close.
+	i.bleve = nil
+	return err
 }
 
 // Enabled reports whether a live Bleve index is wired (false = the server

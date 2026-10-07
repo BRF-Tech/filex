@@ -339,6 +339,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stopping the server during a search index rebuild no longer crashes
+  it.** Closing the index left the closed Bleve index in place, so a rebuild
+  that was still running closed it a second time when it swapped its
+  replacement in, and Bleve panicked ("close of closed channel"). Closing now
+  forgets the live index, a rebuild that ends after it drops its replacement
+  without swapping, and the replacement is closed at most once.
+
 - **A phone is offered to install filex as an app** (#190). On a phone
   nothing offered it: Android Chrome's own install bar was held back for
   filex's offer (`preventDefault` on `beforeinstallprompt`), and that offer
