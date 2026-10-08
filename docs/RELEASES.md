@@ -19,14 +19,221 @@ file on every contributor who ran it.
 Whether filex installs a release by itself depends on which part of the version moved -
 see [Updates](./UPDATES.md).
 
-::: tip Latest - v0.53.0, 7 October 2026
-Replication finally copies: a storage linked to a replication target now writes its files there, each storage into a folder of its own, and an existing one gets its first full copy on its own (before 0.53 it never copied anything, see #91). The admin panel gets one search for pages, settings, people, groups, API keys, apps, storages and files, in English and in the panel's language, on a phone too. Apps can be browsed and requested from an App store screen inside filex and in the desktop app, and the stores an administrator trusts decide what appears there. Notifications can be held and sent as a digest, urgent ones still at once. Multi-tenant mode is a switch in the admin panel that warns before turning off and never deletes a tenant. A document that changes on disk while it is open in ONLYOFFICE is reloaded when it is clean and asked about when it is not, and with FILEX_ONLYOFFICE_FRAME_ORIGIN the editor runs in a frame on the Document Server's own origin. Comments became a permission of their own for API keys (an existing key that should add comments needs comments: rw), no screen uses a native drop-down any more, and a phone is offered to install filex as a web app, whose notifications now reach it while it is open. Security hardening in the normal train: a folder-confined key is held to its folder whatever the request's content type, and storage credentials are no longer sent back to the admin pages.
+::: tip Latest - v0.54.0, 8 October 2026
+The server does the server's work: the rules, numbers and sentences the web app, the desktop app and the packages used to keep copies of now come from the server, so every surface says the same thing in the reader's language, and every refusal carries the server's own sentence next to a stable code. Notifications reach a phone or a browser with filex closed (Web Push, iPhone and iPad from iOS 16.4), with the same kinds, mutes and digest as the bell, and a notification is translated at its last stop, for whoever receives it. The ONLYOFFICE editor opens in the person's language (FILEX_ONLYOFFICE_LANG pins one), the desktop app follows its account's language, and the CLI installs with winget. The vault (encryption level 3) arrives in the explorer and the CLI behind FILEX_E2E_VAULT, off by default. Search, Recent, Starred, Shared with me and tag pages are narrowed and sorted on the server, and every listed link says where it stands. The presigned S3 multipart upload is gone; the staged upload works on every driver. Embedders: the 0.54 packages need a 0.54 server. Security hardening across ONLYOFFICE save callbacks, apps, encrypted folders, share e-mails, quotas and the S3 gateway; upgrading is recommended.
 :::
 
 ```bash
-docker pull ghcr.io/brf-tech/filex:slim-v0.53.0
-docker pull ghcr.io/brf-tech/filex:full-v0.53.0
+docker pull ghcr.io/brf-tech/filex:slim-v0.54.0
+docker pull ghcr.io/brf-tech/filex:full-v0.54.0
 ```
+
+## v0.54.0
+
+<span class="filex-release-date">8 October 2026</span>
+
+The server does the server's work: the rules, numbers and sentences the web app, the desktop app and the packages used to keep copies of now come from the server, so every surface says the same thing in the reader's language, and every refusal carries the server's own sentence next to a stable code. Notifications reach a phone or a browser with filex closed (Web Push, iPhone and iPad from iOS 16.4), with the same kinds, mutes and digest as the bell, and a notification is translated at its last stop, for whoever receives it. The ONLYOFFICE editor opens in the person's language (FILEX_ONLYOFFICE_LANG pins one), the desktop app follows its account's language, and the CLI installs with winget. The vault (encryption level 3) arrives in the explorer and the CLI behind FILEX_E2E_VAULT, off by default. Search, Recent, Starred, Shared with me and tag pages are narrowed and sorted on the server, and every listed link says where it stands. The presigned S3 multipart upload is gone; the staged upload works on every driver. Embedders: the 0.54 packages need a 0.54 server. Security hardening across ONLYOFFICE save callbacks, apps, encrypted folders, share e-mails, quotas and the S3 gateway; upgrading is recommended.
+
+## What changed
+
+> ⚠ **Upgrading to 0.54:**
+>
+> - **Embedders: update the server with the packages.** `@brftech/filex`,
+>   `@brftech/filex-core` and `@brftech/filex-react` 0.54 need a filex 0.54
+>   server: which files open for editing, the input limits and the version
+>   line come from its capabilities, with no list to fall back on
+>   ([API.md](./API.md)).
+> - **API clients:** the refusals that put an English sentence in `error` put
+>   a code there now, and every refusal carries the server's sentence in
+>   `message` - show that ([API-ERRORS.md](./API-ERRORS.md)). The presigned
+>   S3 multipart upload (`POST /api/files/upload/init`, `/finalize`, `/abort`)
+>   is gone; the staged upload works on every driver
+>   ([UPLOADS.md](./UPLOADS.md)). The notification lists no longer read
+>   `lang=`: a row comes in the account's language.
+> - **Migrations** 00096, 00097, 00098 and 00105 run at the first start (the
+>   vault's lock, Web Push devices, a symlink's reason, a webhook's language);
+>   nothing to do by hand.
+> - **The desktop app has no language of its own:** an install that had
+>   pinned one hands it to its account once, if the account had none.
+
+### Added
+
+- **Push notifications while filex is closed** (#191). **Push notifications
+  on this device** in user settings → Notifications (a browser tab, the
+  installed app, and the app on an iPhone's or iPad's Home Screen, iOS 16.4
+  or later) sends what the person's bell tells them to that phone or browser
+  with filex closed: the same kinds, the same mutes and the same digest - an
+  urgent kind at once, a held kind as its digest - in their language, a tap
+  opening what the bell would. Web Push (RFC 8030, 8291, 8292) with a VAPID
+  key made at the first start and stored sealed with `FILEX_SECRET_KEY` (no
+  key, no push); only the browsers' push services are accepted as endpoints
+  (`FILEX_PUSH_HOSTS` adds one), each row is pushed to a device once however
+  many servers run, devices are listed and removable, a test push is one
+  click, signing out forgets the browser, and **Admin → Notifications → Push
+  notifications** rotates the key
+  ([NOTIFICATIONS.md → Web Push](./NOTIFICATIONS.md#web-push)).
+- **The ONLYOFFICE editor speaks the person's language** (#214,
+  [GitHub Discussion #93](https://github.com/BRF-Tech/filex/discussions/93)).
+  It opened in English for everybody; the server now chooses its language and
+  regional setting (`editorConfig.lang`, `editorConfig.region`) for every
+  surface that opens it: the administrator's fixed language, else the one the
+  request names, the language on the person's screen (which the viewer sends),
+  their account's, `FILEX_DEFAULT_LOCALE`, English - a language pack's
+  language too, whenever ONLYOFFICE offers it, and the nearest one it offers
+  for a regional tag (`de-AT` → `de`, `zh-HK` → `zh-TW`). **External services
+  → ONLYOFFICE → Editor language** sets *Automatic* (the default) or one of
+  the editor's 46 languages for everybody, and `FILEX_ONLYOFFICE_LANG` pins
+  it like `FILEX_ONLYOFFICE_URL`
+  ([ONLYOFFICE.md → The editor's language](./ONLYOFFICE.md#the-editors-language)).
+- **The vault, encryption level 3, in the explorer** (#94). Behind the server's
+  `FILEX_E2E_VAULT` switch (off by default, `capabilities.e2e_vault`), the
+  encrypted-folder dialog offers level 3 for a new folder, with its cost and
+  the pack size (4 MiB or 16 MiB). An unlocked vault lists from its encrypted
+  index in this tab - the server never hears a path below the vault folder -
+  opens and downloads by byte ranges of its packs, and takes the write lock
+  at the first change (upload, new folder, rename, move or copy inside the
+  vault, delete), committing each change as one generation. A strip says who
+  writes and counts down both clocks: the person's idle time (1 to 10
+  minutes, a new row in Settings → Preferences), after which the writer goes
+  back to read-only, and the 15 minutes after which an unused vault drops
+  its keys and asks for the password again. The same code runs in the web
+  app, the desktop app and the embeds (`packages/core`, `lib/e2evault/*`,
+  `useE2eVault`), held byte for byte to the format's test vectors. An upload
+  whose name is taken asks first, in the explorer's "already there" dialog,
+  whether it goes up under the free name (a vault keeps no earlier version,
+  so nothing is replaced). The folder chooser (Move to, Copy to, an app's
+  chooser) says which folder is a vault, offers only that vault for what is
+  inside it and no vault for anything else, and nobody sees the vault's
+  layout on the storage (`v/`) as folders - the server's listing now marks a
+  vault folder (`e2e_vault`) and a listing inside one (`e2e_vault_root`).
+  What the Go writer writes the browser reads, and the other way round:
+  `testdata/vault-go` and `testdata/vault-web`, frozen fixtures each side opens.
+  The vault's engine is loaded with the first vault opened or made, not
+  with the explorer, so the main chunk stays within workbox's 2 MiB
+  precache limit (`lib/e2evault`, `e2eVaultEngine`; a test walks the static
+  import graph).
+- **Narrow a search on the server** (#207). `type` (`file`, `dir` or a kind:
+  `image`, `spreadsheet`...), `mime`, `modified_after` / `modified_before`,
+  `min_size` / `max_size`, `under` / `not_under`, `owner` and `hidden` are
+  parameters of `/api/files/search`, the explorer's name search, `/api/ai/search`,
+  the MCP `file_search` tool and `filex client search` (one flag each), applied
+  to every candidate before the limit counts it; a value the server cannot read
+  is a `400 bad_filter`. Search answers carry `total`, and every hit its
+  `score` and `kind` ([SEARCH.md → Narrowing a search](./SEARCH.md#narrowing-a-search)).
+- **A new link's answer carries its download command** (#210). `POST /api/files/share`, `POST /api/ai/share` and the MCP `file_share` tool return
+  `download_command`: the `curl` and PowerShell lines that fetch the link,
+  written by the server (`-L` for an S3 redirect, `?zip=wait` for a folder,
+  the PIN as `?pin=` on the creator's own answer). The share dialog shows both
+  lines and no longer builds a command itself; an agent passes them on
+  ([SHARING.md → Command line](./SHARING.md)).
+- **The vault's server half, behind a switch** (#94). With
+  `FILEX_E2E_VAULT=1` (off by default, and `capabilities.e2e_vault` says
+  which) the server serves `/api/files/e2e/vault/*`: a new empty vault made in
+  one request (folder, key file, generation 1's index, undone if a step
+  fails), its state and a paged listing of packs and index files with the
+  server's clock, the write lock (one session at a time, a 60-second lease,
+  each person's idle time of 1 to 10 minutes, a break by the folder's owner or
+  an administrator), packs stored whole and once, index files committed only
+  as the next generation through a temporary file renamed into place and
+  abandoned after 60 seconds, and the lock holder's garbage collection that
+  never deletes the three newest generations. The lock lives in the database
+  (`vault_locks`, migration 00096) with compare-and-set updates, so several
+  filex processes on one database agree; its token is kept only as its
+  SHA-256. Inside a vault folder only that API writes: the explorer, the
+  queue, the agent API and MCP, archives, apps, the document server's save,
+  WebDAV, S3, SFTP, FTPS and NFS are refused there (`403 VAULT_PATH`), and
+  the key file keeps its vault block and its place (`409 VAULT_KEYFILE`). `vault.create`, `vault.lock`,
+  `vault.unlock` and `vault.lock_break` are audited, `vault.generation` and
+  `vault.lock` are realtime frames, and the `filexvlt` magic joins the
+  content sniff. [BACKEND.md](./BACKEND.md#vault-encryption-level-3),
+  [CONFIGURATION.md](./CONFIGURATION.md#end-to-end-encryption-the-vault).
+- **Vaults from the command line** (#94): `filex decrypt` reads a vault (level
+  3) from a copy or straight from the server (`filex decrypt docs://Kasa`, no
+  lock, `--generation N` for an older state still kept), `filex vault mount`
+  serves one from a WebDAV server on 127.0.0.1 that the system mounts (net
+  use, mount_webdav, gio or davfs2; no FUSE) - the write lock at the first
+  change, a commit within 5 seconds of the last write, out after 15 idle
+  minutes - and `filex vault prune` collects and repacks. They work against
+  a server with the vault API on (`FILEX_E2E_VAULT`).
+  [CLI.md](./CLI.md#filex-vault---a-vault-on-a-server).
+- **The vault level's format, written down** (#94). Level 3 of end-to-end
+  encryption - built in this release, behind `FILEX_E2E_VAULT` (above) - has
+  a normative format and protocol,
+  [E2E-VAULT-FORMAT.md](./E2E-VAULT-FORMAT.md): equal packs (4 MiB, or
+  16 MiB chosen at creation) filled with random bytes, an encrypted index of
+  the whole tree padded with Padmé, keys derived from the folder key with
+  HKDF so that every key encrypts exactly one plaintext, one writer at a time
+  under a lock the server keeps (idle after 3 minutes by default, at most 10),
+  garbage collection by the lock holder, and test vectors from an independent
+  reference implementation (`backend/internal/e2edecrypt/testdata/gen_vault_vectors.mjs`,
+  `node:crypto`) that the browser, the server and the command line are held
+  to. The [roadmap](./E2E-ROADMAP.md#3-the-vault-level) records the
+  decisions that replaced its open questions. What the first runs of all
+  three together settled is in it too: the listing's `e2e_vault` /
+  `e2e_vault_root`, an upload whose name is taken asked about first (a vault
+  replaces nothing), `release` with `locked_idle` only from a session that
+  still holds the write lock, and a repack branch of the test vectors
+  (generations 4 to 6) that holds both writers to one repack layout.
+- **`access.changed` on the live socket** (#196). When a grant, a role, a
+  group, a permission rule, the tenant's encryption policy or an encryption
+  approval changes, the server tells the people it can concern -
+  `{"type":"access.changed"}` to a grant's or a request's person, a group's
+  members, `"scope":"all"` to every socket of the tenant the change was made
+  in (never another tenant's), or to every open socket for a change at the
+  platform level - and their explorers ask the answers their menus depend on
+  again. The frame names no path, no person and no reason; a burst is one frame
+  ([REALTIME.md → When access changes](./REALTIME.md#when-access-changes)).
+- **Every listed link says where it stands** (#210). `GET /api/shares` and
+  `GET /api/admin/shares` give each link `state`: `active`, `expired`,
+  `exhausted` (its download, visit or upload cap is used up) or `revoked`.
+- **Recent, Starred, Shared with me and a tag page and sort on the server**
+  (#207): `offset`, `sort`, `total` and `truncated` on each, `opened_at` /
+  `starred_at` on the rows; the explorer says when a view holds more than it
+  loaded and loads the rest on request ([BACKEND.md](./BACKEND.md)).
+- **The server checks an e-mail address and a username while they are typed**
+  (#209). `POST /api/auth/account/check` answers with the save's own rules and
+  words, in the reader's language; the profile and the "Add user" form ask it
+  instead of a copy of the rules in the browser, which had already drifted (it
+  let `a,b@x` and `ada.@x` through). Whether an address is taken is told only
+  where the save would tell it ([BACKEND.md](./BACKEND.md#post-apiauthaccountcheck-)).
+- **`GET /api/public/strings`** (#210): the public pages' sentences
+  (`server.public.*`) in one language, for the JavaScript share and
+  file-request pages ([BACKEND.md](./BACKEND.md)).
+- **`share_link_max_days` in `GET /api/capabilities`** (#210): the longest
+  life a new link made by THIS person may get - the install's ceiling or
+  their permission rules' **Maximum share-link lifetime**, whichever is
+  shorter.
+- **Editing encrypted office documents: the design and a protocol
+  prototype** (#189). Nothing offers it yet. The ONLYOFFICE editor would run
+  in the browser from its own unchanged files, with only its socket.io client
+  replaced by a bridge that answers it the way a Document Server does; what
+  the other editors need goes sealed (a session key under the folder key,
+  AES-256-GCM, each entry bound to its place in the log and chained to the
+  one before) through a filex relay that orders it without reading it, gives
+  the right to write changes only to an editor that has every change before
+  them, and records who joined, who left and what a save holds. Every bridge
+  runs the Document Server's lock rules on the same sequence, so the first
+  request for a paragraph or a range wins everywhere. Who saves is the same
+  answer in every browser: every 10 minutes while changes are unsaved, on
+  Save, and by the last writer to leave; unsaved work waits 30 days; a vault
+  edits alone. filex's half of the prototype is the relay
+  (`backend/internal/e2eoffice`, in memory, no route) and the keys and the
+  log reader (`packages/core/src/lib/e2eoffice.ts`, `e2eofficeSave.ts`). The
+  editor's half - the bridge, the socket.io stand-in and the x2t driver - is
+  AGPL and is not part of filex: it is the start of an app of its own,
+  [filex-office-editor](https://github.com/BRF-Tech/filex-office-editor)
+  (AGPL-3.0-or-later, its own repository and versions), that needs no
+  Document Server; it has no release yet ([E2E-OFFICE.md](./E2E-OFFICE.md)).
+
+**This release has more to it than fits on one page.** The rest of the
+entry - and every earlier release - is in [CHANGELOG.md](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0540---2026-10-08).
+
+- **Documentation** - &lt;https://docs.filex.sh>
+- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
+- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
+- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
+
+[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.54.0) · `ghcr.io/brf-tech/filex:slim-v0.54.0`
 
 ## v0.53.0
 
@@ -3085,91 +3292,13 @@ Upgrade notes that matter: a click beside a name, or a Ctrl/Shift click, no long
 
 [Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.4) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.4`
 
-## v0.41.2
-
-<span class="filex-release-date">15 September 2026</span>
-
-A fix release for four reports on 0.41.1. A press on a file or folder name now opens it on every device - a tap on a phone, a click on a desktop - even while something is selected; the checkbox selects, and a right click or a long press opens the menu (#26). After a move, upload or delete, folder sizes follow within seconds instead of waiting for the next sync, and a move between two storages shows the bytes it has moved rather than a bar frozen at 0% (#27). The SSO button on the sign-in page takes your own label from Admin → Branding, and its default no longer names Keycloak (#28). A black or white branding accent no longer hides that button: its label and edge adapt to the accent and to the light or dark theme (#29).
-
-Upgrade notes that matter: a single click on a name now opens it with a mouse too - select with the checkbox, a click beside the name, or Ctrl/Shift. GET /api/files/ops carries bytes_done and bytes_total while a transfer between storages runs. No migrations.
-
-## What changed
-
-### Changed
-
-- **A press on a file or folder name opens it, on every device** (#26). The
-  first round made a tap open on a phone only while nothing was selected; after
-  a long press every tap toggled the selection, so a name could no longer be
-  opened. The rule is now the one the reporter asked for, on a phone and with a
-  mouse alike: a click or tap on the **name** opens the item, with or without a
-  selection · the **checkbox** selects, as before · a **right click** or a
-  **long press** opens the menu · Ctrl/Shift on a name still add to or extend
-  the selection · a click beside the name (the size or date cells) still
-  selects with a mouse. A habitual double-click on a folder name opens that
-  folder only: the second click is ignored instead of opening whatever the new
-  listing put under the pointer. Measured in a real browser at phone size with
-  touch and at desktop size with a mouse; the double-click guard was proven by
-  removing it, which opened the sub-folder under the pointer.
-
-- **The SSO button's label is yours** (#28). *Admin → Branding → SSO button
-  label* (setting `branding.sso_label`, per tenant, up to 60 characters). Empty
-  keeps the default, which no longer names a provider: it reads **Sign in with
-  SSO** instead of "Sign in with SSO (Keycloak)", whatever the identity provider
-  is ([docs/SSO.md](./SSO.md#3-sign-in)).
-
-### Fixed
-
-- **A black or white accent no longer hides the sign-in button** (#29). The
-  branding accent was painted as the button's fill with the theme's label colour
-  and nothing else, so a black accent drew a dark label on a black button on the
-  dark card, and a white accent a white label on a white button on the light
-  card. The button is now designed per theme: the label is picked from the
-  accent itself, and whenever the fill does not stand out from the card of the
-  theme it is shown in, the button draws an edge in that theme. Measured in a
-  real browser for black and white in both themes: label contrast ≥ 3:1 on the
-  fill, and fill or edge ≥ 1.6:1 against the card. The public share page's
-  accent button follows the same rule.
-
-- **Folder sizes follow a move, an upload or a delete right away** (#27). They
-  were only recomputed at the end of a sync pass, so on a storage that syncs
-  rarely - or manually - a moved file stayed counted in its old folder and
-  missing from the new one for hours. Every change now schedules a recompute of
-  that storage's folder sizes (2 s after a burst, at most 15 s into a long one)
-  and refreshes the open listings, whichever surface made the change - the
-  explorer, WebDAV, S3, SFTP or NFS. Measured on two MinIO storages: both folders
-  show their new size within seconds; with the refresh removed, even an upload's
-  folder stayed at 0.
-
-- **A running move shows how far it has got** (#27). A queued operation counts
-  what you selected, so moving one large file - or one folder - was "0 of 1"
-  until the end: a bar frozen at 0% that then vanished. A transfer between two
-  storages now reports the bytes it has moved and the total it measured, and
-  both progress surfaces (the explorer's operations center and the admin tray)
-  draw that; when there is no honest percentage they show a moving indicator
-  instead of 0%. `GET /api/files/ops` carries `bytes_done` / `bytes_total` while
-  such an operation runs ([docs/BACKEND.md](./BACKEND.md#get-apifilesops-)).
-
-- **A file at a storage's root no longer shows a lone "-" under its name in
-  grid view** - search results and the Recent, Starred and Shared views, where
-  the card names the folder a result lives in. The gallery and the list's
-  Location column already left it empty; the grid printed a dash that read as a
-  stray character. Found while checking this release's screenshots.
-
-[Full changelog entry](https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md#0412---2026-09-15)
-
-- **Documentation** - &lt;https://docs.filex.sh>
-- **Report a bug** - &lt;https://github.com/BRF-Tech/filex/issues>
-- **Full changelog** - &lt;https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md>
-- **Every release** - &lt;https://github.com/BRF-Tech/filex/releases>
-
-[Downloads and checksums](https://github.com/BRF-Tech/filex/releases/tag/v0.41.2) · desktop packages included · `ghcr.io/brf-tech/filex:slim-v0.41.2`
-
 ## Earlier releases
 
-The 114 releases before v0.41.2, in brief. Full notes are on GitHub.
+The 115 releases before v0.41.4, in brief. Full notes are on GitHub.
 
 | Version | Date | What changed |
 |---|---|---|
+| [v0.41.2](https://github.com/BRF-Tech/filex/releases/tag/v0.41.2) | 15 September 2026 | A fix release for four reports on 0.41.1. A press on a file or folder name now opens it on every device - a tap on a phone, a click on a desktop - even while something is selected; the checkbox selects, and a right click or a… |
 | [v0.41.1](https://github.com/BRF-Tech/filex/releases/tag/v0.41.1) | 14 September 2026 | A fix release for three reports and the rough edges left after 0.41.0. Moving a file larger than 8 MiB onto an S3 storage served over plain http (Garage or MinIO on a container network) works again (#27). |
 | [v0.41.0](https://github.com/BRF-Tech/filex/releases/tag/v0.41.0) | 14 September 2026 | The explorer has one face now, on every surface. It is rebuilt around the end-user shell a contributor designed on top of filex (#14): a top bar with one search field and + New, a panel with Home, Shared with me, Recent, Starred… |
 | [v0.39.1](https://github.com/BRF-Tech/filex/releases/tag/v0.39.1) | 12 September 2026 | The quick-look key legend is a small pill again. Pressing Space over a file opens the preview with a legend at the bottom edge; in the web UI it was drawn as a giant rounded shape across the whole window, on top of the file being… |
@@ -3287,4 +3416,4 @@ The 114 releases before v0.41.2, in brief. Full notes are on GitHub.
 
 ---
 
-<small>Last refreshed 2026-10-07 from 134 published releases.</small>
+<small>Last refreshed 2026-10-08 from 135 published releases.</small>

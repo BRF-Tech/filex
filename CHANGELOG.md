@@ -702,7 +702,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than the caller's own draft) is answered `404` by every app door
   ([APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md)).
 - **Encrypted folders: only the owner or an administrator retires old key
-  files** (#204). When a password or recovery slot changes, the earlier
+  files** (#204,
+  [GHSA-25hj-4g7f-8c2c](https://github.com/BRF-Tech/filex/security/advisories/GHSA-25hj-4g7f-8c2c)).
+  When a password or recovery slot changes, the earlier
   versions of the folder's key file - and of a single encrypted file's
   header - are deleted only if the folder's (or file's) owner or an
   administrator made the change; anyone else's change keeps them, and the
@@ -726,13 +728,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never from the joining connection
   ([E2E-OFFICE.md](docs/E2E-OFFICE.md#what-the-server-sees)).
 - **The ONLYOFFICE save callback now trusts only the signed payload** (#202,
+  [GHSA-5896-rqg6-cqjr](https://github.com/BRF-Tech/filex/security/advisories/GHSA-5896-rqg6-cqjr),
   [ONLYOFFICE.md → What a save callback is trusted for](docs/ONLYOFFICE.md#what-a-save-callback-is-trusted-for)).
   Document keys handed to the editor are longer now (`<32 hex>-<32 hex>`);
   sessions opened before the upgrade still save.
 - An answer for an open editing session (*Write mine*, *Keep the outside
   version*) is taken only from one of that session's own editors, and audited
   as `file.office_session_answered` (#202).
-- **Share e-mails are written by the server, from the link** (#203).
+- **Share e-mails are written by the server, from the link** (#203,
+  [GHSA-w8mc-47jv-jp74](https://github.com/BRF-Tech/filex/security/advisories/GHSA-w8mc-47jv-jp74)).
   `POST /api/files/permissions/share-mail` takes the link (`share`, its
   token), the addresses and the language; the address, the days left, the
   item's name, kind and size and a file request's limits come from the link
