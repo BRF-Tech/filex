@@ -8,9 +8,12 @@
  * place holds the folder's other keys: its password and, where the
  * installation has one, the operator's escrow slot.
  *
- * Levels are a list the dialog walks, not three hard-coded buttons: level 3
- * (the vault) is designed and not built, so it is not in the list and not
- * shown — a choice that does not work is not offered.
+ * Levels are a list the dialog walks, not three hard-coded buttons.
+ *
+ * wiring:e2 vault — a vault (level 3) shows its level and nothing to change
+ * it: a vault is made new and stays one (no move to another level, no
+ * re-key - its folder key derives every key in it, so a new one is a new
+ * vault). Its password and escrow slot change as at levels 1 and 2.
  *
  * Collects the choice; every action is the parent's (FileExplorer).
  */
@@ -55,11 +58,17 @@ watch(
 );
 
 const levelLabel = computed(() =>
-  props.level === 'content' ? t('e2e.level.content') : t('e2e.level.names'),
+  props.level === 'content' ? t('e2e.level.content') : props.level === 'vault' ? t('e2e.level.vault') : t('e2e.level.names'),
 );
 const levelHint = computed(() =>
-  props.level === 'content' ? t('e2e.level.content_hint') : t('e2e.level.names_hint'),
+  props.level === 'content'
+    ? t('e2e.level.content_hint')
+    : props.level === 'vault'
+      ? t('e2e.level.vault_hint')
+      : t('e2e.level.names_hint'),
 );
+/** wiring:e2 vault — nothing about a vault's level or keys is changed here. */
+const isVault = computed(() => props.level === 'vault');
 
 function raise() {
   if (!ack.value || props.busy) return;
@@ -77,7 +86,10 @@ function raise() {
         </p>
         <p class="fe-e2e-settings__hint">{{ levelHint }}</p>
 
-        <template v-if="canRaise">
+        <p v-if="isVault" class="fe-e2e-settings__hint" data-testid="e2e-settings-vault-fixed">
+          {{ t('e2e.vault.level_fixed') }}
+        </p>
+        <template v-if="canRaise && !isVault">
           <button
             v-if="!confirming"
             type="button"
@@ -113,7 +125,7 @@ function raise() {
           </div>
         </template>
         <button
-          v-if="level !== 'content' && plainNamed > 0"
+          v-if="level !== 'content' && !isVault && plainNamed > 0"
           type="button"
           class="fe-btn"
           data-testid="e2e-settings-fix-names"

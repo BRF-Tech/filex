@@ -2,6 +2,19 @@
  * surucu:d1 — the filter row's model, kept out of the components so the
  * predicate has one definition and can be tested without a DOM.
  *
+ * ⚠⚠ 0.54 (task #207): what is the SERVER's here and what is not.
+ *   - A row's KIND (the Type chip) is the server's `kind` field
+ *     (internal/nodefilter KindOf): this file used to keep its own extension
+ *     and mime tables, a second rule beside the server's.
+ *   - The NAME box is answered by the server's name rule (`lib/nameFilter`,
+ *     `POST /api/files/search/match`); `applyFilters` does not match names.
+ *   - Over a SEARCH, every choice here travels to the server as a parameter
+ *     (`lib/advSearch` advFilterParams) and is applied before the server cuts
+ *     its page; the browser does not narrow search hits any more.
+ *   What stays here is the narrowing of a FOLDER listing the browser already
+ *   holds in full, by numbers the rows carry (date, size, owner) and the
+ *   server's `kind`.
+ *
  * ⚠ EVERY filter here answers from a field the listing row ALREADY carries
  * (`type`, `extension`, `mime_type`, `size`, `last_modified`). That is not a
  * shortcut, it is the constraint: `GET /api/files/manager?action=index` reads
@@ -147,15 +160,16 @@ export const EMPTY_FILTERS: DriveFilters = {
  *  ⚠ `toLowerCase()` alone maps `İ` to `i` + a combining dot, which then
  *  matches nothing the user typed; stripping the marks is what makes the two
  *  sides comparable.
- *  ⚠ And the four Latin i's are one letter, as they are to the server's search
- *  and to tags (internal/namefold, `tagKey`): `ı` has no mark to strip, so
- *  without the last step "ışık" did not answer to "IŞIK" — nor "IŞIK" to
- *  "ışık", since `toLowerCase` lowers `I` to `i`.
+ *  ⚠ And the four Latin i's are one letter (internal/namefold): `ı` has no
+ *  mark to strip, so without the last step "ışık" did not answer to "IŞIK".
  *
- *  Exported (task #168) as the one rule for comparing what a person typed
- *  with a name or a label: the admin panel's search (lib/panelSearch) folds
- *  with it too, so "kullanici" finds "Kullanıcılar" and "guvenlik" finds
- *  "Güvenlik" exactly as a file name is found. */
+ *  ⚠ This is NOT how a file name is searched - the search keeps accents
+ *  ("musteri" does not find "müşteri"). It is the LABEL rule: the admin
+ *  panel's search (lib/panelSearch) folds its own page and setting labels
+ *  with it, the same rule the server's panel search applies (namefold.Loose).
+ *  A file name the person types into "Filter in this folder" is matched by the
+ *  server (`lib/nameFilter`); this rule answers only a name the server must
+ *  not see (decrypted in this tab) - see `nameMatches`. */
 export function foldText(s: string): string {
   return s
     .normalize('NFD')
@@ -219,26 +233,24 @@ const TYPE_FAMILIES: Record<Exclude<TypeFilter, 'any'>, IconFamily[]> = {
   code: ['code'],
 };
 
-/** MIME fallback — a file with no extension still has a `mime_type` from the
- *  backend sniffer, and "IMG_0042" with no suffix is a real thing people have. */
-const MIME_PREFIXES: Partial<Record<Exclude<TypeFilter, 'any'>, string[]>> = {
-  image: ['image/'],
-  video: ['video/'],
-  audio: ['audio/'],
-  pdf: ['application/pdf'],
-  document: ['text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessing'],
-  spreadsheet: ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheet'],
-  presentation: ['application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentation'],
-  archive: ['application/zip', 'application/x-tar', 'application/gzip', 'application/x-7z'],
-};
-
+/**
+ * The Type chip, answered by the server's `kind` on the row (internal/nodefilter
+ * KindOf: extension, then sniffed mime). "Document" takes plain text too, as
+ * the server's `type=document` does.
+ *
+ * ⚠ A row WITHOUT `kind` is one the server could not name: decrypted in this
+ * tab (its real name is not on the server), or from a server before 0.54. Only
+ * then the icon family answers - the glyph's own taxonomy, the e2e exception.
+ */
 function matchesType(n: FileNode, t: TypeFilter): boolean {
   if (t === 'any') return true;
   if (t === 'folder') return n.type === 'dir';
   if (n.type === 'dir') return false;
-  if (TYPE_FAMILIES[t].includes(iconFamilyFor(n))) return true;
-  const mime = (n.mime_type || '').toLowerCase();
-  return !!mime && (MIME_PREFIXES[t] ?? []).some((p) => mime.startsWith(p));
+  const kind = (n as Record<string, unknown>).kind;
+  if (typeof kind === 'string' && kind !== '') {
+    return kind === t || (t === 'document' && kind === 'text');
+  }
+  return TYPE_FAMILIES[t].includes(iconFamilyFor(n));
 }
 
 /** `now` is a parameter so a test can pin the clock instead of sleeping. */
@@ -265,63 +277,102 @@ function parseAnchor(raw: string | undefined): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-function matchesModified(n: FileNode, g: DriveFilters, now: number): boolean {
+/**
+ * The modified choice as a window of epoch milliseconds, in the viewer's own
+ * clock and calendar ("today" is their midnight). Null = no window (any, or
+ * "around" with no anchor yet). ONE definition: the folder chips compare a
+ * row's date with it, and a search sends it to the server as
+ * `modified_after` / `modified_before` (lib/advSearch advFilterParams).
+ */
+export function modifiedWindow(g: DriveFilters, now: number = Date.now()): { after?: number; before?: number } | null {
   const f = g.modified;
-  if (f === 'any') return true;
-  const ms = typeof n.last_modified === 'number' ? n.last_modified : 0;
-  // No timestamp = no answer. Dropping the row would hide files whose driver
-  // gave us nothing; keeping it would put them in "Today". Hiding is the
-  // honest one: the row does not satisfy "modified today", it is unknown.
-  if (!ms) return false;
+  if (f === 'any') return null;
   if (f === 'around') {
     const anchor = parseAnchor(g.aroundDate);
     // No anchor typed yet: "around nothing" is not a window, so the choice is
     // inert rather than empty. Narrowing to zero rows the moment the user
     // picks the mode — before they have picked a date — reads as a broken
     // search, not as an unfinished one.
-    if (anchor === null) return true;
-    return Math.abs(ms - anchor) <= AROUND_MS[g.aroundSpan ?? 'd1'];
+    if (anchor === null) return null;
+    const span = AROUND_MS[g.aroundSpan ?? 'd1'];
+    return { after: anchor - span, before: anchor + span };
   }
   if (f === 'year') {
-    return new Date(ms).getFullYear() === new Date(now).getFullYear();
+    const y = new Date(now).getFullYear();
+    return { after: new Date(y, 0, 1).getTime(), before: new Date(y + 1, 0, 1).getTime() - 1 };
   }
   if (f === 'today') {
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
-    return ms >= start.getTime();
+    return { after: start.getTime() };
   }
   const days = f === '7d' ? 7 : 30;
-  return ms >= now - days * 86_400_000;
+  return { after: now - days * 86_400_000 };
+}
+
+function matchesModified(n: FileNode, g: DriveFilters, now: number): boolean {
+  const w = modifiedWindow(g, now);
+  if (!w) return true;
+  const ms = typeof n.last_modified === 'number' ? n.last_modified : 0;
+  // No timestamp = no answer. Dropping the row would hide files whose driver
+  // gave us nothing; keeping it would put them in "Today". Hiding is the
+  // honest one: the row does not satisfy "modified today", it is unknown.
+  if (!ms) return false;
+  if (w.after !== undefined && ms < w.after) return false;
+  if (w.before !== undefined && ms > w.before) return false;
+  return true;
 }
 
 const MB = 1024 * 1024;
 
+/**
+ * The size choice as inclusive byte bounds; null = any size. ONE definition:
+ * the folder chips compare a row with it, a search sends it as `min_size` /
+ * `max_size`. A custom range with both ends open is "any size" by another
+ * name and narrows nothing.
+ */
+export function sizeBounds(g: DriveFilters): { min?: number; max?: number } | null {
+  switch (g.size) {
+    case 'any':
+      return null;
+    case 'lt1':
+      return { max: MB - 1 };
+    case '1to10':
+      return { min: MB, max: 10 * MB - 1 };
+    case '10to100':
+      return { min: 10 * MB, max: 100 * MB - 1 };
+    case 'gt100':
+      return { min: 100 * MB };
+    case 'range': {
+      const lo = typeof g.sizeMin === 'number' ? g.sizeMin : undefined;
+      const hi = typeof g.sizeMax === 'number' ? g.sizeMax : undefined;
+      return { min: lo, max: hi };
+    }
+  }
+  return null;
+}
+
 function matchesSize(n: FileNode, g: DriveFilters): boolean {
-  const f = g.size;
-  if (f === 'any') return true;
+  const b = sizeBounds(g);
+  if (!b) return true;
   // ⚠ Folders drop out of every size choice rather than passing through. A
   // directory row's `size` is 0 from the projector, so "under 1 MB" would
   // otherwise list every folder in the drive — an answer that looks like a
-  // measurement and is not one.
+  // measurement and is not one. (The server's size bounds say the same.)
   if (n.type === 'dir') return false;
   const s = typeof n.size === 'number' ? n.size : 0;
-  if (f === 'range') {
-    // Either end may be left open. Both open = "any size" wearing another
-    // name, which is exactly what an untouched custom range is.
-    const lo = typeof g.sizeMin === 'number' ? g.sizeMin : null;
-    const hi = typeof g.sizeMax === 'number' ? g.sizeMax : null;
-    if (lo !== null && s < lo) return false;
-    if (hi !== null && s > hi) return false;
-    return true;
-  }
-  if (f === 'lt1') return s < MB;
-  if (f === '1to10') return s >= MB && s < 10 * MB;
-  if (f === '10to100') return s >= 10 * MB && s < 100 * MB;
-  return s >= 100 * MB;
+  if (b.min !== undefined && s < b.min) return false;
+  if (b.max !== undefined && s > b.max) return false;
+  return true;
 }
 
 /**
  * gorunum:v1 — the name input's predicate, over a bare STRING.
+ *
+ * ⚠⚠ 0.54: the box asks the server (`lib/nameFilter`); this local rule
+ * answers only the names the server must not be sent - decrypted in this tab
+ * (an encrypted-names folder, a vault) - and stands in while a server older
+ * than 0.54 has no answer. It is not the search's rule (accents, separators).
  *
  * ⚠ Exported over a string rather than over a `FileNode`, because the name box
  * now narrows things that are not nodes: `surucu:d1-scope` puts the same box on
@@ -334,13 +385,6 @@ function matchesSize(n: FileNode, g: DriveFilters): boolean {
 export function nameMatches(name: string, needle: string): boolean {
   if (!needle) return true;
   return foldText(name || '').includes(foldText(needle));
-}
-
-/** The same predicate over a listing row. Folders take part like any other row:
- *  hiding the folder whose name you just typed would be the one result you
- *  meant. */
-function matchesName(n: FileNode, needle: string): boolean {
-  return nameMatches(n.basename || '', needle);
 }
 
 /**
@@ -463,21 +507,27 @@ function matchesPeople(n: FileNode, f: DriveFilters): boolean {
   return Number.isFinite(id) && ownerIdOf(n) === id;
 }
 
+/**
+ * The chips' narrowing of rows the browser holds in full (a folder listing).
+ *
+ * ⚠ The NAME box is not applied here (0.54): it is the server's rule, asked by
+ * `lib/nameFilter` over the rows this returns. `filtersActive` still counts it,
+ * so the empty state and the "clear filters" escape still know it is on.
+ */
 export function applyFilters(
   files: FileNode[],
   f: DriveFilters,
   now: number = Date.now(),
 ): FileNode[] {
-  // No active filter → the SAME array reference, so an unfiltered explorer
-  // renders exactly what it rendered before this file existed.
-  if (!filtersActive(f)) return files;
-  const needle = nameNeedle(f);
+  // No active filter other than the name → the SAME array reference, so an
+  // unfiltered explorer renders exactly what it rendered before this file
+  // existed.
+  if (!filtersActive({ ...f, name: '' })) return files;
   return files.filter(
     (n) =>
       matchesType(n, f.type) &&
       matchesModified(n, f, now) &&
       matchesSize(n, f) &&
-      matchesName(n, needle) &&
       matchesPath(n, f) &&
       matchesPeople(n, f),
   );

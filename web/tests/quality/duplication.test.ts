@@ -399,14 +399,6 @@ const KNOWN_DUPLICATION: Debt[] = [
     maxTokens: 200,
   },
   {
-    files: ['web/src/views/Protection.vue'],
-    reason:
-      'Two settings-save handlers in one view repeat the same block: clear the error ' +
-      'ref, await, read the response back into local refs, toast, extractError into ' +
-      'the error ref, clear the saving flag in finally.',
-    maxTokens: 175,
-  },
-  {
     files: ['desktop/src/dragout.ts'],
     reason:
       'Listing a remote directory through the manager API — build the URL, set ' +

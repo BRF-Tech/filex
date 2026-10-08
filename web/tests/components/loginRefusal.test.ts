@@ -2,6 +2,11 @@
 // holds — read from the server's 401 / 429 bodies
 // (backend/internal/api/handlers/auth.go, loginFailed / writeLocked).
 //
+// ⚠⚠ In the SERVER's words (0.54 audit A8): the tries left are its `message`,
+// a lock is its `countdown` with `{wait}` filled by the form's clock. The
+// form kept its own copy of both sentences (login.errRemaining,
+// login.errLocked*) before; RED on that code, which printed its own words.
+//
 // ⚠ The countdown is the client's clock, so it is driven here with fake
 // timers; it ends by itself and gives the button back without a request.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,13 +57,13 @@ const err = (status: number, data: Record<string, unknown>, headers: Record<stri
 describe('readLoginRefusal', () => {
   it('reads the tries left from a 401', () => {
     expect(readLoginRefusal(err(401, { error: 'x', message: 'm', remaining: 3, limit: 5, scope: 'account' }))).toEqual({
-      status: 401, locked: false, scope: 'account', remaining: 3, limit: 5, totp: false,
+      status: 401, locked: false, scope: 'account', remaining: 3, limit: 5, totp: false, message: 'm',
     });
   });
 
   it('reads the wait from a 429, from the body first and the header second', () => {
-    expect(readLoginRefusal(err(429, { locked: true, scope: 'ip', retry_after: 90 }))).toMatchObject({
-      locked: true, scope: 'ip', retryAfter: 90,
+    expect(readLoginRefusal(err(429, { locked: true, scope: 'ip', retry_after: 90, countdown: 'Wait {wait}.' }))).toMatchObject({
+      locked: true, scope: 'ip', retryAfter: 90, countdown: 'Wait {wait}.',
     });
     expect(readLoginRefusal(err(429, { locked: true }, { 'retry-after': '45' }))).toMatchObject({ retryAfter: 45 });
   });
@@ -106,18 +111,29 @@ describe('the sign-in page after a refusal', () => {
     answer = null;
   });
 
-  it('says how many tries are left before a lock', async () => {
-    answer = { status: 401, data: { error: 'invalid credentials', message: 'server words', remaining: 3, limit: 5, scope: 'account' } };
+  it("says how many tries are left before a lock, in the server's words", async () => {
+    const words = 'Wrong credentials. 3 attempts left; the account is locked at failed attempt 5.';
+    answer = { status: 401, data: { error: 'invalid credentials', message: words, remaining: 3, limit: 5, scope: 'account' } };
     const w = await mountLogin();
     await attempt(w);
-    expect(w.get('[role="alert"]').text()).toBe('Email, username or password is wrong. Attempts left before a lock: 3.');
+    expect(w.get('[role="alert"]').text()).toBe(words);
   });
 
   it('counts a lock down, holds the button, and gives it back at zero', async () => {
-    answer = { status: 429, data: { error: 'too many attempts', message: 'server words', locked: true, scope: 'account', retry_after: 5 } };
+    answer = {
+      status: 429,
+      data: {
+        error: 'too many attempts',
+        message: 'Too many failed attempts: this account is locked. Try again in 5 seconds.',
+        countdown: 'Too many failed attempts: this account is locked. Try again in {wait}.',
+        locked: true,
+        scope: 'account',
+        retry_after: 5,
+      },
+    };
     const w = await mountLogin();
     await attempt(w);
-    expect(w.get('[role="alert"]').text()).toBe('Too many wrong attempts for this account. Try again in 0:05.');
+    expect(w.get('[role="alert"]').text()).toBe('Too many failed attempts: this account is locked. Try again in 0:05.');
     const button = () => w.get('button[type="submit"]');
     expect(button().attributes('disabled')).toBeDefined();
     expect(button().text()).toContain('Try again in 0:05');
@@ -134,17 +150,23 @@ describe('the sign-in page after a refusal', () => {
   });
 
   it('names the address, not the account, when the address is locked', async () => {
-    answer = { status: 429, data: { locked: true, scope: 'ip', retry_after: 65 } };
+    answer = {
+      status: 429,
+      data: { locked: true, scope: 'ip', retry_after: 65, countdown: 'Too many failed attempts from this address. Try again in {wait}.' },
+    };
     const w = await mountLogin();
     await attempt(w);
-    expect(w.get('[role="alert"]').text()).toBe('Too many wrong attempts from this address. Try again in 1:05.');
+    expect(w.get('[role="alert"]').text()).toBe('Too many failed attempts from this address. Try again in 1:05.');
   });
 
-  it('speaks Turkish', async () => {
-    answer = { status: 429, data: { locked: true, scope: 'account', retry_after: 30 } };
+  it('speaks the language the server wrote in', async () => {
+    answer = {
+      status: 429,
+      data: { locked: true, scope: 'account', retry_after: 30, countdown: 'Çok fazla hatalı deneme: bu hesap kilitlendi. {wait} sonra yeniden deneyin.' },
+    };
     const w = await mountLogin('tr');
     await attempt(w);
-    expect(w.get('[role="alert"]').text()).toBe('Bu hesap için çok fazla hatalı deneme yapıldı. 0:30 sonra tekrar deneyin.');
+    expect(w.get('[role="alert"]').text()).toBe('Çok fazla hatalı deneme: bu hesap kilitlendi. 0:30 sonra yeniden deneyin.');
   });
 
   it('falls back to the server sentence when it gave no count', async () => {

@@ -90,6 +90,26 @@ import {
  * header version 0x02 (lib/e2estream.ts). `decryptFile` and `rewrapFileKey`
  * below read both versions; the header up to offset 69 is the same. */
 import { E2E_FILE_VERSION_STREAM, decryptStreamFolderFileBytes } from './e2estream';
+/* wiring:e2 vault - level 3 (docs/E2E-VAULT-FORMAT.md). A vault's key file is
+ * the marker below with one required feature, `vault`; its FMK is imported as
+ * an HKDF key and never encrypts anything itself (lib/e2evault).
+ *
+ * ⚠ Only the format's few numbers are imported here (e2evault/consts): this
+ * file is in the explorer's main chunk, and the rest of lib/e2evault is
+ * loaded when a vault is unlocked or made (`loadVaultKeys`, `createVault`). */
+import {
+  VAULT_DEFAULT_PACK_LOG2,
+  VAULT_FEATURE,
+  VAULT_FORMAT,
+  VAULT_ID_LEN,
+  VAULT_WRITER_PACK_LOG2,
+  validReaderPackLog2,
+} from './e2evault/consts';
+
+/** wiring:e2 vault - the vault's key schedule, loaded on first use. */
+function loadVaultKeys(): Promise<typeof import('./e2evault/keys')> {
+  return import('./e2evault/keys');
+}
 
 export const E2E_MARKER_NAME = '.filex-e2e.json';
 export const E2E_MAGIC = 'filexe2e';
@@ -100,7 +120,7 @@ export const E2E_MARKER_VERSION = 2;
 /** Marker schema version of a folder that carries required features (`req`). */
 export const E2E_MARKER_VERSION_FEATURES = 3;
 /** Required features this build understands. Anything else in `req` → refuse. */
-export const E2E_KNOWN_FEATURES: readonly string[] = ['names', 'rekey', 'conv'];
+export const E2E_KNOWN_FEATURES: readonly string[] = ['names', 'rekey', 'conv', VAULT_FEATURE];
 export const E2E_DEFAULT_ITERATIONS = 600_000;
 export const E2E_MIN_ITERATIONS = 600_000;
 /** The most a marker may ask for (a hostile `iter` would hang the tab). */
@@ -201,8 +221,23 @@ export interface E2eConvSlot {
   cleanup?: { versions: boolean; trash: boolean };
 }
 
+/**
+ * The vault block of a level-3 key file (docs/E2E-VAULT-FORMAT.md → "The key
+ * file"). Fixed when the vault is made; nothing rewrites it.
+ */
+export interface E2eVaultSlot {
+  /** Format version of packs and index: 1. */
+  v: number;
+  /** 16 random bytes, base64url without padding (22 characters). */
+  id: string;
+  /** The pack size as a power of two: writers make 22 (4 MiB) or 24 (16 MiB). */
+  pack: number;
+}
+
 export interface E2eMarker {
   v: number;
+  /** v3 + req ['vault']: the vault (level 3). */
+  vault?: E2eVaultSlot;
   /** v3 only: features a client must understand to open this folder. */
   req?: string[];
   /** v3 + req 'rekey': a re-key in progress. */
@@ -388,6 +423,16 @@ async function importFmk(raw: Uint8Array): Promise<CryptoKey> {
     'encrypt',
     'decrypt',
   ]);
+}
+
+/**
+ * wiring:e2 vault - the FMK as the marker's level needs it: for a vault, a
+ * non-extractable HKDF key every vault key is derived from (it never
+ * encrypts anything itself); for levels 1 and 2, the AES-GCM key that wraps
+ * the file keys. The caller zeroes `raw`.
+ */
+async function importFmkFor(marker: E2eMarker, raw: Uint8Array): Promise<CryptoKey> {
+  return markerIsVault(marker) ? (await loadVaultKeys()).importVaultFmk(raw) : importFmk(raw);
 }
 
 // ---------------------------------------------------------------------
@@ -630,6 +675,72 @@ export async function createEncryptedFolder(
   return { marker, fmk, recoveryKey, names: sealed.key };
 }
 
+/* wiring:e2 vault ------------------------------------------------------ */
+
+export interface CreateVaultOptions {
+  iterations?: number;
+  /** Base64 SPKI of the installation escrow key, when escrow is enabled. */
+  escrowPublicKey?: string | null;
+  /** The pack size, log2: 22 (4 MiB, the default) or 24 (16 MiB). */
+  packLog2?: number;
+}
+
+export interface CreatedVault {
+  /** The key file: v3, req ["vault"], the same slots as levels 1 and 2. */
+  marker: E2eMarker;
+  /** The FMK as a non-extractable HKDF key (lib/e2evault/keys). */
+  fmk: CryptoKey;
+  /** Show this ONCE. filex never stores it and can never show it again. */
+  recoveryKey: string;
+  /** The 16 raw bytes of `vault.id`. */
+  vaultId: Uint8Array;
+  /** Generation 1: the empty tree in a 64 KiB index file. */
+  index: Uint8Array<ArrayBuffer>;
+}
+
+/**
+ * Make a new, empty vault (docs/E2E-VAULT-FORMAT.md → "The key file",
+ * "Generations"): a random FMK wrapped under the password, a recovery key
+ * and - when the installation has one - an escrow slot, exactly as levels 1
+ * and 2; a random vault id; and generation 1, sealed. Nothing is sent: the
+ * caller hands both to `POST /api/files/e2e/vault/create`.
+ */
+export async function createVault(password: string, opts: CreateVaultOptions = {}): Promise<CreatedVault> {
+  const packLog2 = opts.packLog2 ?? VAULT_DEFAULT_PACK_LOG2;
+  if (!VAULT_WRITER_PACK_LOG2.includes(packLog2)) throw new Error(`e2e: a vault's packs are 2^22 or 2^24 bytes, not 2^${packLog2}`);
+  // The vault's code first (loaded on first use, see the imports): no key
+  // material waits on a download.
+  const [{ importVaultFmk }, { cryptoRandom, sealIndexFile }, { encodeIndexBody }] = await Promise.all([
+    loadVaultKeys(),
+    import('./e2evault/writer'),
+    import('./e2evault/vindex'),
+  ]);
+  const iter = Math.max(E2E_MIN_ITERATIONS, opts.iterations ?? E2E_DEFAULT_ITERATIONS);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const kek = await deriveKek(password, salt, iter);
+  const rawFmk = crypto.getRandomValues(new Uint8Array(FMK_LEN));
+  const recoveryKey = generateRecoveryKey();
+  const vaultId = crypto.getRandomValues(new Uint8Array(VAULT_ID_LEN));
+  const marker: E2eMarker = {
+    v: E2E_MARKER_VERSION_FEATURES,
+    req: [VAULT_FEATURE],
+    salt: bytesToB64(salt),
+    iter,
+    verify: await gcmSeal(kek, new TextEncoder().encode(VERIFY_PLAINTEXT)),
+    fmk: 'wrapped',
+    fmk_pw: await gcmSeal(kek, rawFmk),
+    rk: await sealRecoverySlot(rawFmk, recoveryKey),
+  };
+  if (opts.escrowPublicKey) marker.esc = await sealEscrowSlot(rawFmk, opts.escrowPublicKey);
+  marker.vault = { v: VAULT_FORMAT, id: b64urlEncode(vaultId), pack: packLog2 };
+  const fmk = await importVaultFmk(rawFmk);
+  rawFmk.fill(0);
+  const index = await sealIndexFile(fmk, vaultId, 1, encodeIndexBody(new Map(), []).body, cryptoRandom);
+  return { marker, fmk, recoveryKey, vaultId, index };
+}
+
+/* /wiring:e2 vault ----------------------------------------------------- */
+
 /**
  * Give an existing v1 folder recovery keys, in place and without rewriting a
  * single file.
@@ -838,6 +949,20 @@ export function parseMarkerDetailed(text: string): ParsedMarker | null {
   if (m.v === E2E_MARKER_VERSION_FEATURES) {
     if (!Array.isArray(m.req) || m.req.some((f) => typeof f !== 'string')) return null;
     for (const f of m.req) if (!E2E_KNOWN_FEATURES.includes(f)) unsupported.push(f);
+    /* wiring:e2 vault - docs/E2E-VAULT-FORMAT.md → "The key file": req is
+     * exactly ["vault"], the FMK is wrapped, no slot of another feature, and
+     * a vault block this build reads. A higher `vault.v` is a vault a newer
+     * filex made: refused by name, never read. */
+    if (m.req.includes(VAULT_FEATURE)) {
+      if (m.req.length !== 1) return null;
+      if (m.fmk !== 'wrapped' || typeof m.fmk_pw !== 'string') return null;
+      if (m.names !== undefined || m.rekey !== undefined || m.conv !== undefined) return null;
+      const vs = vaultSlotProblem(m.vault);
+      if (vs === 'malformed') return null;
+      if (vs === 'newer') unsupported.push(`${VAULT_FEATURE} v${(m.vault as E2eVaultSlot).v}`);
+    } else if (m.vault !== undefined) {
+      return null;
+    }
     if (m.req.includes('names') && !validNamesSlot(m.names)) return null;
     if (m.req.includes('rekey')) {
       if (m.fmk !== 'wrapped' || !m.rekey || typeof m.rekey.from !== 'string') return null;
@@ -849,11 +974,45 @@ export function parseMarkerDetailed(text: string): ParsedMarker | null {
     } else if (m.conv !== undefined) {
       return null;
     }
-  } else if (m.req !== undefined || m.names !== undefined || m.rekey !== undefined || m.conv !== undefined) {
+  } else if (m.req !== undefined || m.names !== undefined || m.rekey !== undefined || m.conv !== undefined || m.vault !== undefined) {
     // A v1/v2 marker carrying v3 fields is not something any filex wrote.
     return null;
   }
   return { marker: m, unsupported };
+}
+
+/**
+ * wiring:e2 vault - what is wrong with a key file's `vault` block, if
+ * anything: 'malformed' (refuse the key file), 'newer' (a `vault.v` above
+ * this build's: a newer filex is needed), or null.
+ */
+function vaultSlotProblem(v: unknown): 'malformed' | 'newer' | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return 'malformed';
+  const s = v as Partial<E2eVaultSlot>;
+  if (typeof s.v !== 'number' || !Number.isInteger(s.v) || s.v < 1) return 'malformed';
+  if (typeof s.id !== 'string' || b64urlDecode(s.id)?.length !== VAULT_ID_LEN) return 'malformed';
+  if (!validReaderPackLog2(s.pack)) return 'malformed';
+  if (s.v > VAULT_FORMAT) return 'newer';
+  return null;
+}
+
+/** wiring:e2 vault - true for a vault's key file (level 3). */
+export function markerIsVault(m: E2eMarker | null | undefined): boolean {
+  return (
+    !!m &&
+    m.v === E2E_MARKER_VERSION_FEATURES &&
+    Array.isArray(m.req) &&
+    m.req.length === 1 &&
+    m.req[0] === VAULT_FEATURE &&
+    !!m.vault
+  );
+}
+
+/** wiring:e2 vault - the 16 raw bytes of a vault's id, or null. */
+export function vaultIdOf(m: E2eMarker | null | undefined): Uint8Array | null {
+  if (!markerIsVault(m)) return null;
+  const id = b64urlDecode(m!.vault!.id);
+  return id && id.length === VAULT_ID_LEN ? id : null;
 }
 
 function validNamesSlot(n: E2eNamesSlot | undefined): boolean {
@@ -960,19 +1119,28 @@ export function finishNames(marker: E2eMarker): E2eMarker {
  *               recovery upgrade, which makes it v2).
  *   'names'     level 2: contents and names encrypted (v3, req 'names').
  *   'pending'   a move from 1 to 2 started and did not finish.
- *
- * Level 3, the vault, is designed (docs/E2E-ROADMAP.md) and not built; no
- * marker carries it yet, and nothing offers it.
+ *   'vault'     level 3: the vault (v3, req exactly ['vault'];
+ *               docs/E2E-VAULT-FORMAT.md). Only ever a new, empty folder,
+ *               offered where the server has vaults (FILEX_E2E_VAULT,
+ *               `capabilities.e2e_vault`); never converted to or from.
  */
-export type EncryptionLevel = 'content' | 'names' | 'pending';
+export type EncryptionLevel = 'content' | 'names' | 'pending' | 'vault';
 
-/** The levels a folder can be GIVEN today, in order (level 1 first — the
- *  default). The vault joins this list when it works, not before. */
-export type ChoosableLevel = 'content' | 'names';
-export const E2E_CHOOSABLE_LEVELS: readonly ChoosableLevel[] = ['content', 'names'];
+/** The levels a folder can be GIVEN, in order (level 1 first — the default).
+ *  wiring:e2 vault - the vault (level 3) is offered only where the server
+ *  has its API (`capabilities.e2e_vault`), and only to a NEW folder: an
+ *  existing one is never converted (`choosableLevels`). */
+export type ChoosableLevel = 'content' | 'names' | 'vault';
+export const E2E_CHOOSABLE_LEVELS: readonly ChoosableLevel[] = ['content', 'names', 'vault'];
 export const E2E_DEFAULT_LEVEL: ChoosableLevel = 'content';
 
+/** The levels to offer: the vault only for a new folder on a server that has it. */
+export function choosableLevels(opts: { vault?: boolean } = {}): ChoosableLevel[] {
+  return E2E_CHOOSABLE_LEVELS.filter((l) => l !== 'vault' || opts.vault === true);
+}
+
 export function encryptionLevel(m: E2eMarker | null): EncryptionLevel {
+  if (markerIsVault(m)) return 'vault';
   if (m && markerHasNames(m)) return m.names!.pending ? 'pending' : 'names';
   return 'content';
 }
@@ -1064,7 +1232,7 @@ async function fmkFromKek(marker: E2eMarker, kek: CryptoKey): Promise<CryptoKey 
   if (!marker.fmk_pw) return null;
   const raw = await gcmOpen(kek, marker.fmk_pw);
   if (!raw || raw.length !== FMK_LEN) return null;
-  const fmk = await importFmk(raw);
+  const fmk = await importFmkFor(marker, raw);
   raw.fill(0);
   return fmk;
 }
@@ -1121,7 +1289,7 @@ export async function unlockWithRecoveryKey(
   raw.fill(0);
   const fmkRaw = await gcmOpen(rkek, marker.rk.blob);
   if (!fmkRaw || fmkRaw.length !== FMK_LEN) return null;
-  const fmk = await importFmk(fmkRaw);
+  const fmk = await importFmkFor(marker, fmkRaw);
   fmkRaw.fill(0);
   return fmk;
 }
@@ -1151,7 +1319,7 @@ export async function unlockWithEscrowKey(
     return null; // wrong escrow key, or a slot sealed to another installation
   }
   if (raw.length !== FMK_LEN) return null;
-  const fmk = await importFmk(raw);
+  const fmk = await importFmkFor(marker, raw);
   raw.fill(0);
   return fmk;
 }
@@ -1417,6 +1585,9 @@ export async function startRekey(
   opts: { escrowPublicKey?: string | null; iterations?: number } = {},
 ): Promise<RekeyStart> {
   if (rekeyPending(marker)) throw new Error('e2e: a re-key is already in progress; resume it');
+  /* wiring:e2 vault - the FMK derives every key of a vault: a new FMK is a
+   * new vault, so a re-key is not offered (docs/E2E-VAULT-FORMAT.md). */
+  if (markerIsVault(marker)) throw new Error('e2e: a vault is not re-keyed; make a new vault instead');
   const oldRaw = await fmkRawFrom(marker, cred);
   const newRaw = crypto.getRandomValues(new Uint8Array(FMK_LEN));
   try {
@@ -1545,6 +1716,7 @@ export function startConversion(
   when: string = new Date().toISOString(),
   cleanup?: { versions: boolean; trash: boolean },
 ): E2eMarker {
+  if (markerIsVault(marker)) throw new Error('e2e: a vault is never converted');
   const req = Array.from(new Set([...(marker.req ?? []), 'conv']));
   const conv: E2eConvSlot = { pending: true, started: when, ...(cleanup ? { cleanup } : {}) };
   return { ...marker, v: E2E_MARKER_VERSION_FEATURES, req, conv };

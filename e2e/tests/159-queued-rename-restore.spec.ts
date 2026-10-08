@@ -16,10 +16,13 @@ import { loginAs } from '../helpers/auth';
 import { dropStorageByName, seedLocalStorage } from '../helpers/seed';
 import { setAccountViewMode } from '../helpers/prefs';
 import { settled } from '../helpers/stable';
+import { cataloguedIn, holdsThroughScans, scanNow } from '../helpers/scan';
 
 const STAMP = Date.now();
 const STORAGE = `e2e-queued-${STAMP}`;
 const RENAME = /^(Rename|Yeniden adlandır)$/;
+/** The storage's id, for its "Scan now". */
+let storageId = 0;
 
 async function upload(page: Page, dir: string, name: string) {
   const res = await page.request.post('/api/files/manager?action=upload', {
@@ -53,8 +56,9 @@ async function pick(page: Page, rel: string, verb: RegExp) {
   await menu.getByRole('menuitem', { name: verb }).click();
 }
 
-/** Renames rel to name through the dialog and returns the server's answer. */
-async function renameThroughTheDialog(page: Page, rel: string, name: string) {
+/** Renames rel to name through the dialog and returns the server's answer.
+ *  `beside` runs at the moment the rename is saved. */
+async function renameThroughTheDialog(page: Page, rel: string, name: string, beside?: () => Promise<unknown>) {
   await pick(page, rel, RENAME);
   const dialog = page.getByRole('dialog', { name: RENAME });
   await expect(dialog).toBeVisible();
@@ -62,7 +66,7 @@ async function renameThroughTheDialog(page: Page, rel: string, name: string) {
   const answered = page.waitForResponse(
     (r) => r.request().method() === 'POST' && r.url().includes('action=rename'),
   );
-  await dialog.getByRole('button', { name: /^(Save|Kaydet)$/ }).click();
+  await Promise.all([dialog.getByRole('button', { name: /^(Save|Kaydet)$/ }).click(), beside?.()]);
   return { dialog, res: await answered };
 }
 
@@ -76,7 +80,7 @@ async function openStorage(page: Page) {
 test.describe('Queued rename and restore', () => {
   test.beforeAll(async ({ request }) => {
     await dropStorageByName(request, STORAGE);
-    await seedLocalStorage(request, STORAGE, `/tmp/filex-${STORAGE}`);
+    storageId = (await seedLocalStorage(request, STORAGE, `/tmp/filex-${STORAGE}`)).id;
   });
 
   test.afterAll(async ({ request }) => {
@@ -90,8 +94,13 @@ test.describe('Queued rename and restore', () => {
     await newFolder(page, from);
     await upload(page, from, 'icinde.txt');
     await page.reload();
+    const inside = await cataloguedIn(page.request, STORAGE, from);
+    expect(inside.map(([, name]) => name), 'the file is catalogued in the folder').toEqual(['icinde.txt']);
 
-    const { dialog, res } = await renameThroughTheDialog(page, from, to);
+    // ⚠ A scan of the storage runs beside the rename, on purpose (issue #192):
+    // in the 0.53 run one met the rename by chance and the renamed folder
+    // opened empty - its rows dropped, its file back later as another row.
+    const { dialog, res } = await renameThroughTheDialog(page, from, to, () => scanNow(page.request, storageId));
     expect(res.url(), 'the explorer asked for a job').toContain('queued=1');
     expect(res.status(), 'the server queued it').toBe(202);
     expect(((await res.json()) as { op?: { kind?: string } }).op?.kind).toBe('rename');
@@ -99,11 +108,13 @@ test.describe('Queued rename and restore', () => {
 
     await expect.poll(() => namesIn(page, ''), { timeout: 15_000 }).toContain(to);
     expect(await namesIn(page, '')).not.toContain(from);
-    expect(await namesIn(page, to)).toEqual(['icinde.txt']);
+    expect(await cataloguedIn(page.request, STORAGE, to), 'the renamed folder opens with its file, the same row').toEqual(inside);
     // When the job ends the explorer says so, and offers the undo it would
     // have offered for a rename inside the request.
     await expect(page.locator('.fe-toast__msg')).toHaveText(/^(Renamed|Yeniden adlandırıldı)$/);
     await expect(page.locator('.fe-toast__action')).toHaveText(/^(Undo|Geri al)$/);
+    // The same row, by id, on every read while the storage is scanned again.
+    await holdsThroughScans(page.request, STORAGE, storageId, to, inside);
   });
 
   test('a file is still renamed inside the request', async ({ page }) => {

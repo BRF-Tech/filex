@@ -9,9 +9,23 @@
 // - ⚠ Ends every test the one safe way (helpers/teardown): let what is in
 //   flight land, unmount every mounted page, THEN empty <body>. Tests do not
 //   do this themselves (task #127).
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterAll, afterEach, vi } from 'vitest';
+import { takeServerRules } from '@brftech/filex-core/src/lib/serverRules';
 import { failOnNetworkHits } from './helpers/noNetwork';
 import { teardownDom } from './helpers/teardown';
+
+// The server's rules (#211): which files are office documents or text, and
+// the input limits, as /api/files/capabilities publishes them - read from the
+// drift file the Go tests hold to editkind.Published and the server's limits,
+// so a component test sees the server's real lists (lib/serverRules). A test
+// about an older server, or about the rules themselves, resets them.
+{
+  const file = path.resolve(__dirname, '../../backend/internal/api/handlers/testdata/rule-mirrors.json');
+  const v = JSON.parse(readFileSync(file, 'utf8')) as Parameters<typeof takeServerRules>[0];
+  takeServerRules(v);
+}
 
 // matchMedia stub — required by DarkModeToggle / theme.ts on cold boot.
 if (!('matchMedia' in window)) {

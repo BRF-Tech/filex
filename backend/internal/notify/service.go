@@ -21,6 +21,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // Service is the public façade subsystems use to emit events. Send
@@ -107,8 +108,12 @@ type TargetDeliveryStatus struct {
 // optional — leave empty to skip webhook delivery (in-app still
 // records the event).
 type Config struct {
-	WebhookURL    string
-	WebhookToken  string
+	WebhookURL   string
+	WebhookToken string
+	// WebhookLang is the language the legacy webhook's title and body are
+	// said in (FILEX_WEBHOOK_LANG); "" is the instance's. A webhook target
+	// has its own (model.WebhookTarget.Lang).
+	WebhookLang   string
 	HTTPTimeout   time.Duration
 	RetryBackoffs []time.Duration // attempt delays; default {1s,3s,9s}
 
@@ -118,6 +123,9 @@ type Config struct {
 	// Mail sends the emails an event asks for (Event.Mail) and the digest's.
 	// Nil: no email.
 	Mail MailFunc
+	// Push switches Web Push on (push.go): what a person's bell tells them
+	// reaches their devices while filex is closed. Nil: no push.
+	Push *PushConfig
 	// Now is the clock the digest windows are measured with (tests). Nil:
 	// time.Now.
 	Now func() time.Time
@@ -147,8 +155,12 @@ func New(store db.Store, cfg Config) Service {
 	if cfg.Digest != nil {
 		s.dig = &digestRuntime{cfg: *cfg.Digest, people: map[int64]personDigest{}}
 	}
+	if cfg.Push != nil {
+		s.push = newPushRuntime(*cfg.Push)
+	}
 	s.idle = sync.NewCond(&s.inflightMu)
 	s.SetWebhook(cfg.WebhookURL, cfg.WebhookToken)
+	s.webhookLang = strings.TrimSpace(cfg.WebhookLang)
 	return s
 }
 
@@ -157,12 +169,13 @@ type service struct {
 	store db.Store
 	http  *http.Client
 
-	mu         sync.RWMutex
-	webhookURL string
-	bearer     string
-	backoffs   []time.Duration
-	stopOnce   sync.Once
-	stopCh     chan struct{}
+	mu          sync.RWMutex
+	webhookURL  string
+	bearer      string
+	webhookLang string
+	backoffs    []time.Duration
+	stopOnce    sync.Once
+	stopCh      chan struct{}
 
 	// The deliveries in flight, counted under inflightMu - not a
 	// WaitGroup: a delivery is started by whichever goroutine sends (a write
@@ -178,6 +191,8 @@ type service struct {
 	// (StartDigests); nil while none runs. Guarded by inflightMu, like
 	// stopped: a pass that starts after Stop is refused there.
 	loopDone chan struct{}
+	// pushDone is the same for Web Push's pass (StartPush).
+	pushDone chan struct{}
 
 	// targetStatus caches the last delivery outcome per webhook target
 	// id (guarded by tsMu). Feeds the admin list's "last status" column.
@@ -189,6 +204,9 @@ type service struct {
 	viewer Viewer
 	now    func() time.Time
 	mail   MailFunc
+
+	// Web Push (push.go): nil when it is off.
+	push *pushRuntime
 }
 
 // destination is one webhook endpoint a single event is delivered to —
@@ -200,6 +218,9 @@ type destination struct {
 	url      string
 	bearer   string
 	secret   string
+	// lang is the language the receiver is told in: the target's own, the
+	// legacy webhook's (FILEX_WEBHOOK_LANG); "" the instance's.
+	lang string
 }
 
 // Signature computes the X-Filex-Signature header value for a payload
@@ -230,11 +251,17 @@ func (s *service) Send(ctx context.Context, e Event) (int64, error) {
 	}
 	if held != nil {
 		s.openWindow(ctx, *e.UserID, held)
-	} else if e.Mail != nil && e.UserID != nil {
-		s.mailNow(ctx, e)
+	} else {
+		if e.Mail != nil && e.UserID != nil {
+			s.mailNow(ctx, e)
+		}
+		// Told at once: the person's devices are told too (push.go) - the
+		// addressee's, or for a broadcast everybody's whose bell takes it. A
+		// held row is pushed as its digest, which wakes the pass in turn.
+		s.wakePush(e.UserID)
 	}
 	if e.NoWebhook {
-		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "sent to the webhooks with another row of the same event")
+		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), SkipSibling)
 		return id, nil
 	}
 	s.dispatch(id, e)
@@ -282,11 +309,11 @@ func (s *service) prepare(ctx context.Context, e Event) (Event, *model.Notificat
 	}, true, nil
 }
 
-// mailNow emails an event's addressee at once (Event.Mail): its Title as the
-// subject, its Body and Link as the text, in the language they were written
-// in. Off the caller's path, counted with the deliveries so Stop waits for it;
-// a mail that cannot go (no SMTP set up, no address) is left out quietly, as
-// the drop notice always did.
+// mailNow emails an event's addressee at once (Event.Mail): the words their
+// bell says (say.go), in their language - the title as the subject, the body
+// and the Link as the text. Off the caller's path, counted with the
+// deliveries so Stop waits for it; a mail that cannot go (no SMTP set up, no
+// address) is left out quietly, as the drop notice always did.
 func (s *service) mailNow(ctx context.Context, e Event) {
 	if s.mail == nil || s.store == nil || e.UserID == nil || e.Mail == nil {
 		return
@@ -295,11 +322,16 @@ func (s *service) mailNow(ctx context.Context, e Event) {
 	if err != nil || u == nil || strings.TrimSpace(u.Email) == "" {
 		return
 	}
-	body := e.Body
+	lang := PersonLang(u)
+	said := SayEvent(lang, e)
+	body := strings.Join(said.Lines, "\n")
 	if e.Mail.Link != "" {
-		body += "\n\n" + e.Mail.Link
+		if body != "" {
+			body += "\n\n"
+		}
+		body += e.Mail.Link
 	}
-	to, subject, lang := u.Email, e.Title, e.Mail.Lang
+	to, subject := u.Email, said.Title
 	if !s.beginDelivery() {
 		return
 	}
@@ -491,18 +523,42 @@ func (s *service) dispatch(id int64, e Event) {
 	s.mu.RLock()
 	legacyURL := s.webhookURL
 	token := s.bearer
+	legacyLang := s.webhookLang
 	backoffs := append([]time.Duration(nil), s.backoffs...)
 	s.mu.RUnlock()
 
-	body, err := json.Marshal(e)
-	if err != nil {
+	// ⚠⚠ Translated at the LAST stop (the maintainers' rule, 2026-10-08):
+	// the event travels untranslated - its facts and its catalogue keys - and
+	// is said only for the receiver, in the receiver's language. A webhook is
+	// a receiver no person stands behind, so it has the language chosen for
+	// it (a target's own, FILEX_WEBHOOK_LANG for the legacy one), else the
+	// instance's. The body also carries the message untranslated (`i18n`:
+	// the keys and their values) for a receiver that translates for itself.
+	bodies := map[string][]byte{}
+	bodyFor := func(lang string) ([]byte, error) {
+		lang = srvtext.Pick(lang)
+		if b, ok := bodies[lang]; ok {
+			return b, nil
+		}
+		said := SayEvent(lang, e)
+		out := e
+		out.Title, out.Body = said.Title, said.Body
+		out.I18n = MessageOf(lang, e)
+		b, err := json.Marshal(out)
+		if err != nil {
+			return nil, err
+		}
+		bodies[lang] = b
+		return b, nil
+	}
+	if _, err := bodyFor(legacyLang); err != nil {
 		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusFailed), "marshal event: "+err.Error())
 		return
 	}
 
 	if !s.beginDelivery() {
 		// Stopped: the row is kept, nothing is sent after shutdown began.
-		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), "service stopped before delivery")
+		_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), SkipStopped)
 		return
 	}
 	go func() {
@@ -524,7 +580,7 @@ func (s *service) dispatch(id int64, e Event) {
 		named := e.Event == EventNotificationDigest
 		dests := make([]destination, 0, 4)
 		if legacyURL != "" && !named {
-			dests = append(dests, destination{url: legacyURL, bearer: token})
+			dests = append(dests, destination{url: legacyURL, bearer: token, lang: legacyLang})
 		}
 		targets, err := s.store.ListWebhookTargets(ctx)
 		if err != nil {
@@ -539,13 +595,14 @@ func (s *service) dispatch(id int64, e Event) {
 			if named && !hasString(t.EventList(), string(e.Event)) {
 				continue
 			}
-			dests = append(dests, destination{targetID: t.ID, name: t.Name, url: t.URL, secret: t.Secret})
+			dests = append(dests, destination{targetID: t.ID, name: t.Name, url: t.URL, secret: t.Secret, lang: t.Lang})
 		}
 		if len(dests) == 0 {
-			// No webhook configured — still record the skip for the audit.
-			why := "no webhook URL configured"
+			// No webhook configured — still record the skip for the audit,
+			// as a code the admin page says in words (webhook_reason.go).
+			why := SkipNoDestination
 			if named {
-				why = "no webhook target names " + string(EventNotificationDigest)
+				why = SkipDigestUnnamed
 			}
 			_ = s.store.UpdateWebhookStatus(context.Background(), id, string(WebhookStatusSkipped), why)
 			return
@@ -557,8 +614,17 @@ func (s *service) dispatch(id int64, e Event) {
 			errs  []string
 		)
 		for _, d := range dests {
+			// Each receiver its own language (bodies are made one at a time,
+			// here, and shared by the receivers of the same language).
+			body, err := bodyFor(d.lang)
+			if err != nil {
+				errMu.Lock()
+				errs = append(errs, d.name+": marshal event: "+err.Error())
+				errMu.Unlock()
+				continue
+			}
 			wg.Add(1)
-			go func(d destination) {
+			go func(d destination, body []byte) {
 				defer wg.Done()
 				code, err := s.deliver(ctx, d, string(e.Event), body, backoffs)
 				if d.targetID != 0 {
@@ -573,7 +639,7 @@ func (s *service) dispatch(id int64, e Event) {
 					}
 					errMu.Unlock()
 				}
-			}(d)
+			}(d, body)
 		}
 		wg.Wait()
 
@@ -1083,10 +1149,13 @@ func (s *service) Stop() {
 	// was telling is in the database either way (digest.go). No pass starts
 	// once stopped is set (StartDigests checks it under the same mutex).
 	s.inflightMu.Lock()
-	done := s.loopDone
+	done, pushDone := s.loopDone, s.pushDone
 	s.inflightMu.Unlock()
 	if done != nil {
 		<-done
+	}
+	if pushDone != nil {
+		<-pushDone
 	}
 	s.waitIdle()
 }

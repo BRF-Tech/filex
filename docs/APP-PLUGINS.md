@@ -583,9 +583,9 @@ install link and opens the store review, where the permissions are read and
 approved when that install ends; **Reject** works as for any request, and the
 person reads the reason on their *My requests*.
 
-![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.30cc6e7ecb96.png)
+![Plugins → Install requests: two requests an agent's API key left](https://filex.sh/shots/pluginrequests/requests-1440.a64df82ef245.png)
 
-![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.12c3634c4188.png)
+![One request's review: the frozen SHA-256, the source, the reason and the permissions](https://filex.sh/shots/pluginrequests/review.8217c4046e38.png)
 
 ### Leaving one
 
@@ -622,7 +622,7 @@ here, which engines this host has, whether signatures are required, and when
 the apps' sources were last checked for updates; **Check for updates** beside
 **Refresh** asks them now.
 
-![The Apps tab, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.c0b6a723e725.png)
+![The Apps tab, a language pack among the apps](https://filex.sh/shots/langpack/apps-list-1440.50e11eedf3d4.png)
 
 A **language pack** (below) sits in the same list and is read the same way -
 its row says what it is, and, per language, how much of THIS filex it
@@ -661,7 +661,10 @@ section per card, **Back** returns to the Apps tab:
   shapes storage drivers use; a choice is a row of buttons, never a dropdown).
   A field marked secret is sealed at rest with the instance key and is only
   ever opened inside the app's own `settings_get` call; the page shows `***`,
-  and saving `***` keeps it.
+  and saving `***` keeps it. The server checks every value against its field
+  before it stores anything - a number inside its bounds, one of the offered
+  choices, a required field filled - and says in your language which field
+  it refused, whoever saved it (the page, an API key, MCP).
 - **Menu actions** - one row per action in the file menu: turn it off,
   restrict it to administrators, or change the *applies* rule (which kinds,
   extensions and MIME types it is offered for, and whether several files may
@@ -944,8 +947,11 @@ database - is [APP-PLUGINS-API.md → The scheduled wake-up](APP-PLUGINS-API.md#
 - **Menu rows.** Right-click a file (or several) and the actions whose rule
   accepts the selection appear under the built-in ones. An action that
   writes needs *editor* on the file; a storage that is read-only refuses
-  writing actions; files inside an encrypted folder are never offered - the
-  server has no key to hand the app; and an action that needs one of the
+  writing actions (the server says on each action whether a click there would
+  go through, and the menu shows only those); files inside an encrypted folder
+  are never offered - the server has no key to hand the app; filex's own
+  folders (the trash, the version history) are never an app's input either -
+  a run on a path there is answered *not found*; and an action that needs one of the
   app's own permissions is offered only to the people who hold it
   ([App permissions](#app-permissions)). The menu's filter is a convenience;
   the server checks all of this again when the action runs. Rows can follow the
@@ -1161,7 +1167,7 @@ permission and stops at the review like any other.
 
 | The review of an app with its own interface | Its kind of file in **New document**, under **Apps** |
 |---|---|
-| ![The install review's Interface group](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png) | ![New document offering the app's kind of file](https://filex.sh/shots/apps/app-new-document-1440.6083ebe05fcc.png) |
+| ![The install review's Interface group](https://filex.sh/shots/apps/app-interface-review-1440.5e0e3009d2ba.png) | ![New document offering the app's kind of file](https://filex.sh/shots/apps/app-new-document-1440.3d03f7fa7b67.png) |
 
 | …and the interface open on its file type, where filex's preview would be (a small example app, written for these pictures) |
 |---|
@@ -1419,7 +1425,7 @@ some other way (an old bookmark) says this and offers no button.
    purpose: what is being asked of whom is one decision, where it goes is
    the next. Every signer needs at least one signature box.
 
-   ![Defining the boxes](https://filex.sh/shots/signing/sign-define-1440.4a966ffefa4f.png)
+   ![Defining the boxes](https://filex.sh/shots/signing/sign-define-1440.63ea72b13724.png)
 
 4. **Place them** - the document, and the boxes that still need a place.
    Choose one, then tap the page where it goes, or drag to size it as you
@@ -1498,7 +1504,7 @@ during which even the right PIN is refused.
 
 | The partner's link, behind its PIN | …and what it opens: only their own boxes |
 |---|---|
-| ![The outside signer's PIN gate](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![The outside signer filling in their boxes](https://filex.sh/shots/signing/sign-outside-fill-1440.54632da00ef4.png) |
+| ![The outside signer's PIN gate](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![The outside signer filling in their boxes](https://filex.sh/shots/signing/sign-outside-fill-1440.9f50aeb7abef.png) |
 
 Both kinds of signer then walk the same three steps:
 
@@ -1528,7 +1534,7 @@ fingerprint, and the certificate files to keep.
   file), and the audit trail saved. These controls are offered to anybody who
   may edit the document, not only to the requester.
 
-  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.518a3bd6651f.png)
+  ![The document frozen, its Signatures panel open](https://filex.sh/shots/signing/sign-status-1440.b5bfdbd379c3.png)
 
 - **The Signatures home screen**, under **Apps** in the navigation: what is
   *waiting for my signature*, what *I asked for*, what *I have signed* - and,
@@ -1888,6 +1894,7 @@ admin surface refuses installs regardless.
 | `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](#install-requests) waits for an administrator before it expires (both kinds of plugin) |
 | `FILEX_APP_STORE_URLS` / `FILEX_APP_STORE_KEYS` | - | Stores trusted by configuration, and the keys they sign with ([Trusted stores](#trusted-stores)) |
 | `FILEX_APP_GITHUB_RAW_BASE` | `https://raw.githubusercontent.com` | Where a GitHub install and a store link read a repository's files (a mirror; the guard applies) |
+| `FILEX_APP_CLOCK` | - | ⚠ Screenshots and tests only: an RFC 3339 instant the apps' clock starts at - the time inside every module, and the host's times handed to an app (a lock's end, a link's expiry, a wake-up's window). What filex stores stays on the real clock ([CONFIGURATION.md](CONFIGURATION.md)) |
 | `FILEX_SECRET_KEY` | - | Seals secret settings, the signing authority's key, share PINs and paid apps' license keys; without it secret settings and signing answer *unavailable*, and a PIN cannot be read back later. The public-link unlock cookie falls back to a per-process key: it works, but a restart signs visitors out and two instances behind one address do not share it |
 
 Apps need an **amd64 or arm64** host: the WebAssembly compiler has no

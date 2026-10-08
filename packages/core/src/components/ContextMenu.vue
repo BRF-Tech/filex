@@ -6,7 +6,7 @@
  * transformed flex containers, panel sidebars, …) can shift the
  * `position: fixed` backdrop off-window.
  */
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { FileNode } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
@@ -14,6 +14,7 @@ import { useSystemDark } from '../composables/useSystemDark';
 import { menuShortcutHint } from '../composables/useKeyboardShortcuts';
 import { actionIconSvg } from '../lib/actionIcons';
 import { openAlongInline } from '../lib/direction';
+import { heldMenuRows, visibleMenuRows } from '../lib/heldMenuRows'; /* #196 */
 import { POPUP_BASE_Z, openerCandidates, popupLayer } from '../lib/popupLayer'; /* katman:z1 */
 
 export interface ContextAction {
@@ -132,6 +133,9 @@ async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[])
   /* katman:z1 — BEFORE the backdrop exists: once it does it covers the
    * viewport and `elementFromPoint` answers with the backdrop itself. */
   layerZ.value = popupLayer(openerCandidates(ev.clientX, ev.clientY));
+  /* #196 — a new opening draws what is offered now, in its own order. */
+  openedRows.value = null;
+  sheetHeight.value = null;
   open.value = true;
   x.value = ev.clientX;
   y.value = ev.clientY;
@@ -142,7 +146,16 @@ async function show(ev: { clientX: number; clientY: number }, nodes: FileNode[])
   // bottom/right edge doesn't push the menu off-screen (it opens down-right
   // from the cursor by default).
   await nextTick();
+  /* #196 — from the first frame on, the rows hold their places until the
+   * menu closes (lib/heldMenuRows). Taken after the render, so it is the list
+   * the opener's props hold for THIS opening. */
+  if (open.value) openedRows.value = visibleMenuRows(props.actions);
   if (props.sheet) {
+    /* #196 — the sheet hangs from the bottom edge and grows upward: a row
+     * added at its end would lift every row above it. Held at the height it
+     * opened with, a late row scrolls into its list instead. */
+    const h = sheetEl.value?.getBoundingClientRect().height;
+    if (h) sheetHeight.value = h;
     // bag:b4 — sheet mode: no anchoring; focus the panel so Esc closes it
     // without requiring a prior click inside.
     sheetEl.value?.focus();
@@ -192,6 +205,8 @@ function clampToViewport() {
 
 function hide() {
   open.value = false;
+  openedRows.value = null; /* #196 */
+  sheetHeight.value = null;
   /* bag:b4 — reset any in-flight sheet drag so reopening starts clean. */
   sheetDragging.value = false;
   sheetDragY.value = 0;
@@ -263,11 +278,17 @@ function onSheetDragEnd() {
     sheetDragY.value = 0;
   }
 }
-const sheetStyle = computed(() =>
-  sheetDragY.value > 0
-    ? { transform: `translateY(${sheetDragY.value}px)`, transition: 'none' }
-    : undefined,
-);
+/* #196 — the height the sheet opened with, held while it is open (`show`). */
+const sheetHeight = ref<number | null>(null);
+const sheetStyle = computed(() => {
+  const style: Record<string, string> = {};
+  if (sheetHeight.value !== null) style.height = `${sheetHeight.value}px`;
+  if (sheetDragY.value > 0) {
+    style.transform = `translateY(${sheetDragY.value}px)`;
+    style.transition = 'none';
+  }
+  return Object.keys(style).length ? style : undefined;
+});
 /* /bag:b4 */
 
 function pick(a: ContextAction) {
@@ -320,17 +341,38 @@ function onKey(e: KeyboardEvent) {
 /* wiring:c4 — hidden-entry filtering used to leave orphaned separators
  * (leading/trailing/doubled) when the entries around a divider were hidden
  * by RBAC or selection shape. Collapse them here so every visible divider
- * actually separates two groups. */
-const visibleActions = computed(() => {
-  const vis = props.actions.filter((a) => !a.hidden);
-  const out: ContextAction[] = [];
-  for (const a of vis) {
-    if (a.divider && (out.length === 0 || out[out.length - 1].divider)) continue;
-    out.push(a);
-  }
-  while (out.length > 0 && out[out.length - 1].divider) out.pop();
-  return out;
-});
+ * actually separates two groups (lib/heldMenuRows `visibleMenuRows`).
+ *
+ * ⚠⚠ #196 — and once the menu is open its rows HOLD STILL. A row that waits on
+ * a server answer ("Encrypt with E2EE…" asks POST /api/files/e2e/allowed) used
+ * to be drawn when the answer landed, pushing every row below it down while the
+ * person was aiming: in the 0.53 release run a click pressed on "Tags" was
+ * released on "Star". `openedRows` is the list as it was on the first frame;
+ * while it is set, a row that goes away keeps its place greyed and a row that
+ * comes late is added at the end (lib/heldMenuRows `heldMenuRows`). */
+const openedRows = ref<ContextAction[] | null>(null);
+const visibleActions = computed(() =>
+  openedRows.value ? heldMenuRows(openedRows.value, props.actions) : visibleMenuRows(props.actions),
+);
+
+/* #196 — a late row grows the menu downward, never moving what is drawn. Near
+ * the bottom edge that would push the new row out of the window: the menu then
+ * stops at the edge and scrolls inside itself, still without moving. */
+watch(
+  () => visibleActions.value.length,
+  async () => {
+    if (!open.value || !openedRows.value || props.sheet) return;
+    await nextTick();
+    const el = menuEl.value;
+    if (!el || typeof window === 'undefined') return;
+    const rect = el.getBoundingClientRect();
+    const room = window.innerHeight - 8 - rect.top;
+    if (room > 0 && rect.height > room) {
+      el.style.maxHeight = room + 'px';
+      el.style.overflowY = 'auto';
+    }
+  },
+);
 
 /* The OS mode for `auto` (`data-prefers-dark`): composables/useSystemDark,
    the one listener every core surface shares (#74). */

@@ -2,14 +2,14 @@ manifestVersion: 1
 id: filex
 category: files
 name: filex
-version: "0.53.0"
+version: "0.54.0"
 releaseNotes: |-
-  filex v0.53.0 - 2026-10-07
-  • The App store inside filex
-  • The whole test chain runs on GitHub, split into parts that run side by side.
-  • A tag run promotes what the dry run of its commit built.
-  • The release can be packaged off GitHub.
-  • The Playwright and Go suites run in parts, side by side.
+  filex v0.54.0 - 2026-10-08
+  • Push notifications while filex is closed
+  • The ONLYOFFICE editor speaks the person's language
+  • The vault, encryption level 3, in the explorer
+  • Narrow a search on the server
+  • A new link's answer carries its download command
   Full changelog: https://github.com/BRF-Tech/filex/blob/main/CHANGELOG.md
 tagline: Self-hosted file manager for all your storages
 description: >-

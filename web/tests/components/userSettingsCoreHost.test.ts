@@ -28,6 +28,7 @@ import { WEBHOOK_EVENTS, userEventKey } from '@brftech/filex-core/src/lib/webhoo
 import { en as coreEn } from '@brftech/filex-core/src/locales/en';
 import { tr } from '@brftech/filex-core/src/locales/tr';
 import { answerAccountPrefs } from '../helpers/accountPrefs';
+import { ACCOUNT_CHECK_DELAY_MS } from '@brftech/filex-core/src/lib/accountRules';
 
 // Picking a theme writes it to the account 400 ms later.
 answerAccountPrefs();
@@ -58,6 +59,13 @@ function plainHost(extra: Partial<UserSettingsHost> = {}, locale = 'en') {
       verifyTotp: vi.fn(async () => {}),
       disableTotp: vi.fn(async () => {}),
       quota: vi.fn(async () => ({ used_bytes: 1024, quota_bytes: 0, percent_used: 0, unlimited: true })),
+      // The server's account check (POST /api/auth/account/check): its code
+      // and its sentence for what it would refuse.
+      checkAccount: vi.fn(async (q: { email?: string }) =>
+        q.email !== undefined && q.email !== user.email && !q.email.includes('@')
+          ? { email: { error: 'email_invalid', message: `“${q.email}” is not an email address. Write it as name@example.com.` } }
+          : {},
+      ),
       notificationSettings: vi.fn(async () => ({ in_app_enabled: true, muted_events: ['file.moved'] })),
       updateNotificationSettings: calls.updateNotificationSettings,
     },
@@ -137,13 +145,17 @@ describe('the core settings dialog, with only what an explorer can give it', () 
     expect(calls.toast).toHaveBeenCalledWith('success', expect.any(String));
   });
 
-  it('a problem under the box stops the save — in the explorer catalogue’s words', async () => {
+  // ⚠ 0.54 (#209, B15/A12): the words are the SERVER's, asked while typing;
+  // the explorer catalogue keeps no copy of them.
+  it('a problem under the box stops the save — in the server’s words', async () => {
     const { host, calls } = plainHost();
     const w = open(host);
     await flushPromises();
     await w.find('[data-testid="profile-email"]').setValue('bu-bir-eposta-degil');
+    await new Promise((r) => setTimeout(r, ACCOUNT_CHECK_DELAY_MS + 50));
+    await flushPromises();
     const err = w.find('[data-testid="profile-email-error"]');
-    expect(err.text()).toBe('This is not an email address. Write it as name@example.com.');
+    expect(err.text()).toBe('“bu-bir-eposta-degil” is not an email address. Write it as name@example.com.');
     expect(w.find('[data-testid="user-settings-save-profile"]').attributes('disabled')).toBeDefined();
     expect(calls.updateProfile).not.toHaveBeenCalled();
   });
@@ -179,19 +191,17 @@ describe('the core settings dialog, with only what an explorer can give it', () 
   });
 });
 
-// The two encryption request switches (lib/webhookEvents), as the explorer's
-// own host draws them: who the account is comes from the HOST (`isAdmin`, the
-// role the explorer read from /api/auth/me), what the server says of the
-// instance from the capabilities.
-//
-// ⚠ `caller_admin` is the supertenant's alone on a multi-tenant install. A
-// tenant's own administrator — who is sent every new request of their tenant —
-// has `isAdmin` and not `caller_admin`, and must still be offered the switch.
+// The two encryption request switches, as the explorer's own host draws them.
+// Whether they can happen, and whether THIS caller could change that, is the
+// server's answer (`capabilities.event_off`, #211 audit B16; the rule - the
+// approval policy, a new request only for administrator accounts, the role and
+// not `caller_admin` - is backend capabilities_rules.go eventsOff, tested in
+// Go). The host's `isAdmin` decides nothing here any more.
 describe('the encryption request switches, in the explorer’s host', () => {
   const VERSION = '0.49.0';
-  const policy = (p: string) => ({ e2e_policy: { available: true, policy: p } });
   const CREATED = 'e2e.request_created';
   const DECIDED = 'e2e.request_decided';
+  const SAID_TR = 'Yalnız şifreleme politikası onay istediğinde.';
 
   async function notifications(extra: Partial<UserSettingsHost>, locale = 'en') {
     const { host } = plainHost(extra, locale);
@@ -202,43 +212,36 @@ describe('the encryption request switches, in the explorer’s host', () => {
   }
   const sw = (w: VueWrapper, ev: string) => w.find(`[data-testid="user-settings-event-${ev}"]`);
 
-  it('offers a tenant’s own administrator the switch for a new request — by the role, not by caller_admin', async () => {
-    const w = await notifications({ isAdmin: true, capabilities: { version: VERSION, caller_admin: false, ...policy('approval') } });
+  it('offers both, switchable, when the server lists neither', async () => {
+    const w = await notifications({ isAdmin: false, capabilities: { version: VERSION, event_off: {} } });
     for (const ev of [CREATED, DECIDED]) {
       expect(sw(w, ev).exists(), `${ev} offered`).toBe(true);
       expect(sw(w, ev).attributes('disabled'), `${ev} switchable`).toBeUndefined();
     }
   });
 
-  it('still offers the supertenant both', async () => {
-    const w = await notifications({ isAdmin: true, capabilities: { version: VERSION, caller_admin: true, ...policy('approval') } });
-    for (const ev of [CREATED, DECIDED]) {
-      expect(sw(w, ev).exists(), `${ev} offered`).toBe(true);
-      expect(sw(w, ev).attributes('disabled'), `${ev} switchable`).toBeUndefined();
-    }
-  });
-
-  it('offers a member the answer to their own request and not the switch for a new one', async () => {
-    const w = await notifications({ isAdmin: false, capabilities: { version: VERSION, caller_admin: false, ...policy('approval') } });
-    expect(sw(w, CREATED).exists()).toBe(false);
-    expect(sw(w, DECIDED).exists()).toBe(true);
-  });
-
-  it('greys both for a tenant’s own administrator while the policy asks for no approval — in the reader’s language', async () => {
+  it('greys what the caller could switch on, with the server’s sentence in the reader’s language', async () => {
+    const said = { reason: 'e2e_approval', fixable: true, text: SAID_TR };
     const w = await notifications(
-      { isAdmin: true, capabilities: { version: VERSION, caller_admin: false, ...policy('permitted') } },
+      { isAdmin: false, capabilities: { version: VERSION, event_off: { [CREATED]: said, [DECIDED]: said } } },
       'tr',
     );
     for (const ev of [CREATED, DECIDED]) {
       expect(sw(w, ev).attributes('disabled'), `${ev} cannot be switched`).toBeDefined();
-      expect(w.find(`[data-testid="user-settings-event-off-${ev}"]`).text()).toBe(tr['webhooks.offReason.e2eApproval']);
+      expect(w.find(`[data-testid="user-settings-event-off-${ev}"]`).text()).toBe(SAID_TR);
     }
   });
 
-  it('offers a member neither while the policy asks for no approval', async () => {
-    const w = await notifications({ isAdmin: false, capabilities: { version: VERSION, caller_admin: false, ...policy('permitted') } });
+  it('does not offer what the caller cannot change, whatever the host says of the account', async () => {
+    const w = await notifications({
+      isAdmin: true,
+      capabilities: {
+        version: VERSION,
+        event_off: { [CREATED]: { reason: 'e2e_approval', fixable: false, text: SAID_TR } },
+      },
+    });
     expect(sw(w, CREATED).exists()).toBe(false);
-    expect(sw(w, DECIDED).exists()).toBe(false);
+    expect(sw(w, DECIDED).exists()).toBe(true);
   });
 });
 

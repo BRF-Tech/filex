@@ -133,6 +133,39 @@ describe('the first load after the upgrade', () => {
     await flushPrefs();
     expect(f.mock.calls.every((c) => (c[1] as RequestInit)?.method !== 'PUT')).toBe(true);
   });
+
+  it('the language is not adopted: it is the account\'s own, and a new account\'s first page writes nothing (0.54)', async () => {
+    // ⚠ Red on the code before: the sign-in writes the ACCOUNT's language
+    // into this mirror (web i18n applyAccountLocale), so every new account's
+    // first page met an empty document, "adopted" its own language and PUT it
+    // back - a write the sign-in's navigation cut off or sent from pagehide,
+    // which hung the browser suites (0.54 full run 001b652e). The server
+    // gives an account without a language one at the sign-in.
+    localStorage.setItem(PREF_LS_KEYS.locale, 'tr');
+    const f = vi.fn(async () => answer(200, { prefs: {} }));
+    configurePrefs({ surface: 'web', fetchImpl: f as unknown as typeof fetch });
+
+    expect(await hydratePrefs()).toEqual({});
+    vi.advanceTimersByTime(PREFS_PUT_DEBOUNCE_MS);
+    await flushPrefs();
+    expect(f.mock.calls.every((c) => (c[1] as RequestInit)?.method !== 'PUT')).toBe(true);
+    // …and the mirror keeps caching the account's language for the next
+    // first paint, rather than being emptied by a document that holds none.
+    expect(localPref('locale')).toBe('tr');
+  });
+
+  it('a look is adopted without the language beside it', async () => {
+    localStorage.setItem(PREF_LS_KEYS.palette, 'night-blue');
+    localStorage.setItem(PREF_LS_KEYS.locale, 'tr');
+    const f = vi.fn(async () => answer(200, { prefs: {} }));
+    configurePrefs({ surface: 'web', fetchImpl: f as unknown as typeof fetch });
+
+    expect(await hydratePrefs()).toEqual({ palette: 'night-blue' });
+    vi.advanceTimersByTime(PREFS_PUT_DEBOUNCE_MS);
+    await flushPrefs();
+    const put = f.mock.calls.find((c) => (c[1] as RequestInit)?.method === 'PUT');
+    expect(JSON.parse((put![1] as RequestInit).body as string)).toEqual({ prefs: { palette: 'night-blue' } });
+  });
 });
 
 describe('a page that closes inside the debounce window (#150)', () => {

@@ -10,11 +10,13 @@
 //     "OK" is worse than none;
 //   · what is tested is the form AS IT STANDS (unsaved edits included), the
 //     same map Save would write;
-//   · each step is said in the reader's language, with the reason in words
-//     and the server's own text only as a "technical detail";
+//   · each step is said in the reader's language - by the SERVER since 0.54
+//     (`text`, backend auth/probe_say.go; the page prints it as it is), with
+//     the server's own error only as a "technical detail";
 //   · every step and reason the Go probes can answer has a sentence in both
-//     languages — read out of the Go source, so a new check without words
-//     fails here instead of showing "connect: fail" to an operator.
+//     languages of the SERVER catalogue (backend/internal/srvtext/locales) -
+//     read out of the Go source, so a new check without words fails here
+//     instead of showing "connect: fail" to an operator.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
@@ -168,13 +170,18 @@ describe('Test now', () => {
     expect(draft).not.toHaveProperty('bind_password');
   });
 
-  it('says every step in the reader’s language, the failed one with its reason', async () => {
+  it('prints every step as the server said it, the failed one with its technical detail', async () => {
     testCall.mockResolvedValue({
       testable: true,
       ok: false,
       checks: [
-        { id: 'required', status: 'ok' },
-        { id: 'connect', status: 'fail', params: { host: 'dc.example.com:389', reason: 'refused', detail: 'dial tcp: connection refused' } },
+        { id: 'required', status: 'ok', text: 'Zorunlu alanlar dolu.' },
+        {
+          id: 'connect',
+          status: 'fail',
+          params: { host: 'dc.example.com:389', reason: 'refused', detail: 'dial tcp: connection refused' },
+          text: 'dc.example.com:389 adresine bağlanılamadı: bağlantı reddedildi.',
+        },
       ],
     });
     const w = await mountEdit('ldap', 'tr');
@@ -187,12 +194,11 @@ describe('Test now', () => {
 
     const connect = w.find('[data-testid="auth-provider-check-connect"]');
     expect(connect.attributes('data-status')).toBe('fail');
-    expect(connect.text()).toContain('dc.example.com:389');
-    expect(connect.text()).toContain(tr.authProviders.reasons.refused);
-    // The server's own words only as the technical detail, never as the sentence.
+    expect(connect.text()).toContain('dc.example.com:389 adresine bağlanılamadı: bağlantı reddedildi.');
+    // The error the server met only as the technical detail, never as the sentence.
     expect(connect.text()).toContain(tr.authProviders.technicalDetailIs.replace('{detail}', 'dial tcp: connection refused'));
     expect(connect.text()).not.toMatch(/^connect: fail/);
-    expect(w.find('[data-testid="auth-provider-check-required"]').text()).toContain(tr.authProviders.checks.required.ok);
+    expect(w.find('[data-testid="auth-provider-check-required"]').text()).toContain('Zorunlu alanlar dolu.');
   });
 });
 
@@ -202,8 +208,13 @@ describe('a step the server worded itself', () => {
       testable: true,
       ok: false,
       checks: [
-        { id: 'sudo', status: 'ok' },
-        { id: 'pamtester', status: 'fail', params: { reason: 'missing', hint: 'pamtester is not installed at /usr/bin/pamtester. Install it.' } },
+        { id: 'sudo', status: 'ok', text: 'sudo lets filex run that one command without a password.' },
+        {
+          id: 'pamtester',
+          status: 'fail',
+          params: { reason: 'missing', hint: 'pamtester is not installed at /usr/bin/pamtester. Install it.' },
+          text: 'pamtester is not installed at /usr/bin/pamtester. Install it.',
+        },
       ],
     });
     const w = await mountEdit('ldap');
@@ -213,7 +224,7 @@ describe('a step the server worded itself', () => {
     expect(bad.attributes('data-status')).toBe('fail');
     expect(bad.text()).toContain('pamtester is not installed at /usr/bin/pamtester. Install it.');
     expect(bad.text()).not.toContain('pamtester: fail');
-    expect(w.find('[data-testid="auth-provider-check-sudo"]').text()).toContain(en.authProviders.checks.sudo.ok);
+    expect(w.find('[data-testid="auth-provider-check-sudo"]').text()).toContain('sudo lets filex run that one command without a password.');
   });
 });
 
@@ -302,8 +313,8 @@ describe('Save and apply', () => {
       message: 'The test failed',
       failed: ['connect'],
       checks: [
-        { id: 'required', status: 'ok' },
-        { id: 'connect', status: 'fail', params: { host: 'dc.example.com:389', reason: 'refused' } },
+        { id: 'required', status: 'ok', text: 'Zorunlu alanlar dolu.' },
+        { id: 'connect', status: 'fail', params: { host: 'dc.example.com:389', reason: 'refused' }, text: 'dc.example.com:389 adresine bağlanılamadı: bağlantı reddedildi.' },
       ],
     });
     updateCall.mockResolvedValueOnce({ status: 'saved', provider: null, checks: [], testOk: false });
@@ -314,8 +325,7 @@ describe('Save and apply', () => {
     const ask = w.find('[data-testid="auth-provider-confirm"]');
     expect(ask.exists()).toBe(true);
     const step = w.find('[data-testid="auth-provider-confirm-connect"]');
-    expect(step.text()).toContain('dc.example.com:389');
-    expect(step.text()).toContain(tr.authProviders.reasons.refused);
+    expect(step.text()).toContain('dc.example.com:389 adresine bağlanılamadı: bağlantı reddedildi.');
     expect(w.find('[data-testid="auth-provider-confirm-required"]').exists()).toBe(false);
     expect(updateCall).toHaveBeenCalledTimes(1);
 
@@ -374,15 +384,17 @@ describe('the words for every step the server can answer', () => {
   it.each([
     ['en', en],
     ['tr', tr],
-  ])('%s has a sentence for each', (_lang, bundle) => {
-    const said = bundle.authProviders.checks as Record<string, Record<string, string>>;
-    const missing = checks.filter((c) => {
-      const [id, st] = c.split('.');
-      return !said[id]?.[st];
-    });
+  ])('%s has a sentence for each, in the SERVER catalogue', (_lang, bundle) => {
+    const table = JSON.parse(
+      fs.readFileSync(path.resolve(here, `../../../backend/internal/srvtext/locales/${_lang}.json`), 'utf8'),
+    ) as Record<string, string>;
+    const missing = checks.filter((c) => !table[`server.auth_provider.check.${c}`]);
     expect(missing).toEqual([]);
-    const words = bundle.authProviders.reasons as Record<string, string>;
-    expect(reasons.filter((r) => !words[r])).toEqual([]);
+    expect(reasons.filter((r) => !table[`server.auth_provider.reason.${r}`])).toEqual([]);
+    // …and the panel keeps no copy of them (0.54: lib/providerChecks is gone).
+    const panel = bundle.authProviders as Record<string, unknown>;
+    expect(panel.checks).toBeUndefined();
+    expect(panel.reasons).toBeUndefined();
   });
 });
 
@@ -426,14 +438,26 @@ describe('an LDAP directory’s page: sections, hints, defaults and the director
     expect(text).toContain(en.authProviders.secretSetShort);
   });
 
-  it('says what the directory holds, one or many', async () => {
+  // The one/many wording is the server's (auth/probe_say_test.go); the page
+  // prints what it was given.
+  it('says what the directory holds, as the server worded it', async () => {
     testCall.mockResolvedValue({
       testable: true,
       ok: true,
       checks: [
-        { id: 'people', status: 'ok', params: { n: '1000+', mail: '998', filter: '(mail=*)', attr: 'mail' } },
-        { id: 'groups', status: 'unchecked', params: { attr: 'memberOf' } },
-        { id: 'sync_groups', status: 'ok', params: { n: '1' } },
+        {
+          id: 'people',
+          status: 'ok',
+          params: { n: '1000+', mail: '998', filter: '(mail=*)', attr: 'mail' },
+          text: '1000+ people found with (mail=*); 998 with an email (mail).',
+        },
+        {
+          id: 'groups',
+          status: 'unchecked',
+          params: { attr: 'memberOf' },
+          text: 'Nobody lists groups in memberOf. If your directory has groups, set a group search filter.',
+        },
+        { id: 'sync_groups', status: 'ok', params: { n: '1' }, text: 'Directory sync would bring in 1 group.' },
       ],
     });
     const w = await mountEdit('ldap');

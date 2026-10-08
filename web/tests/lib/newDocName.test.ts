@@ -17,8 +17,8 @@ import {
   finalDocName,
   retypeDocName,
   stemEnd,
-  suggestDocName,
 } from '@brftech/filex-core/src/lib/newDocName';
+import * as newDocName from '@brftech/filex-core/src/lib/newDocName';
 import type { NewDocType } from '@brftech/filex-core/src/types/FileNode';
 
 const txt: NewDocType = { ext: 'txt', group: 'text', mime: 'text/plain; charset=utf-8', ext_required: false };
@@ -33,17 +33,11 @@ const docx: NewDocType = {
 const drawio: NewDocType = { ext: 'drawio', group: 'diagram', mime: 'application/vnd.jgraph.mxfile', requires: 'drawio', ext_required: true };
 const ALL = [docx, md, txt, drawio];
 
+// #211 (audit B18): the free name beside a taken one is the server's
+// (`newFileCheck`, the create's dry run) - tests/components/newDocumentModal.
 describe('the prefilled name', () => {
-  it('is the full name, with the type’s extension in it', () => {
-    expect(suggestDocName('Untitled', 'txt', new Set())).toBe('Untitled.txt');
-    expect(suggestDocName('Untitled', 'docx', new Set())).toBe('Untitled.docx');
-  });
-
-  it('steps past a name already in the folder, case-insensitively', () => {
-    const taken = new Set(['untitled.txt', 'untitled (2).txt']);
-    expect(suggestDocName('Untitled', 'txt', taken)).toBe('Untitled (3).txt');
-    // Another type's Untitled is no collision.
-    expect(suggestDocName('Untitled', 'md', taken)).toBe('Untitled.md');
+  it('is not numbered here any more', () => {
+    expect('suggestDocName' in newDocName).toBe(false);
   });
 });
 

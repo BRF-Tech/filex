@@ -240,3 +240,88 @@ describe('DestinationPickerModal — pick: file', () => {
     expect(confirm(w).attributes('disabled')).toBeDefined();
   });
 });
+
+// wiring:e2 vault — a vault (docs/E2E-VAULT-FORMAT.md) is written only
+// through its own API: what is in one moves only inside it, and nothing goes
+// into or out of one on the server. The chooser says so before anyone picks,
+// and never offers the vault's layout on the storage (`v/`) as folders.
+describe('DestinationPickerModal and vaults', () => {
+  const VT: Record<string, Listing & { e2e_vault_root?: string }> = {
+    'main://': {
+      adapter: 'main',
+      storages: ['main'],
+      dirname: 'main://',
+      read_only: false,
+      perm: 'owner',
+      files: [d('main://docs'), { ...d('main://Kasa'), e2e: true, e2e_vault: true }],
+    },
+    'main://docs': { adapter: 'main', storages: ['main'], dirname: 'main://docs', read_only: false, perm: 'owner', files: [] },
+    // The server's listing of a vault folder: its layout, never rows.
+    'main://Kasa': {
+      adapter: 'main',
+      storages: ['main'],
+      dirname: 'main://Kasa',
+      read_only: false,
+      perm: 'owner',
+      e2e_vault_root: 'main://Kasa',
+      files: [d('main://Kasa/v')],
+    },
+  };
+  // The explorer's paneApi: an open vault lists from its index.
+  const OPEN: Record<string, Listing & { e2e_vault_root?: string }> = {
+    ...VT,
+    'main://Kasa': { ...VT['main://Kasa'], files: [d('main://Kasa/Belgeler'), d('main://Kasa/Arşiv')] },
+    'main://Kasa/Belgeler': { ...VT['main://Kasa'], dirname: 'main://Kasa/Belgeler', files: [] },
+  };
+  const mountWith = async (tree: typeof VT, props: Record<string, unknown>) => {
+    const idx = vi.fn(async (p: string) => {
+      const hit = tree[p];
+      if (!hit) throw new Error('404');
+      return hit;
+    });
+    const w = mount(DestinationPickerModal, { props: { open: true, api: { index: idx }, locale: 'en', storages: ['main'], ...props } });
+    await flush();
+    return w;
+  };
+
+  it('from outside: a vault is said to be one and is a dead end', async () => {
+    const w = await mountWith(VT, { startAt: 'main://', mode: 'move' });
+    const row = rowFor(w, 'Kasa');
+    expect(row.find('[data-testid="destpicker-vault-tag"]').text()).toBe('Vault');
+    expect(row.attributes('disabled')).toBeDefined();
+    expect(row.attributes('title')).toMatch(/Nothing goes into a vault/);
+    expect(rowFor(w, 'docs').attributes('disabled')).toBeUndefined();
+  });
+
+  it('standing in a vault from outside: no `v/`, and nothing to choose', async () => {
+    const w = await mountWith(VT, { startAt: 'main://Kasa', mode: 'copy' });
+    expect(rowFor(w, 'v').exists()).toBe(false);
+    expect(confirm(w).attributes('disabled')).toBeDefined();
+    expect(reason(w).text()).toMatch(/Nothing goes into a vault/);
+  });
+
+  it('a vault this tab knows is one even when no listing says so', async () => {
+    const plain = { ...VT, 'main://': { ...VT['main://'], files: [d('main://docs'), d('main://Kasa')] } };
+    const w = await mountWith(plain, { startAt: 'main://', mode: 'move', vaultRoots: ['main://Kasa'] });
+    expect(rowFor(w, 'Kasa').find('[data-testid="destpicker-vault-tag"]').exists()).toBe(true);
+    expect(rowFor(w, 'Kasa').attributes('disabled')).toBeDefined();
+  });
+
+  it('from inside a vault: only that vault, and the way back into it stays open', async () => {
+    const w = await mountWith(OPEN, { startAt: 'main://', mode: 'move', vaultFrom: 'main://Kasa', vaultRoots: ['main://Kasa'] });
+    expect(confirm(w).attributes('disabled')).toBeDefined();
+    expect(reason(w).text()).toMatch(/moves only inside that vault/);
+    expect(rowFor(w, 'docs').attributes('disabled')).toBeDefined();
+    const kasa = rowFor(w, 'Kasa');
+    expect(kasa.attributes('disabled')).toBeUndefined();
+    await kasa.trigger('click');
+    await flush();
+    expect(rowFor(w, 'Belgeler').exists()).toBe(true);
+    expect(rowFor(w, 'v').exists()).toBe(false);
+    expect(confirm(w).attributes('disabled')).toBeUndefined();
+    await rowFor(w, 'Belgeler').trigger('click');
+    await flush();
+    await confirm(w).trigger('click');
+    expect(w.emitted('pick')).toEqual([['main://Kasa/Belgeler']]);
+  });
+});

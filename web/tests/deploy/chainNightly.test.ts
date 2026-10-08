@@ -376,6 +376,25 @@ describe('the morning report', () => {
     expect(r.message).toMatch(/release evidence: pnpm release <version> --resume --chain/);
   });
 
+  it("says a green job's warnings and makes the night a warning, not green and not red (#187, language packs behind the tree)", () => {
+    // The maintainer, 2026-10-08: a night whose only failed screenshot scene is a
+    // language pack behind the tree is a WARNING (the shots job exits 0 and
+    // says JOBWARN, run.mjs keeps it as `warnings`); a release run stays red.
+    const w = 'shots: the language packs are behind this tree, so langpack.mjs was not taken; every other scene was (150 of 151 pictures).';
+    const warned = result({
+      counts: { passed: 4, failed: 0, skipped: 0, total: 4 },
+      jobs: [...result().jobs, { name: 'shots', status: 'passed', log: '/r/logs/shots.log', summary: 'shots=0 (warning: ...)', warnings: [w] }],
+    });
+    const r = composeReport({ tonight: tonight(), result: warned, history, commits, nowMs: now, tz });
+    expect(r.severity).toBe('warning');
+    expect(r.title).toBe(`filex nightly 2026-10-07: green, 1 job(s) with a warning (${C.slice(0, 8)}, 2h15m00s)`);
+    expect(r.message).toContain(`WARNING shots: ${w}`);
+    expect(r.message).not.toMatch(/^RED shots/m);
+    // A red night stays red: a warning never softens it.
+    const red = result({ ok: false, counts: { passed: 3, failed: 1, skipped: 0, total: 4 }, jobs: [...warned.jobs.slice(0, 2), { name: 'e2e-webkit', status: 'failed', log: '/r/logs/e2e-webkit.log', summary: 'e2e=1' }, warned.jobs[3]] });
+    expect(composeReport({ tonight: tonight(), result: red, history, commits, nowMs: now, tz }).severity).toBe('danger');
+  });
+
   it('says red, each red job with its summary and log, and the commits since it last passed (a deliberate red names its range)', () => {
     const red = result({
       ok: false,

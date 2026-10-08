@@ -74,7 +74,10 @@ test.describe('The explorer Trash deletes permanently', () => {
     await expect(dialog, 'the dialog is not in Turkish').toContainText('kalıcı olarak silinecek');
     await expect(dialog, 'the dialog still says "moved to trash"').not.toContainText(/moved to trash|çöpe atılacak/i);
 
-    const purged = page.waitForResponse((r) => r.request().method() === 'DELETE' && r.url().includes('/api/admin/trash/'));
+    // One request for the selection (0.54, finding A15): POST /api/admin/trash/purge.
+    const purged = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && r.url().includes('/api/admin/trash/purge'),
+    );
     await dialog.getByRole('button', { name: /^(Delete permanently|Kalıcı olarak sil)$/ }).click();
     const res = await purged;
     expect(res.ok(), `purge ${res.status()}`).toBeTruthy();

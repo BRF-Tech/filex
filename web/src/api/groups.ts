@@ -100,8 +100,9 @@ export const GroupsApi = {
     return data.memberships ?? {};
   },
 
-  async list(): Promise<Group[]> {
-    const { data } = await api.get<{ groups: Group[] }>('/admin/groups');
+  /** `q` narrows on the server (name, description, directory links). */
+  async list(q?: string): Promise<Group[]> {
+    const { data } = await api.get<{ groups: Group[] }>('/admin/groups', { params: q ? { q } : undefined });
     return data.groups ?? [];
   },
 

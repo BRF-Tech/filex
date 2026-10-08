@@ -16,6 +16,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -110,11 +111,7 @@ func (s *storageSyncer) run(ctx context.Context) error {
 	// is asked once, up front; the walk then reads directories out of memory.
 	// Anything else — or a tree too large to hold — is walked directory by
 	// directory as before.
-	list := dirLister(s.driver.List)
-	if idx, ok := s.prefetchTree(ctx, "/"); ok {
-		list = idx.list
-	}
-	seen, err := s.walk(ctx, "/", nil, c, list, storage.NewCycleGuard(), 0)
+	seen, err := s.walk(ctx, "/", nil, c, s.lister(ctx, "/"), storage.NewCycleGuard(), 0)
 	if err != nil {
 		s.finishRun(ctx, run.ID, seen, c.added, c.updated, 0, err)
 		return err
@@ -249,6 +246,34 @@ func (idx treeIndex) list(_ context.Context, p string) ([]storage.Object, error)
 	return idx[path.Clean("/"+p)], nil
 }
 
+// lister is what one walk from root reads its directories with: the tree
+// fetched in one pass when the backend can hand it over (prefetchTree), the
+// driver's List otherwise.
+//
+// ⚠ The tree in memory is a picture of the storage at the moment it was
+// fetched, and filex keeps changing the storage while the walk reads it. A
+// rename that finishes after the picture was taken has moved its rows to the
+// new path already, while the picture still shows the old one: the walk would
+// find the old path with no row and catalogue the moved folder again, as a
+// copy at its old name, until the next pass. So the picture is used only for
+// as long as no two-step change (internal/rowgate) has finished on the
+// storage since BEFORE it was taken; from the first one on, every directory
+// is asked of the storage itself. Each directory is read under the gate
+// (listDir), so the count compared there is exact.
+func (s *storageSyncer) lister(ctx context.Context, root string) dirLister {
+	moves := rowgate.Moves(s.storage.ID)
+	idx, ok := s.prefetchTree(ctx, root)
+	if !ok {
+		return s.driver.List
+	}
+	return func(ctx context.Context, p string) ([]storage.Object, error) {
+		if rowgate.Moves(s.storage.ID) != moves {
+			return s.driver.List(ctx, p)
+		}
+		return idx.list(ctx, p)
+	}
+}
+
 // TreePrefetchMax bounds how many objects one RunOnce will hold in memory
 // from a single-pass listing before it gives up on the shortcut and walks
 // directory by directory instead. Two million objects is on the order of a
@@ -302,25 +327,49 @@ func (s *storageSyncer) prefetchTree(ctx context.Context, root string) (treeInde
 	return idx, true
 }
 
+// errDirGone: a directory the walk was about to list is not on the storage
+// (storage.ErrNotFound from its listing).
+var errDirGone = errors.New("sync: the directory is not on the storage any more")
+
 // walk recursively lists the storage from `path` downwards. parent is the
 // DB id of the parent node (nil at root). list answers each directory —
-// the driver, or a tree fetched up front (see prefetchTree).
+// the driver, or a tree fetched up front (see lister).
 //
 // A directory's own entries are applied first, all of them (applyListing: in
 // one transaction), and only then are its subfolders walked.
+//
+// A top that is not on the storage is an empty walk, as it always was: for a
+// full scan that is the whole-listing guard's business (a storage root that
+// lists nothing), and a rescan or a copy mirror of a folder that is gone has
+// nothing to catalogue.
 func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *walkCounts, list dirLister, guard *storage.CycleGuard, depth int) (int, error) {
-	objs, err := list(ctx, p)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return 0, nil
-		}
+	n, err := s.walkFrom(ctx, p, parent, c, list, guard, depth)
+	if errors.Is(err, errDirGone) {
+		return 0, nil
+	}
+	return n, err
+}
+
+// walkFrom is walk for one directory and everything below it.
+//
+// ⚠⚠ A folder its parent's listing showed, gone by the time the walk lists
+// it, is a folder the walk COULD NOT LIST - never an empty one (issue #192).
+// It used to be read as "listed, nothing in it": every row below it looked
+// unseen, the tombstone pass confirmed each one gone by a Stat of the path the
+// row still named, and dropped it. That is exactly what a rename running
+// beside the scan looks like - the parent listed before the bytes moved, the
+// folder listed after - and the rows dropped were the folder's contents, a
+// moment before the rename re-homed them: the renamed folder opened empty in
+// the explorer, and its files came back on the next scan as new files,
+// without their shares, versions or comments (e2e 159 and 172, WebKit, the
+// 0.53 run). Now the folder is put with the ones whose listing failed
+// (walkCounts.unlisted): nothing below it is judged this pass, and the next
+// pass, which sees the storage as it is, decides about it.
+func (s *storageSyncer) walkFrom(ctx context.Context, p string, parent *int64, c *walkCounts, list dirLister, guard *storage.CycleGuard, depth int) (int, error) {
+	listed, err := s.listDir(ctx, p, parent, c, list)
+	if errors.Is(err, errDirGone) {
 		return 0, err
 	}
-	markerFirst(objs)
-	listed, err := s.applyListing(ctx, p, parent, objs, c, func(ctx context.Context, _ []listedEntry, _ *entryBatch) error {
-		s.dirListed(ctx, p, len(objs))
-		return nil
-	})
 	if errors.Is(err, errAbandoned) {
 		c.partial = true
 		c.unlisted = append(c.unlisted, p)
@@ -342,15 +391,46 @@ func (s *storageSyncer) walk(ctx context.Context, p string, parent *int64, c *wa
 		if e.node == nil || !e.descend || !guard.Enter(e.obj, depth+1) {
 			continue
 		}
-		cn, err := s.walk(ctx, e.obj.Path, &e.node.ID, c, list, guard, depth+1)
+		cn, err := s.walkFrom(ctx, e.obj.Path, &e.node.ID, c, list, guard, depth+1)
 		if err == nil {
 			count += cn
-		} else {
-			c.partial = true
-			c.unlisted = append(c.unlisted, e.obj.Path)
+			continue
 		}
+		if errors.Is(err, errDirGone) {
+			slog.Info("sync: a folder its parent's listing showed was gone when the walk reached it; nothing below it is judged this pass",
+				slog.Int64("node", e.node.ID),
+				slog.String("path", e.obj.Path),
+				slog.String("storage", s.storage.Name))
+		}
+		c.partial = true
+		c.unlisted = append(c.unlisted, e.obj.Path)
 	}
 	return count, nil
+}
+
+// listDir lists one directory and applies the listing to the catalogue,
+// holding the storage's gate alone for both (rowgate.Judge): a rename, a move
+// or a delete filex is making on the storage is either wholly before this
+// directory's listing or wholly after it, so the rows the listing is compared
+// with say what the storage it lists says. The gate is let go before the
+// walk goes down into the subfolders, which take it again one at a time.
+//
+// errDirGone: the directory is not on the storage.
+func (s *storageSyncer) listDir(ctx context.Context, p string, parent *int64, c *walkCounts, list dirLister) ([]listedEntry, error) {
+	release := rowgate.Judge(s.storage.ID)
+	defer release()
+	objs, err := list(ctx, p)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, errDirGone
+		}
+		return nil, err
+	}
+	markerFirst(objs)
+	return s.applyListing(ctx, p, parent, objs, c, func(ctx context.Context, _ []listedEntry, _ *entryBatch) error {
+		s.dirListed(ctx, p, len(objs))
+		return nil
+	})
 }
 
 // catalogueTxEntries bounds one transaction of applyListing. A directory of
@@ -703,6 +783,7 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 	} else {
 		c.added++
 	}
+	s.recordLinkState(ctx, created, obj)
 	b.index = append(b.index, created)
 	// A file nobody wrote through filex, catalogued for the first
 	// time. This — not the drift branch below — is the first import
@@ -718,6 +799,9 @@ func (s *storageSyncer) catalogueEntry(ctx context.Context, p string, parent *in
 func (s *storageSyncer) refreshEntry(ctx context.Context, existing *model.Node, obj storage.Object, c *walkCounts, b *entryBatch) {
 	// Listed again: the storage answers for it (issue #104).
 	s.answered(ctx, existing, b)
+	// And a link says again why it will not open - which is also how a link
+	// row catalogued before 0.54 gets its reason (migration 00098).
+	s.recordLinkState(ctx, existing, obj)
 	unstored := isUnstored(existing)
 	settled := unstored && s.settleTransfer(ctx, existing, obj)
 	drifted := false
@@ -802,6 +886,36 @@ func (s *storageSyncer) enqueueScan(ctx context.Context, n *model.Node) {
 		return
 	}
 	s.avScan(ctx, n)
+}
+
+// recordLinkState keeps why a link row will not open: the reason the driver
+// gave for the entry just listed (storage.MetaLinkState - outside_root,
+// broken, unresolved), so a listing the catalogue answers names it the way a
+// listing read from the storage does (migration 00098). Before it the
+// catalogue kept only that the row is a link filex will not follow, and every
+// listing after the first sync said the general "Link".
+//
+// Only a link row carries one. When what is listed at a link row's path is no
+// longer a link the driver refuses, the old reason is cleared rather than left
+// to describe something that is not there. Nothing is written while the reason
+// is the one already recorded (NodeLinkStateSQL compares in the UPDATE), so
+// the walk can ask on every pass.
+//
+// Best-effort, like the rest of the per-entry bookkeeping: a failed write
+// leaves the row saying "Link" until the next pass, never fails the pass.
+func (s *storageSyncer) recordLinkState(ctx context.Context, n *model.Node, obj storage.Object) {
+	if n == nil || n.Type != model.NodeTypeSymlink {
+		return
+	}
+	state := ""
+	if obj.Kind == storage.KindSymlink {
+		state = obj.Metadata[storage.MetaLinkState]
+	}
+	if _, err := s.store.SetNodeLinkState(ctx, n.ID, state); err != nil {
+		slog.Warn("sync: could not record why a link will not open",
+			slog.Int64("node", n.ID), slog.String("path", n.Path),
+			slog.String("storage", s.storage.Name), slog.String("err", err.Error()))
+	}
 }
 
 // reconcileTrash puts right anything LIVE inside `.filex-trash/`.
@@ -1001,9 +1115,21 @@ func (s *storageSyncer) settleTransfer(ctx context.Context, n *model.Node, obj s
 // same reason: the walk does not look there, so "unseen" says nothing about
 // it. Such a row was catalogued before its pattern was added, or written
 // through filex since; it stays as it is — the folder is still there.
+//
+// ⚠⚠ It holds the storage's gate alone while it confirms and drops
+// (rowgate.Judge, issue #192): a rename, a move or a delete filex is making on
+// the storage moves the bytes first and the rows after, and a row judged in
+// between names a path its object has just left. Confirmed gone by a Stat of
+// that path, it was dropped - shares, versions, comments - a moment before
+// the rename would have re-homed it. With the gate, every change filex makes
+// is either finished before the judgement or starts after it.
 func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int {
 	b := &entryBatch{}
-	deleted := s.tombstoneRows(ctx, stale, b)
+	deleted := func() int {
+		release := rowgate.Judge(s.storage.ID)
+		defer release()
+		return s.tombstoneRows(ctx, stale, b)
+	}()
 	s.handOff(ctx, b)
 	return deleted
 }
@@ -1011,18 +1137,59 @@ func (s *storageSyncer) tombstone(ctx context.Context, stale []*model.Node) int 
 // tombstoneRows is tombstone with the search-index deletions and the cache
 // releases left in b, for a caller running inside a transaction (the lazy
 // delete pass): they happen only once the drops have committed.
+//
+// ⚠ It takes no gate itself (the lazy delete pass runs inside a transaction,
+// and its caller holds the gate already: see rowgate). Each candidate is read
+// again first: the list it was given may be older than the gate its caller now
+// holds (RunOnce lists the stale rows before tombstone takes it), and a row
+// that moved or went in between is not the row that list described.
 func (s *storageSyncer) tombstoneRows(ctx context.Context, stale []*model.Node, b *entryBatch) int {
 	var gone []*model.Node
 	for _, n := range stale {
 		if s.rule.Skips(n.Path) {
 			continue
 		}
-		if !s.confirmGone(ctx, n, b) {
+		cur := s.stillAsListed(ctx, n)
+		if cur == nil {
 			continue
 		}
-		gone = append(gone, n)
+		if !s.confirmGone(ctx, cur, b) {
+			continue
+		}
+		gone = append(gone, cur)
 	}
 	return s.dropRows(ctx, gone, b)
+}
+
+// stillAsListed reads row n again and returns it when it is still the row n
+// describes: there, at the same path, live or deleted as it was. nil when it
+// is gone, or moved or changed state since (said at INFO: a row that moves
+// under the pass is what a rename beside the scan looks like, and the next
+// pass judges it where it is now). The tombstone pass asks it of each
+// candidate before its Stat, and dropRows of each row right before the drop.
+func (s *storageSyncer) stillAsListed(ctx context.Context, n *model.Node) *model.Node {
+	cur, err := s.store.GetNode(ctx, n.ID)
+	if err != nil || cur == nil {
+		return nil
+	}
+	if !sameRowPlace(n, cur) {
+		slog.Info("sync: keeping a row that moved while the pass was judging it",
+			slog.Int64("node", n.ID),
+			slog.String("was", n.Path),
+			slog.String("now", cur.Path),
+			slog.String("storage", s.storage.Name))
+		return nil
+	}
+	return cur
+}
+
+// sameRowPlace reports whether cur, a row read again, still stands where was,
+// the same row read earlier, put it: the same path, the same storage key and
+// the same live-or-deleted state.
+func sameRowPlace(was, cur *model.Node) bool {
+	return cur.PathHash == was.PathHash &&
+		cur.StorageKey == was.StorageKey &&
+		(cur.DeletedAt == nil) == (was.DeletedAt == nil)
 }
 
 // confirmGone decides whether a node the walk did not see is gone from the

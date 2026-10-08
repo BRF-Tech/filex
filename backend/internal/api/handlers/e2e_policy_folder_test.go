@@ -24,24 +24,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/api"
-	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
-	"github.com/brf-tech/filex/backend/internal/testutil"
 )
 
 // The agent API's write and zip decided by writeNeed (a Stat that answered),
@@ -121,63 +117,6 @@ func TestE2EPolicy_AFolderWithTheNameIsNotAFileToReplace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, kfNewPw, string(got))
 	})
-}
-
-// localParts is local storage that also hands out part URLs — the presigned
-// upload (upload.go Init) is open only on a driver that does — and counts the
-// multipart uploads it was asked to start.
-type localParts struct {
-	*local.Driver
-	started atomic.Int32
-}
-
-func (d *localParts) InitMultipart(context.Context, string, int64, int) (string, []string, error) {
-	return fmt.Sprintf("upload-%d", d.started.Add(1)), nil, nil
-}
-
-func (d *localParts) CompleteMultipart(context.Context, string, string, []storage.PartCompletion) error {
-	return nil
-}
-
-func (d *localParts) AbortMultipart(context.Context, string, string) error { return nil }
-
-// The presigned upload decided "create" by a Stat that failed, and a folder
-// answered it: the Init read as an overwrite and the rule was never asked.
-// Nothing looks again — no kind guard at Init, none at Finalize — so on an
-// object store the parts went up and were assembled beside the prefix.
-func TestE2EPolicy_PresignedInitOntoAFolderWithTheName(t *testing.T) {
-	root := t.TempDir()
-	lp := &localParts{Driver: &local.Driver{}}
-	require.NoError(t, lp.Init(context.Background(), map[string]any{"root": root}))
-	srv, _, store := testutil.NewTestServerWith(t, nil, func(d *api.Deps) {
-		d.StorageResolver = func(int64) (storage.Driver, error) { return lp, nil }
-	})
-	ctx := context.Background()
-	st, err := store.CreateStorage(ctx, &model.Storage{Name: "yerel", Driver: "local", MountPath: "/yerel", Enabled: true, ConfigJSON: json.RawMessage(`{}`)})
-	require.NoError(t, err)
-	adminID, _ := testutil.SeedAdminUser(t, store)
-	tok := issueToken(t, store, adminID, fullScopes, nil)
-	targets := []string{"Kasa/" + e2eKeyFile, "rapor.pdf.fxe"}
-	for _, rel := range targets {
-		require.NoError(t, os.MkdirAll(filepath.Join(root, filepath.FromSlash(rel)), 0o755))
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(root, "eski.fxe"), []byte(fxeBody), 0o644))
-	encryptionOff(t, store)
-	initUpload := func(rel string) (int, string) {
-		return fxPost(t, srv.URL+"/api/files/upload/init", tok, map[string]any{"storage_id": st.ID, "path": rel, "size": 6 << 20})
-	}
-
-	for _, rel := range targets {
-		status, body := initUpload(rel)
-		assertE2ERefused(t, "a presigned upload onto the folder "+rel, status, body)
-		assert.DirExists(t, filepath.Join(root, filepath.FromSlash(rel)), "%s is not the folder any more", rel)
-	}
-	assert.Zero(t, lp.started.Load(), "the driver was asked to start a multipart upload")
-
-	status, body := initUpload("eski.fxe")
-	require.Equal(t, http.StatusOK, status, "replacing a .fxe that is there: %s", body)
-	status, body = initUpload("yedek.bin")
-	require.Equal(t, http.StatusOK, status, "an ordinary file: %s", body)
 }
 
 // stagedFixtureOver is newStagedFixture over the driver wrap makes of its

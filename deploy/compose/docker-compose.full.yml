@@ -75,7 +75,9 @@ services:
       # (SigV4 recomputes an HMAC chain), so it is sealed with this key rather
       # than hashed. Without it those refuse instead of storing plaintext — and
       # losing it stops every existing access key verifying, so back it up with
-      # the database.
+      # the database. Web Push needs it too: the key pushes are signed with
+      # is stored sealed with it, and without it push stays off
+      # (docs/NOTIFICATIONS.md, Web Push).
       FILEX_SECRET_KEY: ${FILEX_SECRET_KEY:-}
       # Optional operator key escrow for end-to-end encrypted folders, and
       # the one decision on this list that a fresh deployment cannot defer
@@ -136,6 +138,9 @@ services:
       # instead of in filex's pages: https://${ONLYOFFICE_DOMAIN} (the Caddyfile
       # sends /filex-frame/* there to filex). Empty keeps it in filex's pages.
       FILEX_ONLYOFFICE_FRAME_ORIGIN: ${FILEX_ONLYOFFICE_FRAME_ORIGIN:-}
+      # The editor's language: empty or auto opens it in each person's own
+      # filex language; a code (de, fr, tr, pt-PT, ...) is everybody's.
+      FILEX_ONLYOFFICE_LANG: ${FILEX_ONLYOFFICE_LANG:-}
       FILEX_DRAWIO_URL: ${FILEX_DRAWIO_URL:-}
       # ── Zero-touch config (fill in .env) ────────────────────────────────
       # SSO: set FILEX_AUTH_DRIVERS=local,oidc + the FILEX_OIDC_* vars. These

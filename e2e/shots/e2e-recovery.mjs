@@ -31,7 +31,7 @@ import { chromium } from '@playwright/test';
 // seeds has to be the same v1 folder the product makes, or the upgrade leg
 // measures a fixture instead of the feature.
 import * as e2ecrypto from '../../packages/core/dist/filex-core.js';
-import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
+import { SCENE_CONTEXT, pinTimes, sceneServerEnv, stageClock } from './clock.mjs';
 import { shotsDir } from './release.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
@@ -101,9 +101,24 @@ async function api(token, method, url, body, isForm = false) {
  * hold the run hostage, so after 5s it shoots anyway and says so.
  */
 async function shot(page, name) {
+  // ⚠ Two frames first: a Vue <Transition> puts its enter classes on in the
+  // next frame, and until then getAnimations() is empty - the check below
+  // passed on the dialog's first, nearly transparent frame (0.54 release
+  // run, the same picture again).
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   try {
     await page.waitForFunction(
-      () => document.getAnimations().every((a) => a.playState !== 'running'),
+      () => {
+        if (!document.getAnimations().every((a) => a.playState !== 'running')) return false;
+        // And every open dialog drawn whole: it and every box around it at
+        // full opacity.
+        for (const d of document.querySelectorAll('[role="dialog"], [aria-modal="true"]')) {
+          for (let el = d; el && el !== document.body; el = el.parentElement) {
+            if (Number(getComputedStyle(el).opacity) < 1) return false;
+          }
+        }
+        return true;
+      },
       null,
       { timeout: 5000 },
     );
@@ -231,6 +246,8 @@ async function bootEscrowInstance() {
       FILEX_ADMIN_PASSWORD: PASSWORD,
       FILEX_DEFAULT_LOCALE: 'en',
       FILEX_SECRET_KEY: 'e2e-recovery-shots-key-not-a-real-secret',
+      // The apps on the scene's clock (clock.mjs, part 5).
+      ...sceneServerEnv(),
       FILEX_INSTALLATION_E2E_ESCROW_KEY: spki,
     },
     stdio: ['ignore', logFd, logFd],
@@ -610,9 +627,9 @@ async function main(expectedKid) {
     // 2026-09-14 shell (packages/core/src/components/NotificationBell.vue), so the row
     // the event produced is one click away; the panel fetches on open.
     //
-    // ⚠ Matched on "Encrypted folder opened", not on /escrow/: the bell renders
-    // the event through packages/core/src/lib/notificationText.ts, whose wording is its
-    // own, so the server's title is not what is on screen.
+    // ⚠ Matched on "Encrypted folder opened", not on /escrow/: the bell shows
+    // the sentence the server says for the event (backend notify say.go,
+    // `server.notify.e2e.escrow_used.title`), not the words its emitter stored.
     //
     // ⚠ And the page is RELOADED first, which is why the folder is locked
     // behind the panel. Measured 2026-09-14 on this build: the bell's list is

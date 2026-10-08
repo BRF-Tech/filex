@@ -157,6 +157,12 @@ type Hub struct {
 
 	// now is time.Now, swappable in tests.
 	now func() time.Time
+
+	// access gathers the "what you may do may have changed" announcements of
+	// one burst (access.go); accessDelay is how long. A field so the tests can
+	// shrink it.
+	access      accessPending
+	accessDelay time.Duration
 }
 
 // Default coalescing bounds.
@@ -187,6 +193,7 @@ func NewHub() *Hub {
 		coalesceMin: defaultCoalesceMin,
 		coalesceMax: defaultCoalesceMax,
 		now:         time.Now,
+		accessDelay: accessDelayDefault,
 	}
 }
 

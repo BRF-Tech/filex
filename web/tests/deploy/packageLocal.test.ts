@@ -44,6 +44,7 @@ describe('packaging off GitHub Actions', () => {
       const text = notes.join('\n');
       expect(text).toContain('gh workflow run release.yml -R BRF-Tech/filex -f tag=v1.2.3 -f only=macos -f publish=true');
       expect(text).toContain('gh workflow run release.yml -R BRF-Tech/filex -f tag=v1.2.3 -f only=snap-arm64 -f publish=true');
+      expect(text, 'the stores, with the tokens GitHub holds').toContain('gh workflow run release.yml -R BRF-Tech/filex -f tag=v1.2.3 -f only=stores -f publish=true');
       expect(text, 'the release notes say macOS follows').toMatch(/goes out without the macOS packages: say so in its notes/);
       expect(text).toContain('pnpm release 1.2.3 --resume --only deploy');
     }

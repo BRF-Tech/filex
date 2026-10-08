@@ -1,4 +1,5 @@
 import { api } from './client';
+import { langParam } from './screenLang';
 
 /**
  * Storage usage and cost (issue #20).
@@ -45,6 +46,27 @@ export interface UsageTotals {
   ops_c: number;
   ops_d: number;
   account_ops: { A: number; B: number; C: number; D: number };
+  /** A+B+C+D of account_ops, the number printed beside the bucket table. */
+  account_ops_total?: number;
+}
+
+/** One row of the bucket table, added up by the server (usage.PerBucket):
+ *  the mean daily storage and the window's traffic and transactions. */
+export interface UsageBucket {
+  /** The bucket as the table names it, its region in brackets. */
+  label: string;
+  bucket: string;
+  location?: string;
+  avg_stored_bytes: number;
+  uploaded_bytes: number;
+  downloaded_bytes: number;
+  ops: number;
+}
+
+/** One day of the storage trend, every bucket together (usage.Trend). */
+export interface UsageTrendPoint {
+  date: string;
+  stored_bytes: number;
 }
 
 export interface UsageCost {
@@ -98,13 +120,19 @@ export interface UsageReport {
   days: UsageDay[];
   totals: UsageTotals;
   cost: UsageCost;
+  /** The bucket table and the daily trend, as the server added them up with
+   *  the same source rule as `totals`. The page adds up nothing. */
+  buckets?: UsageBucket[] | null;
+  trend?: UsageTrendPoint[] | null;
+  /** Things to know about this answer, in the screen's language
+   *  (srvtext `server.usage.note.*`). */
   notes?: string[];
 }
 
 export const UsageApi = {
   /** The last `days` days, ending today. */
   async report(days = 30): Promise<UsageReport> {
-    const { data } = await api.get<UsageReport>('/admin/usage', { params: { days } });
+    const { data } = await api.get<UsageReport>('/admin/usage', { params: { days, ...langParam() } });
     return data;
   },
 

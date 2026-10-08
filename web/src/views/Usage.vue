@@ -15,11 +15,11 @@
  *     defaults rather than the operator's contract, it says so, with the date
  *     they were read.
  */
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { BarChart3, Save, RefreshCw, Info, ExternalLink } from 'lucide-vue-next';
 
-import { UsageApi, type UsageReport, type UsageDay } from '@/api/usage';
+import { UsageApi, type UsageBucket, type UsageReport } from '@/api/usage';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { localeTag } from '@brftech/filex-core';
@@ -92,31 +92,14 @@ const configured = computed(() => report.value?.configured === true);
 const cost = computed(() => report.value?.cost);
 const totals = computed(() => report.value?.totals);
 
-/** Bucket rows only — the account line is rendered on its own. */
-const bucketDays = computed<UsageDay[]>(() =>
-  (report.value?.days ?? []).filter((d) => d.scope === 'bucket'),
-);
+/** One row per bucket over the window, as the server added it up
+ *  (usage.PerBucket: the mean daily storage, the traffic, the transactions,
+ *  of the same source rows as the totals) - largest first. Before 0.54 the
+ *  page summed the day rows itself, of whichever source, beside a server
+ *  that refuses to add an estimate to an invoice (usage.SumBuckets). */
+const perBucket = computed<UsageBucket[]>(() => report.value?.buckets ?? []);
 
-/** One row per bucket, summed over the window. */
-const perBucket = computed(() => {
-  const by = new Map<string, { bucket: string; stored: number; down: number; up: number; ops: number }>();
-  for (const d of bucketDays.value) {
-    const key = d.location ? `${d.bucket} (${d.location})` : d.bucket || '-';
-    const cur = by.get(key) ?? { bucket: key, stored: 0, down: 0, up: 0, ops: 0 };
-    // Storage is a daily reading, so the bucket's figure is its mean, not a sum.
-    cur.stored += d.byte_hours > 0 ? d.byte_hours / 24 : d.stored_bytes;
-    cur.down += d.downloaded_bytes;
-    cur.up += d.uploaded_bytes;
-    cur.ops += d.ops_a + d.ops_b + d.ops_c + d.ops_d;
-    by.set(key, cur);
-  }
-  const days = new Set(bucketDays.value.map((d) => d.date.slice(0, 10))).size || 1;
-  return [...by.values()]
-    .map((b) => ({ ...b, stored: b.stored / days }))
-    .sort((a, b) => b.stored - a.stored);
-});
-
-type BucketRow = (typeof perBucket.value)[number];
+type BucketRow = UsageBucket;
 
 /* The explorer's table (DataTable), remembered under `admin.usage.buckets`.
  * Every bucket of the window is on screen, so the table sorts the rows
@@ -124,24 +107,21 @@ type BucketRow = (typeof perBucket.value)[number];
  * Stored compares bytes, not the "1,2 GB" text. Until somebody picks a column
  * the rows keep `perBucket`'s own order — largest first. */
 const bucketColumns = computed<DataColumn<BucketRow>[]>(() => [
-  { id: 'bucket', label: t('usage.buckets.bucket'), sortable: true, width: 220 },
-  { id: 'stored', label: t('usage.buckets.stored'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
-  { id: 'up', label: t('usage.buckets.uploaded'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
-  { id: 'down', label: t('usage.buckets.downloaded'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
+  { id: 'label', label: t('usage.buckets.bucket'), sortable: true, width: 220 },
+  { id: 'avg_stored_bytes', label: t('usage.buckets.stored'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
+  { id: 'uploaded_bytes', label: t('usage.buckets.uploaded'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
+  { id: 'downloaded_bytes', label: t('usage.buckets.downloaded'), align: 'right', sortable: true, sortDir: 'desc', width: 120 },
   { id: 'ops', label: t('usage.buckets.ops'), align: 'right', sortable: true, sortDir: 'desc', width: 110 },
 ]);
 
-/** The daily trend, as one point per day across every bucket. */
-const trend = computed(() => {
-  const by = new Map<string, number>();
-  for (const d of bucketDays.value) {
-    const key = d.date.slice(0, 10);
-    by.set(key, (by.get(key) ?? 0) + (d.byte_hours > 0 ? d.byte_hours / 24 : d.stored_bytes));
-  }
-  return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, bytes]) => ({ date, bytes }));
-});
+/** The daily trend, one point per day across every bucket, as the server
+ *  added it up (usage.Trend). Only the bars' heights are worked out here. */
+const trend = computed(() => (report.value?.trend ?? []).map((p) => ({ date: p.date, bytes: p.stored_bytes })));
 
 const trendMax = computed(() => Math.max(1, ...trend.value.map((p) => p.bytes)));
+
+/** The account-level transactions, beside the table (never inside it). */
+const accountOps = computed(() => totals.value?.account_ops_total ?? 0);
 
 function money(n: number | undefined): string {
   if (n === undefined) return '-';
@@ -158,6 +138,11 @@ function bytes(n: number): string {
 }
 
 onMounted(load);
+// The notes are the server's sentences, in the screen's language: a
+// language switch asks again.
+watch(locale, () => {
+  if (report.value) void load();
+});
 </script>
 
 <template>
@@ -335,22 +320,22 @@ onMounted(load);
             table-id="admin.usage.buckets"
             :columns="bucketColumns"
             :rows="perBucket"
-            row-key="bucket"
+            row-key="label"
           >
             <template #toolbar>
               <h2 class="text-sm font-semibold">{{ t('usage.buckets.title') }}</h2>
             </template>
-            <template #cell-bucket="{ row }">
-              <span class="tbl-mono">{{ row.bucket }}</span>
+            <template #cell-label="{ row }">
+              <span class="tbl-mono">{{ row.label }}</span>
             </template>
-            <template #cell-stored="{ row }">
-              <span class="tabular-nums">{{ bytes(row.stored) }}</span>
+            <template #cell-avg_stored_bytes="{ row }">
+              <span class="tabular-nums">{{ bytes(row.avg_stored_bytes) }}</span>
             </template>
-            <template #cell-up="{ row }">
-              <span class="tabular-nums">{{ bytes(row.up) }}</span>
+            <template #cell-uploaded_bytes="{ row }">
+              <span class="tabular-nums">{{ bytes(row.uploaded_bytes) }}</span>
             </template>
-            <template #cell-down="{ row }">
-              <span class="tabular-nums">{{ bytes(row.down) }}</span>
+            <template #cell-downloaded_bytes="{ row }">
+              <span class="tabular-nums">{{ bytes(row.downloaded_bytes) }}</span>
             </template>
             <template #cell-ops="{ row }">
               <span class="tabular-nums">{{ formatNumber(row.ops, locale) }}</span>
@@ -358,22 +343,8 @@ onMounted(load);
           </DataTable>
 
           <!-- ⚠ Beside the table, never inside it. -->
-          <p
-            v-if="(totals?.account_ops?.A ?? 0) + (totals?.account_ops?.B ?? 0) + (totals?.account_ops?.C ?? 0) + (totals?.account_ops?.D ?? 0) > 0"
-            class="help-text"
-            data-testid="usage-account-ops"
-          >
-            {{
-              t('usage.buckets.accountOps', {
-                n: formatNumber(
-                  (totals?.account_ops?.A ?? 0) +
-                    (totals?.account_ops?.B ?? 0) +
-                    (totals?.account_ops?.C ?? 0) +
-                    (totals?.account_ops?.D ?? 0),
-                  locale,
-                ),
-              })
-            }}
+          <p v-if="accountOps > 0" class="help-text" data-testid="usage-account-ops">
+            {{ t('usage.buckets.accountOps', { n: formatNumber(accountOps, locale) }) }}
           </p>
         </div>
       </template>

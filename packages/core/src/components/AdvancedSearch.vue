@@ -66,15 +66,17 @@
  *     component's to write.
  *
  * The live count is a REAL query, debounced — the same search the button runs,
- * counted after the client-side half. That costs a round trip, so the dialog
- * prints that it does instead of presenting the number as free.
+ * with the type, date, size, folder and owner choices sent as the server's
+ * parameters (0.54, task #207: the server narrows before it cuts its page; the
+ * browser used to narrow the page afterwards). That costs a round trip, so the
+ * dialog prints that it does instead of presenting the number as free.
  */
 import { computed, ref, watch, onBeforeUnmount } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import Modal from '../modals/Modal.vue';
 import { actionIconSvg } from '../lib/actionIcons';
-import { tagKey, type TagItem, type TagKind } from '../lib/tags';
+import { keyOfName, type TagItem, type TagKind } from '../lib/tags';
 import TagKindIcon from './TagKindIcon.vue';
 import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
 import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
@@ -176,11 +178,15 @@ const knownTagGroups = computed(() =>
     .filter((g) => g.list.length > 0),
 );
 
-/** A pick appends its name to the box, once (by the server's sameness). */
-function pickTag(name: string) {
+/** A pick appends its name to the box, once - by the server's sameness: the
+ *  `key` it sent with each known tag (#211), so "Rapor" picked beside a typed
+ *  "RAPOR" the server knows is not added twice. */
+function pickTag(tag: TagItem) {
   const current = parseTagList(tagsRaw.value);
-  if (current.some((c) => tagKey(c) === tagKey(name))) return;
-  tagsRaw.value = [...current, name].join(', ');
+  const known = props.knownTags ?? [];
+  const same = (c: string) => c === tag.name || (!!tag.key && keyOfName(known, c) === tag.key);
+  if (current.some(same)) return;
+  tagsRaw.value = [...current, tag.name].join(', ');
 }
 const excludeRaw = ref('');
 const type = ref<TypeFilter>('any');
@@ -791,7 +797,7 @@ function submit() {
                   :data-tag-kind="g.kind"
                   :title="t(`tags.chip.${g.kind}`, { tag: tag.name })"
                   :aria-label="t(`tags.chip.${g.kind}`, { tag: tag.name })"
-                  @click="pickTag(tag.name)"
+                  @click="pickTag(tag)"
                 >
                   <TagKindIcon :kind="g.kind" />
                   {{ tag.name }}

@@ -80,7 +80,8 @@ import {
   isVirtualViewPath,
 } from '../lib/listing';
 import { iconFamilyFor } from '../lib/fileIcons';
-import { applyFilters, filtersActive, type DriveFilters } from '../lib/fileFilters';
+import { applyFilters, filtersActive, nameNeedle, type DriveFilters } from '../lib/fileFilters';
+import { useServerNameFilter } from '../lib/nameFilter';
 import {
   SORT_STORE_KEY,
   createSortStore,
@@ -202,6 +203,10 @@ const props = withDefaults(
     /** A second narrowing composed AFTER this pane's own filter row (the
      *  advanced-search dialog's). Null when there is none. */
     extraFilters?: DriveFilters | null;
+    /** The server already applied `extraFilters` to these rows (a search it
+     *  ran with the narrowing as parameters, task #207): the pane counts them
+     *  as on - the empty state, "Clear" - but does not narrow again. */
+    extraFiltersOnServer?: boolean;
     canWrite?: boolean;
     canPaste?: boolean;
 
@@ -217,6 +222,9 @@ const props = withDefaults(
     folderPreviews?: boolean;
     keepBadgeFor?: (n: FileNode) => 'kept' | 'syncing' | 'cloud' | 'partial' | null;
     starredIds?: Set<number>;
+    /** Stars the person just toggled (id -> starred), until the next answer
+     *  says it itself. The pane's own rows carry `starred` (task #207). */
+    starOverrides?: Map<number, boolean>;
     starEnabled?: boolean;
     apiBase?: string;
     authHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
@@ -483,12 +491,35 @@ onBeforeUnmount(() => {
   peek.leave();
 });
 
+/* #207 (audit D5) — "Filter in this folder": the server's name rule, asked
+   about the names this pane holds (lib/nameFilter: debounced, the question
+   typed past aborted, a decrypted name matched here and never sent). */
+const nameFilter = useServerNameFilter<FileNode>(
+  () => nameNeedle(props.filters),
+  () => paneRows.value,
+  (n) => n.basename || '',
+  () => props.api.matchNames,
+);
 const displayFiles = computed<FileNode[]>(() => {
-  const base = applyFilters(paneRows.value, props.filters);
+  const base = nameFilter.apply(applyFilters(paneRows.value, props.filters));
   return sort.sortListing(
-    props.extraFilters ? applyFilters(base, props.extraFilters) : base,
+    props.extraFilters && !props.extraFiltersOnServer ? applyFilters(base, props.extraFilters) : base,
     props.order ?? 'sort',
   );
+});
+
+/* #207 (audit D4) — which rows are starred: what each row says (`starred`,
+   the server's), what the host knows, and what the person just toggled. */
+const paneStarredIds = computed(() => {
+  const out = new Set<number>(props.starredIds ?? []);
+  for (const n of paneRows.value) {
+    if (typeof n.id === 'number' && (n as Record<string, unknown>).starred === true) out.add(n.id);
+  }
+  for (const [id, on] of props.starOverrides ?? new Map<number, boolean>()) {
+    if (on) out.add(id);
+    else out.delete(id);
+  }
+  return out;
 });
 const filtersOn = computed(() => filtersActive(props.filters) || !!props.extraFilters);
 
@@ -1010,7 +1041,7 @@ watch(panePath, () => {
         :theme="theme"
         :thumb-src="thumbSrc"
         :keep-badge-for="keepBadgeFor"
-        :starred-ids="starredIds"
+        :starred-ids="paneStarredIds"
         :star-enabled="starEnabled"
         :api-base="apiBase"
         :auth-headers="authHeaders"
@@ -1038,7 +1069,7 @@ watch(panePath, () => {
         :keep-badge-for="keepBadgeFor"
         :thumb-src="thumbSrc"
         :e2e-active="e2eActive"
-        :starred-ids="starredIds"
+        :starred-ids="paneStarredIds"
         :star-enabled="starEnabled"
         :api-base="apiBase"
         :auth-headers="authHeaders"
@@ -1064,7 +1095,7 @@ watch(panePath, () => {
         :loading="paneLoading"
         :thumb-src="thumbSrc"
         :e2e-active="e2eActive"
-        :starred-ids="starredIds"
+        :starred-ids="paneStarredIds"
         :star-enabled="starEnabled"
         :api-base="apiBase"
         :auth-headers="authHeaders"

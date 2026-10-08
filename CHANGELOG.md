@@ -7,6 +7,762 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-10-08
+
+> ⚠ **Upgrading to 0.54:**
+>
+> - **Embedders: update the server with the packages.** `@brftech/filex`,
+>   `@brftech/filex-core` and `@brftech/filex-react` 0.54 need a filex 0.54
+>   server: which files open for editing, the input limits and the version
+>   line come from its capabilities, with no list to fall back on
+>   ([API.md](docs/API.md)).
+> - **API clients:** the refusals that put an English sentence in `error` put
+>   a code there now, and every refusal carries the server's sentence in
+>   `message` - show that ([API-ERRORS.md](docs/API-ERRORS.md)). The presigned
+>   S3 multipart upload (`POST /api/files/upload/init`, `/finalize`, `/abort`)
+>   is gone; the staged upload works on every driver
+>   ([UPLOADS.md](docs/UPLOADS.md)). The notification lists no longer read
+>   `lang=`: a row comes in the account's language.
+> - **Migrations** 00096, 00097, 00098 and 00105 run at the first start (the
+>   vault's lock, Web Push devices, a symlink's reason, a webhook's language);
+>   nothing to do by hand.
+> - **The desktop app has no language of its own:** an install that had
+>   pinned one hands it to its account once, if the account had none.
+
+### Added
+
+- **Push notifications while filex is closed** (#191). **Push notifications
+  on this device** in user settings → Notifications (a browser tab, the
+  installed app, and the app on an iPhone's or iPad's Home Screen, iOS 16.4
+  or later) sends what the person's bell tells them to that phone or browser
+  with filex closed: the same kinds, the same mutes and the same digest - an
+  urgent kind at once, a held kind as its digest - in their language, a tap
+  opening what the bell would. Web Push (RFC 8030, 8291, 8292) with a VAPID
+  key made at the first start and stored sealed with `FILEX_SECRET_KEY` (no
+  key, no push); only the browsers' push services are accepted as endpoints
+  (`FILEX_PUSH_HOSTS` adds one), each row is pushed to a device once however
+  many servers run, devices are listed and removable, a test push is one
+  click, signing out forgets the browser, and **Admin → Notifications → Push
+  notifications** rotates the key
+  ([NOTIFICATIONS.md → Web Push](docs/NOTIFICATIONS.md#web-push)).
+- **The ONLYOFFICE editor speaks the person's language** (#214,
+  [GitHub Discussion #93](https://github.com/BRF-Tech/filex/discussions/93)).
+  It opened in English for everybody; the server now chooses its language and
+  regional setting (`editorConfig.lang`, `editorConfig.region`) for every
+  surface that opens it: the administrator's fixed language, else the one the
+  request names, the language on the person's screen (which the viewer sends),
+  their account's, `FILEX_DEFAULT_LOCALE`, English - a language pack's
+  language too, whenever ONLYOFFICE offers it, and the nearest one it offers
+  for a regional tag (`de-AT` → `de`, `zh-HK` → `zh-TW`). **External services
+  → ONLYOFFICE → Editor language** sets *Automatic* (the default) or one of
+  the editor's 46 languages for everybody, and `FILEX_ONLYOFFICE_LANG` pins
+  it like `FILEX_ONLYOFFICE_URL`
+  ([ONLYOFFICE.md → The editor's language](docs/ONLYOFFICE.md#the-editors-language)).
+- **The vault, encryption level 3, in the explorer** (#94). Behind the server's
+  `FILEX_E2E_VAULT` switch (off by default, `capabilities.e2e_vault`), the
+  encrypted-folder dialog offers level 3 for a new folder, with its cost and
+  the pack size (4 MiB or 16 MiB). An unlocked vault lists from its encrypted
+  index in this tab - the server never hears a path below the vault folder -
+  opens and downloads by byte ranges of its packs, and takes the write lock
+  at the first change (upload, new folder, rename, move or copy inside the
+  vault, delete), committing each change as one generation. A strip says who
+  writes and counts down both clocks: the person's idle time (1 to 10
+  minutes, a new row in Settings → Preferences), after which the writer goes
+  back to read-only, and the 15 minutes after which an unused vault drops
+  its keys and asks for the password again. The same code runs in the web
+  app, the desktop app and the embeds (`packages/core`, `lib/e2evault/*`,
+  `useE2eVault`), held byte for byte to the format's test vectors. An upload
+  whose name is taken asks first, in the explorer's "already there" dialog,
+  whether it goes up under the free name (a vault keeps no earlier version,
+  so nothing is replaced). The folder chooser (Move to, Copy to, an app's
+  chooser) says which folder is a vault, offers only that vault for what is
+  inside it and no vault for anything else, and nobody sees the vault's
+  layout on the storage (`v/`) as folders - the server's listing now marks a
+  vault folder (`e2e_vault`) and a listing inside one (`e2e_vault_root`).
+  What the Go writer writes the browser reads, and the other way round:
+  `testdata/vault-go` and `testdata/vault-web`, frozen fixtures each side opens.
+  The vault's engine is loaded with the first vault opened or made, not
+  with the explorer, so the main chunk stays within workbox's 2 MiB
+  precache limit (`lib/e2evault`, `e2eVaultEngine`; a test walks the static
+  import graph).
+- **Narrow a search on the server** (#207). `type` (`file`, `dir` or a kind:
+  `image`, `spreadsheet`...), `mime`, `modified_after` / `modified_before`,
+  `min_size` / `max_size`, `under` / `not_under`, `owner` and `hidden` are
+  parameters of `/api/files/search`, the explorer's name search, `/api/ai/search`,
+  the MCP `file_search` tool and `filex client search` (one flag each), applied
+  to every candidate before the limit counts it; a value the server cannot read
+  is a `400 bad_filter`. Search answers carry `total`, and every hit its
+  `score` and `kind` ([SEARCH.md → Narrowing a search](docs/SEARCH.md#narrowing-a-search)).
+- **A new link's answer carries its download command** (#210). `POST
+  /api/files/share`, `POST /api/ai/share` and the MCP `file_share` tool return
+  `download_command`: the `curl` and PowerShell lines that fetch the link,
+  written by the server (`-L` for an S3 redirect, `?zip=wait` for a folder,
+  the PIN as `?pin=` on the creator's own answer). The share dialog shows both
+  lines and no longer builds a command itself; an agent passes them on
+  ([SHARING.md → Command line](docs/SHARING.md)).
+- **The vault's server half, behind a switch** (#94). With
+  `FILEX_E2E_VAULT=1` (off by default, and `capabilities.e2e_vault` says
+  which) the server serves `/api/files/e2e/vault/*`: a new empty vault made in
+  one request (folder, key file, generation 1's index, undone if a step
+  fails), its state and a paged listing of packs and index files with the
+  server's clock, the write lock (one session at a time, a 60-second lease,
+  each person's idle time of 1 to 10 minutes, a break by the folder's owner or
+  an administrator), packs stored whole and once, index files committed only
+  as the next generation through a temporary file renamed into place and
+  abandoned after 60 seconds, and the lock holder's garbage collection that
+  never deletes the three newest generations. The lock lives in the database
+  (`vault_locks`, migration 00096) with compare-and-set updates, so several
+  filex processes on one database agree; its token is kept only as its
+  SHA-256. Inside a vault folder only that API writes: the explorer, the
+  queue, the agent API and MCP, archives, apps, the document server's save,
+  WebDAV, S3, SFTP, FTPS and NFS are refused there (`403 VAULT_PATH`), and
+  the key file keeps its vault block and its place (`409 VAULT_KEYFILE`). `vault.create`, `vault.lock`,
+  `vault.unlock` and `vault.lock_break` are audited, `vault.generation` and
+  `vault.lock` are realtime frames, and the `filexvlt` magic joins the
+  content sniff. [BACKEND.md](docs/BACKEND.md#vault-encryption-level-3),
+  [CONFIGURATION.md](docs/CONFIGURATION.md#end-to-end-encryption-the-vault).
+- **Vaults from the command line** (#94): `filex decrypt` reads a vault (level
+  3) from a copy or straight from the server (`filex decrypt docs://Kasa`, no
+  lock, `--generation N` for an older state still kept), `filex vault mount`
+  serves one from a WebDAV server on 127.0.0.1 that the system mounts (net
+  use, mount_webdav, gio or davfs2; no FUSE) - the write lock at the first
+  change, a commit within 5 seconds of the last write, out after 15 idle
+  minutes - and `filex vault prune` collects and repacks. They work against
+  a server with the vault API on (`FILEX_E2E_VAULT`).
+  [CLI.md](docs/CLI.md#filex-vault---a-vault-on-a-server).
+- **The vault level's format, written down** (#94). Level 3 of end-to-end
+  encryption - built in this release, behind `FILEX_E2E_VAULT` (above) - has
+  a normative format and protocol,
+  [E2E-VAULT-FORMAT.md](docs/E2E-VAULT-FORMAT.md): equal packs (4 MiB, or
+  16 MiB chosen at creation) filled with random bytes, an encrypted index of
+  the whole tree padded with Padmé, keys derived from the folder key with
+  HKDF so that every key encrypts exactly one plaintext, one writer at a time
+  under a lock the server keeps (idle after 3 minutes by default, at most 10),
+  garbage collection by the lock holder, and test vectors from an independent
+  reference implementation (`backend/internal/e2edecrypt/testdata/gen_vault_vectors.mjs`,
+  `node:crypto`) that the browser, the server and the command line are held
+  to. The [roadmap](docs/E2E-ROADMAP.md#3-the-vault-level) records the
+  decisions that replaced its open questions. What the first runs of all
+  three together settled is in it too: the listing's `e2e_vault` /
+  `e2e_vault_root`, an upload whose name is taken asked about first (a vault
+  replaces nothing), `release` with `locked_idle` only from a session that
+  still holds the write lock, and a repack branch of the test vectors
+  (generations 4 to 6) that holds both writers to one repack layout.
+- **`access.changed` on the live socket** (#196). When a grant, a role, a
+  group, a permission rule, the tenant's encryption policy or an encryption
+  approval changes, the server tells the people it can concern -
+  `{"type":"access.changed"}` to a grant's or a request's person, a group's
+  members, `"scope":"all"` to every socket of the tenant the change was made
+  in (never another tenant's), or to every open socket for a change at the
+  platform level - and their explorers ask the answers their menus depend on
+  again. The frame names no path, no person and no reason; a burst is one frame
+  ([REALTIME.md → When access changes](docs/REALTIME.md#when-access-changes)).
+- **Every listed link says where it stands** (#210). `GET /api/shares` and
+  `GET /api/admin/shares` give each link `state`: `active`, `expired`,
+  `exhausted` (its download, visit or upload cap is used up) or `revoked`.
+- **Recent, Starred, Shared with me and a tag page and sort on the server**
+  (#207): `offset`, `sort`, `total` and `truncated` on each, `opened_at` /
+  `starred_at` on the rows; the explorer says when a view holds more than it
+  loaded and loads the rest on request ([BACKEND.md](docs/BACKEND.md)).
+- **The server checks an e-mail address and a username while they are typed**
+  (#209). `POST /api/auth/account/check` answers with the save's own rules and
+  words, in the reader's language; the profile and the "Add user" form ask it
+  instead of a copy of the rules in the browser, which had already drifted (it
+  let `a,b@x` and `ada.@x` through). Whether an address is taken is told only
+  where the save would tell it ([BACKEND.md](docs/BACKEND.md#post-apiauthaccountcheck-)).
+- **`GET /api/public/strings`** (#210): the public pages' sentences
+  (`server.public.*`) in one language, for the JavaScript share and
+  file-request pages ([BACKEND.md](docs/BACKEND.md)).
+- **`share_link_max_days` in `GET /api/capabilities`** (#210): the longest
+  life a new link made by THIS person may get - the install's ceiling or
+  their permission rules' **Maximum share-link lifetime**, whichever is
+  shorter.
+- **Editing encrypted office documents: the design and a protocol
+  prototype** (#189). Nothing offers it yet. The ONLYOFFICE editor would run
+  in the browser from its own unchanged files, with only its socket.io client
+  replaced by a bridge that answers it the way a Document Server does; what
+  the other editors need goes sealed (a session key under the folder key,
+  AES-256-GCM, each entry bound to its place in the log and chained to the
+  one before) through a filex relay that orders it without reading it, gives
+  the right to write changes only to an editor that has every change before
+  them, and records who joined, who left and what a save holds. Every bridge
+  runs the Document Server's lock rules on the same sequence, so the first
+  request for a paragraph or a range wins everywhere. Who saves is the same
+  answer in every browser: every 10 minutes while changes are unsaved, on
+  Save, and by the last writer to leave; unsaved work waits 30 days; a vault
+  edits alone. filex's half of the prototype is the relay
+  (`backend/internal/e2eoffice`, in memory, no route) and the keys and the
+  log reader (`packages/core/src/lib/e2eoffice.ts`, `e2eofficeSave.ts`). The
+  editor's half - the bridge, the socket.io stand-in and the x2t driver - is
+  AGPL and is not part of filex: it is the start of an app of its own,
+  [filex-office-editor](https://github.com/BRF-Tech/filex-office-editor)
+  (AGPL-3.0-or-later, its own repository and versions), that needs no
+  Document Server; it has no release yet ([E2E-OFFICE.md](docs/E2E-OFFICE.md)).
+
+### Changed
+
+- **The rules the clients kept copies of are the server's** (#211). How each
+  kind of file is edited (`capabilities.edit_kinds`, from one Go rule,
+  `internal/editkind`, that ONLYOFFICE's document types and save-text's "is
+  this text" now share), the input limits (`capabilities.limits`: tag 64,
+  comment 5000 and encryption-request reason 2000 characters, an app's kept
+  state 16 KiB, an interface's save chunk 8 MiB), the notification events that
+  cannot happen here and who could change that (`capabilities.event_off`, with
+  the sentence in the reader's language), and the release, commit and build
+  time apart (`release`, `commit`, `built`) are published by the server and
+  read by the explorer, the admin panel and the desktop app. A tag's identity
+  arrives as `key` on every tag item; the Add user form asks
+  `GET /api/admin/users/suggest`; the New document dialog asks
+  `?action=newfile` with `dry_run` whether a name is free and which free name
+  to offer; an app interface's `file.read` goes through
+  `GET /api/files/plugins/ui/{plugin}/{view}/read`, which checks the app's
+  `files:read` grant like a save. The rules a client applies while a person
+  types (a theme's key, the accent colour, a ZIP password, an app action's
+  `applies` and level, a form field's condition, the formats saved beside a
+  file) are held to one shared case file both sides test against
+  ([BACKEND.md → Rules the server publishes](docs/BACKEND.md#rules-the-server-publishes)).
+  `@brftech/filex-core` no longer exports `tagKey`, `parseServerVersion`,
+  `eventOffReason`, `eventPossible` or the `EventPossibility` type; it exports
+  `takeServerRules`, `isOfficeExt`, `isTextEditable`, `isTextualMime`,
+  `serverLimit` and `keyOfName`, and a host that fetches the capabilities
+  itself hands them over with `takeServerRules`. **@brftech/filex 0.54
+  needs a filex 0.54 server** (`edit_kinds`, the input limits and the version
+  parts come from its capabilities; the packages keep no list to fall back
+  on, so against an older server nothing is offered Edit, nothing opens as an
+  office document and no version line is drawn).
+- **The desktop app reads the sync engine's events, not its English lines**
+  (#213). `filex sync run --json` writes one JSON event per line on stdout -
+  `{event, pair, code, params, message}` - with the message said by the engine
+  in `--lang` (or `$FILEX_LANG`, else the account's language on the server),
+  from the server catalogue's new `server.sync.*` keys, so a language pack on
+  the server translates it too. The desktop app starts every watcher with
+  `--json` (and no `--lang`: the engine asks the server for the account's
+  language) and shows the engine's sentences under each
+  folder (the phase with its figures, a folder another filex syncs, the sync
+  window, an error, *Live* / *Polling* / *Offline*, a folder that cannot be
+  watched); its regular expressions over the engine's lines and its own copies
+  of those sentences are gone, and a change of the account's language restarts
+  that account's watchers. Without `--json` the plain lines for a terminal
+  are unchanged. An engine older than 0.54 does not know `--json`; the folder then says the
+  engine could not start, with its refusal
+  ([SYNC.md → The event stream](docs/SYNC.md#the-event-stream---json)).
+- **The sync engine reads the sync window, the desktop app does not** (#213).
+  New `filex sync window [HH:MM-HH:MM] --json` answers whether the engine
+  accepts a window, its canonical form and when it opens or closes next. The
+  desktop app stores that answer (and checks the stored window once at start)
+  instead of parsing `HH:MM` itself: its parser refused `7:00-9:00` and spaces
+  that the engine runs with, so such a window read as "any time" on screen. A
+  folder waiting for the window now waits until the engine's own `opens_at`.
+- **The admin pages show the server's numbers and words** (#208). The audit
+  log's and the dashboard's rows carry `label` and `target_label` (the action
+  and its target in words) and the audit list its "What" filter
+  (`resources`); a sign-in provider test's every step carries `text`; the
+  Updates status carries `policy_name`, `policy_badge` and `policy_note`; the
+  usage report carries its bucket table (`buckets`), daily `trend` and notes,
+  and the dashboard its `active_syncs` and newest `last_sync_at` - the words
+  said by the server in the reader's language (`?lang=`, else the
+  account's). The admin MCP tools `admin_audit_list` and
+  `admin_auth_providers_test` read the same words. The panel composes none of
+  them any more: the audit label, provider-check and update-policy words moved
+  from the panel's catalogue to the server's
+  ([BACKEND.md → audit](docs/BACKEND.md),
+  [OS-LOGIN.md → API](docs/OS-LOGIN.md#api), [UPDATES.md](docs/UPDATES.md),
+  [USAGE.md → The API](docs/USAGE.md#the-api)).
+- **Protection and webhook forms take the server's word** (#208).
+  `GET /api/admin/protection` sends the bounds of the retention, version and
+  share numbers; an out-of-range value, an empty box or a fraction is refused
+  with a sentence in the reader's language (`message`, with `field`), shown
+  under the field. A webhook target's refusal names its box (`field`: `name`
+  or `url`) and says why (`message`)
+  ([PROTECTION.md](docs/PROTECTION.md), [NOTIFICATIONS.md](docs/NOTIFICATIONS.md#admin-endpoints)).
+- **A skipped webhook delivery keeps a code and is said in words** (#208).
+  `webhook_error` on a skipped row is `no_destination`, `digest_unnamed`,
+  `sibling` or `stopped`, and every row carries `webhook_reason` in the
+  reader's language ([NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
+- **The trash says its own outcome, in the reader's language** (#206). How
+  "Empty trash" stands and ends ("Emptying the trash… 120 of 61,844", "Trash
+  emptied, but 3 items could not be deleted and are still in the trash."), what
+  a restore or a permanent delete did and why the rest did not, are composed
+  on the server (`summary` on the run, on the batch answers and on the
+  `trash-empty`, `restore` and `purge` rows of the operations list) and shown
+  as they are by the explorer, the admin Trash page and an agent; nobody is
+  sent to the server log and a proxy's 504 is no longer printed as "504". A
+  restore or a permanent delete of a selection is one request now
+  (`POST /api/files/manager/restore {node_ids}`, `POST /api/admin/trash/purge`)
+  instead of one per item; the MCP tools `trash_list` and `trash_restore`
+  answer the same `summary`, and `admin_trash_purge_batch` and
+  `admin_trash_empty_preview` are new.
+- **Lists and search are the server's** (#207). Every listing and search row
+  says whether the caller starred it (`starred`) and what it is (`kind`); the
+  explorer no longer fetches the first 500 stars to draw them, and its Type
+  chip reads `kind` instead of an extension table of its own. The advanced
+  search sends its type, date, size, folder and owner choices to the server
+  instead of narrowing the first 250 hits in the browser. "Filter in this
+  folder" asks the server which names answer the words (`POST
+  /api/files/search/match`, the search's own rule: separators are one, accents
+  count) - "invoice 2026" now finds `invoice_2026.pdf` there too; a name
+  decrypted in the browser is still matched there and never sent. The admin
+  Users and Groups search boxes are a server `?q=`, and the panel search's
+  folding rule is `namefold.Loose`, one definition beside the file search's.
+- **One order for a folder** (#207). A folder's contents come back folders
+  first, then by name (numbers as numbers), whichever path built the answer;
+  the catalogue path used to answer files first, and MCP `file_list` the
+  storage driver's order. `sort=` picks another key on a listing and on
+  `file_list`.
+- **One shape for every refusal, and the server writes its sentence** (#209).
+  A refusal answers `{"error": "<code>", "message": "<sentence>", "params"?}`:
+  `error` is a stable code, `message` the server's sentence in the reader's
+  language (a language pack's too). The file manager, the admin panel, the
+  desktop app, the CLI and MCP agents all show `message`; the browser no longer
+  rebuilds sentences from codes or from the server's English. The refusals
+  that put an English sentence in `error` now answer a code there (`read_only`,
+  `quota_exceeded`, `name_taken`, `reserved_name`, `bad_kind`,
+  `not_cancellable`, `finished`, `too_many`, the drafts', `entry_unavailable`,
+  `e2e_policy_undecided`); an upper-case `code` a route always sent stays. A
+  failed queue operation keeps a code and its values instead of Go's error
+  text and carries `error_text`, said when the row is read in the reader's
+  language. An app lock (423) is said by the server with the app's name, its
+  reason and the end of the lock; a sign-in lock carries `countdown`, its
+  sentence with `{wait}` left for the form's clock
+  ([API-ERRORS.md](docs/API-ERRORS.md)).
+- **A notification is translated at the last stop, for whoever receives it;
+  the app's language is the account's** (#191). A notification travels
+  untranslated (its facts and catalogue keys) and is said only where it
+  reaches its receiver: a person reads it in their **account** language on
+  every channel - the bell, the administrators' history, the desktop toast, a
+  push, every email - also when it is instance-wide; the lists no longer take
+  `lang=`. A webhook target has a **language of its own** (Admin → Webhooks →
+  Language, migration 00105; `FILEX_WEBHOOK_LANG` for the legacy webhook;
+  empty = the instance's), and every webhook body also carries the message
+  untranslated - `i18n: {lang, title: {key, count, vars}, body: {...}}` - for a
+  receiver that translates for itself. A share or file-request link mailed to
+  several addresses goes to each in its own language: an account's own, else
+  the one picked in the share dialog's new optional *Recipient's language*,
+  else the instance's - never one language for all, and never the sender's
+  screen language (the dialog sends `locale` only when somebody picked one;
+  the share sheet's words and an account opened by an invitation follow the
+  same pick). **The web
+  panel, the explorer and the desktop app take their language from the
+  account**, and a language picked on any of them changes the account's (and
+  so every other surface's): the browser's own copy only paints the first
+  frame, an account with no language is given, by the server at the sign-in,
+  the one it signs in with (the panel sends the language on screen), the desktop app
+  has no language of its own any more (Settings → Language writes the
+  account; an older install's pinned choice goes to an account that had none)
+  and starts the sync engine without `--lang`, so its messages come in the
+  account's language too. An **embedded explorer** draws the account's
+  language as well: the host's `locale` is the fallback with nobody signed
+  in (or an app's token), and the starting value an account with no language
+  takes (docs/API.md "The explorer's language"). Before, the bell could read Turkish while the same
+  person's phone and email read English, and a webhook was always told in the
+  instance's language.
+- **The server says every notification, the same words on every channel**
+  (#191). A notification's sentence is composed on the server, in the
+  reader's language, by one piece of code (`internal/notify/say.go`) - the
+  bell and the page's pop-up (`GET /api/notifications` answers each row's
+  `title` and `body` already said), the desktop app's toast, a push to a
+  phone, the emails (an urgent drop notice, the digest's: the title is the
+  subject) and the webhooks' `title`/`body` (in the webhook's language).
+  Before, every screen composed its own sentence from the row and the push
+  composed another, so a Turkish bell said "Yeni dosya: rapor.pdf" while the
+  phone said "rapor.pdf - Rapor: 1 dosya eklendi", the drop email said a third
+  thing and the sign-in provider and test alarms reached everyone in English.
+  The phrases are the server catalogue's `server.notify.*` keys, which a
+  language pack translates as before; each receiver reads in its own
+  language (the entry above); right-to-left values are
+  isolated by the server. An item inside an encrypted folder whose names are
+  encrypted reads "🔒 Encrypted item" on every channel, and the row says where
+  (`e2e`) so a browser with the folder unlocked puts its name there. The
+  emitters write facts, not sentences (the English titles of the update,
+  replica, antivirus, sign-in provider, plugin request, escrow, password and
+  encryption-request notices are gone), and whether a click on a row goes
+  somewhere is the server's verdict too (`opens` on every row, `open` on a
+  push). The desktop app's toasts speak the account's language, a language
+  pack's included. No screen
+  composes a notification any more: `@brftech/filex-core`'s
+  `NOTIFICATION_PHRASES`, `renderNotification`, `fillTemplate`,
+  `notificationVars` and `NOTIFICATION_EVENT_LABEL` are gone,
+  `notificationText(row, resolver)` shows the server's words, and
+  `useNotificationText()` takes no arguments
+  ([NOTIFICATIONS.md → What a notification says](docs/NOTIFICATIONS.md#what-a-notification-says)).
+- **Every screenshot is taken in the build host's test chain, in one
+  typeface** (#187). The chain's shots job takes the app scenes too - with
+  the app builds and the language packs its settings name
+  (`CHAIN_SIGN_APP_DIR`, `CHAIN_CONVERT_APP_DIR`, `CHAIN_LANG_ES_DIR`,
+  `CHAIN_LANG_DE_DIR`, `CHAIN_LANG_FR_DIR`), copied into the job first, and
+  the converter's engines installed in its container - and the ONLYOFFICE
+  scene against the chain's own Document Server: it runs right after `ds-go`,
+  while that is up, and a release's `CHAIN_EXTRAS=shots` run starts one for
+  it. The step that took those six scenes on the build host itself, in its
+  DejaVu Sans beside the chain's Liberation Sans, is gone. `pnpm shots
+  --keep-going` (the chain's job uses it) takes every other scene after one
+  fails, and the run stays a failure; `CHAIN_SHOTS_ONLY` narrows the job to
+  some scripts
+  ([CONTRIBUTING.md → Release process](docs/CONTRIBUTING.md#release-process)).
+- **`shots-site.mjs accept` refuses a run taken outside the build host's test
+  chain** (#187). Since the chain takes every scene, a Linux run anywhere
+  else (`SHOTS_ENVIRONMENT` is not `chain`) is no longer accepted with only a
+  warning: `accept --looked --outside-chain` takes it on purpose, and still
+  prints the warning. `pnpm shots` says so at the end of such a run.
+- **A language pack behind the tree is a warning in the nightly run, not a
+  red night** (#187). `langpack.mjs` exits 3 when a shipped pack is under
+  100% (or carries keys this filex dropped), and the review records the scene
+  as `packs-behind`; when that is the run's only failure, the nightly chain's
+  shots job is green and says `JOBWARN`, which the morning report lists and
+  makes the night a warning. A release's run (`CHAIN_EXTRAS=shots`) stays
+  red, and `accept` refuses the run either way. Any chain job can now leave
+  such warnings (`warn` in `scripts/chain/job/common.sh`, kept as `warnings`
+  in `result.json`).
+- **The shell's README picture is Home, where signing in lands.** The
+  explorer's hero (`driveshell/driveshell-hero-1440.png`, "The shell - what
+  everybody lands on") is now the person's storages, recent files and stars;
+  it used to be the same moment as `driveshell-grid-1440.png`, byte for byte.
+- **The dialogs a person opens load with their first use.** The viewer and
+  Quick Look, Sharing and permissions, the settings dialog and its time-zone
+  picker, Advanced search, the command palette, New document, Create archive,
+  the tour, the shortcut settings and the encryption dialogs are a chunk each
+  (`packages/core/lazySurfaces.ts`), fetched when the explorer mounts them,
+  instead of riding in the first chunk every page loads. The admin app's main
+  chunk is 1.89 MB again (it was 2.12 MB on the way to 0.54, over the 2 MiB
+  the service worker precaches, and the build failed). In
+  `@brftech/filex-core`'s ES build each of them is a file of its own; the
+  package still exports `PreviewModal`, `UserSettingsDialog` and the rest as
+  before, and a host that does not use one does not load it. `pnpm -C web
+  size` prints the main chunk's size and the room left
+  ([CONTRIBUTING.md → Web](docs/CONTRIBUTING.md#web)).
+- **The CLI installs with winget** (#68). `winget install BRFTech.filex` has
+  worked since 0.53.0 (x64 and arm64, `filex` on the PATH), and the README,
+  its translations, [docs/CLI.md](docs/CLI.md) and filex.sh now give it as
+  working instead of "in review". The desktop app's package
+  (`BRFTech.filex-app`) still waits for its first review, and every page keeps
+  it marked so.
+- **The public share and file-request pages say the server's words** (#210).
+  Every sentence the JavaScript pages show - the limits, "Sent", "Saving…", a
+  refused file, the footer - comes from the server catalogue's
+  `server.public.*`, the table its no-JavaScript pages render; the interface
+  catalogue's 28 `public.*` keys are gone. A file refused before it is sent
+  reads as the server's refusal of it ("a.pdf is too big (max 5 MB).").
+- **The share dialog sends a link's life as `expires_in`** (#210), counted on
+  the server's clock, and offers the expiries of the person's own ceiling
+  (`share_link_max_days`) instead of the install's.
+- **A resumable upload's bookmark lives as long as its staging** (#210):
+  `begin`, every chunk and `GET /api/files/upload/{id}` answer `expires_at`
+  (the last write + `FILEX_UPLOAD_STAGING_TTL`), and the browser keeps the
+  bookmark exactly that long instead of a fixed 24 hours. `@brftech/filex`
+  no longer exports `RESUME_TTL_MS` (a bookmark carries `expiresAt`;
+  `resumeExpiry` reads the server's `expires_at`).
+
+### Removed
+
+- **The presigned S3 multipart upload** (#205): `POST /api/files/upload/init`,
+  `/finalize` and `/abort`. No filex client spoke it any more; every upload is
+  the staged one (`POST /api/files/upload/begin`, [UPLOADS.md](docs/UPLOADS.md)),
+  which works on every driver. `@brftech/filex-core` drops the resolved
+  `uploadInit` / `uploadFinalize` / `uploadAbort` endpoints, and keeps the
+  three config keys as deprecated no-ops so an embedder's config still
+  type-checks. The S3 driver no longer presigns part URLs.
+
+### Fixed
+
+- **Edit is offered on exactly the files the server saves** (#211). The
+  preview offered Edit on `.graphql`, `.gql`, `.mmd` and `.mermaid`, which
+  save-text then refused, and none on `.properties`, `.tsv`, `.lua`, `.pl`,
+  `.r`, `.zsh`, `.gradle`, `Makefile`, `.gitignore` or `.editorconfig`, which
+  it saves; `.docm`, `.xlsm`, `.pptm`, `.ppsx` and `.xlsb` were not office
+  documents to the explorer. Save-text now also saves the four diagram and
+  schema types.
+- **New document no longer calls a free name taken** (#211). The dialog
+  compared lower-cased names, so "Report.docx" was refused beside
+  "report.docx" on a store where the two are different files; it now asks the
+  server, which answers with the create's own existence check and offers its
+  own `name (2).ext`.
+- **Add user suggests the username a first sign-in would get** (#211):
+  `gözlük@…` is `gozluk`, not `g.zl.k`, and a long address is cut to the
+  username's maximum length.
+- **Tags, comments and encryption-request reasons count characters as the
+  server does** (#211): an emoji no longer counts twice against the limit.
+- **An app's kept state is held to its 16 KiB share on the server** (#211),
+  not only in the page.
+- **`FILEX_ONLYOFFICE_CALLBACK_URL` on its own no longer switches ONLYOFFICE
+  off.** On an install that configured ONLYOFFICE on External services and
+  set only the callback address in the environment, every start re-asserted
+  the row as the environment described it - no address, so switched off and
+  its address cleared. The callback address alone is now written as the one
+  option it is, and the service stays as the admin page left it (#214).
+- **The duplicate report's cards counted only the first 100 groups.** The
+  groups, extra copies and wasted space are now the whole report's
+  (`total_groups`, `total_copies`, `total_waste`), counted before the list is
+  cut (#208).
+- **A webhook address with its scheme in capitals** (`HTTPS://…`) was accepted
+  by the form and refused by the server; the scheme is case-insensitive now
+  (#208).
+- **The Notifications page said "no webhook is set up" for every skipped
+  delivery**, also for an event the webhooks had already received with another
+  row and for a delivery the shutting-down server never began (#208).
+- **The usage page's bucket table and trend added a measured estimate to the
+  provider's report** when both were present; the server now adds them up
+  with the report's source rule (#208).
+- **A license the server held could read as running** on an app's License
+  section and the install review, which judged the status word again instead
+  of the server's `held` (#208).
+- **"Empty the trash?" named 50 items and deleted every one** (#206). The
+  explorer's confirmation counted the rows its Trash view had loaded - the
+  first page of the listing, 50 entries - and its size from them, while the
+  purge took the whole trash: every entry of every storage the caller
+  reaches, other people's deletes and swept working copies included (61,844
+  items on one install). The dialog now shows the server's dry run,
+  `GET /api/admin/trash/empty/preview`, counted by the purge's own tally over
+  the caller's own reach ("This permanently deletes 61,844 items (12.3 GB)"),
+  and its button waits for it; the admin Trash page's dialog shows the same
+  for its storage and day count. The explorer's Trash is paged now (200 at a
+  time, **Show more**, the server's count and size above the list) and the
+  admin page draws its pager: entries older than the newest 50 could not be
+  seen or restored. The listing answers `total_bytes`, `newest_deleted_at`
+  and a per-storage summary, and reads `storage=<name>`: a storage's `.trash`
+  row showed the newest 50 deletions of every storage as its own size and
+  date ([TRASH-VERSIONING.md → Trash endpoints](docs/TRASH-VERSIONING.md#trash-endpoints)).
+- **Recent is in the order things were opened** (#207). It was drawn in the
+  files' modification order (a "modified" seed on the view), unlike Home's
+  Recent; Recent was cut at 50 and Starred and Shared at 200 without a word.
+- **The admin search test and Files pages show the server's numbers** (#207):
+  `total`, `truncated` and `score` come from the server (the page made up a
+  total equal to the rows shown and a score of 0 for every hit), and the Files
+  page asks for files (`type=file`) instead of dropping folders out of a page
+  of 50.
+- **The file manager shows why the server refused** (#209). A permission
+  refusal named the role that said no ("the role “Contractors” does not allow
+  you to delete files"); the file manager threw that away and said "You are not
+  allowed to do this", while the admin panel showed it. Both now show the
+  server's sentence, and say the same words about an app lock and the queue's
+  refusals. The command line printed `HTTP 403: permission_denied`; it prints
+  the sentence too.
+- **`@brftech/filex-core`'s `DataTable` declares its slots.** The declaration
+  build read `useSlots()` from the template and looped through the empty-table
+  check (TS7022), so `dist/index.d.ts` gave the table `$slots: any`; its
+  `toolbar`, `actions`, `empty`, `foot`, `colmenu-extra` and `cell-<column>`
+  slots are typed now.
+- **A type error in a package's declarations fails its build.**
+  vite-plugin-dts only printed what it found while writing the `.d.ts` files
+  and the build passed - which is how the `DataTable` slots above shipped as
+  `any`, with `vue-tsc --noEmit` green. Every package that writes
+  declarations (`@brftech/filex-core`, `@brftech/filex`,
+  `@brftech/filex-react`, `@brftech/filex-app-ui`) now stops `vite build` on
+  any diagnostic there, listing where (`scripts/vite-dts-strict.mjs`;
+  `vite build --watch` only warns), and the Docker images copy the helper
+  ([CONTRIBUTING.md → TypeScript / Vue](docs/CONTRIBUTING.md#typescript--vue)).
+- **No console window opens while the tests and release gates run on
+  Windows** (#197). The language packs' nightly driver started its agent
+  detached, and on Windows a detached process has no console: the program
+  its shell started got a new, visible one, which could take the focus and
+  sat waiting for a key press. The agent now stays in the driver's console
+  there (its own process group is the Linux build host's), the Store package
+  run hides every program it starts, and a check reads every script and test:
+  nothing is detached on Windows, and every detached or background launch
+  carries `windowsHide`
+  ([CONTRIBUTING.md → General](docs/CONTRIBUTING.md#general)).
+- **The build host's test chain takes only what its host can give** (#194).
+  Each job is budgeted for what its container was measured to hold: the web
+  gates 3 GiB, not 1 (vitest's 19 forks, now at most `CHAIN_WEB_WORKERS`, 8),
+  and a job that cannot fit beside the browser round waits for it instead of
+  starting over the budget. A run takes `MemAvailable` less the reserve when
+  that is under `CHAIN_MEM_GB`, and names the containers outside the chain.
+  The pool starts one job at a time and none while the kernel says the host is
+  stalled (PSI); a Go test job's `/tmp` and a Playwright line's
+  `e2e/test-results` (every test's trace and video) are tmpfs; Firefox in the
+  e2e suite keeps its HTTP cache in memory and no history database (its line
+  wrote 33-34 GB a run); and a run waits at most 30 min in all for a cool
+  disk. `result.json` keeps each job's `load`
+  (what it held and wrote, the worst memory and IO pressure and disk write
+  while it ran) and the run's `host`; the nightly report names a host stall
+  beside the red job it may explain
+  ([CONTRIBUTING.md → The whole chain on one Linux host](docs/CONTRIBUTING.md#the-whole-chain-on-one-linux-host)).
+- **`shots-site.mjs accept` records the digest of every scene a run took**, and
+  the next `pnpm shots` keeps a scene the last run took. The run writes a
+  scene it took as `shoot`, and both read `shot`: no taken scene's digest was
+  ever recorded (every scene of the 0.53 manifest says `"digest": null`), so
+  every incremental run took every scene again.
+- **A folder renamed beside a storage scan no longer opens empty** (#192).
+  The scan listed the folder's parent before the rename moved the bytes and
+  the folder itself after, read "not found" as "nothing in it", and dropped
+  the rows below - the renamed folder opened empty, and its files came back on
+  the next scan as new rows, without their shares, versions or comments
+  (e2e 159 and 172, WebKit, the 0.53 run). A folder that is gone when the
+  walk reaches it now counts as a listing that failed; each storage has a row
+  gate that the queue's rename, move, delete and restore and the explorer's
+  rename and move hold from the first byte to the last row, while the scan,
+  the tombstone pass and the lazy catalogue hold it alone; a row is read again
+  before it is dropped and kept when it moved; an object store's one-pass
+  listing is not trusted once such a change has finished during the walk; and
+  every dropped row is said in the server log
+  ([ARCHITECTURE.md → The row gate](docs/ARCHITECTURE.md#the-row-gate)).
+- **The right-click menu no longer moves under the pointer** (#196). A file's
+  or folder's menu opened before the server had answered whether it may be
+  encrypted (`POST /api/files/e2e/allowed`), and drew *Encrypt with E2EE…* when
+  the answer landed, pushing every row below it down while the person was
+  aiming: in the 0.53 release run a click pressed on *Tags* was released on
+  *Star*, and on a slow server it can as well be *Delete*. The answers a menu
+  depends on (the encryption answer, per-folder permissions) are now asked
+  when a folder is listed, one batched request per question for every row,
+  and remembered per person and storage in the browser (bounded, versioned,
+  forgotten at sign-out, in memory where `localStorage` is not available), so
+  a menu opens on them at once; the storage's root and its first level, the
+  parent's level and the level below are asked again whenever they are stale.
+  Only a right-click on a row nothing is known about yet waits, at most 40 ms.
+  Every menu built on the core `ContextMenu` holds its rows while it is open:
+  a late row is added at the end, a row that is taken back stays greyed in its
+  place, a bottom sheet keeps its height
+  ([Menus that hold still](docs/INTEGRATION.md#menus-that-hold-still)). The
+  answers only shape the menu; the server decides every action as before.
+- **An admin heading keeps its icon on a phone.** Multi-tenant mode, Archives,
+  Encryption and every other page that sets an icon beside a title and a
+  sentence: on a 390 px screen the wrapping sentence squeezed the icon to a
+  speck. One base rule keeps the panel's icons (lucide) at their size in a
+  flex row.
+- **New document shows every type in a tall window.** The type list's ceiling
+  is a share of the window only; a fixed 420 px cap made it scroll in a window
+  of any height, and picking a tile in a lower row scrolled the rows above it
+  half out of view.
+- **Admin → Shares and My shares print an expiry as the date with the time
+  left under it**, instead of "date · in 7 days" on one line that the column
+  cut mid-word; a link more than a week away no longer prints its date twice.
+- **A symlink's badge names the reason after the storage's sync too** (#198).
+  A link filex will not follow said *Outside storage*, *Broken link* or
+  *Remote link* only while its folder was listed from the storage itself;
+  once the sync had catalogued it - every day after the first sync - the
+  badge said the general *Link*, because the catalogue kept that a row is
+  such a link, not why. The sync now records the driver's reason with the row
+  (migration 00098, `nodes.link_state`) and refreshes it each time it lists
+  the folder; the folder listing, search, Recent, Starred, tag views and
+  "shared with me" send it, and a listing read from the storage still says
+  the storage's reason of the moment. Link rows from an earlier version say
+  *Link* until the next sync of their folder fills the reason in
+  ([STORAGE.md → Symlinks](docs/STORAGE.md#symlinks)).
+- **The screenshots.** An app's own words - the signing app's "requested on",
+  "frozen until" and the date under a signature box - are dated on the scenes'
+  clock: every filex a scene starts sets `FILEX_APP_CLOCK`, the time inside
+  the app modules and the server's times handed to them (a lock's end, a
+  link's expiry, a wake-up's window); screenshots and tests only, everything
+  filex stores stays on the real clock ([CONFIGURATION.md](docs/CONFIGURATION.md)).
+  The symlink picture is taken after the storage's first sync, without its
+  "first sync has not finished" strip; the share dialog is taken with mail set
+  up, without "Email is not set up"; the New document picture fails rather
+  than show a scrolled list.
+- **A key filex drops no longer sends the language packs back** (#195).
+  `scripts/langpacks.mjs apply` and `release` remove the keys filex no longer
+  has from every translation right after the pack's own `pack.mjs sync`, which
+  kept them, and the template's example follows the same rule. Through 0.53
+  the German, Spanish and French validators refused such a key, so 0.53's
+  `tenants.modeOff` put every pack back until it was deleted by hand
+  ([CONTRIBUTING.md → Translations and language packs](docs/CONTRIBUTING.md#translations-and-language-packs)).
+- **An app's menu row on a read-only storage is offered only where a click
+  goes through.** Every action in `GET /api/files/plugins/actions` carries
+  `read_only_ok`, the run's own rule, and the explorer's menu reads it instead
+  of working the rule out itself; an action whose result may go elsewhere but
+  that has no screen to ask where was offered there and then refused with
+  `409 read_only`
+  ([APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md)).
+- **One password rule at every door** (#205). An administrator adding an
+  account or setting its password (`POST` / `PATCH /api/admin/users`) is held
+  to the same rule as the person's own change: at least 8 characters, counted
+  as characters. Each refusal is `400 password_too_short` with the sentence in
+  the reader's language naming the number
+  ([BACKEND.md](docs/BACKEND.md#patch-apiauthprofile-)).
+- **The agent API answers the per-file upload limit with 413** (#205):
+  `FILE_TOO_LARGE`, as the explorer's upload does, instead of a 500; an upload
+  ticket answers `413 file_too_large`.
+- **One PIN rule for every link** (#210). A link's PIN is 4 to 12
+  characters wherever the link is made - the dialog, the agent API, MCP, an
+  app's page; anything else is refused with `400 pin_length` (the bounds and a
+  sentence). `POST /api/files/share` used to take a PIN of any length while the
+  visitor's PIN box stopped at 12, so such a link could not be opened from its
+  own page; the box now stops at the server's `pin_max`.
+- **A file request's uploader name is not cut short without a word** (#210).
+  The name box stops at the server's limit (40 characters, `limits.name_max`,
+  on the JavaScript and no-JavaScript pages alike) and a longer name is
+  refused (`400 name_too_long`); the page used to allow 60 and the server
+  silently kept 40.
+- **My shares no longer calls a used-up link active** (#210): it shows the
+  server's `state`, so a link whose downloads are spent reads *Used up* and a
+  skewed clock no longer turns *Expired* over early or late.
+
+### Security
+
+- **An app's answers are checked by the server** (#212). A screen's values are
+  judged against the screen's own declarations before the app receives them
+  (a form field's type, choices and bounds, a code's length, a document box's
+  rule; a public page's signer reaches only their own boxes, with the
+  document's own labels and rules), and an app's settings against its
+  manifest when they are saved; a value that does not fit is refused in the
+  reader's language. The `pin-input` length is written by the server, and
+  `@brftech/filex-core` no longer exports `pinLength`
+  ([APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md),
+  [PLUGIN-KIT.md](docs/PLUGIN-KIT.md)).
+- **Apps never take filex's own folders as input** (#212). A path inside the
+  trash, the version history, the thumbnail cache or the drafts area (other
+  than the caller's own draft) is answered `404` by every app door
+  ([APP-PLUGINS-API.md](docs/APP-PLUGINS-API.md)).
+- **Encrypted folders: only the owner or an administrator retires old key
+  files** (#204). When a password or recovery slot changes, the earlier
+  versions of the folder's key file - and of a single encrypted file's
+  header - are deleted only if the folder's (or file's) owner or an
+  administrator made the change; anyone else's change keeps them, and the
+  owner is told
+  ([E2E-ENCRYPTION.md → What a password change does not undo](docs/E2E-ENCRYPTION.md#what-a-password-change-does-not-undo)).
+- **Password changes are recorded by the server** (#204). The audit row
+  `e2e.password_change` and the owner's `e2e.password_changed` notification
+  now come from the key-file (or `.fxe` header) rewrite the server sees, on
+  every surface; the explorer announces nothing.
+  `POST /api/files/e2e/password-changed` is kept for older clients, answers
+  `200` and records nothing, and the notification's `meta.via` is gone
+  ([E2E-ENCRYPTION.md → Who is told](docs/E2E-ENCRYPTION.md#who-is-told)).
+- **In-place encryption keeps no plaintext version only for the owner or an
+  administrator** (#204). A conversion write skips the version only when its
+  writer may delete the folder's versions anyway (owner or administrator,
+  `files.purge`, a token's `delete`); the key file's "conversion under way"
+  no longer decides it
+  ([E2E-ENCRYPTION.md → Encrypting a folder you already have](docs/E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have)).
+- **Co-editing relay** (#204): the prototype relay for encrypted office
+  documents takes a member's identity and right to write from the server,
+  never from the joining connection
+  ([E2E-OFFICE.md](docs/E2E-OFFICE.md#what-the-server-sees)).
+- **The ONLYOFFICE save callback now trusts only the signed payload** (#202,
+  [ONLYOFFICE.md → What a save callback is trusted for](docs/ONLYOFFICE.md#what-a-save-callback-is-trusted-for)).
+  Document keys handed to the editor are longer now (`<32 hex>-<32 hex>`);
+  sessions opened before the upgrade still save.
+- An answer for an open editing session (*Write mine*, *Keep the outside
+  version*) is taken only from one of that session's own editors, and audited
+  as `file.office_session_answered` (#202).
+- **Share e-mails are written by the server, from the link** (#203).
+  `POST /api/files/permissions/share-mail` takes the link (`share`, its
+  token), the addresses and the language; the address, the days left, the
+  item's name, kind and size and a file request's limits come from the link
+  itself, and the fields older clients sent about it are not read. Only a
+  link the caller manages can be sent, a PIN is never in the mail (it says
+  one guards the link), and a send reaches at most 20 addresses, an account
+  100 an hour. The dialog's share sheet gets the same words from
+  `GET /api/files/permissions/share-message`
+  ([SHARING.md → Emailing a link](docs/SHARING.md#emailing-a-link)).
+- **`X-Forwarded-Proto` is read only from a trusted proxy** when filex builds
+  a tenant's links, as `X-Forwarded-For` already was (#203).
+- **A grant's file-or-folder kind comes from the item, and presence headers
+  only from a shared proxy token** (#203): `is_dir` is read from the
+  catalogue, and `X-Filex-Presence-*` from a token with a username allow-list.
+- **Every write door asks the account's quota** (#205). The agent API's
+  writes (`/api/ai/upload`, MCP `file_write`), ShareX, upload tickets, the
+  text editor's save and the staged ingest of large uploads hold the account's
+  quota as the explorer's upload does (`413 QUOTA_EXCEEDED`; an upload ticket
+  `507 quota_exceeded`) ([QUOTAS.md](docs/QUOTAS.md#where-it-is-enforced)).
+- **The S3 gateway holds a chunked body to its declared length** (#205). An
+  `aws-chunked` PUT or part whose decoded bytes differ from
+  `x-amz-decoded-content-length` is refused with `400 IncompleteBody`, and a
+  new object's catalogue row records the size that landed
+  ([PROTOCOLS.md](docs/PROTOCOLS.md#s3)).
+- **Cloud signup starts on the free plan** (#205, `FILEX_CLOUD` only). A
+  signup gets the catalogue's first plan without a `stripe_price_id` whatever
+  it asks for; a plan changes only on a Stripe webhook event whose signature
+  verifies (`STRIPE_WEBHOOK_SECRET`); checkout takes `{tenant, plan}` and the
+  server builds its return addresses ([CLOUD.md](docs/CLOUD.md)).
+
 ## [0.53.0] - 2026-10-07
 
 ### Added

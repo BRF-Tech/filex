@@ -125,17 +125,33 @@ import that bypassed filex.
 
 ## Where it is enforced
 
+The ceiling is asked **before the bytes land**, at every write door, together
+with the per-file upload limit of the account's permission rules
+([PERMISSIONS.md](PERMISSIONS.md)). The account asked is the one the bytes are
+billed to (above: a drop link's creator, an upload ticket's minter, otherwise
+the caller).
+
 | Guard | Where | Response |
 |---|---|---|
 | **Ceiling** | staged upload `begin` | `413` `{"code":"QUOTA_EXCEEDED"}` |
+| **Ceiling** | explorer upload (`?action=upload`), *New document* | `413` `{"code":"QUOTA_EXCEEDED"}` (`FILE_TOO_LARGE` for the per-file limit) |
+| **Ceiling** | agent API `POST /api/ai/upload`, MCP `file_write`, ShareX `POST /api/sharex/upload` | `413` with `code` `QUOTA_EXCEEDED` / `FILE_TOO_LARGE` (since 0.54.0; before, only the per-file limit was asked here) |
+| **Ceiling** | upload ticket `PUT`/`POST /u/{ticket}` (billed to the minter) | `507` `{"error":"quota_exceeded"}` · `413` `{"error":"file_too_large"}` (since 0.54.0) |
+| **Ceiling** | text editor `POST /api/files/save-text` | `413` `QUOTA_EXCEEDED` / `FILE_TOO_LARGE` (since 0.54.0). An edit adds only what it grows the file by, so an account exactly at its ceiling can still save an edit that does not grow it |
+| **Ceiling** | staged ingest - the large-file path of the agent API, ShareX, upload tickets and the drop link | that surface's answer; this user's open staged uploads count, as at `begin` (since 0.54.0) |
+| **Ceiling** | public drop link | `507` `quota_exceeded` · `413` `file_too_large` |
+| **Ceiling** | WebDAV `PUT` | `507 Insufficient Storage` |
+| **Ceiling** | S3 gateway `PutObject`, `CompleteMultipartUpload` | `413` `EntityTooLarge`. A chunked body is held to its declared `x-amz-decoded-content-length`, and one that is longer or shorter is `400` `IncompleteBody` (since 0.54.0) |
+| **Ceiling** | SFTP, FTPS, NFS writes | the protocol's "no space" error |
 | **Staging disk headroom** | staged upload `begin` | `507` `{"code":"NO_DISK_SPACE"}` |
 
-The ceiling is checked against `usage_bytes` **plus the bytes already reserved
-by this user's open staged uploads**. Reserving at `begin` rather than settling
-at commit is deliberate: an upload that never commits would otherwise be
-invisible to the ceiling and a user could stage past it. The reservation is
-derived from the open rows themselves, so it is released by the row leaving the
-open set - commit, abort, or sweep - and can never drift from what it describes.
+At staged upload `begin` and in the staged ingest the ceiling is checked
+against `usage_bytes` **plus the bytes already reserved by this user's open
+staged uploads**. Reserving at `begin` rather than settling at commit is
+deliberate: an upload that never commits would otherwise be invisible to the
+ceiling and a user could stage past it. The reservation is derived from the
+open rows themselves, so it is released by the row leaving the open set -
+commit, abort, or sweep - and can never drift from what it describes.
 
 Both guards increment `filex_guard_refusals_total{guard="quota"|"disk"}` and
 write a log line naming the numbers involved. See [Metrics](METRICS.md).

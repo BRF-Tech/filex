@@ -763,6 +763,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 	ooSvc.LiveCallbackURL = func(ctx context.Context) string {
 		return extResolver.Get(ctx, external.OnlyOffice).CallbackURL
 	}
+	// The editor's language (onlyoffice/lang.go): the administrator's setting,
+	// read live like the URL, and the instance's language for a person who
+	// named none.
+	ooSvc.LiveEditorLang = func(ctx context.Context) string {
+		return extResolver.Get(ctx, external.OnlyOffice).EditorLang
+	}
+	ooSvc.DefaultLocale = cfg.DefaultLocale
 
 	// Office thumbnails are the document server's (thumb/office.go): the
 	// pipeline asks it through the adapter, and the Default apps chain names
@@ -964,10 +971,15 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		srvObj.notify = notify.New(store, notify.Config{
 			WebhookURL:   cfg.Notify.WebhookURL,
 			WebhookToken: cfg.Notify.WebhookToken,
+			WebhookLang:  cfg.Notify.WebhookLang,
 			// The notification digest (internal/notify digest.go): the kinds a
 			// person did not mark urgent are told in one notification per
 			// window. A tenant's administrators set its defaults.
 			Digest: &notify.DigestConfig{MultiTenant: cfg.MultiTenant},
+			// Web Push (internal/notify push.go): what the bell tells a person
+			// reaches their phone and browsers while filex is closed. Nil when
+			// FILEX_PUSH_ENABLED=false.
+			Push: pushConfig(cfg),
 			// The emails an event asks for (a file request's owner) and the
 			// digest's. The mailer is made further down; it is read when a mail
 			// goes, not now.
@@ -984,12 +996,13 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 		// the administrators are told once per reason. A failure at boot (the
 		// providers are built before this exists) is raised by this call.
 		authLive.SetProviderAlarm(func(name, reason string) {
+			// The facts only: the server says the alarm from them, in each
+			// reader's language, on the bell, a push and an email alike
+			// (internal/notify say.go, server.notify.auth_provider_down).
 			_, _ = srvObj.notify.Send(context.Background(), notify.Event{
 				Event:    notify.EventAuthProviderDown,
 				Severity: notify.SeverityWarning,
-				Title:    "Sign-in provider " + name + " could not start",
-				Body:     reason + ". It is left out until it can start; every other way to sign in keeps working.",
-				Meta:     map[string]any{"provider": name},
+				Meta:     map[string]any{"provider": name, "reason": reason},
 			})
 		})
 		// An older directory account (keyed by a bare login name before the
@@ -1182,10 +1195,10 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 				}
 				if _, err := notifier.Send(ctx, notify.Event{
 					Event: notify.EventPluginUpdateAvailable, Severity: notify.SeverityInfo,
-					Title: name + " " + version + " is available", Body: notes,
-					// A storage plugin's name is its only label; the bell
-					// reads {plugin} from plugin_label_<lang>.
-					Meta: map[string]any{"plugin": name, "plugin_label_en": name, "version": version},
+					// The facts only (the server says the notice, notify
+					// say.go). A storage plugin's name is its only label;
+					// the sentence reads {plugin} from plugin_label_<lang>.
+					Meta: map[string]any{"plugin": name, "plugin_label_en": name, "version": version, "notes": notes},
 				}); err != nil {
 					slog.Warn("plugins: update notice not sent", slog.String("plugin", name), slog.Any("err", err))
 				}
@@ -1303,17 +1316,19 @@ func New(ctx context.Context, cfg config.Config, embedFS embed.FS) (*Server, err
 			if d.Target.IsSecurity() {
 				sev = notify.SeverityWarning
 			}
+			// The facts only: the server says the notice from them, in each
+			// reader's language (internal/notify say.go,
+			// server.notify.update_available).
 			_, _ = srvObj.notify.Send(context.Background(), notify.Event{
 				Event:    notify.EventUpdateAvailable,
 				Severity: sev,
-				Title:    "filex " + d.Target.Version + " available",
-				Body:     d.Reason,
 				Meta: map[string]any{
 					"version": d.Target.Version,
 					"current": version.Version,
 					"step":    string(d.Step),
 					"action":  string(d.Action),
 					"notes":   d.Target.NotesURL,
+					"reason":  d.Reason,
 				},
 			})
 		}
@@ -1661,6 +1676,27 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 			// Not pinned by the environment: the row is the operator's.
 			continue
 		}
+		// ⚠ Only the callback address pinned (FILEX_ONLYOFFICE_CALLBACK_URL
+		// without FILEX_ONLYOFFICE_URL): the service is the admin page's, and
+		// the environment writes that one option and nothing else. Run through
+		// the re-assertion below it switched a service configured on the admin
+		// page off and wiped its address at every boot (`enabled = d.url != ""`,
+		// found while adding FILEX_ONLYOFFICE_LANG, #214).
+		if cur != nil && d.url == "" {
+			if external.CallbackURLFromOptions(cur.OptionsJSON) == strings.TrimRight(strings.TrimSpace(d.callback), "/") {
+				continue
+			}
+			merged, err := external.WithCallbackURL(cur.OptionsJSON, d.callback)
+			if err != nil {
+				slog.Warn("external service options are not an object; the callback URL was not applied",
+					slog.String("name", d.name), slog.String("err", err.Error()))
+				continue
+			}
+			if err := writeRowOptions(ctx, store, cur, merged); err != nil {
+				slog.Warn("seed external_services callback URL", slog.String("name", d.name), slog.String("err", err.Error()))
+			}
+			continue
+		}
 		// ⚠ Switched on is part of the match. A row the administrator switched
 		// off on External services kept its URL, so it "matched" and stayed off
 		// across restarts - unseen while the OnlyOffice service fell back to the
@@ -1700,6 +1736,62 @@ func seedExternalDefaults(ctx context.Context, store db.Store, cfg config.Config
 			slog.Warn("seed external_services row", slog.String("name", d.name), slog.String("err", err.Error()))
 		}
 	}
+	seedOnlyOfficeEditorLang(ctx, store, cfg.ExternalServices.OnlyOffice.EditorLang)
+}
+
+// seedOnlyOfficeEditorLang writes FILEX_ONLYOFFICE_LANG onto the ONLYOFFICE
+// row, under the same rule as the URL above: a value the environment gives is
+// re-asserted at every boot (an edit on External services lasts until the
+// next start), no value leaves the setting to the admin page.
+//
+// ⚠ Only the language. The row's switch, address and secret are not the
+// variable's to touch: an install that configures ONLYOFFICE on the admin page
+// and pins only the language keeps the rest exactly as the page left it
+// (writeRowOptions, as for a callback address pinned alone).
+//
+// A value ONLYOFFICE does not offer is said once, at boot, and not written:
+// "the setting does not work" is how a typo would otherwise look.
+func seedOnlyOfficeEditorLang(ctx context.Context, store db.Store, raw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+	want, ok := onlyoffice.NormalizeEditorLang(raw)
+	if !ok {
+		slog.Warn("FILEX_ONLYOFFICE_LANG is not a language the ONLYOFFICE editor offers; the setting on External services stands - docs/ONLYOFFICE.md#the-editors-language",
+			slog.String("value", raw))
+		return
+	}
+	cur, err := store.GetExternalService(ctx, external.OnlyOffice)
+	if err != nil || cur == nil {
+		// The loop above creates the row; without it there is nothing to pin.
+		slog.Warn("seed onlyoffice editor language: no ONLYOFFICE row", slog.String("value", raw))
+		return
+	}
+	if stored, ok := onlyoffice.NormalizeEditorLang(external.EditorLangFromOptions(cur.OptionsJSON)); ok && stored == want {
+		return
+	}
+	options, err := external.WithEditorLang(cur.OptionsJSON, want)
+	if err != nil {
+		slog.Warn("external service options are not an object; the editor language was not applied",
+			slog.String("name", external.OnlyOffice), slog.String("err", err.Error()))
+		return
+	}
+	if err := writeRowOptions(ctx, store, cur, options); err != nil {
+		slog.Warn("seed onlyoffice editor language", slog.String("err", err.Error()))
+	}
+}
+
+// writeRowOptions writes a row's options and nothing else: its switch,
+// address, secret and last probe go back as they were. For what the
+// environment pins as an option alone (a callback address, the editor's
+// language) on a service the admin page configured.
+func writeRowOptions(ctx context.Context, store db.Store, cur *db.ExternalService, options string) error {
+	lastCheck := time.Time{}
+	if cur.LastCheck != nil {
+		lastCheck = *cur.LastCheck
+	}
+	return store.UpsertExternalService(ctx, cur.Name, cur.Enabled, cur.URL, cur.SecretEnc, options, lastCheck, cur.LastState)
 }
 
 // releaseStagingFor drops the staging directory (and its row) belonging to a
@@ -1853,6 +1945,12 @@ func (s *Server) Start(ctx context.Context) error {
 	// a stopped server's included - are told (internal/notify digest.go).
 	if dg, ok := s.notify.(notify.Digests); ok {
 		dg.StartDigests(ctx)
+	}
+	// Web Push's pass: the key made at the first start, what was written
+	// while no server ran pushed, then each new row as it is told
+	// (internal/notify push.go).
+	if pp, ok := s.notify.(notify.Pushes); ok {
+		pp.StartPush(ctx)
 	}
 
 	// SMTP config verification — run once on boot, then every 5 minutes. The

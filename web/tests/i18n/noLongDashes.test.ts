@@ -33,7 +33,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { NOTIFICATION_PHRASES } from '@brftech/filex-core/src/lib/notificationText';
 // A plain .mjs: the one definition of what is not a plain hyphen.
 import { dashProblem } from '../../../scripts/i18n-validate.mjs';
 import {
@@ -92,23 +91,10 @@ describe('translations use a plain hyphen, never a long dash', () => {
     expect(longDashes(file), FIX).toEqual([]);
   });
 
-  // The notification phrases are a table inside code (the catalogue exports
-  // them as `server.notify.*`), and the file's comments may say what they
-  // like, so the VALUES are read, not the lines. file.infected's
-  // "{signature} - {path}" was the one left behind the first time.
-  it('packages/core/src/lib/notificationText.ts NOTIFICATION_PHRASES', () => {
-    const found: string[] = [];
-    const walk = (v: unknown, at: string) => {
-      if (typeof v === 'string') {
-        if (isLong(v)) found.push(`${at}: ${v}`);
-      } else if (v && typeof v === 'object') {
-        for (const [k, x] of Object.entries(v)) walk(x, `${at}.${k}`);
-      }
-    };
-    walk(NOTIFICATION_PHRASES, 'NOTIFICATION_PHRASES');
-    expect(Object.keys(NOTIFICATION_PHRASES).length).toBeGreaterThan(10);
-    expect(found, FIX).toEqual([]);
-  });
+  // The notification phrases were a table inside code until 2026-10-08
+  // (packages/core lib/notificationText.ts NOTIFICATION_PHRASES); they are the
+  // server catalogue's `server.notify.*` keys now, read above with the rest of
+  // backend/internal/srvtext/locales.
 });
 
 // ── the interface code ───────────────────────────────────────────────────

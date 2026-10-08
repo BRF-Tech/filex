@@ -362,7 +362,10 @@ async function main() {
     await spage.getByTestId('public-page-pin-submit').click();
     await spage.getByTestId('public-page-action-next').click();
     await spage.getByTestId('surface-signature').waitFor({ timeout: 20_000 });
-    await spage.locator('[data-testid="surface-form"] input[type="text"]').first().fill('01.10.2026');
+    // The day the scenes run on (clock.mjs SCENE_NOW, Tuesday 15 September
+    // 2026), in the box's DD.MM.YYYY: the picture said "01.10.2026", a date
+    // two weeks after everything else on it.
+    await spage.locator('[data-testid="surface-form"] input[type="text"]').first().fill('15.09.2026');
     // The box was defined as typed, so the pad opens in that mode already and
     // offers the one face the requester chose — no mode strip, no font row.
     await spage.getByTestId('surface-signature-typed').fill('Sam Carter');

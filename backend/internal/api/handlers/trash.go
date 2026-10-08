@@ -2,20 +2,24 @@
 //
 // Endpoints:
 //
-//	GET  /api/files/manager/trash                          (auth)  list trashed
-//	POST /api/files/manager/restore                        (auth)  body {node_id}
+//	GET  /api/files/manager/trash                          (auth)  list trashed (+ totals)
+//	POST /api/files/manager/restore                        (auth)  body {node_id} or {node_ids}
 //	DELETE /api/admin/trash/{id}                           (admin) immediate single purge
+//	POST /api/admin/trash/purge                            (admin) body {node_ids}: purge a batch
 //	POST /api/admin/trash/empty?older_than_days=N          (admin) start a batch purge
 //	GET  /api/admin/trash/empty                            (admin) that purge's progress
+//	GET  /api/admin/trash/empty/preview                    (admin) what that purge would delete
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path"
 	"strconv"
@@ -25,6 +29,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -34,6 +39,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/writegate"
@@ -111,6 +117,10 @@ func (h *Trash) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.Ops != nil && r.URL.Query().Get("queued") == "1" {
 		h.restoreQueued(w, r, req)
+		return
+	}
+	if len(req.NodeIDs) > 0 {
+		h.restoreBatch(w, r, req.NodeIDs)
 		return
 	}
 	if req.NodeID <= 0 {
@@ -251,10 +261,7 @@ func (h *Trash) restoreQueued(w http.ResponseWriter, r *http.Request, req restor
 		return
 	}
 	if len(ids) > maxRestoreBatch {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error": fmt.Sprintf("at most %d entries per restore", maxRestoreBatch),
-			"code":  "TOO_MANY", "max": maxRestoreBatch,
-		})
+		writeError(w, r, http.StatusBadRequest, "too_many", apierr.Params{"max": strconv.Itoa(maxRestoreBatch)}, "code", "TOO_MANY", "max", maxRestoreBatch)
 		return
 	}
 	seen := make(map[int64]bool, len(ids))
@@ -294,7 +301,152 @@ func (h *Trash) restoreQueued(w http.ResponseWriter, r *http.Request, req restor
 		queued = append(queued, op)
 	}
 	auditRestored(r.Context(), taken)
-	writeJSON(w, http.StatusAccepted, map[string]any{"ops": queued})
+	// What is on its way, said (ops.SayTrashBatch): the explorer and an agent
+	// show this sentence; how each job ended is its row's own `summary`.
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ops":     queued,
+		"done":    len(taken),
+		"failed":  0,
+		"summary": ops.SayTrashBatch(trashLang(r), ops.OpRestore, true, len(taken), 0, "", ""),
+	})
+}
+
+// trashLang is the language a trash answer's sentences are in: the language
+// on the screen that asked (`?lang=`, which the explorer sends), else the
+// account's, else the browser's (requestLang).
+func trashLang(r *http.Request) string { return requestLang(r, r.URL.Query().Get("lang")) }
+
+// trashBatch is the answer of a batch restore or purge: how many went (or,
+// queued, are on their way), how many did not, why the first of those did not
+// (an ops.Reason* code), and the server's sentence for all of it in the
+// reader's language - what every surface shows (findings A15: the explorer
+// sent one request per entry and composed this itself).
+type trashBatch struct {
+	Done       int    `json:"done"`
+	Failed     int    `json:"failed"`
+	ReasonCode string `json:"reason_code,omitempty"`
+	// Taken names the entries a restore found their place taken for.
+	Taken   []string  `json:"taken,omitempty"`
+	Queued  bool      `json:"queued,omitempty"`
+	Ops     []*ops.Op `json:"ops,omitempty"`
+	Summary string    `json:"summary"`
+	// name is the entry the first failure names (a taken place), for the
+	// sentence only.
+	name string
+}
+
+// fail counts one entry that did not go; the first one's reason is the batch's.
+func (b *trashBatch) fail(reason, name string) {
+	b.Failed++
+	if b.ReasonCode == "" {
+		b.ReasonCode, b.name = reason, name
+	}
+}
+
+// judged is a ResponseWriter that keeps a refusal instead of sending it: a
+// batch judges each entry with the one-entry checks (mayRestore, ownsNode),
+// which write their refusal, and reports what they refused as a count and a
+// reason code instead of ending the request.
+type judged struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (j *judged) Header() http.Header {
+	if j.header == nil {
+		j.header = http.Header{}
+	}
+	return j.header
+}
+
+func (j *judged) Write(b []byte) (int, error) {
+	if j.status == 0 {
+		j.status = http.StatusOK
+	}
+	return j.body.Write(b)
+}
+
+func (j *judged) WriteHeader(code int) {
+	if j.status == 0 {
+		j.status = code
+	}
+}
+
+// reason is the refusal as an ops.Reason* code.
+func (j *judged) reason() string {
+	switch j.status {
+	case http.StatusNotFound:
+		return ops.ReasonNotFound
+	case http.StatusForbidden, http.StatusUnauthorized:
+		return ops.ReasonForbidden
+	case http.StatusConflict:
+		return ops.ReasonExists
+	}
+	return ops.ReasonFailed
+}
+
+// restoreBatch is Restore asked with `node_ids` and no queue: every entry is
+// judged and restored on its own, inside the request, and the answer says how
+// many came back, how many did not and why - `{done, failed, reason_code,
+// taken, summary}`, 200 whatever the mix. The explorer's Restore and its Undo
+// of a delete send one of these instead of one request per entry.
+func (h *Trash) restoreBatch(w http.ResponseWriter, r *http.Request, ids []int64) {
+	if len(ids) > maxRestoreBatch {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": fmt.Sprintf("at most %d entries per restore", maxRestoreBatch),
+			"code":  "TOO_MANY", "max": maxRestoreBatch,
+		})
+		return
+	}
+	// Finished even if the client leaves (detachedMutation), like one entry.
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+	var ans trashBatch
+	var restored []*model.Node
+	seen := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if id <= 0 {
+			ans.fail(ops.ReasonNotFound, "")
+			continue
+		}
+		j := &judged{}
+		node, ok := h.mayRestore(j, r, id)
+		if !ok {
+			ans.fail(j.reason(), "")
+			continue
+		}
+		if node == nil {
+			// No row to restore (restoreQueued refuses it the same way).
+			ans.fail(ops.ReasonNotFound, "")
+			continue
+		}
+		if err := h.Service.Restore(ctx, id); err != nil {
+			var conflict *trash.ConflictError
+			switch {
+			case errors.As(err, &conflict):
+				name := path.Base(conflict.Path)
+				ans.Taken = append(ans.Taken, name)
+				ans.fail(ops.ReasonExists, name)
+			case errors.Is(err, trash.ErrNotInTrash), errors.Is(err, sql.ErrNoRows):
+				ans.fail(ops.ReasonNotFound, "")
+			default:
+				slog.Warn("trash: restore failed", slog.Int64("node", id), slog.String("err", err.Error()))
+				ans.fail(ops.ReasonFailed, "")
+			}
+			continue
+		}
+		ans.Done++
+		h.announceRestore(ctx, id)
+		restored = append(restored, node)
+	}
+	auditRestored(r.Context(), restored)
+	ans.Summary = ops.SayTrashBatch(trashLang(r), ops.OpRestore, false, ans.Done, ans.Failed, ans.ReasonCode, ans.name)
+	writeJSON(w, http.StatusOK, ans)
 }
 
 // auditRestored names the entries a queued restore took, on the request's
@@ -333,7 +485,10 @@ func auditRestored(ctx context.Context, nodes []*model.Node) {
 // errNotThisJobsEntry is a queued restore's or purge's entry that does not
 // live in the storage the job was queued for — in the words a missing entry
 // gets.
-var errNotThisJobsEntry = errors.New("trash entry not found")
+//
+// ⚠ Coded (apierr): the queue row keeps `not_in_trash` and says it in its
+// reader's language when it is read, not this English.
+var errNotThisJobsEntry = apierr.New("not_in_trash", nil, errors.New("trash entry not found"))
 
 // queuedEntry reads the trash entry a queued job names and refuses one that
 // is not in the job's storage.
@@ -367,7 +522,12 @@ func (h *Trash) RestoreNode(ctx context.Context, storageID, nodeID int64) error 
 	if err := h.Service.Restore(ctx, nodeID); err != nil {
 		var conflict *trash.ConflictError
 		if errors.As(err, &conflict) {
-			return fmt.Errorf("something already exists at this path: %s", path.Base(conflict.Path))
+			// Coded (apierr): the queue row keeps `name_taken` and the name, and
+			// is said in its reader's language (ops errcode.go sayErrors, say.go
+			// rowReason); the English, ops.TakenPrefix and the name, stays the
+			// detail.
+			name := path.Base(conflict.Path)
+			return apierr.New("name_taken", apierr.Params{"name": name}, errors.New(ops.TakenPrefix+name))
 		}
 		return err
 	}
@@ -465,6 +625,7 @@ func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	lang := trashLang(r)
 	op, err := h.Ops.SubmitTrashEmpty(ctx, ops.TrashEmptyRequest{
 		StorageID:     storageID,
 		OlderThanDays: older,
@@ -476,7 +637,10 @@ func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
 		// is already happening, with the run to follow — its own tenant's,
 		// by construction; another tenant's run never refuses this one.
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": "the trash is already being emptied", "code": "BUSY", "job": emptyStatusOf(op),
+			"error":   "the trash is already being emptied",
+			"code":    "BUSY",
+			"job":     emptyStatusOf(op, lang),
+			"message": srvtext.Text(lang, "server.trash.empty.busy", nil),
 		})
 		return
 	}
@@ -501,9 +665,14 @@ func (h *Trash) AdminEmpty(w http.ResponseWriter, r *http.Request) {
 	if cur, err := h.Ops.Get(ctx, op.ID); err == nil {
 		op = cur
 	}
-	st := emptyStatusOf(op)
+	st := emptyStatusOf(op, lang)
 	if st.Error != "" {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": st.Error})
+		// `error` stays the run's own (English) record for an operator's
+		// second line; `message` and `summary` are what a person is shown -
+		// never "504", never "see the server log" (finding A4).
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": st.Error, "message": st.Summary, "summary": st.Summary, "job": st,
+		})
 		return
 	}
 	code := http.StatusOK
@@ -530,7 +699,48 @@ func (h *Trash) EmptyStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"running": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, emptyStatusOf(op))
+	writeJSON(w, http.StatusOK, emptyStatusOf(op, trashLang(r)))
+}
+
+// EmptyPreview is "empty the trash" asked as a dry run: what POST
+// /api/admin/trash/empty would delete for the same `storage_id` and
+// `older_than_days`, counted by the purge's own Tally over the caller's own
+// Reach - `{dry_run: true, count, bytes, summary}`, nothing deleted.
+//
+// ⚠⚠ Why (finding D1, 0.54). The explorer's confirmation said "This
+// permanently deletes 50 items (12 MB)" - the first page of the listing,
+// counted in the browser - and the purge then took the whole trash: every
+// entry of every storage the caller reaches, other people's deletes and the
+// desktop app's swept working copies included, 61,844 items on one install.
+// The last screen before an irreversible delete names the server's number.
+func (h *Trash) EmptyPreview(w http.ResponseWriter, r *http.Request) {
+	older, storageID, err := emptyRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if h.Service == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "trash unavailable"})
+		return
+	}
+	ctx := r.Context()
+	n, b, err := h.Service.Tally(ctx, trash.EmptyJob{
+		Before:    trash.EmptyCutoff(time.Now(), older),
+		StorageID: storageID,
+		Reach:     trash.Reach(ctx),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dry_run":         true,
+		"count":           n,
+		"bytes":           b,
+		"storage_id":      storageID,
+		"older_than_days": older,
+		"summary":         ops.SayTrashEmptyPreview(trashLang(r), n, b),
+	})
 }
 
 // emptyStatus is one run as POST and GET /api/admin/trash/empty report it.
@@ -561,13 +771,17 @@ type emptyStatus struct {
 	Error      string     `json:"error,omitempty"`
 	StartedAt  time.Time  `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	// Summary is where the run stands, in the reader's language
+	// (ops.SayTrashEmpty): what the explorer and the admin page show while it
+	// runs and when it ends (finding A4).
+	Summary string `json:"summary"`
 }
 
-// emptyStatusOf reads an OpTrashEmpty row as the endpoint's answer. `error`
-// is a run that could not go on (the trash could not be read); rows that
-// could not be purged are `failed`, and a run stopped by somebody is
-// `cancelled`.
-func emptyStatusOf(op *ops.Op) emptyStatus {
+// emptyStatusOf reads an OpTrashEmpty row as the endpoint's answer, said in
+// lang. `error` is a run that could not go on (the trash could not be read);
+// rows that could not be purged are `failed`, and a run stopped by somebody
+// is `cancelled`.
+func emptyStatusOf(op *ops.Op, lang string) emptyStatus {
 	days, storageID, _, _ := op.TrashEmptyOf()
 	st := emptyStatus{
 		OK:            true,
@@ -592,6 +806,7 @@ func emptyStatusOf(op *ops.Op) emptyStatus {
 			st.Error = "the purge failed"
 		}
 	}
+	st.Summary = ops.SayTrashEmpty(lang, op)
 	return st
 }
 
@@ -666,6 +881,15 @@ func emptyRequest(r *http.Request) (olderThanDays int, storageID int64, err erro
 // The walk below reads the caller's trash in store batches, counts every
 // entry the caller may see, and cuts the page at offset/limit in the caller's
 // own coordinates.
+//
+// ⚠⚠ The answer also counts what the page does not carry (finding D1, 0.54):
+// `total_bytes` (every entry the caller may see, not the page's), the newest
+// deletion, the same three per storage (`storages`: count, bytes,
+// newest_deleted_at) and a `summary` sentence. The explorer drew the trash's
+// size, and its "empty the trash" confirmation, from the 50 rows it had
+// loaded; the virtual `.trash` row of a storage asked `?storage=<name>`,
+// which this handler did not read, and showed the newest 50 of EVERY storage
+// (D2). `storage` (an adapter name) is read now, beside `storage_id`.
 func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	var storagePtr *int64
@@ -673,6 +897,12 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			storagePtr = &n
 		}
+	}
+	if v := strings.TrimSuffix(q.Get("storage"), "://"); v != "" && storagePtr == nil {
+		id := h.storageID(r.Context(), v)
+		// An unknown name is a storage with nothing in its trash - never
+		// "every storage", which is what ignoring it meant.
+		storagePtr = &id
 	}
 	limit := 50
 	offset := 0
@@ -689,6 +919,10 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 	keep := h.trashListKeep(r)
 	entries := make([]trash.TrashEntry, 0, limit)
 	total := 0
+	var totalBytes int64
+	var newest *time.Time
+	perStorage := map[int64]*trashStorageSummary{}
+	storages := make([]*trashStorageSummary, 0, 2)
 	for off := 0; ; off += trashListBatch {
 		batch, stored, err := h.Service.List(r.Context(), storagePtr, trashListBatch, off)
 		if err != nil {
@@ -703,6 +937,17 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 				entries = append(entries, e)
 			}
 			total++
+			totalBytes += e.Size
+			newest = laterOf(newest, e.DeletedAt)
+			s := perStorage[e.StorageID]
+			if s == nil {
+				s = &trashStorageSummary{StorageID: e.StorageID, StorageName: e.StorageName}
+				perStorage[e.StorageID] = s
+				storages = append(storages, s)
+			}
+			s.Count++
+			s.Bytes += e.Size
+			s.NewestDeletedAt = laterOf(s.NewestDeletedAt, e.DeletedAt)
 		}
 		if len(batch) < trashListBatch || off+trashListBatch >= stored {
 			break
@@ -734,11 +979,61 @@ func (h *Trash) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"entries": entries,
-		"total":   total,
-		"limit":   limit,
-		"offset":  offset,
+		"entries":           entries,
+		"total":             total,
+		"total_bytes":       totalBytes,
+		"newest_deleted_at": newest,
+		"storages":          storages,
+		"summary":           sayTrashList(trashLang(r), total, totalBytes),
+		"limit":             limit,
+		"offset":            offset,
 	})
+}
+
+// trashStorageSummary is one storage's part of the caller's trash, as the
+// listing counts it: what the virtual `.trash` row of that storage shows.
+type trashStorageSummary struct {
+	StorageID       int64      `json:"storage_id"`
+	StorageName     string     `json:"storage_name,omitempty"`
+	Count           int        `json:"count"`
+	Bytes           int64      `json:"bytes"`
+	NewestDeletedAt *time.Time `json:"newest_deleted_at"`
+}
+
+// laterOf is the later of cur and t (t's zero value is no date).
+func laterOf(cur *time.Time, t time.Time) *time.Time {
+	if t.IsZero() || (cur != nil && !t.After(*cur)) {
+		return cur
+	}
+	return &t
+}
+
+// sayTrashList is the listing's one line: how much the caller's trash holds.
+func sayTrashList(lang string, total int, size int64) string {
+	count := srvtext.Vars{"count": srvtext.Number(lang, int64(total))}
+	switch {
+	case total == 0:
+		return srvtext.Text(lang, "server.trash.list.empty", nil)
+	case size > 0:
+		count["size"] = srvtext.Bytes(lang, size)
+		return srvtext.Plural(lang, "server.trash.list.summary", total, count)
+	}
+	return srvtext.Plural(lang, "server.trash.list.summary_nosize", total, count)
+}
+
+// storageID resolves an adapter name to its storage id, 0 when there is none.
+func (h *Trash) storageID(ctx context.Context, name string) int64 {
+	if h.Store == nil {
+		return 0
+	}
+	if all, err := h.Store.ListStorages(ctx); err == nil {
+		for _, st := range all {
+			if st.Name == name {
+				return st.ID
+			}
+		}
+	}
+	return 0
 }
 
 // trashListBatch is how many trash rows List reads from the store at a time
@@ -859,4 +1154,99 @@ func (h *Trash) Purge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// PurgeBatch deletes a batch of trash entries for good.
+//
+// POST /api/admin/trash/purge {node_ids: [...]}; with `queued=1` (a server
+// that runs purges on its queue) one job per storage.
+//
+// Every entry is judged the way Purge judges one (ownsNode, and it must be in
+// the trash); what is refused is counted, not fatal. The answer is
+// `{done, failed, reason_code, summary}` - `done` the entries deleted, or,
+// queued, handed to the jobs (`ops`, 202) - and `summary` the server's
+// sentence for it in the reader's language. ⚠ The explorer's "Delete
+// permanently" sent one DELETE per selected entry and composed the summary
+// in the browser (finding A15); it sends this once.
+func (h *Trash) PurgeBatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		NodeIDs []int64 `json:"node_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		return
+	}
+	if len(req.NodeIDs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing node_ids"})
+		return
+	}
+	if len(req.NodeIDs) > maxRestoreBatch {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": fmt.Sprintf("at most %d entries per purge", maxRestoreBatch),
+			"code":  "TOO_MANY", "max": maxRestoreBatch,
+		})
+		return
+	}
+	queued := h.Ops != nil && r.URL.Query().Get("queued") == "1"
+	ans := trashBatch{Queued: queued}
+	// Finished even if the client leaves (detachedMutation), like one entry.
+	ctx, cancel := detachedMutation(r.Context())
+	defer cancel()
+	byStorage := map[int64][]string{}
+	var order []int64
+	seen := make(map[int64]bool, len(req.NodeIDs))
+	for _, id := range req.NodeIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if id <= 0 {
+			ans.fail(ops.ReasonNotFound, "")
+			continue
+		}
+		j := &judged{}
+		if !ownsNode(j, r, h.Store, id, "trash entry") {
+			ans.fail(j.reason(), "")
+			continue
+		}
+		n, err := h.Store.GetNode(r.Context(), id)
+		if err != nil || n == nil || n.DeletedAt == nil {
+			// A live row is not a trash entry: Purge answers it "not found".
+			ans.fail(ops.ReasonNotFound, "")
+			continue
+		}
+		if queued {
+			if _, known := byStorage[n.StorageID]; !known {
+				order = append(order, n.StorageID)
+			}
+			byStorage[n.StorageID] = append(byStorage[n.StorageID], strconv.FormatInt(id, 10))
+			continue
+		}
+		if err := h.Service.PurgeOne(ctx, id); err != nil {
+			msg := err.Error()
+			if errors.Is(err, trash.ErrNotInTrash) || errors.Is(err, sql.ErrNoRows) || strings.Contains(msg, "not found") {
+				ans.fail(ops.ReasonNotFound, "")
+			} else {
+				slog.Warn("trash: purge failed", slog.Int64("node", id), slog.String("err", msg))
+				ans.fail(ops.ReasonFailed, "")
+			}
+			continue
+		}
+		ans.Done++
+	}
+	for _, storageID := range order {
+		op, err := h.Ops.Submit(r.Context(), ops.OpPurge, storageID, byStorage[storageID], "")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "purge: " + err.Error()})
+			return
+		}
+		ans.Ops = append(ans.Ops, op)
+		ans.Done += len(byStorage[storageID])
+	}
+	ans.Summary = ops.SayTrashBatch(trashLang(r), ops.OpPurge, queued && ans.Done > 0, ans.Done, ans.Failed, ans.ReasonCode, ans.name)
+	code := http.StatusOK
+	if len(ans.Ops) > 0 {
+		code = http.StatusAccepted
+	}
+	writeJSON(w, code, ans)
 }

@@ -42,12 +42,17 @@ const short = (sha) => String(sha ?? '').slice(0, 8) || '?';
  *            (decideS3Live, S3_LIVE_PATHS) - and without the settings then,
  *            a warning in the morning report, not a red night. When it runs,
  *            a test that only skipped is red.
- *   shots    `pnpm shots --all` without the app and Document Server scenes
- *            (as CI takes them): a shot script that no longer fits the
- *            product turns the night red, not the release day, and every
- *            picture is compared with the published one - taken in the very
- *            place the published set is taken (the chain's Playwright
- *            container and fontconfig, shots-site PUBLISH_ENVIRONMENT).
+ *   shots    `pnpm shots --all`, every scene - the app scenes with the app
+ *            builds and language packs the chain mounts, the ONLYOFFICE scene
+ *            against the chain's Document Server (task #187): a shot script
+ *            that no longer fits the product turns the night red, not the
+ *            release day, and every picture is compared with the published
+ *            one - taken in the very place the published set is taken (the
+ *            chain's Playwright container and fontconfig, shots-site
+ *            PUBLISH_ENVIRONMENT). It runs right after ds-go, while the
+ *            Document Server is still up. A night whose only failed scene
+ *            is a language pack behind the tree is a warning, not red
+ *            (SHOTS_PACKS_BEHIND=warn; the maintainer, 2026-10-08).
  *   realenv  e2e/realenv/run.sh, filex against the real ACME, SSO and office
  *            servers. It starts containers of its own, so it runs on the host,
  *            not in a job container; the nightly run asks for it once every
@@ -56,6 +61,13 @@ const short = (sha) => String(sha ?? '').slice(0, 8) || '?';
  * CHAIN_NIGHTLY_EXTRAS picks some of them (comma-separated, `none` for none).
  */
 export const NIGHTLY_EXTRAS = ['ds-go', 's3-live', 'shots', 'realenv'];
+
+/**
+ * The extras that need the chain's Document Server (run.mjs starts it for a
+ * browser-round job with `ds`, and stops it once no later job needs it): ds-go
+ * for its Go test, shots for the ONLYOFFICE scene (e2e/shots/csvoffice.mjs).
+ */
+export const DS_EXTRAS = ['ds-go', 'shots'];
 
 /**
  * The settings of the s3-live job: the variables the live S3 suites read
@@ -482,7 +494,56 @@ export function resultFields(result) {
     wall: result.wall,
     counts: result.counts,
     jobs: jobStatuses(result),
+    ...(result.host ? { host: hostFields(result.host) } : {}),
   };
+}
+
+/**
+ * What a night keeps of its host (run.mjs result.json `host`, task #194): the
+ * budget it ran on and the worst pressure it met - the night-by-night record
+ * of whether the chain still stalls its host.
+ */
+export function hostFields(h) {
+  return {
+    budget_gb: h.budget_gb,
+    mem_full_max: h.mem_full_max,
+    io_full_max: h.io_full_max,
+    disk_write_ms_max: h.disk_write_ms_max,
+  };
+}
+
+/**
+ * The marks a host stall leaves on a job (run.mjs records them per job,
+ * result.json `load`; the morning report names them): memory or IO "full"
+ * over these for ten seconds (lesson #1222: at 0.3 everything runs 20-60
+ * times slower), or a write that took a second or more on the run's disk
+ * (lesson #1232: a disk that stops for 15 s freezes every fsync).
+ */
+export const STALL = { memFull: 0.3, ioFull: 0.5, diskWriteMs: 1000 };
+
+/** What of a job's `load` crossed STALL, in words ("memory full 0.62, disk writes 10256 ms"), or ''. */
+export function stallWords(load) {
+  if (!load) return '';
+  const out = [];
+  if (load.host_mem_full >= STALL.memFull) out.push(`memory full ${load.host_mem_full.toFixed(2)}`);
+  if (load.host_io_full >= STALL.ioFull) out.push(`io full ${load.host_io_full.toFixed(2)}`);
+  if (load.disk_write_ms >= STALL.diskWriteMs) out.push(`disk writes ${load.disk_write_ms} ms`);
+  return out.join(', ');
+}
+
+/** The report's line on the host: the budget and the worst pressure of the run, or null without a `host` in the result. */
+export function hostLine(h) {
+  if (!h) return null;
+  const budget = h.budget_cut
+    ? `budget ${h.budget_gb} of ${h.configured_gb} GiB (MemAvailable ${h.mem_available_start_gb} GiB at the start${h.outside ? `; outside the chain: ${h.outside}` : ''})`
+    : `budget ${h.budget_gb} GiB`;
+  const peaks = [
+    Number.isFinite(h.mem_full_max) ? `memory full ${h.mem_full_max.toFixed(2)}` : null,
+    Number.isFinite(h.io_full_max) ? `io full ${h.io_full_max.toFixed(2)}` : null,
+    Number.isFinite(h.disk_write_ms_max) ? `disk writes ${Math.round(h.disk_write_ms_max)} ms${h.disk ? ` (${h.disk})` : ''}` : null,
+  ].filter(Boolean);
+  const temp = h.temp_wait_secs > 0 ? `; waited ${Math.round(h.temp_wait_secs / 60)} min for the disk to cool` : '';
+  return `host: ${budget}${peaks.length ? `; worst ${peaks.join(', ')}` : ''}${temp}`;
 }
 
 /** What history.jsonl keeps of a night: the record without the night's working fields. */
@@ -508,6 +569,7 @@ export function nightRecord(t) {
     wall: t.wall,
     counts: t.counts,
     jobs: t.jobs,
+    host: t.host,
     extras: t.extras,
     s3live: t.s3live ? { status: t.s3live.status, since: t.s3live.since, why: t.s3live.why } : undefined,
     build: b
@@ -602,7 +664,7 @@ const s3LiveTrouble = (s) => s?.status === 'no-credentials';
  *
  * Returns { severity, title, message }: severity success (green), danger
  * (red), warning (stopped, still going or gone, not run, no record, a failed
- * build or publish) or info (main did not move).
+ * build or publish, a green job's warnings) or info (main did not move).
  */
 export function composeReport({
   tonight,
@@ -691,6 +753,8 @@ export function composeReport({
   const delta = prev && Number.isFinite(prev.secs) && Number.isFinite(result.secs) ? `, previous ${prev.wall} (${signedMinutes(result.secs - prev.secs)})` : '';
   lines.push(`wall ${result.wall}${delta} · ${c.passed} passed, ${c.failed} red, ${c.skipped} skipped of ${c.total}`);
   if (tonight.stoppedFor) lines.push(`stopped: ${tonight.stoppedFor}`);
+  const hl = hostLine(result.host);
+  if (hl) lines.push(hl);
 
   const jobs = jobStatuses(result);
   const diff = jobsDiff(prev?.jobs ?? {}, jobs);
@@ -710,6 +774,8 @@ export function composeReport({
       const since = diff.newRed.includes(j.name) ? 'new tonight' : prev ? `red on ${prev.night} too` : 'red';
       lines.push(`${j.status === 'skipped' ? 'SKIPPED' : 'RED'} ${j.name} (${since}): ${j.summary ?? ''}`);
       if (j.log) lines.push(`  log ${j.log}`);
+      const stalled = stallWords(j.load);
+      if (stalled) lines.push(`  the host stalled while it ran (${stalled}): read a timeout there as the host's before the test's`);
     }
     if (green && green.sha !== tonight.sha) {
       const list = safeCommits(commits, green.sha, tonight.sha);
@@ -725,6 +791,11 @@ export function composeReport({
     }
   }
   if (bad.length > shown.length) lines.push(`... and ${bad.length - shown.length} more red or skipped job(s): see the result`);
+  // What a green job wants read (job/common.sh warn, run.mjs jobWarnings):
+  // the shots job when its only failed scene is a language pack behind the
+  // tree (#187). Not red, but not a green night either.
+  const warned = (result.jobs ?? []).filter((j) => j.warnings?.length);
+  for (const j of warned) for (const w of j.warnings) lines.push(`WARNING ${j.name}: ${w}`);
   if (diff.fixed.length) lines.push(`fixed since ${prev?.night ?? 'the last run'}: ${diff.fixed.join(', ')}`);
   const sl = s3LiveLine(tonight.s3live);
   if (sl) lines.push(sl);
@@ -736,7 +807,14 @@ export function composeReport({
   let severity = result.ok ? 'success' : result.stopped ? 'warning' : 'danger';
   if (buildTrouble(tonight.build)) severity = worse(severity, 'warning');
   if (s3LiveTrouble(tonight.s3live)) severity = worse(severity, 'warning');
-  const verdict = result.ok ? 'green' : result.stopped ? 'stopped' : `RED ${bad.length} of ${c.total}`;
+  if (warned.length) severity = worse(severity, 'warning');
+  const verdict = result.ok
+    ? warned.length
+      ? `green, ${warned.length} job(s) with a warning`
+      : 'green'
+    : result.stopped
+      ? 'stopped'
+      : `RED ${bad.length} of ${c.total}`;
   return {
     severity,
     title: `filex nightly ${night}: ${verdict} (${short(tonight.sha)}, ${result.wall})`,

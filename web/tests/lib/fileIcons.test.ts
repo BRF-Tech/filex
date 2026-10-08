@@ -71,9 +71,11 @@ describe('the glyphs they get', () => {
 // #56 lets a person name a new text file `LICENSE` or `Makefile`. With no
 // extension the family map has nothing to go on, and the row drew the "?"
 // glyph beside a Type cell reading "—" — for a file the viewer and the editor
-// both already treat as text (lib/textMime.ts). The server's mime is the fact
-// that is left, and it is used ONLY when there is no extension: an unmapped
-// `.zig` still reads "ZIG" (the tier-3 rule in fileIcons.ts).
+// both already treat as text. The server's mime is the fact that is left, and
+// it is used ONLY when there is no extension: an unmapped `.zig` still reads
+// "ZIG" (the tier-3 rule in fileIcons.ts). Which mimes are text is the
+// server's answer (`capabilities.edit_kinds`, lib/serverRules - #211; the
+// test setup seeds it with the server's lists).
 describe('a file with no extension', () => {
   const t = (k: string) => k;
   it('is text when its mime says text', () => {

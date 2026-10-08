@@ -1,43 +1,55 @@
 // What the sync supervisor knows about one account's engine, and the rules
-// that turn the engine's output lines into it.
+// that fold the engine's EVENTS into it.
 //
-// The watcher's stdout and stderr are the ONLY channel between the engine and
-// this app: every badge, the explorer's bottom strip, the rail dot and the line
-// under each folder in Settings is parsed out of them — HERE, in one place, so
-// the string format lives in one file and the rest of the app gets typed data.
+// The watcher's output is the ONLY channel between the engine and this app:
+// every badge, the explorer's bottom strip, the rail dot and the line under
+// each folder in Settings comes from it — folded HERE, in one place, so the
+// rest of the app gets typed data.
 //
 // ⚠ No `electron` import (same reason as notifications.ts): this module holds
 // the rules, and a module that imports electron cannot run under `node --test`.
 // ⚠ No relative imports either: `node --test` strips types but does not map
 // `./x.js` onto `./x.ts`, so a test importing this file would fail to load.
 //
-// The line formats are the contract with backend/cmd/filex (sync.go,
-// synclive.go). Every line about a pair starts with `<pair-id>: `:
+// ⚠⚠ Since 0.54 (#213) the app starts the engine with `--json` and reads
+// EVENTS, one JSON object per line on stdout (backend/cmd/filex/syncevents.go,
+// docs/DESKTOP.md "The engine's event stream"):
 //
-//   stdout  <pair>: inventory|plan|transfer|settling: …   progress
-//           <pair>: transfer: D/T[ (B of S[, about E left])]  … with bytes and an estimate
-//           <pair>: hold: N item(s) here are not on the server …   a hold (see hold.go)
-//           <pair>: already in step                       a clean pass
-//           <pair>: A/P done — …[, N failed]  (…)         a pass; "failed" = it had errors
-//           <pair>: ~ …                                   raced: both versions kept next pass
-//           <pair>: local: poll-only — <code> — <detail>  local file-system watching unavailable
-//           <pair>: local: watched                        …available again
-//           <pair>: lock: busy — <detail>                 another process on this computer syncs the pair
-//           <pair>: lock: acquired                        …not any more: this engine syncs it now
-//           live: connected|polling|offline — …           how SERVER changes reach the engine
-//           sync: waiting for the sync window W           outside --window: nothing runs
-//           sync: the sync window W closed; …             a pass the window cut short
-//   stderr  <pair>: ! <action error>                      one action of a pass failed
-//           <pair>: note: …                               worth reading in a terminal, not an error
-//           <pair>: lock: busy — <detail>                 (a one-shot run) the same as on stdout
-//           <pair>: <error>                               the pass could not run
-//           filex: <error>                                the command itself stopped (main.go)
-//           anything else (cobra's "Error: …")            not about one pair
+//   {"event":"pass","pair":"pair-1","code":"pass.done","params":{…},"message":"…"}
 //
-// and the exit status SIGNED_OUT_EXIT (3) when the server refused the token.
+// `message` is the sentence a person reads, said BY THE ENGINE in the
+// ACCOUNT's language (#191): the app starts it without `--lang`, the engine
+// reads the account's language from the server when it starts (a language
+// pack's included), and a change of the account's language restarts that
+// account's watchers (main.ts applyAccountLocale). This module
+// keeps it as it is and never parses it; what it acts on is `event`, `code`
+// and the typed `params`. Until 0.54 it read the engine's English lines with
+// regular expressions: a sentence reworded in Go silently broke the status
+// under a folder, and the engine's errors reached a Turkish window in English.
+//
+//   hello     the stream opens: params.protocol, version, lang
+//   progress  a phase of a pass (params.phase, done/total, here/listed, bytes)
+//   hold      items held for a decision (params.count)
+//   pass      a pass finished (params.failed > 0: it had errors, which follow)
+//   error     a failure: of one action, of the pass, of the pair's lock
+//   note      worth reading in a terminal, not state
+//   lock      lock.busy (another process syncs the pair) / lock.acquired
+//   local     local.watched / local.too_large / local.unavailable
+//   live      how SERVER changes reach the engine (params.state)
+//   window    outside the sync window (params.opens_at: when it opens)
+//   fatal     the engine stopped: params.exit; code signed_out = HTTP 401
+//
+// A line on stdout that is not an event is ignored. Anything on stderr is not
+// the engine's stream — a Go panic, an argument the engine refused before it
+// could speak (an engine older than this app: "unknown flag: --json") — and
+// is kept verbatim as the account's error. And the exit status
+// SIGNED_OUT_EXIT (3) when the server refused the token.
+
+/** The version of the stream's shape this app reads (the hello event). */
+export const ENGINE_PROTOCOL = 1;
 
 /**
- * How SERVER-side changes reach the engine (`live: <state> — <detail>`):
+ * How SERVER-side changes reach the engine (the `live` event's state):
  *
  *   - `connected` — subscribed to the server's change stream; a save in the
  *     browser is on disk within about a second.
@@ -47,14 +59,45 @@
  */
 export type LiveState = 'connected' | 'polling' | 'offline';
 
-// The engine writes " - " between a state and its detail (since 0.50; an em
-// dash before it). Both are read: a line from an older engine still parses.
-const liveRe = /^live: (connected|polling|offline)(?: [-—–] (.*))?$/;
+/** One event of `filex sync run --json`. */
+export interface EngineEvent {
+  event: string;
+  pair?: string;
+  code: string;
+  params: Record<string, unknown>;
+  /** The engine's sentence, in the language the app named. Shown, never
+   *  parsed. */
+  message: string;
+}
 
-/** Parses one engine stdout line into a live-state update, or null. */
-export function parseLiveLine(line: string): { live: LiveState; detail: string | null } | null {
-  const m = liveRe.exec(line.trim());
-  return m ? { live: m[1] as LiveState, detail: m[2] ?? null } : null;
+/** One stdout line as an event, or null when it is not one. */
+export function parseEvent(line: string): EngineEvent | null {
+  const t = line.trim();
+  if (!t.startsWith('{')) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(t);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.event !== 'string' || typeof o.code !== 'string') return null;
+  return {
+    event: o.event,
+    pair: typeof o.pair === 'string' && o.pair !== '' ? o.pair : undefined,
+    code: o.code,
+    params: o.params && typeof o.params === 'object' ? (o.params as Record<string, unknown>) : {},
+    message: typeof o.message === 'string' ? o.message : '',
+  };
+}
+
+function num(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function str(v: unknown): string {
+  return typeof v === 'string' ? v : '';
 }
 
 /**
@@ -64,10 +107,12 @@ export function parseLiveLine(line: string): { live: LiveState; detail: string |
  *     past the engine's budget;
  *   - `unavailable` — the operating system refused (a watch limit, a
  *     permission, no watcher at all).
+ * message is the engine's sentence for it.
  */
 export interface LocalNote {
   code: 'too-large' | 'unavailable';
   detail: string | null;
+  message: string;
 }
 
 /**
@@ -76,30 +121,33 @@ export interface LocalNote {
  * same accounts), or `filex sync run` in a terminal — so this engine leaves the
  * pair alone. The engine keeps trying and takes the pair over by itself once
  * that process stops (backend/cmd/filex/synclock.go); nothing is restarted
- * here. detail is the engine's words, naming the other process when it can.
+ * here. detail names the other process (the lock's own words); message is
+ * the engine's sentence.
  */
 export interface PairBusy {
   detail: string;
+  message: string;
 }
 
 /** One pair's health, as its card shows it. */
 export interface PairHealth {
-  /** Its last failure — until a later pass of the SAME pair completes clean. */
+  /** Its last failure (the engine's sentence) — until a later pass of the
+   *  SAME pair completes clean. */
   error: string | null;
-  /** The last thing the engine did for this pair (progress or result). */
+  /** The last thing the engine said it did for this pair. */
   line: string | null;
   local: LocalNote | null;
   /** Set while another process syncs this pair (see PairBusy). */
   busy: PairBusy | null;
-  /** A pass of this pair has finished since the engine started (a summary
-   *  line): until then it is not known to be in step, and its line must not
+  /** A pass of this pair has finished since the engine started (a pass
+   *  event): until then it is not known to be in step, and its line must not
    *  say "watching for changes" (sync-policy.ts folderView). */
   passed?: boolean;
 }
 
 export type SyncPhase = 'inventory' | 'plan' | 'transfer' | 'settling';
 
-/** One pair's live phase, parsed from the engine's progress lines. */
+/** One pair's live phase, from the engine's progress events. */
 export interface SyncActivity {
   pairId: string;
   phase: SyncPhase;
@@ -111,14 +159,25 @@ export interface SyncActivity {
    *  listed so far — a large tree lists for minutes. */
   here?: number;
   listed?: number;
-  /** transfer only, once there are bytes to move: the engine's own figures,
-   *  e.g. '1.2 GiB' of '52.6 GiB'. */
-  bytesDone?: string;
-  bytesTotal?: string;
-  /** transfer only, once the engine has an estimate: its words ('8h 10m')
-   *  and the same in seconds, for a window that words it in its language. */
-  eta?: string;
+  /** transfer only, once there are bytes to move. */
+  bytesDone?: number;
+  bytesTotal?: number;
+  /** transfer only, once the engine has an estimate. */
   etaSeconds?: number;
+  /** The engine's sentence for this step, with every figure above in it. */
+  message: string;
+}
+
+/** Outside its sync window (`--window`) the engine runs nothing and says so
+ *  once. */
+export interface WindowWait {
+  /** The window, e.g. '22:00-07:00' (the engine's canonical form). */
+  window: string;
+  /** When it opens next (epoch ms), from the engine — the app does no clock
+   *  arithmetic of its own on a window (B17). null: the engine did not say. */
+  opensAt: number | null;
+  /** The engine's sentence. */
+  message: string;
 }
 
 /** What the supervisor has observed about one account's sync process. */
@@ -134,29 +193,35 @@ export interface SyncStatus {
   /** The pair the engine is working on RIGHT NOW, or null between runs.
    *  One value, not a map: the engine walks its pairs sequentially. */
   active: SyncActivity | null;
-  /** How changes reach the engine (see LiveState). null until the engine
-   *  has said — an older bundled engine never does; it only ever polls. */
+  /** How changes reach the engine (see LiveState). null until it has said. */
   live: LiveState | null;
-  liveDetail: string | null;
+  /** The engine's sentence for the live state. */
+  liveMessage: string | null;
   /** Per pair, keyed by pair id. */
   pairs: Record<string, PairHealth>;
   /** The server no longer accepts this account's token: the engine exited with
-   *  SIGNED_OUT_EXIT, or (an older engine, which keeps looping) printed a 401.
-   *  The supervisor stops the watcher and does not restart it. */
+   *  SIGNED_OUT_EXIT, or said `signed_out`. The supervisor stops the watcher
+   *  and does not restart it. */
   signedOut?: boolean;
-  /** Outside its sync window (`--window`) the engine runs nothing and says so
-   *  once: this is that window, e.g. '22:00-07:00'. Cleared when a pass
-   *  starts. The page still checks the clock — see folderView in
-   *  sync-policy.ts. */
-  waitingWindow?: string | null;
-  /** Hold lines not yet handed to the supervisor (takeHolds): each is a cue to
-   *  re-read the pair list, which carries the numbers the app shows. */
+  /** Outside its sync window the engine runs nothing (WindowWait). Cleared
+   *  when a pass starts. */
+  waitingWindow?: WindowWait | null;
+  /** Hold events not yet handed to the supervisor (takeHolds): each is a cue
+   *  to re-read the pair list, which carries the numbers the app shows. */
   holds?: Array<{ pairId: string; count: number }>;
   /** The engine stopped on its own: its exit code (or signal), so the page
-   *  can say so in its own language; lastError has the English line. */
+   *  can say so in its own language; lastError has the engine's reason. */
   exited?: string | null;
   /** When the supervisor starts it again (epoch ms), while it waits to. */
   restartAt?: number | null;
+  /** The stream's version (the hello event); null until the engine said. */
+  protocol?: number | null;
+  /** How many events the engine has written since it started. An engine
+   *  that exits having written none never spoke the stream at all: older
+   *  than this app (it refused `--json`), or stopped before it could. */
+  events?: number;
+  /** Set by markExited for exactly that engine (see events). */
+  noStream?: boolean;
 }
 
 /** `filex sync run` exits with this status when the server answers 401, and
@@ -172,10 +237,12 @@ export function newStatus(accountId: string): SyncStatus {
     lastError: null,
     active: null,
     live: null,
-    liveDetail: null,
+    liveMessage: null,
     pairs: {},
     waitingWindow: null,
     holds: [],
+    protocol: null,
+    events: 0,
   };
 }
 
@@ -207,7 +274,7 @@ export function refusalApplies(current: SyncStatus | undefined, mine: SyncStatus
   return current === mine && mine.signedOut === true;
 }
 
-/** The hold lines seen since the last call. */
+/** The hold events seen since the last call. */
 export function takeHolds(st: SyncStatus): Array<{ pairId: string; count: number }> {
   const out = st.holds ?? [];
   st.holds = [];
@@ -241,6 +308,7 @@ export function markExited(st: SyncStatus, code: number | null, stopping: boolea
   st.running = false;
   st.active = null;
   st.live = null;
+  st.liveMessage = null;
   // A pair this engine was waiting for is not being waited for any more, and
   // a pass the NEXT engine has not run is not known to be in step.
   for (const h of Object.values(st.pairs)) {
@@ -249,11 +317,17 @@ export function markExited(st: SyncStatus, code: number | null, stopping: boolea
   }
   if (code === SIGNED_OUT_EXIT) {
     st.signedOut = true;
-    st.lastError = st.lastError ?? 'signed out: the server no longer accepts this token (HTTP 401)';
+    // The engine said why in its signed_out event; the page words the state
+    // itself ('signed-out'), this only keeps the account marked as failing.
+    st.lastError = st.lastError ?? 'HTTP 401';
     return;
   }
   if (!stopping && code !== 0) {
     st.exited = String(code ?? signal ?? 'unknown');
+    // ⚠ Not one event in its whole life: this engine does not speak the
+    // stream (see SyncStatus.events). Its stderr — "unknown flag: --json"
+    // from an engine older than this app — is the reason, kept in lastError.
+    if (!st.events) st.noStream = true;
     st.lastError = st.lastError ?? unexpectedExitLine(st.exited);
   }
 }
@@ -265,94 +339,6 @@ export function unexpectedExitLine(exited: string): string {
   return `sync stopped unexpectedly (exit ${exited})`;
 }
 
-/**
- * A 401 in the engine's own words: `HTTP 401: <message>` (cliclient's
- * APIError) or `(HTTP 401)` (the signed-out line). Anchored on what follows
- * the number, so a FILE called "HTTP 401.txt" in an error line does not sign
- * anybody out.
- */
-const UNAUTHORIZED_RE = /\bHTTP 401(?=[:)]|$)/;
-
-/** True for an engine error line that means "the server refused the token". */
-export function isUnauthorizedLine(line: string): boolean {
-  return UNAUTHORIZED_RE.test(line.trim());
-}
-
-/**
- * `transfer: <done>/<total>` and, from engines that know, ` (<bytes done> of
- * <bytes total>[, about <eta> left])`. The leading `done/total` never changes
- * shape — the explorer's strip reads just that.
- */
-const TRANSFER_RE = /^(\d+)\/(\d+)(?:\s+\((.+?) of (.+?)(?:, about (.+?) left)?\))?\s*$/;
-
-/** The engine's estimate ('8h 10m', '12m', '45s') in seconds, or null. */
-export function parseEta(text: string): number | null {
-  const m = /^(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?$/.exec(text.trim());
-  if (!m || (m[1] === undefined && m[2] === undefined && m[3] === undefined)) return null;
-  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
-}
-
-function transferActivity(pairId: string, detail: string): SyncActivity {
-  const m = TRANSFER_RE.exec(detail);
-  // A detail this parser does not know still has its counts in front.
-  const head = m ?? /^(\d+)\/(\d+)/.exec(detail);
-  const act: SyncActivity = {
-    pairId,
-    phase: 'transfer',
-    done: head ? Number(head[1]) : 0,
-    total: head ? Number(head[2]) : 0,
-  };
-  if (m && m[3] !== undefined && m[4] !== undefined) {
-    act.bytesDone = m[3];
-    act.bytesTotal = m[4];
-    if (m[5] !== undefined) {
-      act.eta = m[5];
-      const secs = parseEta(m[5]);
-      if (secs !== null) act.etaSeconds = secs;
-    }
-  }
-  return act;
-}
-
-const hereRe = /^(\d+) item\(s\) here\b/;
-const listedRe = /^listed \d+ server folder\(s\), (\d+) item\(s\) so far$/;
-const planRe = /^(\d+) change\(s\) to make$/;
-const settlingRe = /^(\d+) of (\d+) change\(s\) recorded$/;
-
-/**
- * A phase other than the transfer, with the figures its line carries:
- *   inventory: 1204 item(s) here, listing the server…
- *   inventory: listed 312 server folder(s), 48211 item(s) so far
- *   plan: 97 change(s) to make
- *   settling: 40 of 97 change(s) recorded
- * They used to be dropped (0/0), so a pass listing a large server for minutes
- * read "listing the server…" with nothing moving. The inventory's two lines
- * add up: the count here stays while the server's is listed.
- */
-function phaseActivity(pairId: string, phase: SyncPhase, rest: string, prev: SyncActivity | null): SyncActivity {
-  const a: SyncActivity = { pairId, phase, done: 0, total: 0 };
-  if (phase === 'inventory') {
-    const same = prev && prev.pairId === pairId && prev.phase === 'inventory' ? prev : null;
-    const here = hereRe.exec(rest);
-    const listed = listedRe.exec(rest);
-    if (here) a.here = Number(here[1]);
-    else if (same?.here !== undefined) a.here = same.here;
-    if (listed) a.listed = Number(listed[1]);
-    return a;
-  }
-  if (phase === 'plan') {
-    const m = planRe.exec(rest);
-    if (m) a.total = Number(m[1]);
-    return a;
-  }
-  const m = settlingRe.exec(rest);
-  if (m) {
-    a.done = Number(m[1]);
-    a.total = Number(m[2]);
-  }
-  return a;
-}
-
 function health(st: SyncStatus, pairId: string): PairHealth {
   let h = st.pairs[pairId];
   if (!h) {
@@ -362,133 +348,162 @@ function health(st: SyncStatus, pairId: string): PairHealth {
   return h;
 }
 
-// `<pair-id>: rest`. Cobra's own prefix is "Error: …" and the command's own
-// exit line is "filex: …" (backend/cmd/filex/main.go) — never a pair.
-//
-// ⚠ "filex: …" read as a pair called `filex` put the reason the watcher DIED
-// under a folder nobody has, so every real folder said only "stopped", and
-// the next reconcile dropped that pair — and with it the one line that said
-// why.
-const pairLineRe = /^(\S+): (.*)$/;
-const progressRe = /^(inventory|plan|transfer|settling): (.*)$/;
-// A pass's summary. ⚠ "failed" is the engine saying the pass had errors; the
-// error TEXT comes on stderr, which may be read before or after this line.
-const summaryRe = /^(?:already in step$|\d+\/\d+ done\b(.*)$)/;
-// " - " since 0.50, an em dash before it: both read (see liveRe).
-const localRe = /^local: (?:(watched)|poll-only [-—–] (too-large|unavailable)(?: [-—–] (.*))?)$/;
-const lockRe = /^lock: (?:(acquired)|busy(?: [-—–] (.*))?)$/;
-const holdRe = /^hold: (\d+)\b/;
-const windowWaitRe = /^sync: waiting for the sync window (\S+)$/;
-const windowClosedRe = /^sync: the sync window (\S+) closed\b/;
+const PHASES: ReadonlySet<string> = new Set(['inventory', 'plan', 'transfer', 'settling']);
+const LIVE_STATES: ReadonlySet<string> = new Set(['connected', 'polling', 'offline']);
 
-function pairOf(t: string): { id: string; rest: string } | null {
-  const m = pairLineRe.exec(t);
-  if (!m || m[1] === 'Error' || m[1] === 'live' || m[1] === 'sync' || m[1] === 'filex') return null;
-  return { id: m[1], rest: m[2] };
+/** A progress event as the pair's activity. The inventory's two reports add
+ *  up: the count here stays while the server is listed (the engine carries it
+ *  in both). */
+function activity(pairId: string, ev: EngineEvent): SyncActivity | null {
+  const phase = str(ev.params.phase);
+  if (!PHASES.has(phase)) return null;
+  const a: SyncActivity = {
+    pairId,
+    phase: phase as SyncPhase,
+    done: num(ev.params.done) ?? 0,
+    total: num(ev.params.total) ?? 0,
+    message: ev.message,
+  };
+  const here = num(ev.params.here);
+  const listed = num(ev.params.listed);
+  const bytesDone = num(ev.params.bytes_done);
+  const bytesTotal = num(ev.params.bytes_total);
+  const eta = num(ev.params.eta_seconds);
+  if (here !== undefined) a.here = here;
+  if (listed !== undefined) a.listed = listed;
+  if (bytesDone !== undefined) a.bytesDone = bytesDone;
+  if (bytesTotal !== undefined) a.bytesTotal = bytesTotal;
+  if (eta !== undefined) a.etaSeconds = eta;
+  return a;
 }
 
-/** Folds one engine output line into the status. */
-export function absorbLine(st: SyncStatus, line: string, isErr: boolean, now = new Date()): void {
-  const t = line.trim();
-  if (!t) return;
-  const p = pairOf(t);
-
-  // Whose pair it is — on either pipe (a watcher says it on stdout, a one-shot
-  // run on stderr). ⚠ Before the error branch: a busy pair is not a failing
-  // one, and its line must not become the folder's error.
-  const lk = p ? lockRe.exec(p.rest) : null;
-  if (p && lk) {
-    health(st, p.id).busy = lk[1] ? null : { detail: lk[2] ?? '' };
-    if (st.active?.pairId === p.id) st.active = null;
-    return;
-  }
-
-  if (isErr) {
-    if (isUnauthorizedLine(t)) st.signedOut = true;
-    if (!p) {
-      st.lastError = t;
+/** Folds one engine event into the status. */
+export function absorbEvent(st: SyncStatus, ev: EngineEvent, now = new Date()): void {
+  st.events = (st.events ?? 0) + 1;
+  switch (ev.event) {
+    case 'hello':
+      st.protocol = num(ev.params.protocol) ?? null;
+      return;
+    case 'live': {
+      // The engine's own account of how changes reach it. Kept apart from
+      // lastLine, which is what the engine last DID.
+      const s = str(ev.params.state);
+      if (LIVE_STATES.has(s)) {
+        st.live = s as LiveState;
+        st.liveMessage = ev.message;
+      }
       return;
     }
-    // `<pair-id>: <error>` means that pair's run died — it is not active.
-    if (st.active?.pairId === p.id) st.active = null;
-    if (p.rest.startsWith('note: ')) return;
-    health(st, p.id).error = p.rest.startsWith('! ') ? p.rest.slice(2) : p.rest;
-    return;
-  }
-
-  if (t.startsWith('live: ')) {
-    // The engine's own account of how changes reach it. Kept apart from
-    // lastLine, which is what the engine last DID — a state line there would
-    // hide the sync result it came after.
-    const lv = parseLiveLine(t);
-    if (lv) {
-      st.live = lv.live;
-      st.liveDetail = lv.detail;
+    case 'window': {
+      // Outside the sync window nothing runs; a pass the window cut short
+      // ends no other way, so this is what ends its activity (and the sleep
+      // guard holding with it).
+      st.active = null;
+      const opens = Date.parse(str(ev.params.opens_at));
+      st.waitingWindow = {
+        window: str(ev.params.window),
+        opensAt: Number.isFinite(opens) ? opens : null,
+        message: ev.message,
+      };
+      st.lastLine = ev.message;
+      st.lastRunAt = now.toISOString();
+      return;
     }
-    return;
+    case 'fatal':
+      st.active = null;
+      if (ev.code === 'signed_out') st.signedOut = true;
+      st.lastError = ev.message;
+      return;
   }
-  // Outside the sync window nothing runs; a pass the window cut short prints
-  // no summary, so this line is what ends its activity (and the sleep guard
-  // holding with it).
-  const ww = windowWaitRe.exec(t) ?? windowClosedRe.exec(t);
-  if (ww) {
-    st.active = null;
-    st.waitingWindow = ww[1];
-    st.lastLine = t;
-    st.lastRunAt = now.toISOString();
-    return;
-  }
-  st.lastLine = t;
-  st.lastRunAt = now.toISOString();
-  if (!p) return;
 
-  const lm = localRe.exec(p.rest);
-  if (lm) {
-    health(st, p.id).local = lm[1] ? null : { code: lm[2] as LocalNote['code'], detail: lm[3] ?? null };
+  const id = ev.pair;
+  if (!id) {
+    // An error about no one pair is every pair's.
+    if (ev.event === 'error') st.lastError = ev.message;
     return;
   }
-  const hm = holdRe.exec(p.rest);
-  if (hm) {
-    // Only the number is read: the pair list (`hold_new` / `held`) is what
-    // the app shows, and this line is the cue to re-read it.
-    (st.holds ??= []).push({ pairId: p.id, count: Number(hm[1]) });
-    return;
+  const h = health(st, id);
+  switch (ev.event) {
+    case 'lock':
+      // ⚠ Not an error: the folder IS being synced, by another process.
+      h.busy = ev.code === 'lock.busy' ? { detail: str(ev.params.detail), message: ev.message } : null;
+      if (st.active?.pairId === id) st.active = null;
+      return;
+    case 'error':
+      // A failed action, a pass that could not run, a lock that could not be
+      // had: that pair's error until its next clean pass.
+      if (st.active?.pairId === id) st.active = null;
+      h.error = ev.message;
+      return;
+    case 'local': {
+      const s = str(ev.params.state);
+      h.local =
+        s === 'too-large' || s === 'unavailable'
+          ? { code: s, detail: str(ev.params.detail) || null, message: ev.message }
+          : null;
+      return;
+    }
+    case 'hold':
+      // Only the number is read: the pair list (`hold_new` / `held`) is what
+      // the app shows, and this event is the cue to re-read it.
+      (st.holds ??= []).push({ pairId: id, count: num(ev.params.count) ?? 0 });
+      return;
+    case 'progress': {
+      const a = activity(id, ev);
+      if (!a) return;
+      // A pass of this pair runs here: whatever held it before, this engine
+      // holds it now — and we are inside the window.
+      h.busy = null;
+      h.line = ev.message;
+      st.waitingWindow = null;
+      st.active = a;
+      st.lastLine = ev.message;
+      st.lastRunAt = now.toISOString();
+      return;
+    }
+    case 'pass':
+      h.busy = null;
+      h.passed = true;
+      h.line = ev.message;
+      if (st.active?.pairId === id) st.active = null;
+      st.lastLine = ev.message;
+      st.lastRunAt = now.toISOString();
+      // The engine works again, whatever stopped it before. ⚠ A pass with
+      // failures keeps the pair's error: its "error" events come right after
+      // it, on the same ordered stream.
+      st.lastError = null;
+      if (!(num(ev.params.failed) ?? 0)) h.error = null;
+      return;
+    default:
+      // note, and anything a newer engine adds: worth reading in a terminal.
+      return;
   }
-  const h = health(st, p.id);
-  if (!p.rest.startsWith('~ ')) h.line = p.rest;
+}
 
-  const pr = progressRe.exec(p.rest);
-  // A pass of this pair ran here: whatever held it before, this engine holds
-  // it now (`lock: acquired` says so first; this does not depend on it).
-  if (pr || summaryRe.test(p.rest)) h.busy = null;
-  if (pr) {
-    st.waitingWindow = null; // a pass started: we are inside the window
-    st.active =
-      pr[1] === 'transfer'
-        ? transferActivity(p.id, pr[2])
-        : phaseActivity(p.id, pr[1] as SyncPhase, pr[2], st.active);
-    return;
-  }
-  const sm = summaryRe.exec(p.rest);
-  if (sm) {
-    h.passed = true;
-    if (st.active?.pairId === p.id) st.active = null;
-    // The engine works again, whatever stopped it before.
-    st.lastError = null;
-    if (!/, \d+ failed\b/.test(sm[1] ?? '')) h.error = null;
-  }
+/** Folds one stdout line: an event, or nothing. */
+export function absorbStdout(st: SyncStatus, line: string, now = new Date()): void {
+  const ev = parseEvent(line);
+  if (ev) absorbEvent(st, ev, now);
+}
+
+/** Folds one stderr line. The engine reports on its stream; stderr carries
+ *  only what it could not say there — a panic, or the refusal of an engine
+ *  that does not know `--json` — and that is the account's error, as it is. */
+export function absorbStderr(st: SyncStatus, line: string): void {
+  const t = line.trim();
+  if (t) st.lastError = t;
 }
 
 /**
  * Turns pipe reads into whole lines. A pipe delivers bytes, not lines: under
  * load one read can end in the middle of a line, and each half parsed on its
- * own is nonsense — half a summary clears nothing, half an error line becomes
- * the error text. The partial tail is carried to the next read.
+ * own is nonsense — half an event is no JSON at all. The partial tail is
+ * carried to the next read.
  *
  * ⚠ It takes the raw bytes and decodes them itself, in streaming mode: a read
- * that ends inside a multi-byte character (the "—" separators, a Turkish file
- * name) must not turn it into two U+FFFD. And a Windows line ending is not
- * part of the line.
+ * that ends inside a multi-byte character (a Turkish message, a file name)
+ * must not turn it into two U+FFFD. And a Windows line ending is not part of
+ * the line.
  */
 export class LineReader {
   /** A tail longer than this is handed on as a line of its own: a process

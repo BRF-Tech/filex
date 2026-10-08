@@ -24,13 +24,60 @@ func humanBytes(n int64) string {
 // shown: the first seconds are dominated by connection setup and small files.
 const etaMinElapsed = 5 * time.Second
 
+// ProgressEvent is one progress report in figures (Engine.OnProgress) — the
+// same report Engine.Progress gets as an English line.
+//
+// Phase is inventory | plan | transfer | settling | hold:
+//
+//   - inventory: Here is what was found on this computer; once the server
+//     listing reports, Listing is true and Listed / ListedFolders are its
+//     items and folders so far (Here still set).
+//   - plan: Total is the changes to make.
+//   - transfer: Done / Total actions; BytesDone / BytesTotal once there are
+//     bytes to move; ETA the estimate of the time left, HasETA when there is
+//     one (the first seconds have none).
+//   - settling: Done of Total changes recorded.
+//   - hold: Held is the items held for a decision.
+type ProgressEvent struct {
+	Phase         string
+	Here          int
+	Listing       bool
+	Listed        int
+	ListedFolders int
+	Done, Total   int
+	BytesDone     int64
+	BytesTotal    int64
+	ETA           time.Duration
+	HasETA        bool
+	Held          int
+}
+
+// transferEvent is the `transfer` report in figures (transferLine in words).
+func transferEvent(done, planned int, bytesDone, bytesTotal int64, elapsed time.Duration) ProgressEvent {
+	ev := ProgressEvent{Phase: "transfer", Done: done, Total: planned}
+	if bytesTotal > 0 {
+		ev.BytesDone, ev.BytesTotal = bytesDone, bytesTotal
+		ev.ETA, ev.HasETA = etaLeft(bytesDone, bytesTotal, elapsed)
+	}
+	return ev
+}
+
+// etaLeft estimates the time left from the average rate so far; false when
+// there is nothing sensible to say yet.
+func etaLeft(done, total int64, elapsed time.Duration) (time.Duration, bool) {
+	if done <= 0 || done >= total || elapsed < etaMinElapsed {
+		return 0, false
+	}
+	return time.Duration(float64(elapsed) * float64(total-done) / float64(done)).Round(time.Second), true
+}
+
 // etaText estimates the time left from the average rate so far, or returns ""
 // when there is nothing sensible to say yet.
 func etaText(done, total int64, elapsed time.Duration) string {
-	if done <= 0 || done >= total || elapsed < etaMinElapsed {
+	left, ok := etaLeft(done, total, elapsed)
+	if !ok {
 		return ""
 	}
-	left := time.Duration(float64(elapsed) * float64(total-done) / float64(done)).Round(time.Second)
 	// Rounded to the unit it is said in BEFORE the unit is chosen: 59m30s is
 	// "about 1h 0m", never "about 60m".
 	switch m := left.Round(time.Minute); {

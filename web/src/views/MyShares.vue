@@ -39,14 +39,14 @@ import { useRouter } from 'vue-router';
 import { ArrowLeft, Link2, Lock, RefreshCcw } from 'lucide-vue-next';
 
 import { MySharesApi, type MyShareRow, type PinUnavailable } from '@/api/myShares';
-import type { PaginatedResponse, Share } from '@/api/types';
+import type { PaginatedResponse, Share, ShareState } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { copyText } from '@/lib/clipboard';
 import { fallbackShareUrl } from '@/lib/shareLink';
-import { formatDate, formatRelative } from '@/lib/format';
 
 import Badge from '@/components/ui/Badge.vue';
+import DateWithDistance from '@/components/DateWithDistance.vue';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
 import { DataTable, pluginLabelOf as labelOf, type ContextAction, type DataColumn } from '@brftech/filex-core';
@@ -109,22 +109,24 @@ function expiresAt(row: MyShareRow): string | null | undefined {
   return shareOf(row).expires_at;
 }
 
-function isExpired(row: MyShareRow): boolean {
-  const at = expiresAt(row);
-  return Boolean(at && new Date(at).getTime() <= Date.now());
-}
-
 /**
- * Ended by its owner (or the app that opened it) rather than run out.
+ * Where the link stands, as the SERVER says it (`share.state`,
+ * model.Share.StateAt): `active`, `expired`, `exhausted` or `revoked`.
  *
- * ⚠ Revoking has always worked by setting the expiry to now, so this page
- * said "Süresi doldu" for a link revoked a minute earlier (QA, 2026-09-21).
- * The server records `revoked_at` beside the expiry since 00053; a link
- * revoked before that cannot be told apart and still reads as expired.
+ * ⚠⚠ Not worked out here. This page used to compare `expires_at` with the
+ * browser's clock, which missed a link whose downloads (or uploads) were used
+ * up - it read "active" while every visitor got "not available" - and turned
+ * over early or late on a clock that was off. The server judges a visit by
+ * the expiry AND the caps, and knows `revoked_at` (00053), so it is the one
+ * that says. An answer without `state` (impossible from the same binary) is
+ * treated as active: the verbs stay offered and the server refuses what it
+ * must.
  */
-function isRevoked(row: MyShareRow): boolean {
-  const s = shareOf(row);
-  return Boolean(s.revoked_at || s.revoked);
+function stateOf(row: MyShareRow): ShareState {
+  return shareOf(row).state ?? 'active';
+}
+function isLive(row: MyShareRow): boolean {
+  return stateOf(row) === 'active';
 }
 
 async function load() {
@@ -219,7 +221,7 @@ function rowActions(row: MyShareRow): ContextAction[] {
       label: t('myShares.revoke'),
       icon: 'lock',
       danger: true,
-      hidden: isExpired(row),
+      hidden: !isLive(row),
       disabled: busy,
     },
   ];
@@ -386,22 +388,28 @@ onMounted(load);
       </template>
 
       <template #cell-expires_at="{ row }">
-        <span class="whitespace-nowrap text-xs" data-testid="my-share-expires">
-          <template v-if="expiresAt(row)">
-            <span v-if="isRevoked(row)" class="text-rose-600 dark:text-rose-400" data-testid="my-share-revoked">
-              {{ t('myShares.revoked') }}
-            </span>
-            <span v-else-if="isExpired(row)" class="text-rose-600 dark:text-rose-400">
-              {{ t('myShares.expired') }}
-            </span>
-            <template v-else>
-              {{ formatDate(expiresAt(row), locale) }}
-              <span class="text-zinc-400">·</span>
-              {{ formatRelative(expiresAt(row), locale) }}
-            </template>
-          </template>
-          <template v-else>{{ t('myShares.neverExpires') }}</template>
+        <template v-if="expiresAt(row)">
+          <span v-if="stateOf(row) === 'revoked'" class="text-xs text-rose-600 dark:text-rose-400" data-testid="my-share-revoked">
+            {{ t('myShares.revoked') }}
+          </span>
+          <span v-else-if="stateOf(row) === 'expired'" class="text-xs text-rose-600 dark:text-rose-400" data-testid="my-share-expired">
+            {{ t('myShares.expired') }}
+          </span>
+          <span v-else-if="stateOf(row) === 'exhausted'" class="text-xs text-rose-600 dark:text-rose-400" data-testid="my-share-exhausted">
+            {{ t('myShares.exhausted') }}
+          </span>
+          <!-- The same cell as Admin → Shares: the date, and how far away it
+               is under it (components/DateWithDistance). -->
+          <DateWithDistance v-else :at="expiresAt(row)!" :locale="locale" />
+        </template>
+        <!-- No expiry, but used up or revoked all the same. -->
+        <span v-else-if="stateOf(row) === 'exhausted'" class="text-xs text-rose-600 dark:text-rose-400" data-testid="my-share-exhausted">
+          {{ t('myShares.exhausted') }}
         </span>
+        <span v-else-if="stateOf(row) === 'revoked'" class="text-xs text-rose-600 dark:text-rose-400" data-testid="my-share-revoked">
+          {{ t('myShares.revoked') }}
+        </span>
+        <span v-else class="text-xs">{{ t('myShares.neverExpires') }}</span>
       </template>
     </DataTable>
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -136,6 +137,7 @@ func (h *SharesAdmin) list(w http.ResponseWriter, r *http.Request, appsOnly bool
 	}
 	names := personNames(r.Context(), h.Store, creators)
 	base := h.Tenants.FromRequest(r)
+	fillShareStates(rows, time.Now())
 	for _, row := range rows {
 		if row != nil && row.Share != nil && row.Share.CreatedBy != nil {
 			row.CreatorName = names[*row.Share.CreatedBy]

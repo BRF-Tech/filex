@@ -3,8 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Search, RefreshCcw, Database } from 'lucide-vue-next';
 
-import { SearchApi, type SearchHitEx, type SearchIndexStats, type SearchScope } from '@/api/search';
-import type { PaginatedResponse } from '@/api/types';
+import { SearchApi, type SearchHitEx, type SearchIndexStats, type SearchPage, type SearchScope } from '@/api/search';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { formatBytes, formatDate, formatNumber, formatRelative } from '@/lib/format';
@@ -26,12 +25,19 @@ const toast = useToastStore();
 const q = ref('');
 /* bul:s3 — search scope (name | content | all). */
 const scope = ref<SearchScope>('all');
-const results = ref<PaginatedResponse<SearchHitEx>>({
+const results = ref<SearchPage>({
   items: [],
   total: 0,
+  truncated: false,
   page: 1,
   page_size: 25,
 });
+/** What the table is told about rows it does not have: while the server
+ *  says more matched than came back, one more than on screen at least, so
+ *  the headers close rather than sort an arbitrary first page (#207, D7). */
+const tableTotal = computed(() =>
+  results.value.truncated ? Math.max(results.value.total, results.value.items.length + 1) : results.value.items.length,
+);
 const stats = ref<SearchIndexStats | null>(null);
 const searching = ref(false);
 const rebuilding = ref(false);
@@ -46,12 +52,12 @@ async function loadStats() {
 
 async function runSearch() {
   if (!q.value.trim()) {
-    results.value = { items: [], total: 0, page: 1, page_size: 25 };
+    results.value = { items: [], total: 0, truncated: false, page: 1, page_size: 25 };
     return;
   }
   searching.value = true;
   try {
-    results.value = await SearchApi.query({ q: q.value, page: 1, page_size: 25, scope: scope.value });
+    results.value = await SearchApi.query({ q: q.value, limit: 25, scope: scope.value });
   } catch (e: unknown) {
     toast.error(extractError(e, t('errors.generic')));
   } finally {
@@ -259,7 +265,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
       table-id="admin.search"
       :columns="columns"
       :rows="results.items"
-      :total="results.total"
+      :total="tableTotal"
       :loading="searching"
       :empty="t('search.noResults')"
       row-key="id"
@@ -267,6 +273,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
     >
       <template #toolbar>
         <span class="text-xs">{{ t('search.resultCount', { n: formatNumber(results.total, locale) }, results.total) }}</span>
+        <span v-if="results.truncated" class="text-xs" data-testid="search-truncated">{{ t('search.moreThanShown') }}</span>
       </template>
       <template #cell-filename="{ row }">
         <!-- ONE root: a Badge beside a name that wraps is squeezed below its

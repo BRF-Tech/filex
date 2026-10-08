@@ -88,6 +88,11 @@ func liveExternalServer(t *testing.T, cfgMutate func(*config.Config)) (*extHarne
 		oo.LiveCallbackURL = func(ctx context.Context) string {
 			return d.External.Get(ctx, external.OnlyOffice).CallbackURL
 		}
+		// The editor's language, as server.New wires it (onlyoffice/lang.go).
+		oo.LiveEditorLang = func(ctx context.Context) string {
+			return d.External.Get(ctx, external.OnlyOffice).EditorLang
+		}
+		oo.DefaultLocale = d.Cfg.DefaultLocale
 		d.OnlyOffice = oo
 	})
 	ctx := context.Background()

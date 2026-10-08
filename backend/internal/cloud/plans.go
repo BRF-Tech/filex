@@ -56,9 +56,14 @@ func DefaultPlans() []Plan {
 }
 
 // ParsePlans decodes the FILEX_CLOUD_PLANS JSON array. An empty input returns
-// DefaultPlans(). Errors (bad JSON, missing/duplicate ids) are returned so
-// the caller can surface them; callers that must keep booting fall back to
-// DefaultPlans() and report the error via /api/cloud/status.
+// DefaultPlans(). Errors (bad JSON, missing/duplicate ids, no plan a signup
+// can start on) are returned so the caller can surface them; callers that
+// must keep booting fall back to DefaultPlans() and report the error via
+// /api/cloud/status.
+//
+// ⚠ A catalogue needs at least one plan with no stripe_price_id: that is the
+// plan every signup starts on (SignupPlan). A paid plan is reached only by a
+// payment Stripe confirms (ApplyStripeEvent), never by asking for it.
 func ParsePlans(raw string) ([]Plan, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -72,6 +77,7 @@ func ParsePlans(raw string) ([]Plan, error) {
 		return nil, fmt.Errorf("cloud: FILEX_CLOUD_PLANS: empty plan list")
 	}
 	seen := map[string]bool{}
+	free := false
 	for i, p := range plans {
 		id := strings.TrimSpace(p.ID)
 		if id == "" {
@@ -81,6 +87,23 @@ func ParsePlans(raw string) ([]Plan, error) {
 			return nil, fmt.Errorf("cloud: FILEX_CLOUD_PLANS: duplicate plan id %q", id)
 		}
 		seen[id] = true
+		if strings.TrimSpace(p.StripePriceID) == "" {
+			free = true
+		}
+	}
+	if !free {
+		return nil, fmt.Errorf("cloud: FILEX_CLOUD_PLANS: no plan without a stripe_price_id for a signup to start on")
 	}
 	return plans, nil
+}
+
+// signupPlan is the first plan in plans nobody pays for (ParsePlans
+// guarantees there is one; DefaultPlans is one).
+func signupPlan(plans []Plan) *Plan {
+	for i := range plans {
+		if strings.TrimSpace(plans[i].StripePriceID) == "" {
+			return &plans[i]
+		}
+	}
+	return nil
 }

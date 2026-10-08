@@ -164,3 +164,32 @@ describe('the app behind the lock, as a person reads it', () => {
     expect(lockWords(lockedRefusal({ status: 423, detail: body }), host)).toBe('e-Signature locked this file');
   });
 });
+
+// ⚠⚠ 0.54 (#209, audit A3): a 423 is said in the SERVER's sentence - the app's
+// label, its reason and the end of the lock, composed by the server in the
+// reader's language (backend handlers.lockedAnswer). The toast shows it as
+// it came; only a listing row's lock (no refusal behind it) is phrased here.
+// RED before: lockWords phrased the refusal itself and dropped `message`.
+describe('the 423 refusal, in the server’s words', () => {
+  const SAID = 'e-Signature locked this file until 2026-10-03 14:00 UTC: signatures are being collected';
+
+  it('the toast says the server’s sentence, read whole from the failure', () => {
+    const err = {
+      status: 423,
+      server: SAID,
+      detail: JSON.stringify({ error: 'locked', message: SAID, plugin: 'sign', reason: 'signatures are being collected' }),
+    };
+    const held = lockedRefusal(err);
+    expect(held?.message).toBe(SAID);
+    expect(lockWords(held, host)).toBe(SAID);
+  });
+
+  it('reads it out of the body when the failure carries no whole sentence', () => {
+    const held = lockedRefusal({ status: 423, detail: JSON.stringify({ error: 'locked', message: SAID, plugin: 'sign' }) });
+    expect(lockWords(held, host)).toBe(SAID);
+  });
+
+  it('a row’s lock is still phrased here - it has no sentence of the server’s', () => {
+    expect(lockWords({ plugin: 'sign', reason: 'out for signature' }, host)).toBe('sign locked this file: out for signature');
+  });
+});

@@ -34,6 +34,8 @@ const storages = useStoragesStore();
 const q = ref('');
 const searched = ref('');
 const hits = ref<SearchHitEx[]>([]);
+/** The server found more files than the page shows (#207, D7). */
+const truncated = ref(false);
 const searching = ref(false);
 const failure = ref('');
 
@@ -56,8 +58,12 @@ async function search() {
   }
   searching.value = true;
   try {
-    const res = await SearchApi.query({ q: term, scope: 'name', page: 1, page_size: 50 });
-    hits.value = res.items.filter((h) => !h.is_dir);
+    // Files only, asked of the SERVER (`type=file`, applied before its limit):
+    // dropping folders out of a page of 50 here left fewer than 50 files when
+    // more existed (#207, audit D7).
+    const res = await SearchApi.query({ q: term, scope: 'name', type: 'file', limit: 50 });
+    hits.value = res.items;
+    truncated.value = res.truncated;
     searched.value = term;
   } catch (e: unknown) {
     failure.value = extractError(e, t('errors.generic'));
@@ -151,6 +157,7 @@ const columns = computed<DataColumn<SearchHitEx>[]>(() => [
         <span class="tbl-clamp"><bdi>{{ row.path }}</bdi></span>
       </template>
     </DataTable>
-    <p v-else class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('adminFiles.hint') }}</p>
+    <p v-if="searched && truncated" class="text-sm text-zinc-500 dark:text-zinc-400" data-testid="admin-files-truncated">{{ t('search.moreThanShown') }}</p>
+    <p v-if="!searched" class="text-sm text-zinc-500 dark:text-zinc-400">{{ t('adminFiles.hint') }}</p>
   </section>
 </template>

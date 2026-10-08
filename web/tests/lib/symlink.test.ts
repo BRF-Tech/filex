@@ -9,19 +9,20 @@
 // rendered the flag, so an out-of-root link was still an ordinary-looking file
 // that mysteriously fails — the original complaint, half answered.
 //
-// ⚠⚠ THE FACT THE WHOLE DESIGN TURNS ON, measured in `handlers/manager.go`:
-// the listing has TWO projectors, and only one of them carries a reason.
-//   · `projectFileNodes` (:1412) — the DB cache, i.e. the NORMAL listing —
-//     emits `symlink: true` and nothing else. `model.Node` has no column for
-//     the state, because the state describes the link as it is now and the
-//     catalogue records what was seen at scan time.
-//   · `projectDriverObjects` (:826) — the cold-cache / pre-sync fallback —
-//     reads the driver and does carry `link_state`.
-// So "flagged, with no reason" is the case a warm installation hits EVERY
-// time, and a design that only understood the three named states would have
-// left the reporter's own screen exactly as broken as before. That is what
-// `'unknown'` is, and why it has wording of its own rather than a fallback to
-// nothing.
+// ⚠⚠ THE FACT THE DESIGN TURNED ON, measured in `handlers/manager.go`: the
+// listing has TWO projectors.
+//   · `projectDriverObjects` — the cold-cache / pre-sync listing — reads the
+//     driver and carries `link_state`.
+//   · `projectFileNodes` — the DB cache, i.e. the NORMAL listing — emitted
+//     `symlink: true` and nothing else until 0.54, because the catalogue had
+//     no column for the reason. Since 0.54 the sync records it (migration
+//     00098) and this listing sends it too.
+// "Flagged, with no reason" is still a real case — a row catalogued before
+// 0.54 until its folder's next sync, a driver that gives no reason — and was
+// the case every warm installation hit before. A design that only understood
+// the three named states would have left the reporter's own screen exactly as
+// broken as before. That is what `'unknown'` is, and why it has wording of its
+// own rather than a fallback to nothing.
 //
 // `followed` never reaches the browser at all: by the time manager.go looks,
 // a followed link has already become KindDirectory/KindFile. `symlink: true`
@@ -73,8 +74,9 @@ describe('reading the row', () => {
     expect(linkStateOf(row({ symlink: true, link_state: 'unresolved' }))).toBe('unresolved');
   });
 
-  it('⚠⚠ still answers for a flag with NO reason — the warm-cache listing', () => {
-    // `projectFileNodes` sends exactly this, on every ordinary listing. If this
+  it('⚠⚠ still answers for a flag with NO reason — a row the sync has not given one yet', () => {
+    // `projectFileNodes` sends exactly this for a link row catalogued before
+    // 0.54 (and sent it on every ordinary listing before then). If this
     // returned null the badge would be absent on the one screen the issue was
     // filed about, and the whole fix would be dead in production while every
     // other assertion here stayed green.
@@ -314,6 +316,41 @@ describe('the rows that come from outside a folder listing', () => {
     expect(n.type).toBe('file');
     expect(n.symlink).toBe(true);
     expect(linkStateOf(n)).toBe('unknown');
+  });
+
+  it('carries the reason the sync recorded, so the badge names it here too', () => {
+    // Since 0.54 the node row carries `link_state` (migration 00098). Dropping
+    // it here would leave Recent, Starred and a tag view saying the general
+    // "Link" for a row the folder beside them calls "Outside storage".
+    const n = nodeRowToFileNode(
+      { id: 9, path: 'archive', name: 'archive', type: 'symlink', size: 0, storage: 'e2e-local', link_state: 'outside_root' },
+      ctx,
+    )!;
+    expect(n.symlink).toBe(true);
+    expect(n.link_state).toBe('outside_root');
+    expect(linkStateOf(n)).toBe('outside_root');
+    expect(linkWordsFor(n, host)!.badge).toBe('Outside storage');
+
+    const w = mount(ListView, {
+      props: { selected: new Set<string>(), locale: 'en' as const, files: [n] },
+    });
+    const badge = w.find('[data-testid="symlink-badge"]');
+    expect(badge.attributes('data-link-state')).toBe('outside_root');
+    expect(badge.text()).toContain('Outside storage');
+  });
+
+  it('takes the reason only for a link, and only as text', () => {
+    const file = nodeRowToFileNode(
+      { id: 9, path: 'a.txt', name: 'a.txt', type: 'file', size: 4, storage: 'e2e-local', link_state: 'broken' },
+      ctx,
+    )!;
+    expect(file.link_state).toBeUndefined();
+    const odd = nodeRowToFileNode(
+      { id: 9, path: 'x', name: 'x', type: 'symlink', size: 0, storage: 'e2e-local', link_state: 42 },
+      ctx,
+    )!;
+    expect(odd.link_state).toBeUndefined();
+    expect(linkStateOf(odd)).toBe('unknown');
   });
 
   it('leaves ordinary rows exactly as they were', () => {

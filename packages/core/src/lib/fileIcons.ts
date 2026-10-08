@@ -20,7 +20,7 @@
  * tile and the row all get one definition (filex lesson #67).
  */
 
-import { isTextualMime } from './textMime';
+import { isTextualMime } from './serverRules';
 
 export type IconFamily =
   | 'folder'

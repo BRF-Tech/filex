@@ -23,7 +23,8 @@ import { app } from 'electron';
 import type { Account } from './accounts.js';
 import { portableMode } from './portable.js';
 import {
-  absorbLine,
+  absorbStderr,
+  absorbStdout,
   LineReader,
   markExited,
   newStatus,
@@ -175,6 +176,38 @@ export async function removePair(id: string): Promise<void> {
  *  pair's baseline, so the next run is an ordinary incremental pass. */
 export async function movePair(id: string, newLocal: string): Promise<void> {
   await run(['sync', 'move', id, newLocal]);
+}
+
+/** The engine's judgement of a sync window (`filex sync window --json`,
+ *  backend/cmd/filex/syncevents.go judgeSyncWindow). */
+export interface WindowCheck {
+  ok: boolean;
+  /** The canonical HH:MM-HH:MM to store and to start watchers with; '' = any
+   *  time (or, with ok false, nothing). */
+  window: string;
+  code: string;
+  /** The engine's sentence, in the language asked for. */
+  message: string;
+}
+
+/**
+ * Asks the engine whether it accepts a sync window. ⚠ The ONLY reader of a
+ * window: this app kept an HH:MM parser of its own that was stricter than
+ * the engine's ("7:00-9:00", spaces), so a window the engine ran with read
+ * as "no window" here (B17). Rejects only when the engine could not be run.
+ */
+export async function checkWindow(spec: string, lang: string): Promise<WindowCheck> {
+  const args = ['sync', 'window', '--json'];
+  if (lang) args.push('--lang', lang);
+  // `--` first: a window is never a flag, whatever it starts with.
+  args.push('--', String(spec ?? ''));
+  const ans = JSON.parse(await run(args)) as Partial<WindowCheck>;
+  return {
+    ok: ans.ok === true,
+    window: typeof ans.window === 'string' ? ans.window : '',
+    code: typeof ans.code === 'string' ? ans.code : '',
+    message: typeof ans.message === 'string' ? ans.message : '',
+  };
 }
 
 /** The items a pair holds go to the server on its next run. Returns the
@@ -351,8 +384,8 @@ export class SyncSupervisor {
     this.procs.set(acc.id, proc);
     const startedAt = Date.now();
 
-    // The server refused the token. Said once per watcher; an older engine
-    // that keeps looping on the 401 instead of exiting is stopped here.
+    // The server refused the token: the engine's `signed_out` event, or its
+    // exit status 3. Said once per watcher; the process is stopped here.
     let refused = false;
     const signedOut = () => {
       if (refused || !refusalApplies(this.status.get(acc.id), st)) return;
@@ -369,15 +402,17 @@ export class SyncSupervisor {
       for (const h of takeHolds(st)) this.onHold(acc.id, h.pairId, h.count);
     };
 
-    // The engine's lines are turned into typed state HERE (syncstatus.ts), so
-    // the string formats live in one place and the UI gets data. One reader
-    // per pipe, fed the raw bytes: a read can end mid-line — or inside a
-    // multi-byte character — and the tail waits for the rest.
-    const out = new LineReader((line) => absorbLine(st, line, false));
-    const err = new LineReader((line) => absorbLine(st, line, true));
+    // The engine's events are folded into typed state HERE (syncstatus.ts);
+    // the UI gets data and the engine's own sentences. One reader per pipe,
+    // fed the raw bytes: a read can end mid-line — or inside a multi-byte
+    // character — and the tail waits for the rest.
+    const out = new LineReader((line) => absorbStdout(st, line));
+    const err = new LineReader((line) => absorbStderr(st, line));
     proc.stdout?.on('data', (c: Buffer) => {
       out.push(c);
       holds();
+      // The engine says `signed_out` on its stream before it exits with 3.
+      signedOut();
       this.onChange();
     });
     proc.stderr?.on('data', (c: Buffer) => {

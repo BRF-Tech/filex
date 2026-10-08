@@ -48,6 +48,9 @@ export class FakeStagedServer {
   private seq = 0;
   /** Set to make `begin` answer as an older server with no staged path. */
   unsupported: number | null = null;
+  /** How long this server keeps a staging (FILEX_UPLOAD_STAGING_TTL): `begin`
+   *  answers `expires_at` = now + this, as handlers/upload_staged.go does. */
+  stagingTtlMs = 24 * 60 * 60 * 1000;
 
   // How GET /ops/{id} answers — the transfer the client now waits for.
   opStatus: 'running' | 'ok' | 'failed' | 'partial' = 'ok';
@@ -137,7 +140,14 @@ export class FakeStagedServer {
         parts: new Map(),
         state: 'staging',
       });
-      return { id, chunk_size: chunkSize, offset: 0, total_size: body.size, state: 'staging' };
+      return {
+        id,
+        chunk_size: chunkSize,
+        offset: 0,
+        total_size: body.size,
+        state: 'staging',
+        expires_at: new Date(Date.now() + this.stagingTtlMs).toISOString(),
+      };
     }
 
     const [pathOnly, query = ''] = path.split('?');
@@ -173,6 +183,7 @@ export class FakeStagedServer {
           chunk_size: s.chunkSize,
           state: s.state,
           complete: this.complete(s),
+          expires_at: new Date(Date.now() + this.stagingTtlMs).toISOString(),
         };
       }
     }
@@ -194,7 +205,7 @@ export class FakeStagedServer {
     id: string,
     contentRange: string,
     body: Uint8Array,
-  ): { offset: number; received: number; total_size: number; state: string } {
+  ): { offset: number; received: number; total_size: number; state: string; expires_at: string } {
     const s = this.sessions.get(id);
     if (!s) throw this.err(404, 'upload not found');
     if (s.state !== 'staging') throw this.err(409, `upload is ${s.state}`);
@@ -227,6 +238,8 @@ export class FakeStagedServer {
       received: this.received(s),
       total_size: s.total,
       state: s.state,
+      // The sweeper's rule: TTL past the LAST write (handlers/upload_staged.go).
+      expires_at: new Date(Date.now() + this.stagingTtlMs).toISOString(),
     };
   }
 }

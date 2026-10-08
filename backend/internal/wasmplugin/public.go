@@ -344,7 +344,7 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 
 	// PIN policy is the manifest page's when there is one; a page-less link
 	// has no page to set a policy, so the plugin's ask stands — inside the
-	// host's own 4–12 bound, which every share obeys.
+	// host's own PIN rule (share.CheckPINLength), which every share obeys.
 	pin := strings.TrimSpace(req.PIN)
 	if spec != nil {
 		switch spec.PIN {
@@ -359,8 +359,10 @@ func hfShareCreate(ctx context.Context, s *Scope, in json.RawMessage) (any, erro
 	if pin == "auto" {
 		pin = randomDigits(pagePinLength)
 	}
-	if pin != "" && (len(pin) < 4 || len(pin) > 12) {
-		return nil, hostErr(wire.ErrInvalid, "pin must be 4-12 characters")
+	// The host's one PIN rule (share/pinrule.go), asked here as well so the
+	// plugin hears it as ErrInvalid before anything is staged.
+	if err := share.CheckPINLength(pin); err != nil {
+		return nil, hostErr(wire.ErrInvalid, "pin must be "+strconv.Itoa(share.PINMinLen)+"-"+strconv.Itoa(share.PINMaxLen)+" characters")
 	}
 
 	// TTL: the plugin's ask, clamped by the manifest's ceiling and the host's.

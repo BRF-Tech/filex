@@ -1,108 +1,141 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  absorbLine,
+  absorbEvent,
+  absorbStderr,
+  absorbStdout,
   anyError,
+  ENGINE_PROTOCOL,
   LineReader,
   markExited,
   newStatus,
   pairView,
-  parseEta,
-  parseLiveLine,
+  parseEvent,
   refusalApplies,
   retainPairs,
   SIGNED_OUT_EXIT,
   takeHolds,
+  type EngineEvent,
 } from '../src/syncstatus.ts';
 
-// The engine's output → what the sync card says, pair by pair.
+// The engine's events → what the sync card says, pair by pair.
 //
-// Before these rules an error line was copied into ONE account-wide field and
+// ⚠⚠ #213 (A9): until 0.54 this module read the engine's ENGLISH lines with
+// regular expressions — a sentence reworded in Go silently broke the status
+// under a folder, and the engine's errors reached a Turkish window in
+// English. The engine (`filex sync run --json`) now writes one JSON event per
+// line, its `message` said in the app's language; these tests feed events,
+// the shape backend/cmd/filex/syncevents.go writes.
+//
+// Before these rules an error was copied into ONE account-wide field and
 // never cleared: with the live engine running a pass every few seconds, a
 // failure from minutes ago sat under every synced folder of the account and
 // read as a current one.
 
-const out = (st: ReturnType<typeof newStatus>, line: string) => absorbLine(st, line, false);
-const err = (st: ReturnType<typeof newStatus>, line: string) => absorbLine(st, line, true);
+type Ev = Partial<EngineEvent> & { event: string };
+const ev = (e: Ev): EngineEvent => ({ code: e.event, params: {}, message: '', ...e });
+const feed = (st: ReturnType<typeof newStatus>, e: Ev) => absorbStdout(st, JSON.stringify(ev(e)));
+
+const pass = (pair: string, failed = 0, message = failed ? 'a pass with failures' : 'already in step') =>
+  ({ event: 'pass', pair, code: failed ? 'pass.done_failed' : 'pass.in_step', params: { failed }, message });
+const error = (pair: string | undefined, message: string, code = 'pass.action_failed') =>
+  ({ event: 'error', pair, code, params: { error: message }, message });
+
+test('the engine is started for the event stream, and the app reads no English line', () => {
+  // The source no longer carries a pattern of the engine's sentences.
+  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'syncstatus.ts'), 'utf8');
+  for (const gone of ['already in step$', 'lock: (?:', 'local: (?:', 'item\\(s\\) here', 'change\\(s\\) to make', 'waiting for the sync window', 'HTTP 401(?=']) {
+    assert.equal(src.includes(gone), false, `syncstatus.ts still matches the engine's words: ${gone}`);
+  }
+  assert.equal(ENGINE_PROTOCOL, 1);
+});
+
+test('a stdout line is an event or nothing', () => {
+  assert.deepEqual(parseEvent('{"event":"pass","pair":"pair-1","code":"pass.in_step","params":{"failed":0},"message":"zaten eşitlenmiş"}'), {
+    event: 'pass', pair: 'pair-1', code: 'pass.in_step', params: { failed: 0 }, message: 'zaten eşitlenmiş',
+  });
+  for (const not of ['', 'pair-1: already in step', '{', '{"code":"x"}', '[1,2]', 'null', '{"event":1,"code":"x"}']) {
+    assert.equal(parseEvent(not), null, not);
+  }
+  const st = newStatus('acc');
+  absorbStdout(st, 'Watching: changes on either side are synced as they happen');
+  assert.deepEqual(st.pairs, {}, 'a plain line changes nothing');
+  assert.equal(st.events, 0);
+});
+
+test('hello says which stream the engine speaks', () => {
+  const st = newStatus('acc');
+  feed(st, { event: 'hello', params: { protocol: 1, version: '0.54.0', lang: 'tr' } });
+  assert.equal(st.protocol, 1);
+});
 
 test('a pair\'s error is cleared by its next clean pass', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: 1/2 done - 0 up, 1 down, 0 removed here, 0 removed on the server, 1 failed  (5ms)');
-  err(st, 'pair-1: ! download a.txt: connection reset');
-  assert.equal(pairView(st, 'pair-1').error, 'download a.txt: connection reset');
+  feed(st, pass('pair-1', 1));
+  feed(st, error('pair-1', 'Bir öğe eşitlenemedi: download a.txt: connection reset'));
+  assert.equal(pairView(st, 'pair-1').error, 'Bir öğe eşitlenemedi: download a.txt: connection reset');
 
-  out(st, 'pair-1: 1/1 done - 0 up, 1 down, 0 removed here, 0 removed on the server  (4ms)');
+  feed(st, pass('pair-1'));
   assert.equal(pairView(st, 'pair-1').error, null, 'a clean pass must clear the pair\'s error');
   assert.equal(st.lastError, null, 'and nothing account-wide may keep it');
 
-  err(st, 'pair-1: list docs://work: HTTP 502: bad gateway');
-  assert.equal(pairView(st, 'pair-1').error, 'list docs://work: HTTP 502: bad gateway');
-  out(st, 'pair-1: already in step');
+  feed(st, error('pair-1', 'Bu klasör eşitlenemedi: list docs://work: HTTP 502', 'pass.failed'));
+  assert.equal(pairView(st, 'pair-1').error, 'Bu klasör eşitlenemedi: list docs://work: HTTP 502');
+  feed(st, pass('pair-1'));
   assert.equal(pairView(st, 'pair-1').error, null);
 });
 
 test('an error for one pair never shows on another', () => {
   const st = newStatus('acc');
-  err(st, 'pair-1: ! upload big.bin: HTTP 413: quota exceeded');
+  feed(st, error('pair-1', 'An item could not be synced: upload big.bin: HTTP 413: quota exceeded'));
   assert.equal(pairView(st, 'pair-2').error, null);
   assert.ok(pairView(st, 'pair-1').error?.includes('quota exceeded'));
 });
 
-// stdout and stderr are two pipes; which one Node reads first is not
-// guaranteed. A pass that failed says so in its own summary, so the order in
-// which the summary and the error text arrive cannot clear a fresh failure.
-test('a failed pass keeps its error whichever pipe is read first', () => {
-  const summary = 'pair-1: 0/1 done - 0 up, 0 down, 0 removed here, 0 removed on the server, 1 failed  (5ms)';
-  const detail = 'pair-1: ! download a.txt: connection reset';
-  const a = newStatus('acc');
-  err(a, detail);
-  out(a, summary);
-  assert.equal(pairView(a, 'pair-1').error, 'download a.txt: connection reset');
-  const b = newStatus('acc');
-  out(b, summary);
-  err(b, detail);
-  assert.equal(pairView(b, 'pair-1').error, 'download a.txt: connection reset');
-});
-
-// A raced action (the other side changed mid-pass; both versions are kept on
-// the next pass) is not a failure and must not paint the folder red.
-test('a raced pass is not an error', () => {
+// One ordered stream: the summary comes first, its errors right after it.
+// (Two pipes read in no guaranteed order used to need a verdict in the
+// summary itself; the verdict is still there, as params.failed.)
+test('a pass with failures keeps the error that follows it, and a later one too', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: 0/1 done - 0 up, 0 down, 0 removed here, 0 removed on the server  (5ms)');
-  out(st, 'pair-1: ~ download note.txt: changed on this computer while it was being synced - both versions are kept on the next pass');
-  assert.equal(pairView(st, 'pair-1').error, null);
-});
-
-test('an error that is not about a pair shows on every pair until the engine works again', () => {
-  const st = newStatus('acc');
-  err(st, 'Error: HTTP 401: unauthorized - token missing/expired; run `filex client login`');
-  assert.match(pairView(st, 'pair-1').error ?? '', /401/);
-  assert.match(pairView(st, 'pair-2').error ?? '', /401/);
-  out(st, 'pair-2: already in step');
-  assert.equal(pairView(st, 'pair-1').error, null);
-  assert.equal(st.lastError, null);
+  feed(st, error('pair-1', 'old'));
+  feed(st, pass('pair-1', 1));
+  assert.equal(pairView(st, 'pair-1').error, 'old', 'a failed pass does not clear');
+  feed(st, error('pair-1', 'new'));
+  assert.equal(pairView(st, 'pair-1').error, 'new');
 });
 
 test('notes are not errors', () => {
   const st = newStatus('acc');
-  err(st, 'pair-1: note: skipped 1 unreadable or non-regular item(s), e.g. link-to-elsewhere');
+  feed(st, { event: 'note', pair: 'pair-1', code: 'pass.skipped', params: { count: 1 }, message: '1 unreadable or special item was skipped: link' });
+  feed(st, { event: 'note', pair: 'pair-1', code: 'pass.raced', message: 'Changed on both sides…' });
   assert.equal(pairView(st, 'pair-1').error, null);
   assert.equal(st.lastError, null);
 });
 
-test('local watching state is per pair and clears when watching resumes', () => {
+test('an error that is about no pair shows on every pair until the engine works again', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: local: poll-only - too-large - more than 4000 items (macOS watches every file separately)');
-  assert.deepEqual(pairView(st, 'pair-1').local, {
-    code: 'too-large',
-    detail: 'more than 4000 items (macOS watches every file separately)',
-  });
+  feed(st, error(undefined, 'The list of synced folders could not be read: permission denied', 'pairs_unreadable'));
+  assert.match(pairView(st, 'pair-1').error ?? '', /permission denied/);
+  assert.match(pairView(st, 'pair-2').error ?? '', /permission denied/);
+  feed(st, pass('pair-2'));
+  assert.equal(pairView(st, 'pair-1').error, null);
+  assert.equal(st.lastError, null);
+});
+
+test('local watching state is per pair, in the engine\'s words, and clears when watching resumes', () => {
+  const st = newStatus('acc');
+  const tooLarge = 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur - klasörde izlenemeyecek kadar çok öğe var';
+  feed(st, { event: 'local', pair: 'pair-1', code: 'local.too_large', params: { state: 'too-large', detail: 'more than 4000 items' }, message: tooLarge });
+  assert.deepEqual(pairView(st, 'pair-1').local, { code: 'too-large', detail: 'more than 4000 items', message: tooLarge });
   assert.equal(pairView(st, 'pair-2').local, null);
-  out(st, 'pair-1: local: poll-only - unavailable - too many open files');
-  assert.deepEqual(pairView(st, 'pair-1').local, { code: 'unavailable', detail: 'too many open files' });
-  out(st, 'pair-1: local: watched');
+  feed(st, { event: 'local', pair: 'pair-1', code: 'local.unavailable', params: { state: 'unavailable', detail: 'too many open files' }, message: 'x' });
+  assert.deepEqual(pairView(st, 'pair-1').local, { code: 'unavailable', detail: 'too many open files', message: 'x' });
+  feed(st, { event: 'local', pair: 'pair-1', code: 'local.watched', params: { state: 'watched' }, message: 'y' });
   assert.equal(pairView(st, 'pair-1').local, null);
-  assert.equal(pairView(st, 'pair-1').line, null, 'a state line is not what the engine last DID');
+  assert.equal(pairView(st, 'pair-1').line, null, 'a state is not what the engine last DID');
 });
 
 // Another process on this computer holds a pair (backend/cmd/filex
@@ -111,114 +144,78 @@ test('local watching state is per pair and clears when watching resumes', () => 
 test('a pair another filex syncs is busy — not failing — until this engine takes it', () => {
   const st = newStatus('acc');
   const detail = 'another filex on this computer is syncing this pair (process 4242, C:\\Program Files\\WindowsApps\\filex\\filex.exe)';
-  out(st, `pair-1: lock: busy - ${detail}`);
-  assert.deepEqual(pairView(st, 'pair-1').busy, { detail });
+  const message = 'Another filex on this computer is syncing this folder - this copy takes over when that one stops';
+  feed(st, { event: 'lock', pair: 'pair-1', code: 'lock.busy', params: { state: 'busy', detail }, message });
+  assert.deepEqual(pairView(st, 'pair-1').busy, { detail, message });
   assert.equal(pairView(st, 'pair-1').error, null, 'busy is not an error');
   assert.equal(anyError(st), false, 'and does not turn the rail dot red');
   assert.equal(pairView(st, 'pair-2').busy, null, 'only that pair');
-  assert.equal(pairView(st, 'pair-1').line, null, 'a state line is not what the engine last DID');
+  assert.equal(pairView(st, 'pair-1').line, null, 'a state is not what the engine last DID');
 
-  out(st, 'pair-1: lock: acquired');
+  feed(st, { event: 'lock', pair: 'pair-1', code: 'lock.acquired', params: { state: 'acquired' }, message: 'z' });
   assert.equal(pairView(st, 'pair-1').busy, null);
 });
 
-test('a one-shot run says busy on stderr; it is still busy, not an error', () => {
+test('a pass of the pair ends busy even without lock.acquired', () => {
   const st = newStatus('acc');
-  err(st, 'pair-1: lock: busy - another filex on this computer is syncing this pair');
-  assert.deepEqual(pairView(st, 'pair-1').busy, { detail: 'another filex on this computer is syncing this pair' });
-  assert.equal(pairView(st, 'pair-1').error, null);
-  assert.equal(st.lastError, null);
-});
-
-test('a pass of the pair ends busy even without the acquired line', () => {
-  const st = newStatus('acc');
-  out(st, 'pair-1: lock: busy - another filex on this computer is syncing this pair');
-  out(st, 'pair-1: inventory: 3 item(s) here, listing the server…');
+  feed(st, { event: 'lock', pair: 'pair-1', code: 'lock.busy', params: { detail: 'x' }, message: 'm' });
+  feed(st, { event: 'progress', pair: 'pair-1', code: 'progress.inventory', params: { phase: 'inventory', here: 3 }, message: '3 items' });
   assert.equal(pairView(st, 'pair-1').busy, null);
-  out(st, 'pair-2: lock: busy - another filex on this computer is syncing this pair');
-  out(st, 'pair-2: already in step');
+  feed(st, { event: 'lock', pair: 'pair-2', code: 'lock.busy', params: { detail: 'x' }, message: 'm' });
+  feed(st, pass('pair-2'));
   assert.equal(pairView(st, 'pair-2').busy, null);
 });
 
 test('a watcher that exits is not waiting for any pair', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: lock: busy - another filex on this computer is syncing this pair');
+  feed(st, { event: 'lock', pair: 'pair-1', code: 'lock.busy', params: { detail: 'x' }, message: 'm' });
   markExited(st, 1, false);
   assert.equal(pairView(st, 'pair-1').busy, null);
 });
 
-test('each pair shows its own last line', () => {
+test('each pair shows its own last line, in the engine\'s words', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: transfer: 3/9');
-  out(st, 'pair-2: already in step');
-  assert.equal(pairView(st, 'pair-1').line, 'transfer: 3/9');
-  assert.equal(pairView(st, 'pair-2').line, 'already in step');
+  feed(st, { event: 'progress', pair: 'pair-1', code: 'progress.transfer', params: { phase: 'transfer', done: 3, total: 9 }, message: 'dosyalar aktarılıyor - 3/9' });
+  feed(st, pass('pair-2', 0, 'zaten eşitlenmiş'));
+  assert.equal(pairView(st, 'pair-1').line, 'dosyalar aktarılıyor - 3/9');
+  assert.equal(pairView(st, 'pair-2').line, 'zaten eşitlenmiş');
 });
 
-// A pipe delivers bytes, not lines. A line cut across two reads used to be
-// parsed as two nonsense lines — half a summary cannot clear an error, and
-// half an error line becomes the error text.
-test('a line split across two reads is read whole', () => {
+// A pipe delivers bytes, not lines. Half an event is no JSON at all.
+test('an event split across two reads is read whole', () => {
   const st = newStatus('acc');
-  err(st, 'pair-1: ! download a.txt: connection reset');
-  const r = new LineReader((l) => out(st, l));
-  r.push('pair-1: already in st');
-  assert.notEqual(pairView(st, 'pair-1').error, null, 'nothing is decided on half a line');
-  r.push('ep\npair-2: transfer: 1/');
+  feed(st, error('pair-1', 'boom'));
+  const r = new LineReader((l) => absorbStdout(st, l));
+  const line = JSON.stringify(ev(pass('pair-1')));
+  r.push(line.slice(0, 20));
+  assert.equal(pairView(st, 'pair-1').error, 'boom', 'nothing is decided on half a line');
+  r.push(line.slice(20) + '\n');
   assert.equal(pairView(st, 'pair-1').error, null);
-  r.push('4\n');
-  assert.equal(pairView(st, 'pair-2').line, 'transfer: 1/4');
 });
 
-// The engine's live-state lines are the whole contract between
-// backend/cmd/filex/synclive.go and the sync panel's state word.
-test('parses every state the engine prints', () => {
-  assert.deepEqual(parseLiveLine('live: connected - watching 3 folder(s)'), { live: 'connected', detail: 'watching 3 folder(s)' });
-  assert.deepEqual(parseLiveLine('live: polling - --live=false; changes are found by the interval poll only'),
-    { live: 'polling', detail: '--live=false; changes are found by the interval poll only' });
-  assert.deepEqual(parseLiveLine('live: offline - connect: refused; retrying in 4s'), { live: 'offline', detail: 'connect: refused; retrying in 4s' });
-  assert.deepEqual(parseLiveLine('  live: connected  '), { live: 'connected', detail: null });
-});
-
-// The engine wrote an em dash between a state and its detail before 0.50
-// (" - " since). A line from such an engine still reads the same.
-test('reads the separator an engine before 0.50 wrote', () => {
-  const em = String.fromCharCode(0x2014);
-  assert.deepEqual(parseLiveLine(`live: offline ${em} connect: refused`), { live: 'offline', detail: 'connect: refused' });
+test('the live state is the engine\'s, with its sentence', () => {
   const st = newStatus('acc');
-  out(st, `pair-1: local: poll-only ${em} unavailable ${em} too many open files`);
-  assert.deepEqual(pairView(st, 'pair-1').local, { code: 'unavailable', detail: 'too many open files' });
-  out(st, `pair-2: lock: busy ${em} another filex on this computer is syncing this pair`);
-  assert.deepEqual(pairView(st, 'pair-2').busy, { detail: 'another filex on this computer is syncing this pair' });
+  feed(st, { event: 'live', code: 'live.connected', params: { state: 'connected', detail: 'watching 3 folder(s)' }, message: 'Canlı - değişiklikler anında geliyor' });
+  assert.equal(st.live, 'connected');
+  assert.equal(st.liveMessage, 'Canlı - değişiklikler anında geliyor');
+  feed(st, { event: 'live', code: 'live.unknown', params: { state: 'teleporting' }, message: '?' });
+  assert.equal(st.live, 'connected', 'a state this app does not know changes nothing');
+  assert.deepEqual(st.pairs, {}, 'live is about no pair');
+  markExited(st, 0, true);
+  assert.equal(st.live, null);
+  assert.equal(st.liveMessage, null);
 });
-
-// ⚠ Sync progress and results must NOT be read as a state: a pair id that
-// happens to be "live" would otherwise flip the word, and a pair's LOCAL
-// watching state (LocalNote) is not how server changes arrive.
-test('ignores everything else', () => {
-  for (const line of [
-    'pair-1: transfer: 1/1',
-    'pair-1: 1/1 done - 0 up, 1 down, 0 removed here, 0 removed on the server  (10ms)',
-    'pair-1: local: poll-only - unavailable - too many open files',
-    'live: connectedish',
-    'Watching: changes on either side are synced as they happen; a full check every 30s. Ctrl-C to stop.',
-  ]) {
-    assert.equal(parseLiveLine(line), null, line);
-  }
-});
-
-// ── carried over from PR #35 (src/sync-output.ts, folded into this module) ──
 
 test('a multi-byte character split between reads survives', () => {
   const lines: string[] = [];
   const r = new LineReader((l) => lines.push(l));
-  const bytes = Buffer.from('pair-1: ! upload Türkçe adlı dosya.txt: HTTP 500\n', 'utf8');
-  // Cut inside the two-byte "ü" (0xC3 0xBC).
-  const cut = bytes.indexOf(0xbc);
+  const bytes = Buffer.from('{"event":"error","pair":"pair-1","code":"pass.action_failed","message":"Bir öğe eşitlenemedi"}\n', 'utf8');
+  // Cut inside the two-byte "ö" (0xC3 0xB6).
+  const cut = bytes.indexOf(0xb6);
   r.push(bytes.subarray(0, cut));
   assert.deepEqual(lines, []);
   r.push(bytes.subarray(cut));
-  assert.deepEqual(lines, ['pair-1: ! upload Türkçe adlı dosya.txt: HTTP 500']);
+  assert.equal(parseEvent(lines[0])?.message, 'Bir öğe eşitlenemedi');
 });
 
 test('a Windows line ending is not part of the line, and the tail is read on flush', () => {
@@ -245,8 +242,8 @@ test('an unexpected exit is said out loud; a requested stop is not an error', ()
 
 test('an unpaired folder takes its state with it', () => {
   const st = newStatus('acc');
-  err(st, 'pair-1: list docs://a: HTTP 502');
-  err(st, 'pair-2: list docs://b: HTTP 503');
+  feed(st, error('pair-1', 'list docs://a: HTTP 502', 'pass.failed'));
+  feed(st, error('pair-2', 'list docs://b: HTTP 503', 'pass.failed'));
   assert.equal(retainPairs(st, new Set(['pair-1'])), true);
   assert.equal(pairView(st, 'pair-2').error, null);
   assert.equal(pairView(st, 'pair-1').error, 'list docs://a: HTTP 502');
@@ -254,134 +251,133 @@ test('an unpaired folder takes its state with it', () => {
 });
 
 // A revoked token used to mean a watcher printing `HTTP 401` every 30 seconds
-// forever, and an app that retried it forever — even across reboots. The
-// engine now exits with status 3 on a 401 and says so; an older engine that
-// keeps looping is recognised by its 401 line.
-test('exit status 3 is "signed out", not a crash', () => {
+// forever. The engine exits with status 3 and says `signed_out` first.
+test('signed_out and exit status 3 are "signed out", not a crash', () => {
   const st = newStatus('acc');
+  feed(st, { event: 'fatal', code: 'signed_out', params: { exit: 3 }, message: 'Sunucu bu oturumu artık kabul etmiyor' });
+  assert.equal(st.signedOut, true);
+  assert.equal(st.lastError, 'Sunucu bu oturumu artık kabul etmiyor', 'in the engine\'s words');
   markExited(st, SIGNED_OUT_EXIT, false);
-  assert.equal(st.signedOut, true);
   assert.equal(st.running, false);
-  assert.ok(st.lastError);
+  assert.equal(st.exited ?? null, null);
+
+  const bare = newStatus('acc');
+  markExited(bare, SIGNED_OUT_EXIT, false);
+  assert.equal(bare.signedOut, true, 'the status alone is enough');
+  assert.ok(bare.lastError);
 });
 
-test('an older engine that keeps looping on 401 is recognised from its output', () => {
+test('…and no other failure is: a 403, a 5xx, a file called "HTTP 401"', () => {
   const st = newStatus('acc');
-  err(st, 'pair-1: list docs://work: HTTP 401: unauthorized');
-  assert.equal(st.signedOut, true);
-});
-
-test('…but not from a 403, a 5xx, or a file that happens to be called "HTTP 401"', () => {
-  const st = newStatus('acc');
-  err(st, 'pair-1: list docs://work: HTTP 403: this account is disabled');
-  err(st, 'pair-1: list docs://work: HTTP 502');
-  err(st, 'pair-1: ! upload HTTP 401.txt: HTTP 500');
+  feed(st, error('pair-1', 'list docs://work: HTTP 403: this account is disabled', 'pass.failed'));
+  feed(st, error('pair-1', 'upload HTTP 401.txt: HTTP 500'));
+  feed(st, { event: 'fatal', code: 'fatal', params: { exit: 1 }, message: 'The sync engine stopped: x' });
   assert.notEqual(st.signedOut, true);
   markExited(st, 1, false);
   assert.notEqual(st.signedOut, true);
 });
 
-// Outside its window the watcher says `sync: waiting for the sync window …`
-// once and runs nothing. A pass still busy when the window closes is cancelled
-// like Ctrl-C and says `sync: the sync window … closed; …` — with NO summary
-// line after it, so that line is what ends the activity. Missing it would leave
-// a transfer "active" all day, and the sleep guard holding with it.
-test('waiting for the sync window is a state, and it is not activity', () => {
+// Outside its window the watcher says `window.waiting` once and runs nothing.
+// A pass still busy when the window closes is cancelled like Ctrl-C and says
+// `window.closed` — with NO pass event after it, so that event is what ends
+// the activity. Missing it would leave a transfer "active" all day, and the
+// sleep guard holding with it.
+test('waiting for the sync window is a state, it is not activity, and the engine says when it opens', () => {
   const st = newStatus('acc');
-  out(st, 'sync: waiting for the sync window 22:00-07:00');
-  assert.equal(st.waitingWindow, '22:00-07:00');
+  feed(st, {
+    event: 'window', code: 'window.waiting',
+    params: { window: '22:00-07:00', opens_at: '2026-10-08T22:00:00+03:00' },
+    message: 'eşitleme saatleri bekleniyor, 22:00-07:00',
+  });
+  assert.deepEqual(st.waitingWindow, {
+    window: '22:00-07:00', opensAt: Date.parse('2026-10-08T22:00:00+03:00'), message: 'eşitleme saatleri bekleniyor, 22:00-07:00',
+  });
   assert.equal(st.active, null);
-  assert.deepEqual(st.pairs, {}, '"sync" is not a pair');
-  out(st, 'pair-1: inventory: 3 item(s) here, listing the server…');
+  assert.deepEqual(st.pairs, {}, 'a window is about no pair');
+  feed(st, { event: 'progress', pair: 'pair-1', code: 'progress.inventory', params: { phase: 'inventory', here: 3 }, message: '…' });
   assert.equal(st.waitingWindow, null);
 });
 
-test('a window that closes mid-transfer ends the activity even without a summary', () => {
+test('a window that closes mid-transfer ends the activity even without a pass', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: transfer: 40/900 (1.2 GiB of 52.6 GiB, about 8h 10m left)');
+  feed(st, { event: 'progress', pair: 'pair-1', code: 'progress.transfer_eta', params: { phase: 'transfer', done: 40, total: 900 }, message: 'm' });
   assert.equal(st.active?.pairId, 'pair-1');
-  out(st, 'sync: the sync window 22:00-07:00 closed; the rest continues when it opens');
+  feed(st, { event: 'window', code: 'window.closed', params: { window: '22:00-07:00', opens_at: 'not a time' }, message: 'closed' });
   assert.equal(st.active, null);
-  assert.equal(st.waitingWindow, '22:00-07:00');
+  assert.equal(st.waitingWindow?.window, '22:00-07:00');
+  assert.equal(st.waitingWindow?.opensAt, null, 'an opening the engine did not say is not guessed here');
   assert.equal(st.lastError, null, 'a closing window is not an error');
 });
 
-// "transfer: 120/11704" said nothing about the nine hours ahead. The engine
-// appends `(<done> of <total>, about <eta> left)` — the bytes once there are
-// bytes to move, the estimate once it has one — and keeps the leading
-// "done/total" exactly as it was.
-test('the transfer line carries bytes and an estimate', () => {
+// "transfer: 120/11704" said nothing about the nine hours ahead: the event
+// carries the bytes and the estimate as numbers, and the engine's sentence
+// says them in the reader's language.
+test('the transfer carries its figures and its sentence', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: transfer: 120/11704 (1.2 GiB of 52.6 GiB, about 8h 10m left)');
+  const message = 'moving files - 120/11,704, 1.2 GB of 52.6 GB - about 8 h 10 min left';
+  feed(st, {
+    event: 'progress', pair: 'pair-1', code: 'progress.transfer_eta',
+    params: { phase: 'transfer', done: 120, total: 11704, bytes_done: 1_200_000_000, bytes_total: 52_600_000_000, eta_seconds: 29400 },
+    message,
+  });
   assert.deepEqual(st.active, {
     pairId: 'pair-1', phase: 'transfer', done: 120, total: 11704,
-    bytesDone: '1.2 GiB', bytesTotal: '52.6 GiB', eta: '8h 10m', etaSeconds: 8 * 3600 + 10 * 60,
+    bytesDone: 1_200_000_000, bytesTotal: 52_600_000_000, etaSeconds: 29400, message,
   });
 });
 
-test('…the bytes without an estimate in the first seconds', () => {
+test('every phase keeps its figures', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: transfer: 3/40 (512 B of 12.0 MiB)');
-  assert.deepEqual(st.active, {
-    pairId: 'pair-1', phase: 'transfer', done: 3, total: 40, bytesDone: '512 B', bytesTotal: '12.0 MiB',
-  });
-});
-
-test('…and an older engine\'s bare line still reads as before', () => {
-  const st = newStatus('acc');
-  out(st, 'pair-1: transfer: 20/300');
-  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'transfer', done: 20, total: 300 });
-});
-
-test('the estimate is read into seconds, whatever unit the engine chose', () => {
-  assert.equal(parseEta('8h 10m'), 29400);
-  assert.equal(parseEta('1h 0m'), 3600);
-  assert.equal(parseEta('12m'), 720);
-  assert.equal(parseEta('45s'), 45);
-  assert.equal(parseEta('soon'), null);
-  assert.equal(parseEta(''), null);
+  feed(st, { event: 'progress', pair: 'pair-1', params: { phase: 'inventory', here: 1204 }, message: 'a' });
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'inventory', done: 0, total: 0, here: 1204, message: 'a' });
+  feed(st, { event: 'progress', pair: 'pair-1', params: { phase: 'inventory', here: 1204, listed: 48211, folders: 312 }, message: 'b' });
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'inventory', done: 0, total: 0, here: 1204, listed: 48211, message: 'b' });
+  feed(st, { event: 'progress', pair: 'pair-1', params: { phase: 'plan', total: 97 }, message: 'c' });
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'plan', done: 0, total: 97, message: 'c' });
+  feed(st, { event: 'progress', pair: 'pair-1', params: { phase: 'settling', done: 40, total: 97 }, message: 'd' });
+  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'settling', done: 40, total: 97, message: 'd' });
+  feed(st, { event: 'progress', pair: 'pair-1', params: { phase: 'warp' }, message: 'e' });
+  assert.equal(st.active?.phase, 'settling', 'a phase this app does not know changes nothing');
 });
 
 // A first run that would push a stale mirror's worth of local-only files into a
 // server folder with content HOLDS them and waits for a decision. The count the
-// notice shows comes from `sync list --json` (hold_new / held); the progress
-// line is only the cue to re-read it, so only its number is parsed.
-test('a hold line is handed over once, and changes nothing about the activity', () => {
+// notice shows comes from `sync list --json` (hold_new / held); the event is
+// only the cue to re-read it.
+test('a hold is handed over once, and changes nothing about the activity', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: plan: 150 change(s) to make');
-  out(
-    st,
-    'pair-1: hold: 7 item(s) here are not on the server - waiting for a decision ' +
-      '(`filex sync confirm pair-1` sends them, `filex sync discard pair-1` moves them to the local sync trash)',
-  );
+  feed(st, { event: 'progress', pair: 'pair-1', params: { phase: 'plan', total: 150 }, message: '150 changes to make' });
+  feed(st, { event: 'hold', pair: 'pair-1', code: 'hold', params: { count: 7 }, message: '7 items…' });
   assert.equal(st.active?.phase, 'plan');
   assert.deepEqual(takeHolds(st), [{ pairId: 'pair-1', count: 7 }]);
   assert.deepEqual(takeHolds(st), []);
   assert.equal(st.lastError, null);
 });
 
-// ── found in the review of PR #35 ──
-
-// The CLI's own exit line (`filex: <err>`, backend/cmd/filex/main.go) is about
-// no folder. Read as a pair called `filex`, the reason the watcher died sat
-// under a folder nobody has, every real folder said only "stopped", and the
-// next reconcile dropped it.
-test('the command\'s own exit line is the account\'s error, under every folder', () => {
+// stderr is not the engine's stream: what lands there is a panic or the
+// refusal of an engine that cannot speak it, and that is the account's error.
+test('stderr is the account\'s error, as it is; an engine that never spoke the stream is marked', () => {
   const st = newStatus('acc');
-  err(st, 'filex: re-read pairs: open pairs.json: permission denied');
-  markExited(st, 1, false);
-  assert.deepEqual(st.pairs, {}, '"filex" is not a pair');
-  assert.equal(pairView(st, 'pair-1').error, 'filex: re-read pairs: open pairs.json: permission denied');
+  absorbStderr(st, 'Error: unknown flag: --json');
+  absorbStderr(st, '   ');
+  assert.equal(st.lastError, 'Error: unknown flag: --json');
+  assert.deepEqual(st.pairs, {});
   retainPairs(st, new Set(['pair-1']));
-  assert.equal(pairView(st, 'pair-1').error, 'filex: re-read pairs: open pairs.json: permission denied',
-    'a reconcile keeps it');
+  assert.equal(pairView(st, 'pair-1').error, 'Error: unknown flag: --json', 'under every folder');
+  markExited(st, 1, false);
+  assert.equal(st.noStream, true);
+
+  const spoke = newStatus('acc');
+  feed(spoke, { event: 'hello', params: { protocol: 1 } });
+  markExited(spoke, 1, false);
+  assert.notEqual(spoke.noStream, true, 'an engine that spoke the stream crashed; it is not too old');
 });
 
 // Signing in again starts a new watcher with the new token; the old one's last
 // words — a 401 — can arrive after it and must not sign the fixed account out.
 test('a replaced watcher\'s refusal no longer speaks for the account', () => {
   const old = newStatus('acc');
-  err(old, 'pair-1: list docs://work: HTTP 401: unauthorized');
+  feed(old, { event: 'fatal', code: 'signed_out', params: { exit: 3 }, message: 'x' });
   assert.equal(old.signedOut, true);
   const fresh = newStatus('acc');
   assert.equal(refusalApplies(old, old), true, 'the current watcher\'s refusal counts');
@@ -401,39 +397,17 @@ test('a line that never ends is handed on once it is too long', () => {
   assert.equal(lines[0].length, LineReader.MAX_LINE + 1);
 });
 
-// ── what a pass says while it runs, and whether one has finished (Y11) ──
-//
-// ⚠ The engine says how far a pass has got in every phase, and only the
-// transfer's figures were kept: "listed 312 server folder(s), 48,211 item(s)
-// so far" became "listing the server…", minutes on end, with nothing moving.
-// And a folder no pass had finished yet read "watching for changes" beside a
-// folder that was genuinely in step.
-
-test('every phase keeps its figures', () => {
-  const st = newStatus('acc');
-  out(st, 'pair-1: inventory: 1204 item(s) here, listing the server…');
-  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'inventory', done: 0, total: 0, here: 1204 });
-  out(st, 'pair-1: inventory: listed 312 server folder(s), 48211 item(s) so far');
-  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'inventory', done: 0, total: 0, here: 1204, listed: 48211 });
-  out(st, 'pair-1: plan: 97 change(s) to make');
-  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'plan', done: 0, total: 97 });
-  out(st, 'pair-1: settling: 40 of 97 change(s) recorded');
-  assert.deepEqual(st.active, { pairId: 'pair-1', phase: 'settling', done: 40, total: 97 });
-});
-
 test('a pair has passed once a pass of it has finished, and not before', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: inventory: 3 item(s) here, listing the server…');
+  feed(st, { event: 'progress', pair: 'pair-1', params: { phase: 'inventory', here: 3 }, message: 'a' });
   assert.equal(pairView(st, 'pair-1').passed, false);
-  out(st, 'pair-1: already in step');
+  feed(st, pass('pair-1'));
   assert.equal(pairView(st, 'pair-1').passed, true);
-  out(st, 'pair-2: 4/4 done - 4 uploaded (1.2s)');
-  assert.equal(pairView(st, 'pair-2').passed, true);
 });
 
 test('an engine that stopped on its own says so as a code, and its pairs are to be checked again', () => {
   const st = newStatus('acc');
-  out(st, 'pair-1: already in step');
+  feed(st, pass('pair-1'));
   markExited(st, 1, false);
   assert.equal(st.exited, '1', 'the page cannot word "sync stopped unexpectedly (exit 1)" in Turkish');
   assert.equal(pairView(st, 'pair-1').passed, false, 'the next engine has not checked it yet');
@@ -441,4 +415,11 @@ test('an engine that stopped on its own says so as a code, and its pairs are to 
   const stopped = newStatus('acc');
   markExited(stopped, 0, true);
   assert.equal(stopped.exited ?? null, null, 'a stop the app asked for is not a crash');
+});
+
+test('absorbEvent counts what the engine said', () => {
+  const st = newStatus('acc');
+  absorbEvent(st, ev({ event: 'note', pair: 'pair-1' }));
+  absorbEvent(st, ev({ event: 'something-new' }));
+  assert.equal(st.events, 2, 'an event a newer engine adds is still an event');
 });

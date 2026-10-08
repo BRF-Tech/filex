@@ -580,6 +580,7 @@ func (h *AuthProviders) apply(w http.ResponseWriter, r *http.Request, ctx contex
 		if strict {
 			key = "server.auth_provider.test_required"
 		}
+		auth.SayChecks(readerLang(r), checks)
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":           "test_failed",
 			"message":         srvtext.Text(langOf(r), key, nil),
@@ -699,6 +700,7 @@ func (h *AuthProviders) apply(w http.ResponseWriter, r *http.Request, ctx contex
 	if created {
 		status = http.StatusCreated
 	}
+	auth.SayChecks(readerLang(r), checks)
 	writeJSON(w, status, map[string]any{
 		"ok":       true,
 		"provider": view,
@@ -1316,6 +1318,7 @@ func (h *AuthProviders) Test(w http.ResponseWriter, r *http.Request) {
 	if checks == nil {
 		checks = []auth.ProbeCheck{}
 	}
+	auth.SayChecks(readerLang(r), checks)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name": name, "testable": true, "ok": auth.ProbeOKAll(checks), "checks": checks,
 	})

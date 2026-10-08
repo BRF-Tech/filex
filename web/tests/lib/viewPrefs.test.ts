@@ -125,14 +125,17 @@ describe('the per-folder memory is always on', () => {
     expect(folderPrefs('a/b')).toEqual({ v: 'grid' });
   });
 
-  it('answers Recent’s seeded sort, and a folder’s own choice beats the seed', async () => {
+  it("Recent is NOT seeded with the files' modified order (#207): the server orders it by opening", async () => {
     attach({});
     await settle();
-    expect(folderPrefs('.recent')).toEqual({ k: 'modified', d: 'desc' });
-    // A view-mode-only memory keeps the seeded sort…
+    // No memory of its own: no sort of its own - the view keeps the server's
+    // order (opened_at, newest first) instead of "modified ↓", which is when
+    // the FILE changed and drew Recent in a different order from Home's.
+    expect(folderPrefs('.recent')).toBeNull();
     rememberFolder('.recent', { v: 'grid' });
-    expect(folderPrefs('.recent')).toEqual({ k: 'modified', d: 'desc', v: 'grid' });
-    // …and a sort the person chose replaces it.
+    expect(folderPrefs('.recent')).toEqual({ v: 'grid' });
+    // A sort the person chooses is remembered like any folder's (and sent to
+    // the server as `sort`).
     rememberFolder('.recent', { k: 'name', d: 'asc' });
     expect(folderPrefs('.recent')).toEqual({ v: 'grid', k: 'name', d: 'asc' });
   });

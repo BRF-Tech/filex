@@ -26,7 +26,7 @@ import { computed } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconTile } from '../lib/fileIcons';
-import { nameMatches } from '../lib/fileFilters';
+import { useServerNameFilter, type MatchNamesFn } from '../lib/nameFilter';
 import type { DraftDto } from '../lib/drafts';
 import DataTable, { type DataColumn } from './DataTable.vue';
 import type { ContextAction } from './ContextMenu.vue';
@@ -40,6 +40,9 @@ const props = defineProps<{
   locale: LocaleCode;
   /** The shell's name filter — the same box Home narrows. */
   nameFilter?: string;
+  /** The server question the box is answered by (FileApi `matchNames`,
+   *  task #207). Absent: the local rule stands in. */
+  matchNames?: MatchNamesFn;
   /** A draft a verb is running on: its row's actions are greyed. */
   busyKey?: string | null;
 }>();
@@ -52,7 +55,13 @@ const emit = defineEmits<{
 
 const { t, formatDate } = useLocale(() => props.locale);
 
-const rows = computed(() => props.drafts.filter((d) => nameMatches(d.name, props.nameFilter ?? '')));
+const draftFilter = useServerNameFilter<DraftDto>(
+  () => props.nameFilter ?? '',
+  () => props.drafts,
+  (d) => d.name,
+  () => props.matchNames,
+);
+const rows = computed(() => draftFilter.apply(props.drafts));
 
 function extOf(name: string): string {
   const dot = name.lastIndexOf('.');

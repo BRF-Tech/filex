@@ -40,6 +40,7 @@ import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
 import type { PublicStatus } from '../../composables/usePublicLink';
 import type { PublicLayout } from '../../lib/publicLayout';
 import { useLocale } from '../../composables/useLocale';
+import { usePublicText } from '../../composables/usePublicText';
 import { DEFAULT_BRAND_NAME } from '../../composables/usePublicBranding';
 import LogoMark from '../LogoMark.vue';
 import PublicPinGate from './PublicPinGate.vue';
@@ -78,6 +79,12 @@ const props = defineProps<{
   expiresAt?: string | null;
   /** Visits left before the link stops answering; null = uncounted. */
   visitsLeft?: number | null;
+  /**
+   * The longest PIN the server lets any link carry (`pin_max`, the one PIN
+   * rule in internal/share). The PIN box stops there; absent = no cap of the
+   * box's own.
+   */
+  pinMax?: number | null;
   pinBusy?: boolean;
   pinFailure?: '' | 'wrong' | 'locked';
   lockMessage?: string;
@@ -103,6 +110,9 @@ const emit = defineEmits<{
 // ⚠ RTL: `dir` on the page's own root too — the shell is the whole page when
 // the admin app mounts it, but an embedder may mount it in a page of its own.
 const { t, formatDate, dir } = useLocale(() => props.locale);
+/* The page's own sentences are the SERVER's (server.public.*), handed down
+   by the page that fetched them (composables/usePublicText). */
+const { pt } = usePublicText(() => String(props.locale));
 
 /** The body is drawn for these; everything else is a state of the shell's own. */
 const showBody = computed(() => props.status === 'ready');
@@ -118,13 +128,13 @@ const expiry = computed(() => {
   if (!props.expiresAt) return '';
   const ms = Date.parse(props.expiresAt);
   if (!Number.isFinite(ms)) return '';
-  return t('public.expires', { when: formatDate(ms, { time: true }) });
+  return pt('expires', { when: formatDate(ms, { time: true }) });
 });
 
 const visits = computed(() => {
   const n = props.visitsLeft;
   if (n === null || n === undefined || !Number.isFinite(n)) return '';
-  return t('public.visits_left', { n });
+  return pt('visits_left', { count: n });
 });
 
 /**
@@ -164,7 +174,7 @@ const badgeTone = computed(() =>
 const ownMark = computed(() => !props.logoUrl && props.brandName === DEFAULT_BRAND_NAME);
 
 function pluginNote(plugin: string): string {
-  return t('public.language_from', { app: plugin });
+  return pt('language_from', { app: plugin });
 }
 </script>
 
@@ -280,6 +290,7 @@ function pluginNote(plugin: string): string {
         :busy="pinBusy"
         :failure="pinFailure"
         :lock-message="lockMessage"
+        :max-length="pinMax ?? undefined"
         @submit="(p: string) => emit('pin', p)"
       />
 
@@ -334,7 +345,7 @@ function pluginNote(plugin: string): string {
       <span v-if="!hidePoweredBy" class="fe-ppage__footmark" data-testid="public-footer-powered">
         <img v-if="logoUrl" :src="logoUrl" alt="" />
         <LogoMark v-else-if="ownMark" />
-        {{ t('public.served_by', { name: brandName }) }}
+        {{ pt('served_by', { name: brandName }) }}
       </span>
     </footer>
   </div>

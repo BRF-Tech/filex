@@ -3,7 +3,9 @@
  * Duplicates view (bul:s3) — read-only report of duplicate files across
  * storages. Backed by `GET /api/admin/duplicates` (v0.2 "Bul" contract):
  * files are grouped by identical size + non-empty etag; `total_waste` is
- * (count-1)*size per group, groups sorted by waste desc.
+ * (count-1)*size per group, groups sorted by waste desc. The cards are the
+ * server's totals of the whole report (total_groups / total_copies /
+ * total_waste); the list is its first 100 groups.
  *
  * Deliberately NO delete action in this wave — the page only surfaces
  * where the bytes go.
@@ -45,7 +47,18 @@ const { t, locale } = useI18n();
 const toast = useToastStore();
 const storages = useStoragesStore();
 
+interface DupReport {
+  groups?: DupGroup[] | null;
+  /** The WHOLE report's totals, counted by the server before it cut the
+   *  list to `limit` groups: the cards show these, never a sum of the rows
+   *  this page was sent (which is only the top of the report). */
+  total_groups?: number;
+  total_copies?: number;
+  total_waste?: number;
+}
+
 const groups = ref<DupGroup[]>([]);
+const totals = ref({ groups: 0, copies: 0, waste: 0 });
 const loading = ref(false);
 const loaded = ref(false);
 const expanded = ref<Set<string>>(new Set());
@@ -53,10 +66,15 @@ const expanded = ref<Set<string>>(new Set());
 async function load() {
   loading.value = true;
   try {
-    const { data } = await api.get<{ groups?: DupGroup[] | null }>('/admin/duplicates', {
+    const { data } = await api.get<DupReport>('/admin/duplicates', {
       params: { limit: 100, min_size: 1 },
     });
     groups.value = Array.isArray(data?.groups) ? data.groups : [];
+    totals.value = {
+      groups: data?.total_groups ?? 0,
+      copies: data?.total_copies ?? 0,
+      waste: data?.total_waste ?? 0,
+    };
     loaded.value = true;
     // Auto-open the top group so the page isn't a wall of closed rows.
     if (groups.value.length > 0) expanded.value = new Set([groups.value[0].key]);
@@ -78,10 +96,6 @@ function storageName(id: number): string {
   return storages.items.find((s) => s.id === id)?.name ?? `#${id}`;
 }
 
-const totalWaste = computed(() => groups.value.reduce((acc, g) => acc + (g.total_waste || 0), 0));
-const totalCopies = computed(() =>
-  groups.value.reduce((acc, g) => acc + Math.max(0, (g.count || 0) - 1), 0),
-);
 const hasGroups = computed(() => groups.value.length > 0);
 
 /* The explorer's table (DataTable). Every group's member table shares ONE
@@ -128,26 +142,26 @@ onMounted(async () => {
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
       <StatCard
         :label="t('duplicates.stats.groups')"
-        :value="loaded ? formatNumber(groups.length, locale) : '-'"
+        :value="loaded ? formatNumber(totals.groups, locale) : '-'"
         :icon="Copy"
         icon-tone="brand"
       />
       <StatCard
         :label="t('duplicates.stats.copies')"
-        :value="loaded ? formatNumber(totalCopies, locale) : '-'"
+        :value="loaded ? formatNumber(totals.copies, locale) : '-'"
         :icon="Layers"
         icon-tone="amber"
       />
       <StatCard
         :label="t('duplicates.stats.waste')"
-        :value="loaded ? formatBytes(totalWaste, locale) : '-'"
+        :value="loaded ? formatBytes(totals.waste, locale) : '-'"
         :icon="HardDrive"
         icon-tone="rose"
       />
     </div>
 
     <p v-if="hasGroups" class="text-sm text-zinc-600 dark:text-zinc-300">
-      {{ t('duplicates.summary', { groups: formatNumber(groups.length, locale), waste: formatBytes(totalWaste, locale) }, groups.length) }}
+      {{ t('duplicates.summary', { groups: formatNumber(totals.groups, locale), waste: formatBytes(totals.waste, locale) }, totals.groups) }}
     </p>
 
     <div v-if="loading && !loaded" class="card card-body text-center text-zinc-500"><Spinner /></div>

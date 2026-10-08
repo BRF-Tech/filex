@@ -37,11 +37,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/text/unicode/norm"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
@@ -274,23 +272,14 @@ func runPanelDoor(ctx context.Context, door http.Handler, r *http.Request, query
 
 // ── matching ────────────────────────────────────────────────────────────────
 
-// panelFold is how a typed word and a row are compared: accents and the
-// Turkish letters folded to their base letter (ş → s, ğ → g, ü → u, ö → o,
-// ç → c), the four i's one letter and case ignored (namefold.Rune). The same
-// rule as the client's (core lib/fileFilters foldText), so the server never
-// leaves out a row the client would have found. Unlike a file search
-// (internal/namefold) accents do not count here: a person types a page's or
-// a colleague's name on whatever keyboard they have.
+// panelFold is how a typed word and a row are compared: namefold.Loose -
+// accents and the Turkish letters folded to their base letter (ş → s,
+// ğ → g, ü → u, ö → o, ç → c), the four i's one letter and case ignored.
+// Unlike a file search (namefold.String) accents do not count here: a person
+// types a page's or a colleague's name on whatever keyboard they have. The
+// rule is namefold's, not a copy of its own (filex 0.54, audit D5).
 func panelFold(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range norm.NFD.String(s) {
-		if unicode.Is(unicode.Mn, r) {
-			continue
-		}
-		b.WriteRune(namefold.Rune(r))
-	}
-	return b.String()
+	return namefold.Loose(s)
 }
 
 // panelWords is q folded and split into words.

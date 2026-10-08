@@ -4274,6 +4274,54 @@ filex-explorer {
 .fe-e2e-upgrade__progress {
   font-variant-numeric: tabular-nums;
 }
+/* wiring:e2 vault — the vault strip (E2eVaultStrip): who writes, and the
+   two clocks. It wraps on a narrow screen: the sentence is the point, and a
+   one-line strip would cut it off at 390 px. */
+.fe-vault-strip {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  border-inline-start: 3px solid transparent;
+}
+.fe-vault-strip__text {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--fe-text);
+}
+.fe-vault-strip__sentence {
+  overflow-wrap: anywhere;
+}
+.fe-vault-strip__lock,
+.fe-vault-strip__unsaved {
+  font-size: 12px;
+  color: var(--fe-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.fe-vault-strip__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.fe-vault-strip--write {
+  border-inline-start-color: var(--fe-primary);
+}
+.fe-vault-strip--warn {
+  border-inline-start-color: var(--fe-warning, #f59e0b);
+}
+.fe-vault-strip--error {
+  border-inline-start-color: var(--fe-danger);
+}
+.fe-vault-strip--error .fe-vault-strip__unsaved {
+  color: var(--fe-danger);
+}
+/* The vault card's cost line in the level picker. */
+.fe-e2e-level__cost {
+  font-size: 12px;
+  color: var(--fe-text-muted);
+}
 
 /* Lock screen: a passphrase form on top of the fe-state language. */
 .fe-e2e-lock__form {
@@ -10836,6 +10884,20 @@ filex-explorer {
   color: var(--fe-text);
   font-variant-numeric: tabular-nums;
 }
+/* The server's count and size of the whole trash, and how much of it is on
+   screen (0.54, finding D1: the view is paged). */
+.fe-trashbar__count {
+  flex: 0 1 auto;
+  margin: 0;
+  color: var(--fe-text);
+  font-variant-numeric: tabular-nums;
+}
+.fe-trashbar__shown {
+  color: var(--fe-text-muted);
+}
+.fe-trashbar__more {
+  flex: 0 0 auto;
+}
 
 /* tablo:t1 — the row's real thumbnail. Exactly the type tile's box (24px), so
    turning a glyph into a picture does not move a single row. */
@@ -10992,13 +11054,23 @@ filex-explorer {
  * limit — a deployment may offer nineteen types — so the grid is the part that
  * gets a ceiling and its own scrollbar.
  *
- * `min()` rather than a media query: a short landscape window on a laptop has
- * the same problem as a phone and no media query for width would catch it.
- * The 420px arm keeps it off on a normal desktop dialog, where the grid is
- * ~370px tall and a scrollbar would be noise.
+ * A share of the WINDOW rather than a media query: a short landscape window on
+ * a laptop has the same problem as a phone and no media query for width would
+ * catch it.
+ *
+ * ⚠ No fixed arm. It used to be `min(46vh, 420px)`, written when the grid was
+ * ~370px tall and the 420px arm kept the scrollbar off a normal desktop
+ * dialog. The grid grew past it (the ODF row, then an Apps group), and from
+ * then on the arm was a ceiling of its own: a window of any height scrolled
+ * the list, and picking a tile in the lower rows scrolled the rows above it
+ * half out of the box - the New document picture of 0.52 and 0.53
+ * (apps/app-new-document-1440.png) opened on the bottom edges of the office
+ * tiles even after its window was made 1400px tall. Bounded by the window
+ * alone, a tall window shows every group and a short one still keeps Name and
+ * Location in view.
  */
 .fe-newdoc__types {
-  max-height: min(46vh, 420px);
+  max-height: 46vh;
   overflow-y: auto;
 }
 /* === /belge:n1 addendum === */

@@ -6,7 +6,6 @@ import { RefreshCcw } from 'lucide-vue-next';
 import { useAuditStore } from '@/stores/audit';
 import type { AuditEntry } from '@/api/types';
 import { formatDate, shownAddress } from '@/lib/format';
-import { auditActionLabel, auditResourceOptions, auditTargetLabel } from '@/lib/auditLabel';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -15,10 +14,10 @@ import { DataTable, personName, type DataColumn } from '@brftech/filex-core';
 import Modal from '@/components/ui/Modal.vue';
 import Badge from '@/components/ui/Badge.vue';
 
-const { t, te, tm, locale } = useI18n();
+const { t, locale } = useI18n();
 const audit = useAuditStore();
 
-/** The resource filter: `<resource>.` prefixes (auditResourceOptions). */
+/** The resource filter: `<resource>.` prefixes (the server's `resources`). */
 const action = ref('');
 const from = ref('');
 const to = ref('');
@@ -42,6 +41,10 @@ watch([action, from, to], () => {
   load();
 });
 
+// The rows' words and the filter's are the server's, said in the screen's
+// language: a language switch asks again.
+watch(locale, () => load());
+
 /** "person · token username" for a token-authenticated write — one account's
  *  API keys stay distinguishable ("Ayşe · work" vs "Ayşe · fishapp"). The
  *  person is named the way every screen names them (core personName). */
@@ -54,15 +57,21 @@ function whoOf(r: AuditEntry): string {
 /* ⚠ What the filter offers is what the page SHOWS — the resources by name —
  * not the wire names it used to be matched against exactly ("user.create").
  * The "Target" box beside it filtered nothing at all (the handler has no such
- * parameter) and is gone. */
+ * parameter) and is gone. The names and the prefixes are the server's
+ * (handlers/audit_label.go auditResourceOptions). */
 const resourceOptions = computed(() => [
   { value: '', label: t('common.all') },
-  ...auditResourceOptions(tm('audit.resource') as Record<string, unknown>, t),
+  ...(audit.page.resources ?? []),
 ]);
 
-/** The row's target in words (kind + which one). */
+/** The row's action in words, as the server said it. */
+function actionOf(r: AuditEntry): string {
+  return r.label || r.action || '-';
+}
+
+/** The row's target in words (kind + which one), as the server said it. */
 function targetOf(r: AuditEntry): string {
-  return auditTargetLabel(r.target_type, r.target_id, t, te, r.target_name) || '-';
+  return r.target_label || '-';
 }
 
 /* The explorer's table (DataTable), remembered under `admin.audit`.
@@ -92,7 +101,7 @@ const columns = computed<DataColumn<AuditEntry>[]>(() => [
     label: t('audit.fields.action'),
     sortable: true,
     width: 180,
-    sortValue: (r) => auditActionLabel(r.action, t, te),
+    sortValue: (r) => actionOf(r),
   },
   {
     id: 'target_type',
@@ -164,7 +173,7 @@ onMounted(load);
 
       <template #cell-action="{ row }">
         <Badge size="xs" tone="violet" :title="(row as AuditEntry).action">{{
-          auditActionLabel((row as AuditEntry).action, t, te)
+          actionOf(row as AuditEntry)
         }}</Badge>
       </template>
       <template #cell-target_type="{ row }">
@@ -186,7 +195,7 @@ onMounted(load);
         <dt class="text-zinc-500">{{ t('audit.fields.user') }}</dt>
         <dd>{{ whoOf(detail) }}</dd>
         <dt class="text-zinc-500">{{ t('audit.fields.action') }}</dt>
-        <dd>{{ auditActionLabel(detail.action, t, te) }}</dd>
+        <dd>{{ actionOf(detail) }}</dd>
         <dt class="text-zinc-500">{{ t('audit.fields.target') }}</dt>
         <dd class="break-all">{{ targetOf(detail) }}</dd>
         <dt class="text-zinc-500">{{ t('audit.fields.ip') }}</dt>

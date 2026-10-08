@@ -13,14 +13,17 @@ import { unmountAll } from '../helpers/teardown';
 const en = wordsIn('en');
 const tr = wordsIn('tr');
 
+/** What the server says for a refusal's reason (srvtext server.e2e.not_allowed.*). */
+const POLICY_OFF_TR = 'Bir yönetici şifrelemeyi kapattı.';
+
 /** A stand-in for `useFileApi().e2eRequest`: records what was sent, answers as the server does. */
-function sender(refuse?: string) {
+function sender(refuse?: string, said = POLICY_OFF_TR) {
   const sent: unknown[] = [];
   const api = {
     e2eRequest: vi.fn(async (body: unknown) => {
       sent.push(body);
       if (refuse) {
-        throw requestFailure(403, JSON.stringify({ error: 'e2e_not_allowed', reason: refuse }), 'en');
+        throw requestFailure(403, JSON.stringify({ error: 'e2e_not_allowed', reason: refuse, message: said }), 'tr');
       }
       return { request: { id: 9, path: 'docs://Muhasebe', status: 'pending' }, created: true };
     }),
@@ -139,13 +142,15 @@ describe('E2eRequestModal', () => {
     w.unmount();
   });
 
-  it('says the server’s refusal inside the dialog, by its reason and in the reader’s language', async () => {
+  // ⚠ 0.54 (#209): the sentence is the SERVER's (`message`, in the reader's
+  // language); the dialog no longer words a reason or a code itself.
+  it('says the server’s refusal inside the dialog, in the server’s words', async () => {
     const { api } = sender('policy_off');
     const w = dialog({ api, locale: 'tr' });
     typeReason('Bordro');
     send();
     await flushPromises();
-    expect(alertText()).toBe(tr('err.e2e_not_allowed.policy_off'));
+    expect(alertText()).toBe(POLICY_OFF_TR);
     expect(w.emitted('sent')).toBeUndefined();
     w.unmount();
   });
@@ -154,33 +159,37 @@ describe('E2eRequestModal', () => {
   // now, or the other way round (400 kind_mismatch); or the policy, or an
   // approval, changed what may be asked for (400 not_requestable). The dialog
   // says it in words — never as a bare "Bad request".
-  it('says a request for what changed since the listing in words, in the reader’s language', async () => {
-    const body = { error: 'kind_mismatch', message: 'kind must be what is there: folder for a folder, file for a file' };
+  it('says a request for what changed since the listing in the server’s words', async () => {
+    const said = {
+      en: 'This item has changed since the folder was listed. Refresh the folder and try again.',
+      tr: 'Bu öğe, klasör listelendiğinden beri değişmiş. Klasörü yenileyip tekrar deneyin.',
+    };
     for (const [locale, words] of [['en', en], ['tr', tr]] as const) {
+      const body = { error: 'kind_mismatch', message: said[locale] };
       const w = dialog({ api: refusing(400, body, locale), locale });
       typeReason('Bordro');
       send();
       await flushPromises();
-      expect(words('err.e2e_request.kind_mismatch')).not.toBe('err.e2e_request.kind_mismatch');
-      expect(alertText()).toBe(words('err.e2e_request.kind_mismatch'));
+      expect(alertText()).toBe(said[locale]);
       expect(alertText()).not.toBe(words('err.status.400'));
       expect(w.emitted('sent')).toBeUndefined();
       unmountAll();
     }
   });
 
-  it('says why nothing can be requested any more — the rule’s own reason, or that it changed', async () => {
-    const message = 'encrypting here is not allowed, and a request would not change that';
-    const cases: Array<[Record<string, unknown>, string]> = [
-      [{ error: 'not_requestable', message, answer: 'denied', reason: 'policy_off' }, 'err.e2e_not_allowed.policy_off'],
-      [{ error: 'not_requestable', message, answer: 'allowed' }, 'err.e2e_request.not_requestable'],
+  it('says why nothing can be requested any more - the server’s sentence for the rule’s reason, or that it changed', async () => {
+    const changed =
+      'Burada yapabilecekleriniz klasör listelendiğinden beri değişmiş. Şimdi nelerin sunulduğunu görmek için klasörü yenileyin.';
+    const cases: Array<Record<string, unknown>> = [
+      { error: 'not_requestable', message: POLICY_OFF_TR, answer: 'denied', reason: 'policy_off' },
+      { error: 'not_requestable', message: changed, answer: 'allowed' },
     ];
-    for (const [body, key] of cases) {
+    for (const body of cases) {
       dialog({ api: refusing(400, body, 'tr'), locale: 'tr' });
       typeReason('Bordro');
       send();
       await flushPromises();
-      expect(alertText()).toBe(tr(key));
+      expect(alertText()).toBe(body.message);
       expect(alertText()).not.toBe(tr('err.status.400'));
       unmountAll();
     }

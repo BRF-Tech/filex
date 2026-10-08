@@ -5,6 +5,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 )
 
@@ -142,22 +144,52 @@ func TestRBAC_Grants_And_SelfTokens(t *testing.T) {
 	st, _ = doReq(t, userClient, http.MethodGet, srv.URL+"/api/admin/grants", nil)
 	assert.Equal(t, http.StatusForbidden, st)
 
-	// share-mail: editor+ may send (503 here since no SMTP is configured), but a
-	// viewer with no editor grant is refused.
+	// share-mail names a LINK (share_mail.go): the admin may mail one on
+	// beta (503 here since no SMTP is configured), the viewer, who manages no
+	// link there, is refused.
+	ctx := context.Background()
+	s1, err := store.GetStorageByName(ctx, "s1")
+	require.NoError(t, err)
+	admin, err := store.GetUserByEmail(ctx, email)
+	require.NoError(t, err)
+	betaDoc, err := store.CreateNode(ctx, &model.Node{
+		StorageID: s1.ID, Name: "b.txt", Path: "/beta/b.txt", PathHash: mutTestPathHash(s1.ID, "/beta/b.txt"),
+		Type: model.NodeTypeFile, Size: 1,
+	})
+	require.NoError(t, err)
+	link, err := share.NewService(store).Create(ctx, share.CreateOpts{NodeID: betaDoc.ID, CreatedBy: &admin.ID})
+	require.NoError(t, err)
 	st, _ = doReq(t, adminClient, http.MethodPost, srv.URL+"/api/files/permissions/share-mail",
-		map[string]any{"path": "s1://alfa", "email": "x@test.local", "url": "https://f/s/tok"})
+		map[string]any{"share": link.Token, "email": "x@test.local"})
 	assert.Equal(t, http.StatusServiceUnavailable, st, "admin share-mail: no SMTP → 503, not 403")
 	st, _ = doReq(t, viewClient, http.MethodPost, srv.URL+"/api/files/permissions/share-mail",
-		map[string]any{"path": "s1://beta", "email": "x@test.local", "url": "https://f/s/tok"})
+		map[string]any{"share": link.Token, "email": "x@test.local"})
 	assert.Equal(t, http.StatusForbidden, st, "viewer cannot share-mail")
 
-	// is_dir honored: a grant created with is_dir=false stays a file grant.
-	st, raw = doReq(t, adminClient, http.MethodPost, srv.URL+"/api/files/permissions",
-		map[string]any{"path": "s1://alfa/doc.txt", "user_id": uid, "level": "viewer", "is_dir": false})
-	require.Equal(t, http.StatusOK, st, "file grant: %s", raw)
+	// is_dir is the ITEM's, read from the catalogue — not the request's
+	// (C11a). A catalogued file asked for as a folder is a file grant; a
+	// catalogued folder asked for as a file is a folder grant.
+	_, err = store.CreateNode(context.Background(), &model.Node{
+		StorageID: s1.ID, Name: "doc.txt", Path: "/alfa/doc.txt", PathHash: mutTestPathHash(s1.ID, "/alfa/doc.txt"),
+		Type: model.NodeTypeFile, Size: 3,
+	})
+	require.NoError(t, err)
+	_, err = store.CreateNode(context.Background(), &model.Node{
+		StorageID: s1.ID, Name: "alt", Path: "/alfa/alt", PathHash: mutTestPathHash(s1.ID, "/alfa/alt"),
+		Type: model.NodeTypeDirectory,
+	})
+	require.NoError(t, err)
 	var fg struct {
 		IsDir bool `json:"is_dir"`
 	}
+	st, raw = doReq(t, adminClient, http.MethodPost, srv.URL+"/api/files/permissions",
+		map[string]any{"path": "s1://alfa/doc.txt", "user_id": uid, "level": "viewer", "is_dir": true})
+	require.Equal(t, http.StatusOK, st, "file grant: %s", raw)
 	require.NoError(t, json.Unmarshal(raw, &fg))
-	assert.False(t, fg.IsDir, "is_dir=false must be persisted for single-file grants")
+	assert.False(t, fg.IsDir, "a file's grant is a file grant whatever the request says")
+	st, raw = doReq(t, adminClient, http.MethodPost, srv.URL+"/api/files/permissions",
+		map[string]any{"path": "s1://alfa/alt", "user_id": uid, "level": "viewer", "is_dir": false})
+	require.Equal(t, http.StatusOK, st, "folder grant: %s", raw)
+	require.NoError(t, json.Unmarshal(raw, &fg))
+	assert.True(t, fg.IsDir, "a folder's grant is a folder grant whatever the request says")
 }

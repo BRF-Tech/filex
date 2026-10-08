@@ -3,6 +3,10 @@
 // "URL stable locale" regressions.
 
 describe('theme + locale persistence', () => {
+  // The admin's web preference document as it was before the theme case
+  // changed it; put back after, like the locale below.
+  let webPrefsBefore: Record<string, unknown> | null = null;
+
   beforeEach(() => {
     cy.apiLogin();
   });
@@ -15,6 +19,19 @@ describe('theme + locale persistence', () => {
   // nothing to do with what it tests. Put it back, whatever happened above.
   afterEach(() => {
     cy.apiLogin().then((tok) => {
+      // The theme case's account write goes first: the PATCH below then
+      // leaves the language in every document that holds one (#191).
+      if (webPrefsBefore) {
+        const prefs = webPrefsBefore;
+        webPrefsBefore = null;
+        cy.request({
+          method: 'PUT',
+          url: '/api/me/prefs?surface=web',
+          headers: { Authorization: `Bearer ${tok}` },
+          body: { prefs },
+          failOnStatusCode: false,
+        });
+      }
       cy.request({
         method: 'PATCH',
         url: '/api/auth/profile',
@@ -26,20 +43,30 @@ describe('theme + locale persistence', () => {
   });
 
   it('localStorage filex theme key survives across navigation', () => {
-    cy.visit('/admin/dashboard');
-    // Force-set the theme via localStorage (matches what the toggle
-    // does internally) so we don't depend on a fragile UI selector.
-    cy.window().then((win) => {
-      win.localStorage.setItem('filex.theme', 'dark');
+    // ⚠⚠ Light/dark lives on the ACCOUNT (web/src/lib/theme.ts, prefs v3):
+    // the toggle writes `filex.theme` AND the account's web document, and
+    // every page load repaints from the account's answer - the key is only
+    // the first-paint cache. This case used to write the key alone. Once the
+    // account's document holds anything (since #191 it holds the account's
+    // language) a load reads "no theme chosen" there and clears the key, so
+    // the 0.54 run read '' on the next page. Choose the theme where the
+    // toggle keeps it, then prove it survives a navigation.
+    cy.apiLogin().then((tok) => {
+      const headers = { Authorization: `Bearer ${tok}` };
+      cy.request({ method: 'GET', url: '/api/me/prefs?surface=web', headers }).then((res) => {
+        const body = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+        const prefs = { ...((body?.prefs ?? {}) as Record<string, unknown>) };
+        webPrefsBefore = { ...prefs };
+        cy.request({ method: 'PUT', url: '/api/me/prefs?surface=web', headers, body: { prefs: { ...prefs, theme: 'dark' } } });
+      });
     });
+    cy.visit('/admin/dashboard');
+    cy.get('html').should('have.class', 'dark');
     cy.visit('/admin/storages');
-    cy.window().then((win) => {
-      // The store may rewrite this key; both forms are acceptable.
-      const t =
-        win.localStorage.getItem('filex.theme') ||
-        win.localStorage.getItem('theme') ||
-        '';
-      expect(t.toLowerCase(), 'theme persisted').to.match(/dark|auto|light/);
+    cy.get('html').should('have.class', 'dark');
+    // `.should`, not `.then`: the account's answer lands after the load event.
+    cy.window().should((win) => {
+      expect(win.localStorage.getItem('filex.theme'), 'theme persisted').to.eq('dark');
     });
   });
 
@@ -82,7 +109,10 @@ describe('theme + locale persistence', () => {
         body: { locale: 'tr' },
       });
     });
-    cy.intercept('GET', '/api/admin/dashboard').as('dash');
+    // `pathname`, not the URL: the page asks `/api/admin/dashboard?lang=<the
+    // screen's language>` since 0.54 (#208), and a plain URL string does not
+    // match a request that carries a query.
+    cy.intercept({ method: 'GET', pathname: '/api/admin/dashboard' }).as('dash');
     cy.visit('/admin/dashboard');
     cy.wait('@dash', { timeout: 15000 });
     // At least one Turkish label should appear.

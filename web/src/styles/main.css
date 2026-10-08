@@ -61,6 +61,19 @@
     outline-offset: 2px;
     border-radius: 4px;
   }
+
+  /* ⚠ An icon never gives up its width to the text beside it. In a flex row
+     an <svg> shrinks like any other item, so a page heading whose subtitle
+     wraps on a phone squeezed its icon to a speck - Multi-tenant mode,
+     Archives, Encryption and every other admin heading that sets an icon
+     beside a title and a sentence (tenancy/page-390.png, 0.53.0). One rule
+     for the panel's whole icon set (lucide) instead of `shrink-0` on each
+     of them, which is how the next page forgets it. `:where()` keeps it at
+     zero specificity, so a page that wants an icon to shrink still says
+     `shrink` and wins. */
+  :where(svg.lucide) {
+    flex-shrink: 0;
+  }
 }
 
 /* ---------------------------------------------------------------- */

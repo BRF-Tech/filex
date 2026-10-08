@@ -35,7 +35,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
+import { SCENE_CONTEXT, pinTimes, sceneServerEnv, stageClock } from './clock.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -134,6 +134,8 @@ async function main() {
       FILEX_ADMIN_PASSWORD: ADMIN.password,
       FILEX_DEFAULT_LOCALE: 'en',
       FILEX_SECRET_KEY: 'notify-measure-key-not-a-real-secret',
+      // The apps on the scene's clock (clock.mjs, part 5).
+      ...sceneServerEnv(),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

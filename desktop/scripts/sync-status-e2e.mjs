@@ -135,7 +135,7 @@ try {
   const tr = await until(async () => {
     const a = await card(win, REMOTE_A);
     return { ok: /Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur/.test(a?.localText ?? ''), a };
-  }, 8000);
+  }, 30000); // the engine says it (#213): a new language restarts the watcher
   check('the note speaks Turkish with Turkish letters', tr?.ok === true, tr?.a?.localText ?? 'no card');
   check('…and so does the live word', /^Canlı/.test(tr?.a?.live ?? ''), tr?.a?.live ?? '');
   await win.evaluate(() => document.querySelector('#settings [data-locale="system"]')?.click());

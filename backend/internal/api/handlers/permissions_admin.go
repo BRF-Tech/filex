@@ -440,7 +440,7 @@ func (h *PermissionsAdmin) CreateRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	auditRule(r.Context(), "rule", created)
 	auth.SetAuditTarget(r.Context(), strconv.FormatInt(created.ID, 10), created.Name)
 	h.noteGapsSaved(r.Context(), nil, ruleGapsOf(created), shown)
@@ -511,7 +511,7 @@ func (h *PermissionsAdmin) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	updated, err := h.Store.GetPermissionRule(r.Context(), rule.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -614,7 +614,7 @@ func (h *PermissionsAdmin) DeleteRule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	// Its gaps went with it: the record of what administrators were told
 	// forgets them, so a later role given the same id is told afresh.
 	h.announceGaps(r.Context())
@@ -763,7 +763,7 @@ func (h *PermissionsAdmin) PutUserPermissions(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context(), target.ID)
 	h.writeUserPermissions(w, r, target)
 }
 
@@ -1090,7 +1090,7 @@ func (h *PermissionsAdmin) PutUserRoles(w http.ResponseWriter, r *http.Request) 
 	auth.AddAuditDetail(ctx, "before", map[string]any{"role": target.Role, "role_id": nullableID(before)})
 	auth.AddAuditDetail(ctx, "after", map[string]any{"role": finalRole, "role_id": nullableID(after)})
 	auth.SetAuditTarget(ctx, strconv.FormatInt(target.ID, 10), target.Email)
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context(), target.ID)
 	// ⚠ With no role of their own, a group's role still decides — a built-in
 	// role picked here does not override it, and its level wins. Say so, so
 	// the page can tell the person instead of reporting what was asked.

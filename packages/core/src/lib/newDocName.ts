@@ -53,17 +53,13 @@ export function stemEnd(name: string): number {
   return dot > 0 ? dot : name.length;
 }
 
-/** The first `<base>.<ext>` / `<base> (n).<ext>` not in `taken` (lowercased
- *  basenames of the destination). */
-export function suggestDocName(base: string, ext: string, taken: Set<string>): string {
-  const first = `${base}.${ext}`;
-  if (!taken.has(first.toLowerCase())) return first;
-  for (let i = 2; i < 100; i++) {
-    const cand = `${base} (${i}).${ext}`;
-    if (!taken.has(cand.toLowerCase())) return cand;
-  }
-  return first;
-}
+/*
+ * The free name a taken one is offered instead (`Untitled (2).txt`) is the
+ * SERVER's: the New document dialog asks the create's dry run, which answers
+ * with the existence check the create makes and ops.UniqueDestNumbered's
+ * numbering (#211, audit B18). The copy that stood here compared lower-cased
+ * names, so a case-sensitive store's free "Report.docx" read as taken.
+ */
 
 /**
  * The name, carried across a change of type.

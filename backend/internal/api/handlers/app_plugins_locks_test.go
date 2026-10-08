@@ -91,6 +91,16 @@ func TestAppPlugins_Lock_FreezesFileForEveryone_AppStillWrites_AdminOverrides(t 
 	assert.Contains(t, string(raw), `"error":"locked"`)
 	// The refusal a person reads as a toast carries the label too.
 	assert.Contains(t, string(raw), `"plugin_label":{"en":"Echo Fixture"`)
+	// ⚠ And the sentence is the server's, in the reader's language (0.54
+	// audit A3): who holds the file and why - not "locked by app echo:
+	// docs/nda.txt", which the explorer replaced with words of its own and
+	// the admin panel printed with the app's bare id.
+	var refusal struct {
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &refusal), string(raw))
+	assert.Contains(t, refusal.Message, "Echo Fixture locked this file", string(raw))
+	assert.NotContains(t, refusal.Message, "locked by app", string(raw))
 	status, raw = doReq(t, f.admin, http.MethodPost, f.srv.URL+"/api/files/delete", map[string]any{"source": []string{"main://docs/nda.txt"}})
 	assert.Equal(t, http.StatusLocked, status, string(raw))
 	status, raw = doReq(t, f.admin, http.MethodPost, f.srv.URL+"/api/files/manager?action=rename",

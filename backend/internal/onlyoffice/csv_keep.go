@@ -7,7 +7,8 @@ package onlyoffice
 // number or a date becomes one, and a save writes every cell back as the
 // spreadsheet shows it, edited or not. Measured on filex 0.51.0 with Docs
 // 9.4.0-129, one cell edited in a semicolon file, the editor's language
-// English (filex passes the person's `lang` and no region, service.go): in
+// English (filex then passed the request's `lang`, else "en", and no region;
+// since 0.54 the server chooses both for the person, lang.go): in
 // cells nobody had touched `05320000001` came back as `5320000001`, `007` as
 // `7`, `000` as `0`, `01.02.2026` as `1/2/2026` (`15.03.2026` stayed: month
 // first, and 15 is no month), and every data row had an empty cell more at

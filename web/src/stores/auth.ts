@@ -39,8 +39,9 @@ function attachViewPrefsFor(userId: number | null): void {
     credentials: getUseCredentials() ? 'include' : 'omit',
   });
 }
-import { applyAccountLocale, t } from '@/i18n';
+import { applyAccountLocale, i18n, t } from '@/i18n';
 import { applyAccountTimeZone } from '@/lib/timezone';
+import { forgetWebPush } from '@/lib/webPush';
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null);
@@ -123,7 +124,9 @@ export const useAuthStore = defineStore('auth', () => {
     refusal.value = null;
     handoff.value = null;
     try {
-      const res = await AuthApi.login(payload);
+      // The language on screen goes with the sign-in: an account that holds
+      // none is given it by the server (AuthApi.login).
+      const res = await AuthApi.login(payload, String(i18n.global.locale.value));
       if (res.handoff) {
         // Signed in, but the session belongs to the tenant's address: nothing
         // is kept here. The caller navigates (see `handoff`).
@@ -148,7 +151,7 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null;
     refusal.value = null;
     try {
-      return await adopt(await AuthApi.handoff(code));
+      return await adopt(await AuthApi.handoff(code, String(i18n.global.locale.value)));
     } catch (e: unknown) {
       error.value = extractError(e, t('login.errHandoff'));
       return false;
@@ -176,6 +179,9 @@ export const useAuthStore = defineStore('auth', () => {
   async function logout(returnTo?: string): Promise<string | null> {
     let idpLogout: string | null = null;
     try {
+      // #191 - this browser stops receiving the person's push notifications
+      // while the session can still say so (lib/webPush; bounded).
+      if (user.value) await forgetWebPush(user.value.id);
       const res = await AuthApi.logout(returnTo);
       idpLogout = res?.logout_url || null;
     } catch {

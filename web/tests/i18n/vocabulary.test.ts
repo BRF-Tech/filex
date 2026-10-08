@@ -51,7 +51,7 @@ interface Rule {
 }
 
 const TOKEN_IS_THEIRS: Record<string, string> = {
-  'authProviders.checks.endpoints.ok': 'the OIDC discovery document names its token endpoint; that is the protocol\'s word',
+  'server.auth_provider.check.endpoints.ok': 'the OIDC discovery document names its token endpoint; that is the protocol\'s word',
   'notifications.webhookToken': 'a webhook target\'s Bearer token is the receiving service\'s secret, pasted from there',
   'notifications.tokenHint': 'the global webhook\'s Bearer token (see notifications.webhookToken)',
   'notifications.tokenPlaceholder': 'the global webhook\'s Bearer token (see notifications.webhookToken)',
@@ -311,10 +311,10 @@ const SAME: Array<[string, string[]]> = [
      page was "Permissions / İzinler" until Roles came; now "permission" is a
      role's word, and the grants page, its menu entry and its audit rows are
      Folder access. */
-  ['folder access (the grants page)', ['nav.grants', 'grants.title', 'audit.resource.grants']],
+  ['folder access (the grants page)', ['nav.grants', 'grants.title', 'server.audit.resource.grants']],
   ['roles', ['nav.roles', 'permissions.title']],
-  ['built-in role', ['audit.resource.permissions', 'audit.target.permissions']],
-  ['role', ['common.role', 'audit.resource.permission_rule', 'audit.target.permission_rule']],
+  ['built-in role', ['server.audit.resource.permissions', 'server.audit.target.permissions']],
+  ['role', ['common.role', 'server.audit.resource.permission_rule', 'server.audit.target.permission_rule']],
   /* ⚠ NOT a group: an app permission's Allow / Deny (`permissions.apps.effect.*`)
      and the catalogue's (`permissions.effect.*`) say the same words today, but
      the owner wants the apps' pair free to change on its own — "Block" for an

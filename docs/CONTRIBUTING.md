@@ -168,6 +168,13 @@ pnpm --filter='@brftech/filex-core' test
 
 Vitest with happy-dom.
 
+**The admin app's main chunk has a size budget.** It carries the explorer
+from `packages/core` and must fit workbox's 2 MiB precache limit
+(`web/pwa.config.ts`), or `vite build` fails, so a branch that adds to core
+runs `pnpm -C web build && pnpm -C web size` before it is merged (it prints
+the chunk's size and the room left) and moves a dialog a person opens out of
+the chunk (`packages/core/lazySurfaces.ts`) rather than raising the limit.
+
 **A unit test never reaches the network, and it does not tidy up after
 itself.** `web/tests/setup.ts` refuses every request a test did not mock
 (`fetch`, `XMLHttpRequest`, `WebSocket`/`EventSource` and happy-dom's own
@@ -388,20 +395,47 @@ in the browser round (The nightly run, below); `targeted` runs the build and
 its fast gates, then only what is asked for (`CHAIN_GO_PKGS`,
 `CHAIN_RACE_PKGS`, `CHAIN_MIGRATE=1`, `CHAIN_CY_SPECS`, `CHAIN_E2E_GREP` on
 `CHAIN_E2E_BROWSERS`, and `CHAIN_EXTRAS` - nightly extras by name, such as
-`s3-live`).
+`s3-live`, or `shots` for a release's pictures, which `CHAIN_SHOTS_ONLY`
+narrows to some shot scripts).
 
-**Memory decides what runs at once.** Every job is budgeted for its peak
-resident memory as measured on the build host (`WEIGHTS` in
-`scripts/chain/plan.mjs`). The browser round holds its share for as long as it
-runs, the databases until the last Go or migration job ends, and the pool
-takes what is left of `CHAIN_MEM_GB`, at most `CHAIN_POOL_MAX` jobs at once. A
-job that does not fit keeps its place: the lighter jobs behind it cannot take
-the memory it waits for. A job also waits while the host's `MemAvailable` is
-under its weight plus `CHAIN_MEM_RESERVE_GB`, so another workload on the host
-shrinks the chain instead of pushing it into swap.
+**Memory decides what runs at once.** Every job is budgeted for the memory
+its container was measured to hold on the build host (`WEIGHTS` and
+`JOB_WEIGHTS` in `scripts/chain/plan.mjs`). The browser round holds its share
+for as long as it runs, the databases until the last Go or migration job
+ends, and the pool takes what is left, at most `CHAIN_POOL_MAX` jobs at once.
+A job that does not fit keeps its place: the lighter jobs behind it cannot
+take the memory it waits for. A job that cannot fit beside the round at all
+(the web gates, 3 GiB) waits for the round or the databases to let go
+instead of starting over the budget. A job also waits while the host's
+`MemAvailable` is under its weight plus `CHAIN_MEM_RESERVE_GB`.
+
+The budget is `CHAIN_MEM_GB`, or less when the host has less to give: a run
+takes `MemAvailable` at its start less `CHAIN_MEM_RESERVE_GB` when that is
+smaller, and `chain.log` names the containers that are not the chain's and
+what they hold. Another workload on the host makes a run longer, not red.
 `web/tests/deploy/chainSchedule.test.ts` replays a full run with the measured
 minutes through the same scheduler and holds the budget, `-race` running next
-to Chromium, and the three-hour bound.
+to Chromium, the three-hour bound, and that every job runs on a smaller
+budget.
+
+**The host's pressure.** Every 5 s the run reads the kernel's pressure stall
+information (`/proc/pressure`), the write latency of the disk it writes to
+(`/proc/diskstats`; `CHAIN_DISK`) and each job container's cgroup. The pool
+starts one job per `CHAIN_START_GAP_S` seconds, and none while memory or IO
+"full" is over `CHAIN_PSI_MEM_MAX` or `CHAIN_PSI_IO_MAX` (for at most
+`CHAIN_PSI_WAIT_MIN` minutes at a time). `chain.log` gets a `PRESSURE` line
+while the host is stalled and a `LOAD` line per job. A Go test job's `/tmp`
+is a tmpfs (`CHAIN_TMPFS_GB`), so a test's fsync never waits for the disk (the
+Go build directory stays on the disk), and so is a Playwright line's
+`e2e/test-results`: every test's trace and video is written there and deleted
+when it passes, and a red test's are copied to the run. Firefox keeps its HTTP
+cache in memory and no history database (`e2e/playwright.config.ts`), as a
+Chromium context does: before that the Firefox line wrote 33-34 GB in a run. Before a Playwright line the round
+waits for `CHAIN_TEMP_QUERY` to cool to `CHAIN_TEMP_MAX`, at most
+`CHAIN_TEMP_WAIT_MIN` per line and `CHAIN_TEMP_WAIT_TOTAL_MIN` in a run. A
+timeout in a run is first a question about the host: memory "full" of 0.3, or
+a write that takes seconds, slows everything that runs that minute 20-60
+times.
 
 **The processors are shared by weight.** Every job may use `CHAIN_CPUS`
 cores; when they are all busy, the browser jobs and the vitest job get four
@@ -409,7 +443,9 @@ times the share of a Go, `-race` or docs job (`docker run --cpu-shares` 4096
 against 1024). Those two hold every test to a timeout of a few seconds of
 wall-clock time and a Go test has no such limit, so they are the ones a busy
 host turns red: next to the `-race` shards a vitest file that takes 0.8 s alone
-took 15 s at the same weight, and one of its tests went over its 5 s.
+took 15 s at the same weight, and one of its tests went over its 5 s. vitest
+runs at most `CHAIN_WEB_WORKERS` forks (8): its own default is one per core
+but one, 19 on the build host, where they held 3 GiB.
 
 **The lock.** `run.sh` holds `CHAIN_LOCK` with `flock(1)` for the whole run -
 the lock every other build on the host takes, so a chain and a build wait for
@@ -420,8 +456,12 @@ that, and then exits 3 without starting.
 **What it leaves**, under `$CHAIN_ROOT/runs/<run-id>/`: `chain.log`, a
 `JOBSTART` and a `JOBEXIT` line per job; `logs/<job>.log`; `out/<job>/`, the
 job's test output; and `result.json` - per job its name, start, end, seconds,
-exit code, log and a one-line summary, plus the commit, the budget and the
-lowest `MemAvailable` the run saw. It is rewritten after every job and final
+exit code, log, a one-line summary and its `load` (the most its container
+held and wrote, and the worst memory and IO "full" and disk write while it
+ran), plus the commit, the budget, the lowest `MemAvailable` the run saw and
+`host` (the budget it took and why, and the worst pressure of the run; the
+nightly report says it, and names a host stall beside the red job it may
+explain). It is rewritten after every job and final
 once `finished` is set; `runs/latest-<profile>.json` is the last final one.
 With `CHAIN_NOTIFY_URL` set, the end of the run is posted there. The exit code
 is 0 when every job is green.
@@ -566,14 +606,25 @@ other run has (`NIGHTLY_EXTRAS` in `scripts/chain/nightly-lib.mjs`;
   the values reach the job in a `0600` file of the run, never on a command
   line or in a log, and the job's output is written with the key and the
   secret blanked out;
-- `shots`: `pnpm shots --all` without the app and Document Server scenes, as
-  CI takes them, on the packages and the web build the chain made - every
-  scene, whatever its digest says, so a scene whose `INPUTS` missed something
-  it shows is caught the night it changed. A shot script that no longer fits
-  the product turns a night red instead of a release day; every picture is
-  compared with the published set, which is taken right here - Linux, the
-  chain's Playwright container and fontconfig - and the pictures, the review
-  and the contact sheet are kept in the run's `out/shots/`;
+- `shots`: `pnpm shots --all --keep-going` on the packages and the web build
+  the chain made - every scene, whatever its digest says, so a scene whose
+  `INPUTS` missed something it shows is caught the night it changed. The app
+  scenes are taken too, with the app builds and the language packs the
+  settings name (`CHAIN_SIGN_APP_DIR`, `CHAIN_CONVERT_APP_DIR`,
+  `CHAIN_LANG_ES_DIR`, `CHAIN_LANG_DE_DIR`, `CHAIN_LANG_FR_DIR`), copied into
+  the job before it starts, and the ONLYOFFICE scene against the chain's
+  Document Server: the job runs right after `ds-go`, while that is still up.
+  Without one of them the job is red before it builds anything, unless
+  `CHAIN_REQUIRE_APPS=0` leaves those scenes out. A shot script that no
+  longer fits the product turns a night red instead of a release day, and a
+  failed scene does not stop the others. A language pack behind the tree
+  (the strings the day added are translated after the night's run) fails
+  `langpack.mjs`; when that is the night's only failed scene, the job is
+  green with a **warning** in the morning report, not red - a release's run
+  of the same job stays red (2026-10-08). Every picture is compared with the published set,
+  which is taken right here - Linux, the chain's Playwright container and
+  fontconfig - and the pictures, the review and the contact sheet are kept
+  in the run's `out/shots/`;
 - `realenv`: `e2e/realenv/run.sh` (Against the real servers, above), once
   every `NIGHTLY_REALENV_EVERY_DAYS` days (7). The one job that runs on the
   host itself and not in a container, since it starts containers of its own;
@@ -602,8 +653,10 @@ nightly run, from any checkout on the build host:
 **The morning report.** At 07:00 a second timer sends one notification for the
 night (`scripts/chain/report.mjs`): green or red and the wall time against the
 previous night; every red job with its one-line summary, its log, the night
-it last passed and the commits since then; what the previous night had red
-that passes now; the nightly build; and, for a night that did not run, why. A
+it last passed and the commits since then; every warning a green job left
+(a job's `JOBWARN` lines, such as the shots job's language packs behind the
+tree), which makes the night a warning rather than green; what the previous
+night had red that passes now; the nightly build; and, for a night that did not run, why. A
 night that left no record at all is reported too, and a run still going is
 waited for, at most `NIGHTLY_REPORT_WAIT_MIN` (120) minutes. It posts to
 `CHAIN_NOTIFY_URL` with the key in `CHAIN_NOTIFY_KEY_FILE`, which it never
@@ -639,6 +692,84 @@ the commit the S3 code is measured from).
 `web/tests/deploy/chainNightly.test.ts` holds the decisions above and the
 report's form.
 
+### Known flaky tests
+
+A part of the full matrix (`ci.yml`) is red when one of its tests failed
+twice: with `CI` set, Playwright retries a failed test once (`retries: 1` in
+`e2e/playwright.config.ts`), so a test that failed and then passed is
+reported as `flaky` and its part stays green. The build host's chain sets no
+`CI` and retries nothing; Go, vitest and Cypress retry nothing anywhere.
+
+What follows is what the first full-matrix runs on GitHub measured: 0.53.0's
+release day and the runs after it (runs 37596680800 to 37702037032, task
+#173). When a part is red on a test listed here and on nothing else, re-run
+its failed jobs (`gh run rerun <id> --failed -R BRF-Tech/filex`) before you
+look any further. A red test that is not listed is a fault until a re-run of
+the same commit passes it; then it goes on this list, with the run that
+showed it. A row leaves the list with the commit that removes its cause.
+
+**Red: failed on both tries in a run, passed in another run of the same code.**
+
+| Test | Part | Runs | What fails |
+|---|---|---|---|
+| `199-csv-onlyoffice`: "Edit opens it in ONLYOFFICE; the saved file is the same kind of CSV with the new value" | `Playwright + Document Server (firefox)` | red in 37606303144 and 37661356185; green in 37613557303, 37624094959 and 37702037032 | Firefox only: the address typed into ONLYOFFICE's name box keeps part of the old one (`B2A1`), so the value lands in A1. Typing it key by key and reading it back (0.53.0) did not cure it. |
+| `202-store-install`: "the session gone, a second link in that tab goes into no sign-in address" | `Playwright (nopub, ...)`, `Playwright (chromium 3/4)` | red in two parts of 37702037032, both green on the re-run; flaky in 37598598805 and 37661356185 | The sign-in page is opened with `redirect=/home` instead of `/store-install`. Suspected: a race in the panel between the 401 handler (`web/src/main.ts`) and the store page's own `sessionEnded` over the sign-in address - the product's, not the test's. |
+| `163-explorer-trash-purge`: "an operator's Delete permanently removes the item from the trash" | `Playwright (webkit 2/4)` | red in 37702037032 and on its first re-run, green on the second; flaky in 37661356185; green in 37624094959 | WebKit: after the dialog's button is clicked no `DELETE /api/admin/trash/...` leaves within 10 s. |
+| `158-sidebar-storage-order`: "the administrator drags a storage to the top of the Storages table" | `Playwright (webkit 2/4)` | red in 37613557303 | WebKit: the drag does not move the row. |
+| `109-notifications-non-admin`: "paging reaches rows the bell never showed" | `Playwright (webkit 1/4)` | red in 37624094959, green on its re-run | WebKit: a click, then `page.goto` on the retry, time out. |
+| `139-table-scrollbar-loop`: "the table as shipped settles in a pane its rows just fit" | `Playwright (webkit 4/4)` | red in 37606303144 | `page.goto: WebKit encountered an internal error`, then a 15 s `page.goto` timeout on the retry. |
+
+**Flaky: failed once, passed on the retry; the part stayed green.** WebKit
+unless another engine is named:
+
+- `100-viewer-audit` (html, webp; odt and psd with the Document Server),
+  `101-quicklook-hint`, `102-touch-tap-opens`, `109-notifications-non-admin`
+  (two more of its tests), `114-language-pack` (the Label cell at 1280 px, in
+  four runs), `115-tag-kinds`, `130-sign-fill-only-and-pins` (install),
+  `135-version-where-a-person-finds-it`, `150-archives`,
+  `155-new-document-any-name` and `168-drafts` (the 390 px checks),
+  `156-driver-time-limits`, `157-plugin-surface-theme`,
+  `158-sidebar-storage-order` (sort by name; Move down; no sideways overflow
+  at 1280 px), `164-sub-path`, `173-e2e-single-file` (the 200 MB stream file),
+  `174-e2e-encrypt-existing`, `175-app-interface-sandbox`, `180-thumbnails`,
+  `195-office-thumbnails`, `197-e2e-policy-approval`, `207-admin-search`,
+  `50-search`, `60-user-settings`, `83-meta-and-markdown`, `95-app-plugins`;
+- `159-queued-rename-restore` and `172-e2e-names`: a folder listed empty for
+  a moment after a queued rename. Suspected: the queue's rename and the
+  storage scan racing over the same rows (the build host's chain caught it
+  too);
+- `202-store-install`: "someone who is not an administrator" (Chromium) and
+  "a repository serving other bytes" (WebKit);
+- Chromium: `197-e2e-policy-approval` (a folder that holds something is
+  encrypted in place); Firefox: `190-open-while-relisting`.
+
+**Red once and fixed: not flaky.**
+
+- `Go -race (handlers-5)`, 37596680800: the shard passed (`ok`, 736 s) and
+  its step failed. GitHub runs a `run:` block under `bash -e`, so a `grep`
+  that found no failure line ended a green shard red; the step runs with
+  `set +e` since.
+- `Go -race (handlers-7)`, 37598598805: `panic: close of closed channel` in
+  bleve's `Close`, from a search rebuild that ended after the index was
+  closed (it hit `TestSearchEndpoint_ForgivingNames`). Fixed in
+  `internal/search`: a rebuild ending after `Close` no longer closes the index
+  a second time (`close_rebuild_test.go`).
+- `Playwright (chromium 2/4)`, 37610419458: three `173-e2e-single-file` tests
+  could not import `packages/core/dist/filex-core.js`. The e2e build artifact
+  carries it now.
+- `Go -race (rest)`, 37613557303: `loginguard`'s
+  `TestTheLoopSweepsWithoutTraffic` read the audit log between the row and its
+  entry. It waits for the entry now.
+
+**Not a test.** In run 37661356185 two parts (`chromium 4/4`, `firefox 4/4`)
+hung for 44 minutes in `playwright install --with-deps`, on `apt-get update`,
+and were cancelled at their 45-minute limit; the run took 69.7 minutes.
+Re-run the cancelled parts.
+
+The chain on the build host has reds of its own under load, and they are no
+flaky test: a timeout at a moment the host stalled (memory or disk) is the
+host's. Look at the host first (The whole chain on one Linux host, above).
+
 ### What needs tests
 
 - **Always**: every new HTTP endpoint, every new storage driver method,
@@ -664,6 +795,14 @@ report's form.
 
 - ESLint with `eslint-plugin-vue` recommended config.
 - Strict TypeScript: `noImplicitAny`, `strictNullChecks`.
+- A package's build (`pnpm run build:packages`) fails on any TypeScript
+  diagnostic its declaration build (vite-plugin-dts) reports, through
+  `afterDiagnostic: failOnDtsDiagnostics(...)` from `scripts/vite-dts-strict.mjs`
+  in every `packages/*/vite.config.ts` that writes `.d.ts` files. That build
+  types `.vue` files through its own `@vue/language-core` and finds errors
+  `vue-tsc --noEmit` does not (a `useSlots()` loop shipped `DataTable`'s slots
+  as `any` with vue-tsc green); fix the cause rather than loosening the hook.
+  `web/tests/deploy/dtsStrict.test.ts` fails on a `dts()` without it.
 - Prefer composables for reusable logic; SFC for components.
 - No default exports (named only) - easier IDE refactor.
 
@@ -899,10 +1038,24 @@ for a service of the instance: the two encryption request switches in the
 settings dialog (`e2e.request_created`, `e2e.request_decided`) wait for the
 tenant's encryption policy, which the tenant's own administrators set. There
 the person who could fix it - and who a new request is sent to - is an
-administrator *account*: the role the host knows (`host.isAdmin`), because
-`caller_admin` is the supertenant's alone on a multi-tenant install and would
-leave a tenant's own administrator out, and the server publishes nothing
-finer (`eventFixableBy` in `packages/core/src/lib/webhookEvents.ts`).
+administrator *account*, not `caller_admin` (the supertenant's alone on a
+multi-tenant install, which would leave a tenant's own administrator out).
+Since 0.54 the server says it per event: `capabilities.event_off[event]
+.fixable` (`backend/internal/api/handlers/capabilities_rules.go`
+`eventsOff`), and the dialog reads that instead of the account's role.
+
+#### A rule the server applies is the server's (0.54)
+
+A decision, a number, a rule or a sentence the server applies is made on the
+server and only shown by the clients: the server publishes it (a capabilities
+field, a field on each row, an endpoint) and the client reads it. A client
+that keeps its own copy drifts the first time one side changes - in 0.54's
+audit the preview offered Edit on `.graphql`, which save-text refused, and the
+Add user form spelled `gözlük@…` as `g.zl.k` where the server's rule gives
+`gozluk`. Where a rule cannot travel as a value because the client applies it
+while a person types or picks, its cases go into
+`backend/internal/api/handlers/testdata/rule-mirrors.json`, and both sides
+test against that file.
 
 #### Words: one term per concept
 
@@ -1009,6 +1162,19 @@ log line, an export, an API document - never a label.
   suite is testing. This is not cosmetic: a `.sh` file checked out with CRLF
   fails on Linux and under WSL with `/usr/bin/env: 'bash\r': No such file or
   directory`, which is what the repository shipped until 2026-09-05.
+- **A script or test that starts a process keeps it off the screen on
+  Windows.** There a child that finds no console to share is given a new,
+  visible one: a window on the desktop of whoever runs the tests, which can
+  take the focus while they type. A detached process has no console at all,
+  so every console program it starts opens such a window, and `windowsHide`
+  on the detached process does not reach it. So `detached` depends on
+  `process.platform` (a process group of its own on Linux, the parent's
+  console on Windows) and comes with `windowsHide: true`, and every launch the
+  parent does not wait for (`spawn`, `execFile`, `exec`, `fork`) in
+  `scripts/` and `web/` carries `windowsHide: true` too.
+  `web/tests/quality/hiddenConsoleWindows.test.ts` reads the source for both
+  (#197; a script that stops anywhere but Linux before its work, like
+  `scripts/chain/`, is left out).
 - ASCII characters by default. Add comments in English even if the codebase
   is bilingual.
 - No `console.log` left over - use `import.meta.env.DEV` guards in dev-only
@@ -1129,12 +1295,13 @@ is the whole flow.
    (2026-10-06): fonts are the system's, and pictures from two places are a
    README in two typefaces. A run on Windows or macOS takes, compares and
    shows its pictures for you to look at while you work on a screen, stages
-   nothing for the site, and `accept` refuses it; a run on the build host
-   outside the chain is accepted with a warning (the app and Document Server
-   scenes, which the chain cannot take yet, are taken there), but it puts
-   `"environment": "local"` in the manifest, which the shot gates refuse: take
-   those scenes in the chain's Playwright image and fontconfig with
-   `SHOTS_ENVIRONMENT=chain`. A
+   nothing for the site, and `accept` refuses it. A run on the build host
+   outside the chain (`SHOTS_ENVIRONMENT` is not `chain`) is refused too
+   (2026-10-08): the chain takes every scene, the app and Document Server
+   scenes included (task #187), so no scene needs the host.
+   `accept --looked --outside-chain` takes such a run on purpose; it still
+   prints a warning, and the manifest then says `"environment": "local"`,
+   which the shot gates refuse until the chain takes the set again. A
    screen with no picture yet gets one in the
    `e2e/shots/` script that owns it, or in a new script there - the command
    finds every file in that directory that imports `@playwright/test`, so a new
@@ -1150,7 +1317,8 @@ is the whole flow.
 3. **Publish them, then link them**: `node scripts/shots-site.mjs upload`
    (maintainers; it reads every file back from the site), then
    `node scripts/shots-site.mjs accept --looked`, which refuses a run not
-   taken on Linux and until every new picture answers from the site, then
+   taken on Linux, a run taken outside the build host's test chain (unless
+   `--outside-chain`) and a failed run, and refuses until every new picture answers from the site, then
    writes the manifest and points every page at the new URLs. Commit the manifest and those pages with the code. Never a
    PNG: there is no screenshot folder in the tree any more, and
    `web/tests/deploy/shotsSite.test.ts` fails on one.
@@ -1187,17 +1355,22 @@ CI runs the same command with `--all` on every tag and on demand (GitHub
 so a script that no longer fits the product turns a job red instead of a
 release night. CI publishes nothing.
 
-**The app scenes are taken outside CI, on the build host.** `apps.mjs` and `signing.mjs` photograph
-e-Signature and Convert, two of the apps filex ships alongside itself, and their
+**The app scenes are taken outside CI, in the build host's test chain.** `apps.mjs`,
+`apppermissions.mjs`, `langpack.mjs`, `pluginrequests.mjs` and `signing.mjs` photograph
+e-Signature, Convert and the language packs, which filex ships alongside itself, and their
 builds are not in this repository: they come from sibling checkouts of
-[filex-sign](https://github.com/BRF-Tech/filex-sign) and
-[filex-convert](https://github.com/BRF-Tech/filex-convert) (`../filex-sign/dist`,
-`../filex-convert`), or from `FILEX_SIGN_APP_DIR` / `FILEX_CONVERT_APP_DIR`.
-Without one, `pnpm shots` stops before it builds anything and says which. In CI
-(`CI` is set) those two scenes are **left out** instead - named in the log, the
-verdict and the contact sheet, and their published pictures stand -
-because at a tag there may be no app release to fetch yet, and the converter
-scene needs Docker for its engines. `--with-apps` puts
+[filex-sign](https://github.com/BRF-Tech/filex-sign),
+[filex-convert](https://github.com/BRF-Tech/filex-convert) and the language
+pack repositories (`../filex-sign/dist`, `../filex-convert`,
+`../filex-lang-es`, ...), or from `FILEX_SIGN_APP_DIR`, `FILEX_CONVERT_APP_DIR`
+and `FILEX_LANG_{ES,DE,FR}_APP_DIR`. The chain's shots job sets those from
+the directories its settings name (`CHAIN_SIGN_APP_DIR`, `CHAIN_CONVERT_APP_DIR`,
+`CHAIN_LANG_ES_DIR`, `CHAIN_LANG_DE_DIR`, `CHAIN_LANG_FR_DIR`) and runs with
+`--with-apps`. Without one, `pnpm shots` stops before it builds anything and
+says which. In CI (`CI` is set) those scenes are **left out** instead - named
+in the log, the verdict and the contact sheet, and their published pictures
+stand - because at a tag there may be no app release to fetch yet, and the
+converter scene needs Docker for its engines. `--with-apps` puts
 them back; `--without-apps` leaves them out anywhere.
 
 **The converter picture needs the conversion engines.** Its wizard lists what
@@ -1208,7 +1381,9 @@ lacks all of them), `apps.mjs` runs **this tree's build inside the full image**
 poppler and rsvg) with Docker - nothing is installed on the host,
 the image is pulled once, and the container's UI is checked byte for byte
 against `web/dist` like the host binary's. `SHOTS_ENGINES=host|container`
-forces one side. The office engine is not in the image: since 0.50 it is the
+forces one side. The chain's shots job installs the five in its own
+container (they draw the thumbnails too) and sets `SHOTS_ENGINES=host`: it
+has no Docker to fall back on, and a missing engine fails the scene. The office engine is not in the image: since 0.50 it is the
 ONLYOFFICE Document Server filex is connected to, so the scene points the
 instance at `SHOTS_ONLYOFFICE_URL` / `SHOTS_ONLYOFFICE_JWT` when they are set,
 and otherwise at a placeholder that marks the engine connected for a picture
@@ -1226,7 +1401,19 @@ the document server), `SHOTS_ONLYOFFICE_JWT` (its secret) and
 this machine by: the scene's filex listens on every address, because the
 document server downloads the file from it). Without them `pnpm shots` stops
 before it builds anything and says which is missing; in CI, and with
-`--without-apps`, the scene is left out exactly like the app scenes.
+`--without-apps`, the scene is left out exactly like the app scenes. The
+chain's shots job points them at the chain's own Document Server
+(`SHOTS_ONLYOFFICE_CALLBACK_HOST=filex`, the name the chain gives its jobs'
+network on the server's network); the job runs while that server is up.
+
+**`--keep-going`** runs every scene even after one failed. The run is still a
+failure - the review names every failed scene and `accept` refuses it - but
+the other scenes are taken and compared. The chain's shots job uses it. A
+scene whose language packs are behind this tree (`langpack.mjs` exits 3,
+`PACKS_BEHIND_EXIT` in `scripts/lib/shot-scripts.mjs`) is recorded in the
+review as `"reason": "packs-behind"`; when every failed scene of a run is
+one of those, the nightly chain's shots job is green with a warning instead
+of red (`SHOTS_PACKS_BEHIND=warn`, which only the nightly profile sets).
 
 ---
 
@@ -1261,7 +1448,8 @@ node scripts/langpacks.mjs apply --worklist <dir> --commit
 
 - **`status`** gives three lists per language: *missing* (no translation - the
   new keys), *changed* (translated for English that has changed since) and
-  *removed* (keys filex no longer has). A pack's `catalogue/` is the English its
+  *removed* (keys filex no longer has: nothing to translate, `apply` and
+  `release` drop them from the translation). A pack's `catalogue/` is the English its
   translation was written for, which is how a changed string is told apart:
   `pack.mjs sync` alone keeps the old translation of a reworded string without
   a word. `--json <file>` writes the report, `--check` exits 1 while anything is
@@ -1284,10 +1472,21 @@ node scripts/langpacks.mjs apply --worklist <dir> --commit
   warnings alike (the packs are kept at 0 and 0). It names the items to fix and
   touches no file while one is wrong. Then, per pack: the pack's own
   `pack.mjs sync` from the worklist's catalogue (so a tree that moved on since
-  `todo` changes nothing), the answers, `pack.mjs build`, the pack's `validate`
+  `todo` changes nothing), the keys filex no longer has dropped from every
+  translation of the pack, the answers, `pack.mjs build`, the pack's `validate`
   script (written to `validate-output.txt`) and, with `--commit`, a local commit
-  *Sync to filex `<commit>`: N of N*. A pack whose own validators go red is put
-  back as it was. The pack's version does not move, and nothing is pushed.
+  *Sync to filex `<commit>`: N of N* that names the dropped keys. A pack whose
+  own validators go red is put back as it was. The pack's version does not
+  move, and nothing is pushed.
+- **A key filex drops leaves the packs on its own.** Every release drops some.
+  The packs' `pack.mjs sync` kept such a key in `translations/<tag>.json`
+  through 0.53, and the German, Spanish and French validators refuse it
+  (`ERROR UNKNOWN`), so 0.53's `tenants.modeOff` sent every pack back until
+  it was deleted by hand. `apply` and `release` (the template's example
+  included) now remove it right after the pack's sync, filled or empty,
+  whatever the pack's own script does; a plural form the language adds to a
+  key filex still has (`<key>_few`) stays. Its wording is in the pack's git
+  history.
 
 **Every night** the build host translates what the packs lack against `main`,
 after its [nightly run](#the-nightly-run) (`scripts/langpacks-nightly.mjs`).
@@ -1297,7 +1496,7 @@ which is not on every night:
 ```bash
 sudo bash scripts/chain/install-langpacks.sh --root /var/lib/filex-langpacks \
   --env /etc/filex-langpacks.env --git-name "<name>" --git-email "<email>" \
-  --pack de=<clone URL> --init ar --dry-run                          # once; then without --dry-run
+  --init de,es,fr --dry-run                                          # once; then without --dry-run
 node /var/lib/filex-langpacks/bin/scripts/langpacks-nightly.mjs check --probe          # what a night needs, proven
 node /var/lib/filex-langpacks/bin/scripts/langpacks-nightly.mjs run --dry-run --no-wait  # what tonight would do
 node /var/lib/filex-langpacks/bin/scripts/langpacks-nightly.mjs status                  # the last nights
@@ -1392,8 +1591,11 @@ for a person. `release` refuses a pack whose `nightly` remote still has
 commits it lacks (pull first), and a remote it cannot reach is said and not
 waited for. For every pack it refreshes the catalogue from the release's own
 (`filex-catalogue-en.json` and `filex-catalogue-context.json`, attached to the
-GitHub Release; `--catalogue <dir>` for a copy), moves the version one patch up
-in `filex-app.json` and `package.json`, rewrites the README's status block -
+GitHub Release; `--catalogue <dir>` for a copy), drops the keys the release no
+longer has from its translations (as `apply` does: a key can go after the last
+night, or on a night with nothing to translate and so no `apply`), moves the
+version one patch up in `filex-app.json` and `package.json`, rewrites the
+README's status block -
 everything between `<!-- langpack:status -->` and `<!-- /langpack:status -->` -
 runs the pack's validators, commits, and prints the signed tag and the push
 commands: to the pack's own remote (never `nightly`), and `push nightly <branch>`,
@@ -1523,7 +1725,6 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
 
    ```bash
    CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <the release checkout>
-   pnpm shots --only apppermissions,apps,csvoffice,langpack,pluginrequests,signing   # on the build host: the scenes the chain cannot take yet
    ```
 
    and **open the contact sheet it prints**. It lists only what moved: the
@@ -1534,18 +1735,20 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    The last night's sheet (`out/shots/` of the nightly run) shows the same
    changes the morning after they landed, so release day holds no surprise.
 
-   ⚠ The second command's run is `"environment": "local"` unless it runs in
-   the chain's Playwright image with its fontconfig (`scripts/chain/run.mjs`
-   `FONTS_CONF`) and `SHOTS_ENVIRONMENT=chain`, and `accept` writes the
-   environment of the run it accepts into the manifest, which
-   `web/tests/deploy/shotsSite.test.ts` holds to `chain`. Those six scenes
-   call `findApp` or `documentServer` (the app builds, the language packs, a
-   Document Server) and the chain's shots job leaves them out
-   (`--without-apps`). `langpack.mjs` also refuses a language pack that does
-   not cover this tree whole (`node scripts/langpacks.mjs status`), and a
-   failed scene stops the run: until the packs are translated, take the rest
-   with `--only` and the published language pack picture stands (0.53.0:
-   319 strings missing in every pack).
+   It takes every scene in one place (task #187): the six that call
+   `findApp` or `documentServer` too, with the app builds and the language
+   packs the chain's settings name (`CHAIN_SIGN_APP_DIR`,
+   `CHAIN_CONVERT_APP_DIR`, `CHAIN_LANG_ES_DIR`, `CHAIN_LANG_DE_DIR`,
+   `CHAIN_LANG_FR_DIR` - the builds of this release) and against the chain's
+   own Document Server. Until 0.53.0 those six were taken on the build host
+   itself, and the README showed its typeface beside the chain's.
+   `langpack.mjs` refuses a language pack that does not cover this tree
+   whole (`node scripts/langpacks.mjs status`); the other scenes are still
+   taken, but the run failed - here red, where the nightly run only warns -
+   and `accept` refuses it. Until the packs are
+   translated, take the rest with `CHAIN_SHOTS_ONLY` (the other scripts'
+   names, comma-separated) on the same command, and the published language
+   pack picture stands (0.53.0: 319 strings missing in every pack).
 
    Then publish and link them:
 
@@ -1996,12 +2199,26 @@ waits for it (`scripts/train/when-done.mjs`) instead of being watched.
    snap to the Snap Store and attaches `filex-desktop-arm64.snap` and no
    other file: the rest of the Release stays byte for byte as published,
    since the winget pull request and the update feeds pin its files by hash.
+   And one sends a release to the stores its tag run never reached
+   (`-f only=stores -f publish=true`; 0.53.0: GitHub failed to create the
+   tag run's desktop jobs, with an internal error, on a run it would not
+   retry): the amd64 snap to the Snap Store, the desktop app's winget pull
+   request and the Microsoft Store bundle. It builds nothing the Release has
+   and attaches nothing: the windows and linux rows download the Release's
+   `filex-desktop-x64.exe`, `filex-desktop-arm64.exe` and
+   `filex-desktop-amd64.snap` by name and check them against the digests the
+   Release gives, so the winget manifest hashes the very files its URLs
+   name. No Release carries the Store bundle, so the store row sends the one
+   the dry run of the tag's commit kept (checked against its sums), or
+   builds it from the tag when none was kept (a commit gated on CircleCI, or
+   a dry run past its 14 days). The Homebrew desktop cask is `only=macos`'s.
    None of them re-runs the tag run, and none builds or publishes anything
-   else. None of them submits to the Microsoft Store either: when the tag run
-   published nothing, the Store bundle is submitted by hand in Partner Center,
-   and the release tool's Store gate then reads the Store's public listing
-   instead of the run (it turns green once certification passes, hours to
-   three working days later). A Store job that ran and failed stays red.
+   else. When the tag run has no Store job, the release tool's Store gate
+   reads the `only=stores` run's (`publish stores vX.Y.Z <commit>`): a
+   bundle built or promoted, and submitted without a warning. With neither -
+   a bundle submitted by hand in Partner Center - it reads the Store's
+   public listing instead (green once certification passes, hours to three
+   working days later). A Store job that ran and failed stays red.
 
    Once a tag is on a remote, `--resume` never goes back to the stamp or the
    test chain, whatever `main` has done since: the release is the tag. When
@@ -2497,7 +2714,8 @@ pnpm release X.Y.Z --plan --gate circleci      # what is read from CircleCI, and
   `verify` reads GitHub first; missing the full matrix or the dry run on
   the commit, it asks CircleCI, and a green `ci` workflow on that very
   commit lets the run publish - a tag push, and a run started by hand that
-  adds to a release (`only=arm64`, `only=macos`, `only=snap-arm64`), alike.
+  adds to a release (`only=arm64`, `only=macos`, `only=snap-arm64`,
+  `only=stores`), alike.
   A red, unfinished or missing workflow, or a CircleCI that does not
   answer, publishes nothing. With nothing to promote, the tag run builds as
   tag runs did before #174: `docker` builds both images on their own
@@ -2514,8 +2732,9 @@ pnpm release X.Y.Z --plan --gate circleci      # what is read from CircleCI, and
   run that starts late, once Actions is back, cannot tag images or attach
   files over the ones packaged off GitHub, which winget and the feeds pin by
   hash. Such a release gets its macOS packages and its arm64 snap from
-  `only=macos` and `only=snap-arm64`, which `verify` lets through on
-  CircleCI's word.
+  `only=macos` and `only=snap-arm64`, and reaches the Snap Store (amd64),
+  winget and the Microsoft Store with `only=stores`, which `verify` lets
+  through on CircleCI's word.
 
 **Why the config lives in this repository** when the GitHub workflows do not.
 `scripts/export-public.sh` keeps the public checkout's `.github/workflows` and
@@ -2561,8 +2780,11 @@ node scripts/release/package-local.mjs X.Y.Z --run --only images,desktop-windows
   goes out without them and its notes say so; `only=macos` and
   `only=snap-arm64` add them once GitHub can - after GitHub has tested the
   commit, since a run that adds to a release is asked what a tag run is.
-  npm, the Microsoft Store, winget and Homebrew are a person's, with their own
-  sign-in; the command prints what to run.
+  The stores need tokens GitHub alone holds: `only=stores` sends the amd64
+  snap, the desktop app's winget pull request and the Microsoft Store bundle
+  (the one the dry run kept, or built there: no Release carries one), and
+  `only=macos` commits the Homebrew desktop cask. npm is a person's, with
+  their own sign-in; the command prints what to run.
 - Then `pnpm release X.Y.Z --resume --only deploy`.
   `web/tests/deploy/packageLocal.test.ts` holds the plan to these rules.
 

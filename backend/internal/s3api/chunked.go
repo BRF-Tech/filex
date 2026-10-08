@@ -71,7 +71,83 @@ var (
 	// ErrChunkSignature means a chunk's MAC did not match — the body was
 	// altered between the client and here.
 	ErrChunkSignature = errors.New("s3api: chunk signature does not match")
+	// ErrDecodedLength means the decoded body did not add up to the
+	// x-amz-decoded-content-length the client declared: shorter, or longer.
+	ErrDecodedLength = errors.New("s3api: the decoded body does not match x-amz-decoded-content-length")
 )
+
+// exactBody hands on exactly the declared number of decoded bytes of a
+// chunked body and refuses one that is shorter or longer.
+//
+// ⚠ The declared length is what the quota, the per-file limit and the
+// catalogue row are decided on before a byte is read, so the bytes that land
+// have to be that many. The chunk framing carries its own lengths, and nothing
+// in it ties their sum to the header: without this wrapper a body could go on
+// past what it declared and the driver would write all of it.
+type exactBody struct {
+	cr     *chunkedReader
+	remain int64
+	bad    bool
+}
+
+func newExactBody(cr *chunkedReader, size int64) *exactBody {
+	return &exactBody{cr: cr, remain: size}
+}
+
+func (e *exactBody) Read(p []byte) (int, error) {
+	if e.bad {
+		return 0, ErrDecodedLength
+	}
+	if e.remain <= 0 {
+		// Everything declared has been handed on: the body must end here.
+		var one [1]byte
+		n, err := e.cr.Read(one[:])
+		if n > 0 {
+			e.bad = true
+			return 0, ErrDecodedLength
+		}
+		if err != nil && err != io.EOF {
+			return 0, err
+		}
+		return 0, io.EOF
+	}
+	if int64(len(p)) > e.remain {
+		p = p[:e.remain]
+	}
+	n, err := e.cr.Read(p)
+	e.remain -= int64(n)
+	if err == io.EOF {
+		if e.remain > 0 {
+			e.bad = true
+			return n, ErrDecodedLength
+		}
+		return n, nil
+	}
+	return n, err
+}
+
+// finish reads to the end of the body after a write that took what it was
+// told to take, and reports whether the body was exactly that long. A driver
+// that reads exactly `size` bytes never asks for the end itself, so a body
+// longer than declared shows only here. It also reads the terminating chunk,
+// which is where the trailing checksum headers are.
+func (e *exactBody) finish() error {
+	if e.bad || e.remain > 0 {
+		e.bad = true
+		return ErrDecodedLength
+	}
+	if _, err := e.Read(make([]byte, 1)); err != io.EOF {
+		if err == nil {
+			err = ErrDecodedLength
+		}
+		return err
+	}
+	return nil
+}
+
+// mismatched reports whether the body has already been caught not matching
+// its declared length (without reading any further).
+func (e *exactBody) mismatched() bool { return e.bad }
 
 // IsChunked reports whether a payload hash marks an aws-chunked body.
 func IsChunked(payloadHash string) bool {

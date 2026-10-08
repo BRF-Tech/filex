@@ -11,7 +11,7 @@ import { useStoragesStore } from '@/stores/storages';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { usePendingOpsStore } from '@/stores/pendingOps';
 import type { PendingOp } from '@/api/ops';
-import { trashApi, type TrashEntry, type TrashEmptyStatus } from '@/api/trash';
+import { trashApi, type TrashEntry, type TrashEmptyPreview, type TrashEmptyStatus } from '@/api/trash';
 import Button from '@/components/ui/Button.vue';
 import Modal from '@/components/ui/Modal.vue';
 import Select from '@/components/ui/Select.vue';
@@ -35,6 +35,8 @@ const pendingOps = usePendingOpsStore();
 
 const entries = ref<TrashEntry[]>([]);
 const total = ref(0);
+/** The server's sentence for the whole trash (count and size). */
+const summary = ref('');
 const loading = ref(false);
 const selectedStorage = ref<number | undefined>(undefined);
 const limit = ref(50);
@@ -54,6 +56,7 @@ async function load() {
     });
     entries.value = res.entries;
     total.value = res.total;
+    summary.value = res.summary ?? '';
   } catch (err: any) {
     toast.error(err?.response?.data?.error ?? String(err));
   } finally {
@@ -121,11 +124,14 @@ function sayJobEnd(entry: TrashEntry, job: RowJob, op: PendingOp) {
   }
   // Stopped from the tray before it ran: the reloaded list says what is left.
   if (op.status === 'cancelled') return;
-  const reason = op.error_message ?? '';
-  if (job === 'restore' && /already exists/i.test(reason)) {
-    toast.error(t('trash.restore_taken', { name: entry.name }));
+  // ⚠ Why it did not go is the SERVER's sentence (the job row's `summary`,
+  // 0.54 finding A15): this page matched the job's English error with a
+  // regex ("already exists") and worded the rest itself.
+  if (op.summary) {
+    toast.error(op.summary);
     return;
   }
+  const reason = op.error_message ?? '';
   toast.error(t(job === 'restore' ? 'trash.restore_failed' : 'trash.purge_failed', { name: entry.name, reason }));
 }
 
@@ -217,6 +223,40 @@ const emptyDays = computed<number | undefined | null>(() => {
 });
 const emptyDaysInvalid = computed(() => emptyDays.value === null);
 
+/* ⚠⚠ The dialog names the SERVER's count of what the purge takes (0.54,
+ * finding D1): its dry run, for the storage and the day count in the dialog,
+ * over everything this admin's purge reaches. The button waits for it. */
+const emptyPreview = ref<TrashEmptyPreview | null>(null);
+const emptyPreviewError = ref('');
+let previewAsk = 0;
+
+async function askPreview() {
+  emptyPreview.value = null;
+  emptyPreviewError.value = '';
+  if (!showEmptyDialog.value || emptyDaysInvalid.value) return;
+  const ask = ++previewAsk;
+  try {
+    const p = await trashApi.emptyPreview({
+      storage_id: selectedStorage.value,
+      older_than_days: emptyDays.value ?? undefined,
+    });
+    if (ask === previewAsk) emptyPreview.value = p;
+  } catch (err: any) {
+    if (ask === previewAsk) {
+      const data = err?.response?.data;
+      emptyPreviewError.value = data?.message ?? data?.error ?? t('errors.generic');
+    }
+  }
+}
+
+watch([showEmptyDialog, emptyDays, selectedStorage], () => {
+  void askPreview();
+});
+
+const emptyConfirmable = computed(
+  () => !emptyDaysInvalid.value && !emptyStarting.value && (emptyPreview.value?.count ?? 0) > 0,
+);
+
 async function emptyTrash() {
   if (emptyStarting.value || emptying.value || emptyDaysInvalid.value) return;
   emptyStarting.value = true;
@@ -232,11 +272,13 @@ async function emptyTrash() {
     const data = err?.response?.data;
     // Another tab, or another admin of this tenant, already started one.
     if (err?.response?.status === 409 && data?.code === 'BUSY') {
-      toast.error(t('trash.empty_busy'));
+      toast.error(data.message ?? t('trash.empty_busy'));
       if (data.job?.running) await followEmpty(data.job);
       return;
     }
-    toast.error(data?.error ?? String(err));
+    // The server's sentence (`message`, the run's `summary`), never its
+    // English record or a status code (finding A4).
+    toast.error(data?.message ?? data?.summary ?? data?.error ?? String(err));
   } finally {
     emptyStarting.value = false;
   }
@@ -258,17 +300,14 @@ async function followEmpty(st: TrashEmptyStatus) {
     await load();
     return;
   }
-  if (st.error) {
-    toast.error(t('trash.empty_stopped', { error: st.error }));
-  } else if (st.cancelled) {
-    const n = st.purged ?? 0;
-    toast.warn(t('trash.stopped_after', { count: formatNumber(n, locale.value) }, n));
-  } else {
-    const n = st.purged ?? 0;
-    toast.success(t('trash.empty_done', { count: formatNumber(n, locale.value) }, n));
-  }
-  if (st.failed) {
-    toast.warn(t('trash.empty_failed', { count: formatNumber(st.failed, locale.value) }, st.failed));
+  // ⚠ How it ended is the SERVER's sentence (the run's `summary`, 0.54
+  // finding A4): this page and the explorer each worded it themselves, one
+  // with "see the server log", the other with whatever `error` held.
+  const said = st.summary ?? '';
+  if (said) {
+    if (st.error) toast.error(said);
+    else if (st.cancelled || st.failed) toast.warn(said);
+    else toast.success(said);
   }
   await load();
 }
@@ -414,6 +453,14 @@ const storageOptions = computed(() => [
   ...storages.items.map((s) => ({ value: String(s.id), label: s.name })),
 ]);
 
+/** The table's pager: the server counts every entry (`total`), and a page
+ *  is `limit` of them from `offset`. ⚠ It drew no pager, so the entries after
+ *  the first 50 could not be reached from this page (0.54, finding D1). */
+function goPage(page: number) {
+  offset.value = Math.max(0, (page - 1) * limit.value);
+  void load();
+}
+
 function pickStorage(v: string | number | null) {
   const id = v == null || v === '' ? undefined : Number(v);
   selectedStorage.value = id;
@@ -480,11 +527,10 @@ function onRowAction(key: string, row: TrashEntry) {
       class="card card-body space-y-2"
     >
       <div class="flex flex-wrap items-center justify-between gap-3 text-sm">
-        <span class="font-medium">{{ emptyRun.queued ? t('trash.emptying_queued') : t('trash.empty_running') }}</span>
+        <!-- The server's sentence for where the run stands ("Emptying the
+             trash… 120 of 61,844"). -->
+        <span class="font-medium tabular-nums">{{ emptyRun.summary }}</span>
         <div class="flex items-center gap-3">
-          <span class="tabular-nums fx-trash-run__muted">
-            {{ t('trash.emptying_progress', { done: formatNumber(emptyDone, locale), total: formatNumber(emptyTotal, locale) }) }}
-          </span>
           <Button
             v-if="emptyRun.op_id"
             data-testid="trash-empty-stop"
@@ -519,10 +565,13 @@ function onRowAction(key: string, row: TrashEntry) {
       :loading="loading"
       row-key="id"
       :total="total"
-      :foot-note="t('trash.total_count', { n: formatNumber(total, locale) })"
+      :page="Math.floor(offset / limit) + 1"
+      :page-size="limit"
+      :foot-note="summary || t('trash.total_count', { n: formatNumber(total, locale) })"
       :row-actions="(row: TrashEntry) => rowActions(row)"
       :row-actions-test-id="(row: TrashEntry) => `trash-actions-${row.id}`"
       @row-action="(key: string, row: TrashEntry) => onRowAction(key, row)"
+      @page="goPage"
     >
       <template #toolbar>
         <Select
@@ -585,6 +634,11 @@ function onRowAction(key: string, row: TrashEntry) {
 
     <Modal v-model="showEmptyDialog" :title="t('trash.empty_modal_title')">
       <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ t('trash.empty_modal_body') }}</p>
+      <!-- ⚠⚠ The server's count of what this purge deletes (its dry run), for
+           the storage and the day count set here. -->
+      <p v-if="emptyPreview" data-testid="trash-empty-count" class="mt-3 text-sm font-medium">{{ emptyPreview.summary }}</p>
+      <p v-else-if="emptyPreviewError" class="error-text mt-3" role="alert">{{ emptyPreviewError }}</p>
+      <p v-else-if="!emptyDaysInvalid" class="mt-3 text-sm text-zinc-500" role="status">{{ t('trash.empty_counting') }}</p>
       <label class="mt-3 block text-sm">
         {{ t('trash.older_than_days') }}
         <input
@@ -606,7 +660,7 @@ function onRowAction(key: string, row: TrashEntry) {
           data-testid="trash-empty-confirm"
           variant="danger"
           :loading="emptyStarting"
-          :disabled="emptyDaysInvalid || emptyStarting"
+          :disabled="!emptyConfirmable"
           @click="emptyTrash"
         >
           {{ t('trash.empty') }}

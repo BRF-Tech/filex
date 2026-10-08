@@ -34,6 +34,14 @@ export interface Account {
    * person clears it (upsertAccount).
    */
   signedOut?: string;
+  /**
+   * The account's language (users.locale) as the server last said it - '' when
+   * it holds none. ⚠ A cache, not a setting: the app's language IS the
+   * account's (src/account-locale.ts), read again at start, on a switch and
+   * when the window is focused; stored so the tray and the window open in it
+   * before the server answers.
+   */
+  locale?: string;
 }
 
 export interface DesktopState {
@@ -45,11 +53,13 @@ export interface DesktopState {
   /** Keep running in the tray when the window is closed. */
   runInBackground: boolean;
   launchAtLogin: boolean;
-  /** Interface language. 'system' follows the OS — what the app did when there
-   *  was nothing to choose, so an existing install keeps the language it
-   *  already had. The window, the tray menu and the file explorer inside it all
-   *  read this one value: a Turkish shell around an English file list is one
-   *  app pretending to be two. */
+  /**
+   * ⚠⚠ NOT the app's language any more (#191): the app's language IS the
+   * active account's (Account.locale, src/account-locale.ts). This field only
+   * carries an older install's pinned choice ('en' | 'tr') to its account once
+   * - adopted when the account holds no language (pinToAdopt) - and reads
+   * 'system' from then on. Nothing else reads it.
+   */
   locale: DesktopLocale;
   /** Show a native OS notification when something new lands in the bell.
    *  Default ON — the desktop window has no bell of its own, so off would mean

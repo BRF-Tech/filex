@@ -37,9 +37,9 @@ export interface PluginMenuContext {
   /** Inside an E2E-encrypted folder — the server would only see ciphertext. */
   e2e?: boolean;
   /**
-   * The selection sits on a read-only storage. An action whose result is
-   * WRITTEN there (`output_mode` `sibling` / `version`) is then not offered —
-   * see `pluginActionWrites`.
+   * The selection sits on a read-only storage. An action the server says it
+   * would refuse there (`read_only_ok: false` on its row) is then not
+   * offered.
    */
   readOnly?: boolean;
   /**
@@ -100,35 +100,33 @@ export function isPluginActionKey(key: string): boolean {
 /**
  * Whether running the action writes next to or over its file: its manifest
  * output is `sibling` (a new file beside it) or `version` (a new version of
- * it). The server's own test is the same one (handlers/app_plugins.go
- * `authorise` → `jobOutputMode`), and it refuses those on a read-only storage
- * with `409 read_only`.
- *
- * ⚠⚠ Why the menu asks at all (QA, 2026-09-21): on a read-only drive
- * "Dönüştür…", "İmzala…" and "İmza iste…" were all offered, and the first
- * one answered the click with a 409 and a toast that was gone in 2.5 s — for
- * the person it did nothing. An action that can only be refused is not
- * offered, the same rule the built-in verbs follow (Rename / Delete / Move
- * are not in the menu of a read-only row either).
- *
- * ⚠ `none` answers false, and that is the limit of what the menu can know:
- * an action with no file output may still write through the app's own
- * permissions ("İmza iste…" starts a flow whose LAST step writes the signed
- * copy). The app has to refuse that itself, in words, and the host's refusal
- * path (useFileApi `refusalMessage`) says a `read_only` answer in words
- * whichever surface it comes back through.
+ * it), or its rule says the flow ends in a write (`applies.writable`). Read
+ * by `pluginActionNeed` (writing needs `editor`).
  */
 export function pluginActionWrites(a: Pick<PluginActionRow, 'output_mode'> & { applies?: Pick<PluginActionRow['applies'], 'writable'> }): boolean {
   return a.output_mode === 'sibling' || a.output_mode === 'version' || a.applies?.writable === true;
 }
 
 /**
- * Not offered on a read-only storage: an action that writes there — unless
- * its result may go into a folder the person chooses (`output_elsewhere`),
- * whose screen then asks where.
+ * Not offered on a read-only storage: the SERVER's answer, sent on every
+ * action row as `read_only_ok` (wasmplugin.OffersOnReadOnly — the rule the
+ * run itself applies in handlers/app_plugins.go `authorise`).
+ *
+ * ⚠⚠ Why the menu asks at all (QA, 2026-09-21): on a read-only drive
+ * "Dönüştür…", "İmzala…" and "İmza iste…" were all offered, and the first
+ * one answered the click with a 409 and a toast that was gone in 2.5 s — for
+ * the person it did nothing. An action that can only be refused is not
+ * offered, the same rule the built-in verbs follow.
+ *
+ * ⚠⚠ Why it is the server's answer and not worked out here (0.54, #212): the
+ * menu used to rebuild the rule from `output_mode` and `output_elsewhere`, and
+ * offered every "elsewhere" action — the run lets one through only when it
+ * opens a screen that asks where the result goes, so an elsewhere action with
+ * no screen was offered and refused. A row from a server that does not send
+ * the answer is offered; the run decides either way.
  */
 function refusedReadOnly(a: PluginActionRow): boolean {
-  return pluginActionWrites(a) && a.output_elsewhere !== true;
+  return a.read_only_ok === false;
 }
 
 const LEVEL_RANK: Record<string, number> = { none: 0, viewer: 1, editor: 2, owner: 3 };

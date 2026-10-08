@@ -692,7 +692,7 @@
     </div></div>
 
     <script type="module">
-      import './filex.js';
+      import * as filexWc from './filex.js';
 
       // ── Web Share, which Electron does not ship ───────────────
       // The explorer already has a share button; it is gated on
@@ -862,12 +862,13 @@
       // pretending to be two — which is most of why this window looked wrong.
       // The OS locale decides, and everything we do not ship falls back to
       // English rather than to an empty string.
-      // ⚠ A `let`, and read through lang(): the language is a SETTING now
-      // (Settings → Language: System / English / Türkçe). The main process
-      // resolves 'system' against the OS and hands the answer down as
-      // `effectiveLocale`, so the tray menu and this window can never disagree
-      // about what "system" means. Until the first state arrives — the boot
-      // screens draw before any IPC — the browser locale is the best guess.
+      // ⚠ A `let`, and read through lang(): the language is the ACCOUNT's
+      // (#191 - the app has no language of its own; Settings → Language writes
+      // the account's). The main process resolves it (the active account's,
+      // else the system's) and hands the answer down as `effectiveLocale`, so
+      // the tray menu and this window can never disagree. Until the first
+      // state arrives — the boot screens draw before any IPC — the browser
+      // locale is the best guess.
       let LANG = (navigator.language || 'en').toLowerCase().startsWith('tr') ? 'tr' : 'en';
       function applyLang(next) {
         const lang = next === 'tr' || next === 'en' ? next : LANG;
@@ -1051,9 +1052,10 @@
         'set.other_copy_snap_sub': ['The Snap Store copy of filex is installed on this computer as well. It keeps its own accounts and its own sync history, so a folder paired in both is synced by two apps that do not know about each other - duplicate uploads, conflict copies, a delete reaching the side that did not ask for it. Keep one: remove the snap with "sudo snap remove filex-app", or remove this copy with your package manager.',
                                     'filex\'in Snap Store kopyası da bu bilgisayarda kurulu. Kendi hesaplarını ve kendi senkron geçmişini tuttuğu için ikisinde de eşlenen bir klasörü birbirinden habersiz iki uygulama senkronlar: aynı dosya iki kez yüklenir, çakışma kopyaları oluşur, bir silme istemeyen tarafa ulaşabilir. Birini tutun: snap\'i "sudo snap remove filex-app" komutuyla ya da bu kopyayı paket yöneticinizle kaldırın.'],
         'set.language':         ['Language', 'Dil'],
-        'set.language_sub':     ['Applies to this window, the tray menu and the file list.',
-                                 'Bu pencere, tepsi menüsü ve dosya listesi için geçerlidir.'],
-        'set.language_system':  ['System', 'Sistem'],
+        'set.language_sub':     ['Your account\'s language: this window, the tray menu, the file list and your notifications everywhere follow it.',
+                                 'Hesabının dili: bu pencere, tepsi menüsü, dosya listesi ve her yerdeki bildirimlerin bu dili kullanır.'],
+        'set.language_signed_out': ['Sign in to choose: the language belongs to your account. Until then the app uses the system language.',
+                                    'Seçmek için giriş yap: dil hesabına aittir. O zamana kadar uygulama sistemin dilini kullanır.'],
         'ow.title':             ['Open documents with filex', 'Belgeleri filex ile aç'],
         'ow.idea':              ['Double-click a Word, Excel, PowerPoint or CSV file and it opens here, in the editor your filex server runs - no Office needed on this computer.',
                                  'Bir Word, Excel, PowerPoint ya da CSV dosyasına çift tıkla; filex sunucunun çalıştırdığı düzenleyicide burada açılsın - bu bilgisayarda Office gerekmez.'],
@@ -1123,27 +1125,9 @@
         'sync.waiting':         ['waiting to start', 'başlaması bekleniyor'],
         'sync.watching':        ['watching for changes', 'değişiklikler izleniyor'],
         'sync.stopped':         ['stopped', 'durdu'],
-        // How changes reach the engine (LiveState in src/syncstatus.ts). One word
-        // and what it means — no new UI, just the truth about the speed.
-        'sync.live.connected':  ['Live - changes arrive as they happen', 'Canlı - değişiklikler anında geliyor'],
-        'sync.live.polling':    ['Polling - this server does not announce changes; checked every 30 s',
-                                 'Yoklama - bu sunucu değişiklikleri bildirmiyor; 30 sn’de bir kontrol ediliyor'],
-        'sync.live.offline':    ['Offline - the server cannot be reached; retrying',
-                                 'Çevrimdışı - sunucuya ulaşılamıyor; yeniden deneniyor'],
-        // Keys are the engine's codes (LocalNote in src/syncstatus.ts).
-        'sync.local.too-large': ['Changes made on this computer are found by the 30-second check - the folder has too many items to watch',
-                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur - klasörde izlenemeyecek kadar çok öğe var'],
-        'sync.local.unavailable': ['Changes made on this computer are found by the 30-second check - the folder cannot be watched',
-                                 'Bu bilgisayarda yapılan değişiklikler 30 saniyelik kontrolde bulunur - klasör izlenemiyor'],
-        // Another process holds the folder's lock (FolderView 'busy' in
-        // src/sync-policy.ts): the other copy of this app, or the CLI. Not an
-        // error — the folder is being synced, just not by this copy.
-        'sync.busy':            ['Another filex on this computer is syncing this folder - this copy takes over when that one stops',
-                                 'Bu bilgisayardaki başka bir filex bu klasörü eşitliyor - o kapandığında bu kopya devralır'],
         'sync.paused':          ['paused - resume sync to continue', 'duraklatıldı - devam etmek için eşitlemeyi sürdür'],
         'sync.signed_out':      ['stopped - the server signed this account out; Reconnect to continue',
                                  'durdu - sunucu bu hesabın oturumunu kapattı; devam etmek için Yeniden bağlan'],
-        'sync.window_wait':     ['waiting for the sync window, {window}', 'eşitleme saatleri bekleniyor, {window}'],
         'sync.held_one':        ['1 item on this computer is not on the server or differs from it.',
                                  'Bu bilgisayardaki 1 öğe sunucuda yok ya da sunucudakinden farklı.'],
         'sync.held_many':       ['{n} items on this computer are not on the server or differ from it.',
@@ -1152,30 +1136,16 @@
                                  'filex bunları yüklemek yerine bekletiyor: bu klasörün ilk eşitlemesi, zaten içeriği olan bir sunucu klasörüne çok sayıda öğe gönderecekti - bu, klasörün eski bir kopyasına benziyor. Geri kalan her şey eşitlenmeye devam ediyor.'],
         'sync.held_upload':     ['Upload them', 'Sunucuya yükle'],
         'sync.held_discard':    ['Move to local trash', 'Yerel çöpe taşı'],
-        'sync.phase_inventory': ['listing the server…', 'sunucu listeleniyor…'],
-        'sync.phase_plan':      ['working out what to change…', 'neyin değişeceği hesaplanıyor…'],
-        // A count says one or many (Tn): English has two forms, Turkish puts
-        // no plural on a noun after a number and needs one.
-        'sync.phase_plan_n':    ['{n} changes to make', '{n} değişiklik yapılacak'],
-        'sync.phase_plan_n_one': ['{n} change to make', '{n} değişiklik yapılacak'],
-        'sync.phase_inventory_listed': ['listing the server - {n} items so far', 'sunucu listeleniyor - şimdiye dek {n} öğe'],
-        'sync.phase_inventory_listed_one': ['listing the server - {n} item so far', 'sunucu listeleniyor - şimdiye dek {n} öğe'],
-        'sync.phase_inventory_here': ['{n} items on this computer - listing the server…', 'bu bilgisayarda {n} öğe - sunucu listeleniyor…'],
-        'sync.phase_inventory_here_one': ['{n} item on this computer - listing the server…', 'bu bilgisayarda {n} öğe - sunucu listeleniyor…'],
-        'sync.phase_inventory_also_here': ['({n} on this computer)', '(bu bilgisayarda {n})'],
-        'sync.phase_settling_n': ['finishing up - {done}/{total}', 'tamamlanıyor - {done}/{total}'],
         'sync.pending':         ['waiting for its first check', 'ilk denetimini bekliyor'],
         'sync.moving':          ['moving to the new filex folder…', 'yeni filex klasörüne taşınıyor…'],
         'set.sync_root_moving': ['Moving…', 'Taşınıyor…'],
         'sync.exited':          ['the sync engine stopped (exit {code})', 'eşitleme motoru durdu (çıkış {code})'],
+        // An engine that never wrote one event and exited: it does not speak
+        // the --json stream (older than this app, FILEX_CLI) or stopped before
+        // it could. Its own words follow, as for any engine error.
+        'sync.no_stream':       ['the sync engine could not start (exit {code}) - it may be older than this app',
+                                 'eşitleme motoru başlatılamadı (çıkış {code}) - bu uygulamadan eski olabilir'],
         'sync.restarting':      ['- starting it again shortly', '- birazdan yeniden başlatılıyor'],
-        'sync.phase_transfer':  ['moving files - {done}/{total}', 'dosyalar aktarılıyor - {done}/{total}'],
-        'sync.phase_bytes':     ['{bytes} of {size}', '{bytes} / {size}'],
-        'sync.eta':             ['about {eta} left', 'yaklaşık {eta} kaldı'],
-        'sync.eta_h':           ['{h} h {m} min', '{h} sa {m} dk'],
-        'sync.eta_m':           ['{m} min', '{m} dk'],
-        'sync.eta_s':           ['{s} s', '{s} sn'],
-        'sync.phase_settling':  ['finishing up…', 'tamamlanıyor…'],
         'sync.trash_kept':      ['Kept for 30 days:', '30 gün saklanıyor:'],
         'sync.trash_empty':     ['Nothing has been removed by sync.', 'Eşitleme hiçbir şey silmedi.'],
 
@@ -1194,12 +1164,6 @@
         let s = entry ? (LANG === 'tr' ? entry[1] : entry[0]) : key;
         if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(v);
         return s;
-      }
-
-      /** T for a count: `<key>_one` when there is exactly one and the table
-       *  has it, `<key>` otherwise, with {n} in this window's digits. */
-      function Tn(key, n, vars) {
-        return T(n === 1 && STRINGS[key + '_one'] ? key + '_one' : key, { ...vars, n: localCount(n) });
       }
 
       /**
@@ -1446,6 +1410,9 @@
         $('#boot-reconnect').addEventListener('click', () => { void window.filexApp.reconnect(account.id); });
         $('#boot-signout').addEventListener('click', async () => {
           state = await window.filexApp.signOut(account.id);
+          // #196 - the menu answers the explorer remembered for this browser go
+          // with the account (the web app's sign-out does the same).
+          filexWc.clearMenuAnswers?.();
           mountedFor = null;
           render();
         });
@@ -1864,59 +1831,6 @@
       // native menu built in the main process, and nothing in the file list can
       // tell it what language to speak. One control, in the one place that can
       // reach all three surfaces (this window, the tray, the explorer).
-      /** The engine's size ('1.2 GiB') with this window's decimal mark. */
-      function localSize(s) {
-        return LANG === 'tr' ? String(s).replace(/(\d)\.(\d)/, '$1,$2') : String(s);
-      }
-
-      /** The engine's estimate in this window's words; its own text when it
-       *  said something this window cannot read. */
-      function localEta(v) {
-        const t = v.etaSeconds;
-        if (typeof t !== 'number') return v.eta || '';
-        if (t >= 3600) return T('sync.eta_h', { h: String(Math.floor(t / 3600)), m: String(Math.floor((t % 3600) / 60)) });
-        if (t >= 60) return T('sync.eta_m', { m: String(Math.round(t / 60)) });
-        return T('sync.eta_s', { s: String(t) });
-      }
-
-      /** One of the engine's phases, in words, for the folder line — with the
-       *  bytes and the time left once the engine reports them. */
-      function activityLine(v) {
-        if (v.phase === 'transfer' && v.total > 0) {
-          let line = T('sync.phase_transfer', { done: String(v.done), total: String(v.total) });
-          if (v.bytesDone && v.bytesTotal) {
-            line += ', ' + T('sync.phase_bytes', { bytes: localSize(v.bytesDone), size: localSize(v.bytesTotal) });
-          }
-          if (v.eta) line += ' - ' + T('sync.eta', { eta: localEta(v) });
-          return line;
-        }
-        // Every phase says its figures once the engine has them: a large
-        // server lists for minutes, and "listing the server…" alone read as
-        // stuck.
-        if (v.phase === 'plan') {
-          return v.total > 0 ? Tn('sync.phase_plan_n', v.total) : T('sync.phase_plan');
-        }
-        if (v.phase === 'settling') {
-          return v.total > 0
-            ? T('sync.phase_settling_n', { done: localCount(v.done), total: localCount(v.total) })
-            : T('sync.phase_settling');
-        }
-        // The count of what is HERE comes first and stays while the server is
-        // listed (syncstatus.ts keeps it across the two inventory lines).
-        const here = typeof v.here === 'number';
-        if (typeof v.listed === 'number') {
-          const line = Tn('sync.phase_inventory_listed', v.listed);
-          return here ? line + ' ' + T('sync.phase_inventory_also_here', { n: localCount(v.here) }) : line;
-        }
-        if (here) return Tn('sync.phase_inventory_here', v.here);
-        return T('sync.phase_inventory');
-      }
-
-      /** A count with this window's thousands separator. */
-      function localCount(n) {
-        return Number(n).toLocaleString(LANG === 'tr' ? 'tr-TR' : 'en-US');
-      }
-
       /** A bandwidth limit: the presets the main process offers, KiB/s. A
        *  stored value that is not one of them is named rather than hidden. */
       function limitRow(id, current, label, sub) {
@@ -1937,6 +1851,10 @@
 
       function settingsHtml() {
         const active = state.accounts.find((a) => a.id === state.activeId);
+        // The language is written to the account (#191): an account whose
+        // token the server no longer takes cannot write it (main.ts refuses
+        // settings:set for it), so it is offered like no account at all.
+        const signedIn = !!active && !active.signedOut;
 
         /** A yes/no row: the label, what it means, and a switch that shows the
          *  state instead of a button whose text is the state. */
@@ -1973,24 +1891,27 @@
           const st = statusOf[f.accountId];
           // ⚠ THIS folder's state, not the account's (per-pair state:
           // src/syncstatus.ts). What the line leads with is decided in the
-          // main process (src/sync-policy.ts folderView); this only puts it
-          // into words.
+          // main process (src/sync-policy.ts folderView). ⚠⚠ What the ENGINE
+          // reports (a phase, a busy folder, the window, an error, how changes
+          // reach it) is its own sentence, said in this app's language by the
+          // engine (`--lang`, #213): shown as it is, never worded here. Only
+          // the app's own states (paused, signed out, moving…) are worded here.
           const h = (st && st.pairs && st.pairs[f.id]) || {};
           const v = f.view || { kind: 'starting' };
           let line = T('sync.waiting'), cls = 'muted';
           switch (v.kind) {
             case 'paused': line = T('sync.paused'); break;
             case 'signed-out': line = T('sync.signed_out'); cls = 'err'; break;
-            case 'active': line = activityLine(v); cls = 'ok'; break;
-            case 'busy': line = T('sync.busy'); break;
-            case 'window': line = T('sync.window_wait', { window: v.window.replace('-', '-') }); break;
+            case 'active': line = v.message || T('sync.waiting'); cls = 'ok'; break;
+            case 'busy': line = v.message; break;
+            case 'window': line = v.message; break;
             // An engine that stopped on its own: said in this window's
             // language, with the engine's own reason when it gave one (its
             // words, like any engine error here) and the restart the
             // supervisor has scheduled.
             case 'error':
               line = v.exited
-                ? T('sync.exited', { code: v.exited }) + (v.reason ? ': ' + v.reason : '') +
+                ? T(v.noStream ? 'sync.no_stream' : 'sync.exited', { code: v.exited }) + (v.reason ? ': ' + v.reason : '') +
                   (v.restartAt ? ' ' + T('sync.restarting') : '')
                 : v.message;
               cls = 'err';
@@ -2007,12 +1928,10 @@
           // A busy folder is synced by ANOTHER process: how changes reach
           // this copy's engine is not news about it.
           const syncing = st && st.running && v.kind !== 'paused' && v.kind !== 'signed-out' && v.kind !== 'busy';
-          const live = syncing && st.live ? T('sync.live.' + st.live) : '';
+          const live = syncing && st.live ? (st.liveMessage || '') : '';
           // How changes made on THIS computer reach the engine — only said
           // when they cannot be watched and wait for the 30-second check.
-          const localNote = syncing && h.local
-            ? T('sync.local.' + h.local.code) + (h.local.code === 'unavailable' && h.local.detail ? `: ${h.local.detail}` : '')
-            : '';
+          const localNote = syncing && h.local ? (h.local.message || '') : '';
           return `
           <div class="card" data-pair="${esc(f.id)}"><div class="between">
             <div style="min-width:0">
@@ -2095,7 +2014,7 @@
                 (state.syncWindow || '') === w ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
               }${w ? ` title="${esc(w.replace('-', '-'))}"` : ''}>${esc(w ? T('set.window_' + w) : T('set.window_any'))}</button>`).join('')
             }</div>
-          </div></div>
+          </div>${state.syncWindowProblem ? `<div class="muted err" data-window-problem>${esc(state.syncWindowProblem)}</div>` : ''}</div>
           ${active ? `<div class="card"><div class="between">
             <div style="min-width:0">
               <div class="label">${esc(T('set.sync_root'))}</div>
@@ -2120,14 +2039,17 @@
           <h2>${esc(T('set.this_app'))}</h2>
           <div class="card"><div class="between">
             <div><div class="label">${esc(T('set.language'))}</div>
-              <div class="muted">${esc(T('set.language_sub'))}</div></div>
+              <div class="muted">${esc(T(signedIn ? 'set.language_sub' : 'set.language_signed_out'))}</div></div>
             <div class="segmented">${
               // The names stay in their own language — a Turkish speaker looking
               // for Turkish scans for "Türkçe", not for "Turkish".
-              [['system', T('set.language_system')], ['en', 'English'], ['tr', 'Türkçe']]
+              // ⚠ #191: no "System" choice - the app's language IS the
+              // account's, and a pick is written to the account (main.ts
+              // settings:set). The lit one is the language the window draws.
+              [['en', 'English'], ['tr', 'Türkçe']]
                 .map(([code, label]) => `<button data-locale="${code}"${
-                  (state.locale || 'system') === code ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
-                }>${esc(label)}</button>`).join('')
+                  state.effectiveLocale === code ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"'
+                }${signedIn ? '' : ' disabled'}>${esc(label)}</button>`).join('')
             }</div>
           </div></div>
           <div class="card"><div class="between">
@@ -2361,7 +2283,9 @@
         el.innerHTML = settingsHtml();
         $('#close-settings', el).addEventListener('click', () => toggleSettings(false));
         el.querySelectorAll('[data-signout]').forEach((b) => b.addEventListener('click', async () => {
-          state = await window.filexApp.signOut(b.dataset.signout); render(); renderSettings();
+          state = await window.filexApp.signOut(b.dataset.signout);
+          filexWc.clearMenuAnswers?.(); /* #196 */
+          render(); renderSettings();
         }));
         el.querySelectorAll('[data-admin]').forEach((b) => b.addEventListener('click', () =>
           window.filexApp.openAdmin(b.dataset.admin)));
@@ -2458,8 +2382,8 @@
         }));
         el.querySelectorAll('[data-locale]').forEach((b) => b.addEventListener('click', async () => {
           state = await window.filexApp.setSettings({ locale: b.dataset.locale });
-          // The main process resolves 'system'; taking its answer keeps this
-          // window and the tray menu in the same language.
+          // Written to the account by the main process; taking its answer
+          // keeps this window and the tray menu in the same language.
           applyLang(state.effectiveLocale);
           relabelStatic();
           render();

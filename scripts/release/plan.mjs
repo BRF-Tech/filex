@@ -238,6 +238,21 @@ const WORKFLOW_GUARDS = [
   'circleci-green.mjs reads a commit as the release tool does',
   'circleci-green.mjs says when it could not ask, never "not green", and never prints the token',
   'circleci-green.mjs refuses what is no project slug or no commit before it asks anything',
+  // 0.53.0: GitHub never created the tag run's desktop jobs (an internal
+  // error, on a run that could not be retried) after the binaries, images and
+  // npm were out. only=stores sends what the Release has to the Snap Store
+  // (amd64), winget and the Microsoft Store, builds nothing the Release has
+  // and attaches nothing (packaging/ci/release-stores.patch,
+  // web/tests/deploy/releaseStoresOnly.test.ts).
+  'only=stores needs a tag, may publish, and is no full run',
+  'only=stores keeps the windows, linux and store rows of a full run, and empties the scripts of the two whose files the Release has',
+  'only=stores runs plan, verify and desktop, and no other job',
+  "only=stores builds nothing on the windows and linux rows: it downloads the Release's files by name and checks them against the Release's digests",
+  "only=stores sends the Release's installers to winget and its amd64 snap to the Snap Store, and attaches nothing",
+  'only=stores sends the bundle the dry run kept to the Microsoft Store, or builds it when none was kept',
+  'a dry run of only=stores publishes nothing, and writes and validates the winget manifest',
+  "verify asks the tag's commit for CI and a dry run of everything, for only=stores as for only=arm64, and finds the Store bundle it kept",
+  'a dry run of only=stores is let through without asking, like one of only=arm64',
 ];
 
 /**
@@ -316,6 +331,11 @@ function wingetArches(version) {
  * public listing answers instead, which turns green once certification passes.
  * A Store job that ran and failed stays red: the listing would still show the
  * previous version, or a hand submission would hide the failure.
+ *
+ * 0.53.0: GitHub never created the tag run's desktop jobs, and a run of
+ * release.yml with only=stores ("publish stores <tag> <commit>", run-name)
+ * sent the Store bundle instead. When the tag run has no Store job, that run's
+ * is read the same way.
  */
 function storeBundle(tag, version) {
   return {
@@ -325,22 +345,56 @@ function storeBundle(tag, version) {
         const r = await storeListing('9PKXDJLVZWXW', 'BRFTech.filexapp', storeVersion(version), ['x64', 'arm64']);
         return { ok: r.ok, detail: `${why}; ${r.detail}` };
       };
+      const storeJob = (id) => {
+        const view = run('gh', ['run', 'view', id, '-R', 'BRF-Tech/filex', '--json', 'jobs']);
+        if (view.status !== 0) return { error: `could not check — gh run view ${id}: ${view.stderr.trim()}` };
+        return { job: JSON.parse(view.stdout).jobs.find((j) => j.name === 'Desktop packages (store)') };
+      };
       const runs = run('gh', ['run', 'list', '-R', 'BRF-Tech/filex', '--workflow', 'release.yml', '--branch', tag, '--limit', '1', '--json', 'databaseId', '--jq', '.[0].databaseId']);
-      const id = runs.stdout.trim();
       if (runs.status !== 0) return { ok: false, detail: `could not check — gh run list: ${runs.stderr.trim()}` };
-      if (!id) return listing(`no release.yml run for ${tag}`);
-      const view = run('gh', ['run', 'view', id, '-R', 'BRF-Tech/filex', '--json', 'jobs']);
-      if (view.status !== 0) return { ok: false, detail: `could not check — gh run view ${id}: ${view.stderr.trim()}` };
-      const job = JSON.parse(view.stdout).jobs.find((j) => j.name === 'Desktop packages (store)');
-      if (!job) return listing(`run ${id} has no "Desktop packages (store)" job`);
-      const step = (n) => job.steps.find((x) => x.name === n)?.conclusion ?? 'missing';
-      const problems = [];
-      for (const n of ['Bundle the Store packages', 'Submit to the Microsoft Store']) if (step(n) !== 'success') problems.push(`"${n}": ${step(n)}`);
+      let id = runs.stdout.trim();
+      let job;
+      if (id) {
+        const r = storeJob(id);
+        if (r.error) return { ok: false, detail: r.error };
+        job = r.job;
+      }
+      if (!job) {
+        const title = `publish stores ${tag} `;
+        const stores = run('gh', ['run', 'list', '-R', 'BRF-Tech/filex', '--workflow', 'release.yml', '--event', 'workflow_dispatch', '--limit', '100', '--json', 'databaseId,displayTitle',
+          '--jq', `[.[] | select(.displayTitle | startswith(${JSON.stringify(title)}))][0].databaseId // empty`]);
+        if (stores.status !== 0) return { ok: false, detail: `could not check — gh run list: ${stores.stderr.trim()}` };
+        const sid = stores.stdout.trim();
+        if (sid) {
+          const r = storeJob(sid);
+          if (r.error) return { ok: false, detail: r.error };
+          if (r.job) [id, job] = [sid, r.job];
+        }
+      }
+      if (!job) return listing(id ? `run ${id} has no "Desktop packages (store)" job` : `no release.yml run for ${tag}`);
       const notes = run('gh', ['api', `repos/BRF-Tech/filex/check-runs/${job.databaseId}/annotations`, '--jq', '.[] | select(.title == "Microsoft Store") | .message']);
-      if (notes.status === 0 && notes.stdout.trim()) problems.push(`the run warned: ${notes.stdout.trim()}`);
+      const problems = storeJobProblems(job.steps, notes.status === 0 ? notes.stdout.trim() : '');
       return problems.length ? { ok: false, detail: `run ${id}: ${problems.join('; ')}` } : { ok: true, detail: `run ${id}: bundled and submitted` };
     },
   };
+}
+
+/**
+ * What is wrong with a release run's "Desktop packages (store)" job, from its
+ * steps and its "Microsoft Store" annotations: the bundle was built there
+ * ("Bundle the Store packages") or is the one the dry run kept, checked
+ * against its sums (a tag run that promotes, #174, and only=stores), and it
+ * was submitted without a warning (msstore-submit.ps1 warns rather than fails).
+ */
+export function storeJobProblems(steps, warnings = '') {
+  const step = (n) => steps.find((x) => x.name === n)?.conclusion ?? 'missing';
+  const built = 'Bundle the Store packages';
+  const kept = 'They are the files the dry run kept, for this version';
+  const problems = [];
+  if (step(built) !== 'success' && step(kept) !== 'success') problems.push(`"${built}": ${step(built)}, "${kept}": ${step(kept)}`);
+  if (step('Submit to the Microsoft Store') !== 'success') problems.push(`"Submit to the Microsoft Store": ${step('Submit to the Microsoft Store')}`);
+  if (warnings) problems.push(`the run warned: ${warnings}`);
+  return problems;
 }
 
 /**
@@ -756,6 +810,7 @@ export default function plan({ repo, version, tag }) {
             'tests/deploy/ciFullMatrix.test.ts',
             'tests/deploy/releasePromote.test.ts',
             'tests/deploy/releaseVerifyCircleci.test.ts',
+            'tests/deploy/releaseStoresOnly.test.ts',
           ],
           env: (c) => ({ FILEX_WORKFLOWS_DIR: workflowsOf(c.exportTarget) }),
           mustPass: WORKFLOW_GUARDS,

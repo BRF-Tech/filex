@@ -10,18 +10,28 @@
  * "save failed: 500 {…}" under an editor, "engine libreoffice is not
  * installed on this host" in the operations centre.
  *
+ * ⚠⚠ And the sentence is the SERVER's (0.54 audit A1/A2, backend
+ * internal/apierr, docs/API-ERRORS.md): a refusal carries `message`, written
+ * by the server in the reader's language, and this file shows it. It keeps
+ * no table of the server's codes or of its English any more - those tables
+ * (CODE_WORDS, JOB_WORDS, CODE_FIELD_WORDS, REASON_WORDS) were copies of the
+ * server's words that drifted from it, and the explorer threw the server's
+ * own reason away for them. Its own words are only for what never reached
+ * the server (the network) and for an answer that carries no sentence (the
+ * status's words).
+ *
  * So:
  *   - `requestFailure` turns an HTTP refusal into an Error whose `message` is
- *     already the sentence, with `status`, the refusal's `code` and the raw
- *     body (`detail`) riding along for whoever may see them. useFileApi's
- *     `jsonFetch` / `fetchBlob` / uploads and every component that calls
- *     `fetch` itself go through it — one table of codes, not one per screen.
+ *     already the sentence (the server's `message`, else the status's words),
+ *     with `status`, the refusal's `code` and the raw body (`detail`) riding
+ *     along for whoever may see them. useFileApi's `jsonFetch` / `fetchBlob` /
+ *     uploads and every component that calls `fetch` itself go through it.
  *   - `sayFailure` turns ANY caught failure into `{ text, detail? }`: the
  *     sentence for everybody, the raw words only when the caller may
  *     administer the instance (`caller_admin`).
- *   - `jobFailure` is the operations centre's case: the server classifies a
- *     failed app job (`error_code`), and an app's own words are shown as
- *     they are unless they look like plumbing (`looksTechnical`).
+ *   - `jobFailure` is the operations centre's case: the server says a failed
+ *     queue row (`error_text`, from its `error_code`), and an app's own words
+ *     are shown as they are unless they look like plumbing (`looksTechnical`).
  */
 import { foreignText } from './direction';
 import { localeTable } from './uiLocales';
@@ -81,6 +91,8 @@ export interface RequestFailure extends Error {
   /** `admin_hint` — the fix, which the SERVER sends only to a caller who can
    *  act on it (handlers/tenantown.go `callerMayConfigureInstance`). */
   hint?: string;
+  /** The server's own sentence (`message`), whole: `detail` is clipped. */
+  server?: string;
   /** The refusal's `reason` (`{"error":"e2e_not_allowed","reason":"policy_off"}`),
    *  kept whole. ⚠ `detail` is clipped to 300 characters, and a Go map writes
    *  its keys in order — error, message, reason — so a long `message` pushes
@@ -130,138 +142,25 @@ export function statusIsTelling(status: number): boolean {
   return status >= 400 && status < 500 && status in STATUS_KEYS;
 }
 
-/**
- * Refusals a person can act on, by the code or words the server answers with.
- *
- * ⚠⚠ A read-only storage answers in two shapes — `409 {"error":"read_only"}`
- * from the app and public-API paths, `403 {"error":"storage is read-only"}`
- * from the manager's mutating verbs — and by status alone they read "Already
- * exists / conflict" and "You are not allowed to do this" (QA, 2026-09-21).
- * `no_secret_key` is the S3/SSH key endpoints on an install with no
- * encryption key: its server message names an environment variable, which a
- * regular user must never be shown.
- */
-const CODE_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^read_only$|read-only/i, 'err.read_only'],
-  [/^no_secret_key$/, 'err.no_secret_key'],
-  [/^quota_exceeded$|quota exceeded|quota: exceeded/i, 'err.quota'],
-  /* wiring:e2 policy — an encryption refused with a reason this build does
-     not know (REASON_WORDS has the ones it does): still said as an encryption
-     refused, never as a bare "you are not allowed". */
-  [/^e2e_not_allowed$/, 'err.e2e_not_allowed.other'],
-  /* wiring:e2 policy — `POST /api/files/e2e/requests` on a listing gone stale
-     (handlers/e2e_policy_files.go, e2epolicy requests.go): the kind asked for
-     is not what is at the path, or nothing can be requested there any more
-     and the refusal names no reason (the answer is now `allowed`). Its other
-     400s are `bad_request`, which the request dialog never provokes. */
-  [/^kind_mismatch$/, 'err.e2e_request.kind_mismatch'],
-  [/^not_requestable$/, 'err.e2e_request.not_requestable'],
-  /* wiring:e2 policy - the same endpoint (operator decision 2026-10-03): a
-     request names something that is there (`404 path_missing`), and one
-     person has at most twenty waiting (`429 too_many_pending`). */
-  [/^path_missing$/, 'err.e2e_request.path_missing'],
-  [/^too_many_pending$/, 'err.e2e_request.too_many_pending'],
-  /* wiring:e2 policy — a rule that could not be decided is not a yes: every
-     HTTP door that creates a key file or a `.fxe` answers `500
-     {"error":"could not check the encryption policy"}` (handlers/
-     e2e_policy_gate.go answerE2E). By status alone that reads "Server error",
-     which says nothing of what failed; the error text is the whole code. */
-  [/^could not check the encryption policy$/, 'err.e2e_policy.undecided'],
-];
-
-/**
- * The reasons an encryption is refused for (backend internal/e2epolicy
- * Reason), in the order the rule asks: the platform operator's switch, the
- * tenant's policy, the permission, an approval.
- */
-const E2E_REFUSAL_REASONS: ReadonlyMap<string, string> = new Map([
-  ['tenant_disabled', 'err.e2e_not_allowed.tenant_disabled'],
-  ['policy_off', 'err.e2e_not_allowed.policy_off'],
-  ['admins_only', 'err.e2e_not_allowed.admins_only'],
-  ['permission', 'err.e2e_not_allowed.permission'],
-  ['approval_required', 'err.e2e_not_allowed.approval_required'],
-]);
-
-/**
- * Refusals that say WHICH rule said no, in a `reason` beside their code — one
- * sentence per reason. ⚠ Only for a code listed here: elsewhere `reason` is
- * free text (a plugin request's is the requester's own words).
- *
- * wiring:e2 policy — `403 {"error":"e2e_not_allowed","reason":…}` from every
- * door that creates a key file or a `.fxe`; and `400 not_requestable` from
- * the request endpoint, which carries the same `reason` when the rule now
- * says no (and none when it now says yes: CODE_WORDS).
- */
-const REASON_WORDS: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map([
-  ['e2e_not_allowed', E2E_REFUSAL_REASONS],
-  ['not_requestable', E2E_REFUSAL_REASONS],
-]);
-
-function reasonWordsWith(code: string, reason: unknown, t: T): string {
-  const key = typeof reason === 'string' ? REASON_WORDS.get(code)?.get(reason) : undefined;
-  return key ? t(key) : '';
+/** The server's own sentence in a refusal body (`message`), or ''. */
+function messageOf(fields: Record<string, unknown>): string {
+  const m = fields.message;
+  return typeof m === 'string' ? m.trim() : '';
 }
 
 /**
- * A queue JOB's own error strings a person can act on — read from a failed
- * ops row (`jobFailure`) and nowhere else.
- *
- * ⚠⚠ Anchored to the two sentences the server writes, not to "already
- * exists" anywhere. The loose pattern sat in CODE_WORDS, which every HTTP
- * refusal goes through, and New document's 503 EXISTS_CHECK_FAILED ("could
- * not check whether that file already exists…" — an outage) told the person a
- * file of that name was there and to rename it.
- *   - ops.ErrNameTaken — a queued rename (internal/ops/rename_restore.go);
- *   - handlers.Trash RestoreNode — a queued restore (internal/api/handlers/trash.go).
- * A row that also skipped items appends "; …" (ops service), hence `^` only.
+ * The server's sentence in a refusal's data, isolated for the reader's
+ * direction, or '' when it sent none - for a client that holds the answer's
+ * data rather than its text (the admin panel's axios errors, web api/client
+ * `extractError`). The explorer reads the same field through
+ * `requestFailure`, so the two say one sentence about one refusal (0.54
+ * audit A1: the admin panel showed the server's reason, the explorer its own
+ * "You are not allowed to do this").
  */
-const JOB_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/^something with that name already exists here\b|^something already exists at this path: /, 'err.name_taken'],
-  // A queued purge of an entry restored (or taken) meanwhile: the server
-  // leaves a live row alone (trash.ErrNotInTrash, handlers.Trash PurgeNode).
-  [/^trash: the item is not in the trash\b|^trash entry not found\b/, 'err.not_in_trash'],
-];
-
-/**
- * Refusals the queue's doors name in a `code` field beside their English
- * `error` (handlers/ops.go, handlers/trash.go). The code decides the words:
- * printed as it came, a Turkish reader got "this operation cannot be stopped
- * once it has started; it finishes on its own" — and by status alone a 409
- * NOT_CANCELLABLE read "Already exists / conflict".
- */
-const CODE_FIELD_WORDS: Readonly<Record<string, string>> = {
-  BAD_KIND: 'err.bad_kind',
-  READ_ONLY: 'err.read_only',
-  NOT_CANCELLABLE: 'err.not_cancellable',
-  FINISHED: 'err.finished',
-  TOO_MANY: 'err.too_many',
-  /* Drafts (issue #71, handlers/drafts.go). TARGET_TAKEN is not here: it is a
-     question the client asks ("save as name (2).ext?"), never a refusal. */
-  DRAFT_LIMIT: 'err.draft_limit',
-  FOLDER_GONE: 'err.draft_folder_gone',
-  DRAFTS_UNAVAILABLE: 'err.drafts_unavailable',
-  /* Issue #104 - an entry the storage could not answer for (lib/unavailable).
-     By status alone the 409 read "Already exists / conflict". */
-  ENTRY_UNAVAILABLE: 'err.entry_unavailable',
-};
-
-function codeFieldWordsWith(fields: Record<string, unknown>, t: T): string {
-  const key = typeof fields.code === 'string' ? CODE_FIELD_WORDS[fields.code] : undefined;
-  if (!key) return '';
-  // The refusal's numbers are the sentence's placeholders (`{max}`, `{limit}`).
-  const params: Record<string, number> = {};
-  for (const [k, v] of Object.entries(fields)) if (typeof v === 'number') params[k] = v;
-  return t(key, params);
-}
-
-/**
- * The words for a refusal's `code` field, or '' when it names none this file
- * knows — for a client that holds the answer's data rather than its text (the
- * admin panel's axios errors, web api/client `extractError`).
- */
-export function codeWords(data: unknown, locale: string | undefined): string {
+export function serverSaid(data: unknown, locale: string | undefined): string {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return '';
-  return codeFieldWordsWith(data as Record<string, unknown>, wordsIn(locale));
+  const said = messageOf(data as Record<string, unknown>);
+  return said ? foreignText(locale, said) : '';
 }
 
 function fieldsOf(body: string): Record<string, unknown> {
@@ -279,41 +178,37 @@ export function refusalCode(body: string): string {
   return typeof v === 'string' ? v : '';
 }
 
-/** The words for a refusal: what the server SAID when a person can act on it,
- *  the status's words otherwise. */
+/** The words for a refusal: what the server SAID (`message`), the status's
+ *  words when it said nothing. */
 export function refusalWords(status: number, body: string, locale: string | undefined): string {
   return refusalWordsWith(status, body, wordsIn(locale));
 }
 
 /**
  * `whole` is the refusal as `requestFailure` read it, for a caller that says it
- * again from the clipped `detail` (sayFailure): its code and reason stand in
- * for what the clip cut off.
+ * again from the clipped `detail` (sayFailure): the server's whole sentence
+ * stands in for what the clip cut off.
+ *
+ * ⚠ The server's sentence is isolated for the reader's direction (`T.foreign`):
+ * it never passed through a translator, and a path or a name in it would lose
+ * its neutral characters in an Arabic line.
  */
-function refusalWordsWith(
-  status: number,
-  body: string,
-  t: T,
-  whole: Pick<RequestFailure, 'code' | 'reason'> = {},
-): string {
-  const fields = fieldsOf(body);
-  const byCode = codeFieldWordsWith(fields, t);
-  if (byCode) return byCode;
-  const code = refusalCode(body) || whole.code || '';
-  const byReason = reasonWordsWith(code, typeof fields.reason === 'string' ? fields.reason : whole.reason, t);
-  if (byReason) return byReason;
-  for (const [re, key] of CODE_WORDS) if (code && re.test(code)) return t(key);
+function refusalWordsWith(status: number, body: string, t: T, whole: Pick<RequestFailure, 'server'> = {}): string {
+  const said = whole.server || messageOf(fieldsOf(body));
+  if (said) return foreignWith(t, said);
   return statusWordsWith(status, t);
 }
 
 /** An HTTP refusal as an Error carrying its own sentence. */
 export function requestFailure(status: number, body: string, locale: string | undefined): RequestFailure {
-  const err = new Error(refusalWords(status, body, locale)) as RequestFailure;
+  const fields = fieldsOf(body);
+  const server = messageOf(fields);
+  const err = new Error(refusalWordsWith(status, body, wordsIn(locale), { server })) as RequestFailure;
   err.status = status;
   err.code = refusalCode(body);
   err.detail = body.slice(0, 300);
   err.said = true;
-  const fields = fieldsOf(body);
+  if (server) err.server = server;
   const hint = fields.admin_hint;
   if (typeof hint === 'string' && hint) err.hint = hint;
   if (typeof fields.reason === 'string' && fields.reason) err.reason = fields.reason;
@@ -324,12 +219,13 @@ export function requestFailure(status: number, body: string, locale: string | un
  * What to print for a refusal on a screen that used to print the server's
  * `error` field as it came (the connection panels: keys, tokens, exports).
  *
- * A known code is said in the person's language (`CODE_WORDS`); a server
- * sentence written for a person ("public key is not a valid OpenSSH key") is
- * kept, because the status's words would lose what went wrong; plumbing and
- * bare codes fall back to the status's words. ⚠ This replaced five copies of
- * one `messageOf` that printed the field whatever it held — including an
- * environment variable to a regular user.
+ * The server's sentence (`message`) is said as it came; an older refusal
+ * that put a sentence written for a person in `error` ("public key is not a
+ * valid OpenSSH key") is kept too, because the status's words would lose what
+ * went wrong; plumbing and bare codes fall back to the status's words.
+ *
+ * ⚠ This replaced five copies of one helper that printed the field whatever
+ * it held - including an environment variable to a regular user.
  */
 export function serverWords(err: unknown, locale?: string): string {
   // ⚠ `locale` is the reader's: what comes back may be the SERVER's sentence,
@@ -338,10 +234,8 @@ export function serverWords(err: unknown, locale?: string): string {
   const say = (text: string): string => foreignText(locale, text);
   const e = err as Partial<RequestFailure> | null | undefined;
   if (!e || e.said !== true) return say(e instanceof Error ? e.message : err ? String(err) : '');
-  const code = e.code ?? '';
-  if (code && CODE_WORDS.some(([re]) => re.test(code))) return say(e.message ?? '');
-  const f = fieldsOf(e.detail ?? '');
-  const own = typeof f.message === 'string' && f.message ? f.message : code;
+  if (e.server) return say(e.server);
+  const own = e.code ?? '';
   if (own && !looksTechnical(own) && !/^[a-z0-9_]+$/.test(own)) return say(own);
   return say(e.message ?? '');
 }
@@ -419,7 +313,7 @@ export function sayFailure(
   const text = !said
     ? fallback
     : opts.t && typeof e?.status === 'number'
-      ? refusalWordsWith(e.status, e.detail ?? '', opts.t, { code: e.code, reason: e.reason })
+      ? refusalWordsWith(e.status, e.detail ?? '', opts.t, { server: e.server })
       : e?.message || fallback;
   if (!said && raw && typeof console !== 'undefined') console.warn('[filex]', raw);
   // ⚠ Both lines are isolated for the reader's direction: `text` may be the
@@ -444,12 +338,12 @@ export type JobErrorCode =
   | 'app';
 
 /**
- * A failed operation, said — the operations centre and its toast.
+ * A failed operation, said - the operations centre and its toast.
  *
- * `error_code` comes from the server (wasmplugin DecorateOps), which knows
- * the failures it produced itself; the raw `error` stays the admin's second
- * line. With no code (a copy / move, or an older server), known refusals are
- * recognised by their words (`CODE_WORDS`) and anything else is `fallback`.
+ * The server says a failed row (`error_text`, made from the row's
+ * `error_code` in the reader's language, backend ops/errcode.go); the raw
+ * `error` stays the admin's second line. With no sentence, an app's own words
+ * are shown when they are words (`app`), and anything else is `fallback`.
  */
 /** A queue row, as usePendingOps normalises it. */
 export interface FailedOpLike {
@@ -459,6 +353,8 @@ export interface FailedOpLike {
   error_message?: string | null;
   error_code?: string | null;
   error_engine?: string | null;
+  /** The server's sentence for the failure, in the reader's language. */
+  error_text?: string | null;
 }
 
 /**
@@ -474,7 +370,7 @@ export function opFailure(op: FailedOpLike, t: T, opts: { callerAdmin?: boolean 
     ? t('plugin.failed', { label: op.label || op.action || t('opc.kind.plugin') })
     : t('toast.failed');
   return jobFailure(
-    { error: op.error_message, error_code: op.error_code, error_engine: op.error_engine },
+    { error: op.error_message, error_code: op.error_code, error_engine: op.error_engine, error_text: op.error_text },
     fallback,
     t,
     opts,
@@ -482,7 +378,7 @@ export function opFailure(op: FailedOpLike, t: T, opts: { callerAdmin?: boolean 
 }
 
 export function jobFailure(
-  op: { error?: string | null; error_code?: string | null; error_engine?: string | null },
+  op: { error?: string | null; error_code?: string | null; error_engine?: string | null; error_text?: string | null },
   fallback: string,
   t: T,
   opts: { callerAdmin?: boolean } = {},
@@ -497,26 +393,13 @@ export function jobFailure(
   const say = (text: string): string => foreignWith(t, text);
   const withDetail = (text: string): SaidFailure =>
     admin && raw && raw !== text ? { text: say(text), detail: say(raw) } : { text: say(text) };
-  const engine = op.error_engine || '';
+  // The server's sentence: a timeout, a missing engine (the administrator's
+  // form for an administrator), a taken name, an entry gone from the trash…
+  const said = (op.error_text ?? '').trim();
+  if (said) return withDetail(said);
   switch (op.error_code) {
-    case 'timeout':
-      return withDetail(t('opc.err.timeout'));
-    case 'out_of_memory':
-      return withDetail(t('opc.err.out_of_memory'));
-    case 'crashed':
-      return withDetail(t('opc.err.crashed'));
-    case 'app_removed':
-      return withDetail(t('opc.err.app_removed'));
-    case 'action_removed':
-      return withDetail(t('opc.err.action_removed'));
     case 'cancelled':
       return { text: t('opc.status.aborted') };
-    case 'engine_missing':
-      return withDetail(t(admin ? 'opc.err.engine_missing_admin' : 'opc.err.engine_missing', { engine }));
-    case 'office_unconfigured':
-      // 0.50: office documents are converted by the connected ONLYOFFICE;
-      // none is connected. Not "install a program": connect a server.
-      return withDetail(t(admin ? 'opc.err.office_unconfigured_admin' : 'opc.err.office_unconfigured'));
     case 'app': {
       // The app's own words, meant for the person (wasmplugin CallError:
       // "safe for a user; the guest's own words") — unless they are plumbing.
@@ -534,6 +417,5 @@ export function jobFailure(
     default:
       break;
   }
-  for (const [re, key] of [...JOB_WORDS, ...CODE_WORDS]) if (raw && re.test(raw)) return withDetail(t(key));
   return withDetail(fallback);
 }

@@ -119,6 +119,7 @@ func (h *SharesMine) List(w http.ResponseWriter, r *http.Request) {
 		rows = []*db.ShareWithMeta{}
 	}
 	base := h.Tenants.FromRequest(r)
+	fillShareStates(rows, time.Now())
 	for _, row := range rows {
 		if row == nil || row.Share == nil {
 			continue
@@ -299,6 +300,19 @@ func (h *SharesMine) auditReveal(r *http.Request, sh *model.Share, user *model.U
 		IP:         clientIP(r),
 		CreatedAt:  time.Now(),
 	})
+}
+
+// fillShareStates says where each listed link stands (model.Share.StateAt):
+// active, expired, exhausted or revoked. Every list of links answers it, so
+// no screen works a link's state out from its expiry on the browser's clock
+// - which missed a link whose downloads were used up and turned over early
+// or late on a skewed clock.
+func fillShareStates(rows []*db.ShareWithMeta, now time.Time) {
+	for _, row := range rows {
+		if row != nil && row.Share != nil {
+			row.Share.State = row.Share.StateAt(now)
+		}
+	}
 }
 
 // shareLinkPath is the public prefix a link of this kind is served under — a

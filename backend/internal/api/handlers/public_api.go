@@ -7,6 +7,7 @@
 //
 //	GET  /api/public/branding                  — who this instance says it is
 //	GET  /api/public/ui-locales/{code}         — one language an app adds: its strings
+//	GET  /api/public/strings                   — the public pages' sentences, in one language
 //	GET  /api/public/s/{token}                 — a share's state
 //	POST /api/public/s/{token}/pin             — answer the PIN → unlock cookie
 //	POST /api/public/s/{token}/event           — an app page's surface event
@@ -228,6 +229,43 @@ func (h *PublicAPI) UILocale(w http.ResponseWriter, r *http.Request) {
 	writePublicJSON(w, r, PublicUILocale{Code: code, Strings: strs})
 }
 
+// PublicStrings is GET /api/public/strings: every sentence a public page
+// says (the server catalogue's `server.public.*`), in ONE language.
+type PublicStrings struct {
+	// Lang is the language the table is in: the request's ?lang= when the
+	// server speaks it (a pack's language counts), else the visitor's
+	// Accept-Language, else the instance default, else English.
+	Lang string `json:"lang"`
+	// Dir is "rtl" or "ltr" for Lang.
+	Dir string `json:"dir"`
+	// Strings is publicT(Lang): keys without the `server.public.` prefix,
+	// placeholders unfilled, every key present (English where the language
+	// has no word), and a counted sentence's category forms listed as
+	// `<key>_<category>` - the page picks `strings[key + "_" +
+	// Intl.PluralRules(lang).select(n)] || strings[key]`.
+	Strings map[string]string `json:"strings"`
+}
+
+// Strings answers the public pages' sentences in one language.
+//
+// ⚠⚠ ONE catalogue for the pages strangers see. The JavaScript pages
+// (packages/core PublicLinkPage and its bodies) used to carry a second copy
+// of these words in the interface catalogue (`public.*`), so the same limit
+// was said two ways - "Not sent - larger than 5 MB." on one page, "a.pdf is
+// too big (max 5 MB)." on the other - and a language pack had to translate
+// both. The no-JavaScript pages and the refusals (Drop.refuse) already said
+// `server.public.*`; the JavaScript pages now read the same table from here.
+//
+// Not about a link and not about a person: no token, no session, the same
+// answer for every visitor who asks in the same language. Left `no-store`
+// like every other /api answer - the instance-identity exception is the
+// four answers TestAPICache_PublicOnlyOnTheInstanceIdentity names.
+func (h *PublicAPI) Strings(w http.ResponseWriter, r *http.Request) {
+	h.headers(w)
+	lang := publicLocale(r, h.DefaultLocale)
+	writeJSON(w, http.StatusOK, PublicStrings{Lang: lang, Dir: pageDir(lang), Strings: publicT(lang)})
+}
+
 // ─────────────────── the share's state ───────────────────
 
 // PublicNode is the little a visitor learns about the file behind a link:
@@ -279,6 +317,10 @@ type PublicShare struct {
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	VisitsLeft *int       `json:"visits_left"`
 	Subject    string     `json:"subject,omitempty"`
+	// PinMax is the longest PIN any link may carry (share.PINMaxLen), told
+	// with needs_pin so the PIN box stops where the rule does instead of at a
+	// number of its own. Absent when the link has no PIN.
+	PinMax int `json:"pin_max,omitempty"`
 	// Node is the file or folder behind the link, once unlocked. ⚠ Omitted
 	// for an app link: there the node is the ANCHOR the app's state and its
 	// follow-up job hang on, and the only bytes a visitor may have are the
@@ -309,6 +351,9 @@ func (h *PublicAPI) describe(r *http.Request, sh *model.Share, unlocked bool) Pu
 		Locked:    sh.PinLocked(now),
 		ExpiresAt: sh.ExpiresAt,
 		Subject:   sh.Subject,
+	}
+	if out.NeedsPIN {
+		out.PinMax = share.PINMaxLen
 	}
 	if sh.MaxDownloads != nil {
 		left := *sh.MaxDownloads - sh.CappedCount()
@@ -527,14 +572,17 @@ func (h *PublicAPI) Event(w http.ResponseWriter, r *http.Request) {
 	// their screen should be taken. A hidden field's value is dropped before
 	// the app sees it; an empty `required_when` field refuses the event, so it
 	// cannot become a job queued as the link's creator.
-	if missing, gerr := gateSurfaceValues(req.Event, req.State, req.Data, func(gin wire.ViewEventInput) (*wire.Surface, error) {
+	// The answers are judged too (type, option, min/max, PIN length, a PDF
+	// text box's rule; another signer's box is dropped): the anonymous signer
+	// is the caller whose browser the host can least assume ran the screen.
+	if verdict, gerr := gateSurfaceValues(req.Event, req.State, req.Data, func(gin wire.ViewEventInput) (*wire.Surface, error) {
 		gin.Context = wire.CallContext{Locale: locale}
 		return h.Apps.Registry.PageEvent(r.Context(), sh, p, gin, clientIP(r))
 	}); gerr != nil {
 		h.Apps.callFail(w, gerr)
 		return
-	} else if len(missing) > 0 {
-		writeSurfaceRequired(w, missing)
+	} else if verdict.refused() {
+		writeSurfaceRefused(w, locale, verdict)
 		return
 	}
 	in := wire.ViewEventInput{Event: req.Event, ActionID: req.ActionID, State: req.State, Data: req.Data,
@@ -551,6 +599,7 @@ func (h *PublicAPI) Event(w http.ResponseWriter, r *http.Request) {
 		h.enqueueAsCreator(w, r, sh, p, s.Job)
 		return
 	}
+	markSurfaceProblems(req.Event, s, req.Data, locale)
 	writeJSON(w, http.StatusOK, map[string]any{"surface": s})
 }
 
@@ -669,7 +718,7 @@ func (h *PublicAPI) enqueueAsCreator(w http.ResponseWriter, r *http.Request, sh 
 	// fails in the worker where the visitor never sees it.
 	if writes {
 		if st, err := h.Store.GetStorage(r.Context(), storageID); err == nil && st != nil && st.ReadOnly {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "read_only", "message": "this storage is read-only"})
+			writeReadOnly(w, r, http.StatusConflict)
 			return
 		}
 	}
@@ -976,6 +1025,8 @@ type PublicDrop struct {
 	Expired  bool   `json:"expired"`
 	Revoked  bool   `json:"revoked"`
 	Locked   bool   `json:"locked"`
+	// PinMax: as on a share (share.PINMaxLen), absent without a PIN.
+	PinMax int `json:"pin_max,omitempty"`
 	// Folder is the destination's NAME — never its path, and never a listing.
 	Folder      string     `json:"folder,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
@@ -988,6 +1039,10 @@ type dropLimits struct {
 	MaxFileSizeMB int      `json:"max_file_size_mb"`
 	AllowedExt    []string `json:"allowed_ext"`
 	AskName       bool     `json:"ask_name"`
+	// NameMax is the longest name the uploader may give, in characters
+	// (dropNameMax): the box stops there, and the upload refuses a longer
+	// one (name_too_long) rather than cutting it short without a word.
+	NameMax int `json:"name_max"`
 }
 
 // DropState answers a file-request link's state.
@@ -1009,7 +1064,10 @@ func (h *PublicAPI) DropState(w http.ResponseWriter, r *http.Request) {
 		Expired:   sh.ExpiresAt != nil && now.After(*sh.ExpiresAt),
 		Locked:    sh.PinLocked(now),
 		ExpiresAt: sh.ExpiresAt,
-		Limits:    dropLimits{MaxFiles: ds.MaxFiles, MaxFileSizeMB: ds.MaxFileSizeMB, AllowedExt: ds.AllowedExt, AskName: ds.AskName},
+		Limits:    dropLimits{MaxFiles: ds.MaxFiles, MaxFileSizeMB: ds.MaxFileSizeMB, AllowedExt: ds.AllowedExt, AskName: ds.AskName, NameMax: dropNameMax},
+	}
+	if out.NeedsPIN {
+		out.PinMax = share.PINMaxLen
 	}
 	if sh.MaxUploads != nil {
 		left := *sh.MaxUploads - sh.UploadCount

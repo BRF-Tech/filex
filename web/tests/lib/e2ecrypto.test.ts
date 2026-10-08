@@ -42,7 +42,19 @@ import {
   unlockWithRecoveryKey,
   upgradeMarkerV1,
   type E2eMarker,
+  /* wiring:e2 vault */
+  canRaiseToNames,
+  changePassword,
+  choosableLevels,
+  createVault,
+  encryptionLevel,
+  markerIsVault,
+  parseMarkerDetailed,
+  passwordChangeNeedsRekey,
+  startConversion,
+  startRekey,
 } from '../../../packages/core/src/lib/e2ecrypto';
+import * as legacy047 from '../fixtures/e2ecrypto-legacy-v0.47.0';
 
 import * as legacy from '../fixtures/e2ecrypto-legacy-v0.30.1';
 import escrowTestKey from '../fixtures/escrow-testkey.json';
@@ -623,5 +635,88 @@ describe('parseMarker', () => {
     expect(parseMarker('')).toBeNull();
     expect(parseMarker('not json')).toBeNull();
     expect(parseMarker('null')).toBeNull();
+  });
+});
+
+/* wiring:e2 vault - level 3's key file (docs/E2E-VAULT-FORMAT.md → "The key
+ * file"). The byte formats are held to the vectors in e2evaultVectors.test.ts;
+ * this is the key file's own rules and what the older code does with it. */
+describe('the vault key file', () => {
+  it('createVault: v3, req exactly ["vault"], a wrapped FMK, the same slots as levels 1 and 2', async () => {
+    const made = await createVault(PW, { escrowPublicKey: escrowTestKey.public_spki_b64 });
+    const m = wire(made.marker);
+    expect(m.v).toBe(3);
+    expect(m.req).toEqual(['vault']);
+    expect(m.fmk).toBe('wrapped');
+    expect(typeof m.fmk_pw).toBe('string');
+    expect(m.rk).toBeDefined();
+    expect(m.esc?.alg).toBe('RSA-OAEP-256');
+    expect(m.vault).toEqual({ v: 1, id: expect.any(String), pack: 22 });
+    expect(markerIsVault(m)).toBe(true);
+    expect(encryptionLevel(m)).toBe('vault');
+    // The password, the recovery key and the escrow key all reach it, as an HKDF key.
+    const fmk = await unlockWithPassword(m, PW);
+    expect(fmk?.algorithm.name).toBe('HKDF');
+    const viaRk = await unlockWithRecoveryKey(m, made.recoveryKey);
+    expect(viaRk?.algorithm.name).toBe('HKDF');
+    const priv = await importEscrowPrivateKey(escrowTestKey.private_pkcs8_b64);
+    const viaEsc = await unlockWithEscrowKey(m, priv);
+    expect(viaEsc?.algorithm.name).toBe('HKDF');
+  });
+
+  it('a filex 0.47 refuses the vault key file outright (it refuses every v3)', async () => {
+    const made = await createVault(PW);
+    expect(legacy047.parseMarker(JSON.stringify(made.marker))).toBeNull();
+  });
+
+  it('malformed: another feature beside vault, a kek FMK, a bad id or pack, a vault block without the feature', async () => {
+    const m = (await createVault(PW)).marker;
+    const bad = (patch: (x: Record<string, unknown>) => void) => {
+      const x = JSON.parse(JSON.stringify(m)) as Record<string, unknown>;
+      patch(x);
+      return parseMarkerDetailed(JSON.stringify(x));
+    };
+    expect(bad((x) => (x.req = ['vault', 'names']))).toBeNull();
+    expect(bad((x) => ((x.fmk = 'kek'), delete x.fmk_pw))).toBeNull();
+    expect(bad((x) => ((x.vault as { id: string }).id = 'AAAA'))).toBeNull();
+    expect(bad((x) => ((x.vault as { pack: number }).pack = 25))).toBeNull();
+    expect(bad((x) => ((x.vault as { pack: number }).pack = 15))).toBeNull();
+    expect(bad((x) => (x.req = ['names']))).toBeNull();
+    expect(bad((x) => ((x.v = 2), delete x.req))).toBeNull();
+    // A reader accepts 16 to 24.
+    expect(bad((x) => ((x.vault as { pack: number }).pack = 16))?.unsupported).toEqual([]);
+  });
+
+  it('a higher vault.v needs a newer filex: refused by name, never read', async () => {
+    const m = JSON.parse(JSON.stringify((await createVault(PW)).marker)) as E2eMarker;
+    m.vault!.v = 2;
+    const parsed = parseMarkerDetailed(JSON.stringify(m));
+    expect(parsed?.unsupported).toEqual(['vault v2']);
+    expect(parseMarker(JSON.stringify(m))).toBeNull();
+  });
+
+  it('a new password changes the password slot only: v, req and vault stay', async () => {
+    const made = await createVault(PW);
+    const next = await changePassword(made.marker, { password: PW }, 'a brand new password');
+    expect(next.v).toBe(made.marker.v);
+    expect(next.req).toEqual(made.marker.req);
+    expect(next.vault).toEqual(made.marker.vault);
+    expect(next.rk).toEqual(made.marker.rk);
+    expect((await unlockWithPassword(next, 'a brand new password'))?.algorithm.name).toBe('HKDF');
+    expect(await unlockWithPassword(next, PW)).toBeNull();
+  });
+
+  it('a vault is never re-keyed, converted or moved to another level', async () => {
+    const m = (await createVault(PW)).marker;
+    await expect(startRekey(m, { password: PW }, 'a brand new password')).rejects.toThrow();
+    expect(() => startConversion(m)).toThrow();
+    expect(canRaiseToNames(m)).toBe(false);
+    expect(passwordChangeNeedsRekey(m)).toBe(false);
+  });
+
+  it('level 3 is offered only where asked for (a new folder on a server that has vaults)', () => {
+    expect(choosableLevels()).toEqual(['content', 'names']);
+    expect(choosableLevels({ vault: false })).toEqual(['content', 'names']);
+    expect(choosableLevels({ vault: true })).toEqual(['content', 'names', 'vault']);
   });
 });

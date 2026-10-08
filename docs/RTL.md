@@ -94,14 +94,19 @@ happens where the words are drawn; a translator writes plain text.
 
 **And text filex did not write goes through the same gate.** A sentence the
 SERVER composed (`server.*` - it reaches the browser as the `message` of a
-refusal), an installed app's own words, a notification built out of a row:
-none of it passes through `useLocale().t` or the admin panel's
-post-translation hook, and it is the text most likely to name a path, a URL or
-a command. `lib/direction` **`foreignText(locale, text)`** is the one function
-for it - `lib/errorWords` calls it for every failure it says (the reader's
-direction rides on the translator, `T.foreign`), `api/client.ts` for the
-message of a refusal, and `useNotificationText` for the bell and the browser
-notification.
+refusal), an installed app's own words: none of it passes through
+`useLocale().t` or the admin panel's post-translation hook, and it is the text
+most likely to name a path, a URL or a command. `lib/direction`
+**`foreignText(locale, text)`** is the one function for it - `lib/errorWords`
+calls it for every failure it says (the reader's direction rides on the
+translator, `T.foreign`) and `api/client.ts` for the message of a refusal.
+
+A **notification** is said by the server whole (`internal/notify/say.go`,
+[NOTIFICATIONS.md](NOTIFICATIONS.md#the-words)), so the server isolates it: in
+a right-to-left language every value it places in the sentence - a name, a
+path, a reason, an app's words - is wrapped in FIRST STRONG ISOLATE … POP
+DIRECTIONAL ISOLATE before the bell, the browser's pop-up, the desktop app, a
+push or an email shows it.
 
 > ⚠ Measured in the Arabic panel (v0.43.0): `server.token.scope_unknown` names
 > `root:<storage>://<folder>`, and without isolation the closing `>` took the

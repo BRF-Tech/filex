@@ -79,6 +79,9 @@ export type PublicFailure = '' | 'not_found' | 'gone' | 'error';
  */
 export interface PublicLinkBase {
   needs_pin: boolean;
+  /** The longest PIN any link may carry (the server's one PIN rule); sent
+   *  with a PIN-protected link so the PIN box stops where the rule does. */
+  pin_max?: number;
   unlocked: boolean;
   expired?: boolean;
   revoked?: boolean;
@@ -174,6 +177,9 @@ export interface PublicDropLimits {
   allowed_ext?: string[];
   /** The uploader is asked for their name. */
   ask_name?: boolean;
+  /** The longest name the server keeps, in characters; a longer one is
+   *  refused (`name_too_long`), so the name box stops here. */
+  name_max?: number;
 }
 
 /** `GET /api/public/d/{token}` — the drop box an outsider uploads into. */

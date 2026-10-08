@@ -54,6 +54,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Bell, ShieldCheck, SlidersHorizontal, Sparkles, User as UserIcon, X } from 'lucide-vue-next';
 import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
+import ChoiceSelect, { type SelectOption } from './ChoiceSelect.vue';
 import { ONLYOFFICE_VIEWER, openHandlersFor, type OpenHandler } from '../lib/appViewer';
 import { onlyOfficeUsable } from '../lib/serviceGate';
 import { clearOpenWithChoices, followOpenWithChoices, openWithChoices, setOpenWithChoice } from '../lib/openWith';
@@ -66,7 +67,8 @@ import ThemePalette from './ThemePalette.vue';
 import TimeZonePicker from './TimeZonePicker.vue';
 import { formatInstant, localeTag, useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
-import { accountProblemKey, emailProblem, refusalField, usernameProblem } from '../lib/accountRules';
+import { accountChecker, refusalField, type AccountCheckAnswer } from '../lib/accountRules';
+import { foreignText } from '../lib/direction';
 import { availableLocales } from '../lib/uiLocales';
 import { gateOnService } from '../lib/serviceGate';
 // tablo:t3 — the DEFAULT FOLDER VIEW: what a folder the person has never
@@ -96,7 +98,7 @@ import { deviceTimeZone, resolvedTimeZone } from '../lib/timezone';
 import { personInitial, personName } from '../lib/personName';
 import { getDensity, setDensity, type Density } from '../lib/density';
 import { downscaleImageToDataURL } from '../lib/imageDownscale';
-import { DIGEST_EVENT, WEBHOOK_EVENTS, eventFixableBy, eventOffReason, userEventKey } from '../lib/webhookEvents';
+import { DIGEST_EVENT, WEBHOOK_EVENTS, userEventKey } from '../lib/webhookEvents';
 import type {
   BrowserNotifyPermission,
   SettingsNotificationPrefs,
@@ -104,6 +106,7 @@ import type {
   SettingsThemeMode,
   UserSettingsHost,
 } from '../lib/userSettingsHost';
+import type { WebPushDevice, WebPushState } from '../lib/webPush';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -252,30 +255,34 @@ const avatarInput = ref<HTMLInputElement | null>(null);
 const savingProfile = ref(false);
 
 /*
- * ⚠⚠ The e-mail and the username are checked WHILE they are typed
- * (lib/accountRules.ts, the mirror of the server's rules), and a refusal the
- * server still makes lands under the box it is about, in the words the
- * server wrote for the reader. Before (release-candidate sweep, 2026-09-21):
- * "bu-bir-eposta-degil" saved with "Profil kaydedildi", another account's
- * address answered "saved" and changed nothing, and "Ayşe Yılmaz!" as a
- * username came back as raw English in a toast.
+ * ⚠⚠ The e-mail and the username are checked WHILE they are typed - by the
+ * SERVER (POST /api/auth/account/check, lib/accountRules `accountChecker`),
+ * which says what it would refuse in the reader's language, the save's own
+ * rules and words (0.54 audit B15/A12: this dialog used to judge with a
+ * mirror of the rules and its own copy of the sentences). A refusal the save
+ * still makes lands under the box it is about too. Before (release-candidate
+ * sweep, 2026-09-21): "bu-bir-eposta-degil" saved with "Profil kaydedildi",
+ * another account's address answered "saved" and changed nothing, and
+ * "Ayşe Yılmaz!" as a username came back as raw English in a toast.
  */
 const serverRefusal = ref<{ field: string; message: string } | null>(null);
-watch([email, username], () => {
+const checked = ref<AccountCheckAnswer>({});
+const checkAccount = accountChecker((q) => props.host.api.checkAccount?.(q) ?? Promise.resolve({}));
+watch([email, username], ([e, u]) => {
   serverRefusal.value = null;
+  void checkAccount({ email: e, username: u }).then((ans) => {
+    if (ans) checked.value = ans;
+  });
 });
+/** The server's sentence, isolated for the reader's direction. */
+const said = (text: string | undefined): string => (text ? foreignText(currentLocale.value, text) : '');
 const emailError = computed(() => {
-  if (serverRefusal.value?.field === 'email') return serverRefusal.value.message;
-  // An account that never had an address may keep having none (the server
-  // agrees: account_rules / UpdateProfile).
-  if (!email.value.trim() && !(props.host.user?.email ?? '')) return '';
-  const p = emailProblem(email.value);
-  return p ? t(accountProblemKey(p.key), p.params ?? {}) : '';
+  if (serverRefusal.value?.field === 'email') return said(serverRefusal.value.message);
+  return said(checked.value.email?.message);
 });
 const usernameError = computed(() => {
-  if (serverRefusal.value?.field === 'username') return serverRefusal.value.message;
-  const p = usernameProblem(username.value, props.host.user?.username ?? '');
-  return p ? t(accountProblemKey(p.key), p.params ?? {}) : '';
+  if (serverRefusal.value?.field === 'username') return said(serverRefusal.value.message);
+  return said(checked.value.username?.message);
 });
 const profileInvalid = computed(() => !!emailError.value || !!usernameError.value);
 
@@ -546,6 +553,43 @@ function pickOpenTrigger(value: 'single' | 'double') {
   props.host.openTrigger?.set(value);
 }
 
+/* wiring:e2 vault - how long a vault this person writes to stays theirs
+ * while they do nothing (1-10 minutes, kept on the server for the person;
+ * docs/E2E-VAULT-FORMAT.md → "The idle lock"). Drawn only where the server
+ * has vaults and the host can reach the setting. Fifteen minutes after it
+ * the vault locks itself; that clock is fixed and not offered here. */
+const vaultIdle = ref<number | null>(null);
+const vaultIdleBusy = ref(false);
+const vaultIdleShown = computed(
+  () => props.host.capabilities?.e2e_vault === true && !!props.host.api.vaultIdle && !!props.host.api.setVaultIdle,
+);
+const vaultIdleOptions = computed<SelectOption[]>(() =>
+  Array.from({ length: 10 }, (_, i) => ({ value: i + 1, label: t('userSettings.vault.minutes', { n: i + 1 }) })),
+);
+function loadVaultIdle(): void {
+  const get = props.host.api.vaultIdle;
+  if (!vaultIdleShown.value || !get) return;
+  get()
+    .then((m) => (vaultIdle.value = m))
+    .catch(() => (vaultIdle.value = null));
+}
+async function pickVaultIdle(minutes: number): Promise<void> {
+  const set = props.host.api.setVaultIdle;
+  if (!set || vaultIdleBusy.value || !Number.isInteger(minutes) || minutes < 1 || minutes > 10) return;
+  const was = vaultIdle.value;
+  vaultIdle.value = minutes;
+  vaultIdleBusy.value = true;
+  try {
+    vaultIdle.value = await set(minutes);
+    props.host.toast('success', t('userSettings.vault.saved'));
+  } catch (err) {
+    vaultIdle.value = was;
+    props.host.toast('error', props.host.errorText(err, t('userSettings.vault.failed')));
+  } finally {
+    vaultIdleBusy.value = false;
+  }
+}
+
 const quota = ref<SettingsQuota | null>(null);
 
 const quotaLine = computed(() => {
@@ -590,21 +634,20 @@ const notifPrefs = ref<SettingsNotificationPrefs | null>(null);
 
 const inAppOn = computed(() => notifPrefs.value?.in_app_enabled !== false);
 const mutedEvents = computed<string[]>(() => notifPrefs.value?.muted_events ?? []);
-// The events that can happen on this instance (lib/webhookEvents
-// eventOffReason): a switch for virus hits with scanning off, for the escrow
-// key where there is none, or for encryption requests where the policy asks
-// for no approval, is a promise the product cannot keep. ⚠ The same split as
-// every "needs a service" entry (lib/serviceGate): an ADMINISTRATOR, who can
-// switch the service on, sees it greyed with the reason (QA #39); everybody
-// else is not offered it at all. Which administrator is the event's
-// (eventFixableBy): the instance's for a service, the tenant's own for the
-// encryption policy — the account's role, which the HOST knows and the
-// capabilities do not say.
+// The events that can happen on this instance: the SERVER's answer
+// (`capabilities.event_off`, #211 audit B16) - a switch for virus hits with
+// scanning off, for the escrow key where there is none, or for encryption
+// requests where the policy asks for no approval, is a promise the product
+// cannot keep. ⚠ The same split as every "needs a service" entry
+// (lib/serviceGate): whoever could switch it on (`fixable`, the server's
+// verdict on THIS caller - the instance's administrator for a service, the
+// tenant's own for the encryption policy) sees it greyed with the server's
+// sentence (QA #39); everybody else is not offered it at all.
 const offeredEvents = computed(() => {
-  const facts = { ...(props.host.capabilities ?? {}), account_admin: props.host.isAdmin === true };
+  const offs = props.host.capabilities?.event_off ?? {};
   return WEBHOOK_EVENTS.map((ev) => {
-    const off = eventOffReason(ev, facts);
-    const gate = gateOnService(off === null, eventFixableBy(ev, facts), off ? t(off) : '');
+    const off = offs[ev] ?? null;
+    const gate = gateOnService(off === null, off?.fixable === true, off?.text ?? '');
     return { ev, off, gate };
   }).filter((row) => !row.gate.hidden);
 });
@@ -691,6 +734,112 @@ async function askPermission() {
   if (!b) return;
   permission.value = await b.ask();
   if (permission.value === 'granted') setBrowser(true);
+}
+
+/* ── push notifications on this device (#191, lib/webPush) ─────────────
+ * The host's row: the web app, which runs filex's own service worker. What a
+ * push says and when is the server's (it reads the person's bell); this row
+ * only turns THIS browser on or off, lists the person's devices and sends a
+ * test. ⚠ `togglePush` is the click handler and calls `enable()` with nothing
+ * awaited before it: iOS asks for the permission only from the tap itself. */
+const pushState = ref<WebPushState | null>(null);
+const pushBusy = ref(false);
+const pushOn = computed(() => pushState.value?.on === true);
+const pushDevices = computed<WebPushDevice[]>(() => pushState.value?.status?.devices ?? []);
+/** The switch moves only where this browser can be turned on or off here. */
+const pushCanSwitch = computed(() => {
+  const st = pushState.value;
+  if (!st || !st.supported || !st.status?.available) return false;
+  return st.permission !== 'denied' || pushOn.value;
+});
+/** The chip beside the switch: why it cannot move, or that it is on. */
+const pushChip = computed<{ text: string; tone: '' | 'ok' | 'bad' } | null>(() => {
+  const st = pushState.value;
+  if (!st) return null;
+  if (!st.supported) return { text: t('notifications.prefs.pushUnsupported'), tone: '' };
+  if (!st.status?.available) return { text: t('notifications.prefs.pushUnavailable'), tone: '' };
+  if (st.on) return { text: t('notifications.prefs.pushOn'), tone: 'ok' };
+  if (st.permission === 'denied') return { text: t('notifications.prefs.permDenied'), tone: 'bad' };
+  return null;
+});
+/** The line under it: what to do about it, for the one who can. */
+const pushWhy = computed(() => {
+  const st = pushState.value;
+  if (!st) return '';
+  if (!st.supported) return props.host.installApp?.state === 'ios' ? t('notifications.prefs.iosHomeScreen') : '';
+  if (!st.status?.available) {
+    if (!props.host.isAdmin) return '';
+    if (st.status?.reason === 'no_secret_key') return t('notifications.prefs.pushNoSecretKey');
+    if (st.status?.reason === 'key_unreadable') return t('notifications.prefs.pushKeyUnreadable');
+    if (st.status?.reason === 'disabled') return t('notifications.prefs.pushDisabled');
+    return '';
+  }
+  if (st.permission === 'denied' && !st.on) return t('notifications.prefs.permDeniedHint');
+  return '';
+});
+
+async function loadPush() {
+  const p = props.host.webPush;
+  if (!p) return;
+  try {
+    pushState.value = await p.state();
+  } catch {
+    pushState.value = null;
+  }
+}
+
+/** ⚠ From the click and from nowhere else (see the note above). */
+async function togglePush() {
+  const p = props.host.webPush;
+  if (!p || pushBusy.value) return;
+  const want = !pushOn.value;
+  pushBusy.value = true;
+  try {
+    pushState.value = want ? await p.enable() : await p.disable();
+    if (want && !pushState.value.on && pushState.value.permission === 'granted') {
+      props.host.toast('error', t('notifications.prefs.pushFailed'));
+    }
+  } catch {
+    props.host.toast('error', t('notifications.prefs.pushFailed'));
+    await loadPush();
+  } finally {
+    pushBusy.value = false;
+  }
+}
+
+async function testPush() {
+  const p = props.host.webPush;
+  if (!p || pushBusy.value) return;
+  pushBusy.value = true;
+  try {
+    const res = await p.test();
+    if (res.sent > 0) props.host.toast('success', t('notifications.prefs.pushTestSent', { count: res.sent }));
+    else props.host.toast('warn', t('notifications.prefs.pushTestNone'));
+  } catch (e: unknown) {
+    props.host.toast('error', props.host.errorText(e, t('errors.generic')));
+  } finally {
+    pushBusy.value = false;
+  }
+}
+
+async function removePushDevice(id: number) {
+  const p = props.host.webPush;
+  if (!p || pushBusy.value) return;
+  pushBusy.value = true;
+  try {
+    pushState.value = await p.remove(id);
+  } catch (e: unknown) {
+    props.host.toast('error', props.host.errorText(e, t('errors.generic')));
+  } finally {
+    pushBusy.value = false;
+  }
+}
+
+/** When a device subscribed, in the reader's language. */
+function pushAdded(d: WebPushDevice): string {
+  const at = new Date(d.created_at);
+  if (Number.isNaN(at.getTime())) return '';
+  return t('notifications.prefs.pushAdded', { date: formatInstant(at, currentLocale.value, { dateStyle: 'medium' }) });
 }
 
 /* ── installing the web app (task #190) ─────────────────────────────────
@@ -822,6 +971,7 @@ function sync(open: boolean) {
     refreshTzNow();
     permission.value = h.browserNotifications?.permission() ?? 'unsupported';
     browserOn.value = h.browserNotifications?.enabled() ?? false;
+    void loadPush();
     resetTotp();
     // Both are best-effort: a dialog that will not open because one GET
     // failed is worse than a pane that says nothing.
@@ -833,6 +983,7 @@ function sync(open: boolean) {
       .quota()
       .then((q) => (quota.value = q))
       .catch(() => (quota.value = null));
+    loadVaultIdle();
   }
 }
 
@@ -896,7 +1047,7 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
         <!-- Which filex this is — at the end of the head, before the way out,
              quiet: the same piece the account menus draw (the maintainer, 2026-09-24).
              Nothing is drawn while the server's answer is not in. -->
-        <ProductVersion :version="host.capabilities?.version" class="fx-us__version" />
+        <ProductVersion :version="host.capabilities?.release" class="fx-us__version" />
         <button
           type="button"
           class="fx-us__icon-btn"
@@ -1288,6 +1439,21 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
               <span class="fx-us__hint">{{ t('userSettings.prefs.openTriggerHint') }}</span>
             </div>
 
+            <!-- wiring:e2 vault - the person's idle time for a vault's write
+                 lock (1-10 minutes): ten answers, so a list, not a strip. -->
+            <div v-if="vaultIdleShown" class="fx-us__field" data-testid="user-settings-vault-idle">
+              <span id="fx-us-vault-idle-label" class="fx-us__label">{{ t('userSettings.vault.idle') }}</span>
+              <ChoiceSelect
+                :model-value="vaultIdle"
+                :options="vaultIdleOptions"
+                :disabled="vaultIdleBusy || host.demoReadOnly"
+                aria-labelledby="fx-us-vault-idle-label"
+                testid="user-settings-vault-idle-select"
+                @update:model-value="(v) => pickVaultIdle(Number(v))"
+              />
+              <span class="fx-us__hint">{{ t('userSettings.vault.idle_help') }}</span>
+            </div>
+
             <!-- The downloads, permanently. The corner reminder is dismissible
                  for good; this is where it goes on living. -->
             <div
@@ -1520,6 +1686,79 @@ const profileSaveVisible = computed(() => section.value === 'profile' && !props.
                       {{ t('notifications.prefs.iosHomeScreen') }}
                     </span>
                   </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- #191 - push notifications on THIS device: what the bell tells
+                 the person reaches this phone or browser while filex is
+                 closed. The host's row (lib/webPush); the server decides what
+                 is pushed, by the person's bell. -->
+            <div v-if="host.webPush" class="fx-us__switch-row" data-testid="user-settings-push-row">
+              <button
+                type="button"
+                role="switch"
+                class="fx-us__switch"
+                :class="{ 'is-on': pushOn }"
+                :aria-checked="pushOn"
+                :disabled="pushBusy || !pushCanSwitch"
+                data-testid="user-settings-push"
+                @click="togglePush"
+              >
+                <span class="fx-us__switch-knob" />
+              </button>
+              <div class="fx-us__switch-text">
+                <span class="fx-us__label">{{ t('notifications.prefs.push') }}</span>
+                <span class="fx-us__hint">{{ t('notifications.prefs.pushHint') }}</span>
+                <div v-if="pushChip || pushOn" class="fx-us__chips">
+                  <span
+                    v-if="pushChip"
+                    class="fx-us__chip"
+                    :class="{ 'fx-us__chip--ok': pushChip.tone === 'ok', 'fx-us__chip--bad': pushChip.tone === 'bad' }"
+                    data-testid="user-settings-push-state"
+                  >
+                    {{ pushChip.text }}
+                  </span>
+                  <button
+                    v-if="pushOn"
+                    type="button"
+                    class="fx-us__btn fx-us__btn--sm"
+                    :disabled="pushBusy"
+                    data-testid="user-settings-push-test"
+                    @click="testPush"
+                  >
+                    {{ t('notifications.prefs.pushTest') }}
+                  </button>
+                </div>
+                <span v-if="pushWhy" class="fx-us__hint" data-testid="user-settings-push-why">{{ pushWhy }}</span>
+                <div v-if="pushDevices.length" class="fx-us__devices" data-testid="user-settings-push-devices">
+                  <span class="fx-us__hint">{{ t('notifications.prefs.pushDevices') }}</span>
+                  <ul class="fx-us__device-list">
+                    <li
+                      v-for="d in pushDevices"
+                      :key="d.id"
+                      class="fx-us__device"
+                      :data-testid="`user-settings-push-device-${d.id}`"
+                    >
+                      <span class="fx-us__device-text">
+                        <span class="fx-us__device-name">{{ d.label || d.service || t('notifications.prefs.pushUnnamed') }}</span>
+                        <span class="fx-us__hint">{{ pushAdded(d) }}</span>
+                      </span>
+                      <span v-if="d.id === pushState?.thisDevice" class="fx-us__chip fx-us__chip--ok">
+                        {{ t('notifications.prefs.pushThisDevice') }}
+                      </span>
+                      <button
+                        type="button"
+                        class="fx-us__btn fx-us__btn--sm"
+                        :disabled="pushBusy"
+                        :aria-label="t('notifications.prefs.pushRemoveLabel', { device: d.label || d.service || '' })"
+                        :data-testid="`user-settings-push-remove-${d.id}`"
+                        @click="removePushDevice(d.id)"
+                      >
+                        {{ t('notifications.prefs.pushRemove') }}
+                      </button>
+                    </li>
+                  </ul>
                 </div>
               </div>
             </div>
@@ -2476,6 +2715,44 @@ select.fx-us__input {
 .fx-us__switch-spacer {
   flex: 0 0 auto;
   width: 34px;
+}
+
+/* ── push devices (#191) ──────────────────────────────────────────── */
+/* A list, not a table: a name, when it was added and one action per row. */
+.fx-us__devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-xs);
+  margin-top: var(--fe-gap-sm);
+}
+.fx-us__device-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fe-gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fx-us__device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fe-gap-sm);
+  padding: var(--fe-gap-xs) var(--fe-gap-sm);
+  border: 1px solid var(--fe-border);
+  border-radius: var(--fe-radius-sm);
+}
+.fx-us__device-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+.fx-us__device-name {
+  font-size: var(--fe-text-sm);
+  color: var(--fe-text);
+  overflow-wrap: anywhere;
 }
 
 /* ── chips ────────────────────────────────────────────────────────── */

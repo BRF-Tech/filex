@@ -212,26 +212,33 @@ export function injectTrashRow(
 }
 
 /** Best-effort fill of the trash row's size (total bytes) + date (newest
- *  deletion) from the backend trash listing, so it reads like a real
- *  folder instead of "— / —". Non-blocking; mutates the row in place. */
+ *  deletion), so it reads like a real folder instead of "— / —".
+ *  Non-blocking; mutates the row in place.
+ *
+ *  ⚠ The numbers are the SERVER's, for this storage (finding D2, 0.54): the
+ *  row used to sum the entries of one listing page, asked with a `storage=`
+ *  the server did not read - the newest 50 deletions of EVERY storage, shown
+ *  as this one's size and date. The listing now answers `storages`, one
+ *  summary per storage over every entry the caller may see; one row of it
+ *  (`limit=1`) is all this needs. */
 export async function hydrateTrashRow(
   files: FileNode[],
   storage: string,
-  api: { listTrash: (s?: string) => Promise<{ entries: Array<{ size?: number; deleted_at: string }> }> },
+  api: {
+    listTrash: (
+      s?: string,
+      page?: { limit?: number; offset?: number },
+    ) => Promise<{ storages?: Array<{ storage_name?: string; bytes: number; newest_deleted_at: string | null }> }>;
+  },
 ): Promise<void> {
   try {
-    const { entries } = await api.listTrash(storage);
+    const { storages } = await api.listTrash(storage, { limit: 1 });
     const row = files.find((f) => f.basename === '.trash');
     if (!row) return;
-    let total = 0;
-    let newest = 0;
-    for (const e of entries) {
-      total += e.size || 0;
-      const ts = Date.parse(e.deleted_at);
-      if (!Number.isNaN(ts) && ts > newest) newest = ts;
-    }
-    row.size = total;
-    if (newest > 0) row.last_modified = newest;
+    const mine = (storages ?? []).find((s) => s.storage_name === storage);
+    row.size = mine?.bytes ?? 0;
+    const newest = mine?.newest_deleted_at ? Date.parse(mine.newest_deleted_at) : NaN;
+    if (!Number.isNaN(newest)) row.last_modified = newest;
   } catch {
     /* keep the bare row */
   }

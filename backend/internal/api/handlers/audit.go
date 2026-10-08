@@ -112,10 +112,23 @@ func (h *Audit) List(w http.ResponseWriter, r *http.Request) {
 	if h.DemoMode {
 		newDemoMask(ctx, h.Store).auditRows(entries)
 	}
+	// Each row in words, in the reader's language (audit_label.go) - after
+	// the demo mask, so a masked address is said, never printed.
+	lang := readerLang(r)
+	for _, e := range entries {
+		if e == nil || e.Entry == nil {
+			continue
+		}
+		e.Label = auditActionLabel(lang, e.Entry.Action)
+		e.TargetLabel = auditTargetLabel(lang, e.Entry.TargetType, e.Entry.TargetID, e.TargetName)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries": entries,
 		"total":   total,
 		"limit":   limit,
 		"offset":  offset,
+		// The "What" filter: every resource a row can be written under, in
+		// the reader's language, with the prefixes the `action` filter takes.
+		"resources": auditResourceOptions(lang),
 	})
 }

@@ -304,6 +304,67 @@ eventMatchesShortcut(ev, 'palette'); // true when THIS event fires that action
 
 `docs/API.md` has the full list; `SHORTCUT_ACTIONS` is the source of truth.
 
+### Menus that hold still
+
+Some rows of a file's or folder's right-click menu depend on an answer from
+the server: *Encrypt with E2EE…* asks `POST /api/files/e2e/allowed` for that
+path, a role with per-folder permissions asks `POST /api/files/manager
+?action=allowed`, and the desktop app asks its keep state. Until 0.53 the menu
+opened first and drew those rows when their answer landed, pushing the rows
+below them down while the person was aiming (a click pressed on *Tags* could be
+released on *Star*).
+
+Since 0.54 the answers are there **before** the menu is opened, so a menu
+waits on nothing:
+
+- **Asked when a folder is listed.** Every row's questions go out at once, one
+  batched request per question (both endpoints take up to 1 000 paths), for
+  the folder itself (New folder, Upload) and its first 500 rows. A menu on a
+  row reads the answer it already has.
+- **Remembered per person and storage.** The answers are kept in the
+  browser's `localStorage` under `filex.menuAnswers.v1|…` - one key per person
+  (server, account, tenant and the root the explorer is confined to, hashed)
+  and storage, versioned and bounded (1 500 paths per storage, six storages per
+  person, about 190 000 characters per key, seven days), dropped least recently
+  used first. Where `localStorage` is not available or refuses (a private
+  window, blocked site data, a full quota) they live in memory for the page. A
+  sign-out forgets every key (`forgetPersonalPrefs`, which the web app calls;
+  the desktop app calls `clearMenuAnswers` on its own sign-out; a host with a
+  sign-out of its own imports `clearMenuAnswers` from `@brftech/filex` or
+  `@brftech/filex-core`).
+- **Hot and cold.** Around the folder being viewed - the storage's root and its
+  first level, the parent's level, the folder's own level and the level below
+  it - the remembered answers are the *hot* tier: asked again whenever they are
+  stale. Everything else is *cold*: shown as it was last answered, asked again
+  when it becomes hot.
+- **Kept fresh by the live socket.** The server sends `access.changed` when a
+  grant, a role, a group, a permission rule, the encryption policy or an
+  approval changes - to the people it can concern, a tenant's change to that
+  tenant's sockets only ([REALTIME.md](REALTIME.md#when-access-changes)); the explorer
+  marks every answer stale, lists the folder again and asks the hot tier again.
+  A socket that was down asks again when it is back. Without a live socket
+  every listing asks again (in the background - the menu still opens on the
+  answers it has). An answer also ages out after 30 seconds.
+- **Only when nothing is known.** The one menu that still waits is a
+  right-click faster than the folder's own questions came back, on a row the
+  browser has never heard about: it waits at most **40 ms**, and an answer
+  slower than that adds its row at the end of the open menu.
+
+The answers only shape the menu. The server decides every action again, so a
+remembered answer that turned out wrong costs a refused click, never an action
+the person may not take. Nothing below a vault's folder is asked or kept: a
+vault's rows are asked about as the vault folder.
+
+Every menu built on the core `ContextMenu` - the explorer's, the selection
+bar's "⋯", the side panel's, a table's row actions (`RowActions`) - also holds
+its rows while it is open. A row whose answer comes later is added at the end,
+behind a divider. A row that stops being offered keeps its place, greyed, and
+cannot be picked. A late row near the bottom of the window makes the menu
+scroll inside itself instead of moving, and a bottom sheet keeps the height it
+opened with. The next opening draws the menu in its own order again. Nothing
+needs configuring: a host that changes `actions` while its menu is open gets
+the same behaviour.
+
 ### Themes
 
 A theme is a map of `--fe-*` custom properties in a light and a dark variant,

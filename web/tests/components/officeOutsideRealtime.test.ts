@@ -67,6 +67,9 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
   let configs = 0;
   let staleAnswer = false;
   let sessionCalls: Array<{ path: string; key: string; action: string }> = [];
+  /** The `token` each session call carried (0.54: an answer shows the editor
+   *  configuration's signed token; a question carries none). */
+  let sessionTokens: Array<string | undefined> = [];
   const opened: VueWrapper[] = [];
 
   afterEach(() => {
@@ -79,6 +82,7 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
     configs = 0;
     staleAnswer = false;
     sessionCalls = [];
+    sessionTokens = [];
     FakeSocket.all = [];
     editors = installOfficeEditors(mode);
     vi.stubGlobal('WebSocket', FakeSocket);
@@ -93,7 +97,7 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
             status: 200,
             json: async () => ({
               documentServerUrl: 'https://docs.example.com',
-              config: { document: { key: `v${configs}` } },
+              config: { document: { key: `v${configs}` }, token: `signed-v${configs}` },
               ...editors.answer(),
             }),
             text: async () => '',
@@ -101,6 +105,7 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
         }
         if (url === SESSION) {
           sessionCalls.push({ path: body.path, key: body.key, action: body.action });
+          sessionTokens.push(body.token);
           return { ok: true, status: 200, json: async () => ({ stale: staleAnswer, known: true }), text: async () => '' };
         }
         return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
@@ -192,6 +197,8 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
 
     await click('outside-write-mine');
     expect(sessionCalls.at(-1)).toEqual({ path: PATH, key: 'v1', action: 'mine' });
+    expect(sessionTokens.at(-1), "the answer shows the session's signed editor configuration").toBe('signed-v1');
+    expect(sessionTokens[0], 'a question carries no token').toBeUndefined();
     expect(editors.destroyed(), 'the edited editor stays').toBe(0);
   });
 
@@ -205,6 +212,7 @@ describe.each(OFFICE_MODES)('the document changed on the server while it was ope
     await click('outside-keep-theirs');
     await settle();
     expect(sessionCalls).toContainEqual({ path: PATH, key: 'v1', action: 'theirs' });
+    expect(sessionTokens[sessionCalls.findIndex((c) => c.action === 'theirs')]).toBe('signed-v1');
     expect(editors.created).toEqual(['v1', 'v2']);
   });
 

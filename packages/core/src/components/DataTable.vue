@@ -44,6 +44,7 @@
  * token, so every table follows the palette the person picked.
  */
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue';
+import type { Slots } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { useSystemDark } from '../composables/useSystemDark';
@@ -564,7 +565,14 @@ const sortedRows = computed<any[]>(() => {
 const segments = computed<Group[]>(() => props.groups ?? [{ id: 'all', items: sortedRows.value }]);
 
 /** What an empty table says; '' (or null) says nothing and draws no box. */
-const slots = useSlots();
+// ⚠ `Slots`, written out: the declaration build (vite-plugin-dts, on
+// @vue/language-core 2.2.0) types `useSlots()` as the template's own slots,
+// the template reads `emptyShown`, and `emptyShown` reads `slots` - a loop
+// TypeScript answers with TS7022/TS7024 and an `any` template (DataTable's
+// `$slots: any`) in dist/index.d.ts. vue-tsc --noEmit (2.2.12) does not infer
+// it and stays green, and the plugin only prints its errors, so the build
+// passed with them (since 0.54 they fail it: scripts/vite-dts-strict.mjs).
+const slots: Slots = useSlots();
 const emptyText = computed(() => (props.empty === undefined ? t('table.empty') : (props.empty ?? '')));
 const emptyShown = computed(() => !props.loading && rowCount.value === 0 && (!!slots.empty || emptyText.value !== ''));
 /** Is anything in the body to own? An empty rowgroup is invalid ARIA. */

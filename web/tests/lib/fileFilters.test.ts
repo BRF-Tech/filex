@@ -1,6 +1,6 @@
 // The drive shell's filter row (surucu:d1 / GitHub #14).
 //
-// ⚠ Same reasoning as connectionGuides.test.ts and shareCli.test.ts: the
+// ⚠ Same reasoning as connectionGuides.test.ts: the
 // predicate lives in @brftech/filex-core, the core package has no test runner
 // of its own, and this is a pure function — so it is exercised here, in the app
 // that ships it.
@@ -23,6 +23,7 @@ import {
   activeFilterCount,
   applyFilters,
   filtersActive,
+  nameMatches,
   peopleOptions,
   type DriveFilters,
 } from '@brftech/filex-core/src/lib/fileFilters';
@@ -63,7 +64,7 @@ const TREE: FileNode[] = [
   file({ basename: 'beach.png', size: 3 * MB, last_modified: daysAgo(2) }),
   file({ basename: 'mountains.jpg', size: 12 * MB, last_modified: daysAgo(40) }),
   // No extension at all — the case a name-only classifier gets wrong.
-  file({ basename: 'IMG_0042', extension: '', mime_type: 'image/jpeg', size: 900 * 1024 }),
+  file({ basename: 'IMG_0042', extension: '', mime_type: 'image/jpeg', size: 900 * 1024, kind: 'image' } as never),
   file({ basename: 'Q3 budget.xlsx', size: 40 * 1024, last_modified: daysAgo(9) }),
   file({ basename: 'Proposal.docx', size: 80 * 1024, last_modified: daysAgo(400) }),
   file({ basename: 'overview.pdf', size: 2 * MB }),
@@ -98,14 +99,23 @@ describe('drive filters — Type', () => {
     ]);
   });
 
-  it('classifies a file with NO extension by its mime type', () => {
-    // The point of the case: `IMG_0042` is above. Without the mime fallback it
-    // would be invisible under Images, which is the one filter someone with a
-    // camera roll actually reaches for.
+  it('classifies a file with NO extension by the kind the SERVER put on it', () => {
+    // The point of the case: `IMG_0042` is above. The server names it an image
+    // from its sniffed mime (internal/nodefilter KindOf) and says so in `kind`;
+    // the browser has no mime table of its own any more (task #207).
     const hit = applyFilters(TREE, F({ type: 'image' }), NOW).find(
       (n) => n.basename === 'IMG_0042',
     );
     expect(hit).toBeDefined();
+  });
+
+  it('the server\'s kind wins over the extension the browser would guess from', () => {
+    const odd = file({ basename: 'export.dat', kind: 'spreadsheet' } as never);
+    expect(names(applyFilters([odd], F({ type: 'spreadsheet' }), NOW))).toEqual(['export.dat']);
+    expect(applyFilters([odd], F({ type: 'code' }), NOW)).toEqual([]);
+    // Documents take plain text, as the server's type=document does.
+    const txt = file({ basename: 'readme', kind: 'text' } as never);
+    expect(names(applyFilters([txt], F({ type: 'document' }), NOW))).toEqual(['readme']);
   });
 
   it('keeps documents and spreadsheets apart, and neither is a folder', () => {
@@ -196,36 +206,24 @@ describe('drive filters — combined', () => {
  * places this product runs.
  */
 describe('drive filters — the name box', () => {
-  it('is a substring of the name, case-insensitively', () => {
-    expect(names(applyFilters(TREE, F({ name: 'bud' }), NOW))).toEqual(['Q3 budget.xlsx']);
-    expect(names(applyFilters(TREE, F({ name: 'BUD' }), NOW))).toEqual(['Q3 budget.xlsx']);
+  // ⚠ 0.54 (task #207, audit D5): the box is answered by the SERVER's name
+  // rule (lib/nameFilter -> POST /api/files/search/match), so applyFilters
+  // does not match names any more. It still counts the box as a filter, so
+  // the empty state and "Clear" know it is on. The local rule below
+  // (`nameMatches`) answers only names the server must not see.
+  it('applyFilters leaves the name to the server', () => {
+    expect(applyFilters(TREE, F({ name: 'bud' }), NOW)).toBe(TREE);
+    expect(names(applyFilters(TREE, F({ name: 'bud', type: 'image' }), NOW))).toEqual(
+      names(applyFilters(TREE, F({ type: 'image' }), NOW)),
+    );
   });
 
-  it('folds accents, so Turkish names answer to what a Turkish keyboard types', () => {
-    const tree = [
-      ...TREE,
-      file({ basename: 'İstanbul planı.docx', size: 2000 }),
-      file({ basename: 'Ödev.pdf', size: 2000 }),
-    ];
-    expect(names(applyFilters(tree, F({ name: 'ist' }), NOW))).toEqual(['İstanbul planı.docx']);
-    expect(names(applyFilters(tree, F({ name: 'odev' }), NOW))).toEqual(['Ödev.pdf']);
-  });
-
-  it('treats the four Latin i letters as one, like the server search and tags', () => {
-    // A name a Mac wrote decomposed, an all-caps Turkish name, and its lower case.
-    const tree = [
-      ...TREE,
-      file({ basename: 'IŞIK.pdf', size: 2000 }),
-      file({ basename: 'ışık notları.txt', size: 2000 }),
-      file({ basename: 'Gürel.pdf'.normalize('NFD'), size: 2000 }),
-    ];
-    expect(names(applyFilters(tree, F({ name: 'ışık' }), NOW))).toEqual(['IŞIK.pdf', 'ışık notları.txt']);
-    expect(names(applyFilters(tree, F({ name: 'IŞIK' }), NOW))).toEqual(['IŞIK.pdf', 'ışık notları.txt']);
-    expect(names(applyFilters(tree, F({ name: 'gürel' }), NOW))).toEqual(['Gürel.pdf'.normalize('NFD')]);
-  });
-
-  it('matches folders too — hiding the folder you just typed is the one result you meant', () => {
-    expect(names(applyFilters(TREE, F({ name: 'photo' }), NOW))).toContain('Photos');
+  it('the local rule (decrypted names only) folds case, accents and the four i letters', () => {
+    expect(nameMatches('Q3 budget.xlsx', 'BUD')).toBe(true);
+    expect(nameMatches('İstanbul planı.docx', 'ist')).toBe(true);
+    expect(nameMatches('IŞIK.pdf', 'ışık')).toBe(true);
+    expect(nameMatches('Gürel.pdf'.normalize('NFD'), 'gürel')).toBe(true);
+    expect(nameMatches('notes.txt', 'zzz')).toBe(false);
   });
 
   it('empty or whitespace is not a filter (same array back, no "Clear" offered)', () => {
@@ -235,16 +233,10 @@ describe('drive filters — the name box', () => {
     expect(activeFilterCount(F({ name: '  ' }))).toBe(0);
   });
 
-  it('counts as one active filter, and ANDs with a chip', () => {
+  it('counts as one active filter, beside a chip', () => {
     expect(filtersActive(F({ name: 'a' }))).toBe(true);
     expect(activeFilterCount(F({ name: 'a' }))).toBe(1);
     expect(activeFilterCount(F({ name: 'ea', type: 'image' }))).toBe(2);
-    // 'ea' is in beach.png and in nothing else that is an image.
-    expect(names(applyFilters(TREE, F({ name: 'ea', type: 'image' }), NOW))).toEqual(['beach.png']);
-  });
-
-  it('no match is an empty listing, which is what the empty state is for', () => {
-    expect(applyFilters(TREE, F({ name: 'zzz-nothing' }), NOW)).toEqual([]);
   });
 });
 

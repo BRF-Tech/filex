@@ -52,6 +52,7 @@ const withPin = {
     created_by: 2,
     created_at: '2026-09-20T12:56:06Z',
     expires_at: '2036-01-01T00:00:00Z',
+    state: 'active',
   },
   node_path: '/teklif.pdf',
   storage_name: 'depo',
@@ -68,6 +69,7 @@ const withoutPin = {
     download_count: 3,
     created_by: 2,
     created_at: '2026-09-19T09:10:11Z',
+    state: 'active',
   },
   node_path: '/rapor.pdf',
   storage_name: 'depo',
@@ -85,6 +87,7 @@ const pinUnrecoverable = {
     download_count: 1,
     created_by: 2,
     created_at: '2026-06-18T08:00:00Z',
+    state: 'active',
   },
   node_path: '/eski.pdf',
   storage_name: 'depo',
@@ -108,6 +111,7 @@ const revokedLink = {
     created_at: '2026-09-21T10:00:00Z',
     expires_at: '2026-09-21T10:05:00Z',
     revoked_at: '2026-09-21T10:05:00Z',
+    state: 'revoked',
   },
   node_path: '/iptal.pdf',
   storage_name: 'depo',
@@ -124,10 +128,53 @@ const ranOut = {
     created_by: 2,
     created_at: '2026-09-01T10:00:00Z',
     expires_at: '2026-09-08T10:00:00Z',
+    state: 'expired',
   },
   node_path: '/eski.pdf',
   storage_name: 'depo',
   url: 'https://files.example.com/s/cd34cd34cd34cd34cd34cd34cd34cd34',
+};
+
+/** #210 (B6): a link whose downloads are USED UP while its date is far off.
+ *  The page compared the date with the browser's clock and called it live;
+ *  the server says `exhausted`, and every visitor gets "not available". */
+const usedUp = {
+  share: {
+    id: 33,
+    node_id: 72,
+    token: 'ef56ef56ef56ef56ef56ef56ef56ef56',
+    has_pin: false,
+    pin_recoverable: false,
+    download_count: 3,
+    max_downloads: 3,
+    created_by: 2,
+    created_at: '2026-09-01T10:00:00Z',
+    expires_at: '2036-01-01T00:00:00Z',
+    state: 'exhausted',
+  },
+  node_path: '/tukendi.pdf',
+  storage_name: 'depo',
+  url: 'https://files.example.com/s/ef56ef56ef56ef56ef56ef56ef56ef56',
+};
+
+/** #210 (B6): the server says ACTIVE for a date this device's clock calls
+ *  past (a clock running ahead). The server's word stands. */
+const skewed = {
+  share: {
+    id: 34,
+    node_id: 73,
+    token: '0a0b0a0b0a0b0a0b0a0b0a0b0a0b0a0b',
+    has_pin: false,
+    pin_recoverable: false,
+    download_count: 0,
+    created_by: 2,
+    created_at: '2020-01-01T10:00:00Z',
+    expires_at: '2020-01-02T10:00:00Z',
+    state: 'active',
+  },
+  node_path: '/saat.pdf',
+  storage_name: 'depo',
+  url: 'https://files.example.com/s/0a0b0a0b0a0b0a0b0a0b0a0b0a0b0a0b',
 };
 
 /** What the PIN endpoint answers, per share id. Tests rewrite it. */
@@ -140,8 +187,8 @@ vi.mock('@/api/client', () => ({
       if (url === '/shares') {
         return {
           data: {
-            items: [withPin, withoutPin, pinUnrecoverable, revokedLink, ranOut],
-            total: 5,
+            items: [withPin, withoutPin, pinUnrecoverable, revokedLink, ranOut, usedUp, skewed],
+            total: 7,
             page: 1,
             page_size: 25,
           },
@@ -392,6 +439,27 @@ describe('My shares — the row', () => {
     // Neither offers to revoke again.
     await openRowMenu(w, actionsOf(31));
     expect(menuEntries().map((e) => e.label)).not.toContain(tr.myShares.revoke);
+    closeRowMenus();
+  });
+
+  it('the state is the SERVER’s: a used-up link says so and offers no revoke (#210)', async () => {
+    const w = mountPage('tr');
+    await flushPromises();
+    const row = w.get('[data-testid="my-share-row-33"]');
+    expect(row.get('[data-testid="my-share-exhausted"]').text()).toBe(tr.myShares.exhausted);
+    await openRowMenu(w, actionsOf(33));
+    expect(menuEntries().map((e) => e.label)).not.toContain(tr.myShares.revoke);
+    closeRowMenus();
+  });
+
+  it('a link the server calls active is active, whatever this device’s clock says (#210)', async () => {
+    const w = mountPage('tr');
+    await flushPromises();
+    const row = w.get('[data-testid="my-share-row-34"]');
+    expect(row.find('[data-testid="my-share-expired"]').exists()).toBe(false);
+    expect(row.text()).not.toContain(tr.myShares.expired);
+    await openRowMenu(w, actionsOf(34));
+    expect(menuEntries().map((e) => e.label)).toContain(tr.myShares.revoke);
     closeRowMenus();
   });
 

@@ -4,6 +4,7 @@
  * Backend `?q=index` (or `GET /api/files/manager?action=index`) returns:
  *   { adapter, storages, dirname, files: FileNode[] }
  */
+import type { EditKinds, EventOff, ServerLimits } from '../lib/serverRules';
 import type { AppLock } from './Plugins';
 
 /** Why a file has no thumbnail, when the reason is the file's own (`thumb_note`). */
@@ -81,6 +82,9 @@ export interface FileNode {
   /* wiring:e2 — dir rows: true when the folder is E2E-encrypted (carries a
    * `.filex-e2e.json` marker). Drives the 🔒 badge in the listings. */
   e2e?: boolean;
+  /* wiring:e2 vault — dir rows: true when the folder IS a vault (level 3,
+   * docs/E2E-VAULT-FORMAT.md); the server says so from its key file. */
+  e2e_vault?: boolean;
   /* wiring:e2 names — set by the name view (composables/useE2eNames) on a
    * row inside an encrypted folder whose NAMES are encrypted. `basename` is
    * then the plaintext; `e2e_stored` is what the server stores and the only
@@ -90,6 +94,10 @@ export interface FileNode {
   e2e_stored?: string;
   e2e_name_state?: 'enc' | 'plain' | 'unreadable' | 'locked';
   e2e_display_dir?: string;
+  /* wiring:e2 vault — a row of a vault's tree (composables/useE2eVault): the
+   * vault folder's wire path. Such a row exists only in this tab; its path is
+   * never sent to the server. */
+  vault_root?: string;
   /* wiring:e2 fxe — a single encrypted file (`.fxe`) opened in this tab: its
    * ORIGINAL name, which the header carries sealed. Shown instead of the
    * stored name (useLocale `nodeDisplayName`); `basename` stays the stored
@@ -119,13 +127,14 @@ export interface FileNode {
   symlink?: boolean;
   /** Why it will not open — `outside_root` | `broken` | `unresolved`.
    *
-   *  ⚠⚠ Absent far more often than present: only the cold-cache driver
-   *  listing carries it. The normal DB-backed listing sends `symlink: true`
-   *  alone, because `model.Node` has no column for a fact that belongs to the
-   *  link as it is RIGHT NOW rather than as it was at scan time. Read it
-   *  through `lib/symlink.linkStateOf`, which answers `'unknown'` for that
-   *  case — and for a state a newer server invents — instead of dropping the
-   *  row back into silence. */
+   *  Every listing carries it when the reason is known: one read from the
+   *  driver says what the driver says now, one answered by the catalogue says
+   *  what the sync recorded (migration 00098, filex 0.54). ⚠ It can still be
+   *  absent - a row catalogued before 0.54 until the next sync of its folder,
+   *  a driver that gives no reason - so read it through
+   *  `lib/symlink.linkStateOf`, which answers `'unknown'` for that case (and
+   *  for a state a newer server invents) instead of dropping the row back into
+   *  silence. */
   link_state?: string;
   /** Issue #104 - an entry the STORAGE COULD NOT ANSWER FOR: the sync asked
    *  whether it still exists and got neither "yes" nor "not found". It is
@@ -139,6 +148,16 @@ export interface FileNode {
   [k: string]: unknown;
 }
 
+/** The one line that fetches a download link's file from a terminal, as the
+ *  SERVER writes it (handlers/share_command.go): it knows a folder's archive,
+ *  the PIN and an S3 redirect. Shown as it is; never assembled here. */
+export interface ShareDownloadCommand {
+  /** For a POSIX shell. */
+  curl: string;
+  /** For Windows PowerShell 5.1 and PowerShell 7. */
+  powershell: string;
+}
+
 export interface ShareInfo {
   uuid: string;
   url: string;
@@ -150,6 +169,9 @@ export interface ShareInfo {
   max_downloads?: number | null;
   downloads?: number;
   created_at?: string;
+  /** On the creation answer of a DOWNLOAD link only (absent for a file
+   *  request, and never in a listing - it may carry the PIN). */
+  download_command?: ShareDownloadCommand | null;
 }
 
 export interface UploadLimits {
@@ -211,13 +233,26 @@ export interface Capabilities {
    *  cards and the list of what a folder holds when the pointer rests on it.
    *  Absent (an older server): on. */
   folder_previews?: boolean;
-  /** Which filex answered (`0.47.0`) — the line the account menu ends with. */
+  /** Which filex answered, in one line (`v0.47.0 (<commit>, <built>)`). */
   version?: string;
+  /** 0.54 (#211, audit A11): the release alone (`v0.54.0`) — the line the
+   *  account menu ends with — and the commit and build time beside it. A
+   *  part the build did not stamp is absent; nothing parses `version`. */
+  release?: string;
+  commit?: string;
+  built?: string;
+  /** 0.54 (#211): how each kind of file is edited and the numbers an input is
+   *  held to — the server's rules, held by lib/serverRules. */
+  edit_kinds?: EditKinds;
+  limits?: ServerLimits;
+  /** 0.54 (#211, audit B16): the notification events that cannot happen
+   *  here, by event (lib/serverRules `EventOff`). */
+  event_off?: Record<string, EventOff>;
   /** The public demo: nothing a visitor changes may be saved (the settings
    *  dialog greys its saves). */
   demo_mode?: boolean;
-  /** Virus scanning is on (the settings dialog offers the "virus found"
-   *  notification only then — lib/webhookEvents eventOffReason). */
+  /** Virus scanning is on. (Whether the "virus found" notification can
+   *  happen is the server's own answer, `event_off`.) */
   antivirus?: boolean;
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature — hosts must treat that as "offer nothing". */
@@ -233,9 +268,14 @@ export interface Capabilities {
   drawio_url?: string | null;
   max_chunk_mb?: number;
   upload_limit_mb?: number;
-  /** Longest life a new share link may be given, in days (0 = no ceiling).
-   *  Read by the share dialogs so they offer only expiries the server keeps. */
+  /** Longest life a new share link may be given on this install, in days
+   *  (0 = no ceiling) - the administrator's setting. */
   share_max_ttl_days?: number;
+  /** Longest life a new link made by THIS caller may be given, in days (0 =
+   *  no ceiling): the install's ceiling or the permission rules binding them
+   *  (ShareLinkMaxDays), whichever is shorter. Read by the share dialog so it
+   *  offers only expiries the server keeps for this person. */
+  share_link_max_days?: number;
   /** Archive creation policy. Absent on servers older than archive providers.
    *  `allowed_formats` is what this server can actually make (every format
    *  but a plain ZIP needs 7-Zip there); empty means it can make none, and
@@ -308,6 +348,10 @@ export interface Capabilities {
    *  (`POST /api/files/e2e/allowed`), which can differ either way — so nothing
    *  is hidden from this field; only the per-path answer hides a door. */
   e2e_policy?: { available: boolean; policy: string };
+  /** wiring:e2 vault — the server has the vault API (`/api/files/e2e/vault/*`,
+   *  docs/E2E-VAULT-FORMAT.md): level 3 is offered for a new folder only
+   *  here. Absent or false: the level is not drawn at all. */
+  e2e_vault?: boolean;
 }
 
 /**
@@ -405,4 +449,30 @@ export interface TrashEntry {
   /** One of the asker's own drafts (#71), discarded: it came from Drafts,
    *  and Restore puts it back there. `path` is then just its name. */
   draft?: boolean;
+}
+
+/** One storage's part of the caller's trash, as the server counts it: what
+ *  that storage's virtual `.trash` row shows. */
+export interface TrashStorageSummary {
+  storage_id: number;
+  storage_name?: string;
+  count: number;
+  bytes: number;
+  newest_deleted_at: string | null;
+}
+
+/** One page of the trash listing, and the server's totals for ALL of it.
+ *  ⚠ `total`, `total_bytes` and `storages` count every entry the caller may
+ *  see, not the page: the size and the count a screen shows come from here,
+ *  never from summing the rows it has loaded (0.54, finding D1). */
+export interface TrashPage {
+  entries: TrashEntry[];
+  total: number;
+  total_bytes?: number;
+  newest_deleted_at?: string | null;
+  storages?: TrashStorageSummary[];
+  /** How much the trash holds, said by the server in the screen's language. */
+  summary?: string;
+  limit?: number;
+  offset?: number;
 }

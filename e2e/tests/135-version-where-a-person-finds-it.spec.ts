@@ -7,7 +7,7 @@
  * an administrator, had no way to answer "which version are you on?".
  *
  * Measured against the server's own answer (`/api/files/capabilities` →
- * `version`), in the three places the line is drawn: the admin panel's
+ * `release`, the release alone since 0.54 - #211, audit A11), in the three places the line is drawn: the admin panel's
  * account menu, the explorer's avatar menu, the user settings dialog. The
  * words are the product's name and that string — `filex 0.1.0-dev` on this
  * development build, which is the honest answer — and no catalogue key.
@@ -21,9 +21,9 @@ test.describe('The version is where a person can find it', () => {
   let expected = '';
   test.beforeAll(async ({ request }) => {
     const caps = await (await request.get('/api/files/capabilities')).json();
-    expect(typeof caps.version === 'string' && caps.version !== '', 'the server reports its version').toBe(true);
-    // The release only: the server adds the commit and build time in brackets.
-    expected = `filex ${String(caps.version).split(' (')[0]}`;
+    expect(typeof caps.release === 'string' && caps.release !== '', 'the server reports its release').toBe(true);
+    // The release, as the server sends it apart from the commit and build time.
+    expected = `filex ${caps.release}`;
   });
 
   test('at the foot of the admin panel’s account menu', async ({ page }) => {
@@ -68,7 +68,18 @@ test.describe('The version is where a person can find it', () => {
     // The admin app reads /api/capabilities, the explorer /api/files/capabilities.
     await page.route(/\/api\/(files\/)?capabilities(\?|$)/, async (route) => {
       const res = await route.fetch();
-      await route.fulfill({ response: res, json: { ...(await res.json()), version: REAL } });
+      // 0.54: the parts arrive apart too (`release`, `commit`, `built`), and
+      // they are what the pages read.
+      await route.fulfill({
+        response: res,
+        json: {
+          ...(await res.json()),
+          version: REAL,
+          release: 'v0.46.0',
+          commit: 'a2d7e34d1971707c638a5a44756685f1cd010bd6',
+          built: '2026-09-26T03:41:30Z',
+        },
+      });
     });
   }
   const scrollsSideways = (el: Element) => el.scrollWidth > el.clientWidth + 1;

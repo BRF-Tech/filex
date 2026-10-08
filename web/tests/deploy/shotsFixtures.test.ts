@@ -30,6 +30,7 @@ import {
   pinTimes,
   sceneAnswer,
   sceneRequest,
+  sceneServerEnv,
   sceneShift,
   shiftJson,
   shiftQuery,
@@ -281,6 +282,51 @@ describe('the scenes run on one clock', () => {
       contexts += made;
     }
     expect(contexts, 'no shot script makes a browser context any more - has the scan broken?').toBeGreaterThan(8);
+  });
+
+  it("starts every filex a script boots with the apps on the scene clock - an app's own words carry dates too", () => {
+    // ⚠ 0.53.0: signing/sign-status-1440.png (in every README) read
+    // "Requested ... on Oct 7, 2026" and "frozen until Oct 14, 2026" beside
+    // "locked until Sep 22, 2026": the signing app writes its dates into its
+    // text, which no route can move. FILEX_APP_CLOCK puts the apps themselves
+    // on SCENE_NOW (backend/internal/wasmplugin/appclock.go).
+    const before = process.env.SHOTS_REAL_CLOCK;
+    try {
+      delete process.env.SHOTS_REAL_CLOCK;
+      expect(sceneServerEnv()).toEqual({ FILEX_APP_CLOCK: '2026-09-15T10:30:00Z' });
+      process.env.SHOTS_REAL_CLOCK = '1';
+      expect(sceneServerEnv(), 'SHOTS_REAL_CLOCK=1 leaves the apps on the real clock with the browsers').toEqual({});
+    } finally {
+      if (before === undefined) delete process.env.SHOTS_REAL_CLOCK;
+      else process.env.SHOTS_REAL_CLOCK = before;
+    }
+    const goSide = readFileSync(path.join(REPO, 'backend', 'internal', 'wasmplugin', 'appclock.go'), 'utf8');
+    expect(goSide, 'the server reads the name the scenes set').toContain('const EnvAppClock = "FILEX_APP_CLOCK"');
+    let boots = 0;
+    for (const name of readdirSync(SHOTS).filter((f) => f.endsWith('.mjs') && f !== 'clock.mjs')) {
+      const src = readFileSync(path.join(SHOTS, name), 'utf8');
+      const started = (src.match(/spawn\([^)]*\['serve'\]/g) ?? []).length + (src.match(/\bstartContainer\(\{/g) ?? []).length;
+      const clocked = (src.match(/\.\.\.sceneServerEnv\(\)/g) ?? []).length;
+      expect(clocked, `e2e/shots/${name} starts ${started} filex and puts the apps of ${clocked} on the scene clock (sceneServerEnv)`).toBe(started);
+      boots += started;
+    }
+    expect(boots, 'no shot script starts a filex any more - has the scan broken?').toBeGreaterThan(6);
+  });
+
+  it("drives the product's own lists, never a native <select> (#160)", () => {
+    // 0.53.0 replaced every native <select> with core's ChoiceSelect, and the
+    // two README pictures of the connection guide (connections-guide.png,
+    // sidenav/connect-1440.png) had to be taken again: they still showed the
+    // native list. A scene that picks with selectOption() is a scene of a
+    // control that no longer exists - it times out, or photographs an old build.
+    for (const name of readdirSync(SHOTS).filter((f) => f.endsWith('.mjs'))) {
+      const src = readFileSync(path.join(SHOTS, name), 'utf8');
+      expect(src, `e2e/shots/${name} picks from a native <select>`).not.toMatch(/\.selectOption\(/);
+    }
+    const capture = readFileSync(path.join(SHOTS, 'capture.mjs'), 'utf8');
+    expect(capture, 'the connection guide is shot on SFTP, picked from the ChoiceSelect listbox').toContain(
+      `page.locator('[role="listbox"] [role="option"][data-value="sftp"]').click()`,
+    );
   });
 
   it('starts the browser at SCENE_NOW and lets it run - a frozen clock swallows every click after the first open', () => {

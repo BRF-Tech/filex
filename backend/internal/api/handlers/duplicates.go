@@ -7,7 +7,10 @@
 // Grouping runs in SQL (db.Store.ListDuplicateNodes: GROUP BY size, etag
 // HAVING COUNT(*)>1 on live file nodes with a non-empty etag); the
 // handler folds the flat rows into groups, computes total_waste =
-// (count-1)*size and sorts groups by total_waste descending.
+// (count-1)*size and sorts groups by total_waste descending. The answer
+// carries the whole report's totals (total_groups, total_copies,
+// total_waste) beside the first `limit` groups, so a page never sums a
+// truncated list.
 package handlers
 
 import (
@@ -146,11 +149,27 @@ func (h *Duplicates) Report(w http.ResponseWriter, r *http.Request) {
 		}
 		groups = kept
 	}
+	// The report's totals are the WHOLE report's, counted before the list is
+	// cut to `limit`: the page's cards ("groups", "extra copies", "wasted
+	// space") summed the 100 groups they were sent, so an install with more
+	// than that read a total that was only the top of it.
+	totalGroups := len(groups)
+	var totalCopies, totalWaste int64
+	for _, g := range groups {
+		totalCopies += int64(g.Count - 1)
+		totalWaste += g.TotalWaste
+	}
 	if len(groups) > limit {
 		groups = groups[:limit]
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"groups": groups})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"groups":       groups,
+		"total_groups": totalGroups,
+		"total_copies": totalCopies,
+		"total_waste":  totalWaste,
+		"truncated":    len(groups) < totalGroups,
+	})
 }
 
 // queryPosInt parses a non-negative int query param with a default;

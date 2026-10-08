@@ -29,8 +29,7 @@
  */
 import { ref, onMounted, onBeforeUnmount, computed, inject, watch } from 'vue';
 import type { FileApi, Grant, GroupSuggestion, UserSuggestion } from '../composables/useFileApi';
-import type { ShareInfo } from '../types/FileNode';
-import { shareCliCommand } from '../lib/shareCli';
+import type { ShareDownloadCommand, ShareInfo } from '../types/FileNode';
 import {
   STOCK_EXPIRY_DAYS,
   clampExpiryOptions,
@@ -44,21 +43,24 @@ import { resolveLocale } from '../locales/resolve';
 import { localeTag, useLocale } from '../composables/useLocale';
 import { personInitial, personName } from '../lib/personName';
 import { splitList } from '../lib/listInput';
+import { serverWords } from '../lib/errorWords';
 import { actionIconSvg } from '../lib/actionIcons';
 import { fileIconTile } from '../lib/fileIcons';
 import { gateOnService } from '../lib/serviceGate';
 import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
 import ChoiceSelect, { type SelectOption } from '../components/ChoiceSelect.vue';
+import { availableLocales } from '../lib/uiLocales';
 import ChoiceButtons, { type ChoiceOption } from '../components/ChoiceButtons.vue';
 
 const props = defineProps<{
   api: FileApi;
   path: string; // adapter://rel of the target item
-  isDir?: boolean; // folder → grants cascade; file → no `/…` inheritance hint
-  size?: number; // bytes, for the share-mail body (files only)
+  isDir?: boolean; // folder → the "Request files" section and the curl's zip; the server decides a grant's kind
   locale?: string;
-  /** Server ceiling on a new link's life in days (capabilities.share_max_ttl_days).
-   *  undefined/0 = no ceiling. The expiry choices are derived from it. */
+  /** THIS person's ceiling on a new link's life in days
+   *  (capabilities.share_link_max_days: the install's ceiling or their
+   *  permission rules, whichever is shorter). undefined/0 = no ceiling. The
+   *  expiry choices are derived from it. */
   shareMaxTtlDays?: number;
   /**
    * surucu:d1 — which part of the dialog the caller wants opened. Absent =
@@ -113,7 +115,7 @@ const mailMissing = computed(() => props.mailReady === false);
 const mailRowShown = computed(() => !mailMissing.value || props.canConfigure === true);
 
 const localeCode = computed(() => resolveLocale(props.locale));
-const { t, formatSize } = useLocale(() => localeCode.value);
+const { t } = useLocale(() => localeCode.value);
 
 // Split adapter://rel for a friendlier path chip.
 const pathParts = computed(() => {
@@ -152,6 +154,20 @@ const level = ref<'viewer' | 'editor' | 'owner'>('viewer');
 const busy = ref(false);
 const notice = ref('');
 const noAccount = ref(false);
+/* #191 (the maintainers' rule, 2026-10-08): the language a mail to somebody
+ * with NO account here is written in - and the language an account opened by
+ * an invitation starts in - is the one picked here, else the server's own
+ * (FILEX_DEFAULT_LOCALE). The sender's screen language is not a choice for the
+ * recipient, so nothing is sent unless somebody picked. An address that IS an
+ * account always reads its owner's language, whatever this says. */
+const recipientLang = ref('');
+const recipientLangChoices = computed<SelectOption[]>(() => [
+  { value: '', label: t('access.ui.recipient_lang_server') },
+  ...availableLocales().map((o) => ({ value: o.code, label: o.label || o.code })),
+]);
+function pickRecipientLang(v: unknown) {
+  recipientLang.value = typeof v === 'string' ? v : '';
+}
 const createRole = ref<'user' | 'viewer'>('user');
 const inviteResult = ref<{ tempPassword?: string } | null>(null);
 const suggestions = ref<UserSuggestion[]>([]);
@@ -204,7 +220,18 @@ const shares = ref<ShareInfo[]>([]);
 const shareBusy = ref(false);
 const sharePwd = ref(false);
 const shareExpiry = ref(defaultExpiryDays(props.shareMaxTtlDays)); // days; 0 = never
-const shareResult = ref<{ url: string; pin?: string | null; expiresAt?: string | null; clamped?: boolean } | null>(null);
+/** A link this dialog just made. `token` names it to the server (share mail,
+ *  share sheet); nothing else about it is sent back. `command` is the server's
+ *  one-line download commands (share_command.go). */
+type MadeLink = {
+  token: string;
+  url: string;
+  pin?: string | null;
+  expiresAt?: string | null;
+  clamped?: boolean;
+  command?: ShareDownloadCommand | null;
+};
+const shareResult = ref<MadeLink | null>(null);
 const shareErr = ref('');
 const copied = ref('');
 // prefilled recipient when the owner chose "share link" for a no-account email
@@ -261,23 +288,15 @@ const maxDlOptions = computed(() => [
 ]);
 const maxDlChoices = computed<SelectOption[]>(() => maxDlOptions.value.map((o) => ({ value: o.v, label: o.l })));
 
-// ⚠ The one-line curl went missing the same way the download cap did: it was
-// part of the old standalone share dialog, and link creation moved here
-// without it. A share link is regularly made FOR a server ("pull this onto the
-// box"), and that reader has no browser — so the command comes back, built by
-// the shared helper both surfaces use.
-const shareCli = computed(() =>
-  shareCliCommand(
-    shareResult.value
-      ? {
-          url: shareResult.value.url,
-          pin: shareResult.value.pin,
-          filename: pathParts.value.name,
-          isDir: !!props.isDir,
-        }
-      : null,
-  ),
-);
+// ⚠ The one-line download command. A share link is regularly made FOR a
+// server ("pull this onto the box"), and that reader has no browser. The
+// SERVER writes it (`download_command`, handlers/share_command.go): it knows
+// a folder's archive is behind `?zip=wait`, that the PIN rides as `?pin=` and
+// that an S3-backed install answers with a redirect - this dialog used to
+// know all three itself (lib/shareCli), and an agent making the same link
+// over MCP got no command at all.
+const shareCli = computed(() => shareResult.value?.command?.curl ?? '');
+const sharePs = computed(() => shareResult.value?.command?.powershell ?? '');
 
 // ── file-drop (public upload link) state ──
 const dropPwd = ref(false);
@@ -289,7 +308,7 @@ const dropAllowedExt = ref<string>('');
 const dropAskName = ref(true);
 const dropBusy = ref(false);
 const dropErr = ref('');
-const dropResult = ref<{ url: string; pin?: string | null; expiresAt?: string | null; clamped?: boolean } | null>(null);
+const dropResult = ref<MadeLink | null>(null);
 const dropMailTo = ref('');
 const dropMailBusy = ref(false);
 const dropMailNotice = ref('');
@@ -308,14 +327,6 @@ function splitEmails(raw: string): string[] {
     }
   }
   return out;
-}
-
-// mailResultNotice renders a sent/failed summary from the share-mail response.
-function mailResultNotice(res: { sent?: string[]; failed?: string[] }): string {
-  const sent = res.sent?.length ?? 0;
-  const failed = res.failed?.length ?? 0;
-  if (failed === 0) return t('access.ui.mail_sent', { sent });
-  return t('access.ui.mail_partial', { sent, failed });
 }
 
 async function reload() {
@@ -430,7 +441,7 @@ async function grantGroup(g: GroupSuggestion, lvl: string) {
   busy.value = true;
   notice.value = '';
   try {
-    await props.api.addPermission({ path: props.path, group_id: g.id, level: lvl, is_dir: !!props.isDir });
+    await props.api.addPermission({ path: props.path, group_id: g.id, level: lvl });
     email.value = '';
     suggestions.value = [];
     groupSuggestions.value = [];
@@ -451,7 +462,7 @@ async function pickUser(u: UserSuggestion) {
   busy.value = true;
   notice.value = '';
   try {
-    await props.api.addPermission({ path: props.path, user_id: u.id, level: lvl, is_dir: !!props.isDir });
+    await props.api.addPermission({ path: props.path, user_id: u.id, level: lvl });
     email.value = '';
     suggestions.value = [];
     await reload();
@@ -478,7 +489,7 @@ async function submitEmail() {
     if (res.found && res.user) {
       let lvl = level.value;
       if (res.user.role === 'viewer' && lvl !== 'viewer') lvl = 'viewer';
-      await props.api.addPermission({ path: props.path, user_id: res.user.id, level: lvl, is_dir: !!props.isDir });
+      await props.api.addPermission({ path: props.path, user_id: res.user.id, level: lvl });
       email.value = '';
       await reload();
       notice.value = t('access.ui.access_granted');
@@ -497,8 +508,8 @@ async function inviteCreateUser() {
   try {
     const r = await props.api.invitePermission({
       path: props.path, email: email.value.trim().toLowerCase(),
-      level: level.value, create_user: true, role: createRole.value, is_dir: !!props.isDir,
-      locale: resolveLocale(props.locale),
+      level: level.value, create_user: true, role: createRole.value,
+      ...(recipientLang.value ? { locale: recipientLang.value } : {}),
     });
     inviteResult.value = { tempPassword: r.temp_password };
     notice.value = r.emailed
@@ -591,9 +602,17 @@ function gkey(prefix: string, g: Grant): string {
 }
 
 // ── share actions ──
-function expiresAtISO(): string | null {
-  if (!shareExpiry.value) return null;
-  return new Date(Date.now() + shareExpiry.value * 86400000).toISOString();
+/**
+ * The link's life as a LENGTH (`expires_in`, seconds), never as a moment.
+ *
+ * ⚠ It used to send `expires_at`, worked out on this device's clock: a clock
+ * a few hours off made a "7 days" link that lived 6 days and 20 hours (or got
+ * cut by the server's ceiling and reported as clamped). The server counts the
+ * days from its own now. null = "never" (the server then applies its
+ * ceiling, as it always did).
+ */
+function expiresInSeconds(days: number): number | null {
+  return days > 0 ? days * 86400 : null;
 }
 /**
  * Make THE link with the options as they stand.
@@ -616,16 +635,19 @@ async function createLink() {
     const r = await props.api.createShare({
       path: props.path,
       password: sharePwd.value,
-      expires_at: expiresAtISO(),
+      expires_in: expiresInSeconds(shareExpiry.value),
       // null, not 0 — the server reads 0 as "no cap given" either way, but a
       // null says it explicitly and keeps the payload honest.
       max_downloads: shareMaxDl.value || null,
     });
     shareResult.value = {
+      // The create answer's `uuid` IS the token (share.go shareCreateRespInner).
+      token: r.share.token ?? r.share.uuid,
       url: r.share.url,
       pin: r.share.password_pin ?? null,
       expiresAt: r.share.expires_at ?? null,
       clamped: !!r.share.expiry_clamped,
+      command: r.share.download_command ?? null,
     };
     await reloadShares();
   } catch (e) {
@@ -667,48 +689,50 @@ async function toggleLink() {
   await createLink();
 }
 
-// ⚠ One mail per press. The Send button shuts while the mail goes out, but
-// the address box sends on Enter too, and Enter did not ask: a second Enter
-// while the first mail was on its way sent it again, to the same people.
-async function sendShareMail() {
-  if (shareMailBusy.value) return;
-  const list = splitEmails(shareMailTo.value);
+/**
+ * "Send by e-mail" for a link this dialog made.
+ *
+ * ⚠⚠ The request names the LINK (its token), the addresses and the language
+ * — nothing else. The server writes the mail from the link itself: its
+ * address, its expiry, the item's name, kind and size, a file request's
+ * limits; it never mails a PIN (the mail says one guards the link and the
+ * sender gives it another way). This dialog used to send the address, the
+ * PIN, the expiry, the kind and the size, and the server mailed them as given
+ * (C2, 0.54). What comes back is said by the server too (`message`, in the
+ * composer's language), the refusals included.
+ *
+ * ⚠ One mail per press. The Send button shuts while the mail goes out, but
+ * the address box sends on Enter too, and Enter did not ask: a second Enter
+ * while the first mail was on its way sent it again, to the same people.
+ */
+async function sendLinkMail(link: MadeLink | null, to: string, busy: { value: boolean }, notice: { value: string }) {
+  if (busy.value) return;
+  const list = splitEmails(to);
   if (!list.length) {
-    shareMailNotice.value = t('access.ui.enter_a_valid_email');
+    notice.value = t('access.ui.enter_a_valid_email');
     return;
   }
-  if (!shareResult.value?.url) return;
-  shareMailBusy.value = true;
-  shareMailNotice.value = '';
+  if (!link?.token) return;
+  busy.value = true;
+  notice.value = '';
   try {
     const res = await props.api.shareMail({
-      path: props.path, emails: list, url: shareResult.value.url,
-      pin: shareResult.value.pin ?? undefined,
-      expires_days: shareExpiry.value || undefined,
-      locale: resolveLocale(props.locale),
-      is_dir: !!props.isDir,
-      size: props.size,
+      share: link.token,
+      emails: list,
+      ...(recipientLang.value ? { locale: recipientLang.value } : {}),
     });
-    shareMailNotice.value = mailResultNotice(res);
+    notice.value = res?.message ?? '';
   } catch (e) {
-    const detail = (e as { detail?: string }).detail ?? '';
-    if (detail.includes('not_configured')) {
-      shareMailNotice.value = t('access.ui.smtp_not_set_up_verified_share_the_link');
-    } else if (detail.includes('send_failed')) {
-      shareMailNotice.value = t('access.ui.send_failed_temporary_please_retry');
-    } else {
-      shareMailNotice.value = e instanceof Error ? e.message : String(e);
-    }
+    notice.value = serverWords(e, localeCode.value);
   } finally {
-    shareMailBusy.value = false;
+    busy.value = false;
   }
+}
+function sendShareMail() {
+  return sendLinkMail(shareResult.value, shareMailTo.value, shareMailBusy, shareMailNotice);
 }
 
 // ── file-drop (upload link) actions ──
-function dropExpiresAtISO(): string | null {
-  if (!dropExpiry.value) return null;
-  return new Date(Date.now() + dropExpiry.value * 86400000).toISOString();
-}
 async function createDropLink() {
   if (!mayShare.value.uploadLinks) return;
   dropBusy.value = true;
@@ -725,10 +749,11 @@ async function createDropLink() {
       path: props.path,
       kind: 'drop',
       password: dropPwd.value,
-      expires_at: dropExpiresAtISO(),
+      expires_in: expiresInSeconds(dropExpiry.value),
       drop_settings,
     });
     dropResult.value = {
+      token: r.share.token ?? r.share.uuid,
       url: r.share.url,
       pin: r.share.password_pin ?? null,
       expiresAt: r.share.expires_at ?? null,
@@ -741,36 +766,10 @@ async function createDropLink() {
     dropBusy.value = false;
   }
 }
-async function sendDropMail() {
-  if (dropMailBusy.value) return; // one mail per press, as sendShareMail
-  const list = splitEmails(dropMailTo.value);
-  if (!list.length) {
-    dropMailNotice.value = t('access.ui.enter_a_valid_email');
-    return;
-  }
-  if (!dropResult.value?.url) return;
-  dropMailBusy.value = true;
-  dropMailNotice.value = '';
-  try {
-    const res = await props.api.shareMail({
-      path: props.path, emails: list, url: dropResult.value.url,
-      pin: dropResult.value.pin ?? undefined,
-      expires_days: dropExpiry.value || undefined,
-      locale: resolveLocale(props.locale),
-      is_dir: true,
-      mode: 'drop',
-    });
-    dropMailNotice.value = mailResultNotice(res);
-  } catch (e) {
-    const detail = (e as { detail?: string }).detail ?? '';
-    if (detail.includes('not_configured')) {
-      dropMailNotice.value = t('access.ui.smtp_not_set_up_verified_share_the_link');
-    } else {
-      dropMailNotice.value = e instanceof Error ? e.message : String(e);
-    }
-  } finally {
-    dropMailBusy.value = false;
-  }
+// The same send for the upload link: the server knows it is one and writes
+// the upload invitation with the link's own limits.
+function sendDropMail() {
+  return sendLinkMail(dropResult.value, dropMailTo.value, dropMailBusy, dropMailNotice);
 }
 async function revoke(s: ShareInfo) {
   shareBusy.value = true;
@@ -794,31 +793,45 @@ function copy(text: string, tag = 'url') {
 // ── native share (Web Share API) ──
 // Same OS share sheet the fishapp uses (Windows share / Android share). Only
 // shown when the browser supports it (secure context + navigator.share, e.g.
-// Chrome/Edge on Windows, Android). The shared text mirrors the invite email
-// body (see backend mail_templates.go) so a WhatsApp/mail forward reads the
-// same as an emailed link.
+// Chrome/Edge on Windows, Android).
 const canShare = computed(() => typeof navigator !== 'undefined' && typeof navigator.share === 'function');
 
 /**
- * The size line in the share message — the product's one byte format, in the
- * viewer's language.
+ * What the share sheet is handed: the share mail's own subject and body,
+ * written by the SERVER for this link (GET …/permissions/share-message), so a
+ * WhatsApp forward reads exactly like the e-mail — and, like it, carries no
+ * PIN. ⚠ This dialog used to write the message itself, a copy of the
+ * server's mail in its own words (C2, 0.54); the copy is gone.
  *
- * ⚠ It used to mirror the server's `humanSize()` (base 1024, always one
- * decimal, a dot and English letters) so that the message forwarded by the OS
- * share sheet and the one e-mailed would agree — and both disagreed with the
- * listing: "1.4 MB" in the message, "1.5 MB" on the row. The server writes
- * sizes with the interface's rules now (srvtext.Bytes), so this is simply the
- * listing's formatter.
+ * Asked for as soon as a link is made, not on the click: a browser opens the
+ * sheet only inside the click's activation, which a round trip can outlast.
+ * A link replaced while its words were on the way does not get the old
+ * link's words. Without words the button is not drawn; Copy and e-mail stay.
  */
-function humanSize(b?: number): string {
-  if (!b || b <= 0) return '';
-  return formatSize(b);
+type SheetWords = { title: string; text: string };
+const shareSheet = ref<SheetWords | null>(null);
+const dropSheet = ref<SheetWords | null>(null);
+async function loadSheet(token: string | undefined, current: () => string | undefined, into: { value: SheetWords | null }) {
+  into.value = null;
+  if (!token || !canShare.value) return;
+  try {
+    // The share sheet's words go to whoever it is sent to: the language
+    // picked for the recipient, else the server's.
+    const m = await props.api.shareMessage(token, recipientLang.value || undefined);
+    if (current() === token) into.value = { title: m.subject, text: m.body };
+  } catch {
+    if (current() === token) into.value = null;
+  }
 }
+watch(
+  () => [shareResult.value?.token, recipientLang.value] as const,
+  ([token]) => void loadSheet(token, () => shareResult.value?.token, shareSheet),
+);
+watch(
+  () => [dropResult.value?.token, recipientLang.value] as const,
+  ([token]) => void loadSheet(token, () => dropResult.value?.token, dropSheet),
+);
 
-function expiryLine(days: number): string {
-  if (days > 0) return t('access.ui.valid_for', { days });
-  return t('share.ttl.never');
-}
 // What the server actually stored — shown under a fresh link so the real
 // expiry is visible even when the server shortened the request.
 // The explorer this dialog belongs to reads deadlines on its own clock.
@@ -899,55 +912,8 @@ const dropSummary = computed(() =>
   dropShares.value.length ? t('access.sum.drop', { n: dropShares.value.length }) : t('access.sum.drop_none'),
 );
 
-// Text + title for a download-share link, mirroring shareMailText().
-function shareBody(): { title: string; text: string } {
-  const name = pathParts.value.name;
-  const url = shareResult.value?.url ?? '';
-  const pin = shareResult.value?.pin ?? '';
-  // ⚠ A sentence per kind, not "a {kind}": a word dropped into another
-  // sentence cannot agree with it in a language with gender or case.
-  const title = t(props.isDir ? 'access.ui.mail_title_folder' : 'access.ui.mail_title_file', { name });
-  const lines: string[] = [];
-  lines.push(t('access.ui.mail_hello'), '');
-  lines.push(t(props.isDir ? 'access.ui.mail_shared_folder' : 'access.ui.mail_shared_file'), '');
-  if (props.isDir) {
-    lines.push(t('access.ui.mail_folder', { name }));
-  } else {
-    lines.push(t('access.ui.mail_file', { name }));
-    const sz = humanSize(props.size);
-    if (sz) lines.push(t('access.ui.mail_size', { size: sz }));
-  }
-  lines.push('', t('access.ui.mail_download_here'), url);
-  if (pin) lines.push('', t('access.ui.mail_pin', { pin }));
-  lines.push('', expiryLine(shareExpiry.value));
-  return { title, text: lines.join('\n') };
-}
-
-// Text + title for a file-drop (upload) link, mirroring dropInviteMailText().
-function dropBody(): { title: string; text: string } {
-  const folder = pathParts.value.name;
-  const url = dropResult.value?.url ?? '';
-  const pin = dropResult.value?.pin ?? '';
-  const maxFiles = Number(dropMaxFiles.value) || 20;
-  const maxMB = Number(dropMaxSizeMB.value) || 500;
-  const exts = splitList(dropAllowedExt.value, { spaces: true }).map((s) => s.replace(/^\./, '')).filter(Boolean);
-  const title = t('access.ui.drop_title', { folder });
-  const lines: string[] = [];
-  lines.push(t('access.ui.mail_hello'), '');
-  lines.push(t('access.ui.drop_invited'), '');
-  lines.push(t('access.ui.mail_folder', { name: folder }));
-  lines.push(t('access.ui.drop_limit', { files: maxFiles, mb: maxMB }));
-  lines.push(exts.length
-    ? t('access.ui.drop_types', { types: exts.join(', ') })
-    : t('access.ui.drop_types_all'));
-  lines.push('', t('access.ui.drop_upload_here'), url);
-  if (pin) lines.push('', t('access.ui.mail_pin', { pin }));
-  lines.push('', expiryLine(dropExpiry.value));
-  return { title, text: lines.join('\n') };
-}
-
-async function nativeShare(body: { title: string; text: string }) {
-  if (!canShare.value) return;
+async function nativeShare(body: SheetWords | null) {
+  if (!canShare.value || !body) return;
   try {
     await navigator.share(body);
   } catch {
@@ -1090,13 +1056,20 @@ async function nativeShare(body: { title: string; text: string }) {
 
               <template v-if="shareResult">
                 <!-- one-line download command, for pulling the file onto a server -->
-                <div class="fx-perm-cli fe-share__cli">
+                <div v-if="shareCli || sharePs" class="fx-perm-cli fe-share__cli" data-testid="share-cli">
                   <span class="fe-share__fieldlabel">{{ t('access.ui.command_line') }}</span>
-                  <div class="fe-share__clirow">
-                    <code class="fe-share__clicmd" :title="shareCli">{{ shareCli }}</code>
+                  <div v-if="shareCli" class="fe-share__clirow">
+                    <code class="fe-share__clicmd" :title="shareCli" data-testid="share-cli-curl">{{ shareCli }}</code>
                     <button type="button" class="fe-share__copy" @click="copy(shareCli, 'sharecli')">
                       <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
                       <span>{{ copied === 'sharecli' ? t('access.copied') : t('access.copy') }}</span>
+                    </button>
+                  </div>
+                  <div v-if="sharePs" class="fe-share__clirow">
+                    <code class="fe-share__clicmd" :title="sharePs" data-testid="share-cli-powershell">{{ sharePs }}</code>
+                    <button type="button" class="fe-share__copy" @click="copy(sharePs, 'shareps')">
+                      <span aria-hidden="true" v-html="actionIconSvg('copy')"></span>
+                      <span>{{ copied === 'shareps' ? t('access.copied') : t('access.copy') }}</span>
                     </button>
                   </div>
                 </div>
@@ -1110,13 +1083,24 @@ async function nativeShare(body: { title: string; text: string }) {
                     {{ t('access.ui.send') }}
                   </button>
                 </div>
+                <div v-if="mailRowShown && !mailMissing" class="fe-share__mailrow" data-testid="share-mail-lang-row">
+                  <span class="fe-share__hint">{{ t('access.ui.recipient_lang') }}</span>
+                  <ChoiceSelect
+                    :model-value="recipientLang"
+                    :options="recipientLangChoices"
+                    size="sm"
+                    :aria-label="t('access.ui.recipient_lang')"
+                    testid="share-mail-lang"
+                    @update:model-value="pickRecipientLang"
+                  />
+                </div>
                 <div v-if="mailRowShown && mailMissing" class="fe-share__notice" data-testid="share-mail-unavailable">
                   {{ t('access.ui.mail_not_set_up') }}
                 </div>
                 <div v-if="shareMailNotice" class="fe-share__notice">{{ shareMailNotice }}</div>
 
                 <!-- native share (OS share sheet) — same as the fishapp Share button -->
-                <button v-if="canShare" type="button" class="fe-share__btn fe-share__btn--wide" @click="nativeShare(shareBody())">
+                <button v-if="canShare && shareSheet" type="button" class="fe-share__btn fe-share__btn--wide" data-testid="share-sheet" @click="nativeShare(shareSheet)">
                   <span aria-hidden="true" v-html="actionIconSvg('access')"></span>
                   <span>{{ t('access.ui.share') }}</span>
                 </button>
@@ -1225,6 +1209,17 @@ async function nativeShare(body: { title: string; text: string }) {
                     <button type="button" class="fe-share__btn fe-share__btn--primary" :disabled="busy" @click="inviteCreateUser">
                       {{ t('access.ui.create_user_grant') }}
                     </button>
+                  </div>
+                  <div class="fe-share__mailrow" data-testid="share-invite-lang-row">
+                    <span class="fe-share__hint">{{ t('access.ui.recipient_lang') }}</span>
+                    <ChoiceSelect
+                      :model-value="recipientLang"
+                      :options="recipientLangChoices"
+                      size="sm"
+                      :aria-label="t('access.ui.recipient_lang')"
+                      testid="share-invite-lang"
+                      @update:model-value="pickRecipientLang"
+                    />
                   </div>
                   <button v-if="mayShare.links" type="button" class="fe-share__linkbtn" data-testid="share-send-link-instead" :disabled="busy" @click="gotoShareWithMail">
                     {{ t('access.ui.just_send_a_share_link') }}
@@ -1380,13 +1375,24 @@ async function nativeShare(body: { title: string; text: string }) {
                     {{ t('access.ui.send') }}
                   </button>
                 </div>
+                <div v-if="mailRowShown && !mailMissing" class="fe-share__mailrow" data-testid="drop-mail-lang-row">
+                  <span class="fe-share__hint">{{ t('access.ui.recipient_lang') }}</span>
+                  <ChoiceSelect
+                    :model-value="recipientLang"
+                    :options="recipientLangChoices"
+                    size="sm"
+                    :aria-label="t('access.ui.recipient_lang')"
+                    testid="drop-mail-lang"
+                    @update:model-value="pickRecipientLang"
+                  />
+                </div>
                 <div v-if="mailRowShown && mailMissing" class="fe-share__notice">
                   {{ t('access.ui.mail_not_set_up') }}
                 </div>
                 <div v-if="dropMailNotice" class="fe-share__notice">{{ dropMailNotice }}</div>
 
                 <!-- native share (OS share sheet) — same as the fishapp Share button -->
-                <button v-if="canShare" type="button" class="fe-share__btn fe-share__btn--wide" @click="nativeShare(dropBody())">
+                <button v-if="canShare && dropSheet" type="button" class="fe-share__btn fe-share__btn--wide" data-testid="drop-sheet" @click="nativeShare(dropSheet)">
                   <span aria-hidden="true" v-html="actionIconSvg('access')"></span>
                   <span>{{ t('access.ui.share') }}</span>
                 </button>

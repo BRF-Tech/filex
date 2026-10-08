@@ -2,10 +2,11 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/writegate"
 )
@@ -39,7 +40,42 @@ func gate(w http.ResponseWriter, r *http.Request, resolver *acl.Resolver, storag
 			targets[i] = keyless(targets[i])
 		}
 	}
-	return answerGate(w, writegate.Check(liveLocks(r, resolver, storageID), 0, targets...))
+	err := writegate.Check(liveLocks(r, resolver, storageID), 0, targets...)
+	if answerVaultGate(w, langOf(r), err) {
+		return true
+	}
+	return answerGate(w, r, err)
+}
+
+// answerVaultGate writes the refusal of writegate's vault rule
+// (docs/E2E-VAULT-FORMAT.md → Writes from anywhere else), in lang ("" = the
+// server's default language), and reports whether err was one:
+//
+//   - 403 VAULT_PATH: the write touches something strictly inside a vault
+//     folder, where only the vault API (/api/files/e2e/vault/*) writes;
+//   - 409 VAULT_KEYFILE: it would change a vault's key file other than by
+//     its usual door, or remove or move it on its own.
+func answerVaultGate(w http.ResponseWriter, lang string, err error) bool {
+	var ve *writegate.VaultPathError
+	switch {
+	case err == nil:
+		return false
+	case errors.As(err, &ve) && ve.KeyFile, errors.Is(err, writegate.ErrVaultKeyFile):
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":   "VAULT_KEYFILE",
+			"code":    "VAULT_KEYFILE",
+			"message": srvtext.Text(lang, "server.e2e.vault.keyfile", nil),
+		})
+		return true
+	case errors.Is(err, writegate.ErrVaultPath):
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":   "VAULT_PATH",
+			"code":    "VAULT_PATH",
+			"message": srvtext.Text(lang, "server.e2e.vault.path", nil),
+		})
+		return true
+	}
+	return false
 }
 
 // liveLocks is the storage's live lock table, or nil when no ACL resolver is
@@ -53,26 +89,35 @@ func liveLocks(r *http.Request, resolver *acl.Resolver, storageID int64) writega
 
 // answerGate writes the refusal for an error from writegate.Check (or from a
 // service that passed one through) and reports whether it did.
-func answerGate(w http.ResponseWriter, err error) bool {
+func answerGate(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return false
 	}
+	// The vault rule, for the doors that pass a service's error on (the
+	// queue, a share, an app's interface): worded in the reader's language.
+	if answerVaultGate(w, langOf(r), err) {
+		return true
+	}
 	var re *syspath.ReservedError
 	if errors.As(err, &re) {
-		writeReserved(w, re.Rel)
+		writeReserved(w, r, re.Rel)
 		return true
 	}
 	var le *writegate.LockedError
 	if errors.As(err, &le) {
-		lockedAnswer(w, le.Lock, le.Rel)
+		lockedAnswer(w, r, le.Lock, le.Rel)
 		return true
 	}
 	switch {
 	case errors.Is(err, syspath.ErrReserved):
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error(), "code": "RESERVED_NAME"})
+		// No name travels with the bare sentinel: the sentence that names
+		// none, under the same code.
+		body := errorBody(r, "reserved_name", nil, "code", "RESERVED_NAME")
+		body["message"] = apierr.Text(langOf(r), "reserved_any", nil)
+		writeJSON(w, http.StatusForbidden, body)
 		return true
 	case errors.Is(err, writegate.ErrLocked):
-		writeJSON(w, http.StatusLocked, map[string]string{"error": "locked", "message": err.Error()})
+		writeError(w, r, http.StatusLocked, "locked", nil)
 		return true
 	}
 	return false
@@ -83,11 +128,7 @@ func answerGate(w http.ResponseWriter, err error) bool {
 // 403 with `RESERVED_NAME`, not 404: the person named the path themselves, so
 // there is nothing to hide, and "not found" for a folder they are trying to
 // CREATE would be a lie.
-func writeReserved(w http.ResponseWriter, rel string) {
+func writeReserved(w http.ResponseWriter, r *http.Request, rel string) {
 	name := syspath.Reserved(rel)
-	writeJSON(w, http.StatusForbidden, map[string]string{
-		"error": fmt.Sprintf("%q is reserved for filex's own use", name),
-		"code":  "RESERVED_NAME",
-		"name":  name,
-	})
+	writeError(w, r, http.StatusForbidden, "reserved_name", apierr.Params{"name": name}, "code", "RESERVED_NAME", "name", name)
 }

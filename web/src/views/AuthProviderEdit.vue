@@ -41,7 +41,6 @@ import type {
 import { useToastStore } from '@/stores/toast';
 import { useTenancy } from '@/composables/useTenancy';
 import { extractError } from '@/api/client';
-import { providerCheckText, providerFieldLabel } from '@/lib/providerChecks';
 
 import Button from '@/components/ui/Button.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
@@ -154,9 +153,14 @@ function sectionsOf(p: AuthProvider): { key: string; fields: AuthProviderField[]
   return order.map((key) => ({ key, fields: fields.filter((f) => sectionOf(p, f.key) === key) })).filter((s) => s.fields.length);
 }
 
-/** One step of a test, in words (lib/providerChecks: one wording for every page). */
-const checkText = (c: AuthProviderCheck) => providerCheckText(c, t as never, te as never);
-const fieldLabel = (key: string) => providerFieldLabel(key, t as never, te as never);
+/** One step of a test, in words: the server's sentence (backend
+ *  auth/probe_say.go), the same on every page that tests a provider. */
+const checkText = (c: AuthProviderCheck) => c.text || `${c.id}: ${c.status}`;
+/** A configuration field's name in words (`authProviders.fields.<key>`), else the key. */
+function fieldLabel(key: string): string {
+  const k = `authProviders.fields.${key}`;
+  return te(k) || te(k, 'en') ? t(k) : key;
+}
 
 /** An environment setting as the page shows it: its value, or what an unset
  *  one means ("memberOf (default)"). */

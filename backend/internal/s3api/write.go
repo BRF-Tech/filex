@@ -127,7 +127,30 @@ func (h *Handler) putObject(w http.ResponseWriter, r *http.Request, p *protocola
 		return
 	}
 	if err := writer.Write(ctx, key, hashed, size); err != nil {
+		if bodyMismatched(body) {
+			// A driver that writes in place (local disk) has already put the
+			// bytes before the refusal under the key: they are not the object
+			// the client declared, so they go, as after a failed checksum.
+			if del, ok := drv.(storage.Deleter); ok {
+				_ = del.Delete(context.WithoutCancel(ctx), key)
+			}
+			status, code := chunkedError(ErrDecodedLength)
+			WriteError(w, r, status, code, ErrDecodedLength.Error())
+			return
+		}
 		WriteError(w, r, statusForStorageErr(err), codeForWriteErr(err), err.Error())
+		return
+	}
+	// ⚠ The size the quota and the per-file limit were asked with is the one
+	// the client declared, so a chunked body has to be exactly that long. A
+	// driver that took `size` bytes never looks for the end of the body; this
+	// does, and an object whose body went on is removed rather than kept.
+	if err := bodyFinish(body); err != nil {
+		if del, ok := drv.(storage.Deleter); ok {
+			_ = del.Delete(context.WithoutCancel(ctx), key)
+		}
+		status, code := chunkedError(err)
+		WriteError(w, r, status, code, err.Error())
 		return
 	}
 	sum := hex.EncodeToString(digest.Sum(nil))
@@ -518,6 +541,11 @@ func errString(err error) string {
 // ⚠ Two lengths are in play and confusing them is a quiet bug: Content-Length
 // describes the FRAMED body, x-amz-decoded-content-length the object. Handing
 // the first to the driver records the framing overhead as part of the file.
+//
+// ⚠ A chunked body is held to its declared decoded length (exactBody): the
+// caller decides the quota and the per-file limit on that number before a
+// byte is read. A plain body needs no wrapper: net/http already holds it to
+// its Content-Length.
 func (h *Handler) requestBody(r *http.Request) (io.Reader, int64, error) {
 	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
 	if !IsChunked(payloadHash) {
@@ -554,7 +582,24 @@ func (h *Handler) requestBody(r *http.Request) (io.Reader, int64, error) {
 			return nil, 0, ErrChunkSignature
 		}
 	}
-	return newChunkedReader(r.Body, sr, secret, sr.Signature, verify), size, nil
+	return newExactBody(newChunkedReader(r.Body, sr, secret, sr.Signature, verify), size), size, nil
+}
+
+// bodyFinish checks, after a successful write, that a chunked body ended
+// exactly where it said it would (exactBody.finish). A plain body: nil.
+func bodyFinish(body io.Reader) error {
+	if eb, ok := body.(*exactBody); ok {
+		return eb.finish()
+	}
+	return nil
+}
+
+// bodyMismatched reports whether a chunked body was already caught not
+// matching its declared length, so a failed write is answered as the
+// client's mistake rather than the storage's.
+func bodyMismatched(body io.Reader) bool {
+	eb, ok := body.(*exactBody)
+	return ok && eb.mismatched()
 }
 
 // trailersOf returns the trailing headers of a chunked body, or nil.
@@ -562,6 +607,9 @@ func (h *Handler) requestBody(r *http.Request) (io.Reader, int64, error) {
 // ⚠ Only meaningful once the body has been read to EOF — the trailer is at the
 // end, which is the whole reason a client uses one.
 func trailersOf(body io.Reader) map[string]string {
+	if eb, ok := body.(*exactBody); ok {
+		return eb.cr.Trailers()
+	}
 	if cr, ok := body.(*chunkedReader); ok {
 		return cr.Trailers()
 	}
@@ -582,6 +630,9 @@ func chunkedError(err error) (int, string) {
 		return http.StatusNotImplemented, "NotImplemented"
 	case errors.Is(err, ErrChunkSignature):
 		return http.StatusForbidden, "SignatureDoesNotMatch"
+	case errors.Is(err, ErrDecodedLength):
+		// S3's own word for a body that is not the length it declared.
+		return http.StatusBadRequest, "IncompleteBody"
 	case errors.Is(err, ErrChunkFraming):
 		return http.StatusBadRequest, "InvalidRequest"
 	default:

@@ -134,8 +134,9 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 	// filex account, so the account name ("admin") would be misleading. A
 	// trusted host proxy can additionally stamp the REAL end user via
 	// X-Filex-Presence-Name/-Key; the display then combines both:
-	// "Ada (work)". (Honored only on token auth; proxies strip these from
-	// client requests, so end users can't spoof them.)
+	// "Ada (work)". (Honored only on a SHARED PROXY token — one with a
+	// username allow-list; proxies strip these from client requests, so end
+	// users can't spoof them. A personal token's stamp is not read.)
 	name := wsDisplayName(user)
 	// ⭐ The picture follows the ACCOUNT, not the client: a session, the
 	// desktop app and every API key minted under the same user all resolve to
@@ -159,7 +160,15 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 		// "filex desktop — Win32" in the presence bar of the owner's OWN folder.
 		// Their name leads and the client goes in parentheses instead —
 		// "Ada (filex desktop)", the same shape the proxy branch produces.
-		if len(tok.UsernameList()) == 0 {
+		//
+		// sharedProxy: the token is a host proxy's, serving many end users
+		// under one account (a username allow-list) — the one identity type
+		// that has somebody else to name. Only its X-Filex-Presence-* stamp is
+		// read: a personal token (the desktop app, a CLI, a script) IS its
+		// owner, and a stamp from it would put another person's name and face
+		// on the owner's own connection.
+		sharedProxy := len(tok.UsernameList()) > 0
+		if !sharedProxy {
 			qualifier = wsClientLabel(tok.Label)
 			if qualifier != "" {
 				name += " (" + qualifier + ")"
@@ -170,7 +179,7 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 			name = uname
 			avatar = ""
 		}
-		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); v != "" {
+		if v := sanitizePresenceName(r.Header.Get("X-Filex-Presence-Name")); sharedProxy && v != "" {
 			if qualifier != "" {
 				name = v + " (" + qualifier + ")"
 			} else {
@@ -182,7 +191,9 @@ func (h *WS) Ticket(w http.ResponseWriter, r *http.Request) {
 			// one — never the token owner's.
 			avatar = sanitizePresenceAvatar(r.Header.Get("X-Filex-Presence-Avatar"))
 		}
-		presenceKey = sanitizePresenceKey(r.Header.Get("X-Filex-Presence-Key"))
+		if sharedProxy {
+			presenceKey = sanitizePresenceKey(r.Header.Get("X-Filex-Presence-Key"))
+		}
 		if presenceKey == "" {
 			// Default token connections to their own (token, username) identity:
 			// without this a keyless token viewer collides with the token
@@ -364,6 +375,13 @@ func (h *WS) Handle(w http.ResponseWriter, r *http.Request) {
 
 	client := realtime.NewClient(userID, name, 32)
 	client.Avatar = avatar
+	// #196 - the tenant whose access.changed news this socket hears: the
+	// scope the cookie door's middleware attached, or the one restored above
+	// for a ticket. The platform's own accounts and a single-tenant install
+	// stay 0 (they hear only what is named or meant for everybody).
+	if sc, ok := tenant.FromContext(baseCtx); ok && sc != nil && !sc.IsSupertenant && sc.ProviderID > 0 {
+		client.Tenant = sc.ProviderID
+	}
 	if ticketed {
 		client.PresenceKey = ticket.PresenceKey
 	}

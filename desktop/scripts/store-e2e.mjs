@@ -74,11 +74,16 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'filex-store-e2e-'));
 const unpacked = path.join(work, 'unpacked');
 
 /** Runs Windows PowerShell (the Appx cmdlets live there, not in pwsh). The
- *  script travels base64-encoded, so no quoting layer can mangle it. */
+ *  script travels base64-encoded, so no quoting layer can mangle it.
+ *  ⚠ windowsHide on every program this run starts (#197): started from a
+ *  parent without a console of its own to share, a console program is
+ *  otherwise given a visible window on the desktop of whoever cuts the
+ *  release - the one thing step 7 says this run never does. */
 function ps(script) {
   return execFileSync('powershell.exe', psArgs(script), {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
   }).trim();
 }
 function psArgs(script) {
@@ -323,13 +328,13 @@ try {
     `-c.appx.displayName=${VARIANT.displayName}`,
     `-c.appx.customExtensionsPath=${extFile}`,
     `-c.directories.output=${OUT}`,
-  ], { cwd: DESKTOP, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' } });
+  ], { cwd: DESKTOP, stdio: 'inherit', env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' }, windowsHide: true });
   const appx = fs.readdirSync(OUT).find((f) => f.endsWith('.appx'));
   if (!appx) throw new Error(`no .appx in ${OUT}`);
 
   // ── install it ──────────────────────────────────────────────────────
   ps(`Get-AppxPackage -Name ${q(VARIANT.identity)} | Remove-AppxPackage`);
-  execFileSync(findMakeAppx(), ['unpack', '/p', path.join(OUT, appx), '/d', unpacked, '/o'], { stdio: 'ignore' });
+  execFileSync(findMakeAppx(), ['unpack', '/p', path.join(OUT, appx), '/d', unpacked, '/o'], { stdio: 'ignore', windowsHide: true });
   ps(`Add-AppxPackage -Register ${q(path.join(unpacked, 'AppxManifest.xml'))}`);
   const info = JSON.parse(ps(`Get-AppxPackage -Name ${q(VARIANT.identity)} | Select-Object PackageFamilyName, InstallLocation, Version | ConvertTo-Json`));
   pfn = info.PackageFamilyName;

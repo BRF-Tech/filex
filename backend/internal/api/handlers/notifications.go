@@ -48,6 +48,13 @@ func NewNotifications(svc notify.Service, store db.Store, r *acl.Resolver) *Noti
 // It is also what the browser notification and the desktop toast read (the
 // web store diffs this list; the desktop polls `unread=true`), so what a
 // reader may learn of a broadcast is decided here once for all three.
+//
+// ⚠⚠ Each row's `title` and `body` are the SERVER's sentence, said here in the
+// reader's language (notify.SayRows, the one code path a push and an email
+// take too): the language of the reader's ACCOUNT (notify.PersonLang) - one
+// setting, whichever surface it was set on; the request names none. A row
+// that names an item inside an encrypted folder also carries `e2e`: where the
+// lock word stands, for a screen that can name the item.
 func (h *Notifications) List(w http.ResponseWriter, r *http.Request) {
 	if h.Service == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifications offline"})
@@ -66,6 +73,7 @@ func (h *Notifications) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	notify.SayRows(notify.PersonLang(user), rows)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":  rows,
 		"total":  total,
@@ -789,6 +797,8 @@ func (h *Notifications) AdminList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The history is said in its reader's language too, by the same code.
+	notify.SayRows(notify.PersonLang(auth.UserFrom(r.Context())), rows)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items":  rows,
 		"total":  total,
@@ -814,11 +824,12 @@ func (h *Notifications) AdminTest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifications offline"})
 		return
 	}
+	// The server's own row, from its own event: nothing of the request goes
+	// into it, and its words are said by the server in each reader's language
+	// (internal/notify say.go, server.notify.admin_test).
 	id, err := h.Service.Send(r.Context(), notify.Event{
 		Event:    notify.EventAdminTest,
 		Severity: notify.SeverityInfo,
-		Title:    "filex test notification",
-		Body:     "If you're reading this, both the in-app bell and the webhook plumbing are wired correctly.",
 		Meta:     map[string]any{"source": "admin_test"},
 	})
 	if err != nil {

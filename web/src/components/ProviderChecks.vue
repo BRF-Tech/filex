@@ -4,16 +4,17 @@
  * was not and why, and what cannot be known without a person signing in.
  * ⚠ Shown on the card, not in a toast: the step that failed is the one the
  * operator has to read and act on. One drawing for every page that tests a
- * provider (lib/providerChecks).
+ * provider. Every step's sentence is the SERVER's (`text`, backend
+ * auth/probe_say.go): the page words nothing (0.54 - the panel used to build
+ * the sentences from the step ids, and an API reader got only the ids).
  */
 import { useI18n } from 'vue-i18n';
-import type { AuthProviderTestResult } from '@/api/types';
-import { providerCheckText } from '@/lib/providerChecks';
+import type { AuthProviderCheck, AuthProviderTestResult } from '@/api/types';
 import CodeText from '@/components/ui/CodeText.vue';
 
 defineProps<{ result: AuthProviderTestResult; testid: string }>();
-const { t, te } = useI18n();
-const text = (c: Parameters<typeof providerCheckText>[0]) => providerCheckText(c, t as never, te as never);
+const { t } = useI18n();
+const text = (c: AuthProviderCheck) => c.text || `${c.id}: ${c.status}`;
 </script>
 
 <template>

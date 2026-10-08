@@ -222,13 +222,13 @@ func registerDoorTools(srv *mcp.Server, ops *aiOps) {
 		func(in mcpOpIDIn) string { return fmt.Sprint(in.ID) })
 
 	regDoorTool(srv, ops, "trash_list",
-		"List what you can bring back from the trash: {entries: [{id, path (where it was), name, size, deleted_at, deleted_by_self, …}], total, limit, offset}. Only entries you could see where they were, inside your root.",
+		"List what you can bring back from the trash: {entries: [{id, path (where it was), name, size, deleted_at, deleted_by_self, …}], total, total_bytes, storages: [{storage_name, count, bytes, newest_deleted_at}], summary, limit, offset}. total and total_bytes count every entry, not the page; summary says it in your language. Only entries you could see where they were, inside your root.",
 		func(ctx context.Context, in mcpTrashListIn) (doorAnswer, error) {
 			return ops.TrashList(ctx, in.Storage, in.Limit, in.Offset)
 		}, nil)
 
 	regDoorTool(srv, ops, "trash_restore",
-		"Bring trash entries back to where they were (node_ids = the id of trash_list entries, at most 1000). Every entry is checked first - files.create where it came from, app locks - and nothing is queued unless all pass. A place that is taken meanwhile is reported on the operation. Answers 202 {ops: […]} (one per storage); follow them with op_get.",
+		"Bring trash entries back to where they were (node_ids = the id of trash_list entries, at most 1000). Every entry is checked first - files.create where it came from, app locks - and nothing is queued unless all pass. A place that is taken meanwhile is reported on the operation. Answers 202 {ops: […], done, summary} (one op per storage); follow them with op_get, whose summary says how each ended.",
 		func(ctx context.Context, in mcpTrashRestoreIn) (doorAnswer, error) {
 			return ops.TrashRestore(ctx, in.NodeIDs)
 		}, nil)

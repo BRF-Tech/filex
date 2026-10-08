@@ -22,9 +22,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/writegate"
@@ -108,11 +110,17 @@ type Op struct {
 	// says it in the person's language (lib/errorWords `jobFailure`) and keeps
 	// `Error` — English, sometimes plumbing — for an administrator's second
 	// line. Filled by the plugin Decorator, never stored.
-	ErrorCode   string     `json:"error_code,omitempty"`
-	ErrorEngine string     `json:"error_engine,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	ErrorEngine string `json:"error_engine,omitempty"`
+	// ErrorParams are the values ErrorCode's sentence takes, kept on the row
+	// with the code (errcode.go); ErrorText is that sentence in the reader's
+	// language, made when the row is read (sayErrors) - what every client
+	// prints. Error stays the English detail.
+	ErrorParams map[string]string `json:"error_params,omitempty"`
+	ErrorText   string            `json:"error_text,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	StartedAt   *time.Time        `json:"started_at,omitempty"`
+	FinishedAt  *time.Time        `json:"finished_at,omitempty"`
 	// Plugin fields are filled by the Decorator for OpPluginAction rows and
 	// never stored here: which plugin/action ran, the action's label in the
 	// caller's locale, the last progress message, and the committed outputs.
@@ -135,6 +143,10 @@ type Op struct {
 	ActorID *int64 `json:"actor_id,omitempty"`
 	// Cancellable is advertised rather than inferred from the operation kind.
 	Cancellable bool `json:"cancellable"`
+	// Summary is where a trash job stands, said in the reader's language
+	// (say.go): a restore, a permanent delete or "empty the trash". Filled by
+	// Get/List for those kinds, never stored.
+	Summary string `json:"summary,omitempty"`
 
 	// An OpTrashEmpty row's request (trash_empty.go): kept out of the
 	// answers, which carry its counts only.
@@ -152,6 +164,7 @@ type Op struct {
 // the other kinds store paths; that is read into the private fields and
 // taken out of the public ones.
 func shape(op *Op) {
+	decodeFailure(op)
 	if op.DestStorageID == 0 {
 		op.DestStorageID = op.StorageID
 	}
@@ -657,7 +670,9 @@ func (s *Service) Get(ctx context.Context, id int64) (*Op, error) {
 		if s.decorator != nil {
 			s.decorator(ctx, []*Op{op})
 		}
+		sayErrors(ctx, []*Op{op})
 		op.Cancellable = cancellable(op)
+		sayRows(ctx, []*Op{op})
 	}
 	return op, err
 }
@@ -763,6 +778,8 @@ func (s *Service) ListFor(ctx context.Context, status string, v Viewer) ([]*Op, 
 	if s.decorator != nil && len(out) > 0 {
 		s.decorator(ctx, out)
 	}
+	sayErrors(ctx, out)
+	sayRows(ctx, out)
 	return out, nil
 }
 
@@ -1141,7 +1158,7 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		status = StatusCancelled
 	case op.Failed == 0 && left != nil:
 		status = StatusPartial
-		errMsg = left.Error()
+		errMsg = encodeFailure(left, "")
 	case errors.Is(ctx.Err(), context.Canceled) && !finishesOnceStarted(op.Kind):
 		// A finishing job that got here did every entry, and says how that
 		// went: a rename completed while the server stopped is `ok`, not
@@ -1151,13 +1168,14 @@ func (s *Service) execute(ctx context.Context, op *Op) {
 		status = StatusOK
 	case op.Done == 0:
 		status = StatusFailed
-		errMsg = errMessage(lastErr)
+		errMsg = encodeFailure(lastErr, "")
 	default:
 		status = StatusPartial
-		errMsg = errMessage(lastErr)
+		tail := ""
 		if left != nil {
-			errMsg += "; " + left.Error()
+			tail = left.Error()
 		}
+		errMsg = encodeFailure(lastErr, tail)
 	}
 	// The counters ride along: a delete job writes its progress at most once
 	// a second, so the last item's count may not be on the row yet.
@@ -1218,7 +1236,7 @@ func (s *Service) executeJob(ctx context.Context, op *Op) {
 	delete(s.jobs, op.ID)
 	s.jobsMu.Unlock()
 	if queued.run == nil {
-		s.fail(ctx, op, "the server restarted before this archive operation finished; start it again")
+		s.fail(ctx, op, apierr.Encode("restarted", nil, "the server restarted before this archive operation finished; start it again"))
 		return
 	}
 	if queued.cleanup != nil {
@@ -1279,6 +1297,13 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		// trash" — the same call the web UI, WebDAV and the AI surface make — so
 		// an async batch delete cannot drift from what a synchronous delete of
 		// the same item does.
+		//
+		// The bytes go first and the rows after, under the storage's row gate
+		// (internal/rowgate): a scan between the two would see a live row
+		// whose bytes had left, confirm it gone and drop it, and the trash
+		// entry the person could restore from would be lost with it.
+		release := rowgate.Move(op.StorageID)
+		defer release()
 		out, terr := trash.Put(ctx, drv, src)
 		switch {
 		case terr == nil && out.Trashed:
@@ -1332,6 +1357,10 @@ func (s *Service) runOne(ctx context.Context, drv, dstDrv storage.Driver, op *Op
 		if normOpPath(dst) == normOpPath(src) {
 			return nil
 		}
+		// From the first byte that moves to the last row that follows, under
+		// the storage's row gate (internal/rowgate, issue #192): see runRename.
+		release := rowgate.Move(op.StorageID)
+		defer release()
 		if err := m.Move(ctx, src, dst); err != nil {
 			if !errors.Is(err, storage.ErrNotFound) {
 				return err

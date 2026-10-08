@@ -27,25 +27,25 @@ import {
   type NotificationDestination,
   type NotificationTarget,
 } from '../../packages/core/src/lib/notificationTarget.ts';
-// ⚠⚠ Same reason, same boundary: the SENTENCE also comes from the core package,
-// because a row's stored title is written once on the server in one language
-// and for most file events is not written at all (Send substitutes the event
-// id, which is how a native toast once read `file.uploaded`). One catalogue for
-// the bell, the browser toast and this one — see packages/core/src/lib/notificationText.ts.
-import {
-  renderNotification,
-  type NotificationText,
-  type NotifyLocale,
-} from '../../packages/core/src/lib/notificationText.ts';
+// ⚠⚠ The SENTENCE is the server's: `GET /api/notifications` answers each row
+// with its title and body already said in the reader's language (backend
+// internal/notify say.go) - the words the window's bell, the browser's pop-up,
+// a push to the person's phone and their email say too. This process composes
+// nothing; it shows the row's words as they are. An item inside an encrypted
+// folder reads "🔒 Encrypted item" here: the main process has no folder key.
+
+/** What a native toast shows: the row's own words. */
+export interface NotificationText {
+  title: string;
+  body: string;
+}
 
 /** The bell's own cadence. Do not lower it — see the note above. */
 export const NOTIFY_POLL_MS = 15_000;
 
-/** One row of `GET /api/notifications`, only the fields we use.
- *
- *  ⚠ `meta` is not decoration: it carries the nested `node`, `actor` and
- *  `share` the phrasing interpolates. Dropping it here would leave the shared
- *  renderer with nothing to say but the path. */
+/** One row of `GET /api/notifications`, only the fields we use: its words
+ *  (said by the server, in the language the request named) and where a click
+ *  goes. */
 export interface NotificationRow {
   id: number;
   event: string;
@@ -53,6 +53,12 @@ export interface NotificationRow {
   body?: string;
   meta?: unknown;
   target?: NotificationTarget;
+}
+
+/** A row's words as a native toast shows them - the server's, as they are. */
+export function toastText(row: NotificationRow): NotificationText {
+  const title = typeof row.title === 'string' ? row.title.trim() : '';
+  return { title: title || row.event, body: typeof row.body === 'string' ? row.body : '' };
 }
 
 /**
@@ -117,18 +123,12 @@ export interface DesktopNotifierOptions {
    */
   onUnread?: (accountId: string, count: number) => void;
   /**
-   * The language THIS reader is using — main.ts passes `effectiveLocale()`.
-   * Read per row rather than captured, so switching the app's language changes
-   * what the next notification says without a restart.
-   */
-  locale?: () => NotifyLocale;
-  /**
    * Puts one row on screen. main.ts passes a real OS notification.
    *
-   * ⚠ `text` is what to show; `row` is kept only for logging and for the click.
-   * The composition happens HERE rather than in main.ts so the rule — never
-   * show a raw event id — is covered by `node --test`, where a rule that
-   * cannot be tested is a rule nobody checks.
+   * ⚠ `text` is what to show - the server's words for the row (toastText);
+   * `row` is kept only for logging and for the click. The language is the one
+   * `fetchRows` names to the server (main.ts: the app's own, `lang=`), so
+   * switching it changes what the next notification says without a restart.
    */
   show: (row: NotificationRow, text: NotificationText, onClick: () => void) => void;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
@@ -274,10 +274,8 @@ export class DesktopNotifier {
       const fresh = newRows(rows, this.since);
       this.since = Math.max(this.since, top);
       if (!this.opts.enabled()) return;
-      const lang: NotifyLocale = this.opts.locale?.() ?? 'en';
       for (const row of fresh) {
-        const text = renderNotification(row, lang);
-        this.opts.show(row, text, () => this.clicked(acc, row));
+        this.opts.show(row, toastText(row), () => this.clicked(acc, row));
       }
     } catch (err) {
       // A server that is asleep, no network: the app keeps working and says

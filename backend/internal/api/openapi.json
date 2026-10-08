@@ -3713,7 +3713,8 @@
     "/api/files/e2e/password-changed": {
       "post": {
         "operationId": "e2ePasswordChanged",
-        "summary": "Record a folder password change (audit + the owner's notification)",
+        "summary": "Kept for clients older than 0.54: answers and records nothing (the server records a password change itself)",
+        "deprecated": true,
         "tags": [
           "Encryption"
         ],
@@ -3876,6 +3877,801 @@
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilese2erequests"
         },
         "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/create": {
+      "post": {
+        "operationId": "createVault",
+        "summary": "Make a new, empty vault: the folder, its key file and generation 1's index file",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The vault folder, `<storage>://<path>`."
+                  },
+                  "marker": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "The vault's key file: v 3, req [\"vault\"], fmk \"wrapped\", vault {v: 1, id, pack: 22 or 24}."
+                  },
+                  "index": {
+                    "type": "string",
+                    "description": "The base64 of generation 1's 65536-byte index file."
+                  }
+                },
+                "required": [
+                  "path",
+                  "marker",
+                  "index"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Made: `{generation: 1}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "generation": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/state": {
+      "get": {
+        "operationId": "getVaultState",
+        "summary": "A vault's id, pack size, latest generation and write lock",
+        "tags": [
+          "Encryption"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The vault folder, `<storage>://<path>`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`{vault_id, pack_log2, generation, lock}`; lock is null or `{holder, since, expires_at, mine}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "vault_id": {
+                      "type": "string"
+                    },
+                    "pack_log2": {
+                      "type": "integer"
+                    },
+                    "generation": {
+                      "type": "integer"
+                    },
+                    "lock": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
+    "/api/files/e2e/vault/list": {
+      "get": {
+        "operationId": "listVaultObjects",
+        "summary": "Page a vault's index files or packs, in name order",
+        "tags": [
+          "Encryption"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The vault folder, `<storage>://<path>`."
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "index",
+                "pack"
+              ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The hex name of the previous page's last item."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "description": "1 000 by default."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`{items, next, now}`: index items `{generation, size, mtime}`, pack items `{id, size, mtime}`; next is the cursor of the next page, or null; now is the server's clock, which retention is measured against.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "now": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
+    "/api/files/e2e/vault/lock": {
+      "post": {
+        "operationId": "lockVault",
+        "summary": "Take a vault's write lock for a new session",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The vault folder, `<storage>://<path>`."
+                  },
+                  "client": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "desktop",
+                      "cli",
+                      "mount"
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "A short free text, e.g. \"Firefox, ofis\"."
+                  }
+                },
+                "required": [
+                  "path",
+                  "client"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`{token, generation, lease_seconds, idle_seconds, expires_at}`; 409 VAULT_LOCKED carries holder, since and retry_after.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "generation": {
+                      "type": "integer"
+                    },
+                    "lease_seconds": {
+                      "type": "integer"
+                    },
+                    "idle_seconds": {
+                      "type": "integer"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/lock/renew": {
+      "post": {
+        "operationId": "renewVaultLock",
+        "summary": "Renew the write lock (the holder's heartbeat)",
+        "tags": [
+          "Encryption"
+        ],
+        "parameters": [
+          {
+            "name": "X-Filex-Vault-Lock",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The write lock's token, as `lock` returned it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The vault folder, `<storage>://<path>`."
+                  },
+                  "active": {
+                    "type": "boolean",
+                    "description": "The holder is about to write."
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`{expires_at, idle_until}`; 409 VAULT_LOCK_LOST carries reason, and holder for taken and broken.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "idle_until": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/lock/release": {
+      "post": {
+        "operationId": "releaseVaultLock",
+        "summary": "Give the write lock up",
+        "tags": [
+          "Encryption"
+        ],
+        "parameters": [
+          {
+            "name": "X-Filex-Vault-Lock",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The write lock's token, as `lock` returned it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The vault folder, `<storage>://<path>`."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "locked_idle"
+                    ],
+                    "description": "The client locked the vault itself after its idle time."
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Released, or the token did not hold it."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/lock/break": {
+      "post": {
+        "operationId": "breakVaultLock",
+        "summary": "End somebody else's write lock (the folder's owner or an administrator)",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The vault folder, `<storage>://<path>`."
+                  },
+                  "client": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "desktop",
+                      "cli",
+                      "mount"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Ended, or nothing was held."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/pack": {
+      "put": {
+        "operationId": "putVaultPack",
+        "summary": "Store one pack, whole, once",
+        "tags": [
+          "Encryption"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The vault folder, `<storage>://<path>`."
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-Filex-Vault-Lock",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The write lock's token, as `lock` returned it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored: `{id}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/index": {
+      "put": {
+        "operationId": "putVaultIndex",
+        "summary": "Commit the next generation's index file",
+        "tags": [
+          "Encryption"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The vault folder, `<storage>://<path>`."
+          },
+          {
+            "name": "generation",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "X-Filex-Vault-Lock",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The write lock's token, as `lock` returned it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Committed: `{generation}`; 409 VAULT_GENERATION carries latest.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "generation": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/e2e/vault/delete": {
+      "post": {
+        "operationId": "deleteVaultObjects",
+        "summary": "Delete packs and index files for good (garbage collection)",
+        "tags": [
+          "Encryption"
+        ],
+        "parameters": [
+          {
+            "name": "X-Filex-Vault-Lock",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The write lock's token, as `lock` returned it."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "The vault folder, `<storage>://<path>`."
+                  },
+                  "packs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "indexes": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`{deleted: {packs, indexes}}`, how many of each were deleted (a missing one counts); 400 VAULT_KEEP for one of the three newest generations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "object",
+                      "properties": {
+                        "packs": {
+                          "type": "integer"
+                        },
+                        "indexes": {
+                          "type": "integer"
+                        }
+                      },
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "delete"
+      }
+    },
+    "/api/files/e2e/vault/prefs": {
+      "get": {
+        "operationId": "getVaultPrefs",
+        "summary": "The caller's idle time as a vault writer",
+        "tags": [
+          "Encryption"
+        ],
+        "responses": {
+          "200": {
+            "description": "`{idle_minutes}`: 1 to 10, 3 until set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "idle_minutes": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "read"
+      },
+      "put": {
+        "operationId": "putVaultPrefs",
+        "summary": "Set the caller's idle time as a vault writer",
+        "tags": [
+          "Encryption"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "idle_minutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  }
+                },
+                "required": [
+                  "idle_minutes"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`{idle_minutes}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "idle_minutes": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "externalDocs": {
+          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/E2E-VAULT-FORMAT.md#api"
+        },
+        "x-filex-token-verb": "read"
       }
     },
     "/api/files/manager": {
@@ -4168,7 +4964,7 @@
         },
         "responses": {
           "200": {
-            "description": "Restored.",
+            "description": "Restored. One `node_id`: `{ok}`. `node_ids` (no queue): `{done, failed, reason_code, taken, summary}` whatever the mix.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4176,6 +4972,25 @@
                   "properties": {
                     "ok": {
                       "type": "boolean"
+                    },
+                    "done": {
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "type": "integer"
+                    },
+                    "reason_code": {
+                      "type": "string",
+                      "enum": ["exists", "not_found", "forbidden", "failed"]
+                    },
+                    "taken": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "summary": {
+                      "type": "string"
                     }
                   }
                 }
@@ -4575,6 +5390,22 @@
             "description": "Only this storage."
           },
           {
+            "name": "storage",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Only this storage, by its adapter name. An unknown name lists nothing."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The language of `summary` (the screen's); else the account's, else Accept-Language."
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -4934,7 +5765,7 @@
         "tags": [
           "Documents"
         ],
-        "description": "For an office editor whose document changed outside it (#184). `action` `state` (the default) asks: `stale` true means a save of the session would be written beside the document as a conflict copy (`<name>.filex-conflict-<time>.<ext>`), not over it. `mine` is the answer \"write my version over the outside one\" (the session's save is written over the version there now), `theirs` \"keep the outside version\" (the session's save is not written). `known` is false when filex has no record of the session (one opened before the record existed, or whose record expired); the record is kept in the database, so every instance behind it answers alike. Asking needs what opening the document needs; an answer needs files.modify and a token that may write.",
+        "description": "For an office editor whose document changed outside it (#184). `action` `state` (the default) asks: `stale` true means a save of the session would be written beside the document as a conflict copy (`<name>.filex-conflict-<time>.<ext>`), not over it. `mine` is the answer \"write my version over the outside one\" (the session's save is written over the version there now), `theirs` \"keep the outside version\" (the session's save is not written). `known` is false when filex has no record of the session (one opened before the record existed, or whose record expired); the record is kept in the database, so every instance behind it answers alike. Asking needs what opening the document needs; a key that is not the document's is answered stale false, known false, and nothing is recorded. An answer needs files.modify, a token that may write and, since 0.54, to come from one of the session's own editors: somebody filex handed an editing configuration with that key (`token`, the configuration's signed token, shows it to any instance), else 403 `not_your_session`. Each answer is audited as `file.office_session_answered`.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4953,6 +5784,10 @@
                   "key": {
                     "type": "string",
                     "description": "The editor's ONLYOFFICE `document.key`."
+                  },
+                  "token": {
+                    "type": "string",
+                    "description": "The editor configuration's signed `token`, sent with an answer (`mine`, `theirs`): it shows that the caller was handed an editing session with this key."
                   },
                   "action": {
                     "type": "string",
@@ -5520,7 +6355,7 @@
     "/api/files/permissions/share-mail": {
       "post": {
         "operationId": "shareMail",
-        "summary": "E-mail a grantee that an item was shared with them",
+        "summary": "E-mail a public link the caller made; the server writes the message from the link",
         "tags": [
           "Permissions"
         ],
@@ -5530,6 +6365,31 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "properties": {
+                  "share": {
+                    "type": "string",
+                    "description": "The link's token (`token` in the create answer). Or `share_id`."
+                  },
+                  "share_id": {
+                    "type": "integer",
+                    "description": "The link's numeric id (`uuid` in GET /api/files/share)."
+                  },
+                  "email": {
+                    "type": "string",
+                    "description": "One address, or several separated by commas, semicolons or spaces."
+                  },
+                  "emails": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Addresses; at most 20 per send, 100 an hour per account."
+                  },
+                  "locale": {
+                    "type": "string",
+                    "description": "The language the mail is written in."
+                  }
+                },
                 "additionalProperties": true
               }
             }
@@ -5537,7 +6397,7 @@
         },
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "OK: `{emailed, sent[], failed[], pin_withheld, message}`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5552,6 +6412,58 @@
           }
         },
         "x-filex-token-verb": "write"
+      }
+    },
+    "/api/files/permissions/share-message": {
+      "get": {
+        "operationId": "shareMessage",
+        "summary": "The share mail's subject and body for a link, without sending it",
+        "tags": [
+          "Permissions"
+        ],
+        "parameters": [
+          {
+            "name": "share",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The link's token. Or `share_id`."
+          },
+          {
+            "name": "share_id",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The link's numeric id."
+          },
+          {
+            "name": "lang",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The language to write it in."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK: `{subject, body, pin_withheld}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read"
       }
     },
     "/api/files/permissions/users": {
@@ -5903,6 +6815,60 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/api/files/plugins/ui/{plugin}/{view}/read": {
+      "get": {
+        "operationId": "appUiRead",
+        "summary": "An app interface reads the file it was opened with",
+        "description": "Checked like a save: the app is running, the view is its interface, the person may run apps (`plugins.run`), the app was granted `files:read`, and the administrator did not turn the app off for this kind of file. The read itself is the explorer's preview read - the person's read permission, confinement and ranges - so an app reads nothing its person could not.",
+        "tags": [
+          "Apps"
+        ],
+        "parameters": [
+          {
+            "name": "plugin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The file, `<storage>://<path>`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes (a `Range` header is honoured).",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read"
       }
     },
     "/api/files/plugins/ui/{plugin}/{view}/save": {
@@ -6441,6 +7407,65 @@
         "x-filex-token-verb": "read"
       }
     },
+    "/api/files/search/match": {
+      "post": {
+        "operationId": "searchMatchNames",
+        "summary": "Which of these names answer a query, by the search's own name rule",
+        "description": "What the explorer's \"Filter in this folder\" box asks: the names are the rows the caller already holds, and the answer is the indexes of those that answer `q` by the search's own rule (every word of it in the name; `.`, `-`, `_` and a space are one separator; accents are kept, as a search keeps them). Reads no storage and returns nothing the caller did not send. At most 20,000 names (`413 too_many_names`).",
+        "tags": [
+          "Search"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string"
+                  },
+                  "names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "q",
+                  "names"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The indexes, in `names`, of the names that match.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "matches": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-filex-token-verb": "read"
+      }
+    },
     "/api/files/share": {
       "get": {
         "operationId": "listItemShares",
@@ -6724,46 +7749,6 @@
         "x-filex-token-verb": "read"
       }
     },
-    "/api/files/upload/abort": {
-      "post": {
-        "operationId": "uploadAbortS3",
-        "summary": "Abort a presigned multipart upload",
-        "tags": [
-          "Uploads"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "externalDocs": {
-          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilesuploadabort"
-        },
-        "x-filex-token-verb": "write"
-      }
-    },
     "/api/files/upload/begin": {
       "post": {
         "operationId": "uploadBegin",
@@ -6800,86 +7785,6 @@
         },
         "externalDocs": {
           "url": "https://github.com/BRF-Tech/filex/blob/main/docs/UPLOADS.md"
-        },
-        "x-filex-token-verb": "write"
-      }
-    },
-    "/api/files/upload/finalize": {
-      "post": {
-        "operationId": "uploadFinalizeS3",
-        "summary": "Complete a presigned multipart upload",
-        "tags": [
-          "Uploads"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "externalDocs": {
-          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilesuploadfinalize"
-        },
-        "x-filex-token-verb": "write"
-      }
-    },
-    "/api/files/upload/init": {
-      "post": {
-        "operationId": "uploadInitS3",
-        "summary": "Begin a presigned multipart upload (S3 storages)",
-        "tags": [
-          "Uploads"
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "externalDocs": {
-          "url": "https://github.com/BRF-Tech/filex/blob/main/docs/BACKEND.md#post-apifilesuploadinit"
         },
         "x-filex-token-verb": "write"
       }
@@ -7290,15 +8195,22 @@
         "properties": {
           "error": {
             "type": "string",
-            "description": "What went wrong, in English (sometimes a machine word such as `permission_denied`)."
+            "description": "The refusal's code: lower-case, stable across releases (`read_only`, `quota_exceeded`, `permission_denied`, ...). Some older routes still put an English sentence here; branch on the code, print `message` (docs/API-ERRORS.md)."
           },
           "code": {
             "type": "string",
-            "description": "A stable machine-readable code where the route has one (`NAME_TAKEN`, `READ_ONLY`, `E2E_ENCRYPTED`, ...)."
+            "description": "A second, upper-case code some routes have always sent beside `error` (`NAME_TAKEN`, `READ_ONLY`, `E2E_ENCRYPTED`, ...); kept for the clients that read it."
           },
           "message": {
             "type": "string",
-            "description": "A longer sentence beside a machine word in `error`."
+            "description": "The sentence to show a person, written by the server in the reader's language (the account's, else Accept-Language). Print it as it is."
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The values `message` was filled with (a name, a limit), for a program that wants them."
           },
           "hint": {
             "type": "string"
@@ -7717,7 +8629,48 @@
             }
           },
           "total": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Every entry the caller may see, not the page's."
+          },
+          "total_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The bytes of every entry the caller may see."
+          },
+          "newest_deleted_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "storages": {
+            "type": "array",
+            "description": "The same counts per storage: what a storage's virtual `.trash` row shows.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "storage_id": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "storage_name": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "newest_deleted_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "summary": {
+            "type": "string",
+            "description": "How much the trash holds, in the reader's language."
           },
           "limit": {
             "type": "integer"

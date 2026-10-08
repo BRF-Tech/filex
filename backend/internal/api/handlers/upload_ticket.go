@@ -457,6 +457,10 @@ func (h *TicketUpload) Upload(w http.ResponseWriter, r *http.Request) {
 func (h *TicketUpload) failWrite(w http.ResponseWriter, err error, dest string, size int64) {
 	code, status := "storage_unavailable", http.StatusServiceUnavailable
 	switch {
+	case errors.Is(err, quota.ErrFileTooLarge):
+		// Before ErrQuotaExceeded, which it wraps: the ticket owner's role
+		// caps one file's size, and room on the account does not change it.
+		code, status = "file_too_large", http.StatusRequestEntityTooLarge
 	case errors.Is(err, quota.ErrQuotaExceeded):
 		code, status = "quota_exceeded", http.StatusInsufficientStorage
 	case errors.Is(err, storage.ErrReadOnly):
@@ -479,6 +483,7 @@ func (h *TicketUpload) failWrite(w http.ResponseWriter, err error, dest string, 
 	hint := map[string]string{
 		"storage_unavailable": "The storage backend refused the write - this is not your request. The ticket is still valid: retry it later, and tell the user storage is down if it keeps failing.",
 		"quota_exceeded":      "The ticket owner is out of storage. Free space or raise the quota; retrying will not help until then.",
+		"file_too_large":      "The file is larger than the ticket owner's per-file upload limit. Retrying will not help; upload a smaller file.",
 		"read_only":           "The destination storage is read-only. Mint a ticket for a writable storage instead.",
 		"forbidden":           "The ticket owner no longer has permission to write there. Ask for access, or mint a ticket for a path you can write.",
 		"e2e_plaintext_refused": "The destination is now inside an end-to-end encrypted folder, and filex holds no key to encrypt the upload with. " +

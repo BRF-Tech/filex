@@ -96,6 +96,11 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// Rows deleted where they stood (issue #74), the same way.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB}
+	// Why a link will not open (00098), the same way.
+	s.NodeLinkStateSQL = &db.NodeLinkStateSQL{Pool: sqlDB}
+	// A page of a person's Recent / Starred, and which rows carry a star
+	// (filex 0.54), the same way.
+	s.UserMetaPageSQL = &db.UserMetaPageSQL{Pool: sqlDB}
 	// What is at and below a folder (00083), the same way; seen_at is
 	// compared as text on both engines this file serves, and path byte for
 	// byte.
@@ -110,6 +115,9 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// Office editing sessions (00092), the same way; nothing in it is a
 	// timestamp.
 	s.OfficeSessionSQL = &db.OfficeSessionSQL{Pool: sqlDB}
+	// Vault write locks and idle times (00096), the same way; nothing in it
+	// is a timestamp.
+	s.VaultLockSQL = &db.VaultLockSQL{Pool: sqlDB}
 	// Replication initial copies (00094), the same way; nothing in it is a
 	// timestamp.
 	s.ReplicaInitialCopySQL = &db.ReplicaInitialCopySQL{Pool: sqlDB}
@@ -131,6 +139,8 @@ func newStore(sqlDB *sql.DB, mysql bool) *Store {
 	// The notification digest (00087), the same way and with the same
 	// timestamp spelling.
 	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Time: db.CatalogueTime}
+	// Web Push (task #191), the same way; no timestamp is bound in it.
+	s.PushSQL = &db.PushSQL{Pool: sqlDB}
 	return s
 }
 
@@ -157,6 +167,11 @@ type Store struct {
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
 	// node_unavailable_sql.go, migration 00078).
 	*db.NodeUnavailableSQL
+	// SetNodeLinkState, NodeLinkStates (internal/db node_link_state_sql.go,
+	// migration 00098).
+	*db.NodeLinkStateSQL
+	// UserNodeMetaPage, UserNodeMetaAt (internal/db user_meta_page_sql.go).
+	*db.UserMetaPageSQL
 	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,
 	// HasLiveNodesUnder (internal/db nodes_under_sql.go, migration 00083).
 	*db.NodesUnderSQL
@@ -169,6 +184,9 @@ type Store struct {
 	// The office editing sessions (internal/db office_session_sql.go,
 	// migration 00092).
 	*db.OfficeSessionSQL
+	// The vault write locks and idle times (internal/db vault_lock_sql.go,
+	// migration 00096).
+	*db.VaultLockSQL
 	// The replication initial copies (internal/db replica_initial_copy_sql.go,
 	// migration 00094).
 	*db.ReplicaInitialCopySQL
@@ -190,6 +208,8 @@ type Store struct {
 	*db.E2ERequestSQL
 	// The notification digest (internal/db digest_sql.go, migration 00087).
 	*db.DigestSQL
+	// Web Push devices and the VAPID key (internal/db push_sql.go, task #191).
+	*db.PushSQL
 }
 
 // upsertClause matches SQLite's upsert tail so it can be swapped for MySQL's.
@@ -4547,9 +4567,9 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 		enabled = 1
 	}
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`INSERT INTO webhook_targets (name, url, secret, events, enabled)
-		 VALUES (?,?,?,?,?)`,
-		t.Name, t.URL, t.Secret, t.Events, enabled)
+		`INSERT INTO webhook_targets (name, url, secret, events, enabled, lang)
+		 VALUES (?,?,?,?,?,?)`,
+		t.Name, t.URL, t.Secret, t.Events, enabled, t.Lang)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: insert webhook target: %w", err)
 	}
@@ -4560,7 +4580,7 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 // GetWebhookTarget returns a single target by id.
 func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error) {
 	row := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at, lang
 		 FROM webhook_targets WHERE id=?`, id)
 	return scanWebhookTarget(row)
 }
@@ -4570,7 +4590,7 @@ func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookT
 // tiny and the admin list needs disabled rows too.
 func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error) {
 	rows, err := s.conn(ctx).QueryContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at, lang
 		 FROM webhook_targets ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list webhook targets: %w", err)
@@ -4597,8 +4617,8 @@ func (s *Store) UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 		enabled = 1
 	}
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE webhook_targets SET name=?, url=?, secret=?, events=?, enabled=? WHERE id=?`,
-		t.Name, t.URL, t.Secret, t.Events, enabled, t.ID)
+		`UPDATE webhook_targets SET name=?, url=?, secret=?, events=?, enabled=?, lang=? WHERE id=?`,
+		t.Name, t.URL, t.Secret, t.Events, enabled, t.Lang, t.ID)
 	if err != nil {
 		return fmt.Errorf("sqlite: update webhook target: %w", err)
 	}
@@ -4649,7 +4669,7 @@ func scanWebhookTarget(rs interface {
 		lastErr sql.NullString
 		lastAt  sql.NullTime
 	)
-	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &enabled, &t.CreatedAt, &lastSt, &lastErr, &lastAt); err != nil {
+	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &enabled, &t.CreatedAt, &lastSt, &lastErr, &lastAt, &t.Lang); err != nil {
 		return nil, err
 	}
 	t.Enabled = enabled != 0

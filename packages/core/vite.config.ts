@@ -6,6 +6,36 @@ import { resolve } from 'path';
 // plugin's own note for why library mode forces the question, and why the
 // web-component build has to use the very same plugin.
 import { fontsAsFiles } from '../../scripts/vite-fonts-as-files.mjs';
+import type { Rollup } from 'vite';
+import { lazySurfaceChunks } from './lazySurfaces';
+// A TypeScript diagnostic in the declaration build fails the build instead of
+// shipping `any` in dist/index.d.ts (DataTable's slots did, for months).
+import { failOnDtsDiagnostics } from '../../scripts/vite-dts-strict.mjs';
+
+/** What the ES and the UMD output share. */
+const output: Rollup.OutputOptions = {
+  globals: {
+    vue: 'Vue',
+    '@headlessui/vue': 'HeadlessUIVue',
+    'lucide-vue-next': 'LucideVueNext',
+    'monaco-editor': 'monaco',
+    'highlight.js': 'hljs',
+    'markdown-it': 'markdownit',
+    jszip: 'JSZip',
+    mermaid: 'mermaid',
+    epubjs: 'ePub',
+    xlsx: 'XLSX',
+    '@google/model-viewer': 'ModelViewer',
+  },
+  exports: 'named',
+  // Single rolled-up style file regardless of how many SFCs the
+  // tree has — consumers do `import '@brftech/filex-core/style.css'`
+  // exactly once.
+  assetFileNames: (info) => {
+    if (info.name && info.name.endsWith('.css')) return 'style.css';
+    return 'assets/[name]-[hash][extname]';
+  },
+};
 
 /**
  * Vite library build for @brftech/filex-core.
@@ -32,6 +62,7 @@ export default defineConfig({
       exclude: ['**/*.spec.ts', '**/*.test.ts'],
       rollupTypes: true,
       insertTypesEntry: true,
+      afterDiagnostic: failOnDtsDiagnostics('@brftech/filex-core'),
     }),
   ],
   resolve: {
@@ -45,8 +76,8 @@ export default defineConfig({
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'FilexCore',
+      // The formats are the two outputs below (ES + UMD).
       fileName: (format) => (format === 'es' ? 'filex-core.js' : 'filex-core.umd.cjs'),
-      formats: ['es', 'umd'],
     },
     rollupOptions: {
       external: [
@@ -80,29 +111,20 @@ export default defineConfig({
         // CodeMirror language packs (lazy-loaded)
         /^@codemirror\/lang-/,
       ],
-      output: {
-        globals: {
-          vue: 'Vue',
-          '@headlessui/vue': 'HeadlessUIVue',
-          'lucide-vue-next': 'LucideVueNext',
-          'monaco-editor': 'monaco',
-          'highlight.js': 'hljs',
-          'markdown-it': 'markdownit',
-          jszip: 'JSZip',
-          mermaid: 'mermaid',
-          epubjs: 'ePub',
-          xlsx: 'XLSX',
-          '@google/model-viewer': 'ModelViewer',
+      // ⚠ Two outputs written out (lib.formats would make the same two) so the
+      // ES one alone can carry `manualChunks`: the UMD bundle inlines every
+      // dynamic import and rollup refuses manualChunks there.
+      output: [
+        {
+          ...output,
+          format: 'es',
+          // The dialogs the explorer opens get a chunk each, so a host that
+          // draws the explorer does not carry them in its own first chunk
+          // (lazySurfaces.ts; the web app's 2 MiB precache limit).
+          manualChunks: lazySurfaceChunks(resolve(__dirname, 'src')),
         },
-        exports: 'named',
-        // Single rolled-up style file regardless of how many SFCs the
-        // tree has — consumers do `import '@brftech/filex-core/style.css'`
-        // exactly once.
-        assetFileNames: (info) => {
-          if (info.name && info.name.endsWith('.css')) return 'style.css';
-          return 'assets/[name]-[hash][extname]';
-        },
-      },
+        { ...output, format: 'umd', name: 'FilexCore' },
+      ],
     },
   },
 });

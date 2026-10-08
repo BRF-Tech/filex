@@ -13,6 +13,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/notify"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // WebhooksAdmin is the admin CRUD surface for webhook v2 targets
@@ -43,6 +44,7 @@ type webhookTargetResp struct {
 	SecretSet  bool                         `json:"secret_set"`
 	Events     []string                     `json:"events"`
 	Enabled    bool                         `json:"enabled"`
+	Lang       string                       `json:"lang"`
 	CreatedAt  string                       `json:"created_at"`
 	LastStatus *notify.TargetDeliveryStatus `json:"last_status,omitempty"`
 
@@ -63,6 +65,7 @@ func toWebhookTargetResp(t *model.WebhookTarget, statuses map[int64]notify.Targe
 		SecretSet: t.Secret != "",
 		Events:    events,
 		Enabled:   t.Enabled,
+		Lang:      t.Lang,
 		CreatedAt: t.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if t.LastStatus != nil {
@@ -98,8 +101,50 @@ func sanitizeWebhookEvents(events []string) string {
 	return strings.Join(out, ",")
 }
 
+// validWebhookURL: an http(s) address. ⚠ The scheme in any case
+// (`HTTPS://hooks.example`): a URL's scheme is case-insensitive, and the
+// form said yes to one this said no to (0.54 audit, B10).
 func validWebhookURL(u string) bool {
-	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
+	return hasPrefixFold(u, "http://") || hasPrefixFold(u, "https://")
+}
+
+func hasPrefixFold(s, prefix string) bool {
+	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
+}
+
+// webhookFormRefusal is a refused target form: `error` the English a script
+// reads, `field` the box it is about (name | url | lang), `message` the sentence in
+// the reader's language. The page shows the sentence under that box and has
+// no rule of its own about either.
+func webhookFormRefusal(w http.ResponseWriter, r *http.Request, field, url string) {
+	code, english := "name_required", "name required"
+	switch {
+	case field == "url" && url == "":
+		code, english = "url_required", "url required"
+	case field == "url":
+		code, english = "url_scheme", "url must start with http:// or https://"
+	case field == "lang":
+		code, english = "invalid_lang", "invalid_lang"
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{
+		"error":   english,
+		"field":   field,
+		"message": srvtext.Text(requestLang(r), "server.webhooks."+code, nil),
+	})
+}
+
+// webhookLang is the language a target is told in, as stored: "" (the
+// instance's, FILEX_DEFAULT_LOCALE) or a language the server speaks - one it
+// ships or one a running language pack adds, as it serves the tag
+// (srvtext.Resolve: `tr-TR` is stored as `tr`). ok=false for anything else.
+func webhookLang(in string) (string, bool) {
+	if strings.TrimSpace(in) == "" {
+		return "", true
+	}
+	if v := srvtext.Resolve(in); v != "" {
+		return v, true
+	}
+	return "", false
 }
 
 // List returns every target (enabled or not), secrets masked, plus the
@@ -134,12 +179,15 @@ type webhookTargetCreateReq struct {
 	Secret  string   `json:"secret"`
 	Events  []string `json:"events"`
 	Enabled *bool    `json:"enabled"`
+	// Lang is the language the target's title and body are said in; "" is
+	// the instance's (notify say.go).
+	Lang string `json:"lang"`
 }
 
 // Create adds a new target.
 //
 //	POST /api/admin/webhooks
-//	body: {name, url, secret?, events?: ["file.uploaded",...], enabled?}
+//	body: {name, url, secret?, events?: ["file.uploaded",...], enabled?, lang?}
 func (h *WebhooksAdmin) Create(w http.ResponseWriter, r *http.Request) {
 	if !requireSupertenant(w, r, "webhook targets receive every tenant's event stream") {
 		return
@@ -152,16 +200,21 @@ func (h *WebhooksAdmin) Create(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.URL = strings.TrimSpace(req.URL)
 	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		webhookFormRefusal(w, r, "name", "")
 		return
 	}
 	if !validWebhookURL(req.URL) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url must start with http:// or https://"})
+		webhookFormRefusal(w, r, "url", req.URL)
 		return
 	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
+	}
+	lang, ok := webhookLang(req.Lang)
+	if !ok {
+		webhookFormRefusal(w, r, "lang", "")
+		return
 	}
 	created, err := h.Store.CreateWebhookTarget(r.Context(), &model.WebhookTarget{
 		Name:    req.Name,
@@ -169,6 +222,7 @@ func (h *WebhooksAdmin) Create(w http.ResponseWriter, r *http.Request) {
 		Secret:  req.Secret,
 		Events:  sanitizeWebhookEvents(req.Events),
 		Enabled: enabled,
+		Lang:    lang,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -186,6 +240,7 @@ type webhookTargetPatchReq struct {
 	Secret  *string   `json:"secret"`
 	Events  *[]string `json:"events"`
 	Enabled *bool     `json:"enabled"`
+	Lang    *string   `json:"lang"`
 }
 
 // Update patches a target.
@@ -214,14 +269,14 @@ func (h *WebhooksAdmin) Update(w http.ResponseWriter, r *http.Request) {
 		if n := strings.TrimSpace(*req.Name); n != "" {
 			target.Name = n
 		} else {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+			webhookFormRefusal(w, r, "name", "")
 			return
 		}
 	}
 	if req.URL != nil {
 		u := strings.TrimSpace(*req.URL)
 		if !validWebhookURL(u) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url must start with http:// or https://"})
+			webhookFormRefusal(w, r, "url", u)
 			return
 		}
 		target.URL = u
@@ -234,6 +289,14 @@ func (h *WebhooksAdmin) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Enabled != nil {
 		target.Enabled = *req.Enabled
+	}
+	if req.Lang != nil {
+		lang, ok := webhookLang(*req.Lang)
+		if !ok {
+			webhookFormRefusal(w, r, "lang", "")
+			return
+		}
+		target.Lang = lang
 	}
 	if err := h.Store.UpdateWebhookTarget(r.Context(), target); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

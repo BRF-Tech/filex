@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -117,10 +118,7 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !clientKinds[req.Kind] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "kind must be copy, move or delete",
-			"code":  "BAD_KIND",
-		})
+		writeError(w, r, http.StatusBadRequest, "bad_kind", nil, "code", "BAD_KIND")
 		return
 	}
 	// A token does what its verbs name (auth/token_verbs.go), and here the
@@ -238,7 +236,7 @@ func (o *Ops) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	op, err := o.Service.SubmitTo(ctx, req.Kind, req.StorageID, req.DestStorageID, req.Sources, req.Dest)
-	if answerGate(w, err) {
+	if answerGate(w, r, err) {
 		return
 	}
 	if err != nil {
@@ -452,7 +450,7 @@ func (o *Ops) submitPerVerb(w http.ResponseWriter, r *http.Request, kind string)
 	}
 
 	op, err := o.Service.SubmitTo(ctx, kind, storageID, destStorageID, sources, dest)
-	if answerGate(w, err) {
+	if answerGate(w, r, err) {
 		return
 	}
 	if err != nil {
@@ -612,20 +610,13 @@ func (o *Ops) refuseReadOnly(w http.ResponseWriter, r *http.Request, kind string
 	}
 	if kind == ops.OpMove || kind == ops.OpDelete {
 		if st := readOnlyStorage(r.Context(), o.Store, storageID); st != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{
-				"error": "storage is read-only: " + st.Name,
-				"code":  "READ_ONLY",
-			})
+			writeError(w, r, http.StatusForbidden, "read_only", apierr.Params{"storage": st.Name}, "code", "READ_ONLY")
 			return true
 		}
 	}
 	if kind == ops.OpCopy || kind == ops.OpMove {
 		if st := readOnlyStorage(r.Context(), o.Store, destStorageID); st != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{
-				"error": "destination storage is read-only: " + st.Name,
-				"code":  "READ_ONLY",
-				"hint":  "paste into a writable storage, or clear the read-only flag on " + st.Name,
-			})
+			writeError(w, r, http.StatusForbidden, "read_only", apierr.Params{"storage": st.Name}, "code", "READ_ONLY")
 			return true
 		}
 	}
@@ -977,13 +968,10 @@ func (o *Ops) Cancel(w http.ResponseWriter, r *http.Request) {
 		// on its way.
 		if cur, gerr := o.Service.Get(r.Context(), id); gerr == nil &&
 			(cur.Status == ops.StatusPending || cur.Status == ops.StatusRunning) {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "this operation cannot be stopped once it has started; it finishes on its own",
-				"code":  "NOT_CANCELLABLE",
-			})
+			writeError(w, r, http.StatusConflict, "not_cancellable", nil, "code", "NOT_CANCELLABLE")
 			return
 		}
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "already finished", "code": "FINISHED"})
+		writeError(w, r, http.StatusConflict, "finished", nil, "code", "FINISHED")
 		return
 	}
 	op, _ = o.Service.Get(readerCtx(r), id)

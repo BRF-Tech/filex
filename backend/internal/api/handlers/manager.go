@@ -20,8 +20,10 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/metrics"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/nodefilter"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -883,6 +885,7 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 	// Hydrate Thumb so projectFileNodes can emit thumb_url, and hand what is
 	// missing or stale to the refresher (hydrateThumbs).
 	hydrateThumbs(r.Context(), h.Store, h.ThumbRefresh, nodes)
+	hydrateLinkStates(r.Context(), h.Store, nodes)
 	files := projectFileNodes(s.Name, nodes, dirsOnly, set, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
 	if h.folderPreviewsOn() {
 		annotateFolderPreviews(r.Context(), h.Store, h.ThumbRefresh, h.ThumbSigner, s.ID, nodes, set, files)
@@ -896,12 +899,23 @@ func (h *Manager) vfIndex(w http.ResponseWriter, r *http.Request, s *model.Stora
 // folder whose marker row does not exist yet.
 func (h *Manager) respondIndex(w http.ResponseWriter, r *http.Request, s *model.Storage, rel, dirname string,
 	storageNames []string, dirsOnly bool, set *acl.Set, files []map[string]any, objs []storage.Object) {
+	// ONE order, whichever path built the rows (filex 0.54, audit Y3): the
+	// catalogue said `ORDER BY type DESC, name` (files first), the merged and
+	// driver paths their own. `?sort=` picks another key (listorder).
+	order, ok := listorder.Parse(r.URL.Query().Get("sort"), listorder.Default)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_sort", "field": "sort"})
+		return
+	}
+	listorder.SortEntries(files, order, "")
 	h.annotateSizes(r.Context(), s, files, h.coverageOf(r.Context(), s))
 	if dirsOnly {
 		writeJSON(w, http.StatusOK, map[string]any{"folders": files})
 		return
 	}
 	annotateAppBadges(r.Context(), h.Store, s.ID, files)
+	// `starred` on the caller's starred rows, one query (filex 0.54, D4).
+	annotateStarred(r.Context(), h.Store, files)
 	resp := map[string]any{
 		"adapter":      s.Name,
 		"storages":     storageNames,
@@ -923,8 +937,35 @@ func (h *Manager) respondIndex(w http.ResponseWriter, r *http.Request, s *model.
 		resp["e2e"] = true
 		resp["e2e_root"] = joinAdapterPath(s.Name, strings.Trim(rel, "/"))
 	}
+	annotateVaults(set, s.Name, rel, files, resp)
 	/* /wiring:e2 */
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// wiring:e2 vault — which folder is a vault (docs/E2E-VAULT-FORMAT.md): a dir
+// row that is one carries `e2e_vault: true`, and a listing of a folder inside
+// one (the vault folder itself included) carries `e2e_vault_root`. What a
+// vault keeps on the storage (`v/`, packs, index files) is its own layout,
+// not folders a person opens or chooses: the explorer, its folder chooser and
+// its panes hide it by these, also for a vault this browser never opened.
+func annotateVaults(set *acl.Set, storageName, rel string, files []map[string]any, resp map[string]any) {
+	if set == nil {
+		return
+	}
+	for _, entry := range files {
+		if entry["type"] != "dir" || entry["e2e"] != true {
+			continue
+		}
+		p, _ := entry["path"].(string)
+		_, childRel := splitAdapterPath(p)
+		childRel = strings.Trim(childRel, "/")
+		if root, ok := set.VaultRoot(childRel); ok && root == childRel {
+			entry["e2e_vault"] = true
+		}
+	}
+	if root, ok := set.VaultRoot(strings.Trim(rel, "/")); ok {
+		resp["e2e_vault_root"] = joinAdapterPath(storageName, root)
+	}
 }
 
 /* wiring:e2 — listing-level encrypted-folder annotations (see vfIndex). */
@@ -1047,6 +1088,7 @@ func projectDriverObjects(adapter, dir string, objs []storage.Object, dirsOnly b
 			"size":      o.Size,
 			"mime_type": o.Mime,
 			"storage":   adapter,
+			"kind":      nodefilter.KindOf(o.Name, o.Mime, isDir),
 		}
 		if set != nil {
 			entry["perm"] = set.Effective(acl.CleanRel(rel)).String()
@@ -1123,6 +1165,15 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": terr.Error()})
 		return
 	}
+	// The advanced search's narrowing (filex 0.54, audit D6): the same
+	// parameters /api/files/search reads, applied before the page is cut.
+	crit, cerr := nodefilter.Parse(r.URL.Query())
+	if cerr != nil {
+		writeBadFilter(w, cerr)
+		return
+	}
+	narrow := newNarrowing(r.Context(), h.Store, crit)
+	indexFilter := narrow.into(tagFilter)
 
 	// Multi-tenant: in cross-storage mode `keep` used to accept every hit
 	// regardless of which storage it came from, and this file consulted no
@@ -1186,23 +1237,23 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	case parsed.HasTagFilter() && parsed.Text == "":
 		// A bare `tag:x` lists the tagged nodes; there is no text to score.
 		for _, n := range tagged {
-			if keep(n) {
+			if keep(n) && narrow.accepts(n) {
 				nodes = append(nodes, n)
 			}
 		}
 	case h.Index != nil:
-		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, managerSearchPage, search.ScopeName, tagFilter)
+		hits, more, serr := h.Index.SearchPage(r.Context(), parsed.Text, managerSearchPage, search.ScopeName, indexFilter)
+		if serr != nil {
+			hits, more = nil, false
+		}
 		// The index returns at most a page; a full page is a cut answer - a
 		// page full of hits inside the root, for a confined caller (rootRows).
+		// With a narrowing, so is a candidate window Bleve filled.
 		pageNodes := make([]*model.Node, 0, len(hits))
 		for _, hit := range hits {
-			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
-			if err != nil {
-				n = nil
-			}
-			pageNodes = append(pageNodes, n)
+			pageNodes = append(pageNodes, narrow.node(hit.NodeID))
 		}
-		truncated = rootRows(pageNodes) >= managerSearchPage
+		truncated = rootRows(pageNodes) >= managerSearchPage || (narrow.active() && more)
 		for _, n := range pageNodes {
 			if n == nil || !keep(n) {
 				continue
@@ -1245,7 +1296,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 				if !keep(n) {
 					continue
 				}
-				if plan.Accepts(n.Name, n.Path) && tagFilterAccepts(tagFilter, n.ID) {
+				if plan.Accepts(n.Name, n.Path) && tagFilterAccepts(tagFilter, n.ID) && narrow.accepts(n) {
 					nodes = append(nodes, n)
 				}
 			}
@@ -1255,7 +1306,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 			storages, err := h.Store.ListEnabledStorages(r.Context())
 			if err == nil {
 				for _, st := range storages {
-					rows, err := window(st.ID, managerCrossStoragePage*search.FallbackOverFetch)
+					rows, err := window(st.ID, narrowedWindow(narrow, managerCrossStoragePage*search.FallbackOverFetch))
 					if err != nil {
 						continue
 					}
@@ -1263,7 +1314,7 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 				}
 			}
 		} else {
-			fallback, err := window(s.ID, managerSearchPage*search.FallbackOverFetch)
+			fallback, err := window(s.ID, narrowedWindow(narrow, managerSearchPage*search.FallbackOverFetch))
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
@@ -1314,9 +1365,11 @@ func (h *Manager) vfSearch(w http.ResponseWriter, r *http.Request, s *model.Stor
 	// Hydrate thumb metadata so search results carry the same
 	// thumb_url as the index listing (was always empty pre-v0.1.16).
 	hydrateThumbs(r.Context(), h.Store, h.ThumbRefresh, nodes)
+	hydrateLinkStates(r.Context(), h.Store, nodes)
 
 	files := projectFileNodes(s.Name, nodes, false, nil, h.ThumbSigner, h.hydrateOwnerNames(r.Context(), nodes))
 	annotateAppBadges(r.Context(), h.Store, s.ID, files)
+	annotateStarred(r.Context(), h.Store, files)
 	// wiring:e2 names — a hit inside an encrypted folder says which one, so
 	// the client can name it (or say it is locked) rather than show ciphertext.
 	annotateRowsE2e(r.Context(), h.Store, s.ID, s.Name, files)
@@ -1753,9 +1806,20 @@ func projectFileNodes(adapter string, nodes []*model.Node, dirsOnly bool, set *a
 			"size":      n.Size,
 			"mime_type": n.Mime,
 			"storage":   adapter,
+			// What the row is, by the server's one rule (nodefilter.KindOf):
+			// the explorer's Type chip reads this instead of a second
+			// extension table of its own (filex 0.54, task #207).
+			"kind": nodefilter.KindOf(n.Name, n.Mime, isDir),
 		}
 		if n.Type == model.NodeTypeSymlink {
 			entry["symlink"] = true
+			// Why it will not open, as the sync last saw it (migration 00098;
+			// hydrateLinkStates fills it). Omitted when no reason is known - a
+			// row from before 0.54 until its folder's next sync - which the
+			// explorer reads as the general "Link".
+			if n.LinkState != "" {
+				entry["link_state"] = n.LinkState
+			}
 		}
 		// An entry the storage could not answer for (issue #104): listed, so
 		// it does not just vanish, and flagged, so the explorer can say why

@@ -13,13 +13,42 @@
 //   - Every other job is in the "pool". A pool job starts when its needs have
 //     passed, it fits the memory left over, and fewer than `maxJobs` pool jobs
 //     are running. A job that does not fit RESERVES its weight, so the
-//     smaller jobs behind it cannot keep taking the memory it is waiting for.
+//     smaller jobs behind it cannot keep taking the memory it is waiting for;
+//     a job that cannot fit beside the round at all waits for the round's
+//     share instead (pickJobs).
 //   - The database sidecars hold their share until the last job that uses
 //     them is settled.
+//   - The budget itself is the host's: run.mjs takes CHAIN_MEM_GB, or less
+//     when the host has less available at the start (hostBudget).
 
 /** Memory left for pool jobs, in GiB. */
 export function poolBudget({ memGb, trackActive, trackGb, dbUp, dbGb }) {
   return memGb - (trackActive ? trackGb : 0) - (dbUp ? dbGb : 0);
+}
+
+/**
+ * The memory budget of a run, in GiB: `memGb` (CHAIN_MEM_GB), or less when
+ * the host has less to give when the run starts - its MemAvailable before the
+ * chain has started anything (`availGb`), less the `reserveGb` it keeps free
+ * (CHAIN_MEM_RESERVE_GB), in quarter-GiB steps. `availGb` not finite (no
+ * /proc/meminfo: `--plan` on another system) leaves `memGb`.
+ *
+ * ⚠ Task #194: CHAIN_MEM_GB=8 on a 14.8 GiB host whose Android emulator and
+ * services left 7.9-8.4 GiB available: the chain was allowed every byte the
+ * host had, the page cache its compilers and browsers read from included,
+ * and the host stalled whenever the jobs reached their weights together. A
+ * smaller budget makes a run longer (fewer -race jobs beside a browser), never
+ * redder.
+ */
+export function hostBudget({ memGb, availGb, reserveGb = 0 }) {
+  if (!Number.isFinite(availGb)) return { gb: memGb, cut: false };
+  const room = Math.floor(Math.max(0, availGb - reserveGb) * 4) / 4;
+  return room < memGb ? { gb: room, cut: true } : { gb: memGb, cut: false };
+}
+
+/** What the pool will have once the browser round ends: pickJobs' `ceiling`. */
+export function poolCeiling({ memGb, dbUp, dbGb }) {
+  return poolBudget({ memGb, trackActive: false, trackGb: 0, dbUp, dbGb });
 }
 
 /**
@@ -42,17 +71,47 @@ export function readyJobs(pool, status) {
 
 /**
  * The jobs to start now, in order. `running` is the pool jobs already
- * running. A job heavier than the whole budget still starts when nothing
- * else in the pool runs: refusing it would stop the chain for good.
+ * running; `budget` is what the pool has now (poolBudget) and `ceiling` what
+ * it has once the browser round has let go of its share (poolBudget with the
+ * round inactive; default: `budget`). The round always ends on its own; the
+ * databases end only after their jobs, so the ceiling still holds their share.
+ *
+ *   - A job that fits starts.
+ *   - A job that would fit once running pool jobs end RESERVES its weight:
+ *     the lighter jobs behind it cannot keep taking that memory.
+ *   - A job heavier than what the pool has now waits, while the round runs,
+ *     until it fits (the databases let go) or the round ends, reserving
+ *     nothing: a reservation would hold every job behind it for that long.
+ *     ⚠ Before #194 such a job started "alone": the web gates (3 GiB) beside
+ *     the round's 5 and the databases' 1 held 9 GiB of an 8 GiB budget - the
+ *     opening minutes, when the host stalled in the 0.53 runs.
+ *   - When the round holds nothing (budget = ceiling), a job heavier than the
+ *     pool has starts when nothing else in the pool runs, and the pool drains
+ *     for it: refusing it would stop the chain for good.
  */
-export function pickJobs({ ready, running, budget, maxJobs }) {
+export function pickJobs({ ready, running, budget, maxJobs, ceiling = budget }) {
+  const EPS = 1e-9;
   let free = budget - running.reduce((sum, j) => sum + j.weight, 0);
   let slots = maxJobs - running.length;
   const start = [];
   for (const job of ready) {
-    const alone = running.length === 0 && start.length === 0;
-    if (slots <= 0 || (free <= 0 && !alone)) break;
-    if (job.weight <= free + 1e-9 || alone) {
+    if (slots <= 0) break;
+    if (job.weight > budget + EPS) {
+      // More than the pool has now. While the round holds its share, wait
+      // for it to end, reserving nothing.
+      if (budget < ceiling - EPS) continue;
+      // The pool has all it will get and the job is heavier still: it runs
+      // alone, and the pool drains for it.
+      if (running.length === 0 && start.length === 0) {
+        start.push(job);
+        slots -= 1;
+      }
+      free -= job.weight;
+      if (free <= 0) break;
+      continue;
+    }
+    if (free <= 0) break;
+    if (job.weight <= free + EPS) {
       start.push(job);
       free -= job.weight;
       slots -= 1;
@@ -102,8 +161,9 @@ export function simulate(plan, { memGb, trackGb, dbGb, poolMax, minutes, dsStart
     const trackActive = buildPassed && !trackDone;
     const dbUp = dbJobs.some((n) => !settled(n));
     const budget = poolBudget({ memGb, trackActive, trackGb, dbUp, dbGb });
+    const ceiling = poolCeiling({ memGb, dbUp, dbGb });
     const { ready } = readyJobs(plan.pool, status);
-    for (const job of pickJobs({ ready, running: running.map((r) => r.job), budget, maxJobs: poolMax })) {
+    for (const job of pickJobs({ ready, running: running.map((r) => r.job), budget, ceiling, maxJobs: poolMax })) {
       status[job.name] = 'running';
       const r = { job, start: t, end: t + minutes(job) };
       running.push(r);

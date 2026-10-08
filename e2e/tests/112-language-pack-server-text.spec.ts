@@ -13,9 +13,9 @@
  * server, points filex at it, and restores the settings afterwards.
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import net from 'node:net';
 import { loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage } from '../helpers/seed';
+import { mailToSink, startSink, waitMail, type Sink } from '../helpers/smtpSink';
 
 const STORAGE = `e2e-srvtext-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
@@ -29,9 +29,6 @@ const ES: Record<string, string> = {
   'server.mail.label.file': 'Archivo: {name}',
   'server.mail.share.download': 'Descárgalo aquí:',
   'server.mail.valid_days': 'Este enlace es válido durante {count} días.',
-  'server.mail.drop_received.subject': 'Nueva subida de archivos',
-  'server.mail.drop_received.body': '{who} dejó {count} archivos en «{folder}» ({submission}).',
-  'server.mail.drop_received.body_one': '{who} dejó un archivo en «{folder}» ({submission}).',
   'server.notify.word.someone': 'Alguien',
   'server.notify.drop.received.title': '{count} archivos recibidos',
   'server.notify.drop.received.title_one': 'Un archivo recibido',
@@ -40,101 +37,21 @@ const ES: Record<string, string> = {
   'server.public.footer': 'Compartido con {filex}',
 };
 
-/* ── a tiny SMTP server: keeps every message it is handed ─────────────── */
-
-interface Sink {
-  port: number;
-  mails: string[];
-  close: () => Promise<void>;
-}
-
-function startSink(): Promise<Sink> {
-  const mails: string[] = [];
-  const server = net.createServer((c) => {
-    let buf = '';
-    let inData = false;
-    let body: string[] = [];
-    const say = (l: string) => c.write(`${l}\r\n`);
-    say('220 e2e-sink ESMTP');
-    c.on('data', (d) => {
-      buf += d.toString('utf8');
-      let i: number;
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i).replace(/\r$/, '');
-        buf = buf.slice(i + 1);
-        if (inData) {
-          if (line === '.') {
-            inData = false;
-            mails.push(body.join('\n'));
-            body = [];
-            say('250 Ok');
-          } else body.push(line);
-          continue;
-        }
-        const verb = line.split(' ')[0].toUpperCase();
-        if (verb === 'EHLO' || verb === 'HELO') {
-          say('250-e2e-sink');
-          say('250 8BITMIME');
-        } else if (verb === 'DATA') {
-          inData = true;
-          say('354 go');
-        } else if (verb === 'QUIT') {
-          say('221 bye');
-          c.end();
-        } else say('250 Ok');
-      }
-    });
-  });
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      const port = (server.address() as net.AddressInfo).port;
-      resolve({ port, mails, close: () => new Promise((r) => server.close(() => r())) });
-    });
-  });
-}
-
-/** Headers (RFC 2047 decoded) and body of one received message. */
-function parse(raw: string): { h: Record<string, string>; body: string } {
-  const [head, ...rest] = raw.split('\n\n');
-  const h: Record<string, string> = {};
-  for (const line of head.split('\n')) {
-    const i = line.indexOf(': ');
-    if (i < 0) continue;
-    h[line.slice(0, i)] = line
-      .slice(i + 2)
-      .replace(/=\?utf-8\?b\?([^?]+)\?=\s*/gi, (_m, b64: string) => Buffer.from(b64, 'base64').toString('utf8'))
-      .trim();
-  }
-  return { h, body: rest.join('\n\n') };
-}
-
-async function waitMail(sink: Sink, n: number) {
-  await expect.poll(() => sink.mails.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(n);
-  return parse(sink.mails[n - 1]);
-}
-
-const SMTP_KEYS = ['smtp.host', 'smtp.port', 'smtp.from', 'smtp.tls', 'smtp.username'];
 const PREFS = '/api/me/prefs?surface=web';
 
 test.describe.serial('Language pack — the text the server writes', () => {
   let api: APIRequestContext;
   let sink: Sink;
-  let smtpBefore: Record<string, string> = {};
+  let restoreMail: () => Promise<void> = async () => undefined;
   let prefsBefore: Record<string, unknown> = {};
 
   test.beforeAll(async ({ playwright, baseURL, request }) => {
     sink = await startSink();
     api = await newAuthedRequest(playwright, baseURL ?? '');
-    const settings = (await (await api.get('/api/admin/settings')).json()) as Record<string, string>;
-    for (const k of SMTP_KEYS) smtpBefore[k] = typeof settings[k] === 'string' ? settings[k] : '';
     const prefs = await api.get(PREFS);
     prefsBefore = prefs.ok() ? ((await prefs.json()).prefs ?? {}) : {};
 
-    expect((await api.patch('/api/admin/settings', {
-      data: { 'smtp.host': '127.0.0.1', 'smtp.port': String(sink.port), 'smtp.from': 'filex@e2e.test', 'smtp.tls': 'none', 'smtp.username': '' },
-    })).ok()).toBeTruthy();
-    const verified = await (await api.post('/api/admin/settings/smtp-test', { data: {} })).json();
-    expect(verified.ok, JSON.stringify(verified)).toBe(true);
+    restoreMail = await mailToSink(api, sink);
 
     const list = await (await api.get('/api/admin/app-plugins')).json();
     for (const p of list.plugins ?? []) if (p.name === PACK_NAME) await api.delete(`/api/admin/app-plugins/${p.id}`);
@@ -163,10 +80,7 @@ test.describe.serial('Language pack — the text the server writes', () => {
   test.afterAll(async ({ request }) => {
     const list = await (await api.get('/api/admin/app-plugins')).json();
     for (const p of list.plugins ?? []) if (p.name === PACK_NAME) await api.delete(`/api/admin/app-plugins/${p.id}`);
-    // ⚠ Put the mail settings back EXACTLY and re-verify, so no later spec
-    // finds a "Send by e-mail" pointed at a sink that is gone.
-    await api.patch('/api/admin/settings', { data: smtpBefore });
-    await api.post('/api/admin/settings/smtp-test', { data: {} });
+    await restoreMail();
     await api.put(PREFS, { data: { prefs: prefsBefore } }).catch(() => undefined);
     await api.patch('/api/auth/profile', { data: { locale: 'en' } }).catch(() => undefined);
     await dropStorageByName(request, STORAGE);
@@ -175,12 +89,16 @@ test.describe.serial('Language pack — the text the server writes', () => {
   });
 
   test('a share-link mail arrives in the pack language, English where the pack is silent', async () => {
-    const made = await api.post('/api/files/share', { data: { path: `${STORAGE}://informe.txt` } });
+    // Seven days, so the mail has a validity line to say in Spanish: the
+    // server writes it from the link (share_mail.go), not from the request.
+    const made = await api.post('/api/files/share', {
+      data: { path: `${STORAGE}://informe.txt`, expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString() },
+    });
     expect(made.ok()).toBeTruthy();
-    const url = (await made.json()).share.url;
+    const { url, token } = (await made.json()).share;
     const before = sink.mails.length;
     const sent = await api.post('/api/files/permissions/share-mail', {
-      data: { path: `${STORAGE}://informe.txt`, email: 'amigo@e2e.test', url, locale: 'es', is_dir: false, size: 4, expires_days: 7 },
+      data: { share: token, email: 'amigo@e2e.test', locale: 'es' },
     });
     expect(sent.ok(), await sent.text()).toBeTruthy();
     const { h, body } = await waitMail(sink, before + 1);
@@ -203,9 +121,17 @@ test.describe.serial('Language pack — the text the server writes', () => {
       multipart: { 'file[]': { name: 'factura.txt', mimeType: 'text/plain', buffer: Buffer.from('x') } },
     });
     expect(up.ok(), await up.text()).toBeTruthy();
+    // 0.54 (#191): the owner's drop mail says what their bell says - the
+    // notification's title as the subject, its body as the text - in the
+    // owner's language, said at the last stop (notify mailNow + say.go). The
+    // separate "New file upload" mail sentence is gone. The body's words are
+    // the bell's too: `{uploader} → {folder}`, the uploader being the
+    // pack's "somebody", since nobody gave a name.
     const { h, body } = await waitMail(sink, before + 1);
-    expect(h.Subject).toBe('Nueva subida de archivos');
-    expect(body).toContain('Alguien dejó un archivo en «buzon»');
+    expect(h.Subject).toBe('Un archivo recibido');
+    expect(h['Content-Language']).toBe('es');
+    expect(body).toContain('Alguien → buzon');
+    expect(body).not.toMatch(/file received|New file upload/);
 
     // The bell's words are the READER's: the Spanish phrase, its singular.
     await page.addInitScript(() => localStorage.setItem('filex.tourDone', '1'));

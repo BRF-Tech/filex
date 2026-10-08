@@ -8,6 +8,12 @@
 // two met in one file, and either half could have been dropped without a
 // conflict: the merged page must be DataTable AND say the words, and a
 // sortable column must order by the words it shows.
+//
+// #191: the title and body cells are the SERVER's sentence (backend notify
+// say.go), said in the language of the reader's account, and the page
+// prints them as they are. The mock below replaces NotificationsApi whole,
+// so its rows carry the words the server says to the language each test's
+// account reads in.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
@@ -20,13 +26,15 @@ import { DataTable, registerLocale, resetLocales } from '@brftech/filex-core';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 
+/** The history as the server says it to a Turkish reader (the default page). */
 const items = [
   {
     id: 11,
     event: 'share.created',
     severity: 'info',
-    title: 'share.created',
-    body: '',
+    title: 'Paylaşım bağlantısı oluşturuldu',
+    body: '/Belgeler/rapor.pdf',
+    meta: { node: { name: 'rapor.pdf', path: '/Belgeler/rapor.pdf' } },
     user_id: 2,
     user_name: 'Ayşe Yılmaz',
     webhook_status: 'skipped',
@@ -36,8 +44,9 @@ const items = [
     id: 12,
     event: 'file.uploaded',
     severity: 'info',
-    title: 'file.uploaded',
-    body: '',
+    title: 'Yeni dosya: bütçe.xlsx',
+    body: '/bütçe.xlsx',
+    meta: { node: { name: 'bütçe.xlsx', path: '/bütçe.xlsx' } },
     user_id: null,
     webhook_status: 'sent',
     created_at: '2026-09-21T11:00:00Z',
@@ -89,12 +98,21 @@ describe('admin Notifications — the shared table, saying the words', () => {
     w.unmount();
   });
 
-  it('names the event and the person in the reader’s language', async () => {
+  it('names the event and the person in the reader’s language, and prints the server’s sentence as it is', async () => {
     const w = mountPage();
     await flushPromises();
+    const column = (id: string) =>
+      [...w.element.querySelectorAll(`.fe-list__row .fe-list__cell[data-col="${id}"]`)].map((c) => c.textContent!.trim()).sort();
+    // ⚠ The event is the table's LEAD column (the first one), and a row's
+    // lead cell is `.fe-list__col--lead`, not a `[data-col]` cell.
+    const lead = () =>
+      [...w.element.querySelectorAll('.fe-list__row .fe-list__cell.fe-list__col--lead')].map((c) => c.textContent!.trim()).sort();
+    // The kind of event: this page's own label, the raw id only in its tooltip.
+    expect(lead()).toEqual([tr.notifications.kinds.share_created, tr.notifications.kinds.file_uploaded].sort());
+    // The sentence: the server's words, byte for byte.
+    expect(column('title')).toEqual(items.map((n) => n.title).sort());
+    expect(column('body')).toEqual(items.map((n) => n.body).sort());
     const text = w.text();
-    expect(text).toContain(tr.notifications.kinds.share_created);
-    expect(text).toContain(tr.notifications.kinds.file_uploaded);
     expect(text).not.toContain('share.created');
     expect(text).toContain('Ayşe Yılmaz');
     expect(text).toContain(tr.notifications.scopeEveryone);
@@ -144,19 +162,32 @@ describe('admin Notifications — the shared table, saying the words', () => {
 const LRI = String.fromCharCode(0x2066);
 const PDI = String.fromCharCode(0x2069);
 
-/** A row with a failed delivery and a file at the ROOT of a storage. */
-const ROOT_FILE_FAILED = {
-  id: 21,
-  event: 'file.uploaded',
-  severity: 'info',
-  title: 'file.uploaded',
-  body: '',
-  user_id: null,
-  meta: { node: { path: '/informe.pdf', name: 'informe.pdf' } },
-  webhook_status: 'failed',
-  webhook_error: 'Post "https://hooks.example.test/filex": dial tcp 10.0.0.1:443: connect: connection refused',
-  created_at: '2026-09-24T09:00:00Z',
-};
+/** First strong isolate: what the SERVER wraps a value in, in a right-to-left sentence (notify say.go). */
+const FSI = String.fromCharCode(0x2068);
+
+/**
+ * A row with a failed delivery and a file at the ROOT of a storage, as the
+ * server says it in `lang`. ⚠ In a right-to-left language the server wraps
+ * every value it places in the sentence in FSI ... PDI (backend notify say.go,
+ * "RIGHT TO LEFT"), so `/informe.pdf` cannot read `informe.pdf/`; the page
+ * prints that as it is.
+ */
+function rootFileFailed(lang: 'tr' | 'ar') {
+  const rtl = lang === 'ar';
+  const isolated = (v: string) => (rtl ? `${FSI}${v}${PDI}` : v);
+  return {
+    id: 21,
+    event: 'file.uploaded',
+    severity: 'info',
+    title: rtl ? `ملف جديد: ${isolated('informe.pdf')}` : 'Yeni dosya: informe.pdf',
+    body: isolated('/informe.pdf'),
+    user_id: null,
+    meta: { node: { path: '/informe.pdf', name: 'informe.pdf' } },
+    webhook_status: 'failed',
+    webhook_error: 'Post "https://hooks.example.test/filex": dial tcp 10.0.0.1:443: connect: connection refused',
+    created_at: '2026-09-24T09:00:00Z',
+  };
+}
 
 /**
  * ⚠ Every page these tests open is torn down in `afterEach`, and every query
@@ -188,7 +219,7 @@ describe('admin Notifications — the Webhook cell is ONE box', () => {
      (e2e/tests/133); what is held here is the SHAPE that makes it
      impossible — one element per cell (lesson #373). */
   it('every Webhook cell holds exactly one element, with the badge and the reason inside it', async () => {
-    rows = [...items, ROOT_FILE_FAILED];
+    rows = [...items, rootFileFailed('tr')];
     const w = openPage();
     await flushPromises();
     const cells = [...w.element.querySelectorAll('.fe-list__row .fe-list__cell[data-col="webhook"]')];
@@ -214,19 +245,20 @@ describe('admin Notifications — machine text in a right-to-left panel', () => 
   });
   afterEach(() => resetLocales());
 
-  it('isolates a ROOT file’s path in the body — `/informe.pdf` must not read `informe.pdf/`', async () => {
-    /* The body goes through `foreignText` already (useNotificationText); what
-       missed it was the SHARED rule, which wanted a path of two segments. A
-       file at the root of a storage has one. */
-    rows = [ROOT_FILE_FAILED];
+  it('prints the server’s isolated ROOT path in the body as it is - `/informe.pdf` must not read `informe.pdf/`', async () => {
+    /* The isolation is the SERVER's since #191 (it says the sentence, and
+       wraps the values it places in a right-to-left one). What is held here
+       is that the page neither drops it nor wraps it a second time. */
+    rows = [rootFileFailed('ar')];
     const w = openPage('ar');
     await flushPromises();
-    const body = w.element.querySelector('.fe-list__row .fe-list__cell[data-col="body"]')?.textContent ?? '';
-    expect(body, JSON.stringify(body)).toContain(`${LRI}/informe.pdf${PDI}`);
+    const body = w.element.querySelector('.fe-list__row .fe-list__cell[data-col="body"]')?.textContent?.trim() ?? '';
+    expect(body, JSON.stringify(body)).toBe(`${FSI}/informe.pdf${PDI}`);
+    expect(body).not.toContain(LRI);
   });
 
   it('isolates the RECEIVER’s error in the Webhook cell — the one text cell that was never routed', async () => {
-    rows = [ROOT_FILE_FAILED];
+    rows = [rootFileFailed('ar')];
     const w = openPage('ar');
     await flushPromises();
     const reason = w.element.querySelector('[data-testid="notif-webhook-reason"]')?.textContent ?? '';
@@ -235,11 +267,31 @@ describe('admin Notifications — machine text in a right-to-left panel', () => 
   });
 
   it('leaves a left-to-right panel byte for byte as it was', async () => {
-    rows = [ROOT_FILE_FAILED];
+    rows = [rootFileFailed('tr')];
     const w = openPage('tr');
     await flushPromises();
     const row = w.element.querySelector('.fe-list__row')?.textContent ?? '';
     expect(row).not.toContain(LRI);
+    expect(row).not.toContain(FSI);
+    expect(row).toContain('Yeni dosya: informe.pdf');
     expect(row).toContain('/informe.pdf');
+  });
+});
+
+describe('admin Notifications - why a delivery was skipped is the server’s sentence', () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  /* 0.54 (audit A6): the row keeps a CODE (no_destination, digest_unnamed,
+     sibling, stopped) and the server says it in the screen's language
+     (`webhook_reason`, notify/webhook_reason.go). The page printed "no
+     webhook is set up" for every skipped row - wrong for two of the four. */
+  it('prints webhook_reason as the server said it, never a word of its own', async () => {
+    rows = [{ ...items[0], webhook_error: 'sibling', webhook_reason: 'Webhook bu olayı başka bir satırıyla aldı.' }];
+    const w = openPage('tr');
+    await flushPromises();
+    const reason = w.element.querySelector('[data-testid="notif-webhook-reason"]')?.textContent ?? '';
+    expect(reason).toContain('Webhook bu olayı başka bir satırıyla aldı.');
+    expect(reason).not.toContain('tanımlı webhook yok');
+    expect(reason).not.toContain('sibling');
   });
 });

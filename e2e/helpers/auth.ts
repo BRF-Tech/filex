@@ -144,7 +144,13 @@ export async function apiLogin(
 }
 
 /**
- * Logs out via the user menu. Asserts redirection back to /admin/login.
+ * Logs out via the user menu. Asserts redirection back to the sign-in page.
+ *
+ * ⚠ The sign-in page of the DOOR the page was on: a sign-out on /drive/ lands
+ * on /drive/login?signed_out=1, one on /admin/ on /admin/login (web
+ * lib/signOut.ts signInPage - the server accepts exactly these two as the
+ * IdP's way back). Waiting for /admin/login alone failed 213, which signs out
+ * of /drive/explore (0.54 full run 001b652e).
  *
  * The user menu trigger lives in TopNav and isn't tagged with a stable
  * data-testid (the project's test-id strategy is informal). Match by
@@ -176,5 +182,5 @@ export async function logout(page: Page) {
     await page.evaluate(() => sessionStorage.removeItem('filex.bearer')).catch(() => undefined);
     await page.goto('/admin/login');
   }
-  await page.waitForURL(/\/admin\/login/);
+  await page.waitForURL(/\/(admin|drive)\/login/);
 }

@@ -58,7 +58,8 @@ type csvHarness struct {
 	sink  *captureSink
 	ds    *httptest.Server
 	store db.Store
-	// sessionKey is the document key the callbacks name ("k" until open).
+	// sessionKey is the document key the callbacks name (until open, a key of
+	// this document's that no session recorded).
 	sessionKey string
 	// bodyUsers, when set, is what the callback's BODY says `users` is,
 	// whatever its signed token says.
@@ -124,6 +125,11 @@ func newDocHarness(t *testing.T, name, mime, original string) *csvHarness {
 		}
 		_, _ = fmt.Fprintf(w, `{"endConvert":true,"percent":100,"fileType":"csv","fileUrl":%q}`, "http://"+r.Host+"/conv.csv")
 	})
+	// A redirect from the document server's address to wherever `to` says
+	// (callback_trust_test.go).
+	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, r.URL.Query().Get("to"), http.StatusFound)
+	})
 	mux.HandleFunc("/conv.csv", func(w http.ResponseWriter, _ *http.Request) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -160,7 +166,9 @@ func (h *csvHarness) callback(t *testing.T, status int, saved, filetype string, 
 	h.mu.Unlock()
 	key := h.sessionKey
 	if key == "" {
-		key = "k"
+		// A session filex has no record of, with a key it made for this
+		// document (0.54: the callback acts only on those, callback_trust.go).
+		key = h.svc.sealKey(context.Background(), h.node.ID, md5Hex("k"))
 	}
 	payload := map[string]any{"key": key, "status": status, "url": h.ds.URL + "/saved"}
 	if filetype != "" {

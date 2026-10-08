@@ -155,6 +155,54 @@ export function blockedReason(
   return null;
 }
 
+/* wiring:e2 vault -------------------------------------------------------
+ * A vault (docs/E2E-VAULT-FORMAT.md) is written only through its own API:
+ * what is inside one moves and copies only inside it, and nothing is moved
+ * into a vault or out of one on the server - that is an upload or a
+ * download. The picker says so before the person chooses, rather than
+ * offering a folder the transfer then refuses. */
+
+/** The vault `p` is in or is, or null. `roots` are the vault folders known:
+ *  the ones the explorer opened, and the ones the server's listings named. */
+export function vaultOfWire(p: string, roots: Iterable<string>): string | null {
+  if (!p || p === DRIVES) return null;
+  for (const r of roots) if (r && isAtOrInside(p, r)) return r;
+  return null;
+}
+
+/**
+ * Why the vault rule refuses `dest`, or null. `from` is the vault the items
+ * are in (null: outside every vault); `vaultOf` answers the vault a path is
+ * in or is.
+ *
+ *   `'into'`  the items are outside every vault and dest is in one;
+ *   `'out'`   the items are in a vault and dest is not in that one.
+ */
+export function vaultBlocked(
+  dest: string,
+  from: string | null | undefined,
+  vaultOf: (p: string) => string | null,
+): 'into' | 'out' | null {
+  if (!dest || dest === DRIVES) return null;
+  const v = vaultOf(dest);
+  if (from) return v === from ? null : 'out';
+  return v ? 'into' : null;
+}
+
+/** A row the vault rule closes for good: nothing under it may be chosen
+ *  either. A folder that holds the items' vault stays open - it is the way
+ *  back into the vault. */
+export function vaultDeadEnd(
+  dest: string,
+  from: string | null | undefined,
+  vaultOf: (p: string) => string | null,
+): boolean {
+  if (!vaultBlocked(dest, from, vaultOf)) return false;
+  return !(from && isAtOrInside(from, dest));
+}
+
+/* /wiring:e2 vault */
+
 /** One row in the picker's list. */
 export interface DestinationRow {
   /** Wire path of the folder (or, in a file pick, the file). */
@@ -163,8 +211,11 @@ export interface DestinationRow {
   label: string;
   /** May the caller write into it? Drives the disabled Choose button. */
   writable: boolean;
-  /** Set when this row is one of the folders being moved, or inside one. */
-  blocked: 'self' | 'descendant' | null;
+  /** Set when this row is one of the folders being moved, or inside one -
+   *  or, `'vault'`, a folder the vault rule closes (vaultBlocked). */
+  blocked: 'self' | 'descendant' | 'vault' | null;
+  /** wiring:e2 vault — the folder is a vault (docs/E2E-VAULT-FORMAT.md). */
+  vault?: boolean;
   /**
    * Folders are walked into; a file (offered only when the picker is asked
    * for one — an app plugin's `file-chooser`) is the answer itself.

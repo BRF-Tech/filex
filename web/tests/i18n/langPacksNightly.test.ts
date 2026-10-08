@@ -100,24 +100,30 @@ const GOOD = { 'b.office': 'In ONLYOFFICE bearbeiten', 'd.new': 'Neues Ding' };
    the answers, write a second worklist naming another pack, edit the
    catalogue copy), escape (write a file outside its directory), broken (write
    no JSON in the first round).
-   ⚠ Windows: the driver starts LANGPACKS_AGENT_CMD through cmd.exe in a
-   detached process, which has no console; the node it starts gets a console
-   of its own, and its stdin is that console, not the driver's pipe. A read
-   of fd 0 there waits for a key press for ever: the night hangs until the
-   test's timeout, the stand-in outlives it holding its directory (EBUSY on
-   cleanup). When stdin is a console the stand-in reads the copy of the
-   prompt the driver writes beside the night's logs (logs/<pack>-prompt-<n>.md,
-   two levels above its directory). */
+   ⚠ Windows: the driver starts LANGPACKS_AGENT_CMD through cmd.exe. Until
+   #197 it did so in a detached process, which has no console; the node it
+   started got a console of its own - a visible window on the workstation -
+   and its stdin was that console, not the driver's pipe. A read of fd 0
+   there waits for a key press for ever: the night hung until the test's
+   timeout, the stand-in outlived it holding its directory (EBUSY on
+   cleanup). The driver now keeps the agent in its own console there, and
+   the stand-in logs whether its stdin was a console (stdinTty: a test
+   below wants false on every platform). It still reads the copy of the
+   prompt the driver writes beside the night's logs
+   (logs/<pack>-prompt-<n>.md, two levels above its directory) when stdin is
+   a console, so a regression turns that test red instead of hanging the
+   suite. */
 const FAKE_AGENT = `import fs from 'node:fs';
 import path from 'node:path';
 import tty from 'node:tty';
 const round = Number(process.env.LANGPACKS_ROUND || 0);
 const promptCopy = path.join(process.cwd(), '..', '..', 'logs', path.basename(process.cwd()) + '-prompt-' + (round + 1) + '.md');
-const prompt = tty.isatty(0) ? fs.readFileSync(promptCopy, 'utf8') : fs.readFileSync(0, 'utf8');
+const stdinTty = tty.isatty(0);
+const prompt = stdinTty ? fs.readFileSync(promptCopy, 'utf8') : fs.readFileSync(0, 'utf8');
 const file = process.env.LANGPACKS_WORKLIST;
 const plan = JSON.parse(process.env.FAKE_PLAN || '{}');
 if (process.env.FAKE_LOG) {
-  fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ round, cwd: process.cwd(), home: process.env.HOME, file, prompt, files: fs.readdirSync('.').sort() }) + '\\n');
+  fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ round, cwd: process.cwd(), home: process.env.HOME, file, prompt, stdinTty, files: fs.readdirSync('.').sort() }) + '\\n');
 }
 const rounds = plan.rounds || [];
 const answers = rounds[Math.min(round, rounds.length - 1)] || {};
@@ -175,7 +181,7 @@ function night(s: Night, { plan = {}, extra = {}, args = [] }: { plan?: object; 
     FAKE_LOG: path.join(s.base, 'fake-agent.jsonl'),
     ...extra,
   };
-  const r = spawnSync(process.execPath, [DRIVER, 'run', '--env', s.envFile, ...args], { cwd: ROOT, encoding: 'utf8', env, timeout: 110_000 });
+  const r = spawnSync(process.execPath, [DRIVER, 'run', '--env', s.envFile, ...args], { cwd: ROOT, encoding: 'utf8', env, timeout: 110_000, windowsHide: true });
   return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
 }
 
@@ -766,6 +772,9 @@ describe('a night: the agent answers', () => {
     // A HOME of its own: nothing of the host user's ~/.claude reaches it.
     expect(calls[0].home).toBe(path.join(s.state, 'agent-home'));
     expect(calls[0].prompt).toContain('`filex-lang-de.json` - the worklist: 2 item(s)');
+    // The prompt came on the driver's pipe: the agent got no console of its
+    // own, which on Windows is a window on the screen of whoever runs this (#197).
+    expect(calls[0].stdinTty).toBe(false);
     // The guide the agent reads names its own directory, not the run's.
     const guide = fs.readFileSync(path.join(calls[0].cwd, 'AGENT.md'), 'utf8');
     expect(guide).not.toContain(path.join(rec.night, 'todo', 'filex-lang-de').split(path.sep).join('/'));
@@ -780,6 +789,8 @@ describe('a night: refused answers', () => {
     expect(r.code, `${r.out}${r.err}`).toBe(0);
     const calls = agentCalls(s);
     expect(calls).toHaveLength(2);
+    // Every round's prompt on the pipe, none from a console window (#197).
+    expect(calls.map((c) => c.stdinTty)).toEqual([false, false]);
     expect(calls[1].prompt).toContain('This is round 2');
     expect(calls[1].prompt).toContain('NAME');
     expect(calls[1].prompt).toContain('b.office');

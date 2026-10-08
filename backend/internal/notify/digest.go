@@ -673,6 +673,9 @@ func (s *service) tell(ctx context.Context, userID int64, p personDigest, from, 
 	}
 	if digestID > 0 {
 		s.dispatch(digestID, ev)
+		// The digest row is the notification: it reaches the person's devices
+		// as it reaches their bell (push.go).
+		s.wakePush(&userID)
 	}
 	if len(kept) > 0 {
 		s.mailDigest(ctx, userID, kept, p)
@@ -849,8 +852,6 @@ func (s *service) digestEvent(ctx context.Context, userID int64, kept []*model.N
 	ev := Event{
 		Event:    EventNotificationDigest,
 		Severity: severity,
-		Title:    srvtext.Plural("en", "server.mail.digest.subject", len(kept), nil),
-		Body:     digestSummary("en", list, other, moreFolders),
 		Meta:     meta,
 		TS:       now,
 		UserID:   &userID,
@@ -868,6 +869,11 @@ func (s *service) digestEvent(ctx context.Context, userID int64, kept []*model.N
 		// One folder: a click opens it.
 		ev.Target = &Target{Kind: TargetDir, Storage: list[0].Storage, Path: list[0].Path}
 	}
+	// The row's own title and body - what a reader falls back on, and what a
+	// webhook gets - are the digest said in the instance's language, by the
+	// same code every reader's words come from (say.go).
+	said := SayEvent(srvtext.Pick(), ev)
+	ev.Title, ev.Body = said.Title, said.Body
 	return ev
 }
 
@@ -936,42 +942,9 @@ func partsOf(counts map[string]int) []digestPart {
 	return out
 }
 
-// phraseParts says parts in lang, joined with commas.
-func phraseParts(lang string, parts []digestPart) string {
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		out = append(out, srvtext.Plural(lang, "server.notify.digest."+p.Key, p.Count, nil))
-	}
-	return strings.Join(out, ", ")
-}
-
-// digestLines is a digest folder by folder: "Reports: 12 files added".
-func digestLines(lang string, groups []*digestGroup, other map[string]int, moreFolders int) []string {
-	var lines []string
-	for _, g := range groups {
-		name := g.Name
-		if g.Encrypted || name == "" {
-			name = srvtext.Text(lang, "server.notify.word.locked", nil)
-		}
-		lines = append(lines, name+": "+phraseParts(lang, g.Parts))
-	}
-	if moreFolders > 0 {
-		lines = append(lines, srvtext.Plural(lang, "server.notify.digest.more", moreFolders, nil))
-	}
-	if len(other) > 0 {
-		lines = append(lines, phraseParts(lang, partsOf(other)))
-	}
-	return lines
-}
-
-// digestSummary is the digest on one line, the folders apart by "; " — the
-// row's stored body, what a webhook receiver and the admin list fall back on.
-func digestSummary(lang string, groups []*digestGroup, other map[string]int, moreFolders int) string {
-	return strings.Join(digestLines(lang, groups, other, moreFolders), "; ")
-}
-
 // mailDigest emails the digest when a row it carries asked for an email
-// (Event.Mail) — in the person's language, folder by folder. Off the caller's
+// (Event.Mail) - in the person's language, folder by folder, in the words the
+// bell says it. Off the caller's
 // path, counted with the deliveries so Stop waits for it.
 func (s *service) mailDigest(ctx context.Context, userID int64, kept []*model.Notification, p personDigest) {
 	if s.mail == nil {
@@ -995,11 +968,15 @@ func (s *service) mailDigest(ctx context.Context, userID int64, kept []*model.No
 	if err != nil || u == nil || strings.TrimSpace(u.Email) == "" {
 		return
 	}
-	lang := srvtext.Pick(u.Locale)
-	list, other, moreFolders, _ := s.digestFolders(ctx, kept)
-	subject := srvtext.Plural(lang, "server.mail.digest.subject", len(kept), nil)
+	lang := PersonLang(u)
+	// ⚠ The bell's own words: the digest row said in the person's language
+	// (say.go) - its title is the subject, its lines stand one under the
+	// other. The email adds only its frame: when, and how to make a kind
+	// urgent.
+	said := SayEvent(lang, s.digestEvent(ctx, userID, kept, s.clock()))
+	subject := said.Title
 	body := srvtext.Text(lang, "server.mail.digest.intro", srvtext.Vars{"minutes": strconv.Itoa(int(p.window / time.Minute))}) +
-		"\n\n" + strings.Join(digestLines(lang, list, other, moreFolders), "\n")
+		"\n\n" + strings.Join(said.Lines, "\n")
 	if link != "" {
 		body += "\n\n" + link
 	}

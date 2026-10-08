@@ -1,4 +1,4 @@
-// How a failure is SAID (lib/errorWords) — the one table every screen uses.
+// How a failure is SAID (lib/errorWords) — one helper every screen uses.
 //
 // ⚠⚠ The owner's rule after the QA sweep of 2026-09-21: a translated sentence
 // that says what happened and, where it applies, what to do; an administrator
@@ -6,6 +6,13 @@
 // environment variable, a status code or a JSON body. The sweep found all
 // three on screen ("Config fetch 503: {…}", "set FILEX_SECRET_KEY…",
 // "save failed: 500 {…}", "engine libreoffice is not installed on this host").
+//
+// ⚠⚠ 0.54 (#209, audit A1/A2): the sentence is the SERVER's. A refusal carries
+// `message` (backend internal/apierr), a failed queue row `error_text` (backend
+// ops/errcode.go), both written in the reader's language; the client shows
+// them and keeps no table of the server's codes or of its English (CODE_WORDS,
+// JOB_WORDS, CODE_FIELD_WORDS, REASON_WORDS are gone). The server bodies below
+// carry the sentences the server writes (srvtext en.json / tr.json).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
@@ -48,9 +55,15 @@ describe('statusWords and requestFailure', () => {
     expect(statusWords(599, 'tr')).toBe(tr('err.status.500'));
   });
 
-  it('a missing encryption key is said as a sentence — the env var stays out of the message', () => {
-    const err = requestFailure(503, '{"error":"no_secret_key","admin_hint":"Set FILEX_SECRET_KEY on the server"}', 'tr');
-    expect(err.message).toBe(tr('err.no_secret_key'));
+  it('a missing encryption key is said as the server’s sentence — the env var stays out of the message', () => {
+    const said = 'Bu sunucuda şifreleme anahtarı tanımlı değil, bu yüzden erişim anahtarı verilemiyor. Yöneticinizden tanımlamasını isteyin.';
+    const err = requestFailure(
+      503,
+      JSON.stringify({ error: 'no_secret_key', message: said, admin_hint: 'Set FILEX_SECRET_KEY on the server' }),
+      'tr',
+    );
+    expect(err.message).toBe(said);
+    expect(err.server).toBe(said);
     expectPlainWords(err.message);
     expect(err.code).toBe('no_secret_key');
     // The fix travels only because the server chose to send it (admins only).
@@ -96,11 +109,22 @@ describe('sayFailure', () => {
     expect(sayFailure(err, 'fallback', { t: tr }).text).toBe(tr('err.status.500'));
     expect(sayFailure(err, 'fallback', { callerAdmin: true }).detail).toContain('disk full');
   });
+
+  it('a refusal the server said is re-said in the server’s words, not translated again', () => {
+    const said = 'Bu depo salt okunur.';
+    const err = requestFailure(403, JSON.stringify({ error: 'read_only', message: said }), 'tr');
+    expect(sayFailure(err, 'fallback', { t: en }).text).toBe(said);
+    expect(sayFailure(err, 'fallback', { t: tr }).text).toBe(said);
+  });
 });
 
 describe('serverWords (the connection panels)', () => {
-  it('says a known code in words, keeps a server sentence, hides plumbing', () => {
-    expect(serverWords(requestFailure(503, '{"error":"no_secret_key"}', 'en'))).toBe(en('err.no_secret_key'));
+  it('says the server’s sentence, keeps an older sentence in `error`, hides plumbing and bare codes', () => {
+    const said = 'This server has no encryption key set, so it cannot issue an access key. Ask an administrator to configure one.';
+    expect(serverWords(requestFailure(503, JSON.stringify({ error: 'no_secret_key', message: said }), 'en'))).toBe(said);
+    // A bare code with no sentence is the status's words (the client keeps no
+    // table of codes any more).
+    expect(serverWords(requestFailure(503, '{"error":"no_secret_key"}', 'en'))).toBe(en('err.status.503'));
     expect(serverWords(requestFailure(400, '{"error":"The public key is not a valid OpenSSH key."}', 'en'))).toBe(
       'The public key is not a valid OpenSSH key.',
     );
@@ -115,35 +139,34 @@ describe('serverWords (the connection panels)', () => {
 });
 
 describe('jobFailure (the operations centre)', () => {
-  const op = { error: 'engine libreoffice is not installed on this host', error_code: 'engine_missing', error_engine: 'libreoffice' };
+  const raw = 'engine libreoffice is not installed on this host';
+  const op = { error: raw, error_code: 'engine_missing', error_engine: 'libreoffice' };
+  // What the server says for this row: the reader's form, and the
+  // administrator's (who can install the program) - backend ops sayErrors.
+  const USER = 'Bunun için sunucuda olmayan bir program gerekiyor (libreoffice). Yöneticinize başvurun.';
+  const ADMIN = 'Bunun için libreoffice gerekiyor ve filex\'i çalıştıran sunucuda kurulu değil. Oraya kurup yeniden deneyin.';
 
-  it('a missing engine: a person is told to ask, an admin what to install — both in words', () => {
-    const user = jobFailure(op, 'Convert failed', tr);
-    expect(user.text).toBe(tr('opc.err.engine_missing', { engine: 'libreoffice' }));
+  it('a missing engine is the server’s sentence; the raw words only for an admin', () => {
+    const user = jobFailure({ ...op, error_text: USER }, 'Convert failed', tr);
+    expect(user.text).toBe(USER);
     expect(user.text).not.toContain('not installed on this host');
     expect(user.detail).toBeUndefined();
-    const admin = jobFailure(op, 'Convert failed', tr, { callerAdmin: true });
-    expect(admin.text).toBe(tr('opc.err.engine_missing_admin', { engine: 'libreoffice' }));
-    expect(admin.detail).toBe(op.error);
+    const admin = jobFailure({ ...op, error_text: ADMIN }, 'Convert failed', tr, { callerAdmin: true });
+    expect(admin.text).toBe(ADMIN);
+    expect(admin.detail).toBe(raw);
   });
 
-  it('no document server for the office engine: connect ONLYOFFICE, never "install" (0.50)', () => {
-    /* Red before 0.50: there was no `office_unconfigured`; the office engine
-       was a binary and its failure read "This needs libreoffice, which is
-       not installed ... Install it there". */
-    const raw =
-      'engine libreoffice is not configured on this host: office documents are converted by ONLYOFFICE Document Server, and none is connected (an administrator connects one under External services)';
-    const op = { error: raw, error_code: 'office_unconfigured', error_engine: 'office' };
-    const user = jobFailure(op, 'Dönüştür başarısız', tr);
-    expect(user.text).toBe(tr('opc.err.office_unconfigured'));
-    expect(user.text).toContain('ONLYOFFICE');
-    expect(user.text).not.toContain('configured on this host');
-    expect(user.detail).toBeUndefined();
-    const admin = jobFailure(op, 'Dönüştür başarısız', tr, { callerAdmin: true });
-    expect(admin.text).toBe(tr('opc.err.office_unconfigured_admin'));
-    expect(admin.text).toContain('Dış servisler');
-    expect(admin.detail).toBe(raw);
-    expect(jobFailure(op, 'Convert failed', en, { callerAdmin: true }).text).not.toMatch(/install|libreoffice/i);
+  it('a code the server did not say is the fallback - the client words no job code of its own', () => {
+    // RED before 0.54: the client turned `engine_missing` into opc.err.* of
+    // its own; the server says it now (error_text).
+    expect(jobFailure(op, 'Convert failed', tr)).toEqual({ text: 'Convert failed' });
+    const office = { error: 'engine libreoffice is not configured on this host', error_code: 'office_unconfigured', error_engine: 'office' };
+    expect(jobFailure(office, 'Dönüştür başarısız', tr)).toEqual({ text: 'Dönüştür başarısız' });
+    expect(jobFailure(office, 'Dönüştür başarısız', tr, { callerAdmin: true }).detail).toBe(office.error);
+  });
+
+  it('a cancelled job is said as stopped', () => {
+    expect(jobFailure({ error: 'cancelled', error_code: 'cancelled' }, 'fallback', en)).toEqual({ text: en('opc.status.aborted') });
   });
 
   it('the app’s own words are shown; the app’s plumbing is not', () => {
@@ -176,8 +199,16 @@ describe('jobFailure (the operations centre)', () => {
     );
   });
 
-  it('a copy with no code: a read-only refusal is recognised, anything else is the fallback', () => {
-    expect(jobFailure({ error: 'destination storage is read-only: arsiv' }, 'Operation failed', en).text).toBe(en('err.read_only'));
+  it('a copy: the server’s sentence when it said one, the fallback otherwise - never its English', () => {
+    expect(
+      jobFailure(
+        { error: 'destination storage is read-only: arsiv', error_code: 'read_only', error_text: 'This storage is read-only.' },
+        'Operation failed',
+        en,
+      ).text,
+    ).toBe('This storage is read-only.');
+    // RED before 0.54: CODE_WORDS matched the English "read-only".
+    expect(jobFailure({ error: 'destination storage is read-only: arsiv' }, 'Operation failed', en)).toEqual({ text: 'Operation failed' });
     expect(jobFailure({ error: 'rename x y: EOF' }, 'Operation failed', en)).toEqual({ text: 'Operation failed' });
   });
 
@@ -189,13 +220,17 @@ describe('jobFailure (the operations centre)', () => {
       error_code: 'engine_missing', error_engine: 'libreoffice',
       started_at: null, finished_at: null, created_at: null, plugin: 'convert', action: 'convert', label: 'Dönüştür',
     };
+    // The server says the row for its reader: the administrator's form to an
+    // administrator (backend ops sayErrors).
+    const USER = 'Bunun için sunucuda olmayan bir program gerekiyor (libreoffice). Yöneticinize başvurun.';
+    const ADMIN = 'Bunun için libreoffice gerekiyor ve filex\'i çalıştıran sunucuda kurulu değil. Oraya kurup yeniden deneyin.';
     for (const callerAdmin of [false, true]) {
       const center = useOperations();
       const w = mount(PendingOpsTray, { props: { ops: [], locale: 'tr', center, callerAdmin } });
-      await w.setProps({ ops: [failed] });
+      await w.setProps({ ops: [{ ...failed, error_text: callerAdmin ? ADMIN : USER }] });
       await nextTick();
       const row = [...center.active.value, ...center.history.value].find((o) => String(o.key).endsWith(':7'));
-      expect(row?.error).toBe(tr(callerAdmin ? 'opc.err.engine_missing_admin' : 'opc.err.engine_missing', { engine: 'libreoffice' }));
+      expect(row?.error).toBe(callerAdmin ? ADMIN : USER);
       expect(row?.errorDetail ?? null).toBe(callerAdmin ? failed.error_message : null);
       w.unmount();
     }
@@ -249,180 +284,117 @@ describe('useFileApi says what it cannot reach', () => {
   });
 });
 
-describe('e2e_not_allowed — the reason decides the words (wiring:e2 policy)', () => {
-  const REASONS = ['tenant_disabled', 'policy_off', 'admins_only', 'permission', 'approval_required'] as const;
+// ⚠ 0.54 (#209): these refusals were worded by the client (REASON_WORDS,
+// CODE_WORDS: e2e_not_allowed + reason, kind_mismatch, not_requestable,
+// path_missing, too_many_pending, "could not check the encryption policy").
+// The server words every one of them now (server.e2e.not_allowed.*,
+// server.error.*); the client shows its `message`.
+describe('e2e_not_allowed - the server’s sentence for the reason (wiring:e2 policy)', () => {
+  const SAID: Record<string, string> = {
+    tenant_disabled: 'Encryption is not available here: the platform operator has turned it off.',
+    policy_off: 'An administrator has turned off encryption.',
+    admins_only: 'Only an administrator can create an encrypted folder or file here.',
+    permission: 'Your account is not allowed to encrypt here.',
+    approval_required: 'Encrypting here needs an administrator\'s approval. Send a request for it first.',
+  };
 
-  it('each reason has its own sentence, in both languages, with no code in it', () => {
-    for (const reason of REASONS) {
-      const key = `err.e2e_not_allowed.${reason}`;
-      // A key missing from BOTH tables would make `t(key)` return the key and
-      // the comparison below pass for the wrong reason.
-      expect(en(key), key).not.toBe(key);
-      expect(tr(key), key).not.toBe(key);
-      const body = JSON.stringify({ error: 'e2e_not_allowed', reason, message: 'encryption is not allowed here' });
-      for (const [lang, t] of [['en', en], ['tr', tr]] as const) {
-        const err = requestFailure(403, body, lang);
-        expect(err.message).toBe(t(key));
-        expect(err.code).toBe('e2e_not_allowed');
-        expect(err.reason).toBe(reason);
-        expectPlainWords(err.message);
-      }
+  it('each reason is the sentence the server wrote for it, with the code and the reason kept', () => {
+    for (const [reason, said] of Object.entries(SAID)) {
+      const err = requestFailure(403, JSON.stringify({ error: 'e2e_not_allowed', reason, message: said }), 'en');
+      expect(err.message).toBe(said);
+      expect(err.code).toBe('e2e_not_allowed');
+      expect(err.reason).toBe(reason);
+      expectPlainWords(err.message);
     }
-    expect(new Set(REASONS.map((r) => en(`err.e2e_not_allowed.${r}`))).size).toBe(REASONS.length);
   });
 
-  it('a reason this build does not know still says encryption was refused — never "not allowed" alone', () => {
-    const err = requestFailure(403, '{"error":"e2e_not_allowed","reason":"moon_phase"}', 'en');
-    expect(err.message).toBe(en('err.e2e_not_allowed.other'));
-    expect(err.message).not.toBe(en('err.status.403'));
-    expect(requestFailure(403, '{"error":"e2e_not_allowed"}', 'tr').message).toBe(tr('err.e2e_not_allowed.other'));
+  it('a refusal with no sentence is the status’s words - the client no longer knows the reasons', () => {
+    expect(requestFailure(403, '{"error":"e2e_not_allowed","reason":"moon_phase"}', 'en').message).toBe(en('err.status.403'));
   });
 
-  it('is said again in the reader’s language — even when a long message pushed the reason past the clip', () => {
-    const long = 'x'.repeat(400);
-    // A Go map writes its keys in order: error, message, reason.
-    const err = requestFailure(403, `{"error":"e2e_not_allowed","message":"${long}","reason":"approval_required"}`, 'en');
+  it('survives the clip: a long sentence is said whole, by every re-sayer', () => {
+    const long = 'x'.repeat(400) + ' approval';
+    const err = requestFailure(403, JSON.stringify({ error: 'e2e_not_allowed', message: long, reason: 'approval_required' }), 'en');
     expect(err.detail?.includes('approval_required')).toBe(false);
-    expect(sayFailure(err, 'fallback', { t: tr }).text).toBe(tr('err.e2e_not_allowed.approval_required'));
-    expect(serverWords(err, 'en')).toBe(en('err.e2e_not_allowed.approval_required'));
+    expect(sayFailure(err, 'fallback', { t: tr }).text).toBe(long);
+    expect(serverWords(err, 'en')).toBe(long);
   });
 
-  it('`reason` means nothing on a refusal that is not listed', () => {
-    const err = requestFailure(403, '{"error":"permission_denied","reason":"policy_off"}', 'en');
-    expect(err.message).toBe(en('err.status.403'));
+  it('a permission refusal is said in the server’s words - its reason, not "not allowed" (A1)', () => {
+    const said = 'The role “Contractors” does not allow you to delete files.';
+    const err = requestFailure(403, JSON.stringify({ error: 'permission_denied', message: said, reason: 'policy_off' }), 'en');
+    expect(err.message).toBe(said);
+    expect(err.message).not.toBe(en('err.status.403'));
   });
 });
 
 // `POST /api/files/e2e/requests` answers 400 when the listing the person asked
-// from went stale: `kind_mismatch` — the kind asked for is not what is at the
-// path (a folder was replaced by a file) — and `not_requestable` — the rule now
-// says nothing can be requested there: `allowed` (an approval came, or the
-// policy loosened), or `denied` with the `reason` of the refusal. Its other
-// 400s are `bad_request`, which the dialog never provokes: it sends what the
-// listing said and a reason.
+// from went stale (`kind_mismatch`, `not_requestable`), 404 `path_missing` and
+// 429 `too_many_pending` - each with the server's sentence (backend
+// handlers/e2e_policy_files.go writeE2ERequestError).
 describe('the encryption request’s refusals on a stale listing (wiring:e2 policy)', () => {
-  const kindMismatch = JSON.stringify({
-    error: 'kind_mismatch',
-    message: 'kind must be what is there: folder for a folder, file for a file',
-  });
-  const notRequestable = (answer: string, reason?: string) =>
-    JSON.stringify({
-      error: 'not_requestable',
-      message: 'no approval is needed here: go ahead and encrypt',
-      answer,
-      ...(reason ? { reason } : {}),
-    });
+  const cases = [
+    [400, 'kind_mismatch', 'This item has changed since the folder was listed. Refresh the folder and try again.'],
+    [400, 'not_requestable', 'What you may do here has changed since the folder was listed. Refresh the folder to see what is offered now.'],
+    [404, 'path_missing', 'This folder or file is no longer here. Refresh the folder and try again.'],
+    [429, 'too_many_pending', 'You already have many encryption requests waiting. Wait until an administrator answers one of them, then ask again.'],
+  ] as const;
 
-  it('kind_mismatch is a sentence in both languages, not "Bad request" and not the server’s English', () => {
-    for (const [lang, t] of [['en', en], ['tr', tr]] as const) {
-      const key = 'err.e2e_request.kind_mismatch';
-      expect(t(key), key).not.toBe(key);
-      const err = requestFailure(400, kindMismatch, lang);
-      expect(err.message).toBe(t(key));
-      expect(err.code).toBe('kind_mismatch');
-      expect(err.message).not.toBe(t('err.status.400'));
-      expectPlainWords(err.message);
-      expect(err.message).not.toContain('kind must be');
-    }
-    expect(tr('err.e2e_request.kind_mismatch')).not.toBe(en('err.e2e_request.kind_mismatch'));
-  });
-
-  it('not_requestable says the refusal’s own reason when the rule now says no', () => {
-    for (const reason of ['tenant_disabled', 'policy_off', 'admins_only', 'permission']) {
-      for (const [lang, t] of [['en', en], ['tr', tr]] as const) {
-        const err = requestFailure(400, notRequestable('denied', reason), lang);
-        expect(err.message).toBe(t(`err.e2e_not_allowed.${reason}`));
-        expect(err.code).toBe('not_requestable');
-      }
-    }
-  });
-
-  it('not_requestable without a reason — the rule now says yes — says what changed, in both languages', () => {
-    for (const [lang, t] of [['en', en], ['tr', tr]] as const) {
-      const key = 'err.e2e_request.not_requestable';
-      expect(t(key), key).not.toBe(key);
-      const err = requestFailure(400, notRequestable('allowed'), lang);
-      expect(err.message).toBe(t(key));
-      expect(err.message).not.toBe(t('err.status.400'));
+  it('each is the server’s sentence, not the status’s words', () => {
+    for (const [status, code, said] of cases) {
+      const err = requestFailure(status, JSON.stringify({ error: code, message: said }), 'tr');
+      expect(err.message, code).toBe(said);
+      expect(err.code).toBe(code);
+      expect(err.message).not.toBe(tr(`err.status.${status}`));
+      expect(sayFailure(err, 'fallback', { t: tr }).text).toBe(said);
+      expect(serverWords(err, 'tr')).toBe(said);
       expectPlainWords(err.message);
     }
-    expect(tr('err.e2e_request.not_requestable')).not.toBe(en('err.e2e_request.not_requestable'));
   });
 
-  it('are said again in the reader’s language, from the clipped detail', () => {
-    const err = requestFailure(400, kindMismatch, 'en');
-    expect(sayFailure(err, 'fallback', { t: tr }).text).toBe(tr('err.e2e_request.kind_mismatch'));
-    expect(serverWords(err, 'en')).toBe(en('err.e2e_request.kind_mismatch'));
-    // Even when a long message pushed the reason past the clip.
-    const long = JSON.stringify({ error: 'not_requestable', message: 'x'.repeat(400), answer: 'denied', reason: 'policy_off' });
-    const refused = requestFailure(400, long, 'en');
-    expect(refused.detail?.includes('policy_off')).toBe(false);
-    expect(sayFailure(refused, 'fallback', { t: tr }).text).toBe(tr('err.e2e_not_allowed.policy_off'));
-  });
-
-  it('says its own words only for its own codes', () => {
-    expect(requestFailure(400, '{"error":"bad_request","message":"bad json"}', 'en').message).toBe(en('err.status.400'));
+  it('one with no sentence is the status’s words', () => {
     expect(requestFailure(400, '{"error":"reason_required"}', 'en').message).toBe(en('err.status.400'));
-  });
-
-  // Operator decision 2026-10-03: a request names something that is there
-  // (`404 path_missing`), and one person has at most twenty waiting
-  // (`429 too_many_pending`). The dialog says either in the reader's language,
-  // not "Not found" or "Too many requests".
-  it('path_missing and too_many_pending are sentences in both languages', () => {
-    for (const [status, code, key] of [
-      [404, 'path_missing', 'err.e2e_request.path_missing'],
-      [429, 'too_many_pending', 'err.e2e_request.too_many_pending'],
-    ] as const) {
-      for (const [lang, t] of [['en', en], ['tr', tr]] as const) {
-        expect(t(key), key).not.toBe(key);
-        const err = requestFailure(status, JSON.stringify({ error: code, message: 'the server’s English' }), lang);
-        expect(err.message, `${code} ${lang}`).toBe(t(key));
-        expect(err.code).toBe(code);
-        expect(err.message).not.toBe(t(`err.status.${status}`));
-        expectPlainWords(err.message);
-      }
-      expect(tr(key)).not.toBe(en(key));
-    }
   });
 });
 
 // `answerE2E` (backend handlers/e2e_policy_gate.go): a rule that could not be
 // decided is not a yes, so every HTTP door that creates a key file or a `.fxe`
-// answers `500 {"error":"could not check the encryption policy"}`. By status
-// alone that reads "Server error" for ANY failure; here the failure is named.
-// The explorer's three catch sites (a new encrypted folder, a folder encrypted
-// in place, the conversion) all say a failure through `sayFailure`.
+// answers `500 {"error":"e2e_policy_undecided","message":…}` (it used to put
+// "could not check the encryption policy" in `error`, which the client
+// matched). By status alone that reads "Server error" for ANY failure; the
+// server's sentence names the failure.
 describe('an encryption rule that could not be decided (wiring:e2 policy)', () => {
-  const KEY = 'err.e2e_policy.undecided';
-  const body = JSON.stringify({ error: 'could not check the encryption policy' });
+  const SAID = 'The encryption policy could not be checked. Please try again shortly.';
+  const body = JSON.stringify({ error: 'e2e_policy_undecided', message: SAID });
 
-  it('is a sentence in both languages — what failed, what to do — not "Server error"', () => {
-    for (const [lang, t] of [['en', en], ['tr', tr]] as const) {
-      expect(t(KEY), KEY).not.toBe(KEY);
-      const err = requestFailure(500, body, lang);
-      expect(err.message).toBe(t(KEY));
-      expect(err.message).not.toBe(t('err.status.500'));
-      expect(err.code).toBe('could not check the encryption policy');
-      expectPlainWords(err.message);
-    }
-    expect(tr(KEY)).not.toBe(en(KEY));
+  it('is the server’s sentence - what failed, what to do - not "Server error"', () => {
+    const err = requestFailure(500, body, 'en');
+    expect(err.message).toBe(SAID);
+    expect(err.message).not.toBe(en('err.status.500'));
+    expect(err.code).toBe('e2e_policy_undecided');
+    expectPlainWords(err.message);
   });
 
-  it('reaches a person from the client, and is said again in the reader’s language by the catch sites', async () => {
+  it('reaches a person from the client, and every catch site says the same sentence', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(body, { status: 500, headers: { 'Content-Type': 'application/json' } })),
     );
     const api = useFileApi({ apiBase: '', locale: 'en' });
     const err = await api.e2eRequest({ path: 'docs://a', kind: 'folder', reason: 'x' }).catch((e: Error) => e);
-    expect((err as Error).message).toBe(en(KEY));
-    expect(sayFailure(err, 'Could not create the encrypted folder', { t: tr }).text).toBe(tr(KEY));
-    expect(serverWords(err, 'en')).toBe(en(KEY));
+    expect((err as Error).message).toBe(SAID);
+    expect(sayFailure(err, 'Could not create the encrypted folder', { t: tr }).text).toBe(SAID);
+    expect(serverWords(err, 'en')).toBe(SAID);
   });
 
-  it('is said for this error only — any other 500 still says that the server failed', () => {
-    for (const other of ['{"error":"database is locked"}', '{"error":"internal error"}', 'plain text', '']) {
+  it('any other 500 with no sentence still says that the server failed', () => {
+    for (const other of [
+      '{"error":"database is locked"}',
+      '{"error":"internal error"}',
+      '{"error":"could not check the encryption policy"}',
+      'plain text',
+      '',
+    ]) {
       expect(requestFailure(500, other, 'en').message, other).toBe(en('err.status.500'));
     }
   });

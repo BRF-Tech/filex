@@ -44,7 +44,7 @@ What applies to the caller. Cached client-side for 5 min.
      "applies": {"kind": "file", "ext": ["pdf"], "mime": [], "multi": false, "min": 0, "max": 0,
                  "state": ["pending"], "no_state": []},
      "view": "sign-wizard", "view_placement": "page", "confirm": null, "min_role": "editor", "danger": false,
-     "output_mode": "sibling"}
+     "output_mode": "sibling", "read_only_ok": false}
   ],
   "views": [
     {"plugin": "sign", "id": "sign-status", "placement": "inspector",
@@ -56,6 +56,17 @@ What applies to the caller. Cached client-side for 5 min.
 `applies` is the manifest rule merged with the admin override. The client
 mirrors `Matches` (kind/ext/mime/multi/min/max/state/no_state) to decide
 which rows to show; the server re-checks on every run.
+
+**`read_only_ok` (0.54).** Whether the menu offers the action on a file of a
+read-only storage: `false` when a click there would be refused (its output
+writes beside the file - `sibling`, `version`, or `applies.writable` - and
+it does not open a screen that asks where else to put the result), `true`
+otherwise. It is the run's own rule (`wasmplugin.OffersOnReadOnly`, applied
+by `run` to a menu click), sent on every row so the explorer shows exactly
+what a click may do instead of working it out from `output_mode` and
+`output_elsewhere`. Before 0.54 the explorer offered every "elsewhere"
+action there, including one with no screen, which `run` then refused with
+`409 read_only`.
 
 **Open rules (0.50).** `"open_rules": {"drawio": {"order": ["builtin"], "off":
 ["app:zeta/viewer"]}}`, by kind (a file name's extension, lower-case, no dot):
@@ -140,6 +151,9 @@ storage is read-only, the action is still offered (the row carries
 should go - a `file-chooser` with `kind: "dir"`, starting at
 `context.home` - then answers the job with `output: {"mode": "folder",
 "dir": "<storage>://<folder>"}`. See *Per-job output* below for the checks.
+Only an action that HAS such a screen (`view`) is offered and opened there
+(`read_only_ok: true`); one that would write straight beside its file is
+not.
 
 **Personal state keys (v0.43).** A key an app writes as `<key>@<user id>`
 (`wire.PersonalState(key, id)`) belongs to that one person: their listings
@@ -205,6 +219,11 @@ Answers:
   (`permission_denied` also when the action `requires` an app user permission
   the caller does not hold - above), `404 not_found`, `409 read_only`,
   `422 not_applicable`.
+- `404 not_found` also for a path inside filex's own folders (0.54): the
+  trash, the version history, the thumbnail cache and the drafts area (except
+  the caller's own draft) are never an app's input, on this route, a view's
+  `GET` and events, an interface's `save` and `call` - the answer every
+  by-path door gives a sealed path, whatever the caller's ACL.
 
 ### `GET /api/files/plugins/views/{plugin}/{view}?path=docs://x.pdf`
 Initial surface (event `open`). `POST …/event`:
@@ -216,6 +235,35 @@ Footer buttons post `event: "submit"` when the button is `primary`, else
 when the surface carries `job`, the handler enqueues it with the same checks
 as `run` and answers `202 {"op": …, "job_id"}`. Views may read the named
 files but never write; `state_set` is refused outside a job.
+
+**The host judges the answers (0.54).** Before a `submit` or an `action` is
+handed to the app, the host redraws the screen the values came from (one
+`change` call) and judges them against its own declarations - on this route
+and on a public page's events, the anonymous visitor's included:
+
+- a `form` field by its `type`: `int` a whole number inside `min`..`max`,
+  `bool` yes or no, `select` one of its `options` (each of them for
+  `multi`), every other type text. A plugin's own `default` passes as it
+  spelt it (`"5"` for an int, `"true"` for a bool);
+- a `pin-input` of exactly its `length` (4..8, 6 when none; the host writes
+  the clamped `length` onto the node before the screen leaves, so the box the
+  browser draws is the one judged), no spaces;
+- a `pdf-fields` node in `fill` mode: a tick is a bool, a date `YYYY-MM-DD`,
+  everything else text, and a `text` box obeys its `rule` (the host
+  normalises every rule on the way out). Only the signer's own boxes reach
+  the app - a box of another signer, or one the screen never drew, is
+  dropped like a hidden field's value - and each carries the node's own
+  `label` and `rule`, never the ones the browser sent back.
+
+An unanswered value always fits here (`required` / `required_when` decide
+that). A value that does not fit refuses the event: `422 {"error":
+"invalid", "message": "<the reader's language>", "fields": [keys], "invalid":
+{key: "<why, in the reader's language>"}, "reasons": [{key, reason, limit?}]}`
+(a `pdf-fields` box is keyed `<node id>.<box id>`); an empty required field
+is `422 {"error": "required", "message", "fields"}`. And while a person
+edits, the answer to every `change` carries the same verdict on the screen
+(`errors[key]`, the reader's language) wherever the app has not said
+something there itself.
 
 ⚠⚠ A primary button arrives as `submit`, every other one as `action` - the
 same in the full page, the dialog and an embedded explorer's popup. A plugin
@@ -680,6 +728,15 @@ runs the same code; the rules are in [APP-PLUGINS.md → Updates](APP-PLUGINS.md
 ### `GET/PUT …/{id}/settings`
 `{"values": {"tsa_url": "https://…", "api_key": "***"}}`; a `"***"` value on PUT
 leaves the secret unchanged; secret fields are sealed at rest.
+
+Every value a PUT carries is judged against its manifest field first (0.54):
+an `int` a whole number inside `min`..`max`, a `bool` `true` or `false`, a
+`select` one of its `options` (a `multi` select comma-separated, each one
+offered), and a `required` field (with no `show_when` / `required_when`) not
+empty. The first value that does not fit refuses the whole save and nothing
+is stored: `400 {"error": "setting_invalid", "field": "<key>", "reason":
+"int" | "min" | "max" | "bool" | "option" | "required", "message": "<the
+administrator's language>"}`. A field the PUT leaves out keeps what it held.
 
 ### `GET/PUT …/{id}/overrides`
 `{"actions": [{"id": "sign", "enabled": true, "applies": {…} | null, "admin_only": false}]}`
@@ -2568,6 +2625,21 @@ server's log.
   chunk at the wrong offset answers `409 {received}`; a session is the
   person's, for that app, view and file - any other request naming it is
   `404`; an abandoned one is removed after 30 minutes.
+
+### `GET /api/files/plugins/ui/{plugin}/{view}/read?path=<qualified>`
+
+What an interface's `file.read` reads (0.54). The server checks what it checks
+for a save - the app is running, the view is its interface, the person may
+run apps (`plugins.run`), the app was granted `files:read`, and the
+administrator did not turn the app off for this kind - and then answers the
+bytes the explorer's preview would, under the person's own read permission
+and confinement (ranges included). Before 0.54 the frame checked the grant
+itself and read the preview directly.
+
+An interface's kept state (`state.get` / `state.set`) lives in the person's
+preference document; one app may keep up to `limits.app_state_max_bytes`
+(16 KiB of JSON) there, which `PUT /api/me/prefs` enforces
+(`413 APP_STATE_TOO_LARGE`) and the frame says as `too_large` before it saves.
 
 ### `POST /api/files/plugins/ui/{plugin}/{view}/call`
 

@@ -11,7 +11,8 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import PreviewModal from '@brftech/filex-core/src/modals/PreviewModal.vue';
-import { gateOnService, isOfficeExt } from '@brftech/filex-core/src/lib/serviceGate';
+import { gateOnService } from '@brftech/filex-core/src/lib/serviceGate';
+import { isOfficeExt } from '@brftech/filex-core/src/lib/serverRules';
 import { en } from '@brftech/filex-core/src/locales/en';
 import type { FileNode } from '@brftech/filex-core/src/types/FileNode';
 
@@ -84,9 +85,13 @@ describe('gateOnService — the one rule every menu entry uses', () => {
   it('missing, anybody else: not offered at all', () => {
     expect(gateOnService(false, false, 'set it up')).toEqual({ hidden: true });
   });
-  it('knows which extensions are office documents', () => {
+  // Which extensions are office documents is the server's answer
+  // (`capabilities.edit_kinds`, #211), seeded by the test setup.
+  it('knows which extensions are office documents, by the server', () => {
     expect(isOfficeExt('DOCX')).toBe(true);
+    expect(isOfficeExt('docm'), 'the explorer used to miss it').toBe(true);
     expect(isOfficeExt('pdf')).toBe(false);
+    expect(isOfficeExt('txt'), 'filex opens it as text').toBe(false);
   });
 });
 

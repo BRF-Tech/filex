@@ -26,12 +26,16 @@
 //     them and its notes say so; `only=macos` adds them once GitHub has macOS
 //     runners again (docs/CONTRIBUTING.md, Release process).
 //   - the arm64 snap: snapcraft cannot cross-build it (`only=snap-arm64`).
-//   - npm, the Microsoft Store, winget and Homebrew: a person, with their own
-//     sign-in (the commands are printed).
-// The partial runs above (`only=macos`, `only=snap-arm64`) publish for a
-// commit gated on CircleCI once GitHub Actions is back: their `verify` takes
-// CircleCI's green `ci` workflow when GitHub has no full matrix and dry run
-// of the commit (#181). A release packaged here has made its GitHub Release,
+//   - the stores: the amd64 snap to the Snap Store, the desktop app's winget
+//     pull request and the Microsoft Store need tokens GitHub alone holds;
+//     `only=stores` sends what this attached to the Release, building nothing
+//     the Release has (the Store bundle it builds, since no Release carries
+//     one). The Homebrew desktop cask comes with `only=macos`.
+//   - npm: a person, with their own sign-in (the commands are printed).
+// The partial runs above (`only=macos`, `only=snap-arm64`, `only=stores`)
+// publish for a commit gated on CircleCI once GitHub Actions is back: their
+// `verify` takes CircleCI's green `ci` workflow when GitHub has no full matrix
+// and dry run of the commit (#181). A release packaged here has made its GitHub Release,
 // and its tag run, should it start once Actions is back, publishes nothing:
 // `verify` stops a tag run on CircleCI's word whose tag has a Release, so it
 // cannot tag images or attach files over the ones published from here.
@@ -211,8 +215,9 @@ export function localPlan({ tag, version, exportDir, workDir, linuxDir, linuxExp
     `npm (a person, signed in with npm login; trusted publishing is GitHub's alone), in a tree at ${tag}:`,
     `    pnpm -r --filter './packages/*' exec npm version ${version} --no-git-tag-version --allow-same-version`,
     `    pnpm publish --filter './packages/*' --access public --no-git-checks --otp <code>`,
-    `Microsoft Store: pnpm --filter ./desktop run dist:store (and dist:store:arm64), bundle, and submit in Partner Center by hand (0.52.0: Submission 8).`,
-    `winget and Homebrew: goreleaser skipped them without their tokens; the desktop manifests come from node desktop/scripts/pkg-manifests.mjs (release.yml, desktop job).`,
+    `The stores (the amd64 snap to the Snap Store, the desktop app's winget pull request, the Microsoft Store bundle): their tokens are GitHub's alone. Once the files are attached, after GitHub has tested the commit:`,
+    `    gh workflow run release.yml ${R} -f tag=${tag} -f only=stores -f publish=true`,
+    `Homebrew and the CLI's winget pull request: goreleaser skipped them without their tokens (the desktop cask comes with only=macos).`,
     `Then the deploy checks, on the tagged commits:  pnpm release ${version} --resume --only deploy`,
   ];
   return { steps, notes };

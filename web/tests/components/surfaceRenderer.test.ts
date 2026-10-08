@@ -109,12 +109,15 @@ describe('SurfaceRenderer — M2 nodes', () => {
     expect(w2.find('[role="progressbar"]').attributes('aria-valuenow')).toBeUndefined();
   });
 
-  it('pin-input: the length is clamped to 4..8 and the value truncated to it', async () => {
-    const w = draw([{ id: 'pin', type: 'pin-input', props: { length: 12 } }]);
+  it('pin-input: draws the length the host sent and truncates the value to it', async () => {
+    // The host clamps every pin-input's length to 4..8 before the screen
+    // leaves it (wasmplugin.PinLength); the box draws that number and decides
+    // nothing of its own (#212).
+    const w = draw([{ id: 'pin', type: 'pin-input', props: { length: 5 } }]);
     const input = w.find('[data-testid="surface-pin"] input');
-    expect(input.attributes('maxlength')).toBe('8');
+    expect(input.attributes('maxlength')).toBe('5');
     await input.setValue('12 3456789012');
-    expect(w.emitted('update:values')).toEqual([[{ pin: '12345678' }]]);
+    expect(w.emitted('update:values')).toEqual([[{ pin: '12345' }]]);
   });
 
   it('unknown node types stay visible as unsupported (M3 types included)', () => {

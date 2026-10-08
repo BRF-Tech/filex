@@ -6,7 +6,7 @@
 // time of each notification - and the pixel comparison of `pnpm shots` put
 // them all in front of a person again.
 //
-// Four parts, each where nothing else can do it:
+// Five parts, each where nothing else can do it:
 //
 //   1. THE BROWSER'S CLOCK starts at SCENE_NOW (Playwright's
 //      `context.clock.setSystemTime`) and runs from there, in SCENE_TZ.
@@ -30,13 +30,23 @@
 //   4. THE FIXTURES' OWN TIMES are fixed instants before SCENE_NOW
 //      (fixtureTime, pinTimes in fixtures.mjs), so a file written to disk reads
 //      "3 days ago" in every run.
+//   5. AN APP'S OWN WORDS. An app writes dates into its text - "Requested by
+//      Dana on Oct 7", "the file is frozen until Oct 14", "Signed 2026-10-07
+//      01:00 UTC" under a signature box - and a word is not a time the route
+//      can move. Every filex a scene boots is started with
+//      sceneServerEnv() (FILEX_APP_CLOCK): the apps run on SCENE_NOW, and the
+//      host hands them its own times (a lock's end, a link's expiry) on the
+//      same clock (backend/internal/wasmplugin/appclock.go). ⚠ 0.53.0 showed
+//      the real day beside September 15 in three README pictures of the
+//      signing app.
 //
-// SHOTS_REAL_CLOCK=1 turns 1-3 off, to tell a scene that breaks on the clock
-// from one that breaks on its own.
+// SHOTS_REAL_CLOCK=1 turns 1-3 and 5 off, to tell a scene that breaks on the
+// clock from one that breaks on its own.
 //
 // What it cannot reach: a time inside a WebSocket message (the realtime feed
-// carries changes, not times a picture shows), and a time the page computes
-// and prints without Intl (none known). Pure functions are exported for
+// carries changes, not times a picture shows), a time the page computes and
+// prints without Intl (none known), and a date the SERVER writes into its own
+// words (a notification it phrases itself). Pure functions are exported for
 // web/tests/deploy/shotsFixtures.test.ts.
 
 import { readdirSync, statSync, utimesSync } from 'node:fs';
@@ -54,6 +64,19 @@ export const SCENE_TZ = 'UTC';
 
 /** What every browser context of a scene is created with, on top of its own options. */
 export const SCENE_CONTEXT = Object.freeze({ timezoneId: SCENE_TZ });
+
+/**
+ * What every filex a scene boots is started with, on top of its own
+ * environment: the apps' clock at SCENE_NOW (FILEX_APP_CLOCK, read by
+ * backend/internal/wasmplugin/appclock.go). An app then dates the words it
+ * writes - a request's day, a lock's end, the line under a signature - on the
+ * scene's clock instead of the day the scene ran. SHOTS_REAL_CLOCK=1 leaves the
+ * apps on the real clock with the browsers.
+ */
+export function sceneServerEnv(now = SCENE_NOW) {
+  if (process.env.SHOTS_REAL_CLOCK === '1') return {};
+  return { FILEX_APP_CLOCK: new Date(now).toISOString().replace(/\.000Z$/, 'Z') };
+}
 
 /**
  * Which instants are moved. A server time is this run's when it lies from two

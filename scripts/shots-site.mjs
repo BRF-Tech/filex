@@ -6,6 +6,8 @@
 //   node scripts/shots-site.mjs upload          send the staged files to the site (maintainers)
 //   node scripts/shots-site.mjs accept --looked the reviewed run becomes the published set:
 //                                               manifest + every README/docs/site link
+//                                               (a run outside the build host's test chain
+//                                               only with --outside-chain, and a warning)
 //   node scripts/shots-site.mjs verify [--live] every link is the current file [and answers]
 //   node scripts/shots-site.mjs relink [--write] point every link at the current file
 //   node scripts/shots-site.mjs adopt <dir> [--rev <rev>] [--rewrite] [--platform <os>]
@@ -291,7 +293,9 @@ async function upload() {
 async function accept() {
   const review = readReview();
   const m = readManifest(MANIFEST, { missingOk: true });
-  const why = acceptRefusal(m, review);
+  // --outside-chain: a run taken outside the build host's test chain, accepted
+  // on purpose (acceptRefusal refuses it otherwise); the warning still prints.
+  const why = acceptRefusal(m, review, { outsideChain: has('outside-chain') });
   if (why) throw new Refusal(why);
   const note = environmentNote(m, review);
   if (note) say(`⚠ ${note}`);

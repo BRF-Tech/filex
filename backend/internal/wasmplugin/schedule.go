@@ -426,7 +426,11 @@ func (r *Registry) Tick(ctx context.Context, p *Installed, now, windowEnd time.T
 		MaxItems: MaxScheduleItems, MaxPaths: MaxSchedulePaths,
 		Settings: r.publicSettings(ctx, p), Engines: r.enginesFor(ctx, p),
 	}
-	inb, _ := json.Marshal(in)
+	// The window on the apps' clock, and the due times back off it below:
+	// an app compares the window with the times it stored itself, and those
+	// are on its clock (appclock.go; the real one unless FILEX_APP_CLOCK).
+	clock := r.appClock()
+	inb, _ := json.Marshal(clock.tickInput(in))
 	budget := time.Duration(TickTimeout(p.Manifest)) * time.Second
 	outb, err := c.Call(WithScope(ctx, scope), "tick", inb, budget)
 	if err != nil {
@@ -436,6 +440,7 @@ func (r *Registry) Tick(ctx context.Context, p *Installed, now, windowEnd time.T
 	if err := json.Unmarshal(outb, &out); err != nil {
 		return nil, &CallError{Code: CodePluginError, Export: "tick", Message: "tick returned malformed JSON"}
 	}
+	clock.dueFromApp(out.Items)
 	return &out, nil
 }
 

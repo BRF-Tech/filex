@@ -136,10 +136,7 @@ func (s *storageSyncer) rescanFolder(ctx context.Context, dir string) (FolderRes
 	if err != nil {
 		return res, err
 	}
-	list := dirLister(s.driver.List)
-	if idx, ok := s.prefetchTree(ctx, dir); ok {
-		list = idx.list
-	}
+	list := s.lister(ctx, dir)
 	c := &walkCounts{}
 	// The depth the full scan would be at here, so the rescan stops where it
 	// stops (storage.MaxWalkDepth) and catalogues nothing it would not.

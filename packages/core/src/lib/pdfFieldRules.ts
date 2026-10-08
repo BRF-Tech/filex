@@ -14,9 +14,16 @@
  * guessing from the string: `01/02/2026` is a date to a rule and ambiguous
  * text to a parser.
  *
- * ⚠ This is a CONVENIENCE, not a security boundary. The browser is the only
- * thing that runs it; a plugin that cares re-checks what it is given. Same
- * relationship `applies` has with the server's re-check.
+ * ⚠⚠ This is a CONVENIENCE, not the boundary (0.54, #212). The HOST decides:
+ * it normalises every text box's `rule` before the screen leaves it
+ * (backend/internal/wasmplugin/surface_values.go NormalizePdfRule, so the
+ * rule read here is the one it judges by), and at submit it refuses a value
+ * that breaks the rule, in its own words, and hands the app each box with
+ * the node's own rule and label — not the ones the browser sent back. A fill
+ * page posts nothing while it is typed into, so this file keeps only what
+ * the signer needs on the spot: the keyboard, the shaping, and the hint
+ * under the box. `web/tests/lib/pdfFieldRules.test.ts` and the Go judge read
+ * the same cases (`pdf_rule_cases.json`), so the two cannot drift apart.
  */
 
 /**

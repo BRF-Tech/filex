@@ -917,6 +917,14 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 			return reqSpec{handler: a.trash.Purge, method: http.MethodDelete, path: "/api/ai/admin/trash/" + itoa(in.ID),
 				urlParams: idParam(in.ID), query: queuedQuery(in.Queued)}
 		})
+	regAdminTool(r, "admin_trash_purge_batch", "Hard-delete several trashed nodes. body: {node_ids: [...]} (at most 1000), each judged like admin_trash_purge; with queued: true one job of the operations queue per storage (202 {ops}). Answers {done, failed, reason_code, summary}: summary is the server's sentence for it in the token user's language.",
+		func(in adminQueuedBodyIn) reqSpec {
+			return reqSpec{handler: a.trash.PurgeBatch, method: http.MethodPost, path: "/api/ai/admin/trash/purge", body: in.Body, query: queuedQuery(in.Queued)}
+		})
+	regAdminTool(r, "admin_trash_empty_preview", "What admin_trash_empty would delete, nothing deleted: filters {storage_id?, older_than_days?} -> {count, bytes, summary}, counted the way the purge counts, over the storages the token reaches.",
+		func(in adminFiltersIn) reqSpec {
+			return reqSpec{handler: a.trash.EmptyPreview, method: http.MethodGet, path: "/api/ai/admin/trash/empty/preview", query: filtersToQuery(in.Filters)}
+		})
 
 	// ── search index ──
 	regAdminTool(r, "admin_search_stats", "Full-text (Bleve) index stats: document count + size.",
@@ -956,7 +964,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 			return reqSpec{handler: a.authProv.SetTenants, method: http.MethodPut, path: "/api/ai/admin/auth-providers/" + in.Name + "/tenants",
 				urlParams: nameParam(in.Name), body: in.Body}
 		})
-	regAdminTool(r, "admin_auth_providers_test", "Test an auth provider by name. Optional body: {config?: {field: value} (unsaved edits), test_account?: {username, password}} - the operating-system providers (windows, pam) sign in for real with test_account as their last step (used once, never stored or logged, nothing is changed).",
+	regAdminTool(r, "admin_auth_providers_test", "Test an auth provider by name. Optional body: {config?: {field: value} (unsaved edits), test_account?: {username, password}} - the operating-system providers (windows, pam) sign in for real with test_account as their last step (used once, never stored or logged, nothing is changed). Each step of the answer's checks carries id, status (ok | fail | unchecked), params and text: the step as one sentence (what was reached, and why a failed step failed).",
 		func(in adminNameOptBodyIn) reqSpec {
 			return reqSpec{handler: a.authProv.Test, method: http.MethodPost, path: "/api/ai/admin/auth-providers/" + in.Name + "/test",
 				urlParams: nameParam(in.Name), body: in.Body}
@@ -967,7 +975,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		func(_ adminVoidIn) reqSpec {
 			return reqSpec{handler: a.external.List, method: http.MethodGet, path: "/api/ai/admin/external"}
 		})
-	regAdminTool(r, "admin_external_update", "Update an external service by name. body: {enabled?, url?, secret?, options_json?}.",
+	regAdminTool(r, "admin_external_update", "Update an external service by name. body: {enabled?, url?, secret?, options_json?, callback_url?, editor_lang?}. editor_lang (onlyoffice only): \"auto\" (each person's own filex language) or one of the codes admin_external_list offers as editor_languages.",
 		func(in adminNameBodyIn) reqSpec {
 			return reqSpec{handler: a.external.Update, method: http.MethodPatch, path: "/api/ai/admin/external/" + in.Name,
 				urlParams: nameParam(in.Name), body: in.Body}
@@ -1141,7 +1149,7 @@ func registerAdminTools(srv *mcp.Server, a *AIAdmin, principal *model.User) {
 		})
 
 	// ── audit ──
-	regAdminTool(r, "admin_audit_list", "List audit log entries. filters: {user_id, action, from, to, limit, offset}.",
+	regAdminTool(r, "admin_audit_list", "List audit log entries. filters: {user_id, action, from, to, limit, offset}. Each entry carries label (the action in words, e.g. \"User: password reset\") and target_label (which thing, in words) beside the raw action and target; resources lists the values the action filter takes, each with its label.",
 		func(in adminFiltersIn) reqSpec {
 			return reqSpec{handler: a.audit.List, method: http.MethodGet, path: "/api/ai/admin/audit", query: filtersToQuery(in.Filters)}
 		})

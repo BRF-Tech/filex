@@ -7,7 +7,7 @@
  * their sign-in carries; LDAP directory sync brings the directory's groups in
  * as groups of their own. Each group is edited on its own page.
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { UsersRound, Plus } from 'lucide-vue-next';
@@ -42,7 +42,7 @@ async function load() {
   loading.value = true;
   try {
     const [gs, rs] = await Promise.all([
-      GroupsApi.list(),
+      GroupsApi.list(q.value.trim() || undefined),
       // Best effort: without it a group's role shows as its number.
       RolesApi.listRules().catch(() => ({ rules: [] as PermissionRule[] })),
     ]);
@@ -56,16 +56,25 @@ async function load() {
 }
 onMounted(load);
 
+/* The search box is the SERVER's (`GET /admin/groups?q=`, task #207): name,
+   description and directory links, matched by the panel's own rule (accents,
+   case and the four i's folded), not the browser's locale. Asked again once
+   typing pauses; the kind chips still narrow the rows already here. */
+let qTimer: ReturnType<typeof setTimeout> | undefined;
+watch(q, () => {
+  if (qTimer) clearTimeout(qTimer);
+  qTimer = setTimeout(() => {
+    qTimer = undefined;
+    void GroupsApi.list(q.value.trim() || undefined)
+      .then((gs) => {
+        groups.value = gs;
+      })
+      .catch((e) => toast.error(extractError(e, t('errors.generic'))));
+  }, 250);
+});
+
 const shown = computed(() => {
-  const term = q.value.trim().toLocaleLowerCase();
-  const list = groups.value.filter(
-    (g) =>
-      ofKind(g, kind.value) &&
-      (!term ||
-        g.name.toLocaleLowerCase().includes(term) ||
-        g.description.toLocaleLowerCase().includes(term) ||
-        g.links.some((l) => l.value.toLocaleLowerCase().includes(term))),
-  );
+  const list = groups.value.filter((g) => ofKind(g, kind.value));
   return [...list].sort((a, b) => a.name.localeCompare(b.name));
 });
 

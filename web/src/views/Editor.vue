@@ -25,7 +25,9 @@ import {
   openKindOf,
   openWithChoice,
   pickOpenHandler,
+  takeServerRules,
   useFileApi,
+  type EditKinds,
   type ExplorerConfig,
   type FileNode,
   type ExternalServiceStatus,
@@ -33,6 +35,7 @@ import {
   type OutsideAnswer,
   type OutsideChange,
   type PluginViewRow,
+  type ServerLimits,
 } from '@brftech/filex-core';
 import '@brftech/filex-core/style.css';
 import { liveTheme } from '@/lib/theme';
@@ -92,12 +95,17 @@ async function loadCapabilities(): Promise<void> {
       onlyoffice_url?: string;
       drawio_url?: string;
       caller_admin?: boolean;
+      edit_kinds?: EditKinds;
+      limits?: ServerLimits;
       external?: {
         onlyoffice?: ExternalServiceStatus;
         drawio?: ExternalServiceStatus;
       };
     };
     callerAdmin.value = caps.caller_admin === true;
+    // How a file is edited is the server's answer (lib/serverRules, #211):
+    // the viewer this route mounts reads it.
+    takeServerRules(caps);
     if (caps.external?.onlyoffice && isExternalUsable(caps.external.onlyoffice)) {
       onlyOfficeBase.value = caps.onlyoffice_url || null;
     }

@@ -20,8 +20,9 @@ are described on that area's page.
 - [Capabilities](#capabilities)
 - [File browsing](#file-browsing)
 - [Encryption policy](#encryption-policy)
+- [Vault (encryption level 3)](#vault-encryption-level-3)
 - [Drafts](#drafts)
-- [Uploads (multipart)](#uploads-multipart)
+- [Uploads](#uploads)
 - [Archives](#archives)
 - [Sharing](#sharing)
 - [The public surface](#the-public-surface)
@@ -68,6 +69,12 @@ Every caller is also held to the account's permissions
 ([PERMISSIONS.md](PERMISSIONS.md)); a refusal from that layer is
 `403 {"error": "permission_denied", "permission", "source", "message"}`.
 
+A refusal answers `{"error": "<code>", "message": "<sentence>", "params"?}`:
+`error` is a stable code to branch on, `message` the sentence to show, written
+by the server in the reader's language, and a failed queue operation carries
+`error_code` + `error_text` the same way. The codes, the language rules and
+what changed in 0.54: [API-ERRORS.md](API-ERRORS.md).
+
 A change (any method but `GET`, `HEAD`, `OPTIONS`, and a WebSocket upgrade) that
 a browser sends from another origin with only the session cookie is refused
 before any route runs: `403 {"error": "cross_origin_refused", "message"}`. A
@@ -99,6 +106,17 @@ username, and with a Windows provider also `.\alex` or `CORP\alex`.
 The session cookie is set by the same response. The Bearer token is for SPA
 embeds that prefer header auth.
 
+**The account's language.** An account that holds no language yet is given
+the one its sign-in arrived in: the request's `Accept-Language` (the web panel
+sends the language on its screen; a browser back from an identity provider
+sends its own list), when filex offers it - a shipped language or one a
+running language pack adds. The answer's `user.locale` already carries it. An
+account that has a language keeps it, and a language filex does not offer
+leaves the account without one (it reads the instance's,
+`FILEX_DEFAULT_LOCALE`, until somebody picks). The same happens at the realm
+handoff (`POST /api/auth/handoff`) and at the end of an OIDC sign-in; no
+client writes a language after a sign-in.
+
 **Status codes:** `200` ok · `401` invalid creds · `403` the account is
 disabled (`"disabled": true`), or its tenant may not sign in now - suspended,
 or maintenance mode (`"maintenance": true`) · `403 cross_origin_refused`
@@ -127,8 +145,13 @@ not count. See [Sign-in attempt limits](CONFIGURATION.md#sign-in-attempt-limits)
 lock lasts (even with the right password), with a `Retry-After` header:
 ```json
 { "error": "too many attempts", "message": "Too many failed attempts: this account is locked. Try again in 1 minute.",
+  "countdown": "Too many failed attempts: this account is locked. Try again in {wait}.",
   "locked": true, "scope": "account", "retry_after": 60 }
 ```
+
+`countdown` (since 0.54) is the same sentence with `{wait}` left open: a
+sign-in form that counts the lock down replaces `{wait}` with its own clock
+(`4:05`) instead of keeping a copy of the words.
 
 **Response 503** `{"error": "busy", "message": "…"}` with `Retry-After: 3` -
 the sign-in provider is at its limit of simultaneous sign-ins (a Linux PAM
@@ -245,6 +268,15 @@ Needs the `account.edit` permission; an API token needs `write` too - as do
 `…/disable`: a token that may only read cannot change the account it belongs
 to (`403 token missing scope: write`).
 
+`POST /api/auth/password` (`{current_password, new_password}`) takes a new
+password of at least **8 characters** (counted as characters, not bytes). The
+same rule, in the same words, holds wherever an administrator sets one
+(`POST` and `PATCH /api/admin/users`): a shorter password is `400
+{"error":"password_too_short","field":"password","message":…}`, the sentence in
+the reader's language naming the number. The rule lives in one place on the
+server (`internal/auth/drivers/local/password_rule.go`); until 0.54.0 only the
+person's own change asked it.
+
 `avatar_url` is the **profile picture**: a `data:image/…` URI (≤ 48 KB) or an
 `http(s)` / site-relative URL; an explicit `""` removes it. Anything else is a
 `400` rather than a silent drop - the person is looking at an upload they
@@ -262,11 +294,42 @@ drawing the wrong face on somebody's row:
 - When a trusted host proxy re-identifies a connection as a different end user
   via `X-Filex-Presence-Name`, only *that* person's picture may be drawn -
   supplied by the proxy as `X-Filex-Presence-Avatar` (same accepted shapes, same
-  cap). Without it the row falls back to initials.
+  cap). Without it the row falls back to initials. "A trusted host proxy" is
+  a token with a username allow-list: the `X-Filex-Presence-*` headers
+  (`-Name`, `-Avatar`, `-Key`) are read from such a token only. A personal
+  token (the desktop app, a CLI, a script) is its owner, and its headers are
+  not read (since 0.54).
 
 The cap is small on purpose: the avatar rides inside every presence frame the
 collaboration socket broadcasts, so it is paid for again on each join, leave and
 focus change - unlike the branding logo, which is fetched once per page.
+
+### `POST /api/auth/account/check` ![user](https://img.shields.io/badge/-user-blue)
+Would this e-mail address or username be accepted? Asked while a form is typed
+(the profile, an administrator adding a user) and answered by the same rules
+and in the same words a save refuses with. It writes nothing; an API token
+with `read` may ask. Since 0.54.
+
+```json
+{ "email": "a,b@x", "username": "9lives", "for": "self" }
+```
+
+Only the fields sent are checked. `for` is whose account the values are for:
+`self` (the default; the address and the name the account already holds are no
+change) or `new` (an account an administrator is about to create).
+
+**Response 200** - a field is present only when it would be refused, with the
+save's code and the sentence in the reader's language:
+
+```json
+{ "email": { "error": "email_invalid", "message": "“a,b@x” is not an email address. Write it as name@example.com." },
+  "username": { "error": "username_invalid", "message": "A username cannot start with a digit." } }
+```
+
+Whether an address or a name is **taken** (`email_taken`, `username_taken`) is
+said only where the save would say it: about your own account when you may edit
+it (`account.edit`), and to a full administrator about a new one. Anybody else
+is told about the format only.
 
 ---
 
@@ -300,11 +363,57 @@ build metadata and a set of flat aliases kept for older embeds)
   "auth_drivers": ["local", "oidc"],
   "storage_drivers": ["ftp", "local", "s3", "sftp", "smb", "webdav"],
   "db_driver": "sqlite",
-  "share_max_ttl_days": 7
+  "share_max_ttl_days": 7,
+  "share_link_max_days": 3
 }
 ```
 Cached client-side for 1h. `share_max_ttl_days` is the longest life a new share
-link may be given (0 = no ceiling; [PROTECTION.md](PROTECTION.md)).
+link may be given on this install (0 = no ceiling; [PROTECTION.md](PROTECTION.md)).
+`share_link_max_days` is the CALLER's: that ceiling or the **Maximum share-link
+lifetime** of the permission rules binding them, whichever is shorter (0 = no
+ceiling) - what the share dialog derives its expiry choices from
+([SHARING.md](SHARING.md)).
+
+#### Rules the server publishes
+
+Since 0.54, some answers are rules the clients used to keep copies of; the
+server publishes them and every client (the explorer, the admin panel, the
+desktop app, an embed) reads them instead (#211):
+
+- `release`, `commit`, `built` - the release (`v0.54.0`), the commit and the
+  build time, apart. `version` keeps the one-line form
+  (`v0.54.0 (<commit>, <built>)`); nothing needs to parse it. `commit` and
+  `built` are absent when the build did not stamp them.
+- `edit_kinds` - how each kind of file is edited, from `internal/editkind`:
+  `office` (extensions the document server opens and edits), `text`
+  (extensions the built-in editor opens and `POST /api/files/save-text`
+  saves), `text_names` (whole names that are text, lower case: `makefile`,
+  `.gitignore`), and `text_mime_prefixes` / `text_mimes` (a file whose name
+  says nothing is text when its catalogued mime is). The two rules never
+  claim one file: `.txt`, `.csv`, `.html` and `.xml` are text, and `.pdf`,
+  `.xps` and `.epub`, which the document server only displays, are neither.
+- `limits` - the numbers an input is held to before it is sent, each
+  enforced by the server again: `tag_max_runes` (64), `comment_max_runes`
+  (5000), `e2e_request_reason_max_runes` (2000, the rest is cut),
+  `app_state_max_bytes` (16384 - what one app's interface keeps for a
+  person; `PUT /api/me/prefs` answers `413 APP_STATE_TOO_LARGE` above it)
+  and `app_ui_save_chunk_bytes` (8 MiB). Characters are Unicode code points,
+  not UTF-16 units.
+- `event_off` - for a signed-in caller, the notification events that cannot
+  happen on this instance: `{ "<event>": { "reason", "fixable", "text" } }`.
+  `reason` is what it waits for (`antivirus`, `escrow`, `app_plugins`,
+  `e2e_approval`), `fixable` whether THIS caller could switch that on (the
+  instance's administrator for a service, the tenant's own administrator
+  for the encryption policy) and `text` the sentence, in the reader's
+  language. An event absent from the map can happen. The settings dialog
+  greys a `fixable` one with the sentence and leaves the rest out; Admin →
+  Webhooks prints the sentence beside the box.
+
+A rule a client applies while a person types or picks (a theme's key, the
+accent colour, a ZIP password, which app action a selection may run, which
+form field shows) cannot travel as a value: its cases are kept in
+`backend/internal/api/handlers/testdata/rule-mirrors.json`, which the Go tests
+and the client tests both check their side against.
 
 `realm` is present on a **multi-tenant** install only - the sign-in form's Realm
 field ([MULTI-TENANCY.md → Realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)):
@@ -381,6 +490,10 @@ policy](#encryption-policy)); the row tells the notification settings and the
 Webhooks screen when the two request events can happen. The server decides
 every write.
 
+`e2e_vault` is always present: `true` only on a server that serves the
+[vault API](#vault-encryption-level-3) (`FILEX_E2E_VAULT`). A client offers the
+third encryption level only there.
+
 ⚠ `antivirus` means **configured**, not answering: the setting is on and either
 a scanner binary resolved or a clamd address is set. Reachability costs a
 network round trip and is probed on `GET /api/admin/protection`, where an
@@ -403,6 +516,8 @@ lists only the subfolders (`action=subfolders`) and asks what changed
 |--------|-------|
 | `action` | `index` (default) \| `subfolders` \| `changes` \| `search` \| `preview` \| `download` |
 | `path` | `<storage>://<folder>`, e.g. `docs://reports/2026`; empty = the first storage's root |
+| `sort` | `index` / `subfolders`: `name` (default), `modified`, `size` or `type`; a leading `-` reverses it. Folders always come first. An unknown key answers `400 bad_sort`. |
+| `filter` | `search`: the query. `search` also takes the [narrowing parameters](SEARCH.md#narrowing-a-search) (`type`, `min_size`, `modified_after`, `under`, `owner`, `hidden`…). |
 
 **Response 200**
 ```json
@@ -427,9 +542,26 @@ lists only the subfolders (`action=subfolders`) and asks what changed
 
 `last_modified` is Unix milliseconds. `id` is the catalogue id (versions, tags
 and comments are addressed by it); a folder listed straight from the storage
-before a scan catalogued it carries rows without one. Inside an end-to-end
+before a scan catalogued it carries rows without one.
+
+**One order.** The rows come back folders first, then by name (case and the
+four Latin i's folded, numbers as numbers: `Disk 2` before `Disk 10`), whichever
+path built the answer - the catalogue, the storage itself, or both merged - and
+`file_list` (MCP) answers in the same order (`internal/listorder`). Before 0.54
+the catalogue path answered files first and the others folders first.
+
+**`starred`** is `true` on the rows the caller has starred (absent otherwise),
+and **`kind`** says what a row is (`folder`, `document`, `spreadsheet`,
+`presentation`, `pdf`, `image`, `video`, `audio`, `archive`, `code`, `text`,
+`other`) - the server's one rule, which the explorer's Type chip and a search's
+`type=` both use. Inside an end-to-end
 encrypted folder the answer also carries `e2e` and `e2e_root`, and an
-encrypted folder's own row `e2e: true`.
+encrypted folder's own row `e2e: true`. A vault (encryption level 3,
+[E2E-VAULT-FORMAT.md](E2E-VAULT-FORMAT.md)) is marked as one: its row
+carries `e2e_vault: true`, and a listing of the vault folder or of anything
+in it carries `e2e_vault_root` (the vault folder's wire path) - what is
+listed there is the vault's layout on the storage (`v/`, packs, index
+files), which clients never show as folders.
 
 **Status codes:** `200` ok · `403` forbidden · `404` path missing.
 
@@ -726,11 +858,44 @@ per-item grant rather than their own role. Newest grant first.
 |---|---|---|
 | `limit` | `100` | Page size, max 500. |
 | `offset` | `0` | Page offset. |
+| `sort` | `-when` | `-when` (newest grant first), `name`, `modified`, `size`; a leading `-` reverses. The whole set is ordered, then the page is cut. |
 
 ```json
 { "files": [ /* listing entries, same shape as /api/files/manager */ ],
-  "storages": ["marketing"], "total": 2, "limit": 100, "offset": 0 }
+  "storages": ["marketing"], "total": 2, "limit": 100, "offset": 0,
+  "truncated": false, "sort": "-when" }
 ```
+
+### `GET /api/files/manager/recent` · `GET /api/files/manager/star/list` · `GET /api/files/manager/tagged` ![user](https://img.shields.io/badge/-user-blue)
+
+The person's own views: what they opened (Recent), what they starred, and what
+carries a tag (`?tag=`, `?kind=personal|team`). One page at a time, in the
+server's order, with how many there are in all:
+
+| Param | Default | Meaning |
+|---|---|---|
+| `limit` | Recent `20` (max 200), Starred `50` (max 500), a tag `500` (max 1000) | Page size. |
+| `offset` | `0` | Page offset. |
+| `sort` | Recent / Starred `-when` (the latest opening / star first), a tag `-modified` | `when` is the person's own time on the row; `name`, `modified`, `size`, `type` as on a listing. |
+
+```json
+{ "nodes": [ { "id": 4711, "name": "report.pdf", "storage": "docs", "opened_at": 1776852000000, "starred": true, "kind": "pdf" } ],
+  "total": 812, "limit": 20, "offset": 0, "truncated": true, "sort": "-when" }
+```
+
+Each Recent row carries `opened_at`, each Starred row `starred_at` (Unix
+milliseconds), so a client keeps the server's order rather than re-sorting by
+the file's own date. Before 0.54 these lists had no offset, no total and no
+time: the explorer asked for the newest 50 or 200 and could not say there were
+more.
+
+### `POST /api/files/search/match` ![user](https://img.shields.io/badge/-user-blue)
+
+Which of the given names answer the words, by the search's own name rule -
+what the explorer's "Filter in this folder" box asks. Body
+`{"q": "invoice 2026", "names": ["invoice_2026.pdf", "invoice-final.pdf"]}`,
+answer `{"matches": [0]}` (the indexes). At most 20,000 names; reads no
+storage. See [SEARCH.md](SEARCH.md#the-folder-filter-box).
 
 Each entry carries `perm` (the grant's level), `shared: true` and `shared_at`.
 A grant on a folder lists **the folder**, not its contents - the row is a `dir`
@@ -752,10 +917,13 @@ but with `path` echoing the matching entry's full path.
 | `storage_id` | `0` (all) | Restrict to one storage. Also what enables the SQL LIKE fallback. |
 | `limit` | `50` | Max results. |
 | `scope` | `all` | `name` \| `content` \| `all`. |
+| `type`, `mime`, `modified_after`, `modified_before`, `min_size`, `max_size`, `under`, `not_under`, `owner`, `hidden` | - | The [narrowing](SEARCH.md#narrowing-a-search), applied before `limit` counts a row. |
 
 `POST /api/files/search` takes the same fields as a JSON body. Hits come back in
 a defined rank order - exact filename, prefix, name, path, fuzzy, then
-content-only. Full reference: [SEARCH.md](SEARCH.md).
+content-only - each with `score`, `kind` and (when the caller starred it)
+`starred`; the answer says `truncated` and `total`. Full reference:
+[SEARCH.md](SEARCH.md).
 
 ### `POST /api/files/save-text` ![user](https://img.shields.io/badge/-user-blue)
 Writes the body of the built-in text / code / Markdown editor. Takes a version
@@ -799,8 +967,9 @@ upload tickets) refuses a key file's name before the rule, folder or file:
 `403 RESERVED_NAME`. A door that could not decide the rule - a lookup failed,
 the rule's or one it made to ask (the storage's row, the account a write is
 judged for) - answers its own server failure, never a refusal:
-`500 {"error":"could not check the encryption policy"}` on the web app's routes
-and `/api/ai`, an error result in the same words over MCP,
+`500 e2e_policy_undecided` with the server's sentence on the web app's routes,
+`500 {"error":"could not check the encryption policy"}` on `/api/ai`, an
+error result in those words over MCP,
 `503 storage_unavailable` for an upload ticket and a file request, and
 `500 save_failed` for an app's *save as*. The rule's own log line, one for each
 write it could not decide, names the storage, the person and the error, never
@@ -873,6 +1042,146 @@ a person's own list.
 `expires_at` is when a waiting request lapses, and once it is approved, when the
 approval does: 7 days from the request, and 7 days from the approval. `used_at`
 is when the approval was spent.
+
+---
+
+## Vault (encryption level 3)
+
+The **vault** ([E2E-VAULT-FORMAT.md](E2E-VAULT-FORMAT.md)) is one folder whose
+tree, names and sizes the server never sees: a key file, encrypted index files
+(`v/idx/G.fxi`) and packs of one fixed size (`v/p/XX/ID.fxp`). These routes are
+how a client writes one. **Off unless `FILEX_E2E_VAULT` is set**
+([CONFIGURATION.md](CONFIGURATION.md#end-to-end-encryption-the-vault)): then
+every route below answers `404 VAULT_DISABLED` and `GET /api/files/capabilities`
+says `e2e_vault: false`. The server decrypts nothing; it orders the commits
+under a **write lock** it keeps in the database, checks what is in the clear
+(sizes, names, plaintext headers), and keeps every other door out of the
+folder.
+
+`path` is the vault folder's wire path (`Docs://Kasa`, never a storage's root).
+An error is `{"error": "<CODE>", "message": "…", …}`, `message` in the reader's
+language. Times are RFC 3339 in UTC (`2026-10-06T19:00:00Z`); `vault_id` is the
+key file's id, base64url; `token` is opaque, and travels in the
+`X-Filex-Vault-Lock` header of every write. Reads of packs and index files use
+the ordinary download, ranges included (`GET /api/files/manager?action=download`).
+
+| Status | `error` | When |
+|---|---|---|
+| 400 | `NOT_A_VAULT` | the key file at `path` is not a vault's (or breaks the format's rules: `detail` says how) |
+| 400 | `VAULT_BAD_REQUEST` | a malformed request: `detail` says what |
+| 400 | `VAULT_BAD_OBJECT` | a key file, pack or index file that is not well formed: wrong size, wrong header |
+| 400 | `VAULT_KEEP` | a delete names one of the three newest generations |
+| 403 | `VAULT_PATH` | any **other** door's write strictly inside a vault folder (below) |
+| 404 | `VAULT_DISABLED` | vaults are off |
+| 409 | `VAULT_EXISTS` | `create` where something is: not a new or empty folder |
+| 409 | `VAULT_NESTED` | `create` inside an encrypted folder |
+| 409 | `VAULT_LOCKED` | somebody else holds the lock: `holder {name, client, label}`, `since`, `retry_after` (seconds) |
+| 409 | `VAULT_LOCK_LOST` | the token holds no lock: `reason` `expired` · `idle` · `broken` · `released` · `taken`, and `holder` for `taken` (who holds it now) and `broken` (who broke it) |
+| 409 | `VAULT_PACK_EXISTS` | a pack id that is already stored: packs are never replaced |
+| 409 | `VAULT_GENERATION` | an index that is not `latest + 1`: `latest` |
+| 409 | `VAULT_KEYFILE` | any **other** door changing the key file's `v`, `req` or `vault`, removing or moving it on its own, or making a folder a vault |
+| 503 | `VAULT_TIMEOUT` | an index write that took more than 60 seconds, abandoned |
+| 503 | `VAULT_BUSY` | the lock's record changed under every attempt to update it: try again |
+
+**The lock** (`internal/vaultlock`, table `vault_locks`): one session at a time,
+per tenant and vault id. It is held while its 60-second lease has not run out
+(renewed by the heartbeat every 15 seconds and by every vault write) and the
+session is not idle - a vault write or an `active` renewal within the person's
+idle time (1 to 10 minutes, 3 by default, `/prefs`). It is free again at once
+when it ends, unless an index write of its holder is still running; then when
+that write ends, or 60 seconds after it began. Its ending is audited
+(`vault.unlock`) by the call that finds it.
+
+**Other doors.** Inside a vault folder only these routes write: the explorer's
+verbs, the operations queue, uploads, the agent API and MCP, archives, apps,
+WebDAV, S3, SFTP, FTPS and NFS answer their own refusal (`403 VAULT_PATH` on
+the HTTP routes, `VAULT_PATH` in an MCP error, WebDAV `403`, S3 `AccessDenied`,
+SFTP permission denied, FTPS `550`, NFS `NFS3ERR_ACCES`), and the document
+server's save callback answers `{"error": 1}` and writes nothing. Every door
+asks through the router's one ACL resolver (`Deps.ACL`), the only one the vault
+finder is attached to (`AttachVaults`): a door that built its own with
+`acl.New` would see no vault (the ONLYOFFICE save did until 0.54). The key file is
+rewritten through the explorer's upload (a new password, a recovery reset, an
+escrow slot) only while its `v`, `req` and `vault` stay the same, and never
+removed, renamed or moved on its own (`409 VAULT_KEYFILE`); no upload makes a
+folder a vault. The vault folder itself is renamed, moved, deleted and copied
+like any encrypted folder.
+
+### `POST /api/files/e2e/vault/create` ![user](https://img.shields.io/badge/-user-blue)
+Makes a new, empty vault. Body `{ "path", "marker", "index" }`: `marker` is the
+key file (a JSON object: `v` 3, `req` `["vault"]`, `fmk` `"wrapped"`, `vault`
+`{v: 1, id, pack: 22 | 24}`, and the password slot), `index` the base64 of
+generation 1's 65 536-byte index file. `path` must not exist or be an empty
+folder, outside every encrypted folder; `files.create` at its parent and the
+[encryption rule](#encryption-policy) there (a `new_folder` approval is spent
+under the `approval` policy, `403 e2e_not_allowed` otherwise). It writes the
+folder, the key file and the index, in that order, and removes what it wrote
+when a step fails. `201 { "generation": 1 }`; audited as `vault.create`.
+
+### `GET /api/files/e2e/vault/state` ![user](https://img.shields.io/badge/-user-blue)
+`?path=` → `{ "vault_id", "pack_log2", "generation", "lock" }`: `generation` is
+the latest (0 when there is no index file), `lock` is `null` or
+`{ "holder": {name, client, label}, "since", "expires_at", "mine" }` - `mine`
+for the session whose token the request carries. Needs the right to download
+from the folder.
+
+### `GET /api/files/e2e/vault/list` ![user](https://img.shields.io/badge/-user-blue)
+`?path=&kind=index|pack&after=&limit=` → `{ "items", "next", "now" }`:
+`{generation, size, mtime}` per index file, `{id, size, mtime}` per pack, in
+name order, at most `limit` (1 000 by default, at most 10 000) after `after` -
+the hex name of the previous page's last item; `next` is that cursor for the
+next page, or `null`. `now` is the server's clock: retention is measured
+against it, never against the client's.
+
+### `POST /api/files/e2e/vault/lock` ![user](https://img.shields.io/badge/-user-blue)
+Body `{ "path", "client": "web" | "desktop" | "cli" | "mount", "label" }` →
+`{ "token", "generation", "lease_seconds", "idle_seconds", "expires_at" }`, or
+`409 VAULT_LOCKED`. Needs `files.create`, `files.modify` and `files.delete` at
+the folder (a write session can do all three and the server cannot tell
+which). Audited as `vault.lock`; realtime `vault.lock {path, held, holder}`.
+
+### `POST /api/files/e2e/vault/lock/renew` ![user](https://img.shields.io/badge/-user-blue)
+The heartbeat: body `{ "path", "active" }` + token → `{ "expires_at",
+"idle_until" }`, or `409 VAULT_LOCK_LOST`.
+
+### `POST /api/files/e2e/vault/lock/release` ![user](https://img.shields.io/badge/-user-blue)
+Body `{ "path", "reason" }` + token → `204`, whether or not the token still
+held the lock. `reason` `locked_idle` says the client locked the vault itself
+after 15 minutes of nothing; the `vault.unlock` row records it.
+
+### `POST /api/files/e2e/vault/lock/break` ![user](https://img.shields.io/badge/-user-blue)
+Ends somebody else's lock: the vault folder's owner or an administrator of its
+tenant (`403 permission_denied` otherwise). Body `{ "path" }` → `204`. The
+holder's next call gets `VAULT_LOCK_LOST` `broken`, with who broke it. Audited
+as `vault.lock_break`.
+
+### `PUT /api/files/e2e/vault/pack` ![user](https://img.shields.io/badge/-user-blue)
+`?path=&id=` (32 lower-case hex digits), body: the pack + token → `201`. Exactly
+2^`pack` bytes with the header of that id and size; created once, never
+replaced. Takes a body of up to 16 MiB whatever the limit for other requests;
+counted against the quota like any file.
+
+### `PUT /api/files/e2e/vault/index` ![user](https://img.shields.io/badge/-user-blue)
+`?path=&generation=`, body: the index file + token → `201 { "generation" }`.
+`generation` must be `latest + 1`; the header that of that generation; the size
+a Padmé size from 65 536 bytes to 64 MiB. Written to `v/idx/.tmp-<random>` and
+renamed into place (one PUT on S3), abandoned after 60 seconds and never moved
+into place afterwards; `v/idx/.tmp-*` files older than an hour are removed on
+the way. Realtime `vault.generation {path, generation}`.
+
+### `POST /api/files/e2e/vault/delete` ![user](https://img.shields.io/badge/-user-blue)
+The lock holder's garbage collection: body `{ "path", "packs": ["<32 hex>", …],
+"indexes": [3, …] }` + token → `{ "deleted": { "packs": 3, "indexes": 1 } }`
+(how many). At most 1 000 names; never one of the three newest generations;
+for good - no trash, no version - and a missing one counts as deleted. Needs the
+`delete` verb on a token.
+
+### `GET /api/files/e2e/vault/prefs` ![user](https://img.shields.io/badge/-user-blue)
+The caller's idle time as a vault writer: `{ "idle_minutes" }`, 3 until set.
+
+### `PUT /api/files/e2e/vault/prefs` ![user](https://img.shields.io/badge/-user-blue)
+Body `{ "idle_minutes": 1..10 }` → `{ "idle_minutes" }`. Kept for the person,
+not per browser; read when a lock is taken.
 
 ---
 
@@ -949,85 +1258,18 @@ deleted bytes it is deleted outright (`trashed: false`).
 
 ---
 
-## Uploads (multipart)
+## Uploads
 
-For files >5 MB. Smaller files can use `POST /api/files/manager?action=upload`
-(single-shot `multipart/form-data`); the driver-agnostic, resumable path is the
-staged upload, `POST /api/files/upload/begin` ([UPLOADS.md](UPLOADS.md)).
+Smaller files can use `POST /api/files/manager?action=upload` (single-shot
+`multipart/form-data`); anything larger, and anything that should survive a
+dropped connection, is the staged upload, `POST /api/files/upload/begin`
+([UPLOADS.md](UPLOADS.md)). Both ask the account's quota and the per-file
+upload limit before anything is stored.
 
-### `POST /api/files/upload/init` ![user](https://img.shields.io/badge/-user-blue)
-**Request**
-```json
-{
-  "storage_id": 1,
-  "path": "storage1://big.iso",
-  "filename": "big.iso",
-  "size": 5368709120,
-  "mime": "application/octet-stream",
-  "chunk_bytes": 16777216
-}
-```
-⚠ `mime` is **accepted and ignored here.** The type is re-derived at finalize
-from the stored object and the extension, so sending a wrong one is harmless
-and sending a right one buys nothing. (The staged endpoint,
-`POST /api/files/upload/begin`, keeps it for a file whose bytes name no type.)
-
-`storage_id` may be omitted when `path` carries an adapter prefix; `filename` is
-optional and folded onto `path` when both are sent (an upload to a storage root
-arrives as `path: "adapter://"` plus a filename). `chunk_bytes` is a request:
-the server raises anything below 5 MiB and re-balances so an upload never
-exceeds 10 000 parts - **use the `part_size` it answers with**.
-
-**Response 200**
-```json
-{
-  "upload_id": "u_AbCdEf",
-  "part_urls": [
-    "https://s3.example.com/...&partNumber=1&X-Amz-Sig=...",
-    "https://s3.example.com/...&partNumber=2&X-Amz-Sig=..."
-  ],
-  "part_size": 16777216,
-  "part_count": 320,
-  "expires_at": "2026-04-29T00:00:00Z"
-}
-```
-`part_urls` is a **flat list of URLs**, one per part in order - the browser PUTs
-each chunk straight to its own URL, then calls `/finalize` (or `/abort`).
-
-> ⚠ There is **no chunk-through-filex fallback on this endpoint**. A driver that
-> cannot do multipart at all (local, sftp, ftp, webdav) answers
-> **`501 storage does not support multipart upload`** at `init` - earlier
-> versions of this page described a `POST /api/files/upload/chunk` route as the
-> fallback; that route does not exist. Measured 2026-08-19.
-
-> ⚠⚠ A [plugin](PLUGINS.md) storage that declares `multipart` passes the check
-> at `init` and then usually answers **no part URLs** (`part_urls: null`),
-> because a plugin's multipart is built for the staged-upload commit, where
-> filex pushes the parts itself. There is nothing for the browser to PUT to -
-> use the staged path for plugin storages.
-
-> ⚠ This whole endpoint is the **older** browser-chunked path, kept for older
-> embedders. No filex client speaks it any more: the staged path
-> ([UPLOADS.md](UPLOADS.md)) replaced it everywhere, works on every driver, and
-> is the only one that can resume.
-
-### `POST /api/files/upload/finalize` ![user](https://img.shields.io/badge/-user-blue)
-```json
-{
-  "upload_id": "u_AbCdEf",
-  "etags": [
-    { "part": 1, "etag": "..." },
-    { "part": 2, "etag": "..." }
-  ]
-}
-```
-**Response 200** `{ "id": 99, "path": "/storage1/big.iso", "size": 5368709120, "etag": "..." }`
-
-### `POST /api/files/upload/abort` ![user](https://img.shields.io/badge/-user-blue)
-```json
-{ "upload_id": "u_AbCdEf" }
-```
-Cancels the upload and discards staged chunks.
+The presigned S3 multipart upload (`POST /api/files/upload/init`, `/finalize`
+and `/abort`) was **removed in 0.54.0**: no filex client spoke it any more. A
+caller still sending it is refused (the route is gone); move it to
+`POST /api/files/upload/begin`.
 
 ---
 
@@ -1193,24 +1435,57 @@ is ([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#feature-trade-offs)).
 **Request**
 ```json
 {
-  "path": "/storage1/report.pdf",
-  "ttl": "168h",
+  "path": "storage1://report.pdf",
+  "expires_in": 604800,
   "max_downloads": 10,
-  "pin": "1234",
-  "comment": "for the auditors"
+  "pin": "1234"
 }
 ```
-**Response 200**
+`password: true` instead of `pin` generates an 8-digit PIN. `expires_in` is
+seconds on the server's clock (what the share dialog sends); `expires_at`
+(RFC 3339) wins when both are given.
+
+**The PIN rule.** A PIN is **4 to 12 characters** - one rule, in
+`share.Service.Create`, for every door that makes a link (this one,
+`POST /api/ai/share`, MCP `file_share`, a permission rule's generated PIN, an
+app's `share_create`). Anything else is **400**
+`{"error":"pin_length","pin_min":4,"pin_max":12,"message":"A link's PIN must be 4 to 12 characters long."}`
+(the sentence in the reader's language).
+
+**Response 200** - the link under `share`, and the same fields flat for older
+callers:
 ```json
 {
+  "share": {
+    "id": 42,
+    "uuid": "Xy3kPq",
+    "token": "Xy3kPq",
+    "url": "https://files.example.com/s/Xy3kPq",
+    "kind": "download",
+    "filename": "report.pdf",
+    "has_pin": true,
+    "expires_at": "2026-05-05T12:00:00Z",
+    "max_downloads": 10,
+    "download_command": {
+      "curl": "curl -fSL -o 'report.pdf' 'https://files.example.com/s/Xy3kPq?pin=1234'",
+      "powershell": "Invoke-WebRequest -UseBasicParsing -Uri 'https://files.example.com/s/Xy3kPq?pin=1234' -OutFile 'report.pdf'"
+    }
+  },
   "id": 42,
   "url": "https://files.example.com/s/Xy3kPq",
   "token": "Xy3kPq",
   "expires_at": "2026-05-05T12:00:00Z",
   "expiry_clamped": false,
-  "max_downloads": 10
+  "max_downloads": 10,
+  "download_command": { "curl": "…", "powershell": "…" }
 }
 ```
+
+`download_command` is the one line that fetches the link's file from a
+terminal, **written by the server**: `-L` for an S3 install's redirect,
+`?zip=wait` and `<name>.zip` for a folder, the PIN as `?pin=` (only on this,
+the creator's answer). `null` for a file request. `POST /api/ai/share` and MCP
+`file_share` answer it too.
 
 `expires_at` is what was **stored**, not what was asked: every new link is
 capped at the admin's maximum link life (`share.max_ttl_days`, default 7 days -
@@ -1249,6 +1524,12 @@ creator's address (on this list it is always the caller), and each row's
 `url` built server-side exactly as the share dialog's is - never from the
 browser's address. A `root:`-confined token sees only the links inside its
 folder.
+
+Every row's `share.state` says where the link stands, as the server judges it
+(`model.Share.StateAt`): `active`, `expired`, `exhausted` (its download, visit
+or upload cap is used up) or `revoked`. A screen shows it; it does not work it
+out from `expires_at` on the browser's clock. `GET /api/admin/shares` carries
+the same field.
 
 ### `GET /api/shares/{id}/pin` ![user](https://img.shields.io/badge/-user-blue)
 
@@ -1349,7 +1630,7 @@ header.
   "locale": "tr",
   "locales": ["en", "tr"],
   "ui_locales": [{ "code": "es", "source": "plugin", "plugin": "lang-es", "rtl": false },
-                 { "code": "ar", "source": "plugin", "plugin": "lang-ar", "rtl": true }]
+                 { "code": "fr", "source": "plugin", "plugin": "lang-fr", "rtl": false }]
 }
 ```
 
@@ -1366,6 +1647,38 @@ payload: the SSO button label is not a stranger's business. (The operator's
 custom stylesheet is not on `/api/branding` either any more - it moved to
 `GET /api/me/custom-css`, behind auth, precisely so that no anonymous surface
 can receive it.)
+
+### `GET /api/public/strings` ![public](https://img.shields.io/badge/-public-lightgrey)
+
+Every sentence a public page says - the server catalogue's `server.public.*`,
+the table the no-JavaScript share and drop pages render - in **one** language:
+`?lang=` when the server speaks it (a language pack's counts), else
+`Accept-Language`, else the instance's `default_locale`, else English.
+
+```json
+{
+  "lang": "tr",
+  "dir": "ltr",
+  "strings": {
+    "drop_sub": "Aşağıya dosyaları sürükleyin veya seçin. Yalnızca yükleyebilirsiniz; klasördeki dosyalar size görünmez.",
+    "drop_err_too_large": "{name} çok büyük (en fazla {mb} MB).",
+    "files_left": "{count} dosya daha gönderilebilir",
+    "served_by": "{name} ile paylaşıldı"
+  }
+}
+```
+
+Keys come without the prefix and with their `{placeholders}` unfilled; every
+key is present (English where the language has no word of its own); a counted
+sentence lists the forms its language has as `<key>_<category>`, picked with
+`strings[key + "_" + Intl.PluralRules(lang).select(n)] || strings[key]`.
+
+The JavaScript share and file-request pages (`@brftech/filex` PublicLinkPage,
+and the admin's Corporate identity preview) say **only** these words: there is
+no second copy of them in the interface catalogue, so a limit reads the same on
+both pages and a language pack translates it once. Unauthenticated and
+`no-store` like every other `/api` answer that is not one of the four
+instance-identity answers.
 
 ### `GET /api/public/s/{token}` ![public](https://img.shields.io/badge/-public-lightgrey)
 
@@ -1390,6 +1703,7 @@ can receive it.)
 |---|---|
 | `kind` | `file` · `folder` · `app` (the link carries an app plugin's page) |
 | `needs_pin` / `unlocked` | whether there is a gate, and whether this browser is through it |
+| `pin_max` | with `needs_pin`: the longest PIN any link may carry (the one PIN rule, `12`). The PIN box stops there instead of at a number of its own |
 | `expired` | the clock ran out. An administrator's **Revoke** moves the expiry to the moment it happened, so it lands here too - there is no second column, and one that could disagree with this would be worse than one word doing both |
 | `revoked` | dead for a reason that is **not** the clock: the visit/download ceiling is spent, the file is gone, or the app that answers it was stopped or removed |
 | `locked` | the PIN gate is shut after five wrong answers. **Not** a reason the link is dead - it lifts by itself |
@@ -1471,12 +1785,16 @@ The file request's state.
   "folder": "Gelen kutusu",
   "expires_at": "2026-10-01T09:00:00Z",
   "uploads_left": 18,
-  "limits": { "max_files": 20, "max_file_size_mb": 100, "allowed_ext": ["pdf"], "ask_name": true }
+  "limits": { "max_files": 20, "max_file_size_mb": 100, "allowed_ext": ["pdf"], "ask_name": true, "name_max": 40 }
 }
 ```
 
 ⚠ `folder` is the destination's **name**. Its contents are never listed and
 never counted - a file request is a blind drop.
+
+`limits.name_max` is the longest uploader name the server keeps (40
+characters); the upload refuses a longer one with **400** `name_too_long`
+rather than cutting it. `pin_max` is present with `needs_pin`, as on a share.
 
 ### `POST /api/public/d/{token}/pin` ![public](https://img.shields.io/badge/-public-lightgrey)
 
@@ -1492,7 +1810,9 @@ one upload path. **401** `bad_pin` · **429** `locked` / `rate_limited` ·
 holds `share.upload_links` there) · **413** `file_too_large` (the link's own
 limit, or its creator's largest file) · **415** `ext_not_allowed` (outside the
 link's list, or a type its creator's role blocks) · **422** `too_many_files` /
-`exceeds_remaining`.
+`exceeds_remaining` · **400** `name_too_long` (an uploader name over
+`limits.name_max`). Every refusal carries `message`, the server's sentence in
+the visitor's language.
 
 ### Which answer `/s/` and `/d/` give
 
@@ -1839,6 +2159,11 @@ cancel, all of them.
   cancelled by the administrators of the tenant that asked for it (a
   supertenant sees every one) - and it runs beside the queue, never in the
   worker's line.
+- A `trash-empty`, `restore` or `purge` row carries **`summary`** (since 0.54):
+  where the job stands, said by the server in the reader's language ("Deleting
+  3 items permanently…", "2 items restored - 1 item was not restored:
+  something already has the name “b.txt”"). The explorer and the admin Trash
+  page show it as it is when the job ends; `error` stays the job's own record.
 
 ### `GET /api/files/ops/:id` ![user](https://img.shields.io/badge/-user-blue)
 Single op detail with **every** source (no `source_count` / `source_dir`),
@@ -2376,7 +2701,10 @@ runtime is off: `404 app_plugins_disabled`.
 
 The rows this caller may see: `{actions: [{plugin, id, key, label, icon,
 applies, view, view_placement, confirm, min_role, danger, output_mode,
-requires}], views: [{plugin, id, placement, label, icon, applies, requires}]}`.
+output_elsewhere, read_only_ok, requires}], views: [{plugin, id, placement,
+label, icon, applies, requires}]}`. `read_only_ok` (0.54) says whether a menu
+click may start the action on a read-only storage - the run's own rule, so
+the explorer offers nothing there that `run` would refuse.
 `key` is `plugin:<plugin>/<action>`; `applies` is the manifest rule merged
 with the admin override; admin-only actions are absent for non-administrators,
 `hidden` actions are absent for everyone (a surface starts those), and an
@@ -2524,6 +2852,15 @@ row also carries `disabled_reason` when the server switched the account off
 confirm the address) and `sso_linked: true` when it is bound to an SSO identity
 (the identity itself is never sent) - [SSO.md](SSO.md#which-account-an-sso-sign-in-opens).
 
+### `GET /api/admin/users/suggest?email=` ![admin](https://img.shields.io/badge/-admin-red)
+What the Add user form fills in while an address is typed (0.54):
+`{ "username": "gozluk", "name": "Gözlük" }`. The username is
+`identity.Suggest`'s - the one an account made by its first SSO sign-in gets
+(letters transliterated, a mail tag after `+` dropped, cut to the maximum
+length, a leading digit prefixed) - and the name has a capital first letter
+per word in the reader's language. Both are empty until the address has its
+`@`. It claims nothing: whether the username is free is the create's to say.
+
 ### `GET /api/admin/users/{id}` ![admin](https://img.shields.io/badge/-admin-red)
 
 ### `POST /api/admin/users` ![admin](https://img.shields.io/badge/-admin-red)
@@ -2539,7 +2876,10 @@ the panel: an API key gets `403 session_required`
   "provider_id": 3
 }
 ```
-`password` is optional. An account created without one has no local password:
+`password` is optional, and when given passes the same rule as a person's own
+change (at least 8 characters, `400 password_too_short` -
+[`POST /api/auth/password`](#patch-apiauthprofile-)); with `send_invite` it is
+ignored and filex makes one. An account created without one has no local password:
 every password check refuses it (login form, recovery login, `/dav`, SFTP, FTP)
 and it signs in through SSO - found by the SSO identity it is bound to, or by
 its email address inside its tenant until it is bound
@@ -2554,7 +2894,8 @@ behind the column, so it is validated here.
 ### `PATCH /api/admin/users/{id}` ![admin](https://img.shields.io/badge/-admin-red)
 Partial update - only the fields present in the body are touched:
 `password`, `display_name`, `role`, `locale`, `timezone`, `enabled`,
-`provider_id`, `sso_unlink`.
+`provider_id`, `sso_unlink`. A `password` shorter than 8 characters is `400
+password_too_short`, and then no field of the body is written.
 
 `enabled: true` on an account waiting for approval (`disabled_reason:
 pending_approval`) approves it; switching an account on or off clears the
@@ -2722,7 +3063,7 @@ admin-scoped key where its page says so.
 | `GET /api/admin/app-plugins/licenses`, `GET` · `PUT /api/admin/app-plugins/{id}/license`, `POST …/{id}/license/verify` | paid apps' licenses: the status and the facts (never the key), a new key, a check now; the same gate | [APP-PLUGINS.md](APP-PLUGINS.md#paid-apps) |
 | `GET` · `PATCH /api/admin/archives`, `POST /api/admin/archives/test` | **Settings → Archives**: the live archive policy, the providers' status, an encrypted round trip (platform operator only) | [ARCHIVES.md](ARCHIVES.md#process-configuration) |
 | `GET /api/files/onlyoffice/diagnose?path=` (or `?id=`) | what filex last answered the document server for a document, and when its editor was last opened - this process only | [ONLYOFFICE.md](ONLYOFFICE.md#failure-editor-shows-download-failed) |
-| `POST /api/files/onlyoffice/session` `{path, key, action}` | whether an open editing session is still on the document's current version (`state`), and the person's answer when it is not (`mine`, `theirs`); answers need `files.modify`. Kept in the database (`office_sessions`), so every instance sees it | [ONLYOFFICE.md](ONLYOFFICE.md#when-the-document-changes-while-it-is-open) |
+| `POST /api/files/onlyoffice/session` `{path, key, action, token}` | whether an open editing session is still on the document's current version (`state`), and the person's answer when it is not (`mine`, `theirs`); answers need `files.modify` and, since 0.54, to be one of that session's own editors - `token` is the editor configuration's signed token, which any instance can check (else `403 not_your_session`); each answer is audited (`file.office_session_answered`). A key that is not the document's is answered `{"stale": false, "known": false}`. Kept in the database (`office_sessions`), so every instance sees it | [ONLYOFFICE.md](ONLYOFFICE.md#when-the-document-changes-while-it-is-open) |
 | `GET` · `HEAD /filex-frame/editor` | only with `FILEX_ONLYOFFICE_FRAME_ORIGIN`, and only on that host (normally the Document Server's, whose proxy sends `/filex-frame/*` here), at its root whatever the base path; every other path there is a `404`, and `/filex-frame/` is a `404` on every other host: the page the ONLYOFFICE editor's `api.js` runs in, credential-free and `no-store`, under a policy naming the Document Server in force (`404` while there is none) | [ONLYOFFICE.md](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own) |
 | `GET` · `HEAD /_appui/_onlyoffice/editor` | the same page on `FILEX_APP_UI_ORIGIN`, only on that host, when there is no frame origin. The editor config (`POST /api/files/onlyoffice/config`) names the one in use in `frame` | [ONLYOFFICE.md](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own) |
 | `GET /api/admin/panel-search?q=&kinds=&limit=`, `GET` · `POST` · `DELETE /api/admin/panel-search/recent`, `DELETE …/recent/{id}` | the admin panel's search: the people, groups, API keys (by name), apps and their actions, storages and shares that match, each read through the list its page reads and behind that page's permission - a kind the caller may not open is left out of `searched`; the caller's own recent searches (the newest 20, never in the audit log). An administrator, or a signed-in session holding a delegated `admin.*` permission | [ADMIN-PANEL.md](ADMIN-PANEL.md#search) |
@@ -2830,12 +3171,27 @@ Secrets are never returned - a configured one reads `"***"`.
 re-asserted from there at every boot, so a `PATCH` to it applies immediately but
 does not survive a restart.
 
+The `onlyoffice` row also carries the editor's language
+([ONLYOFFICE.md → The editor's language](ONLYOFFICE.md#the-editors-language)):
+`editor_lang` (`"auto"` - each person's own filex language - or a fixed
+language code), `editor_languages` (the languages it may be, the editor's own
+list: `[{ "code": "de", "name": "Deutsch" }, …]`, each named in itself) and
+`editor_lang_env_managed` (`FILEX_ONLYOFFICE_LANG` pins it).
+
 ### `PATCH /api/admin/external/:name` ![admin](https://img.shields.io/badge/-admin-red)
 ```json
 { "enabled": true, "url": "https://docs.example.com", "secret": "…",
   "options_json": "{}" }
 ```
 Every field is optional; an omitted one keeps its stored value.
+
+`onlyoffice` also takes `"editor_lang"`: `"auto"` or a language the editor
+offers (one of the row's `editor_languages`; `de-DE` and `de_DE` are stored
+as `de`). Anything else - and the field on another service - is
+`400 { "error": "editor_lang_invalid", "message" }` and changes nothing. The
+other options on the row are kept. When `FILEX_ONLYOFFICE_LANG` pins it the
+answer carries `editor_lang_env_managed: true`: the change lasts until the
+next start.
 
 ⚠ A `secret` of exactly `"***"` is **ignored**, because that is what `GET`
 returns in place of a stored secret and a UI that re-sends what it was shown
@@ -3141,7 +3497,7 @@ One event produces one POST **per matching destination**.
 | Route | Purpose |
 |---|---|
 | `GET /api/admin/webhooks` | List targets (secrets masked) plus each one's last delivery. |
-| `POST /api/admin/webhooks` | Create: `name`, `url`, optional `secret`, optional `events` allow-list, `enabled`. |
+| `POST /api/admin/webhooks` | Create: `name`, `url`, optional `secret`, optional `events` allow-list, `enabled`, optional `lang` (the language its `title`/`body` are said in; empty = the instance's, an unknown one answers 400 `invalid_lang` - [Which language](NOTIFICATIONS.md#which-language)). |
 | `PATCH /api/admin/webhooks/:id` | Partial update. |
 | `DELETE /api/admin/webhooks/:id` | Remove the target. |
 | `POST /api/admin/webhooks/:id/test` | Send a test delivery. |
@@ -3213,14 +3569,28 @@ storage at `GET /api/admin/storages/:id/sync-runs` (`entries`, `total`).
         "created_at": "2026-09-05T10:11:12Z"
       },
       "user_email": "admin@local",
-      "user_name": "admin"
+      "user_name": "admin",
+      "label": "Share: created",
+      "target_label": "Share #42"
     }
   ],
   "total": 1,
   "limit": 100,
-  "offset": 0
+  "offset": 0,
+  "resources": [{ "value": "share.", "label": "Share" }]
 }
 ```
+
+`label` is the action in words and `target_label` the thing it is about, said
+by the server in the reader's language (`?lang=` first, then the account's
+language, then `Accept-Language`): a resource and a verb from the server
+catalogue joined by one phrase, a write through the AI admin surface marked
+"(AI)", a target named by `target_name` when the server knows it. `resources` is
+the page's "What" filter: every resource a row can be written under, labelled,
+with the `action` prefix(es) it filters by. The same `label` / `target_label`
+are on the dashboard's `recent_activity` rows and in the `admin_audit_list`
+tool's answer. Before 0.54 the panel composed these labels in the browser and an
+API reader got only the wire names.
 
 ⚠ On a **demo** instance (`FILEX_DEMO_MODE`) every address in a row reads
 `hidden on the demo`: `ip`, a `target_id` that is an address (an address lock's
@@ -3253,7 +3623,7 @@ dashboard's `recent_activity` rows as `user_name`, and permission grants as
 `auth_provider.test` · `auth_provider.update` · `external.test` ·
 `external.update` · `file.archive_add` · `file.archive_extract` ·
 `file.delete` · `file.restore` · `file.star` · `file.tags_set` ·
-`file.upload` · `file.upload_abort` · `profile.password_change` ·
+`profile.password_change` ·
 `profile.update` · `search.rebuild` · `settings.update` · `share.create` ·
 `share.delete` · `share.revoke` · `sharex.upload` · `storage.create` ·
 `storage.delete` · `storage.sync_trigger` · `storage.test` ·
@@ -3289,6 +3659,13 @@ and `after`) · `e2e_request.create` · `e2e_request.approve` ·
 `e2e_request.reject` · `e2e_request.expire` · `e2e_request.use` (target
 `e2e_request` and its id; metadata the folder, kind, requester and state, and
 on `.use` the folder that was actually encrypted, as `encrypted`).
+
+So does the vault ([Vault](#vault-encryption-level-3)): `vault.create` (target
+`vault` and its id; metadata the storage, folder and pack size) · `vault.lock`
+(the client and its label) · `vault.unlock` when a lock ends (`reason`
+`released`, `expired`, `idle`, `broken` or `locked_idle`; the first and last
+generation committed under it; `broken_by` for a break) · `vault.lock_break`
+(who broke whose lock). There is no row per commit.
 
 ⚠ Filtering by `?action=` is an exact match, so the eight values this page
 used to list and no code ever writes (`auth.login`, `auth.logout`,

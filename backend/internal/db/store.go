@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
 
@@ -146,6 +147,15 @@ type Store interface {
 	// UnavailableAt returns the row that makes rel unavailable - rel's own, or
 	// a folder's above it - or nil.
 	UnavailableAt(ctx context.Context, storageID int64, rel string) (*UnavailableEntry, error)
+	// SetNodeLinkState records why row id is a link filex will not follow -
+	// the driver's storage.MetaLinkState as the sync last listed it
+	// (migration 00098) - and reports whether that changed the row; "" clears
+	// it. See NodeLinkStateSQL.
+	SetNodeLinkState(ctx context.Context, id int64, state string) (bool, error)
+	// NodeLinkStates returns the recorded reason of every row in ids that has
+	// one. The common node reads do not carry it (model.Node.LinkState): a
+	// listing asks for its link rows' reasons with this.
+	NodeLinkStates(ctx context.Context, ids []int64) (map[int64]string, error)
 	// ListStaleNodesUnder is ListStaleNodes bounded to the rows strictly BELOW
 	// dir (the folder's own row excluded), matched exactly as ListNodesUnder
 	// matches — the tombstone candidates of a folder rescan.
@@ -857,6 +867,13 @@ type Store interface {
 	GetUserNodeMeta(ctx context.Context, userID, nodeID int64, key string) (string, error)
 	ListUserNodeMetaForNode(ctx context.Context, userID, nodeID int64, prefix string) (map[string]string, error)
 	ListNodesByUserMeta(ctx context.Context, userID int64, key string, limit int) ([]*model.Node, error)
+	// UserNodeMetaPage is one page of the live nodes the person flagged with
+	// key, in the given order, with each one's time and the total (filex
+	// 0.54: Recent and Starred page, sort and say when). See UserMetaPageSQL.
+	UserNodeMetaPage(ctx context.Context, userID int64, key string, order listorder.Order, limit, offset int) ([]UserMetaEntry, int, error)
+	// UserNodeMetaAt returns when the person flagged each of ids with key;
+	// unflagged ids are absent (a listing's `starred`, one query per page).
+	UserNodeMetaAt(ctx context.Context, userID int64, key string, ids []int64) (map[int64]time.Time, error)
 
 	// Per-user VIEW preferences (00039): how this person left each folder, as
 	// one JSON document read whole and written whole. Not per-node and not
@@ -1008,6 +1025,40 @@ type Store interface {
 	GetDigestPolicy(ctx context.Context, scope int64) (*model.DigestPolicy, error)
 	// SaveDigestPolicy replaces the defaults of p.Scope.
 	SaveDigestPolicy(ctx context.Context, p *model.DigestPolicy) error
+
+	// Web Push (task #191, internal/notify push.go): the devices people
+	// receive pushes on, and the instance's VAPID key. Written once for every
+	// engine (push_sql.go).
+	//
+	// SavePushSubscription records a device by its endpoint hash: the same
+	// person's again keeps its row and mark, another person's is replaced.
+	SavePushSubscription(ctx context.Context, s *model.PushSubscription) (*model.PushSubscription, error)
+	// ListPushSubscriptions is one person's devices, oldest first.
+	ListPushSubscriptions(ctx context.Context, userID int64) ([]*model.PushSubscription, error)
+	// ListPushSubscribers is every person with a device.
+	ListPushSubscribers(ctx context.Context) ([]int64, error)
+	CountPushSubscriptions(ctx context.Context) (int64, error)
+	// DeletePushSubscription and DeletePushSubscriptionByHash remove one of
+	// userID's own devices; ok is false for one that is not theirs, exactly
+	// as for one that does not exist.
+	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
+	DeletePushSubscriptionByHash(ctx context.Context, userID int64, hash string) (bool, error)
+	// DropPushSubscription removes a device by id, whoever's it is (the push
+	// service said it is gone).
+	DropPushSubscription(ctx context.Context, id int64) error
+	// AdvancePushMark moves a device's mark from `from` to `to` (to > from)
+	// and answers whether it did - compare-and-set, so a row is pushed once.
+	AdvancePushMark(ctx context.Context, id, from, to int64) (bool, error)
+	// RecordPushResult notes a push taken or refused; it answers the
+	// refusals in a row after the write.
+	RecordPushResult(ctx context.Context, id int64, taken bool) (int, error)
+	// GetPushVAPIDKey is the instance's key, nil when none was made.
+	GetPushVAPIDKey(ctx context.Context) (*model.PushVAPIDKey, error)
+	// CreatePushVAPIDKey stores the first key; it fails when there is one.
+	CreatePushVAPIDKey(ctx context.Context, k *model.PushVAPIDKey) error
+	// ReplacePushVAPIDKey puts k in place of the key and forgets every
+	// device, answering how many (run it in WithTx).
+	ReplacePushVAPIDKey(ctx context.Context, k *model.PushVAPIDKey) (int64, error)
 
 	// Webhook targets (webhook v2, migration 00017) — additional POST
 	// destinations next to the legacy single global webhook. Update
@@ -1199,6 +1250,23 @@ type Store interface {
 	// PruneOfficeSessions removes the rows that expired before `before`.
 	PruneOfficeSessions(ctx context.Context, before time.Time) (int64, error)
 
+	// Vault write locks (migration 00096, internal/vaultlock,
+	// docs/E2E-VAULT-FORMAT.md → The write lock): one row per tenant and
+	// vault id, written by compare-and-set. Written once for every engine
+	// (VaultLockSQL).
+	// GetVaultLock answers (nil, nil) when the vault has no row.
+	GetVaultLock(ctx context.Context, tenantID int64, vaultID string) (*model.VaultLock, error)
+	// InsertVaultLock creates a vault's row at rev 1; ok = false when a row
+	// was already there.
+	InsertVaultLock(ctx context.Context, l *model.VaultLock) (bool, error)
+	// UpdateVaultLock writes l over the row while it is still at rev; ok =
+	// false when another writer came first.
+	UpdateVaultLock(ctx context.Context, l *model.VaultLock, rev int64) (bool, error)
+	// GetVaultIdleMinutes answers a person's idle time, 0 when never set.
+	GetVaultIdleMinutes(ctx context.Context, userID int64) (int, error)
+	// SetVaultIdleMinutes stores it (the caller checks 1 to 10).
+	SetVaultIdleMinutes(ctx context.Context, userID int64, minutes int) error
+
 	// Encryption requests (migration 00080, internal/e2epolicy) — what a
 	// person leaves where the tenant's policy wants an administrator's
 	// approval before a folder or a file is end-to-end encrypted. Written once
@@ -1384,6 +1452,11 @@ type AuditEntryWithUser struct {
 	// UserName is who acted, as every screen names a person
 	// (model.PersonLabel), filled by the audit handler — never by the store.
 	UserName string `json:"user_name,omitempty"`
+	// Label is the action in words and TargetLabel the thing it is about,
+	// in the reader's language (handlers/audit_label.go) — filled by the
+	// audit handler, never by the store.
+	Label       string `json:"label,omitempty"`
+	TargetLabel string `json:"target_label,omitempty"`
 }
 
 // AuditActionPrefixes reads ListAuditFiltered's action filter: a value ending

@@ -79,6 +79,18 @@ type droppedHistory struct {
 // see trash.Vanished): an earlier version's tombstones of its contents, which
 // still name it as their parent. They are no trash entries and would
 // otherwise pin the folder for good.
+//
+// ⚠⚠ Each row is read again right before it goes, and kept when it no longer
+// stands where it stood when it was confirmed gone (issue #192). The decision
+// was made about a PATH - its Stat said "not found" - and the drop is made by
+// ID: a row a move re-homed in between is a row whose object is fine at its
+// new path. The storage's gate (rowgate) keeps filex's own moves out of the
+// pass; this keeps out the ones it does not cover (a second filex process on
+// the same database, a protocol surface that moves without the gate).
+//
+// Every row dropped is said at INFO (droppedLogMax of them per call, then a
+// count): this used to be silent, and a row that vanished left nothing in the
+// server log to tell a drop from a bug.
 func (s *storageSyncer) dropRows(ctx context.Context, rows []*model.Node, b *entryBatch) int {
 	live := map[int64]bool{}
 	var all []*model.Node
@@ -127,7 +139,9 @@ func (s *storageSyncer) dropRows(ctx context.Context, rows []*model.Node, b *ent
 		}
 		return all[i].ID > all[j].ID
 	})
-	dropped := 0
+	// dropped: the live rows dropped (the answer); went: every row dropped;
+	// said: the ones said one by one.
+	dropped, went, said := 0, 0, 0
 	for _, n := range all {
 		if n.Type == model.NodeTypeDirectory {
 			left, err := s.store.CountChildRows(ctx, n.ID)
@@ -139,6 +153,9 @@ func (s *storageSyncer) dropRows(ctx context.Context, rows []*model.Node, b *ent
 				}
 				continue
 			}
+		}
+		if s.stillAsListed(ctx, n) == nil {
+			continue
 		}
 		// The file's snapshots under `.versions/<id>/`: their rows go with this
 		// one, so their keys are read now and the bytes deleted after the
@@ -155,14 +172,33 @@ func (s *storageSyncer) dropRows(ctx context.Context, rows []*model.Node, b *ent
 		if live[n.ID] {
 			dropped++
 		}
+		went++
+		if said < droppedLogMax {
+			said++
+			slog.Info("sync: dropped the row of an object gone from the storage",
+				slog.Int64("node", n.ID),
+				slog.String("path", n.Path),
+				slog.String("type", string(n.Type)),
+				slog.Bool("live", live[n.ID]),
+				slog.String("storage", s.storage.Name))
+		}
 		b.unindex = append(b.unindex, n.ID)
 		b.reclaim = append(b.reclaim, n.ID)
 		if len(history) > 0 {
 			b.history = append(b.history, droppedHistory{node: n.ID, keys: history})
 		}
 	}
+	if more := went - said; more > 0 {
+		slog.Info("sync: dropped more rows of objects gone from the storage than are listed one by one",
+			slog.Int("more", more), slog.String("storage", s.storage.Name))
+	}
 	return dropped
 }
+
+// droppedLogMax bounds the per-row INFO lines one dropRows call writes: a
+// folder of a hundred thousand files deleted outside filex is one summary
+// line after the first ones, not a hundred thousand.
+const droppedLogMax = 50
 
 // dropVanished drops every row of this storage that an earlier version
 // soft-deleted where it stood (trash.Vanished): the tombstones the sync wrote

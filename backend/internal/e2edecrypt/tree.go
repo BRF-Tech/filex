@@ -56,6 +56,9 @@ type OpenOptions struct {
 	MarkerPath string
 	// GOOS overrides runtime.GOOS for the output-name rules (tests).
 	GOOS string
+	// Generation, for a vault, decrypts that generation (one still kept)
+	// instead of the latest. 0: the latest that verifies.
+	Generation uint64
 }
 
 // Result summarises a finished run.
@@ -84,6 +87,8 @@ type Job struct {
 	// fxe is set when the input is a single encrypted file (.fxe): it
 	// carries its own key slots and needs no marker.
 	fxe *fxeInput
+	// gen is the vault generation asked for (OpenOptions.Generation).
+	gen uint64
 
 	res *Result
 }
@@ -226,6 +231,16 @@ func Open(in string, opts OpenOptions) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
+	if m.IsVault() {
+		// wiring:e2 vault - a vault's tree is in its index: it opens whole,
+		// from the folder itself (or a zip of it), never a part of it.
+		if !j.rootIsE2 || (j.markerDir != "" && !samePath(j.markerDir, j.root)) {
+			return nil, errors.New("this is a vault (encryption level 3): it is decrypted whole - pass the vault folder itself, or a .zip of it")
+		}
+	} else if opts.Generation != 0 {
+		return nil, errors.New("--generation is for a vault (encryption level 3); this folder is not one")
+	}
+	j.gen = opts.Generation
 	j.Marker = m
 	ok = true
 	return j, nil
@@ -267,6 +282,30 @@ func (j *Job) Run() (*Result, error) {
 	if j.keys == nil {
 		return nil, errors.New("e2edecrypt: Run before Unlock")
 	}
+	if j.Marker.IsVault() {
+		return j.runVault()
+	}
+	return j.intoPartial(func(tmp string) error {
+		if j.single != "" {
+			return j.decryptSingle(tmp)
+		}
+		id, err := j.idOf(j.root)
+		if err != nil {
+			return err
+		}
+		if id != nil {
+			j.ids = nil
+			j.collectIDs(j.root, id)
+		}
+		return j.decryptDir(j.root, tmp, "", "", j.rootIsE2, id)
+	})
+}
+
+// intoPartial writes the job's output all or nothing - a folder and a vault
+// alike: fill gets a new "<out>.partial-*" directory next to the output, which
+// is renamed into place only when fill succeeded and is removed otherwise. The
+// output must not exist, before or after.
+func (j *Job) intoPartial(fill func(tmp string) error) (*Result, error) {
 	if _, err := os.Lstat(j.out); err == nil {
 		return nil, fmt.Errorf("%s: %w", j.out, ErrOutputExists)
 	}
@@ -285,19 +324,7 @@ func (j *Job) Run() (*Result, error) {
 		}
 	}()
 	j.res = &Result{Out: j.out}
-	if j.single != "" {
-		err = j.decryptSingle(tmp)
-	} else {
-		var id []byte
-		if id, err = j.idOf(j.root); err == nil {
-			if id != nil {
-				j.ids = nil
-				j.collectIDs(j.root, id)
-			}
-			err = j.decryptDir(j.root, tmp, "", "", j.rootIsE2, id)
-		}
-	}
-	if err != nil {
+	if err := fill(tmp); err != nil {
 		return nil, err
 	}
 	if _, err := os.Lstat(j.out); err == nil {

@@ -33,6 +33,7 @@ import {
   findPacks,
   formsNeeded,
   groupKeys,
+  knownKey,
   NIGHTLY_REMOTE,
   mergeItems,
   nameProblem,
@@ -41,10 +42,12 @@ import {
   publishRemote,
   pullStep,
   replaceStatusBlock,
+  staleKeys,
   statusBlock,
   syncedTranslation,
   tableCounts,
   templateReadme,
+  withoutStale,
   worklistItems,
 } from '../../../scripts/lib/langpacks.mjs';
 import { type Catalogue, type Rows, PACK_README as README, filesOf, git, json, makePack, readJson, write, writeCatalogue } from '../helpers/langPacks';
@@ -144,6 +147,53 @@ describe('what a pack still needs', () => {
       translation: { 'a.count': 'old', 'a.count_few': 'old few' },
     });
     expect(ar[0]).toMatchObject({ forms_needed: ['zero', 'two', 'few', 'many'], current_forms: { few: 'old few' }, forms: {} });
+  });
+});
+
+describe('the keys filex no longer has (#195)', () => {
+  // 0.53 dropped `tenants.modeOff`. Every pack's `pack.mjs sync` kept it in
+  // translations/<tag>.json, the packs' own validators refuse such a key
+  // (ERROR UNKNOWN), and `apply` put every pack back until the key was
+  // deleted by hand in each one. apply and release drop it themselves now.
+  const TR = { 'a.count': '{n} Dateien', 'a.count_few': 'x', 'a.title': 'Dateien', 'c.gone': 'Altes Ding', 'c.gone_few': 'alt', 'b.office': 'In ONLYOFFICE bearbeiten', 'e.empty': '' };
+
+  it('are the keys that are neither a catalogue key nor a plural form of one, filled or empty', () => {
+    expect(staleKeys(TR, NEXT)).toEqual(['c.gone', 'c.gone_few', 'e.empty']);
+    expect(knownKey('a.title', NEXT)).toBe(true);
+    expect(knownKey('a.count_few', NEXT)).toBe(true);
+    expect(knownKey('c.gone', NEXT)).toBe(false);
+    expect(knownKey('c.gone_few', NEXT)).toBe(false);
+    expect(staleKeys({ 'a.title': 'Dateien', 'd.new': '' }, NEXT)).toEqual([]);
+  });
+
+  it('leave the translation, and everything else keeps its order and its text', () => {
+    const out = withoutStale(TR, NEXT);
+    expect(Object.keys(out)).toEqual(['a.count', 'a.count_few', 'a.title', 'b.office']);
+    expect(out['a.count_few']).toBe('x');
+    expect(TR).toHaveProperty('c.gone');
+  });
+
+  it("keep a form the English no longer writes as a key of its own: it is the language's form of its base", () => {
+    const next: Catalogue = { ...NEXT };
+    delete next['a.count_one'];
+    expect(staleKeys({ 'a.count': '{n} Dateien', 'a.count_one': '{n} Datei' }, next)).toEqual([]);
+  });
+
+  it("the stand-in pack refuses such a key as the real packs' validators do, and its sync keeps it, as theirs did", SLOW, () => {
+    // Without both, the apply and release tests below would pass whatever
+    // apply and release do with a key filex dropped.
+    const base = tmp('filex-langpacks-strict-');
+    const pack = makePack(base, { catalogue: { ...NEXT, 'c.gone': 'Old thing' }, rows: ROWS, translation: { ...DE, 'b.office': 'In ONLYOFFICE bearbeiten', 'd.new': 'Neues Ding' }, remote: false });
+    const check = () => spawnSync(process.execPath, ['scripts/check.mjs'], { cwd: pack, encoding: 'utf8' });
+    expect(check().status).toBe(0);
+    const now = path.join(base, 'catalogue-now');
+    writeCatalogue(now, NEXT, ROWS, '0.53.0');
+    const sync = spawnSync(process.execPath, ['scripts/pack.mjs', 'sync', '--from', now], { cwd: pack, encoding: 'utf8' });
+    expect(sync.status).toBe(0);
+    expect(readJson(path.join(pack, 'translations', 'de.json'))['c.gone']).toBe('Altes Ding');
+    const r = check();
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('ERROR UNKNOWN de c.gone');
   });
 });
 
@@ -336,15 +386,18 @@ describe('status, todo and apply: a pack follows this tree', () => {
     expect(git(pack, 'status', '--porcelain')).toBe('');
   });
 
-  it('apply folds the answers in, validates and commits locally', SLOW, () => {
+  it('apply folds the answers in, drops the key filex no longer has, validates and commits locally', SLOW, () => {
     answer({ 'b.office': 'In ONLYOFFICE bearbeiten', 'd.new': 'Neues Ding' });
     const r = cli(['apply', '--worklist', work, '--commit', '--trailer', 'Co-Authored-By: Test Agent <agent@example.com>']);
     expect(r.code, `${r.out}${r.err}`).toBe(0);
     const tr = readJson(path.join(pack, 'translations', 'de.json'));
     expect(tr['b.office']).toBe('In ONLYOFFICE bearbeiten');
     expect(tr['d.new']).toBe('Neues Ding');
-    // A removed key stays in the translation, out of the manifest.
-    expect(tr['c.gone']).toBe('Altes Ding');
+    // #195: the key filex dropped leaves the translation. The pack's sync
+    // keeps it and the pack's validator refuses it (ERROR UNKNOWN): through
+    // 0.53 apply went red right here and put the pack back.
+    expect(tr).not.toHaveProperty('c.gone');
+    expect(r.out).toContain('dropped 1 key(s) filex no longer has: de c.gone');
     const manifest = readJson(path.join(pack, 'filex-app.json'));
     expect(manifest.version).toBe('0.1.0');
     expect(manifest.ui_locales.de['c.gone']).toBeUndefined();
@@ -355,6 +408,7 @@ describe('status, todo and apply: a pack follows this tree', () => {
     expect(git(pack, 'log', '-1', '--format=%s')).toBe('Sync to filex abcdef12: 5 of 5');
     const body = git(pack, 'log', '-1', '--format=%B');
     expect(body).toContain('English changed, translated again: b.office');
+    expect(body).toContain('Removed with filex, dropped from the translation: c.gone');
     expect(body).toContain('Co-Authored-By: Test Agent <agent@example.com>');
     // ...and now nothing is pending.
     expect(JSON.parse(cli(['status', ...packArgs, '--catalogue', target, '--json', '-']).out).pending).toBe(0);
@@ -367,7 +421,9 @@ describe('release: the whole release-day step of a pack', () => {
   let release = '';
   beforeAll(() => {
     base = tmp('filex-langpacks-release-');
-    pack = makePack(base, { catalogue: NEXT, rows: ROWS, translation: { ...DE, 'b.office': 'In ONLYOFFICE bearbeiten', 'd.new': 'Neues Ding' } });
+    // The last apply's catalogue still had `c.gone`; the release dropped it
+    // (#195: 0.53 dropped `tenants.modeOff` the same way).
+    pack = makePack(base, { catalogue: { ...NEXT, 'c.gone': 'Old thing' }, rows: ROWS, translation: { ...DE, 'b.office': 'In ONLYOFFICE bearbeiten', 'd.new': 'Neues Ding' } });
     release = path.join(base, 'v0.53.0');
     writeCatalogue(release, NEXT, ROWS, '0.53.0');
   }, 60_000);
@@ -388,9 +444,14 @@ describe('release: the whole release-day step of a pack', () => {
     expect(filesOf(pack)).toEqual(before);
   });
 
-  it('moves the version, rewrites the status block, validates, commits and prints the tag and push commands', SLOW, () => {
+  it('moves the version, drops the key filex no longer has, rewrites the status block, validates, commits and prints the tag and push commands', SLOW, () => {
     const r = cli(['release', '0.53.0', '--packs', pack, '--catalogue', release]);
     expect(r.code, `${r.out}${r.err}`).toBe(0);
+    // #195: through 0.53 the pack's validator refused the key its sync kept,
+    // and release put the pack back here.
+    expect(readJson(path.join(pack, 'translations', 'de.json'))).not.toHaveProperty('c.gone');
+    expect(r.out).toContain('dropped 1 key(s) filex no longer has: de c.gone');
+    expect(git(pack, 'log', '-1', '--format=%B').replace(/\s+/g, ' ')).toContain('1 key(s) filex 0.53.0 no longer has, dropped from the translation (c.gone)');
     expect(readJson(path.join(pack, 'filex-app.json')).version).toBe('0.1.1');
     expect(readJson(path.join(pack, 'package.json')).version).toBe('0.1.1');
     const readme = fs.readFileSync(path.join(pack, 'README.md'), 'utf8');
@@ -418,12 +479,14 @@ describe('release: the whole release-day step of a pack', () => {
   });
 
   it('brings the template along: the release catalogue, exactly its keys in the example, the README; no version, no tag', SLOW, () => {
+    // `c.gone` is one of the example's filled keys: a key filex dropped
+    // leaves the example filled or empty (before #195, a filled one stayed).
     const tpl = makePack(base, {
       name: 'filex-lang-template',
       tag: 'xx',
       catalogue: PREV,
       rows: ROWS,
-      translation: { 'a.count': '', 'a.count_one': '', 'a.title': 'Files (xx)', 'b.office': '', 'c.gone': '' },
+      translation: { 'a.count': '', 'a.count_one': '', 'a.title': 'Files (xx)', 'b.office': '', 'c.gone': 'Old thing (xx)' },
     });
     write(path.join(tpl, 'README.md'), "Sizes: filex's catalogue is 5 keys.\n\nThe catalogue here is for **filex v0.52.0**. Every filex release attaches its own.\n");
     git(tpl, 'commit', '-q', '-am', 'the template README');
@@ -584,7 +647,6 @@ describe("this tree's catalogue", () => {
     const sources = [
       'packages/core/src/locales/en.ts',
       'packages/core/src/locales/tr.ts',
-      'packages/core/src/lib/notificationText.ts',
       'web/src/locales/en.json',
       'web/src/locales/tr.json',
       'backend/internal/srvtext/locales/en.json',

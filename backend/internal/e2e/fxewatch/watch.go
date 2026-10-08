@@ -17,6 +17,11 @@
 // file no longer uses) go. A version holding different content under a
 // different key is history the owner may want, and it opens only what it
 // always opened; so is one under the password still in use. Both stay.
+//
+// ⚠ And only for a writer who may (e2e/slotchange): the file's owner or an
+// administrator. Anybody else who may write the file may also upload a header
+// that names its file key under a password slot of their own; that rewrite
+// keeps every version, and the owner is told.
 package fxewatch
 
 import (
@@ -24,10 +29,12 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"strings"
 
-	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2e/slotchange"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -49,6 +56,11 @@ type Watch struct {
 	Audit    Audit
 	Versions Versions // nil: nothing to compare against, nothing to delete
 	Resolver func(storageID int64) (storage.Driver, error)
+	// Owners answers who owns the file and who wrote (db.Store). nil: no
+	// owner is known, so only an administrator's rewrite deletes anything.
+	Owners slotchange.Store
+	// Notify tells the owner (nil: nobody is told; the audit rows stay).
+	Notify notify.Service
 }
 
 // head reads as much of a stored object as a `.fxe` header can take.
@@ -96,17 +108,30 @@ func (w *Watch) OnWritten(ctx context.Context, storageID int64, node *model.Node
 		}
 	}
 	diff := e2e.DiffFileHeaders(before, after)
+	subject := slotchange.Subject{StorageID: storageID, Root: strings.Trim(node.Path, "/"), File: true}
 
-	deleted := 0
+	var retired []*model.NodeVersion
 	if diff.Valid && w.Versions != nil {
 		for i, v := range versions {
 			old := before
 			if i > 0 {
 				old = head(ctx, drv, v.StorageKey)
 			}
-			if !e2e.RetiredSecret(old, after) {
-				continue
+			if e2e.RetiredSecret(old, after) {
+				retired = append(retired, v)
 			}
+		}
+	}
+	// A password change of THIS file - the same file key under another
+	// secret - is told; a different file written under the name is not.
+	changed := diff.Valid && e2e.RetiredSecret(before, after)
+	var verdict slotchange.Verdict
+	if changed || len(retired) > 0 {
+		verdict = slotchange.Judge(ctx, w.Owners, subject)
+	}
+	deleted, kept := 0, 0
+	if verdict.MayRetire {
+		for _, v := range retired {
 			if err := w.Versions.HardDeleteVersion(ctx, v.ID); err != nil {
 				slog.Warn("e2e: could not delete an old version of an encrypted file",
 					slog.Int64("storage", storageID), slog.String("path", node.Path), slog.String("err", err.Error()))
@@ -114,6 +139,8 @@ func (w *Watch) OnWritten(ctx context.Context, storageID int64, node *model.Node
 			}
 			deleted++
 		}
+	} else {
+		kept = len(retired)
 	}
 
 	meta := map[string]any{
@@ -128,10 +155,16 @@ func (w *Watch) OnWritten(ctx context.Context, storageID int64, node *model.Node
 	if deleted > 0 {
 		meta["versions_deleted"] = deleted
 	}
+	if kept > 0 {
+		meta["versions_kept"] = kept
+	}
 	var actorID *int64
-	if u := auth.UserFrom(ctx); u != nil {
-		actorID = &u.ID
-		meta["actor_email"] = u.Email
+	if wr := slotchange.WriterOf(ctx, w.Owners); wr.ID > 0 {
+		id := wr.ID
+		actorID = &id
+		if wr.User != nil {
+			meta["actor_email"] = wr.User.Email
+		}
 	}
 	target := ""
 	if node.ID != 0 {
@@ -148,5 +181,18 @@ func (w *Watch) OnWritten(ctx context.Context, storageID int64, node *model.Node
 			slog.Warn("e2e: could not audit a rewritten encrypted file",
 				slog.Int64("storage", storageID), slog.String("path", node.Path), slog.String("err", err.Error()))
 		}
+	}
+
+	// The password change itself, said by the server from what it saw change
+	// - never from a client's announcement (e2e/slotchange).
+	if changed {
+		t := &slotchange.Teller{Store: w.Owners, Audit: w.Audit, Notify: w.Notify}
+		t.Tell(ctx, slotchange.Change{
+			Subject: subject,
+			Changes: diff.Changes,
+			Origin:  origin,
+			Deleted: deleted,
+			Kept:    kept,
+		}, verdict)
 	}
 }

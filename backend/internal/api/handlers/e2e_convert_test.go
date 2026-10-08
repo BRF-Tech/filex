@@ -69,6 +69,23 @@ func TestE2EConvert_AConversionWriteKeepsNoPlaintextVersion(t *testing.T) {
 	require.Len(t, versionsOf(t, f, "Kasa/d.txt"), 1, "the flag alone never skips a version")
 }
 
+// The key file's "conversion under way" is the client's word - anybody who
+// may write the folder may write a key file that says it. An editor who does
+// not own the folder writes ciphertext over plaintext with the flag set: the
+// plaintext is kept as a version, as for any overwrite. Up to 0.53 the flag
+// alone dropped it, which otherwise takes the owner or an administrator.
+func TestE2EConvert_TheKeyFilesFlagGivesAnEditorNoWriteWithoutAVersion(t *testing.T) {
+	f := newStagedFixtureWith(t, withVersions)
+	f.stagedAt(t, "Kasa", "a.txt", []byte("plaintext of a"), false)
+	f.stagedAt(t, "Kasa", ".filex-e2e.json", []byte(kfConvPending), false)
+
+	ed := f.asEditor(t)
+	ed.stagedAt(t, "Kasa", "a.txt", cipherBody("a"), true)
+	vs := versionsOf(t, f, "Kasa/a.txt")
+	require.Len(t, vs, 1, "only the folder's owner or an administrator writes without keeping a version")
+	require.Contains(t, readSnapshot(t, f, vs[0]), "plaintext of a")
+}
+
 func TestE2EConvert_TheFlagDoesNothingOutsideAnEncryptedFolder(t *testing.T) {
 	f := newStagedFixtureWith(t, withVersions)
 	f.stagedAt(t, "Acik", "x.txt", []byte("plaintext"), false)

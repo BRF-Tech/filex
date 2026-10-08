@@ -82,8 +82,29 @@ if (cmd === 'sync') {
 }
 `;
 
-/* The pack's own check: green, or red when the run asks for it. */
-export const CHECK_MJS = `if (process.env.LANGPACK_TEST_RED) { console.log('pack check: 1 error'); process.exit(1); }
+/* The pack's own check, as strict as the real packs' (validate-de.mjs,
+   validate-fr.mjs, style-check.mjs): a key of translations/<tag>.json that
+   the pack's catalogue does not have - neither a key nor a plural form of
+   one - is an ERROR UNKNOWN. ⚠ The stand-in sync above KEEPS such a key, as
+   every pack's pack.mjs did through 0.53: that pair is what put every pack
+   back in 0.53 (`tenants.modeOff`), and it is why apply and release must
+   drop the key themselves. Red on demand too (LANGPACK_TEST_RED). */
+export const CHECK_MJS = `import fs from 'node:fs';
+if (process.env.LANGPACK_TEST_RED) { console.log('pack check: 1 error'); process.exit(1); }
+const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+const en = read('catalogue/filex-catalogue-en.json');
+const unknown = [];
+for (const f of fs.readdirSync('translations').filter((n) => n.endsWith('.json'))) {
+  for (const k of Object.keys(read('translations/' + f))) {
+    const base = k.replace(/_(zero|one|two|few|many)$/, '');
+    if (!(k in en) && !(base in en)) unknown.push(f.slice(0, -5) + ' ' + k);
+  }
+}
+if (unknown.length) {
+  for (const k of unknown) console.log('ERROR UNKNOWN ' + k + ': key not in the catalogue');
+  console.log('pack check: ' + unknown.length + ' error(s)');
+  process.exit(1);
+}
 console.log('pack check: 0 errors, 0 warnings');
 `;
 

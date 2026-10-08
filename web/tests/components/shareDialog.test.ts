@@ -38,7 +38,13 @@ function fakeApi(opts: { perms?: 'owner' | 'forbidden'; rbac?: boolean; shares?:
       const uuid = String(++seq);
       const s: Share = { uuid, url: `https://files.example/${body.kind === 'drop' ? 'd' : 's'}/${uuid}`, kind: body.kind ?? 'download' };
       shares.push(s);
-      return { share: { url: s.url, password_pin: body.password ? '4242' : null, expires_at: null } };
+      // The server writes the download command (handlers/share_command.go);
+      // a file request gets none.
+      const download_command =
+        body.kind === 'drop'
+          ? null
+          : { curl: `curl -fSL -o 'x.zip' '${s.url}?zip=wait'`, powershell: `Invoke-WebRequest -UseBasicParsing -Uri '${s.url}?zip=wait' -OutFile 'x.zip'` };
+      return { share: { url: s.url, password_pin: body.password ? '4242' : null, expires_at: null, download_command } };
     }),
     revokeShare: vi.fn(async (uuid: string) => {
       calls.revoke++;
@@ -243,4 +249,48 @@ describe('"Manage permissions" in the details panel', () => {
       w.unmount();
     });
   }
+});
+
+describe('what the server decides about a new link (#210)', () => {
+  it('the command line is the SERVER’s download_command, shown as it is - curl and PowerShell', async () => {
+    const { api } = fakeApi({ perms: 'owner' });
+    const w = dialog({ api });
+    await flushPromises();
+    await w.get('[data-testid="share-switch"]').trigger('click');
+    await flushPromises();
+    await w.get('[data-testid="share-options-toggle"]').trigger('click');
+    expect(w.get('[data-testid="share-cli-curl"]').text()).toBe(
+      "curl -fSL -o 'x.zip' 'https://files.example/s/101?zip=wait'",
+    );
+    expect(w.get('[data-testid="share-cli-powershell"]').text()).toBe(
+      "Invoke-WebRequest -UseBasicParsing -Uri 'https://files.example/s/101?zip=wait' -OutFile 'x.zip'",
+    );
+    w.unmount();
+  });
+
+  it('no download_command from the server: no command line made up here', async () => {
+    const { api } = fakeApi({ perms: 'owner' });
+    (api.createShare as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => ({
+      share: { url: 'https://files.example/s/9', password_pin: null, expires_at: null },
+    }));
+    const w = dialog({ api });
+    await flushPromises();
+    await w.get('[data-testid="share-switch"]').trigger('click');
+    await flushPromises();
+    await w.get('[data-testid="share-options-toggle"]').trigger('click');
+    expect(w.find('[data-testid="share-cli"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('the link’s life is sent as a LENGTH (expires_in), never a moment worked out on this device’s clock', async () => {
+    const { api } = fakeApi({ perms: 'owner' });
+    const w = dialog({ api, shareMaxTtlDays: 7 });
+    await flushPromises();
+    await w.get('[data-testid="share-switch"]').trigger('click');
+    await flushPromises();
+    const body = (api.createShare as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+    expect(body.expires_in).toBe(7 * 86400);
+    expect(body).not.toHaveProperty('expires_at');
+    w.unmount();
+  });
 });

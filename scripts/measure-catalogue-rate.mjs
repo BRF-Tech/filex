@@ -93,6 +93,7 @@ const server = spawn(path.resolve(BIN), ['serve'], {
     FILEX_SECRET_KEY: 'catalogue-rate-lab-not-for-production',
   },
   stdio: ['ignore', log, log],
+  windowsHide: true,
 })
 let exited = null
 server.on('exit', (c) => (exited = c))

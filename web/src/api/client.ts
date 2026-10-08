@@ -1,11 +1,11 @@
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import type { Router } from 'vue-router';
 import {
-  codeWords,
   foreignText,
   kindOfMethod,
   noteRequestFailed,
   noteRequestSucceeded,
+  serverSaid,
   statusIsTelling,
   statusWords,
 } from '@brftech/filex-core';
@@ -154,26 +154,18 @@ function readCookie(name: string): string | null {
 
 export function extractError(err: unknown, fallback?: string): string {
   if (axios.isAxiosError(err)) {
-    // ⚠ 423 is an APP LOCK, not an error to print: an app (the signing app,
-    // while signatures are collected) froze the file, and the server answers
-    // every door with who holds it and why (handlers.lockedAnswer). Its
-    // `message` is English and names a path; the person reads the app's name
-    // and reason in their own language instead. One place, so every page that
-    // shows a refused write says the same thing.
-    if (err.response?.status === 423) return lockedText(err.response.data);
-    // A refusal the server names in a `code` (the queue's doors:
-    // NOT_CANCELLABLE, FINISHED, TOO_MANY…) is said in the reader's language,
-    // in the explorer's words (core lib/errorWords) — its `error` is English.
-    const byCode = codeWords(err.response?.data, String(i18n.global.locale.value));
-    if (byCode) return byCode;
-    // ⚠ `message` FIRST when both are present. A response that carries both is
-    // one where `error` is a machine code and `message` is the sentence
-    // written for the person reading it (`supertenant_only` +
-    // "protection settings apply to the whole instance…", `plugins_disabled` +
-    // which env var did it). Preferring `error` put the code on screen and
-    // threw the sentence away. Handlers that return only `error` — the large
-    // majority, and they put the sentence there — are unaffected.
-    const said = err.response?.data?.message ?? err.response?.data?.error;
+    // ⚠⚠ The SERVER's sentence first (`message`, backend internal/apierr,
+    // docs/API-ERRORS.md): written in the reader's language, and the same
+    // words the explorer shows for the same refusal - one helper, core
+    // lib/errorWords `serverSaid` (0.54 audit A1). That covers an app lock
+    // (423: who holds the file, why, until when - handlers.lockedAnswer, A3)
+    // and the queue's coded refusals (NOT_CANCELLABLE, FINISHED, TOO_MANY…),
+    // which this panel used to word itself from a table of codes.
+    const fromServer = serverSaid(err.response?.data, String(i18n.global.locale.value));
+    if (fromServer) return fromServer;
+    // An older refusal that put its sentence in `error` (most handlers that
+    // the envelope has not reached yet) is still the server's own words.
+    const said = err.response?.data?.error;
     // ⚠⚠ ISOLATED. This sentence was written by the SERVER (`server.*`,
     // internal/srvtext) or by an installed app, so it never passed through
     // vue-i18n and the panel's post-translation hook never saw it — the one
@@ -202,11 +194,3 @@ export function extractError(err: unknown, fallback?: string): string {
   return fallback ?? t('errors.generic');
 }
 
-/** The sentence for a 423 app-lock refusal (see extractError). */
-function lockedText(data: unknown): string {
-  const d = (data ?? {}) as { plugin?: unknown; reason?: unknown };
-  const app = typeof d.plugin === 'string' && d.plugin ? d.plugin : t('appLock.someApp');
-  return typeof d.reason === 'string' && d.reason
-    ? t('appLock.refusedReason', { app, reason: d.reason })
-    : t('appLock.refused', { app });
-}

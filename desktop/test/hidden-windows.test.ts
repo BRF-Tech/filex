@@ -9,6 +9,9 @@
 // `win.show()` somewhere else would put a window back on that desktop, and the
 // Store run would only notice if it happened to reach that window.
 //
+// The console windows of the programs a script or test starts (powershell,
+// node, a shell) are web/tests/quality/hiddenConsoleWindows.test.ts's (#197).
+//
 // Run:  node --experimental-strip-types --test desktop/test/hidden-windows.test.ts
 
 import assert from 'node:assert/strict';

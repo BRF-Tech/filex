@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/nodefilter"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenant"
@@ -191,6 +194,16 @@ type searchResult struct {
 	// E2eRoot is the end-to-end encrypted folder the hit sits in (a wire
 	// path); absent otherwise. See e2eRoots.
 	E2eRoot string `json:"e2e_root,omitempty"`
+	// Score is the ranker's number for this hit, bigger is better within a
+	// tier (filex 0.54, audit D7: the admin search test printed 0.000 for
+	// every row because the client made it up).
+	Score float64 `json:"score"`
+	// Starred: the caller starred this row (omitted otherwise). One query
+	// per response (starredAmong), so the explorer needs no star list.
+	Starred bool `json:"starred,omitempty"`
+	// Kind is what the row is (nodefilter.KindOf), the word the type
+	// narrowing and the explorer's Type chip use.
+	Kind string `json:"kind,omitempty"`
 }
 
 // describeHits fills in the two things a raw node row cannot say about
@@ -281,8 +294,10 @@ func (h *Search) describeHits(ctx context.Context, rows []searchResult) {
 // the POST flow.
 func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	var req searchRequest
+	var filterValues nodefilter.Values = url.Values{}
 	if r.Method == http.MethodGet {
 		q := r.URL.Query()
+		filterValues = q
 		req.Query = q.Get("q")
 		if req.Query == "" {
 			req.Query = q.Get("query")
@@ -299,14 +314,28 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Scope = q.Get("scope")
 	} else {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil || json.Unmarshal(body, &req) != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 			return
 		}
+		var fields map[string]any
+		_ = json.Unmarshal(body, &fields)
+		filterValues = nodefilter.FromMap(fields)
 	}
 	if req.Limit <= 0 {
 		req.Limit = 50
 	}
+	// The narrowing (filex 0.54, audit D6): kind, mime, dates, sizes,
+	// folders, owner, hidden names - read from the query string on GET and
+	// from the body on POST, applied to every candidate BEFORE the limit
+	// counts it.
+	crit, cerr := nodefilter.Parse(filterValues)
+	if cerr != nil {
+		writeBadFilter(w, cerr)
+		return
+	}
+	narrow := newNarrowing(r.Context(), h.Store, crit)
 	sc := search.ParseScope(req.Scope)
 	// Root confinement. A token confined to one folder (a `root:` scope, put
 	// on the context by confine.Middleware — this route is under /api/files)
@@ -361,10 +390,15 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The tag filter and the narrowing travel to the index together.
+	indexFilter := narrow.into(tagFilter)
 
 	results := []searchResult{}
 	// truncated: more matched than came back (see the response below).
 	truncated := false
+	// matched: how many rows satisfied the query before the page was cut -
+	// the response's `total` (a lower bound while `truncated` is true).
+	matched := 0
 	switch {
 	case parsed.HasTagFilter() && parsed.Text == "":
 		// A bare `tag:x` is a listing, not a search: there is no text to
@@ -383,28 +417,44 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 			if !withinRoot(n.StorageID, n.Path) {
 				continue
 			}
+			if !narrow.accepts(n) {
+				continue
+			}
+			matched++
 			results = append(results, searchResult{Node: n, Matched: search.MatchedName})
 			if len(results) >= req.Limit {
 				// Cut when a tagged node is left over - inside the root
 				// (rootRows): one outside it is not this caller's to hint at.
-				truncated = rootRows(tagged[i+1:]) > 0
+				// With a narrowing, a leftover that the narrowing would turn
+				// away is not a cut either.
+				rest := tagged[i+1:]
+				if narrow.active() {
+					kept := make([]*model.Node, 0, len(rest))
+					for _, m := range rest {
+						if narrow.accepts(m) {
+							kept = append(kept, m)
+						}
+					}
+					rest = kept
+				}
+				truncated = rootRows(rest) > 0
 				break
 			}
 		}
 	case h.Index != nil:
-		hits := h.Index.SafeSearchFiltered(r.Context(), parsed.Text, req.Limit, sc, tagFilter)
+		hits, more, serr := h.Index.SearchPage(r.Context(), parsed.Text, req.Limit, sc, indexFilter)
+		if serr != nil {
+			hits, more = nil, false
+		}
 		// The index returns at most `limit` hits; a full page is a cut answer
 		// - a page full of hits inside the root, for a confined caller
-		// (rootRows).
+		// (rootRows). With a narrowing, a candidate window Bleve filled is
+		// one too: rows it turned away may have hidden matches past it.
 		pageNodes := make([]*model.Node, 0, len(hits))
 		for _, hit := range hits {
-			n, err := h.Store.GetNode(r.Context(), hit.NodeID)
-			if err != nil {
-				n = nil
-			}
-			pageNodes = append(pageNodes, n)
+			pageNodes = append(pageNodes, narrow.node(hit.NodeID))
 		}
-		truncated = rootRows(pageNodes) >= req.Limit
+		truncated = rootRows(pageNodes) >= req.Limit || (narrow.active() && more)
 		for i, hit := range hits {
 			n := pageNodes[i]
 			if n != nil && (req.StorageID == 0 || n.StorageID == req.StorageID) {
@@ -417,7 +467,8 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 				if !withinRoot(n.StorageID, n.Path) {
 					continue
 				}
-				results = append(results, searchResult{Node: n, Snippet: hit.Snippet, Matched: hit.Matched})
+				matched++
+				results = append(results, searchResult{Node: n, Snippet: hit.Snippet, Matched: hit.Matched, Score: hit.Score})
 			}
 		}
 	}
@@ -437,7 +488,7 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	if len(results) == 0 && req.StorageID != 0 && parsed.Text != "" && sc != search.ScopeContent {
 		plan := search.PlanFallback(parsed.Text)
 		truncated = false
-		window := req.Limit * search.FallbackOverFetch
+		window := narrowedWindow(narrow, req.Limit*search.FallbackOverFetch)
 		// One row past the window: a row beyond it is the proof it was full.
 		fallback, err := plan.Candidates(r.Context(), h.Store, req.StorageID, window+1)
 		if err == nil {
@@ -460,15 +511,23 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 				if !withinRoot(n.StorageID, n.Path) {
 					continue
 				}
-				results = append(results, searchResult{Node: n, Matched: search.MatchedName})
+				// The narrowing before the page is cut, like the index's.
+				if !narrow.accepts(n) {
+					continue
+				}
+				results = append(results, searchResult{Node: n, Matched: search.MatchedName, Score: float64(plan.Score(n.Name, n.Path))})
 			}
 			sortByRank(results, plan)
+			matched = len(results)
 			if len(results) > req.Limit {
 				truncated = true
 				results = results[:req.Limit]
 			}
 		}
 	}
+	// Rows the tenant and RBAC filters below drop are not matches the caller
+	// may count (`total`).
+	countBefore := len(results)
 	// Multi-tenant: drop hits in storages outside the caller's tenant. This is
 	// the file-data (layer-1) confinement — an unfiltered search is the classic
 	// cross-tenant leak (content, not just a name). No-op unless a scope is set.
@@ -507,12 +566,28 @@ func (h *Search) Search(w http.ResponseWriter, r *http.Request) {
 	// it.
 	h.describeHits(r.Context(), results)
 	roots := newE2eRoots(h.Store)
+	ids := make([]int64, 0, len(results))
 	for i := range results {
 		results[i].E2eRoot = roots.of(r.Context(), results[i].StorageID, results[i].Storage, results[i].Path)
+		results[i].Kind = nodefilter.KindOf(results[i].Name, results[i].Mime, results[i].Type == model.NodeTypeDirectory)
+		ids = append(ids, results[i].ID)
+	}
+	starred := starredAmong(r.Context(), h.Store, ids)
+	for i := range results {
+		results[i].Starred = starred[results[i].ID]
 	}
 	// `truncated`: more rows matched than came back — the index filled its
 	// page, or the fallback filled its window or had more than `limit` left
 	// after ranking. Rows the tenant or RBAC filters then dropped do not make
 	// an answer "cut"; only the page and the window do.
-	writeJSON(w, http.StatusOK, map[string]any{"results": results, "truncated": truncated})
+	//
+	// `total`: the rows that matched before the page was cut, less the ones
+	// the tenant and RBAC filters dropped. Exact while `truncated` is false,
+	// a lower bound while it is true - the server does not count past its
+	// window.
+	total := matched - (countBefore - len(results))
+	if total < len(results) {
+		total = len(results)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results, "truncated": truncated, "total": total})
 }

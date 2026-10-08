@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,13 +15,16 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/nodefilter"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -270,6 +275,7 @@ func withdrawUngrantedFileTools(srv *mcp.Server, tok *model.APIToken) {
 
 type mcpListIn struct {
 	Path string `json:"path,omitempty" jsonschema:"adapter://dir path to list; empty = first storage root"`
+	Sort string `json:"sort,omitempty" jsonschema:"order: name (default), modified, size or type; a leading - reverses it (-modified = newest first). Folders always come before files."`
 }
 type mcpEntriesOut struct {
 	Entries []aiEntry `json:"entries"`
@@ -334,6 +340,40 @@ type mcpSearchIn struct {
 	// Content is a *bool so an omitted argument defaults to TRUE (the
 	// frozen v0.2 contract) while an explicit false still turns it off.
 	Content *bool `json:"content,omitempty" jsonschema:"also match inside extracted file contents and return snippets (default true)"`
+	// The narrowing (filex 0.54): the same parameters /api/files/search
+	// takes, applied before the result count is cut.
+	Type           string `json:"type,omitempty" jsonschema:"only this kind: file, dir, document, spreadsheet, presentation, pdf, image, video, audio, archive, code, text or other"`
+	Mime           string `json:"mime,omitempty" jsonschema:"only mime types starting with this (image/, application/pdf)"`
+	ModifiedAfter  string `json:"modified_after,omitempty" jsonschema:"modified at or after: RFC 3339, YYYY-MM-DD or unix milliseconds"`
+	ModifiedBefore string `json:"modified_before,omitempty" jsonschema:"modified at or before: RFC 3339, YYYY-MM-DD or unix milliseconds"`
+	MinSize        string `json:"min_size,omitempty" jsonschema:"at least this many bytes (folders never match a size bound)"`
+	MaxSize        string `json:"max_size,omitempty" jsonschema:"at most this many bytes"`
+	Under          string `json:"under,omitempty" jsonschema:"only inside this folder (adapter://dir or a storage-relative path)"`
+	NotUnder       string `json:"not_under,omitempty" jsonschema:"only outside this folder"`
+	Owner          string `json:"owner,omitempty" jsonschema:"me, system (nobody put it there through filex) or an account id"`
+	Hidden         string `json:"hidden,omitempty" jsonschema:"false drops names starting with a dot; default keeps them"`
+}
+
+// filterValues is the input's narrowing as the parameters nodefilter.Parse
+// reads.
+func (in mcpSearchIn) filterValues() url.Values {
+	v := url.Values{}
+	set := func(k, x string) {
+		if strings.TrimSpace(x) != "" {
+			v.Set(k, x)
+		}
+	}
+	set("type", in.Type)
+	set("mime", in.Mime)
+	set("modified_after", in.ModifiedAfter)
+	set("modified_before", in.ModifiedBefore)
+	set("min_size", in.MinSize)
+	set("max_size", in.MaxSize)
+	set("under", in.Under)
+	set("not_under", in.NotUnder)
+	set("owner", in.Owner)
+	set("hidden", in.Hidden)
+	return v
 }
 
 // mcpTagsIn is the file_tags input. `Set` is a pointer so "not given" (read)
@@ -414,7 +454,11 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		Description: "List files and folders in a directory. Path is adapter://dir (adapter = storage name); empty path lists the first storage's root. " +
 			"An entry with encrypted: true is end-to-end encrypted (inside the encrypted folder named by e2e_root, or a single encrypted .fxe file): filex holds no key, so its content cannot be read here.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpListIn) (*mcp.CallToolResult, mcpEntriesOut, error) {
-		entries, err := ops.List(ctx, in.Path)
+		order, ok := listorder.Parse(in.Sort, listorder.Default)
+		if !ok {
+			return toolErr[mcpEntriesOut](fmt.Errorf("bad sort %q: use name, modified, size or type, optionally with a leading -", in.Sort))
+		}
+		entries, err := ops.ListSorted(ctx, in.Path, order)
 		if err != nil {
 			return toolErr[mcpEntriesOut](err)
 		}
@@ -553,7 +597,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 		Description: "Search file/folder names AND (by default) inside extracted file contents within a storage. Name matching is forgiving: `.`, `-`, `_` and a space are interchangeable (`invoice 2026` finds `invoice_2026.pdf`), every word must match, and one typo is tolerated. A query may carry `tag:<name>` / `-tag:<name>` filters, which narrow to (or exclude) files carrying that tag - your personal tag of that name or your team's, both count; a tag that does not exist returns nothing. Results are ranked: exact filename, prefix, name, path, fuzzy, then content-only. Content hits include a plain-text snippet with matches wrapped in « ». Pass content=false for the old name-only behavior.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpSearchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 		withContent := in.Content == nil || *in.Content
-		entries, err := mcpSearch(ctx, ops, idx, in.Path, in.Query, withContent)
+		entries, err := mcpSearch(ctx, ops, idx, in.Path, in.Query, withContent, in.filterValues())
 		if err != nil {
 			return toolErr[mcpSearchOut](err)
 		}
@@ -576,7 +620,7 @@ func registerFilexTools(srv *mcp.Server, ops *aiOps, idx *search.Index) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "file_share",
-		Description: "Create a public share link for a file or folder (folders download as a ZIP). Returns the URL + a one-time PIN if pin=true. Use this to hand a file to someone without filex access - do NOT stream large files back through file_read. " +
+		Description: "Create a public share link for a file or folder (folders download as a ZIP). Returns the URL, a one-time PIN if pin=true, and download_command: the ready curl and PowerShell lines that fetch it (PIN, folder ZIP and redirects already handled - pass them on as they are). Use this to hand a file to someone without filex access - do NOT stream large files back through file_read. " +
 			"An end-to-end encrypted folder and anything inside it is never shared (E2E_ENCRYPTED). A single encrypted file (.fxe) is: the result says encrypted: true, and its recipient needs the file's password to open it.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in mcpShareIn) (*mcp.CallToolResult, aiShareResult, error) {
 		res, err := ops.CreateShare(ctx, in.Path, in.Pin, in.ExpiresInDays, in.MaxDownloads)
@@ -725,8 +769,12 @@ func mcpAuditRow(ctx context.Context, store db.Store, tool, id string, detail *a
 // access filters aiOps.Search enforces — storage scoping via resolveStorage,
 // the token's confinement root, and the bound user's RBAC grants — so a
 // snippet can never leak text the caller couldn't reach by browsing.
-func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query string, withContent bool) ([]mcpSearchEntry, error) {
+func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query string, withContent bool, filters nodefilter.Values) ([]mcpSearchEntry, error) {
 	s, _, err := ops.resolveStorage(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	crit, err := nodefilter.Parse(filters)
 	if err != nil {
 		return nil, err
 	}
@@ -735,6 +783,9 @@ func mcpSearch(ctx context.Context, ops *aiOps, idx *search.Index, p, query stri
 	if err != nil {
 		return nil, err
 	}
+	// The narrowing rides with the tag filter: the index asks it about every
+	// candidate, the name search about every row (visibleEntries).
+	tagFilter.index = newNarrowing(ctx, ops.store, crit).into(tagFilter.index)
 	nameEntries, err := aiNameSearch(ctx, ops, p, parsed, tagFilter)
 	if err != nil {
 		return nil, err
@@ -808,6 +859,12 @@ func toolErr[T any](err error) (*mcp.CallToolResult, T, error) {
 	text := err.Error()
 	if code := aiErrCode(err); code != "" {
 		text = code + ": " + text
+	} else if code, params := apierr.CodeOf(err); code != "" {
+		// A coded failure (internal/apierr) reads as its REST twin's
+		// envelope does: the code, then the server's sentence.
+		if said := apierr.Text("", code, params); said != "" {
+			text = strings.ToUpper(code) + ": " + said
+		}
 	}
 	return &mcp.CallToolResult{
 		IsError: true,

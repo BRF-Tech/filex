@@ -306,7 +306,7 @@ The public repository's GitHub Actions (`.github/workflows/`):
 | Workflow · job | When | What |
 |---|---|---|
 | `ci.yml` · `browser` | every push to `main` and every pull request | `node e2e/run.mjs cypress --build` - the Cypress suite against a throwaway build of that commit; failure screenshots and video are uploaded |
-| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux - a shot script that no longer fits the product turns red here instead of on release night. ⚠ The scenes that need an app build (`apps.mjs`, `signing.mjs`) are **left out** in CI and taken on the build host at release step 2 - see [CONTRIBUTING.md → Screenshots](../docs/CONTRIBUTING.md#screenshots) |
+| `shots.yml` | every `v*` tag, and on demand | `pnpm shots` on Linux - a shot script that no longer fits the product turns red here instead of on release night. ⚠ The scenes that need an app build (`apps.mjs`, `signing.mjs` and the others that call `findApp` or `documentServer`) are **left out** in CI and taken in the build host's test chain, every night and at release step 2 - see [CONTRIBUTING.md → Screenshots](../docs/CONTRIBUTING.md#screenshots) |
 
 ⚠ **No CI job runs the Playwright suite** (`node e2e/run.mjs local`). It gates a
 release because the release process runs it (`docs/CONTRIBUTING.md` → *Release

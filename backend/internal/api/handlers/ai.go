@@ -14,7 +14,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/httpx"
+	"github.com/brf-tech/filex/backend/internal/nodefilter"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -298,6 +300,13 @@ func (h *AI) Search(w http.ResponseWriter, r *http.Request) {
 		writeAIError(w, err)
 		return
 	}
+	// The narrowing /api/files/search takes (filex 0.54, audit D6).
+	crit, cerr := nodefilter.Parse(q)
+	if cerr != nil {
+		writeBadFilter(w, cerr)
+		return
+	}
+	tags.index = newNarrowing(r.Context(), h.ops.store, crit).into(tags.index)
 	entries, err := aiNameSearch(r.Context(), h.ops, p, parsed, tags)
 	if err != nil {
 		writeAIError(w, err)
@@ -426,7 +435,7 @@ func (h *AI) Unzip(w http.ResponseWriter, r *http.Request) {
 func writeAIError(w http.ResponseWriter, err error) {
 	var ue *entryUnavailableError
 	if errors.As(err, &ue) {
-		writeJSON(w, http.StatusConflict, ue.body())
+		writeJSON(w, http.StatusConflict, ue.body(""))
 		return
 	}
 	writeJSON(w, aiStatus(err), aiErrorBody(err))
@@ -467,6 +476,16 @@ func aiStatus(err error) int {
 	if errors.Is(err, errEntryUnavailable) {
 		return http.StatusConflict
 	}
+	// writegate's vault rule (docs/E2E-VAULT-FORMAT.md): inside a vault only
+	// the vault API writes (403, VAULT_PATH), and a vault's key file keeps
+	// its vault block and its place (409, VAULT_KEYFILE). The agent surface
+	// has no vault API: it holds no key.
+	if errors.Is(err, writegate.ErrVaultKeyFile) {
+		return http.StatusConflict
+	}
+	if errors.Is(err, writegate.ErrVaultPath) {
+		return http.StatusForbidden
+	}
 	// writegate: an app has frozen the path (423, the message names the app),
 	// or it is one of filex's own names (403).
 	if errors.Is(err, writegate.ErrLocked) {
@@ -506,6 +525,12 @@ func aiStatus(err error) int {
 	// "no free name left", and answered 500, which reads as "retry" (task #116).
 	if errors.Is(err, ops.ErrNoFreeName) {
 		return http.StatusConflict
+	}
+	// The per-file upload limit and the account's ceiling (checkWriteQuota):
+	// 413 with FILE_TOO_LARGE / QUOTA_EXCEEDED, the explorer's upload answer.
+	// mapDriverErr would call either a server fault (500).
+	if errors.Is(err, quota.ErrQuotaExceeded) {
+		return http.StatusRequestEntityTooLarge
 	}
 	// Permanent refusals, not server faults: a confined token reaching outside
 	// its root, or the bound user lacking the grant level. These must NOT fall

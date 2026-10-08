@@ -25,7 +25,10 @@ import { requestFailure } from '../lib/errorWords';
  *     screen, disabled, with the reason — a choice that vanishes cannot tell
  *     the person it exists. A team chip's × is likewise absent for them.
  *   - The name keeps its capitals ("Müşteri Teklifi"); the server decides
- *     sameness (lib/tags `tagKey` mirrors it only to avoid a pointless POST).
+ *     sameness and says it as each item's `key` (#211). A typed name has no
+ *     key yet, so only an exact repeat is held back here; the server keeps
+ *     one tag for the rest. Its length is the server's too (`limits.
+ *     tag_max_runes`), counted in characters as the server counts them.
  *   - An OLDER server (no `items` in its answer) has one shared kind: the
  *     chips read as team and the kind choice is not offered, because the old
  *     server would ignore it and the person would believe a label was private
@@ -51,7 +54,8 @@ import { requestFailure } from '../lib/errorWords';
 import { ref, watch, onMounted, computed } from 'vue';
 import { useLocale } from '../composables/useLocale';
 import type { LocaleCode } from '../types/ExplorerConfig';
-import { announceTagsChanged, tagItemsOf, tagKey, type TagItem, type TagKind } from '../lib/tags';
+import { announceTagsChanged, tagItemsOf, type TagItem, type TagKind } from '../lib/tags';
+import { clipRunes, serverLimit } from '../lib/serverRules';
 import TagKindIcon from './TagKindIcon.vue';
 import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
 
@@ -207,10 +211,18 @@ function closeAdd() {
   adding.value = false;
 }
 
+/* The longest name the server keeps, in characters (`maxlength` counts
+   UTF-16 units: an emoji counted twice, #211 audit B12). */
+const tagMax = computed(() => serverLimit('tag_max_runes'));
+watch(newTag, (v) => {
+  const clipped = clipRunes(v, tagMax.value);
+  if (clipped !== v) newTag.value = clipped;
+});
+
 function add() {
   const v = newTag.value.trim();
   const kind: TagKind = legacy.value ? 'team' : newKind.value;
-  if (!v || items.value.some((i) => i.kind === kind && tagKey(i.name) === tagKey(v))) {
+  if (!v || items.value.some((i) => i.kind === kind && i.name === v)) {
     closeAdd();
     return;
   }
@@ -281,7 +293,6 @@ watch(() => props.nodeId, load);
       <input
         v-model="newTag"
         autofocus
-        maxlength="64"
         :placeholder="t('tags.name')"
         :aria-label="t('tags.name')"
         @blur="onFieldBlur"

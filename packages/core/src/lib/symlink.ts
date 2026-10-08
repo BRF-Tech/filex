@@ -13,28 +13,27 @@
  * ⚠⚠ THE WIRE, AS MEASURED — read this before changing anything below.
  * The driver decides a link's fate in `local.describeLink` and records it as
  * `storage.MetaLinkState` (`followed` / `outside_root` / `broken` /
- * `unresolved`). What reaches the browser is LESS than that, and it is less in
- * two different ways:
+ * `unresolved`). What reaches the browser:
  *
  *   1. `followed` never arrives. `handlers/manager.go` attaches the keys only
  *      when `o.Kind == storage.KindSymlink`, and a followed link has already
  *      become `KindDirectory`/`KindFile` by then. That is correct — a followed
  *      link IS its target and needs no explaining — so `symlink: true` on the
  *      wire always means "this one will not open".
- *   2. `link_state` is the EXCEPTION, not the rule. Two projectors build
- *      listing rows:
- *        • `projectFileNodes` (manager.go:1412) — the DB cache, i.e. the
- *          normal, steady-state listing. It emits `symlink: true` and NOTHING
- *          ELSE, because `model.Node` has no column for the state: the reason
- *          is a property of the link right now, and the catalogue stores what
- *          was seen at scan time.
- *        • `projectDriverObjects` (manager.go:826) — the cold-cache / pre-sync
- *          fallback, which reads the driver directly and therefore DOES carry
- *          `link_state`.
- *      So `symlink: true` with no `link_state` is the COMMON case, not an edge
- *      one, and `'unknown'` below is a first-class state with wording of its
- *      own. A design that only handled the three named states would leave the
- *      reporter's own screen — a warm cache — exactly as broken as before.
+ *   2. `link_state` comes from two places, and since 0.54 both carry it:
+ *        • `projectDriverObjects` — the cold-cache / pre-sync listing, read
+ *          from the driver itself;
+ *        • `projectFileNodes` — the DB cache, i.e. the normal, steady-state
+ *          listing (and search, Recent / Starred / tags through `nodeRow`,
+ *          "shared with me"). The sync records the driver's reason with the
+ *          row (migration 00098) and the listing sends it. Before 0.54 the
+ *          catalogue had no column for it and this listing sent
+ *          `symlink: true` ALONE, so every warm folder said "Link".
+ *      `symlink: true` with no `link_state` still happens: a row catalogued
+ *      before 0.54 until the next sync of its folder, a driver that gives no
+ *      reason, and a state a newer server names that this client has never
+ *      heard of. That is `'unknown'` below — a first-class state with wording
+ *      of its own, never a fall back into silence.
  *
  * `link_target` (the resolved path a followed directory link carries for the
  * walk's cycle guard) is never serialised at all. It is a server-side identity
@@ -57,9 +56,10 @@ import type { FileNode } from '../types/FileNode';
  *
  * The first three are `storage.LinkOutsideRoot` / `LinkBroken` /
  * `LinkUnresolved`. `unknown` is ours: the row says it is a link and the
- * server did not say why — the warm-cache listing (see the note above), or a
- * server newer than this client that named a state we have never heard of.
- * Both deserve the honest general sentence rather than silence.
+ * server did not say why — a row the sync has not given a reason yet (see the
+ * note above), or a server newer than this client that named a state we have
+ * never heard of. Both deserve the honest general sentence rather than
+ * silence.
  */
 export type LinkState = 'outside_root' | 'broken' | 'unresolved' | 'unknown';
 

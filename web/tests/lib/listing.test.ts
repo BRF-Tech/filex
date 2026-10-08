@@ -1,6 +1,6 @@
 // The virtual `.trash` row, and the one listing it must stay out of.
 //
-// ⚠ Same reasoning as connectionGuides.test.ts and shareCli.test.ts: the helper
+// ⚠ Same reasoning as connectionGuides.test.ts: the helper
 // lives in @brftech/filex-core, the core package has no test runner of its own,
 // and this is a pure function — so it is exercised here, in the app that ships
 // it.

@@ -22,7 +22,7 @@ import { mount } from '@vue/test-utils';
 
 import TagPicker from '@brftech/filex-core/src/components/TagPicker.vue';
 import SideNav from '@brftech/filex-core/src/components/SideNav.vue';
-import { tagKey, tagItemsOf, onTagsChanged } from '@brftech/filex-core/src/lib/tags';
+import { keyOfName, tagItemsOf, onTagsChanged } from '@brftech/filex-core/src/lib/tags';
 import {
   makeTagSegment,
   tagOfPath,
@@ -124,6 +124,28 @@ describe('TagPicker — the kind is on every chip and in every add', () => {
       { name: 'Draft', kind: 'personal' },
       { name: 'Customer Offer', kind: 'team' },
     ]);
+    w.unmount();
+  });
+
+  // #211 (audit B12): the name's length is the server's (`limits.tag_max_runes`,
+  // seeded by the test setup) counted in characters - `maxlength` counted an
+  // emoji twice - and which names are one tag is the server's too: a typed
+  // name in other capitals is sent, and the server keeps one tag.
+  it('holds a name to the server’s length in characters, and leaves sameness to the server', async () => {
+    answer = { tags: ['Draft'], items: [{ name: 'Draft', kind: 'personal', key: 'draft' }], can_edit_team: true };
+    const w = picker('en');
+    await settle(w);
+    await w.find('.filex-tag-add-btn').trigger('click');
+    const field = w.find('.filex-tag-add input');
+    expect(field.attributes('maxlength'), 'no UTF-16 count on the box').toBeUndefined();
+    await field.setValue('😀'.repeat(70));
+    await w.vm.$nextTick();
+    expect(Array.from((field.element as HTMLInputElement).value)).toHaveLength(64);
+
+    await field.setValue('DRAFT');
+    await w.find('.filex-tag-add').trigger('submit');
+    await vi.waitFor(() => expect(posted.length).toBe(1));
+    expect((posted[0].items as Array<{ name: string }>).map((i) => i.name)).toEqual(['Draft', 'DRAFT']);
     w.unmount();
   });
 
@@ -257,14 +279,19 @@ describe('SideNav — both kinds, grouped', () => {
 });
 
 describe('lib — what "the same tag" is, and the kind in the address', () => {
-  it('folds case and the four Turkish i’s, keeps accents', () => {
-    expect(tagKey('MÜŞTERİ TEKLİFİ')).toBe(tagKey('müşteri teklifi'));
-    expect(tagKey('IŞIK')).toBe(tagKey('ışık'));
-    expect(tagKey('INVOICE')).toBe(tagKey('invoice'));
-    expect(tagKey('  a   b ')).toBe(tagKey('a b'));
-    expect(tagKey('müşteri')).not.toBe(tagKey('musteri'));
-    // The premise: JS on its own gets the Turkish pair wrong.
-    expect('IŞIK'.toLowerCase()).not.toBe('ışık');
+  // #211 (audit B12): sameness is the server's - each item's `key` - and the
+  // client keeps no copy of the rule (it knew the Turkish i's but not full
+  // case folding: "STRASSE" and "straße" are one tag to the server).
+  it('takes the server’s key with each item, and folds nothing itself', () => {
+    const items = tagItemsOf({
+      items: [
+        { name: 'IŞIK', kind: 'personal', key: 'ışık' },
+        { name: 'straße', kind: 'team', key: 'strasse' },
+      ],
+    });
+    expect(items.map((i) => i.key)).toEqual(['ışık', 'strasse']);
+    expect(keyOfName(items, 'straße')).toBe('strasse');
+    expect(keyOfName(items, 'STRASSE')).toBeUndefined();
   });
 
   it('reads both server shapes', () => {

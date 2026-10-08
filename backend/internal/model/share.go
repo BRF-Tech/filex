@@ -112,6 +112,52 @@ type Share struct {
 	// ⚠ Filled by the LISTINGS (shareMetaCols), not by the single-row reads
 	// (shareCols): those decide whether a link works, and that is the expiry.
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+
+	// State is where the link stands - ShareStateActive, ShareStateExpired,
+	// ShareStateExhausted or ShareStateRevoked - said by the server
+	// (StateAt) on every LIST of links, so a screen shows the word instead of
+	// working it out from the expiry on the browser's clock. Empty on a
+	// single-row read, which decides whether the link works (IsExpired).
+	State string `json:"state,omitempty"`
+}
+
+// Share states, as every list of links names them (Share.StateAt).
+const (
+	// ShareStateActive: the link opens.
+	ShareStateActive = "active"
+	// ShareStateExpired: its time is up.
+	ShareStateExpired = "expired"
+	// ShareStateExhausted: it was used as often as it was allowed to be -
+	// the download (or visit) cap of a link, the upload cap of a file
+	// request.
+	ShareStateExhausted = "exhausted"
+	// ShareStateRevoked: a person (or the app that opened it) ended it.
+	ShareStateRevoked = "revoked"
+)
+
+// StateAt is where the link stands at now.
+//
+// ⚠ The same facts IsExpired judges a visit by, plus the one it cannot see
+// (RevokedAt, filled by the listings only): "My shares" used to compare
+// expires_at with the browser's clock, so a link whose downloads were used
+// up still read as active and a skewed clock turned the label over early or
+// late. Revoked wins over expired because revoking also sets the expiry to
+// the same moment; a link revoked before 00053 has no RevokedAt and reads as
+// expired, which is all that can be known about it.
+func (s *Share) StateAt(now time.Time) string {
+	switch {
+	case s == nil:
+		return ShareStateExpired
+	case s.RevokedAt != nil:
+		return ShareStateRevoked
+	case s.ExpiresAt != nil && now.After(*s.ExpiresAt):
+		return ShareStateExpired
+	case s.MaxDownloads != nil && s.CappedCount() >= *s.MaxDownloads:
+		return ShareStateExhausted
+	case s.MaxUploads != nil && s.UploadCount >= *s.MaxUploads:
+		return ShareStateExhausted
+	}
+	return ShareStateActive
 }
 
 // IsDrop reports whether this is a public upload (file-drop) share.

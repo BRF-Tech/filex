@@ -57,6 +57,15 @@ backend/internal/e2edecrypt/testdata/folders/** -text -eol
 # The same, written the other way round: folders the Go writer (`filex
 # encrypt`) made, which the browser code is tested against.
 backend/internal/e2edecrypt/testdata/folders-go/** -text -eol
+# The vault (encryption level 3) as a storage holds it, written by
+# gen_vault_vectors.mjs: packs and index files are ciphertext pinned by SHA-256
+# (docs/E2E-VAULT-FORMAT.md -> "Test vectors").
+backend/internal/e2edecrypt/testdata/vault/** -text -eol
+# Vaults one implementation wrote for the other to open: vault-go by the Go
+# writer, vault-web by the browser's (vault_crossfixture_test.go,
+# web/tests/lib/e2eVaultCrossFixtures.test.ts).
+backend/internal/e2edecrypt/testdata/vault-go/** -text -eol
+backend/internal/e2edecrypt/testdata/vault-web/** -text -eol
 
 # ── Binaries ──────────────────────────────────────────────────────────────
 # `text=auto` already guesses these correctly, but a guess is a thing that can

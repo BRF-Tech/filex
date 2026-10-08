@@ -160,6 +160,12 @@ func answerE2E(w http.ResponseWriter, r *http.Request, st *model.Storage, err er
 		return true
 	}
 	err = e2epolicy.DoorError(auth.UserFrom(r.Context()), st, err)
+	if isE2EUndecided(err) {
+		// ⚠ The code, not "could not check the encryption policy" in
+		// `error`: the explorer matched that English to say it.
+		writeError(w, r, http.StatusInternalServerError, "e2e_policy_undecided", nil)
+		return true
+	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	return true
 }

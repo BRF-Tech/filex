@@ -146,6 +146,12 @@ type Engine struct {
 	// printing nothing, and looked dead enough that people cancelled it.
 	// Optional.
 	Progress func(string)
+	// OnProgress receives the same reports as figures (ProgressEvent). A
+	// caller that says them in words of its own sets it: `filex sync run
+	// --json` turns each into an event whose sentence is in the reader's
+	// language, so the desktop app no longer reads the English line above
+	// with regular expressions. Optional; independent of Progress.
+	OnProgress func(ProgressEvent)
 	// StopOn, when set, is asked about every action that failed; true ends
 	// the pass at once — the rest of the plan is not attempted, the ledger is
 	// still written — and the pass returns that error. The CLI sets it to
@@ -168,6 +174,10 @@ type Engine struct {
 	beforeReplace func(dest string)
 
 	halt *passHalt
+	// here is the count of the last `inventory` report, carried into the
+	// server listing's reports (ProgressEvent.Here) so a reader of the
+	// figures needs no memory of its own.
+	here int
 }
 
 // passHalt is one pass's emergency stop (Engine.StopOn).
@@ -221,16 +231,21 @@ func (e *Engine) logf(format string, a ...any) {
 	}
 }
 
-func (e *Engine) progressf(format string, a ...any) {
+// progress reports one step: the line to Progress, the figures to
+// OnProgress.
+func (e *Engine) progress(ev ProgressEvent, format string, a ...any) {
 	if e.Progress != nil {
 		e.Progress(fmt.Sprintf(format, a...))
+	}
+	if e.OnProgress != nil {
+		e.OnProgress(ev)
 	}
 }
 
 // remoteProgress emits a listing count for one remote walk, throttled so a
 // huge tree reports every 25 folders rather than every one.
 func (e *Engine) remoteProgress(phase string) func(dirs, items int) {
-	if e.Progress == nil {
+	if e.Progress == nil && e.OnProgress == nil {
 		return nil
 	}
 	next := 1
@@ -239,7 +254,8 @@ func (e *Engine) remoteProgress(phase string) func(dirs, items int) {
 			return
 		}
 		next = dirs + 25
-		e.progressf("%s: listed %d server folder(s), %d item(s) so far", phase, dirs, items)
+		e.progress(ProgressEvent{Phase: phase, Here: e.here, Listing: true, Listed: items, ListedFolders: dirs},
+			"%s: listed %d server folder(s), %d item(s) so far", phase, dirs, items)
 	}
 }
 
@@ -283,7 +299,8 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		return res, fmt.Errorf("read %s: %w", e.Pair.Local, err)
 	}
 	res.Skipped = skipped
-	e.progressf("inventory: %d item(s) here, listing the server…", len(local))
+	e.here = len(local)
+	e.progress(ProgressEvent{Phase: "inventory", Here: len(local)}, "inventory: %d item(s) here, listing the server…", len(local))
 
 	remote, err := e.walkRemoteRoot(ctx, "inventory")
 	if err != nil {
@@ -349,7 +366,7 @@ func (e *Engine) finish(ctx context.Context, led *ledger, res *Result) error {
 func (e *Engine) applyPlan(ctx context.Context, led *ledger, actions []Action, local, remote Snapshot, base Baseline, res *Result, lv *localView, holding bool) {
 	res.Planned += len(actions)
 	if len(actions) > 0 {
-		e.progressf("plan: %d change(s) to make", len(actions))
+		e.progress(ProgressEvent{Phase: "plan", Total: len(actions)}, "plan: %d change(s) to make", len(actions))
 	}
 
 	// Three phases. Directory creation first (parents must exist, and it is
@@ -435,7 +452,9 @@ func (e *Engine) applyPlan(ctx context.Context, led *ledger, actions []Action, l
 		// a tree of 1 GB files would otherwise report once per 10 GB.
 		if done%10 == 0 || done == total || time.Since(lastLine) >= 5*time.Second {
 			lastLine = time.Now()
-			e.progressf("%s", transferLine(done, total, bytesDone, bytesTotal, time.Since(transfersStarted)))
+			elapsed := time.Since(transfersStarted)
+			e.progress(transferEvent(done, total, bytesDone, bytesTotal, elapsed),
+				"%s", transferLine(done, total, bytesDone, bytesTotal, elapsed))
 		}
 	}
 	runOne := func(a Action) {
@@ -499,7 +518,7 @@ func (e *Engine) applyPlan(ctx context.Context, led *ledger, actions []Action, l
 		e.recordHeldConflicts(heldConflicts, res)
 	}
 	if total > 0 {
-		e.progressf("settling: %d of %d change(s) recorded", applied, total)
+		e.progress(ProgressEvent{Phase: "settling", Done: applied, Total: total}, "settling: %d of %d change(s) recorded", applied, total)
 	}
 }
 

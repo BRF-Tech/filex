@@ -180,9 +180,9 @@ async function logout() {
                  nothing to press — the line somebody reads out when asked
                  "which version are you on?" (the maintainer, 2026-09-24). The same
                  piece the explorer's avatar menu and user settings draw. -->
-            <template v-if="productVersionLine(caps.data.version)">
+            <template v-if="productVersionLine(caps.data.release)">
               <div class="divider" />
-              <ProductVersion :version="caps.data.version" class="px-3 py-2" />
+              <ProductVersion :version="caps.data.release" class="px-3 py-2" />
             </template>
           </MenuItems>
         </transition>

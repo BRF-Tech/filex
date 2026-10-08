@@ -25,7 +25,7 @@ import zlib from 'node:zlib';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { decodePng, diffImages, diffOverlay, encodePng, pngSize } from '../../../scripts/lib/png.mjs';
-import { findShotScripts } from '../../../scripts/lib/shot-scripts.mjs';
+import { PACKS_BEHIND, PACKS_BEHIND_EXIT, findShotScripts } from '../../../scripts/lib/shot-scripts.mjs';
 import {
   DIFF_DEFAULTS,
   MANIFEST_REL,
@@ -45,6 +45,7 @@ import {
   localImports,
   manifestProblems,
   nextManifest,
+  onlyPacksBehind,
   parsePublishedUrl,
   productInputs,
   publishedName,
@@ -53,6 +54,7 @@ import {
   referenceFiles,
   relinkRepo,
   relinkText,
+  runFailure,
   sceneDigest,
   sceneOfName,
   scriptInputs,
@@ -322,7 +324,7 @@ describe('a scene is taken again only when what it reads changed', () => {
   const scripts = ['a.mjs', 'b.mjs', 'c.mjs', 'd.mjs', 'e.mjs'];
   const digests = new Map([['a.mjs', 'D1'], ['b.mjs', 'D2'], ['c.mjs', 'D3'], ['d.mjs', 'D4'], ['e.mjs', 'D5']]);
   const manifest = { ...FIXTURE, scenes: { 'a.mjs': { digest: 'D1' }, 'b.mjs': { digest: 'OLD' }, 'c.mjs': { digest: null } } };
-  const previous = { scenes: { 'd.mjs': { action: 'shot', status: 'passed', digest: 'D4', pictures: [] } }, pictures: {} };
+  const previous = { scenes: { 'd.mjs': { action: 'shoot', status: 'passed', digest: 'D4', pictures: [] } }, pictures: {} };
   const excluded = new Map([['e.mjs', 'needs the sign app build']]);
   const actions = (opts: Record<string, unknown>) =>
     Object.fromEntries(
@@ -427,6 +429,9 @@ describe('a reviewed run becomes the published set', () => {
   const review = {
     when: T,
     platform: 'win32',
+    // Taken in the build host's test chain, as the published set is; the
+    // environment rule is tested on its own below.
+    environment: 'chain',
     mode: 'incremental',
     complete: false,
     failure: null,
@@ -437,8 +442,8 @@ describe('a reviewed run becomes the published set', () => {
     },
     removed: ['gone.png'],
     scenes: {
-      'capture.mjs': { action: 'shot', status: 'passed', digest: 'C2' },
-      'set.mjs': { action: 'shot', status: 'failed', digest: 'S2' },
+      'capture.mjs': { action: 'shoot', status: 'passed', digest: 'C2' },
+      'set.mjs': { action: 'shoot', status: 'failed', digest: 'S2' },
       'kept.mjs': { action: 'kept', status: null, digest: 'K' },
       'pub.mjs': { action: 'published', status: null, digest: 'P' },
     },
@@ -456,6 +461,25 @@ describe('a reviewed run becomes the published set', () => {
     const next = nextManifest(manifest, review);
     expect(next.scenes).toEqual({ 'capture.mjs': { digest: 'C2' }, 'set.mjs': { digest: 'S' }, 'old.mjs': { digest: 'X' }, 'kept.mjs': { digest: 'K' } });
     expect(nextManifest(manifest, { ...review, complete: true }).scenes['old.mjs']).toBeUndefined();
+  });
+
+  it("reads a scene's action as the run writes it into its review, so accept records it and the next run keeps it", () => {
+    // ⚠ Through 0.53 the plan said 'shoot' (and the review, which copies the
+    // plan's action: scripts/shots.mjs) while accept and the next run looked
+    // for 'shot': accept recorded no taken scene's digest - every scene of
+    // the 0.53 manifest has `"digest": null` - and every incremental run took
+    // every scene again. The fixtures above spelled it 'shot' too, so nothing
+    // went red. Here the action comes from decideScenes itself.
+    const scripts = ['x.mjs'];
+    const digests = new Map([['x.mjs', 'DX']]);
+    const blank = { ...FIXTURE, scenes: {} };
+    const { action, digest } = decideScenes({ scripts, digests, manifest: blank, mode: 'all' }).get('x.mjs');
+    expect(action).toBe('shoot');
+    const taken = { ...review, scenes: { 'x.mjs': { action, status: 'passed', digest, pictures: [] } } };
+    expect(nextManifest(blank, taken).scenes['x.mjs']).toEqual({ digest: 'DX' });
+    const again = decideScenes({ scripts, digests, manifest: blank, previous: { scenes: taken.scenes, pictures: {} }, keptOk: () => true });
+    expect(again.get('x.mjs').action).toBe('kept');
+    expect(readFileSync(path.join(REPO, 'scripts', 'shots.mjs'), 'utf8')).toContain('action: r.action,');
   });
 
   it('refuses a failed run, and a partial run on another platform (two typefaces in one README)', () => {
@@ -497,29 +521,110 @@ describe('a reviewed run becomes the published set', () => {
     expect(shots).toMatch(/staged for the site: nothing - this run is on/);
   });
 
-  it('the nightly run takes every scene, on Linux (scripts/chain/job/shots.sh)', () => {
+  it('the nightly run takes every scene, on Linux, the app and Document Server scenes included (scripts/chain/job/shots.sh, #187)', () => {
     // --all: a scene whose INPUTS missed something it shows keeps its digest,
     // and only taking it again finds its pixels moved (lesson #1150).
-    const job = readFileSync(path.join(REPO, 'scripts', 'chain', 'job', 'shots.sh'), 'utf8');
-    expect(job).toMatch(/^SHOTS_ENVIRONMENT=chain node scripts\/shots\.mjs --all /m);
-    expect(job).toContain('--without-apps');
+    // ⚠ Until #187 the job ran --without-apps: the six scenes that need an app
+    // build, a language pack or a Document Server were taken on the build host
+    // itself (DejaVu Sans), and the README showed two typefaces.
+    const job = readFileSync(path.join(REPO, 'scripts', 'chain', 'job', 'shots.sh'), 'utf8').replace(/\r\n/g, '\n');
+    const line = job.split('\n').find((l) => l.startsWith('SHOTS_ENVIRONMENT=chain '));
+    expect(line).toBe('SHOTS_ENVIRONMENT=chain SHOTS_ENGINES=host node scripts/shots.mjs "${MODE[@]}" --keep-going "$SCOPE" --skip packages,web,embed > "$OUT/shots.out" 2>&1');
+    expect(job).toContain('MODE=(--all)');
+    expect(job).toMatch(/MODE=\(--only "\$SHOTS_ONLY"\)/);
+    // --with-apps unless the settings let missing builds skip (CHAIN_REQUIRE_APPS=0).
+    expect(job).toMatch(/if \[ -z "\$missing" \] \|\| \[ "\$\{REQUIRE_APPS:-1\}" = 1 \]; then\n\s+SCOPE=--with-apps\n/);
+    // The chain's own Document Server, called back at the `filex` alias run.mjs gives the jobs' network.
+    expect(job).toContain('export SHOTS_ONLYOFFICE_URL="$DS_URL" SHOTS_ONLYOFFICE_CALLBACK_HOST=filex');
+    expect(job).toContain('SHOTS_ONLYOFFICE_JWT="$(cat "$DS_SECRET_FILE")"');
+    expect(job).not.toMatch(/^[^#\n]*node scripts\/shots\.mjs[^\n]*--without-apps/m);
   });
 
-  it("takes the published set in the build host's test chain; elsewhere on Linux it warns, it does not refuse (2026-10-06)", () => {
+  it("the release's own checklist takes the pictures where the published set is taken, not with a bare pnpm shots", () => {
+    // scripts/release/stages.mjs prints the human steps of a release; until
+    // #187 its step 2 still said `pnpm shots`, which on the maintainer's
+    // Windows machine stages nothing and `accept` refuses.
+    const stages = readFileSync(path.join(REPO, 'scripts', 'release', 'stages.mjs'), 'utf8');
+    expect(stages).toContain('CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <the release checkout>');
+    expect(stages).not.toContain('(only what changed is taken)');
+  });
+
+  it('a failed scene stops the run, or with --keep-going does not; either way the run failed and every failed scene is named', () => {
+    const a = { file: 'langpack.mjs', timedOut: false, log: 'e2e/.artifacts/shots/logs/langpack.log' };
+    const b = { file: 'signing.mjs', timedOut: true, log: 'e2e/.artifacts/shots/logs/signing.log' };
+    expect(runFailure([])).toBeNull();
+    expect(runFailure([], { keepGoing: true })).toBeNull();
+    expect(runFailure([a])).toBe('e2e/shots/langpack.mjs failed — see its output above (log: e2e/.artifacts/shots/logs/langpack.log). Stopping: the rest were not run.');
+    const both = runFailure([a, b], { keepGoing: true });
+    expect(both).toMatch(/^2 scene\(s\) failed, and every other scene was still taken \(--keep-going\): /);
+    expect(both).toContain('e2e/shots/langpack.mjs failed (log: e2e/.artifacts/shots/logs/langpack.log)');
+    expect(both).toContain('e2e/shots/signing.mjs timed out (log: e2e/.artifacts/shots/logs/signing.log)');
+    // A failed run is never accepted, whichever way it went on.
+    expect(acceptRefusal({ ...manifest, platform: 'linux' }, { ...review, platform: 'linux', failure: both })).toMatch(/the run failed/);
+    const shots = readFileSync(path.join(REPO, 'scripts', 'shots.mjs'), 'utf8');
+    expect(shots).toContain("const keepGoing = has('keep-going');");
+    expect(shots).toContain('if (!keepGoing) break;');
+    expect(shots).toContain('failure = [runFailure(failed, { keepGoing }), stuck].filter(Boolean).join');
+  });
+
+  it('names a scene whose language packs are behind the tree, and tells a run that failed only for that from any other failure (#187)', () => {
+    // The maintainer, 2026-10-08: the nightly chain reports such a run as a warning
+    // (scripts/chain/job/shots.sh, SHOTS_PACKS_BEHIND=warn); a release run
+    // stays red, and accept refuses it either way.
+    expect(PACKS_BEHIND).toBe('packs-behind');
+    expect(PACKS_BEHIND_EXIT).toBe(3);
+    const behind = { file: 'langpack.mjs', timedOut: false, log: 'l.log', reason: PACKS_BEHIND };
+    expect(runFailure([behind], { keepGoing: true })).toContain('e2e/shots/langpack.mjs failed: its language packs are behind this tree (log: l.log)');
+    const scene = (status: string | null, extra: Record<string, unknown> = {}) => ({ action: 'shoot', status, digest: 'D', pictures: [], ...extra });
+    const run = (scenes: Record<string, unknown>, over: Record<string, unknown> = {}) => ({ ...review, platform: 'linux', failure: 'x', stuck: null, scenes, ...over });
+    const onlyPacks = run({ 'capture.mjs': scene('passed'), 'langpack.mjs': scene('failed', { reason: PACKS_BEHIND }), 'pub.mjs': { action: 'published', status: null } });
+    expect(onlyPacksBehind(onlyPacks)).toEqual(['langpack.mjs']);
+    // Anything else in the run makes it a plain failure.
+    expect(onlyPacksBehind(run({ 'langpack.mjs': scene('failed', { reason: PACKS_BEHIND }), 'signing.mjs': scene('failed') }))).toBeNull();
+    expect(onlyPacksBehind(run({ 'langpack.mjs': scene('timed out', { reason: PACKS_BEHIND }) }))).toBeNull();
+    expect(onlyPacksBehind(run({ 'langpack.mjs': scene('failed', { reason: PACKS_BEHIND }), 'z.mjs': scene('not run') }))).toBeNull();
+    expect(onlyPacksBehind({ ...onlyPacks, stuck: 'could not end processes langpack.mjs left behind: 42' })).toBeNull();
+    expect(onlyPacksBehind({ ...onlyPacks, failure: null })).toBeNull();
+    expect(onlyPacksBehind(null)).toBeNull();
+    // ...and never accepted.
+    expect(acceptRefusal({ ...manifest, platform: 'linux' }, { ...onlyPacks, environment: 'chain' })).toMatch(/the run failed/);
+    // Where the reason comes from: langpack.mjs's exit code, recorded per scene.
+    const shots = readFileSync(path.join(REPO, 'scripts', 'shots.mjs'), 'utf8');
+    expect(shots).toContain('if (!res.timedOut && res.code === PACKS_BEHIND_EXIT) r.reason = PACKS_BEHIND;');
+    expect(shots).toContain('...(r.reason ? { reason: r.reason } : {}),');
+    expect(shots).toMatch(/^\s+stuck,$/m);
+    const langpack = readFileSync(path.join(SHOTS_DIR, 'langpack.mjs'), 'utf8');
+    expect(langpack).toContain('process.exit(err instanceof PacksBehind ? PACKS_BEHIND_EXIT : 1);');
+    expect(langpack).toMatch(/\(l\.unknown \?\? 0\) > 0\) \{\n\s+throw new PacksBehind\(/);
+  });
+
+  it("takes the published set in the build host's test chain; a run from elsewhere on Linux only with --outside-chain, and a warning (#187)", () => {
     // ⚠ The 0.52.0 set reads in DejaVu Sans, the build host's own face; the
     // chain's Playwright container sets the same pages in Liberation Sans
     // (scripts/chain/run.mjs FONTS_CONF). Both are "linux": the platform rule
-    // cannot tell them apart, the environment does. A warning, not a refusal:
-    // the app and Document Server scenes are still taken on the host.
+    // cannot tell them apart, the environment does. Until #187 a warning only,
+    // because the app and Document Server scenes could be taken nowhere else;
+    // since the chain takes every scene, a refusal (the maintainer, 2026-10-08) that
+    // --outside-chain lifts for a run taken outside it on purpose.
     expect(PUBLISH_ENVIRONMENT).toBe('chain');
     const linux = { ...manifest, platform: 'linux', environment: 'chain' };
     expect(environmentNote(linux, { ...review, platform: 'linux', environment: 'chain' })).toBe('');
     expect(environmentNote(linux, { ...review, platform: 'linux', environment: 'local' })).toMatch(/taken in "local", and the published set in "chain".*typeface/);
-    expect(environmentNote(linux, { ...review, platform: 'linux' })).toMatch(/taken in "local"/);
-    expect(acceptRefusal(linux, { ...review, platform: 'linux', environment: 'local' })).toBe('');
+    expect(environmentNote(linux, { ...review, platform: 'linux', environment: undefined })).toMatch(/taken in "local"/);
+    expect(acceptRefusal(linux, { ...review, platform: 'linux', environment: 'chain' })).toBe('');
+    expect(acceptRefusal(linux, { ...review, platform: 'linux', environment: 'local' })).toMatch(/taken in "local", and the published set is taken in "chain".*--outside-chain/);
+    expect(acceptRefusal(linux, { ...review, platform: 'linux', environment: undefined })).toMatch(/taken in "local"/);
+    expect(acceptRefusal(linux, { ...review, platform: 'linux', environment: 'local' }, { outsideChain: true })).toBe('');
+    // --outside-chain lifts the environment rule and no other.
+    expect(acceptRefusal(linux, { ...review, platform: 'win32', environment: 'local' }, { outsideChain: true })).toMatch(/taken on win32/);
+    expect(acceptRefusal(linux, { ...review, platform: 'linux', environment: 'local', failure: 'x' }, { outsideChain: true })).toMatch(/the run failed/);
     expect(nextManifest(linux, { ...review, platform: 'linux', environment: 'chain' }).environment).toBe('chain');
     expect(readFileSync(path.join(REPO, 'scripts', 'shots.mjs'), 'utf8')).toContain("environment: process.env.SHOTS_ENVIRONMENT || 'local',");
-    expect(readFileSync(path.join(REPO, 'scripts', 'shots-site.mjs'), 'utf8')).toContain('const note = environmentNote(m, review);');
+    const cli = readFileSync(path.join(REPO, 'scripts', 'shots-site.mjs'), 'utf8');
+    expect(cli).toContain("const why = acceptRefusal(m, review, { outsideChain: has('outside-chain') });");
+    // Accepted on purpose, the warning still prints.
+    expect(cli).toContain('const note = environmentNote(m, review);');
+    expect(cli.indexOf('const note = environmentNote(m, review);')).toBeGreaterThan(cli.indexOf("{ outsideChain: has('outside-chain') }"));
     const runMjs = readFileSync(path.join(REPO, 'scripts', 'chain', 'run.mjs'), 'utf8');
     expect(runMjs).toMatch(/<family>sans-serif<\/family><prefer><family>Liberation Sans<\/family>/);
     expect(runMjs).toMatch(/shots: \{ image: 'pw', script: 'shots\.sh'[^}]*browser: true/);

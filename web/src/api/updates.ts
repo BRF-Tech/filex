@@ -10,6 +10,7 @@
 // (Homebrew, winget, Snap own the binary). The payload then carries the
 // instructions to show instead.
 import { api } from './client';
+import { langParam } from './screenLang';
 
 /** What filex intends to do about the newest release it knows of. */
 export type UpdateAction = 'none' | 'auto' | 'confirm' | 'instruct';
@@ -50,6 +51,13 @@ export interface UpdateStatus {
    *  package | zero_major. Absent when the saved policy is in force. The
    *  policy itself stays as saved. */
   policy_limit?: string;
+  /** The saved policy by its name, the badge and - when the install does
+   *  less than the policy asks for - why: three sentences the server says in
+   *  the screen's language (handlers/update.go sayPolicy). The page prints
+   *  them as they are; it has no words of its own for a policy. */
+  policy_name?: string;
+  policy_badge?: string;
+  policy_note?: string;
   /** A new binary is on disk but this process is still the old one. */
   restart_required: boolean;
   checked_at?: string;
@@ -77,12 +85,12 @@ export interface ApplyResult {
 
 export const UpdatesApi = {
   async status(): Promise<UpdateStatus> {
-    const { data } = await api.get<UpdateStatus>('/admin/update');
+    const { data } = await api.get<UpdateStatus>('/admin/update', { params: langParam() });
     return data;
   },
 
   async check(): Promise<UpdateStatus> {
-    const { data } = await api.post<UpdateStatus>('/admin/update/check');
+    const { data } = await api.post<UpdateStatus>('/admin/update/check', undefined, { params: langParam() });
     return data;
   },
 

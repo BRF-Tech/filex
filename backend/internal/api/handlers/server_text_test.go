@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -46,6 +47,8 @@ var spanish = srvtext.StaticPacks{"es": {
 	"server.mail.drop_received.body":        "{who} dejó {count} archivos en «{folder}» ({submission}).",
 	"server.mail.drop_received.body_one":    "{who} dejó un archivo en «{folder}» ({submission}).",
 	"server.notify.word.someone":            "Alguien",
+	"server.notify.drop.received.title":     "{count} archivos recibidos",
+	"server.notify.drop.received.title_one": "{count} archivo recibido",
 	"server.public.drop_title":              "Enviar archivos",
 	"server.public.drop_heading":            "Enviar archivos",
 	"server.public.drop_done_sub":           "{count} archivos enviados.",
@@ -78,7 +81,9 @@ func mailParts(t *testing.T, raw string) (map[string]string, string) {
 	return h, body
 }
 
-func shareMailOn(t *testing.T, locale string) (map[string]string, string) {
+// shareMailOn mails a link to informe.txt in locale and answers the mail's
+// headers, its body and the link's address.
+func shareMailOn(t *testing.T, locale string) (map[string]string, string, string) {
 	t.Helper()
 	f := newTenantFixture(t)
 	sink := newSMTPSink(t)
@@ -86,38 +91,46 @@ func shareMailOn(t *testing.T, locale string) (map[string]string, string) {
 	g.AttachInvite(share.NewService(f.store), sink.mailer(t, f.store), tenantOperatorURL)
 	g.AttachTenants(f.tenants(false))
 
-	raw, _ := json.Marshal(map[string]any{
-		"path": f.storage.Name + "://docs/informe.txt", "email": "amigo@example.test",
-		"url": tenantOperatorURL + "/s/tok", "locale": locale, "is_dir": false, "size": 4,
-		"pin": "4321", "expires_days": 7,
+	// The mail is written from the LINK (share_mail.go): a 4-byte file, a PIN,
+	// seven days left.
+	node := fileNode(t, f.store, f.storage, f.root, "docs/informe.txt", "hola")
+	week := time.Now().Add(7 * 24 * time.Hour)
+	owner := f.owner.ID
+	sh, err := share.NewService(f.store).Create(context.Background(), share.CreateOpts{
+		NodeID: node.ID, PIN: "4321", ExpiresAt: &week, CreatedBy: &owner,
 	})
+	require.NoError(t, err)
+	raw, _ := json.Marshal(map[string]any{"share": sh.Token, "email": "amigo@example.test", "locale": locale})
 	req := httptest.NewRequest(http.MethodPost, "/api/files/permissions/share-mail", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	g.ShareMail(rec, f.asOwner(req))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	return mailParts(t, sink.only(t))
+	h, body := mailParts(t, sink.only(t))
+	return h, body, tenantOperatorURL + "/s/" + sh.Token
 }
 
 func TestServerText_ShareMailArrivesInThePacksLanguage(t *testing.T) {
 	withSpanish(t)
-	h, body := shareMailOn(t, "es")
+	h, body, link := shareMailOn(t, "es")
 	assert.Equal(t, "informe.txt se ha compartido contigo", h["Subject"])
 	assert.Equal(t, "es", h["Content-Language"])
 	for _, want := range []string{
-		"Hola:", "Archivo: informe.txt", "Tamaño: 4 B", "Descárgalo aquí:\n" + tenantOperatorURL + "/s/tok",
-		"PIN (código de acceso): 4321", "Este enlace es válido durante 7 días.",
-		// Not in the pack: that one line in English.
+		"Hola:", "Archivo: informe.txt", "Tamaño: 4 B", "Descárgalo aquí:\n" + link,
+		"Este enlace es válido durante 7 días.",
+		// Not in the pack: those lines in English.
 		"A file has been shared with you:",
+		"This link is protected with a PIN.",
 	} {
 		assert.Contains(t, body, want)
 	}
+	assert.NotContains(t, strings.ReplaceAll(body, link, ""), "4321", "a share mail never carries the PIN (share_mail.go)")
 	assert.NotContains(t, body, "paylaşıldı", "a third language is never the Turkish branch")
 }
 
 func TestServerText_ALanguageNobodySpeaksIsEnglish(t *testing.T) {
 	withSpanish(t)
-	h, body := shareMailOn(t, "de")
+	h, body, _ := shareMailOn(t, "de")
 	assert.Equal(t, "informe.txt has been shared with you", h["Subject"])
 	assert.Contains(t, body, "This link is valid for 7 days.")
 	assert.NotContains(t, body, "paylaşıldı")
@@ -144,9 +157,14 @@ func TestServerText_DropOwnerHearsInTheirPacksLanguage(t *testing.T) {
 	rec := dropUploadOn(t, r, "/d/"+sh.Token, "files.example.test")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	h, body := mailParts(t, sink.only(t))
-	assert.Equal(t, "Nueva subida de archivos", h["Subject"])
+	// The notification's own words (notify say.go), even with notifications
+	// switched off: one code path says what a drop says, in the pack's
+	// language where it has the phrase - its singular for one - and English
+	// where it has not.
+	assert.Equal(t, "1 archivo recibido", h["Subject"])
 	assert.Equal(t, "es", h["Content-Language"])
-	assert.Contains(t, body, "Alguien dejó un archivo en «buzon»", "the singular form, and the pack's word for an unnamed uploader")
+	assert.Contains(t, body, "Alguien → buzon", "the pack's word for an unnamed uploader")
+	assert.NotContains(t, body, "Nueva subida de archivos", "the mail's own second wording is gone")
 }
 
 func TestServerText_PublicPagesSpeakThePacksLanguage(t *testing.T) {
@@ -178,8 +196,9 @@ func TestServerText_PublicPagesSpeakThePacksLanguage(t *testing.T) {
 	assert.Contains(t, missing.Body.String(), "No encontrado")
 }
 
-// An invitee whose account the admin creates starts in the COMPOSER's
-// language — any language the server speaks. It was forced to tr/en, so a
+// An invitee whose account the admin creates starts in the language PICKED
+// for it in the form (#191: never the composer's screen language; nothing
+// picked is the server's) — any language the server speaks. It was forced to tr/en, so a
 // Spanish admin's invitee got a Turkish account and a Turkish welcome mail.
 func TestServerText_ANewAccountStartsInTheComposersLanguage(t *testing.T) {
 	withSpanish(t)

@@ -316,7 +316,9 @@ describe('admin (vue-i18n): a pack language’s plural rule', COLD, () => {
     const { i18n } = await adminIn('es', {
       'dashboard.fileCount': '{n} archivos',
       'duplicates.copies': '{n} copia | {n} copias',
-      'trash.empty_done': 'ninguna | una | {count} cosas',
+      // A key the admin catalogue still has: a pack's key it lacks is dropped
+      // (trash.empty_done went to the server in 0.54, #206).
+      'permissions.rules.members': 'ninguna | una | {count} cosas',
     });
     const t = i18n.global.t;
     expect(t('dashboard.fileCount', { n: 1 }, 1)).toBe('1 archivos');
@@ -326,9 +328,9 @@ describe('admin (vue-i18n): a pack language’s plural rule', COLD, () => {
     expect(t('duplicates.copies', { n: 1_000_000 }, 1_000_000)).toBe('1000000 copias');
     // ⚠ Read by ICU's own category list (`one | many | other`) this would be
     // CLDR order, and 1 would pick "ninguna".
-    expect(t('trash.empty_done', { count: 0 }, 0)).toBe('ninguna');
-    expect(t('trash.empty_done', { count: 1 }, 1)).toBe('una');
-    expect(t('trash.empty_done', { count: 5 }, 5)).toBe('5 cosas');
+    expect(t('permissions.rules.members', { count: 0 }, 0)).toBe('ninguna');
+    expect(t('permissions.rules.members', { count: 1 }, 1)).toBe('una');
+    expect(t('permissions.rules.members', { count: 5 }, 5)).toBe('5 cosas');
   });
 
   it('English and Turkish keep vue-i18n’s own rule, and read exactly as before', async () => {

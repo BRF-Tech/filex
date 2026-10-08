@@ -277,9 +277,9 @@ func (s *Service) runTrashEmpty(ctx, life context.Context, op *Op, ch *cancelHan
 		status, msg = StatusFailed, err.Error()
 		slog.Warn("ops: trash empty failed", slog.Int64("op", op.ID), slog.String("err", msg))
 	case failed > 0 && done > failed:
-		status, msg = StatusPartial, fmt.Sprintf("%d of %d items could not be purged; see the server log", failed, done)
+		status, msg = StatusPartial, fmt.Sprintf("%d of %d items could not be purged", failed, done)
 	case failed > 0:
-		status, msg = StatusFailed, fmt.Sprintf("%d items could not be purged; see the server log", failed)
+		status, msg = StatusFailed, fmt.Sprintf("%d items could not be purged", failed)
 	}
 	slog.Info("trash empty finished",
 		slog.Int64("op", op.ID),

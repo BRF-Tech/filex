@@ -116,13 +116,13 @@ func TestDecryptCmd_UnsupportedFeatureExitsSevenBeforeAskingForAnything(t *testi
 	require.NoError(t, err)
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(b, &m))
-	m["req"] = []string{"names", "vault"}
+	m["req"] = []string{"names", "x-future"}
 	b, _ = json.Marshal(m)
 	require.NoError(t, os.WriteFile(mp, b, 0o600))
 	// Empty stdin: if it asked for the password it would fail differently.
 	_, _, err = runDecrypt(t, "", in, "-o", filepath.Join(t.TempDir(), "plain"), "--password-stdin")
 	require.Equal(t, exitDecryptUnsupported, exitCode(err))
-	require.Contains(t, err.Error(), "vault")
+	require.Contains(t, err.Error(), "x-future")
 }
 
 func TestDecryptCmd_NoSecretIsNotAnAttempt(t *testing.T) {

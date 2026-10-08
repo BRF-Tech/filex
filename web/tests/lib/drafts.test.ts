@@ -99,7 +99,22 @@ describe('draftsClient.save', () => {
 
 describe('the draft limit', () => {
   it('is recognised by its code, with the number it names', async () => {
-    const t = transport([{ status: 409, body: { code: 'DRAFT_LIMIT', count: 50, error: 'no', limit: 50 } }]);
+    // The server's answer since 0.54 (#209, handlers/drafts.go): the code,
+    // the numbers, and its sentence in the reader's language - which the
+    // client shows, composing none of its own.
+    const t = transport([
+      {
+        status: 409,
+        body: {
+          error: 'draft_limit',
+          message: 'You already keep as many drafts as this server allows (50). Save or delete some in Drafts.',
+          params: { limit: '50' },
+          code: 'DRAFT_LIMIT',
+          limit: 50,
+          count: 50,
+        },
+      },
+    ]);
     const err = await draftsClient('/api/files/drafts', { request: t.request, locale: 'en' })
       .create('docs://', 'a.txt', 'txt', { exactName: true })
       .catch((e) => e);

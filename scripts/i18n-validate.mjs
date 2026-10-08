@@ -373,35 +373,43 @@ function tsObjectLiteral(src, name, file) {
   return vm.runInNewContext(`(${src.slice(start, end + 2)})`, Object.create(null), { timeout: 2000 });
 }
 
-/** The server table of a checkout: the server's catalogue and the notification phrases. */
+/** The server table of a checkout: the server's catalogue, notifications included. */
 function loadServerTable(src) {
-  const out = JSON.parse(fs.readFileSync(path.join(src, 'backend', 'internal', 'srvtext', 'locales', 'en.json'), 'utf8'));
-  // ⚠ The phrases moved from web/src/lib to packages/core/src/lib on
-  // 2026-09-27 (the desktop app draws the same bell). A checkout older than
-  // that still has them in web/, and this file validates against whichever
-  // checkout it is pointed at — so the new home first, then the old one.
-  const file = [
+  /* ⚠ MUST match scripts/lib/i18n-catalogue.mjs (serverTable): a notification
+     phrase that is one bare `{placeholder}` is not exported - there is no word
+     in it to translate. This file is copied verbatim into filex-lang-template
+     and cannot import the other one, so the two say the same thing twice on
+     purpose; when one changes, change both or the validator reports keys the
+     catalogue never shipped. */
+  const bare = /^\s*\{[A-Za-z0-9_]+\}\s*$/;
+  const out = {};
+  const all = JSON.parse(fs.readFileSync(path.join(src, 'backend', 'internal', 'srvtext', 'locales', 'en.json'), 'utf8'));
+  for (const [k, v] of Object.entries(all)) {
+    if (k.startsWith('server.notify.') && typeof v === 'string' && bare.test(v)) continue;
+    out[k] = v;
+  }
+  /* ⚠ Since 2026-10-08 the notification phrases are keys of that JSON (the
+     server says every notification, backend notify say.go). A checkout from
+     before kept them in a TypeScript table (packages/core/src/lib, or web/src/lib
+     before 2026-09-27); this file validates against whichever checkout it is
+     pointed at, so an older one is still read the old way. */
+  const legacy = [
     path.join(src, 'packages', 'core', 'src', 'lib', 'notificationText.ts'),
     path.join(src, 'web', 'src', 'lib', 'notificationText.ts'),
-  ].find((f) => fs.existsSync(f)) ?? path.join(src, 'packages', 'core', 'src', 'lib', 'notificationText.ts');
-  const ts = fs.readFileSync(file, 'utf8');
-  /* ⚠ MUST match scripts/lib/i18n-catalogue.mjs (loadNotifyTables): a value
-     that is one bare `{placeholder}` is not exported — there is no word in it
-     to translate — and the four fallback WORDS now live in the server's own
-     en.json, beside the mail that shares two of them. This file is copied
-     verbatim into filex-lang-template and cannot import the other one, so the
-     two say the same thing twice on purpose; when one changes, change both or
-     the validator reports keys the catalogue never shipped. */
-  const bare = /^\s*\{[A-Za-z0-9_]+\}\s*$/;
-  const say = (key, value) => {
-    if (typeof value === 'string' && value && !bare.test(value)) out[key] = value;
-  };
-  for (const [event, byLang] of Object.entries(tsObjectLiteral(ts, 'NOTIFICATION_PHRASES', file))) {
-    const p = byLang.en;
-    say(`server.notify.${event}.title`, p.title);
-    say(`server.notify.${event}.body`, p.body);
-    for (const [f, v] of Object.entries(p.one ?? {})) say(`server.notify.${event}.${f}_one`, v);
-    for (const [f, v] of Object.entries(p.file ?? {})) say(`server.notify.${event}.${f}_file`, v);
+  ].find((f) => fs.existsSync(f) && fs.readFileSync(f, 'utf8').includes('NOTIFICATION_PHRASES'));
+  if (legacy) {
+    const ts = fs.readFileSync(legacy, 'utf8');
+    const say = (key, value) => {
+      if (typeof value === 'string' && value && !bare.test(value)) out[key] = value;
+    };
+    for (const [event, byLang] of Object.entries(tsObjectLiteral(ts, 'NOTIFICATION_PHRASES', legacy))) {
+      const p = byLang.en;
+      say(`server.notify.${event}.title`, p.title);
+      say(`server.notify.${event}.body`, p.body);
+      for (const [f, v] of Object.entries(p.one ?? {})) say(`server.notify.${event}.${f}_one`, v);
+      for (const [f, v] of Object.entries(p.file ?? {})) say(`server.notify.${event}.${f}_file`, v);
+      for (const [f, v] of Object.entries(p.rejected ?? {})) say(`server.notify.${event}.${f}_rejected`, v);
+    }
   }
   return out;
 }

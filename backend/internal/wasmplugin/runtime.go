@@ -55,6 +55,9 @@ type Runtime struct {
 	cache    wazero.CompilationCache
 	mu       sync.Mutex
 	closed   bool
+	// clock is the guests' realtime clock (appclock.go): the real one unless
+	// FILEX_APP_CLOCK moved it. Set once, before the first call.
+	clock AppClock
 }
 
 // New prepares a runtime. cacheDir holds compiled modules; "" disables the
@@ -176,8 +179,14 @@ func (c *Compiled) Call(ctx context.Context, export string, input []byte, budget
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
+	// The guest's realtime clock is the apps' clock (appclock.go): the real
+	// one, unless FILEX_APP_CLOCK moved it for the screenshots.
+	var clock AppClock
+	if c.rt != nil {
+		clock = c.rt.clock
+	}
 	inst, err := c.cp.Instance(ctx, extism.PluginInstanceConfig{
-		ModuleConfig: wazero.NewModuleConfig().WithSysWalltime().WithSysNanotime().WithRandSource(randReader{}),
+		ModuleConfig: clock.moduleConfig(),
 	})
 	if err != nil {
 		return nil, &CallError{Code: CodePluginTrap, Export: export, Message: "the plugin could not be started", Cause: err}

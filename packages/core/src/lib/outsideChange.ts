@@ -76,11 +76,15 @@ export function officeSessionEndpoint(diagnoseEndpoint: string | null): string |
  * save). null when the server could not say (an older server, no permission):
  * the caller then does nothing, and the server keeps a stale save beside the
  * document, which loses nothing.
+ *
+ * An answer carries `token`, the signed editor configuration's own token: the
+ * server takes an answer only from somebody it handed an editing session of
+ * that key, and the token is how any of its instances can tell (0.54).
  */
 export async function officeSession(
   request: (url: string, init: RequestInit) => Promise<Response>,
   endpoint: string,
-  body: { path: string; key: string; action?: 'state' | 'mine' | 'theirs' },
+  body: { path: string; key: string; action?: 'state' | 'mine' | 'theirs'; token?: string },
 ): Promise<OfficeSessionState | null> {
   try {
     const res = await request(endpoint, {

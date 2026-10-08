@@ -23,7 +23,14 @@
  * panel and the toast after a refusal all take their words from `lockWords`
  * — a second phrasing is how the badge says "locked by sign" while the toast
  * says "permission denied" about the same file.
+ *
+ * ⚠⚠ A REFUSAL is said in the SERVER's words (0.54 audit A3): the 423 carries
+ * `message` - the app's name, its reason and the end of the lock, composed by
+ * the server in the reader's language (handlers.lockedAnswer) - and that is
+ * what the toast shows, the same sentence the admin panel, the CLI and an
+ * agent read. Only a row's lock (no refusal behind it) is phrased here.
  */
+import { foreignText } from './direction';
 import type { FileNode } from '../types/FileNode';
 import type { AppLock } from '../types/Plugins';
 import { labelOf } from './pluginLabel';
@@ -47,6 +54,8 @@ export function anyLocked(nodes: readonly Pick<FileNode, 'locked' | 'lock'>[]): 
 export interface LockedRefusal extends AppLock {
   /** The path the server refused — the file, or the folder above it. */
   path?: string;
+  /** The server's sentence for the refusal, in the reader's language. */
+  message?: string;
 }
 
 /**
@@ -59,9 +68,11 @@ export interface LockedRefusal extends AppLock {
  * this file" beats "Error (423)" even when the server said no more than that.
  */
 export function lockedRefusal(err: unknown): LockedRefusal | null {
-  const e = err as { status?: number; detail?: string } | null;
+  const e = err as { status?: number; detail?: string; server?: string } | null;
   if (!e || e.status !== 423) return null;
   const out: LockedRefusal = { plugin: '' };
+  // The whole sentence (lib/errorWords keeps it beside the clipped body).
+  if (typeof e.server === 'string' && e.server) out.message = e.server;
   try {
     const body = JSON.parse(String(e.detail ?? '')) as Record<string, unknown>;
     if (typeof body.plugin === 'string') out.plugin = body.plugin;
@@ -72,6 +83,7 @@ export function lockedRefusal(err: unknown): LockedRefusal | null {
     if (typeof body.reason === 'string' && body.reason) out.reason = body.reason;
     if (body.reason_text && typeof body.reason_text === 'object') out.reason_text = body.reason_text as AppLock['reason_text'];
     if (typeof body.until === 'string' && body.until) out.until = body.until;
+    if (!out.message && typeof body.message === 'string' && body.message) out.message = body.message;
   } catch {
     /* an unreadable body is still a lock — see the note above */
   }
@@ -107,6 +119,10 @@ export function lockReasonText(lock: AppLock | null | undefined, locale: string 
  */
 export function lockWords(lock: AppLock | LockedRefusal | null, host: LockWordsHost): string {
   if (!lock) return '';
+  // A refusal: the server said it (isolated for the reader's direction - it
+  // never passed through a translator).
+  const said = (lock as LockedRefusal).message;
+  if (said) return foreignText(host.locale, said);
   /* The app's own label first, its manifest name only where the server could
      not resolve one. ⚠ The name is an ADDRESS (`sign`); every other screen
      shows the label ("e-Signature"), and a banner that says "sign locked this

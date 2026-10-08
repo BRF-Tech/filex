@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
+import { SCENE_CONTEXT, pinTimes, sceneServerEnv, stageClock } from './clock.mjs';
 import { seedFixtures, syncAndWait, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
@@ -126,6 +126,8 @@ async function boot() {
       FILEX_DEFAULT_LOCALE: 'en',
       FILEX_PUBLIC_URL: 'https://files.example.com',
       FILEX_SECRET_KEY: 'starstags-shots-key-not-a-real-secret',
+      // The apps on the scene's clock (clock.mjs, part 5).
+      ...sceneServerEnv(),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -328,11 +328,6 @@ export const StoreScreenApi = {
   },
 };
 
-/** Statuses under which a paid app runs. */
-export function licenseRuns(status: string): boolean {
-  return status === 'free' || status === 'valid' || status === 'grace';
-}
-
 /** A fingerprint as a person compares it: groups of four, the first 32 digits. */
 export function groupedFingerprint(f: string): string {
   return (f.slice(0, 32).match(/.{1,4}/g) ?? []).join(' ');

@@ -121,7 +121,7 @@ interface FakeWindow {
   navigate: ReturnType<typeof vi.fn>;
 }
 
-function bootWorker(windows: FakeWindow[] = []) {
+function bootWorker(windows: FakeWindow[] = [], onScreen?: string[]) {
   const listeners: Record<string, (e: unknown) => void> = {};
   const shown: Array<{ title: string; options: Record<string, unknown> }> = [];
   const opened: string[] = [];
@@ -134,6 +134,13 @@ function bootWorker(windows: FakeWindow[] = []) {
       showNotification: async (title: string, options: Record<string, unknown>) => {
         shown.push({ title, options });
       },
+      // #191 - the toasts on screen by tag, when a test says which are.
+      ...(onScreen
+        ? {
+            scope: 'https://files.example/admin/',
+            getNotifications: async (filter: { tag?: string }) => onScreen.filter((tag) => tag === filter.tag).map((tag) => ({ tag })),
+          }
+        : {}),
     },
     clients: {
       matchAll: async () => windows,
@@ -195,5 +202,61 @@ describe('notify-sw.js: what the installed app does with a push and a tap', () =
     const w = bootWorker([]);
     await w.fire('notificationclick', { notification: { close: vi.fn(), data: { url: '/drive/explore' } } });
     expect(w.opened).toEqual(['https://files.example/drive/explore']);
+  });
+});
+
+// #191 - Web Push: the server pushes what the person's bell tells them, with
+// the row's id and whether it has somewhere to go (backend notify push.go).
+describe('notify-sw.js: a Web Push from the server', () => {
+  it('opens the row through the app, which resolves where it goes', async () => {
+    const w = bootWorker([], []);
+    await w.fire('push', {
+      data: {
+        json: () => ({ v: 1, id: 42, title: 'Acme Files', body: 'rapor.pdf - Rapor: 1 dosya eklendi', tag: 'filex-notification-42', open: true }),
+      },
+    });
+    expect(w.shown).toHaveLength(1);
+    expect(w.shown[0].title).toBe('Acme Files');
+    expect(w.shown[0].options).toMatchObject({
+      body: 'rapor.pdf - Rapor: 1 dosya eklendi',
+      tag: 'filex-notification-42',
+      renotify: true,
+      data: { url: 'https://files.example/admin/notify/42', home: 'https://files.example/admin/' },
+    });
+    await w.fire('notificationclick', { notification: { close: vi.fn(), data: w.shown[0].options.data } });
+    expect(w.opened).toEqual(['https://files.example/admin/notify/42']);
+  });
+
+  it('replaces the page’s own toast of the same row silently - one row, one alert', async () => {
+    const w = bootWorker([], ['filex-notification-42']);
+    await w.fire('push', { data: { json: () => ({ v: 1, id: 42, body: 'x', tag: 'filex-notification-42', open: true }) } });
+    expect(w.shown[0].options.renotify).toBe(false);
+    // A summary replaces the last summary and alerts again.
+    const s = bootWorker([], ['filex-push-summary']);
+    await s.fire('push', { data: { json: () => ({ v: 1, body: '5 new notifications', tag: 'filex-push-summary', renotify: true }) } });
+    expect(s.shown[0].options.renotify).toBe(true);
+  });
+
+  it('a push about nothing in particular opens filex itself - with filex closed there is no window to focus', async () => {
+    const w = bootWorker([], []);
+    await w.fire('push', { data: { json: () => ({ v: 1, id: 7, body: 'Replica failed', tag: 'filex-notification-7', open: false }) } });
+    expect(w.shown[0].options.data).toEqual({ url: '', home: 'https://files.example/admin/' });
+    await w.fire('notificationclick', { notification: { close: vi.fn(), data: w.shown[0].options.data } });
+    expect(w.opened).toEqual(['https://files.example/admin/']);
+
+    // A window is open: it is focused, nothing is navigated.
+    const tab: FakeWindow = { url: 'https://files.example/drive/explore', focus: vi.fn(async () => undefined), navigate: vi.fn() };
+    const open = bootWorker([tab], []);
+    await open.fire('notificationclick', { notification: { close: vi.fn(), data: { url: '', home: 'https://files.example/admin/' } } });
+    expect(tab.focus).toHaveBeenCalled();
+    expect(tab.navigate).not.toHaveBeenCalled();
+    expect(open.opened).toEqual([]);
+  });
+
+  it('every push shows a notification, even an empty one (iOS revokes a site whose push shows none)', async () => {
+    const w = bootWorker([], []);
+    await w.fire('push', { data: null });
+    expect(w.shown).toHaveLength(1);
+    expect(w.shown[0].title).toBe('filex');
   });
 });

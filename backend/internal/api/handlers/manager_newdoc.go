@@ -12,6 +12,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/newdoc"
+	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/quota"
@@ -41,6 +42,29 @@ type vfNewFileBody struct {
 	// called. Without it the old contract holds and the extension is appended,
 	// which is what a dialog from before #56 means by "Q3 report".
 	ExactName bool `json:"exact_name"`
+	// DryRun asks only whether the name is free (filex #211, audit B18):
+	// nothing is written, and the answer is a vfNewFileCheck. The New
+	// document dialog asks it while a name is typed, so "already here" and
+	// the free name it offers instead are the SERVER's - the same Stat the
+	// create makes, byte for byte on a case-sensitive store, and the
+	// " (2)" numbering ops.UniqueDestNumbered gives a draft saved beside a
+	// file of its name - not a lower-cased copy in the browser that refused
+	// "Report.docx" beside "report.docx" on S3.
+	DryRun bool `json:"dry_run"`
+}
+
+// vfNewFileCheck answers a dry run: the name the create would write, whether
+// something already holds it, and the first free name beside it when so.
+type vfNewFileCheck struct {
+	DryRun bool   `json:"dry_run"`
+	Path   string `json:"path"`
+	Name   string `json:"name"`
+	Taken  bool   `json:"taken"`
+	// Code is NAME_TAKEN when Taken, the create's own refusal code.
+	Code string `json:"code,omitempty"`
+	// Suggested is the first free `name (n).ext`; empty when Taken and every
+	// candidate is taken too.
+	Suggested string `json:"suggested,omitempty"`
 }
 
 // vfNewFileResponse tells the caller where the file landed, so it can open it
@@ -170,6 +194,14 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 	// A file landing on an existing folder name: the same collision from the
 	// other side, and on an object store nothing else would notice it.
 	if err := storage.EnsureFileTarget(r.Context(), drv, fullRel); err != nil {
+		// A folder holds the name: taken, as far as a dry run is concerned.
+		if body.DryRun && errors.Is(err, storage.ErrKindConflict) {
+			writeJSON(w, http.StatusOK, vfNewFileCheck{
+				DryRun: true, Path: joinAdapterPath(current.Name, fullRel), Name: name,
+				Taken: true, Code: "NAME_TAKEN", Suggested: freeNewDocName(r, drv, fullRel),
+			})
+			return
+		}
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": err.Error()})
 		return
 	}
@@ -182,10 +214,19 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 	// a feature whose entire purpose is to make a new one. So anything other
 	// than a clean not-found stops us.
 	if _, err := drv.Stat(r.Context(), fullRel); err == nil {
+		suggested := freeNewDocName(r, drv, fullRel)
+		if body.DryRun {
+			writeJSON(w, http.StatusOK, vfNewFileCheck{
+				DryRun: true, Path: joinAdapterPath(current.Name, fullRel), Name: name,
+				Taken: true, Code: "NAME_TAKEN", Suggested: suggested,
+			})
+			return
+		}
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "a file with that name already exists here",
-			"code":  "NAME_TAKEN",
-			"name":  name,
+			"error":     "a file with that name already exists here",
+			"code":      "NAME_TAKEN",
+			"name":      name,
+			"suggested": suggested,
 		})
 		return
 	} else if !errors.Is(err, storage.ErrNotFound) {
@@ -204,6 +245,15 @@ func (h *Manager) vfNewFile(w http.ResponseWriter, r *http.Request) {
 	// one named like an encrypted folder's key file or a `.fxe` is a new
 	// encryption (e2e_policy_gate.go).
 	if refuseE2ECreate(w, r, h.E2EPolicy, current, fullRel) {
+		return
+	}
+
+	// A dry run stops here: the name is free and everything above would let
+	// the create through.
+	if body.DryRun {
+		writeJSON(w, http.StatusOK, vfNewFileCheck{
+			DryRun: true, Path: joinAdapterPath(current.Name, fullRel), Name: name,
+		})
 		return
 	}
 
@@ -326,7 +376,7 @@ func (h *Manager) planNewDoc(w http.ResponseWriter, r *http.Request, body vfNewF
 		return nil, false
 	}
 	if current.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return nil, false
 	}
 
@@ -350,10 +400,7 @@ func (h *Manager) planNewDoc(w http.ResponseWriter, r *http.Request, body vfNewF
 			slog.Info("newfile refused: quota",
 				slog.Int64("user", quotastore.OwnerFrom(r.Context())),
 				slog.Int64("size", size))
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
-				"error": "quota exceeded",
-				"code":  "QUOTA_EXCEEDED",
-			})
+			writeQuotaExceeded(w, r)
 			return nil, false
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -423,4 +470,15 @@ func (h *Manager) mirrorNewDocNode(r *http.Request, drv storage.Driver, storageI
 	h.indexNode(ctx, created)
 	h.dispatchThumb(created)
 	writehook.OnFileWritten(ctx, storageID, created, writehook.OriginManager, writehook.Created)
+}
+
+// freeNewDocName is the first free `name (n).ext` beside a taken rel - the
+// server's numbering (ops.UniqueDestNumbered, the one a draft saved beside a
+// file of its name gets) - or "" when there is none.
+func freeNewDocName(r *http.Request, drv storage.Driver, rel string) string {
+	free, err := ops.UniqueDestNumbered(r.Context(), drv, rel)
+	if err != nil || free == "" {
+		return ""
+	}
+	return path.Base(free)
 }

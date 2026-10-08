@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -166,6 +163,9 @@ type liveLoop struct {
 	// localDown is set when there is no file-system watcher at all; every
 	// pair is then reported as left to the full check.
 	localDown error
+	// rep is where the loop's reports go: the plain lines, or with --json
+	// the event stream (syncevents.go). nil = plain lines on out / errOut.
+	rep *syncReporter
 
 	remoteQuiet, localQuiet, maxWait time.Duration
 	raceRetry                        time.Duration
@@ -358,35 +358,36 @@ func (l *liveLoop) notePairsFile() {
 	l.wake()
 }
 
-// streamState prints the stream's state for people and for the desktop app,
-// which parses `live: <connected|polling|offline>` into its status word.
+// say is the loop's reporter (see rep).
+func (l *liveLoop) say() *syncReporter {
+	if l.rep != nil {
+		return l.rep
+	}
+	return plainReporter(l.out, l.errOut)
+}
+
+// streamState reports the stream's state: `live: <connected|polling|offline>
+// - <detail>` for people, a "live" event for the desktop app.
 func (l *liveLoop) streamState(st cliclient.StreamState, detail string) {
-	fmt.Fprintf(l.out, "live: %s - %s\n", st, detail)
+	l.say().live(st, detail, l.interval)
 	l.mu.Lock()
 	l.streamLive = st == cliclient.StreamLive
 	l.mu.Unlock()
 	l.firstOnce.Do(func() { close(l.connected) })
 }
 
-// localState prints, per pair, whether changes made on this computer are
-// watched — `<pair>: local: poll-only — <code> — <detail>` when they cannot
+// localState reports, per pair, whether changes made on this computer are
+// watched — `<pair>: local: poll-only - <code> - <detail>` when they cannot
 // be and wait for the full check, `<pair>: local: watched` when a folder
-// reported before is watched again. The desktop shows it under that folder
-// (desktop/src/syncstatus.ts LocalNote). Only transitions are printed.
+// reported before is watched again (with --json, a "local" event the desktop
+// shows under that folder). Only transitions are reported.
 func (l *liveLoop) localState(pairID string, err error) {
 	l.mu.Lock()
 	if l.pollOnly != nil {
 		l.pollOnly[pairID] = err != nil
 	}
 	l.mu.Unlock()
-	switch {
-	case err == nil:
-		fmt.Fprintf(l.out, "%s: local: watched\n", pairID)
-	case errors.Is(err, errTooLargeToWatch):
-		fmt.Fprintf(l.out, "%s: local: poll-only - too-large - %s\n", pairID, strings.TrimPrefix(err.Error(), errTooLargeToWatch.Error()+": "))
-	default:
-		fmt.Fprintf(l.out, "%s: local: poll-only - unavailable - %v\n", pairID, err)
-	}
+	l.say().local(pairID, err, l.interval)
 }
 
 // localWatched reports whether the file-system watcher covers a pair — the
@@ -488,10 +489,17 @@ func (l *liveLoop) install(pairs []filesync.Pair) {
 	l.wake()
 }
 
+// pairsReadError is a pair list the watcher could not re-read: it stops,
+// and the desktop app starts it again.
+type pairsReadError struct{ err error }
+
+func (e *pairsReadError) Error() string { return "re-read pairs: " + e.err.Error() }
+func (e *pairsReadError) Unwrap() error { return e.err }
+
 func (l *liveLoop) reloadPairs() error {
 	pairs, err := l.loadPairs()
 	if err != nil {
-		return fmt.Errorf("re-read pairs: %w", err)
+		return &pairsReadError{err: err}
 	}
 	l.applyPairs(pairs)
 	return nil
@@ -795,7 +803,7 @@ func (l *liveLoop) Run(ctx context.Context) error {
 		}
 	}
 	if l.stream == nil {
-		fmt.Fprintf(l.out, "live: polling - changes are found by the interval poll only\n")
+		l.say().liveOff(l.interval)
 	}
 
 	nextPoll := l.now().Add(l.interval)
@@ -807,7 +815,7 @@ func (l *liveLoop) Run(ctx context.Context) error {
 			// Changes keep arriving from the local file system and wait; the
 			// stream is down until the window opens.
 			if !waiting {
-				fmt.Fprintf(l.out, "sync: waiting for the sync window %s\n", l.window)
+				l.say().window("window.waiting", l.window, l.clock())
 				waiting = true
 			}
 			if stopStream != nil {
@@ -843,7 +851,7 @@ func (l *liveLoop) Run(ctx context.Context) error {
 			cut := pctx.Err() != nil && ctx.Err() == nil
 			cancel()
 			if cut {
-				fmt.Fprintf(l.out, "sync: the sync window %s closed; the rest continues when it opens\n", l.window)
+				l.say().window("window.closed", l.window, l.clock())
 				// This pass and every one not started yet are still owed.
 				for _, rest := range ready[i:] {
 					l.requeue(rest)

@@ -46,9 +46,13 @@
  * first two are courtesies that keep somebody from typing a name for thirty
  * seconds before being told no.
  *
- * Name collisions are the same shape: this dialog asks the destination listing
- * first and says "already here" BEFORE the write, and the create endpoint
- * answers 409 anyway.
+ * Name collisions are the same shape, with one difference: whether a name is
+ * taken, and which free name to offer instead, is asked of the SERVER
+ * (`newFileCheck`, the create's own dry run - #211 audit B18), which answers
+ * with the existence check the create makes and its own " (2)" numbering. The
+ * dialog used to lower-case the listing itself, and so refused "Report.docx"
+ * beside "report.docx" on a store where the two are different files. The
+ * create endpoint answers 409 anyway.
  *
  * ## The name is the whole name (#56)
  *
@@ -74,7 +78,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import type { NewDocType } from '../types/FileNode';
-import type { FileApi, ManagerResponse, NewFileResponse } from '../composables/useFileApi';
+import type { FileApi, ManagerResponse, NewFileCheck, NewFileResponse } from '../composables/useFileApi';
 import { useLocale } from '../composables/useLocale';
 import { iconTile, iconFamilyFor, typeLabelFor } from '../lib/fileIcons';
 import { crumbsOfWire, permAllowsWrite, splitWire } from '../lib/destinationTree';
@@ -89,7 +93,6 @@ import {
   finalDocName,
   retypeDocName,
   stemEnd,
-  suggestDocName,
 } from '../lib/newDocName';
 
 const props = defineProps<{
@@ -298,18 +301,30 @@ const extHint = computed(() => {
   return finalName.value === typed ? '' : t('newdoc.hint.ext_added', { name: finalName.value });
 });
 
-function takenNames(resp: ManagerResponse | undefined): Set<string> {
-  const s = new Set<string>();
-  for (const f of resp?.files ?? []) s.add(f.basename.toLowerCase());
-  return s;
+/**
+ * The server's answer for a name in a folder (NewFileCheck), or null when it
+ * cannot be asked - a host api without the dry run, a name it would refuse
+ * anyway (said by `nameProblem`), a folder that cannot be written. Null is
+ * "not known to be taken": the create still answers 409.
+ */
+async function checkName(dir: string, typed: string, ty: NewDocType): Promise<NewFileCheck | null> {
+  const check = props.api.newFileCheck;
+  if (typeof check !== 'function' || !typed.trim()) return null;
+  try {
+    return await check(dir, typed.trim(), keyOf(ty));
+  } catch {
+    return null;
+  }
 }
 
 let checkSeq = 0;
 let checkTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Ask the destination what is already in it: the write permission and the
- * names, in one listing. Debounced because it runs on every keystroke.
+ * Ask the destination whether it may be written (its listing) and the server
+ * whether the name is free there (a dry run of the create). Debounced
+ * because it runs on every keystroke. An untouched name is the server's
+ * first free `Untitled (n).<ext>`.
  */
 async function refreshDestination(opts: { suggest?: boolean } = {}) {
   const seq = ++checkSeq;
@@ -323,12 +338,24 @@ async function refreshDestination(opts: { suggest?: boolean } = {}) {
   if (seq !== checkSeq || target !== dest.value) return;
   destWritable.value = canWrite(resp);
   destChecked.value = true;
-  const taken = takenNames(resp);
-  const ext = selectedType.value?.ext ?? '';
-  if (opts.suggest && !nameTouched.value && ext) {
-    name.value = suggestDocName(t('newdoc.untitled'), ext, taken);
+  const ty = selectedType.value;
+  if (!ty) {
+    collision.value = false;
+    return;
   }
-  collision.value = !!finalName.value && taken.has(finalName.value.toLowerCase());
+  if (opts.suggest && !nameTouched.value) {
+    const first = `${t('newdoc.untitled')}.${ty.ext}`;
+    const answer = await checkName(target, first, ty);
+    if (seq !== checkSeq || target !== dest.value) return;
+    name.value = answer?.taken && answer.suggested ? answer.suggested : first;
+  }
+  if (!finalName.value || nameProblem.value) {
+    collision.value = false;
+    return;
+  }
+  const answer = await checkName(target, name.value, ty);
+  if (seq !== checkSeq || target !== dest.value) return;
+  collision.value = answer?.taken === true;
 }
 
 function scheduleCheck() {

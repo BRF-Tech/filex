@@ -48,15 +48,19 @@ describe('a queued rename or restore', () => {
     w.unmount();
   });
 
+  // 0.54 (#209): the row carries the code and the server's sentence in the
+  // reader's language (backend ops/errcode.go: error_code + error_text); the
+  // centre shows the sentence and no longer reads the English in `error`.
   it('says why it failed when the name is taken', async () => {
+    const TAKEN = 'Something with that name is already there. Rename what is there, then try again.';
     const { center, w } = await centreWith([
       {
         id: 3, kind: 'rename', status: 'failed', total: 1, done: 0, failed: 1, sources: ['Leon'], dest: 'Leo',
-        storage_id: 1, error: 'something with that name already exists here',
+        storage_id: 1, error: 'something with that name already exists here', error_code: 'name_taken', error_text: TAKEN,
       },
       {
         id: 4, kind: 'restore', status: 'partial', total: 2, done: 1, failed: 1, sources: ['11', '12'],
-        storage_id: 1, error: 'something already exists at this path: a.txt',
+        storage_id: 1, error: 'something already exists at this path: a.txt', error_code: 'name_taken', error_text: TAKEN,
       },
     ]);
     const said = [...center.active.value, ...center.history.value].map((o) => o.error);

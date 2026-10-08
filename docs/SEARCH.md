@@ -363,7 +363,7 @@ a tag cannot be used to learn that a file exists.
 opening one lists every file carrying it - from every folder and every storage
 the person can reach:
 
-![Personal and team tags, with a team tag opened](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png)
+![Personal and team tags, with a team tag opened](https://filex.sh/shots/tags/tags-kinds-1440.a9f9fff4d4fd.png)
 
 Rules that follow from it:
 
@@ -693,13 +693,27 @@ curl -X POST https://files.example.com/api/files/search \
 | `limit` | int | `50` | Max results. |
 | `scope` | string | `all` | `name` \| `content` \| `all` - which fields to consult (see [Content search](#content-search)). |
 
-Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both" }, … ], "truncated": false }`,
+The [narrowing parameters](#narrowing-a-search) (`type`, `mime`,
+`modified_after`, `modified_before`, `min_size`, `max_size`, `under`,
+`not_under`, `owner`, `hidden`) are fields of the same body.
+
+Response: `{ "results": [ { …node…, "snippet": "…«term»…", "matched": "name|content|both", "score": 812, "kind": "pdf", "starred": true }, … ], "truncated": false, "total": 1 }`,
 already RBAC-filtered and in [rank order](#ranking). `snippet` is `""` for
 name-only hits. `truncated` is `true` when more matched than came back: the
 index returned a full `limit`, or the LIKE fallback filled its window or still
-had more than `limit` rows after ranking. For a caller confined to a folder,
-only the hits inside it are counted. The explorer's own search
-(`/api/files/manager?action=search`) carries the same flag.
+had more than `limit` rows after ranking (with a narrowing, also when the
+candidate window was full - rows it turned away may have hidden matches past
+it). For a caller confined to a folder, only the hits inside it are counted.
+The explorer's own search (`/api/files/manager?action=search`) carries the
+same flag.
+
+`total` is how many rows matched before the page was cut, after the tenant and
+RBAC filters: exact while `truncated` is `false`, a lower bound while it is
+`true` (the server does not count past its window). `score` is the ranker's
+number for the hit, bigger is better within a [tier](#ranking). `kind` is what
+the row is (the words of `type=` below), and `starred` is present and `true`
+when the **caller** starred it - one query per answer, so a client needs no
+list of stars of its own.
 
 Each hit also says what a bare node row cannot say about itself, so a client
 can open and label a hit from any storage without a second request:
@@ -725,8 +739,10 @@ curl -X POST https://files.example.com/api/files/search \
 ### `GET /api/files/search?q=…` - same handler
 
 Convenience form for the SPA's toolbar (`?q=`, `?storage_id=`, `?limit=`,
-`?scope=`). `q` and `query` are both accepted. Behaves identically to the POST
-form.
+`?scope=`, and the [narrowing parameters](#narrowing-a-search)). `q` and
+`query` are both accepted. Behaves identically to the POST form. There is no
+`page` / `page_size`: one answer is one page of `limit` rows, and `truncated`
+says whether more matched.
 
 ```bash
 curl -G https://files.example.com/api/files/search \
@@ -737,6 +753,49 @@ curl -G https://files.example.com/api/files/search \
 > **and** you passed a non-zero `storage_id`. An all-storages query (`storage_id`
 > = 0) that the index can't answer returns empty rather than scanning every
 > mount.
+
+### Narrowing a search
+
+A search can be narrowed by what a row IS, not only by its name. The narrowing
+is applied by the server to every candidate **before** the limit counts it, so
+`limit` counts rows that satisfy the whole question: "files over 100 MB
+modified this week named report" is answered from the whole index, not from the
+first page of name hits. (Before 0.54 the explorer narrowed the first 250 name
+hits in the browser, and an API, MCP or CLI caller could not ask at all.)
+
+The same parameters are read by `POST|GET /api/files/search`,
+`GET /api/files/manager?action=search`, `GET /api/ai/search`, the MCP tool
+`file_search` and `filex client search` (one flag each).
+
+| Parameter | Value | Keeps |
+|---|---|---|
+| `type` | `file`, `dir` (or `folder`), or a kind: `document`, `spreadsheet`, `presentation`, `pdf`, `image`, `video`, `audio`, `archive`, `code`, `text`, `other` | rows of that kind. A kind is decided by the extension, else by the sniffed mime type; `document` takes plain text too. Every row carries its `kind`. |
+| `mime` | a prefix, `image/` or `application/pdf` | files whose mime type starts with it |
+| `modified_after`, `modified_before` | RFC 3339, `YYYY-MM-DD` (UTC) or epoch milliseconds | rows modified in that window, inclusive. A row with no date satisfies no window. |
+| `min_size`, `max_size` | bytes | files in that range, inclusive. A folder never satisfies a size bound. |
+| `under`, `not_under` | a folder, `adapter://dir` or storage-relative | rows inside (the folder itself counts) / outside it. An adapter prefix also names the storage. |
+| `owner` | `me`, `system` or an account id | rows that account put there; `system` is a row nobody put there through filex |
+| `hidden` | `true` / `false` | `false` drops names starting with a dot; absent keeps them |
+
+A value the server cannot read is refused with `400 {"error":"bad_filter","field":"min_size"}`
+rather than ignored: a dropped filter answers a wider question than the one
+asked. With a narrowing on, the index reads a wider window of candidates
+(2,000) and the index-less fallback a wider window of names (4,000).
+
+### The folder filter box
+
+The explorer's "Filter in this folder" box asks `POST /api/files/search/match`.
+Sent `{"q": "invoice 2026", "names": ["invoice_2026.pdf", "invoice-final.pdf"]}`,
+it answers `{"matches": [0]}`: which of the given names answer the words by the
+**search's own name rule** - every word, `.` `-` `_` and a space as one
+separator, accents significant, the four Latin i's one letter (the rule of the
+[index-less fallback](#how-it-works) over a name on its own). The explorer's
+filter box asks it about the names on screen, once typing pauses, aborting a
+question typed past; it reads no storage and returns nothing the caller did
+not send. A name decrypted in the browser (an encrypted-names folder, a vault)
+is never sent: it is matched in the browser. Before 0.54 the box had a rule of
+its own (an accent-stripped substring), so "invoice 2026" did not find
+`invoice_2026.pdf` there while the search did.
 
 ### Which explorer box asks what
 
@@ -750,6 +809,8 @@ of two routes:
 | Advanced search's **Content** / **All** scopes | `GET /api/files/search?scope=content` (or `all`) `&limit=250` | name, path, content | every drive you can reach |
 | **⌘K → Everywhere** | `GET /api/files/search?scope=all&limit=8` | name, path, content | every drive you can reach - and, in the desktop app, every account on the rail, each searched with its own sign-in |
 | Admin → **Search** (index test page) | `GET /api/files/search` | as asked | every drive the administrator can reach |
+| Admin → **Files** (version history) | `GET /api/files/search?scope=name&type=file&limit=50` | name + path, files only | every drive the administrator can reach |
+| **Filter in this folder…** | `POST /api/files/search/match` | the names on screen | the rows in hand (see above) |
 
 Both routes drop what the caller may not see before answering (tenant, per-drive
 grants, a token's root) - a content hit never carries a snippet from a file the
@@ -776,7 +837,7 @@ curl -G https://files.example.com/api/ai/search \
   --data-urlencode 'path=s3://projects' --data-urlencode 'q=budget'
 ```
 
-Response: `{ "entries": [ … ] }`.
+Response: `{ "entries": [ … ] }`. It takes the [narrowing parameters](#narrowing-a-search) too.
 
 The MCP tool **`file_search`** additionally accepts a boolean `content`
 argument (default `true`): content hits come back with `snippet` + `matched`

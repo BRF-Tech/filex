@@ -42,7 +42,7 @@ export { default as LogoMark } from './components/LogoMark.vue';
 export { default as StarButton } from './components/StarButton.vue';
 export { default as TagPicker } from './components/TagPicker.vue';
 export { default as TagKindIcon } from './components/TagKindIcon.vue';
-export { tagItemsOf, tagKey, isTagKind, type TagItem, type TagKind } from './lib/tags';
+export { tagItemsOf, keyOfName, isTagKind, type TagItem, type TagKind } from './lib/tags';
 export {
   coverageByStorage,
   coverageMessage,
@@ -96,12 +96,13 @@ export {
   type NotificationRowData,
   type NotificationsTransport,
 } from './composables/useNotificationFeed';
-export { useNotificationText, NOTIFICATION_EVENT_LABEL } from './composables/useNotificationText';
+export { useNotificationText } from './composables/useNotificationText';
 export {
   TRASH_VIEW_PATH,
   explorerHashPath,
   explorerPathOf,
   isNotificationClickable,
+  rowOpens,
   notificationHref,
   notificationRoute,
   qualifiedFromHash,
@@ -114,14 +115,12 @@ export {
   type NotificationTargetKind,
 } from './lib/notificationTarget';
 export {
-  NOTIFICATION_PHRASES,
-  fillTemplate,
-  notificationVars,
-  renderNotification,
+  notificationText,
+  type NotificationE2E,
+  type NotificationE2EName,
   type NotificationLike,
   type NotificationText,
-  type NotifyLocale,
-  type RenderOptions,
+  type NotificationTextPart,
 } from './lib/notificationText';
 export { UNREAD_BADGE_MAX, unreadBadgeCount, unreadBadgeLabel } from './lib/unreadBadge';
 export {
@@ -148,27 +147,39 @@ export {
   type UserSettingsApi,
   type UserSettingsHost,
 } from './lib/userSettingsHost';
+/* Push notifications on this device (#191): the one subscription flow, which
+ * a host with filex's own service worker hands its worker and transport. */
+export {
+  WEB_PUSH_NOTE_KEY,
+  base64UrlToBytes,
+  createWebPush,
+  deviceLabel,
+  type WebPushApi,
+  type WebPushController,
+  type WebPushDevice,
+  type WebPushEnv,
+  type WebPushNotificationApi,
+  type WebPushPermission,
+  type WebPushState,
+  type WebPushStatus,
+  type WebPushSubscriptionBody,
+} from './lib/webPush';
 export {
   DIGEST_EVENT,
   WEBHOOK_EVENTS,
-  eventOffReason,
-  eventPossible,
   eventSlug,
   userEventKey,
   webhookEventKey,
-  type EventPossibility,
   type WebhookEvent,
 } from './lib/webhookEvents';
 export {
-  RESERVED_USERNAMES,
-  USERNAME_MAX,
-  USERNAME_MIN,
-  accountProblemKey,
-  emailProblem,
+  ACCOUNT_CHECK_DELAY_MS,
+  accountChecker,
   normalizeUsername,
   refusalField,
-  usernameProblem,
-  type AccountProblem,
+  type AccountCheckAnswer,
+  type AccountCheckQuery,
+  type AccountFieldRefusal,
 } from './lib/accountRules';
 export { downscaleImageToDataURL, type DownscaleOptions } from './lib/imageDownscale';
 export { DENSITY_KEY, applyAccountDensity, getDensity, setDensity, type Density } from './lib/density';
@@ -294,7 +305,7 @@ export type { PendingOpType, PendingOpOutput } from './composables/usePendingOps
 /* M2 — the surface conversation (modal + inspector share it) and the value seeding. */
 export { usePluginSurface, SURFACE_CHANGE_DEBOUNCE_MS } from './composables/usePluginSurface';
 export type { PluginSurfaceStore, PluginSurfaceHost, PluginSurfaceEvents } from './composables/usePluginSurface';
-export { initialValues as surfaceInitialValues, storageFieldOf, pinLength, looksLikeEmail } from './lib/surfaceValues';
+export { initialValues as surfaceInitialValues, storageFieldOf, looksLikeEmail } from './lib/surfaceValues';
 /* v3 §2 — the two rules the RENDERER keeps so no plugin can break them:
  * a field that depends on another field, and a step with one way forward. */
 export {
@@ -353,6 +364,8 @@ export type {
   PublicUpload,
 } from './composables/usePublicLink';
 export { usePublicBranding, normalizeAccent, shade, inkOn, accentStyleOf, DEFAULT_BRAND_NAME } from './composables/usePublicBranding';
+export { usePublicText, loadPublicText, providePublicText, publicSentence, PUBLIC_TEXT } from './composables/usePublicText';
+export type { PublicTextSource, PublicStringsAnswer } from './composables/usePublicText';
 export { default as PublicLinkPage } from './components/public/PublicLinkPage.vue';
 export { default as PublicShell } from './components/public/PublicShell.vue';
 export { default as PublicLinkPreview } from './components/public/PublicLinkPreview.vue';
@@ -441,8 +454,13 @@ export {
    * sign-outs the app is told about. */
   forgetPersonalPrefs,
   registerPersonalMirror,
+  registerPersonalForget,
 } from './lib/prefs';
 export type { LookKey, PrefKey, PrefsConfig, UiPrefs } from './lib/prefs';
+/* #196 — the answers a right-click menu depends on, remembered per person and
+ * storage. `forgetPersonalPrefs` forgets them; a host whose sign-out does not
+ * go through it calls `clearMenuAnswers`. */
+export { clearMenuAnswers, MENU_ANSWERS_PREFIX } from './lib/menuAnswers';
 /* The first-use tour is offered to a PERSON once — the account's answer or
  * this browser's, never once per mount. */
 export { markTourSeen, offerTourOnce, resetTourState, tourSeen, TOUR_LS_KEY } from './lib/tour';
@@ -511,7 +529,6 @@ export type { PdfFieldRule, PdfRuleKind, PdfRuleError } from './lib/pdfFieldRule
 export { lockOf, anyLocked, lockedRefusal, lockWords, lockUntilText, lockReasonText } from './lib/appLock';
 /* How a failure is SAID — one table of words for every screen (lib/errorWords). */
 export {
-  codeWords,
   jobFailure,
   looksTechnical,
   networkFailure,
@@ -519,12 +536,29 @@ export {
   refusalWords,
   requestFailure,
   sayFailure,
+  serverSaid,
   serverWords,
   statusIsTelling,
   statusWords,
 } from './lib/errorWords';
 export type { JobErrorCode, RequestFailure, SaidFailure } from './lib/errorWords';
 export { gateOnService, onlyOfficeUsable } from './lib/serviceGate';
+/* 0.54 (#211) - the rules the server publishes (`capabilities.edit_kinds`,
+   `limits`), held once for every surface; a host that fetches the
+   capabilities itself hands them over with takeServerRules. */
+export {
+  takeServerRules,
+  editKindsKnown,
+  isOfficeExt,
+  isTextEditable,
+  isTextualMime,
+  serverLimit,
+  runeCount,
+  clipRunes,
+  type EditKinds,
+  type EventOff,
+  type ServerLimits,
+} from './lib/serverRules';
 export type { AppLock, LockedRefusal, LockWordsHost } from './lib/appLock';
 /* issue #34 — a symlink the server will NOT follow: what it is, why it will
    not open, and the rule that every surface refuses it out loud. */
@@ -615,6 +649,7 @@ export type {
   FileNode,
   ThumbNote,
   ShareInfo,
+  ShareDownloadCommand,
   UploadLimits,
   Capabilities,
   NewDocType,
@@ -696,7 +731,7 @@ export {
   clearResume,
   pruneResume,
   defaultResumeStorage,
-  RESUME_TTL_MS,
+  resumeExpiry,
 } from './lib/uploadResume';
 export type { ResumeRecord, ResumeStorage } from './lib/uploadResume';
 
@@ -743,8 +778,7 @@ export { default as ConnectionNotice } from './components/ConnectionNotice.vue';
 /* `filex 0.43.0` — which filex this is, in ONE spelling for every place that
    says it (the account menus, user settings, the sign-in page). No catalogue
    key: a name and a number need no translation (lib/productVersion). */
-export { PRODUCT_NAME, parseServerVersion, productVersionLine, shortCommit } from './lib/productVersion';
-export type { ServerVersion } from './lib/productVersion';
+export { PRODUCT_NAME, productVersionLine, shortCommit } from './lib/productVersion';
 export { default as ProductVersion } from './components/ProductVersion.vue';
 /* The one splitter for list fields — "،" "，" "、" are commas too. */
 export { splitList, isListSeparatorKey } from './lib/listInput';

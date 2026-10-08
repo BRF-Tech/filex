@@ -218,7 +218,8 @@ type Presigner interface {
 }
 
 // MultipartUploader is implemented by drivers (S3, GCS, Azure) that support
-// resumable multipart uploads via presigned URLs.
+// multipart uploads. partURLs is historical: since 0.54 no caller reads it (the
+// presigned browser upload was removed) and a driver may return nil.
 type MultipartUploader interface {
 	InitMultipart(ctx context.Context, path string, totalSize int64, partCount int) (uploadID string, partURLs []string, err error)
 	CompleteMultipart(ctx context.Context, path string, uploadID string, parts []PartCompletion) error
@@ -227,11 +228,10 @@ type MultipartUploader interface {
 
 // PartUploader is MultipartUploader plus a SERVER-SIDE part upload.
 //
-// MultipartUploader on its own is presign-only: it hands part URLs to the
-// browser, which means filex never touches the bytes. The staged upload path
-// (internal/staging, docs/UPLOADS.md) holds the bytes itself and must push
-// them, so it needs a way to send one part from an io.Reader and get its ETag
-// back.
+// MultipartUploader on its own only starts, completes and aborts an upload.
+// The staged upload path (internal/staging, docs/UPLOADS.md) holds the bytes
+// itself and must push them, so it needs a way to send one part from an
+// io.Reader and get its ETag back.
 //
 // ⚠ The part boundaries here are the DRIVER's, not the client's. A client that
 // staged 1 MiB chunks must not break an S3 backend, where every non-final part

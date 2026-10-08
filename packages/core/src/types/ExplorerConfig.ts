@@ -5,14 +5,14 @@
  *
  *   1. New clean API (preferred — RESTful, server-agnostic):
  *      { apiBase: 'https://files.example.com', auth: { kind: 'bearer', token } }
- *      → URLs like `${apiBase}/api/files/manager`, `${apiBase}/api/files/upload/init`.
+ *      → URLs like `${apiBase}/api/files/manager`, `${apiBase}/api/files/upload/begin`.
  *
  *   2. Legacy API (Vuefinder-compat — for embedders that mounted the
  *      old `@brftech/file-explorer` package against their own routes):
- *      { endpoint: '/api/files/manager', uploadInit: '/api/files/upload/init', … }
+ *      { endpoint: '/api/files/manager', uploadBegin: '/api/files/upload/begin', … }
  *      → caller fully controls every URL.
  *
- * If both `apiBase` AND any explicit `endpoint`/`uploadInit`/etc. are
+ * If both `apiBase` AND any explicit `endpoint`/`uploadBegin`/etc. are
  * present, the explicit field wins (lets you override one route while
  * keeping the auto-derived rest).
  */
@@ -67,11 +67,6 @@ export interface EndpointMap {
    * override moves the whole protocol.
    */
   uploadBegin: string | null;
-  /** Legacy S3-presigned chunked upload. Still served by the backend for
-   *  older embedders; nothing in this package calls it. */
-  uploadInit: string | null;
-  uploadFinalize: string | null;
-  uploadAbort: string | null;
   shareCreate: string | null;
   shareList: string | null;
   shareDelete: string | null;
@@ -94,12 +89,16 @@ export interface EndpointMap {
   trashList: string | null;
   trashRestore: string | null;
   trashPurge: string | null;
+  /* An operator's permanent delete of several trash entries in one request. */
+  trashPurgeBatch: string | null;
+  /* An operator's "Empty trash" (POST), its progress (GET) and, under
+   * `/preview`, what it would delete. */
+  trashEmpty: string | null;
   /* An operator's hard delete of one version (`{id}`). */
   versionPurge: string | null;
   /* wiring:e2 */
   e2eEscrowChallenge: string | null;
   e2eEscrowUsed: string | null;
-  e2ePasswordChanged: string | null;
   e2eCleanup: string | null;
   /* wiring:e2 policy — may this account encrypt here, and asking for it. */
   e2eAllowed: string | null;
@@ -115,6 +114,8 @@ export interface EndpointMap {
   /** v4 — an app's own interface: its module and its saves. */
   pluginUICall: string | null;
   pluginUISave: string | null;
+  /** 0.54 - what an interface reads of the file it was opened with (`{plugin}`/`{view}`). */
+  pluginUIRead: string | null;
   /** 0.52.0 - what an app reads about its own license (`{plugin}`), fx.license.get(). */
   pluginLicense: string | null;
   /** `POST` cancel of a queued/running ops row — `{id}` placeholder. */
@@ -125,7 +126,7 @@ export interface ExplorerConfig {
   /**
    * Modern shorthand: URL prefix for the standard /api/files/* layout.
    * Example: `https://files.example.com` → `${apiBase}/api/files/manager`,
-   * `${apiBase}/api/files/upload/init`, etc. Any explicit endpoint*
+   * `${apiBase}/api/files/upload/begin`, etc. Any explicit endpoint*
    * field below overrides the derived URL.
    */
   apiBase?: string;
@@ -136,8 +137,12 @@ export interface ExplorerConfig {
   // ——— Per-route overrides (optional; auto-derived from apiBase if absent) ———
   /** Staged upload entry point; the `{id}` routes hang off it. */
   uploadBegin?: string;
+  /** @deprecated Ignored. The presigned S3 upload these named was removed
+   *  from the server in 0.54.0; every upload goes through `uploadBegin`. */
   uploadInit?: string;
+  /** @deprecated Ignored, as `uploadInit`. */
   uploadFinalize?: string;
+  /** @deprecated Ignored, as `uploadInit`. */
   uploadAbort?: string;
 
   shareCreate?: string;
@@ -188,6 +193,8 @@ export interface ExplorerConfig {
   /** An app's own interface: its module (`{plugin}`/`{view}`) and its saves. */
   pluginUICall?: string;
   pluginUISave?: string;
+  /** What an interface reads of its file, checked by the server (0.54). */
+  pluginUIRead?: string;
   /** What an app reads about its own license (`{plugin}`), fx.license.get(). */
   pluginLicense?: string;
 
@@ -275,6 +282,15 @@ export interface ExplorerConfig {
    *  (default `/api/admin/trash/{id}`); `?queued=1` makes it a job of the
    *  operations queue. Only an operator is let through. */
   trashPurge?: string;
+  /** Delete several trash entries for good in one request — `POST
+   *  {node_ids}` (default `/api/admin/trash/purge`), answered
+   *  `{done, failed, reason_code, summary}`; `?queued=1` makes it jobs of the
+   *  operations queue. Only an operator is let through. */
+  trashPurgeBatch?: string;
+  /** "Empty trash" (default `/api/admin/trash/empty`): POST starts it, GET
+   *  reports it, and `<this>/preview` is the dry run whose count the
+   *  confirmation names. Only an operator is let through. */
+  trashEmpty?: string;
   /** Delete one version for good — `DELETE`, `{id}` in the template (default
    *  `/api/admin/versions/{id}`): its row and its stored bytes. Only an
    *  operator is let through. */
@@ -285,7 +301,11 @@ export interface ExplorerConfig {
   e2eEscrowChallenge?: string;
   /** E2E escrow use report — `POST { path, id, nonce }`. */
   e2eEscrowUsed?: string;
-  /** E2E folder password changed — `POST { path, via, rekey }`. */
+  /**
+   * @deprecated Ignored since 0.54: the server records an encrypted folder's
+   * (or file's) password change itself, from the key file it sees rewritten,
+   * and the explorer no longer announces it.
+   */
   e2ePasswordChanged?: string;
   /** wiring:e2 convert — drop the plaintext filex holds after a folder is encrypted in place. */
   e2eCleanup?: string;

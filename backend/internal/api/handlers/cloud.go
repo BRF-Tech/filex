@@ -14,14 +14,17 @@ package handlers
 //	GET  /api/cloud/plans             → the configured plan catalog
 //	POST /api/cloud/signup            → provision a DISABLED tenant + verify token
 //	POST /api/cloud/verify            → consume the token, enable the tenant
-//	POST /api/cloud/billing/checkout  → Stripe checkout-session draft (503 w/o STRIPE_SECRET)
-//	POST /api/cloud/billing/webhook   → Stripe webhook draft (503 w/o STRIPE_SECRET)
+//	POST /api/cloud/billing/checkout  → Stripe checkout session for {tenant, plan} (503 w/o STRIPE_SECRET)
+//	POST /api/cloud/billing/webhook   → verified Stripe events; the only door that changes a plan
+//	                                    (503 w/o STRIPE_SECRET or STRIPE_WEBHOOK_SECRET)
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -35,6 +38,12 @@ type Cloud struct {
 	// MultiTenant is echoed in /status — a real cloud launch requires
 	// FILEX_MULTI_TENANT=1 (a signed-up tenant is a provider row).
 	MultiTenant bool
+	// WebhookSecret is the Stripe webhook signing secret
+	// (STRIPE_WEBHOOK_SECRET, whsec_…). Empty: the webhook answers 503.
+	WebhookSecret string
+	// Origin is a tenant's own address (tenanturl.Resolver.ForProvider), the
+	// base of the checkout's return addresses. nil: relative addresses.
+	Origin func(ctx context.Context, providerID int64) string
 }
 
 // NewCloud constructs the handler.
@@ -107,40 +116,49 @@ func (h *Cloud) Verify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "slug": p.Slug, "enabled": p.Enabled})
 }
 
-// Checkout drafts a Stripe checkout session. Without STRIPE_SECRET → 503.
+// Checkout opens a Stripe checkout session for a tenant's move to a paid plan
+// ({"tenant": "<slug>", "plan": "<id>"}). Without STRIPE_SECRET → 503.
+//
+// ⚠ It opens a payment and changes nothing: the plan moves when Stripe's
+// verified webhook says the payment went through. The return addresses are
+// the server's (cloud.ReturnURLs over the tenant's origin); a success_url or
+// cancel_url in the body is ignored.
 func (h *Cloud) Checkout(w http.ResponseWriter, r *http.Request) {
 	if !h.Stripe.Configured() {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "stripe not configured"})
 		return
 	}
 	var req struct {
-		Plan       string `json:"plan"`
-		SuccessURL string `json:"success_url"`
-		CancelURL  string `json:"cancel_url"`
+		Tenant string `json:"tenant"`
+		Plan   string `json:"plan"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	plan := h.Svc.PlanByID(req.Plan)
-	if plan == nil || plan.StripePriceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown plan or plan has no stripe_price_id"})
-		return
-	}
-	url, err := h.Stripe.CreateCheckoutSession(r.Context(), plan.StripePriceID, req.SuccessURL, req.CancelURL)
+	url, err := h.Svc.Checkout(r.Context(), h.Stripe, req.Tenant, req.Plan, h.Origin)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		status := cloudErrStatus(err)
+		if status == http.StatusInternalServerError {
+			status = http.StatusBadGateway
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"checkout_url": url})
 }
 
-// Webhook drafts the Stripe webhook receiver. Without STRIPE_SECRET → 503;
-// with it, the (skeleton) signature check rejects everything until a launch
-// implements it — the endpoint can never be spoofed into acting.
+// Webhook receives Stripe's events. Without STRIPE_SECRET or
+// STRIPE_WEBHOOK_SECRET → 503. An event whose Stripe-Signature does not
+// verify is refused (400) before it is parsed; a verified one is applied
+// (cloud.Service.ApplyStripeEvent) — the only way a tenant's plan changes.
 func (h *Cloud) Webhook(w http.ResponseWriter, r *http.Request) {
 	if !h.Stripe.Configured() {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "stripe not configured"})
+		return
+	}
+	if h.WebhookSecret == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": cloud.ErrWebhookNotConfigured.Error()})
 		return
 	}
 	payload, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -148,13 +166,20 @@ func (h *Cloud) Webhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
 		return
 	}
-	if err := cloud.VerifyWebhookSignature(payload, r.Header.Get("Stripe-Signature"), ""); err != nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": err.Error()})
+	if err := cloud.VerifyWebhookSignature(payload, r.Header.Get("Stripe-Signature"), h.WebhookSecret, time.Now()); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// TODO(cloud-launch): dispatch on event type — checkout.session.completed →
-	// stamp providers.billing_ref; customer.subscription.deleted → downgrade.
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+	changed, err := h.Svc.ApplyStripeEvent(r.Context(), payload)
+	if err != nil {
+		writeJSON(w, cloudErrStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	status := "ignored"
+	if changed {
+		status = "applied"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 // cloudErrStatus maps service sentinel errors to HTTP statuses.
@@ -166,6 +191,8 @@ func cloudErrStatus(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, cloud.ErrTokenUnknown):
 		return http.StatusNotFound
+	case errors.Is(err, cloud.ErrStripeNotConfigured), errors.Is(err, cloud.ErrWebhookNotConfigured):
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

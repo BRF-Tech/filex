@@ -1,22 +1,32 @@
 // A version restore of a document an app has frozen (the signing app, while
 // signatures are collected) is refused with 423 and the app's name and reason
-// (handlers.lockedAnswer). The inspector says that in the reader's language —
-// not the server's English "locked by app sign: <path>".
+// (handlers.lockedAnswer). Since 0.54 (#209, audit A3) the SERVER says it, in
+// the reader's language (lockedMessage, srvtext server.applock.*): the
+// inspector prints that sentence, never the English "locked by app sign:
+// <path>" it used to replace with words of its own.
 import { describe, it, expect, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 
 import InspectorPanel from '@brftech/filex-core/src/components/InspectorPanel.vue';
 
-const refusal = Object.assign(new Error('locked by app sign: Sozlesmeler/NDA.docx'), {
-  status: 423,
-  detail: JSON.stringify({
-    error: 'locked',
-    message: 'locked by app sign: Sozlesmeler/NDA.docx',
-    plugin: 'sign',
-    reason: 'imzalar toplanıyor',
-    path: 'Sozlesmeler/NDA.docx',
-  }),
-});
+/** The server's 423, in the language it was asked in. */
+const SAID = {
+  en: 'sign locked this file: imzalar toplanıyor',
+  tr: 'sign bu dosyayı kilitledi: imzalar toplanıyor',
+} as const;
+let refusal: Error = new Error('unset');
+function refuse(locale: keyof typeof SAID): Error {
+  return Object.assign(new Error(SAID[locale]), {
+    status: 423,
+    detail: JSON.stringify({
+      error: 'locked',
+      message: SAID[locale],
+      plugin: 'sign',
+      reason: 'imzalar toplanıyor',
+      path: 'Sozlesmeler/NDA.docx',
+    }),
+  });
+}
 
 const api = {
   listShares: vi.fn(async () => {
@@ -56,6 +66,7 @@ describe('InspectorPanel — restoring a frozen document', () => {
     ['tr', 'sign'],
   ] as const) {
     it(`names the app that froze it (${locale})`, async () => {
+      refusal = refuse(locale);
       const w = mount(InspectorPanel, {
         props: { api: api as never, nodes: [NODE], dirLabel: 'demo', dirCount: 1, locale },
         attachTo: document.body,
@@ -73,6 +84,7 @@ describe('InspectorPanel — restoring a frozen document', () => {
       await vi.waitFor(() => expect(w.emitted('toast')).toBeTruthy());
       const said = String(w.emitted('toast')!.at(-1)![0]);
       expect(said).toContain(words);
+      expect(said).toContain(SAID[locale]);
       expect(said).toContain('imzalar toplanıyor');
       expect(said).not.toContain('locked by app');
       expect(said).not.toContain('Sozlesmeler/');

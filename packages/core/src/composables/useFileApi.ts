@@ -14,7 +14,7 @@
  *      Used by `@brftech/file-explorer` 0.1.0 embedders that have a
  *      Laravel/Filament backend already.
  *
- * Per-route fields (`uploadInit`, `shareCreate`, …) ALWAYS win over
+ * Per-route fields (`uploadBegin`, `shareCreate`, …) ALWAYS win over
  * the auto-derived `apiBase` URL — lets the caller mix and match.
  *
  * Auth normalisation is centralised here. The component code never
@@ -27,6 +27,7 @@ import type { ExplorerConfig, AuthConfig, EndpointMap, SearchAccount } from '../
 import type { LicenseInfo } from '@brftech/filex-app-ui/protocol';
 import { resolveLocale } from '../locales/resolve';
 import { listingAddress } from '../lib/internalPaths';
+import { serverLimit, takeServerRules } from '../lib/serverRules';
 import { draftsClient, type DraftDto } from '../lib/drafts';
 import { localeTag } from './useLocale';
 import { networkFailure, requestFailure } from '../lib/errorWords';
@@ -41,7 +42,7 @@ import type {
   Capabilities,
   ArchiveEntry,
   ArchiveCreateFormat,
-  TrashEntry,
+  TrashPage,
   E2eAnswer,
   E2eRequestKind,
   E2eRequestDto,
@@ -71,7 +72,51 @@ export interface PendingOpDto {
   created_at: string | null;
 }
 
+/**
+ * A batch restore or permanent delete of trash entries, as the server answers
+ * it: how many went (or, `queued`, are on their way as `ops`), how many did
+ * not, why the first of those did not, and `summary`, the server's sentence
+ * for all of it in the screen's language — what the explorer shows.
+ */
+export interface TrashBatchAnswer {
+  done: number;
+  failed: number;
+  reason_code?: 'exists' | 'not_found' | 'forbidden' | 'failed';
+  /** The entries a restore found their place taken for. */
+  taken?: string[];
+  queued?: boolean;
+  ops?: PendingOpDto[];
+  summary: string;
+}
+
+/** "Empty trash" asked as a dry run: what it would delete, and the
+ *  confirmation's sentence. */
+export interface TrashEmptyPreview {
+  dry_run: true;
+  count: number;
+  bytes: number;
+  summary: string;
+}
+
 /** Answer to `?action=newfile` — where the new document actually landed. */
+/**
+ * A New document name, checked by the server without anything being written
+ * (`?action=newfile` with `dry_run`, #211 audit B18): the name the create
+ * would write, whether something already holds it, and the first free
+ * `name (n).ext` beside it - the server's own existence check and numbering,
+ * not a lower-cased copy in the browser.
+ */
+export interface NewFileCheck {
+  dry_run: boolean;
+  path: string;
+  name: string;
+  taken: boolean;
+  /** `NAME_TAKEN` when taken. */
+  code?: string;
+  /** The first free name beside a taken one; absent when there is none. */
+  suggested?: string;
+}
+
 export interface NewFileResponse {
   /** Adapter-qualified path, ready to hand to the viewer. */
   path: string;
@@ -107,6 +152,10 @@ export interface ManagerResponse {
    * backends — consumers must stay undefined-safe. */
   e2e?: boolean;
   e2e_root?: string;
+  /* wiring:e2 vault — the vault folder the listed dir is in or is
+   * (docs/E2E-VAULT-FORMAT.md). Its listing on the server is the vault's
+   * layout (`v/`, packs, index files), never rows to show. */
+  e2e_vault_root?: string;
   files: FileNode[];
   /** `action=search` only: more rows matched than came back — the index
    *  filled its page, or the index-less fallback filled its window — so the
@@ -216,6 +265,17 @@ export interface InviteResponse {
   emailed: boolean;
 }
 
+/** POST /api/files/permissions/share-mail's answer. */
+export interface ShareMailResult {
+  emailed: boolean;
+  sent?: string[];
+  failed?: string[];
+  /** The link has a PIN the mail leaves out: the sender gives it separately. */
+  pin_withheld?: boolean;
+  /** The server's sentence for the composer, in their language. */
+  message?: string;
+}
+
 /* === bul:s3 — global search (GET /api/files/search) === */
 
 export type GlobalSearchScope = 'name' | 'content' | 'all';
@@ -291,9 +351,6 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     // Staged (chunked + resumable) uploads — what useUploadChunked speaks on
     // every driver. The {id} routes are derived from this one.
     uploadBegin: derive(config.uploadBegin, '/api/files/upload/begin'),
-    uploadInit: derive(config.uploadInit, '/api/files/upload/init'),
-    uploadFinalize: derive(config.uploadFinalize, '/api/files/upload/finalize'),
-    uploadAbort: derive(config.uploadAbort, '/api/files/upload/abort'),
     shareCreate: derive(config.shareCreate, '/api/files/share'),
     shareList: derive(config.shareList, '/api/files/share'),
     shareDelete: derive(config.shareDelete, '/api/files/share/{uuid}'),
@@ -317,13 +374,16 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     trashRestore: derive(config.trashRestore, '/api/files/manager/restore'),
     /* An operator's "Delete permanently" of one trash entry (`{id}`). */
     trashPurge: derive(config.trashPurge, '/api/admin/trash/{id}'),
+    /* An operator's permanent delete of a selection, in one request. */
+    trashPurgeBatch: derive(config.trashPurgeBatch, '/api/admin/trash/purge'),
+    /* An operator's "Empty trash": POST starts it, GET follows it,
+       `/preview` counts what it would delete. */
+    trashEmpty: derive(config.trashEmpty, '/api/admin/trash/empty'),
     /* An operator's hard delete of one version (`{id}`). */
     versionPurge: derive(config.versionPurge, '/api/admin/versions/{id}'),
     /* wiring:e2 — escrow proof-of-possession, then the owner is told. */
     e2eEscrowChallenge: derive(config.e2eEscrowChallenge, '/api/files/e2e/escrow/challenge'),
     e2eEscrowUsed: derive(config.e2eEscrowUsed, '/api/files/e2e/escrow/used'),
-    /* wiring:e2 password — a folder password was changed; its owner is told. */
-    e2ePasswordChanged: derive(config.e2ePasswordChanged, '/api/files/e2e/password-changed'),
     /* wiring:e2 convert — after a folder is encrypted in place. */
     e2eCleanup: derive(config.e2eCleanup, '/api/files/e2e/cleanup'),
     /* wiring:e2 policy — may this account encrypt here, and asking for it. */
@@ -339,6 +399,8 @@ export function resolveEndpoints(config: ExplorerConfig): EndpointMap {
     /* v4 — an app's own interface (AppFrame): its module, and its saves. */
     pluginUICall: derive(config.pluginUICall, '/api/files/plugins/ui/{plugin}/{view}/call'),
     pluginUISave: derive(config.pluginUISave, '/api/files/plugins/ui/{plugin}/{view}/save'),
+    /* 0.54 - what an interface reads of its file, checked by the server (#211). */
+    pluginUIRead: derive(config.pluginUIRead, '/api/files/plugins/ui/{plugin}/{view}/read'),
     /* 0.52.0 - a paid app's license, as the app itself reads it (fx.license.get()). */
     pluginLicense: derive(config.pluginLicense, '/api/files/plugins/license/{plugin}'),
   };
@@ -381,7 +443,10 @@ function normalizeAuth(auth: AuthConfig | undefined): { kind: 'bearer'; token: s
   return { kind: 'none' };
 }
 
-/** One chunk of an app interface's save (handlers/app_ui_chunks.go). */
+/** One chunk of an app interface's save, for a server that publishes no
+ *  `limits.app_ui_save_chunk_bytes` (older than 0.54). The server's own number
+ *  wins when it says one (handlers/app_ui_chunks.go `uiChunkMax`); this one is
+ *  held to it by a drift test (web/tests/lib/serverRuleVectors.test.ts). */
 export const UI_SAVE_CHUNK = 8 << 20;
 
 export function useFileApi(config: ExplorerConfig) {
@@ -565,7 +630,9 @@ export function useFileApi(config: ExplorerConfig) {
   async function deleteGroupPermission(id: number): Promise<unknown> {
     return jsonFetch(permissionsUrl('/groups/' + id), { method: 'DELETE' });
   }
-  async function addPermission(body: { path: string; user_id?: number; group_id?: number; level: string; is_dir?: boolean }): Promise<unknown> {
+  // ⚠ No `is_dir`: whether a grant is a folder's is the item's fact, and the
+  // server reads it from its catalogue (C11a, 0.54).
+  async function addPermission(body: { path: string; user_id?: number; group_id?: number; level: string }): Promise<unknown> {
     return jsonFetch(permissionsUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
   async function updatePermission(id: number, level: string): Promise<unknown> {
@@ -574,11 +641,25 @@ export function useFileApi(config: ExplorerConfig) {
   async function deletePermission(id: number): Promise<unknown> {
     return jsonFetch(permissionsUrl('/' + id), { method: 'DELETE' });
   }
-  async function invitePermission(body: { path: string; email: string; level: string; create_user?: boolean; role?: string; is_dir?: boolean; locale?: string }): Promise<InviteResponse> {
+  async function invitePermission(body: { path: string; email: string; level: string; create_user?: boolean; role?: string; locale?: string }): Promise<InviteResponse> {
     return jsonFetch<InviteResponse>(permissionsUrl('/invite'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   }
-  async function shareMail(body: { path: string; email?: string; emails?: string[]; url: string; pin?: string | null; expires_days?: number; locale?: string; is_dir?: boolean; size?: number; mode?: string }): Promise<{ emailed: boolean; sent?: string[]; failed?: string[] }> {
-    return jsonFetch<{ emailed: boolean; sent?: string[]; failed?: string[] }>(permissionsUrl('/share-mail'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  /**
+   * E-mail a link this person made. ⚠ Only the link's TOKEN, the addresses
+   * and the language travel: the server writes the whole message from the
+   * link itself (its address, expiry, the item's name, kind and size, a file
+   * request's limits) and never mails a PIN (C2, 0.54). `message` is the
+   * server's sentence for the composer, in their language.
+   */
+  async function shareMail(body: { share: string; emails: string[]; locale?: string }): Promise<ShareMailResult> {
+    return jsonFetch<ShareMailResult>(permissionsUrl('/share-mail'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  }
+  /** The share mail's subject and body for a link, without sending it — what
+   *  the OS share sheet is handed, so both say the same thing. */
+  async function shareMessage(share: string, locale?: string): Promise<{ subject: string; body: string; pin_withheld?: boolean }> {
+    const q = new URLSearchParams({ share });
+    if (locale) q.set('lang', locale);
+    return jsonFetch(permissionsUrl('/share-message') + '?' + q.toString());
   }
 
   // --------------------------------------------------------------------
@@ -615,8 +696,14 @@ export function useFileApi(config: ExplorerConfig) {
     return jsonFetch<ManagerResponse>(managerUrl('index', { path: listingAddress(path) }));
   }
 
-  async function search(path: string, filter: string): Promise<ManagerResponse> {
-    return jsonFetch<ManagerResponse>(managerUrl('search', { path: listingAddress(path), filter }));
+  /**
+   * The manager's name search. `narrow` is the search's narrowing as the
+   * server reads it (`type`, `modified_after`, `min_size`, `under`, `owner`,
+   * `hidden`... - lib/advSearch `advFilterParams`), applied on the server
+   * BEFORE its page is cut (task #207). Absent: the plain search.
+   */
+  async function search(path: string, filter: string, narrow?: Record<string, string>): Promise<ManagerResponse> {
+    return jsonFetch<ManagerResponse>(managerUrl('search', { ...(narrow ?? {}), path: listingAddress(path), filter }));
   }
 
   /* === bul:s3 — global "search everywhere" ===
@@ -626,13 +713,48 @@ export function useFileApi(config: ExplorerConfig) {
    * degrade to an empty result list — the palette just shows nothing. */
   async function globalSearch(
     query: string,
-    opts: { limit?: number; scope?: GlobalSearchScope } = {},
+    opts: { limit?: number; scope?: GlobalSearchScope; narrow?: Record<string, string> } = {},
   ): Promise<GlobalSearchHit[]> {
+    return (await globalSearchPage(query, opts)).hits;
+  }
+
+  /**
+   * `globalSearch` with what the server says about the answer: `truncated`
+   * (more matched than came back) and `total` (how many matched - exact unless
+   * truncated). The advanced dialog's count and the results strip read these
+   * rather than guessing from the page length (task #207).
+   */
+  async function globalSearchPage(
+    query: string,
+    opts: { limit?: number; scope?: GlobalSearchScope; narrow?: Record<string, string> } = {},
+  ): Promise<{ hits: GlobalSearchHit[]; truncated?: boolean; total?: number }> {
     const base = endpoints.manager.replace(/\/manager(\?.*)?$/, '/search');
     const sep = base.includes('?') ? '&' : '?';
-    const url = `${base}${sep}${qs({ q: query, limit: opts.limit, scope: opts.scope })}`;
-    const data = await jsonFetch<{ results?: GlobalSearchHit[] | null }>(url);
-    return Array.isArray(data?.results) ? data.results : [];
+    const url = `${base}${sep}${qs({ ...(opts.narrow ?? {}), q: query, limit: opts.limit, scope: opts.scope })}`;
+    const data = await jsonFetch<{ results?: GlobalSearchHit[] | null; truncated?: boolean; total?: number }>(url);
+    return {
+      hits: Array.isArray(data?.results) ? data.results : [],
+      truncated: typeof data?.truncated === 'boolean' ? data.truncated : undefined,
+      total: typeof data?.total === 'number' ? data.total : undefined,
+    };
+  }
+
+  /**
+   * Which of `names` answer `q` by the SEARCH's own name rule - asked of the
+   * server (`POST /api/files/search/match`), so "Filter in this folder" and
+   * the search can never disagree about a name (task #207, audit D5). Answers
+   * the matching indexes. `signal` lets the caller drop a question the person
+   * has already typed past. Throws on failure (an abort included).
+   */
+  async function matchNames(q: string, names: string[], signal?: AbortSignal): Promise<number[]> {
+    const url = endpoints.manager.replace(/\/manager(\?.*)?$/, '/search/match');
+    const data = await jsonFetch<{ matches?: number[] | null }>(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q, names }),
+      signal,
+    });
+    return Array.isArray(data?.matches) ? data.matches : [];
   }
 
   /* === surucu:d1 — the signed-in person's storage line ==================
@@ -744,6 +866,17 @@ export function useFileApi(config: ExplorerConfig) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(opts.exactName ? { path, name, type, exact_name: true } : { path, name, type }),
+    });
+  }
+
+  /** Ask whether `name` is free in `path` for a new document of `type`,
+   *  writing nothing (NewFileCheck). The name is the whole name, as the dialog
+   *  sends it to `newFile` (`exactName`). */
+  async function newFileCheck(path: string, name: string, type: string): Promise<NewFileCheck> {
+    return jsonFetch<NewFileCheck>(managerUrl('newfile'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, name, type, exact_name: true, dry_run: true }),
     });
   }
 
@@ -869,80 +1002,98 @@ export function useFileApi(config: ExplorerConfig) {
   /**
    * Restore trash entries by node id as jobs of the operations queue
    * (`queued=1`): one request for the whole selection, one job per storage.
-   * Only for a server whose capabilities list `restore` under `queued`; an
-   * older one restores one `node_id` per request (restoreIds).
+   * Only for a server whose capabilities list `restore` under `queued`;
+   * anything else restores the batch inside the request (restoreBatch).
+   * `summary` is the server's sentence for what is on its way.
    */
-  async function restoreQueued(ids: number[]): Promise<{ ops: PendingOpDto[] }> {
+  async function restoreQueued(ids: number[]): Promise<{ ops: PendingOpDto[]; summary: string }> {
     if (!endpoints.trashRestore) throw new Error('trashRestore endpoint not configured');
     const sep = endpoints.trashRestore.includes('?') ? '&' : '?';
-    const res = await jsonFetch<{ ops?: PendingOpDto[] }>(`${endpoints.trashRestore}${sep}queued=1`, {
+    const res = await jsonFetch<{ ops?: PendingOpDto[]; summary?: string }>(
+      withScreenLang(`${endpoints.trashRestore}${sep}queued=1`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ node_ids: ids }),
+      },
+    );
+    return { ops: res.ops ?? [], summary: res.summary ?? '' };
+  }
+
+  /**
+   * One page of the filex trash listing — soft-deleted nodes across (or, with
+   * `storageName`, within) storages — and the server's totals for all of it
+   * (`total`, `total_bytes`, `storages`, `summary`; see TrashPage).
+   *
+   * ⚠ The storage is named `storage=<adapter name>`, which the server reads
+   * since 0.54: it read only `storage_id`, so a storage's `.trash` row summed
+   * the newest 50 entries of every storage (finding D2).
+   */
+  async function listTrash(
+    storageName?: string,
+    page: { limit?: number; offset?: number } = {},
+  ): Promise<TrashPage> {
+    if (!endpoints.trashList) throw new Error('trashList endpoint not configured');
+    const q: string[] = [];
+    if (storageName) q.push(`storage=${encodeURIComponent(storageName)}`);
+    if (page.limit) q.push(`limit=${page.limit}`);
+    if (page.offset) q.push(`offset=${page.offset}`);
+    const base = endpoints.trashList;
+    const url = q.length ? `${base}${base.includes('?') ? '&' : '?'}${q.join('&')}` : base;
+    return jsonFetch<TrashPage>(withScreenLang(url));
+  }
+
+  /**
+   * Restores trash entries by node id in ONE request (`POST {node_ids}`): the
+   * server restores each, inside the request, and answers how many came back,
+   * how many did not and why — `{done, failed, reason_code, taken, summary}`,
+   * `summary` being its sentence for all of it in the screen's language.
+   *
+   * ⚠ This was one request per entry, tallied and worded here (finding A15):
+   * the server knows what happened and says it.
+   */
+  async function restoreBatch(ids: number[]): Promise<TrashBatchAnswer> {
+    const url = endpoints.trashRestore;
+    if (!url) throw new Error('trashRestore endpoint not configured');
+    return jsonFetch<TrashBatchAnswer>(withScreenLang(url), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ node_ids: ids }),
     });
-    return { ops: res.ops ?? [] };
-  }
-
-  /** filex trash listing — soft-deleted nodes across (or within) storages. */
-  async function listTrash(storageName?: string): Promise<{ entries: TrashEntry[]; total: number }> {
-    if (!endpoints.trashList) throw new Error('trashList endpoint not configured');
-    const base = endpoints.trashList;
-    const sep = base.includes('?') ? '&' : '?';
-    const url = storageName ? `${base}${sep}storage=${encodeURIComponent(storageName)}` : base;
-    return jsonFetch<{ entries: TrashEntry[]; total: number }>(url);
   }
 
   /**
-   * Restore soft-deleted nodes by their node id. The filex backend restores
-   * one node per call (`POST {node_id}`), so we fan out and tally successes.
-   *
-   * `taken` names the entries the server refused because something already
-   * holds their original path (409 `EXISTS`). That refusal is the server
-   * protecting the file that holds the name — a restore used to overwrite it —
-   * so it is reported by name rather than folded into "0 items restored",
-   * which would read as if nothing had been tried.
-   *
-   * `failed` counts every other item that did not come back, and `failure` is
-   * the first of those errors, to be said. ⚠ They used to be skipped without a
-   * word: a folder whose restore outran the proxy (every object inside is moved
-   * back one by one on an object store) simply did not count, and the explorer
-   * reported "2 items restored" over a selection of three.
+   * Deletes several trash entries for good in ONE request (`POST
+   * /api/admin/trash/purge {node_ids}`) — an operator's "Delete permanently"
+   * of a selection. With `queued` (a server whose capabilities list `purge`
+   * under `queued`) the server queues one job per storage and hands them back
+   * as `ops`. The answer's `summary` says what was deleted (or is on its way)
+   * and what was not and why; a refusal of the whole request throws, said in
+   * the server's words (requestFailure).
    */
-  async function restoreIds(
-    ids: number[],
-  ): Promise<{ restored: number; taken: string[]; failed: number; failure?: unknown }> {
-    const url = endpoints.trashRestore;
-    if (!url) throw new Error('trashRestore endpoint not configured');
-    let restored = 0;
-    let failed = 0;
-    let failure: unknown;
-    const taken: string[] = [];
-    for (const id of ids) {
-      try {
-        await jsonFetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ node_id: id }),
-        });
-        restored++;
-      } catch (err) {
-        const e = err as { status?: number; detail?: string };
-        if (e.status === 409) {
-          try {
-            const body = JSON.parse(e.detail ?? '') as { code?: string; name?: string };
-            if (body.code === 'EXISTS') {
-              taken.push(body.name || String(id));
-              continue;
-            }
-          } catch {
-            /* a 409 without the envelope is counted as a plain failure */
-          }
-        }
-        failed++;
-        if (failure === undefined) failure = err;
-      }
-    }
-    return failure === undefined ? { restored, taken, failed } : { restored, taken, failed, failure };
+  async function purgeBatch(ids: number[], opts: { queued?: boolean } = {}): Promise<TrashBatchAnswer> {
+    const base = endpoints.trashPurgeBatch;
+    if (!base) throw new Error('trashPurgeBatch endpoint not configured');
+    const url = opts.queued ? `${base}${base.includes('?') ? '&' : '?'}queued=1` : base;
+    return jsonFetch<TrashBatchAnswer>(withScreenLang(url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_ids: ids }),
+    });
+  }
+
+  /**
+   * What "Empty trash" would delete, nothing deleted (`GET <trashEmpty>/preview`):
+   * the server's count over everything the purge reaches — other people's
+   * deletes included — and its sentence for the confirmation.
+   *
+   * ⚠⚠ The confirmation counted the rows this explorer had loaded (the first
+   * 50) while the purge took the whole trash (finding D1). It names this.
+   */
+  async function trashEmptyPreview(): Promise<TrashEmptyPreview> {
+    const base = endpoints.trashEmpty;
+    if (!base) throw new Error('trashEmpty endpoint not configured');
+    return jsonFetch<TrashEmptyPreview>(withScreenLang(`${base.replace(/\/+$/, '')}/preview`));
   }
 
   /**
@@ -1117,7 +1268,11 @@ export function useFileApi(config: ExplorerConfig) {
         drawio_url: config.drawioBase ?? null,
       };
     }
-    return jsonFetch<Capabilities>(endpoints.capabilities);
+    const caps = await jsonFetch<Capabilities>(endpoints.capabilities);
+    // The server's rules (edit kinds, input limits) for every component on
+    // the page - lib/serverRules (#211).
+    takeServerRules(caps);
+    return caps;
   }
 
   /** What the signed-in account may do (`/api/auth/me`, filex internal/perm):
@@ -1229,9 +1384,11 @@ export function useFileApi(config: ExplorerConfig) {
       : `dir=${encodeURIComponent(target.dir)}&name=${encodeURIComponent(target.name)}`;
     const url = fillTemplate(endpoints.pluginUISave, { plugin, view });
     const base = `${url}${url.includes('?') ? '&' : '?'}${q}`;
+    // The server's chunk size when it says one (`limits`, #211).
+    const CHUNK = serverLimit('app_ui_save_chunk_bytes') ?? UI_SAVE_CHUNK;
     const put = <T>(u: string, part: Blob) =>
       jsonFetch<T>(u, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: part });
-    if (body instanceof Blob && body.size <= UI_SAVE_CHUNK) {
+    if (body instanceof Blob && body.size <= CHUNK) {
       return jsonFetch(base, {
         method: 'PUT',
         headers: { 'Content-Type': body.type || 'application/octet-stream' },
@@ -1252,8 +1409,8 @@ export function useFileApi(config: ExplorerConfig) {
       return r;
     };
     if (body instanceof Blob) {
-      for (let at = 0; ; at += UI_SAVE_CHUNK) {
-        const end = Math.min(at + UI_SAVE_CHUNK, body.size);
+      for (let at = 0; ; at += CHUNK) {
+        const end = Math.min(at + CHUNK, body.size);
         const part = body.slice(at, end);
         if (end >= body.size) return (await next(part, true)) as { saved: boolean; path: string; name: string; size: number };
         await next(part, false);
@@ -1268,16 +1425,16 @@ export function useFileApi(config: ExplorerConfig) {
         held.push(value);
         heldBytes += value.byteLength;
       }
-      while (heldBytes >= UI_SAVE_CHUNK && !done) {
+      while (heldBytes >= CHUNK && !done) {
         const all = new Blob(held as BlobPart[]);
-        await next(all.slice(0, UI_SAVE_CHUNK), false);
-        const rest = new Uint8Array(await all.slice(UI_SAVE_CHUNK).arrayBuffer());
+        await next(all.slice(0, CHUNK), false);
+        const rest = new Uint8Array(await all.slice(CHUNK).arrayBuffer());
         held = rest.byteLength ? [rest] : [];
         heldBytes = rest.byteLength;
       }
       if (done) {
         const last = new Blob(held as BlobPart[]);
-        if (!session && last.size <= UI_SAVE_CHUNK) {
+        if (!session && last.size <= CHUNK) {
           return jsonFetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: last });
         }
         return (await next(last, true)) as { saved: boolean; path: string; name: string; size: number };
@@ -1293,6 +1450,29 @@ export function useFileApi(config: ExplorerConfig) {
   async function fetchResponse(path: string): Promise<Response> {
     const headers = await authHeaders();
     const res = await fetch(previewUrl(path), { headers, credentials: credentialsMode(), cache: 'no-store' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw requestFailure(res.status, text, lang());
+    }
+    return res;
+  }
+
+  /**
+   * `file.read` of an app's interface, through the server (#211, audit B19):
+   * `GET /api/files/plugins/ui/{plugin}/{view}/read?path=` checks that the app
+   * runs, was granted files:read and is not switched off for this kind, then
+   * answers the same bytes the preview does. The frame's own check of the
+   * grant is no longer the only one.
+   */
+  async function pluginUIRead(plugin: string, view: string, path: string): Promise<Response> {
+    if (!endpoints.pluginUIRead) return fetchResponse(path);
+    const url = fillTemplate(endpoints.pluginUIRead, { plugin, view });
+    const headers = await authHeaders();
+    const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}path=${encodeURIComponent(path)}`, {
+      headers,
+      credentials: credentialsMode(),
+      cache: 'no-store',
+    });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw requestFailure(res.status, text, lang());
@@ -1471,18 +1651,6 @@ export function useFileApi(config: ExplorerConfig) {
     return jsonFetch(endpoints.e2eCleanup, { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  async function e2ePasswordChanged(payload: {
-    path: string;
-    via: 'password' | 'recovery_key';
-    rekey: boolean;
-  }): Promise<{ ok: boolean; notified: boolean }> {
-    if (!endpoints.e2ePasswordChanged) throw new Error('e2e password endpoint not configured');
-    return jsonFetch(endpoints.e2ePasswordChanged, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  }
-
   /**
    * wiring:e2 policy - may this account START encrypting at each of `asks`:
    * a folder a new encrypted folder would be created in (`new_folder`), a
@@ -1496,9 +1664,13 @@ export function useFileApi(config: ExplorerConfig) {
    * policy, which has no such endpoint — answers `allowed` for every path: the
    * menu then offers what it always did, and the server decides, as it does
    * for every write that creates a key file or a `.fxe`. A failure is said in
-   * the console; it is never shown to the person.
+   * the console; it is never shown to the person. `onFailed` hears that the
+   * answers are that fallback (#196: the explorer then does not remember them).
    */
-  async function e2eAllowedAt(asks: Array<string | { path: string; kind?: E2eRequestKind }>): Promise<E2eAnswer[]> {
+  async function e2eAllowedAt(
+    asks: Array<string | { path: string; kind?: E2eRequestKind }>,
+    opts: { onFailed?: () => void } = {},
+  ): Promise<E2eAnswer[]> {
     const url = endpoints.e2eAllowed;
     if (!url || !asks.length) return asks.map((): E2eAnswer => 'allowed');
     const out: E2eAnswer[] = [];
@@ -1520,6 +1692,7 @@ export function useFileApi(config: ExplorerConfig) {
       // how a menu goes on offering what the server then refuses, and the
       // console is where somebody looks (the `[filex]` prefix of the other warnings).
       console.warn('[filex] could not ask who may encrypt here; offering encryption as before', err);
+      opts.onFailed?.();
       return asks.map((): E2eAnswer => 'allowed');
     }
     return out;
@@ -1547,6 +1720,10 @@ export function useFileApi(config: ExplorerConfig) {
   async function createShare(payload: {
     path: string;
     password?: boolean;
+    /** The link's life in SECONDS, counted on the server's clock (preferred:
+     *  a moment worked out on this device's clock drifts with it). */
+    expires_in?: number | null;
+    /** RFC 3339; wins over `expires_in` when both are sent. */
     expires_at?: string | null;
     max_downloads?: number | null;
     // File-drop (public upload link) — kind:'drop' mints an upload link into a
@@ -1554,7 +1731,7 @@ export function useFileApi(config: ExplorerConfig) {
     kind?: string;
     max_uploads?: number | null;
     drop_settings?: Record<string, unknown> | null;
-  }): Promise<{ share: ShareInfo & { url: string; path: string; filename: string; kind?: string } }> {
+  }): Promise<{ share: ShareInfo & { url: string; path: string; filename: string; kind?: string; token?: string } }> {
     if (!endpoints.shareCreate) throw new Error('shareCreate endpoint not configured');
     return jsonFetch(endpoints.shareCreate, {
       method: 'POST',
@@ -1728,12 +1905,15 @@ export function useFileApi(config: ExplorerConfig) {
     index,
     search,
     globalSearch /* bul:s3 */,
+    globalSearchPage /* #207 */,
+    matchNames /* #207 */,
     quotaMe /* surucu:d1 */,
     storageUsage /* surucu:d1 */,
     appStoreStatus /* #162 */,
     subfolders,
     newFolder,
     newFile,
+    newFileCheck,
     drafts,
     draftsBase,
     rename,
@@ -1747,9 +1927,11 @@ export function useFileApi(config: ExplorerConfig) {
     myPermissions,
     restore,
     listTrash,
-    restoreIds,
+    restoreBatch,
     restoreQueued,
     purgeTrash,
+    purgeBatch,
+    trashEmptyPreview,
     purgeVersion,
     uploadMultipart,
     downloadUrl,
@@ -1762,7 +1944,6 @@ export function useFileApi(config: ExplorerConfig) {
     /* wiring:e2 */
     e2eEscrowChallenge,
     e2eEscrowUsed,
-    e2ePasswordChanged,
     e2eCleanup,
     /* wiring:e2 policy */
     e2eAllowedAt,
@@ -1779,6 +1960,7 @@ export function useFileApi(config: ExplorerConfig) {
     appUIUrl,
     pluginUICall,
     pluginUISave,
+    pluginUIRead,
     pluginLicense,
     fetchResponse,
     createShare,
@@ -1808,6 +1990,7 @@ export function useFileApi(config: ExplorerConfig) {
     deleteGroupPermission,
     invitePermission,
     shareMail,
+    shareMessage,
     // Internals (exposed for useUploadChunked + PreviewModal)
     endpoints,
     authHeaders,

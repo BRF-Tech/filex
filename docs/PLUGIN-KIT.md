@@ -776,7 +776,7 @@ contributes its fields *flat* under their keys.
 | `list` | `{columns: [{key, label, width?, sortable?, align?, format?}], rows: [{id, cells, actions?, sort?}], empty?}` | a row action posts `event: "action"`, `action_id`, `data.row_id`. It is drawn by filex's one table, the explorer's, so a person resizes, sorts, hides and moves the columns; `format: "date"` / `"datetime"` prints an ISO value the way the explorer prints dates, and sorts by the value rather than the printed text |
 | `progress` | `{value: 0..100|null, label?}` | - |
 | `people-picker` | `{id, value: [{user_id?, email, name?}], multi?, allow_external?}` | the list; internal search needs `users:lookup`, otherwise free email only |
-| `pin-input` | `{id, length?: 4..8}` | the string |
+| `pin-input` | `{id, length?: 4..8}` | the string - exactly `length` characters, or the host refuses the event (0.54; the host writes the clamped `length`, 6 when none, onto the node) |
 | `file-chooser` | `{id, kind: file|dir, value?}` | an adapter-qualified path `docs://a/b.pdf` |
 | `preview` | `{path}` or, on a public link, `{ref}` | - |
 | `pdf-fields` | `{id, src: {ref\|path}, mode: define\|place\|edit\|fill, fields[], signers?, signer?, types?, stamp_lines?}` | **define**: the boxes as cards, with no document (what is asked of whom); **place**: the document, and the boxes still waiting to be put on it; **edit**: the older one-screen form - each answers the whole `fields[]` (fractions of the page, origin top-left); **fill**: `{fields: [{id, value}]}`. Each field carries a **`label`** - what it is called, shown in the box, in the fill form and in the audit trail; without one a signer hunts for three identical boxes. A signature field says how it is signed (`style`) and which lines are printed under it (`lines`, from the surface's `stamp_lines`). In a `page` view the node fills the viewport |
@@ -931,6 +931,21 @@ runs**, so it cannot arrive as a surprise, and an empty `required_when` field
 refuses the job. A field that is `show_when`-hidden and unconditionally
 `required` can never be filled - use `required_when`.
 
+⭐ **The host judges every answer against your declarations (0.54).** You can
+trust a value's shape without re-checking it: an `int` is a whole number
+inside `min`..`max`, a `bool` is yes or no, a `select` holds one of the
+`options` you drew (each of them for `multi`), every other type is text, a
+`pin-input` is exactly its `length`, and in a `pdf-fields` fill answer a tick
+is a bool, a date `YYYY-MM-DD`, a `text` box obeys its `rule`, and only the
+signer's own boxes arrive, each with YOUR `label` and `rule` (not the ones the
+browser sent back). A value that does not fit refuses the event in the
+person's language and never reaches you - a public page's anonymous visitor
+included; while a form is edited, the answer to each `change` shows the same
+words on the field unless you put `errors[key]` there yourself. Your
+manifest `settings` are judged the same way when an administrator saves them
+(and a `required` setting may not be saved empty). What a value MEANS - a
+real tax number, a date in the future - is still yours to check.
+
 ⚠ `date` is a field **type**. The `date` *rule* on text fields is gone: two
 ways to ask for the same thing is how you get two answers, and a stamping
 plugin was left guessing whether `01/02/2026` came from a date control or a
@@ -1035,7 +1050,7 @@ ONE flat object of dotted keys:
 | **explorer** | `packages/core/src/locales/en.ts` | as written: `ctx.download` | the explorer, its dialogs, the public pages |
 | **admin** | `web/src/locales/en.json` (nested) | the dotted path: `appPlugins.wizard.title` | the admin panel and the settings dialog |
 | **both** | 55 keys in both (`storages.driver.*`, `storages.fields.*`, `storages.fieldHelp.*`, `home.title`) | the same key | both, with the same English - one translation serves both |
-| **server** | `backend/internal/srvtext/locales/en.json` and the notification phrases of `packages/core/src/lib/notificationText.ts` | everything under `server.`: `server.mail.greeting` | the server: emails, notifications, the no-JavaScript pages, the install review ([Text the server writes](#text-the-server-writes)) |
+| **server** | `backend/internal/srvtext/locales/en.json` (the notification phrases included, `server.notify.*`) | everything under `server.`: `server.mail.greeting` | the server: emails, notifications (the bell, a push, the desktop app's toast - the server says them all, [NOTIFICATIONS.md](NOTIFICATIONS.md#what-a-notification-says)), the no-JavaScript pages, the install review ([Text the server writes](#text-the-server-writes)) |
 
 It is one namespace because no key of one table is a dotted prefix of a key
 of another, a shared key has identical English in both interface tables, and
@@ -1164,11 +1179,11 @@ Everything under `server.` is written by the server, not drawn by a screen:
 | `server.mail.drop_invite.*` | the email asking somebody to upload files (a file-request link) | the sender's |
 | `server.mail.grant.*` | an existing account was given access | the **recipient's** account language, else the sender's |
 | `server.mail.account.*` | an administrator created the recipient's account while inviting them | the inviting administrator's - the new account starts in it too |
-| `server.mail.drop_received.*`, `server.drop.note_from` | files arrived through a file-request link: the owner's email, the notification's stored title, and the first line of `NOT.txt` beside the files | the folder **owner's** account language |
+| `server.mail.drop_received.*`, `server.drop.note_from` | files arrived through a file-request link: the notification's stored title (its fallback) and the first line of `NOT.txt` beside the files - the owner's email says the notification's own words (`server.notify.drop.received.*`) | the folder **owner's** account language |
 | `server.mail.smtp_test.*` | the mail settings' *Send test* | that administrator's |
 | `server.mail.cloud_verify.*` | filex cloud sign-up verification | the visitor's browser language |
 | `server.mail.app_footer` | the line under every mail an installed app sends | the language the app wrote the mail in (`MailSendIn`) when the server speaks it, else the language its call runs in |
-| `server.notify.*` | the notification phrases - the bell, the browser pop-up | the **reader's** screen language (each reader's own: two people read one notification) |
+| `server.notify.*` | every notification - the bell, the browser pop-up, the desktop app's toast, a push to a phone, its email; the server says them all ([NOTIFICATIONS.md](NOTIFICATIONS.md#what-a-notification-says)) | the **reader's**: the language their screen names, else their account's (each reader's own: two people read one notification); a webhook's, the instance's |
 | `server.public.*` | the pages a share or file-request link opens without JavaScript, the PIN gate, the error pages, the sign-in hop | the visitor's browser language (`?lang=` wins) |
 | `server.perm.*` | Plugins → Apps → the install review: what a permission lets an app do | the administrator's |
 

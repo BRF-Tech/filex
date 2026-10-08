@@ -91,7 +91,7 @@ import { formatBytes } from '@/lib/format';
 import { changedPlacements, defaultPlaces } from '@/lib/fileTypes';
 import { useToastStore } from '@/stores/toast';
 import { pluginLabelOf } from '@brftech/filex-core';
-import { AppStoreApi, licenseRuns, storeRefusal, type AppLicense, type StoreReview } from '@/api/appStore';
+import { AppStoreApi, storeRefusal, type AppLicense, type StoreReview } from '@/api/appStore';
 import { storeSentence, storeSource } from '@/lib/storeRefusal';
 
 import Button from '@/components/ui/Button.vue';
@@ -900,7 +900,7 @@ const manifestDescription = computed(() => pluginLabelOf(manifest.value?.descrip
           {{ isUpgrade ? t('appPlugins.wizard.doneUpgrade') : t('appPlugins.wizard.doneInstall') }}
         </p>
         <p
-          v-if="installedLicense && !licenseRuns(installedLicense.status)"
+          v-if="installedLicense && installedLicense.held"
           class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
           role="alert"
           data-testid="app-plugin-store-held"

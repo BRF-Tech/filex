@@ -13,10 +13,14 @@
 //   1. The words come from the explorer's own E2E vocabulary — the recovery
 //      dialog's two tab labels (`e2e.recover.tab_escrow` / `tab_recovery`) —
 //      so there is one name for each key across the product, not one per file.
-//   2. Every English phrase whose title has no placeholder must say exactly
-//      what the emitting Go code's literal `Title:` says, for every event that
-//      sets one. The server title is the fallback every catalogue-less reader
-//      gets (webhook payloads, the audit table); the two may not disagree.
+//   2. There is no second wording to disagree with: since 2026-10-08 no
+//      emitter writes a sentence of its own (backend notify say_test.go
+//      TestSay_NoEmitterWritesItsOwnSentence) - an English `Title:` in the
+//      escrow handler was the second wording this test used to compare.
+//
+// The phrases are the SERVER catalogue's (`server.notify.<event>.title` in
+// backend/internal/srvtext/locales): since 2026-10-08 the server says every
+// notification (backend notify say.go) and no client composes one.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,11 +31,16 @@ import { tr as coreTr } from '@brftech/filex-core/src/locales/tr';
 
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
-import { NOTIFICATION_PHRASES } from '@brftech/filex-core/src/lib/notificationText';
 import { userEventKey, webhookEventKey } from '@brftech/filex-core/src/lib/webhookEvents';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = path.resolve(here, '../../../backend/internal');
+
+/** The server catalogue, the one place a notification's words live. */
+const SERVER: Record<'en' | 'tr', Record<string, string>> = {
+  en: JSON.parse(fs.readFileSync(path.join(BACKEND, 'srvtext/locales/en.json'), 'utf8')),
+  tr: JSON.parse(fs.readFileSync(path.join(BACKEND, 'srvtext/locales/tr.json'), 'utf8')),
+};
 
 function lookup(catalogue: unknown, key: string): string {
   const v = key.split('.').reduce<unknown>((o, k) => (o as Record<string, unknown> | undefined)?.[k], catalogue);
@@ -59,7 +68,7 @@ describe('e2e.escrow_used names the escrow key', () => {
   for (const lang of ['en', 'tr'] as const) {
     const catalogue = lang === 'en' ? en : tr;
     const texts: Array<[string, string]> = [
-      ['notificationText phrase', NOTIFICATION_PHRASES['e2e.escrow_used'][lang].title],
+      ['server phrase', SERVER[lang]['server.notify.e2e.escrow_used.title'] ?? ''],
       ['settings switch label', lookup(catalogue, userEventKey('e2e.escrow_used'))],
       ['webhook event label', lookup(catalogue, webhookEventKey('e2e.escrow_used'))],
     ];
@@ -71,44 +80,5 @@ describe('e2e.escrow_used names the escrow key', () => {
         expect(lower).not.toContain(TERMS[lang].recovery);
       });
     }
-  }
-});
-
-describe('a fixed English phrase says what the server title says', () => {
-  function goFiles(dir: string, out: string[] = []): string[] {
-    for (const name of fs.readdirSync(dir)) {
-      const p = path.join(dir, name);
-      if (fs.statSync(p).isDirectory()) goFiles(p, out);
-      else if (name.endsWith('.go') && !name.endsWith('_test.go')) out.push(p);
-    }
-    return out;
-  }
-
-  const consts = new Map<string, string>();
-  const eventGo = fs.readFileSync(path.join(BACKEND, 'notify/event.go'), 'utf8');
-  for (const m of eventGo.matchAll(/(Event\w+)\s+EventType\s*=\s*"([^"]+)"/g)) consts.set(m[1], m[2]);
-
-  /** event id → the literal titles its emitters set. */
-  const serverTitles = new Map<string, string[]>();
-  for (const f of goFiles(BACKEND)) {
-    const src = fs.readFileSync(f, 'utf8');
-    for (const m of src.matchAll(/Event:\s*notify\.(Event\w+),[^}]*?Title:\s*"([^"]+)"\s*,/g)) {
-      const id = consts.get(m[1]);
-      if (!id) continue;
-      serverTitles.set(id, [...(serverTitles.get(id) ?? []), m[2]]);
-    }
-  }
-
-  it('finds the emitters it compares (a parser that matched nothing would pass everything)', () => {
-    expect(serverTitles.get('e2e.escrow_used')).toEqual(['Encrypted folder opened with the escrow key']);
-  });
-
-  const fixed = Object.entries(NOTIFICATION_PHRASES).filter(
-    ([id, p]) => serverTitles.has(id) && !/\{\w+\}/.test(p.en.title),
-  );
-  for (const [id, phrase] of fixed) {
-    it(`${id}: "${phrase.en.title}"`, () => {
-      expect(serverTitles.get(id)).toContain(phrase.en.title);
-    });
   }
 });

@@ -1,10 +1,11 @@
 package keyfilewatch
 
 // Package keyfilewatch is the server's own record of a rewritten E2E key file
-// (`.filex-e2e.json`): an audit row for every rewrite, and the key file's old
-// versions deleted when a key slot changed. What changed is decided by
-// e2e.DiffKeyFiles; docs/E2E-ENCRYPTION.md → "Who is told" and "What a
-// password change does not undo".
+// (`.filex-e2e.json`): an audit row for every rewrite and, when a key slot
+// changed, the owner told and - when the writer may retire them - the key
+// file's old versions deleted. What changed is decided by e2e.DiffKeyFiles,
+// who may delete and who is told by e2e/slotchange; docs/E2E-ENCRYPTION.md →
+// "Who is told" and "What a password change does not undo".
 
 import (
 	"context"
@@ -12,10 +13,12 @@ import (
 	"log/slog"
 	"path"
 	"strconv"
+	"strings"
 
-	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/e2e"
+	"github.com/brf-tech/filex/backend/internal/e2e/slotchange"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/notify"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -32,11 +35,18 @@ type Audit interface {
 }
 
 // Watch turns a written key file into an audit row, and a changed key
-// slot into deleted versions. Wired as writehook's after-write observer.
+// slot into the owner told and - when the writer may retire them - deleted
+// versions. Wired as writehook's after-write observer.
 type Watch struct {
 	Audit    Audit
 	Versions Versions // nil: nothing to compare against, nothing to delete
 	Resolver func(storageID int64) (storage.Driver, error)
+	// Owners answers who owns the encrypted folder and who wrote
+	// (db.Store). nil: no owner is known, so only an administrator's
+	// rewrite deletes anything.
+	Owners slotchange.Store
+	// Notify tells the owner (nil: nobody is told; the audit rows stay).
+	Notify notify.Service
 }
 
 func readAll(ctx context.Context, drv storage.Driver, key string) []byte {
@@ -82,20 +92,34 @@ func (w *Watch) OnWritten(ctx context.Context, storageID int64, node *model.Node
 		}
 	}
 	diff := e2e.DiffKeyFiles(before, after)
+	folder := path.Dir("/" + node.Path)
+	subject := slotchange.Subject{StorageID: storageID, Root: strings.Trim(folder, "/")}
 
-	purged := 0
-	if diff.Valid && diff.KeySlotChanged && w.Versions != nil {
-		for _, v := range versions {
-			if err := w.Versions.HardDeleteVersion(ctx, v.ID); err != nil {
-				slog.Warn("e2e: could not delete an old key-file version",
-					slog.Int64("storage", storageID), slog.String("path", node.Path), slog.String("err", err.Error()))
-				continue
+	// A changed password or recovery slot: every earlier version wraps the
+	// folder key under the secret that was just changed. Deleting them is
+	// the owner's (or an administrator's) to do - anybody else who may write
+	// the folder may also upload a file under this name, and its bytes prove
+	// nothing (e2e/slotchange). Their rewrite keeps every version, and the
+	// owner is told.
+	purged, kept := 0, 0
+	var verdict slotchange.Verdict
+	if diff.Valid && diff.KeySlotChanged {
+		verdict = slotchange.Judge(ctx, w.Owners, subject)
+		if w.Versions != nil {
+			if !verdict.MayRetire {
+				kept = len(versions)
+			} else {
+				for _, v := range versions {
+					if err := w.Versions.HardDeleteVersion(ctx, v.ID); err != nil {
+						slog.Warn("e2e: could not delete an old key-file version",
+							slog.Int64("storage", storageID), slog.String("path", node.Path), slog.String("err", err.Error()))
+						continue
+					}
+					purged++
+				}
 			}
-			purged++
 		}
 	}
-
-	folder := path.Dir("/" + node.Path)
 	meta := map[string]any{
 		"storage_id": storageID,
 		"folder":     folder,
@@ -107,10 +131,16 @@ func (w *Watch) OnWritten(ctx context.Context, storageID int64, node *model.Node
 	if purged > 0 {
 		meta["versions_deleted"] = purged
 	}
+	if kept > 0 {
+		meta["versions_kept"] = kept
+	}
 	var actorID *int64
-	if u := auth.UserFrom(ctx); u != nil {
-		actorID = &u.ID
-		meta["actor_email"] = u.Email
+	if wr := slotchange.WriterOf(ctx, w.Owners); wr.ID > 0 {
+		id := wr.ID
+		actorID = &id
+		if wr.User != nil {
+			meta["actor_email"] = wr.User.Email
+		}
 	}
 	target := ""
 	if node.ID != 0 {
@@ -124,5 +154,18 @@ func (w *Watch) OnWritten(ctx context.Context, storageID int64, node *model.Node
 			TargetID:   target,
 			Metadata:   meta,
 		})
+	}
+
+	// The password change itself, said by the server from what it saw change
+	// - never from a client's announcement (e2e/slotchange).
+	if diff.Valid && diff.KeySlotChanged {
+		t := &slotchange.Teller{Store: w.Owners, Audit: w.Audit, Notify: w.Notify}
+		t.Tell(ctx, slotchange.Change{
+			Subject: subject,
+			Changes: diff.Changes,
+			Origin:  origin,
+			Deleted: purged,
+			Kept:    kept,
+		}, verdict)
 	}
 }

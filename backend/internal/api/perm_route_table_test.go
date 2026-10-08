@@ -125,6 +125,7 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/auth/desktop/exchange":       exemptBecause("the desktop app's PKCE exchange, before any session exists; access.desktop is checked at /complete"),
 	"POST /api/auth/desktop/complete":       gated(perm.AccessDesktop),
 	"PATCH /api/auth/profile":               gated(perm.AccountEdit),
+	"POST /api/auth/account/check":          exemptBecause("writes nothing: says whether an address or a username would be accepted, in the save's words; whether one is taken is told only where the save would tell it (handlers/account_check.go)"),
 	"POST /api/auth/password":               gated(perm.AccountEdit),
 	"POST /api/auth/s3-keys":                gated(perm.AccessS3),
 	"POST /api/auth/s3-keys/{id}/state":     gated(perm.AccessS3),
@@ -147,15 +148,18 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/notifications/{id}/read":     exemptBecause(whyOwnState),
 	"POST /api/sharex/upload":               inHandler("files.create or files.modify on the file, share.links on its link (via the agent file operations)"),
 
+	// Web Push (#191): this browser as one of the caller's own devices.
+	"POST /api/notifications/push/subscriptions":        exemptBecause(whyOwnState),
+	"DELETE /api/notifications/push/subscriptions/{id}": exemptBecause(whyOwnState),
+	"POST /api/notifications/push/forget":               exemptBecause(whyOwnState),
+	"POST /api/notifications/push/test":                 exemptBecause(whyOwnState),
+
 	// ── the explorer ──
 	"POST /api/files/manager":              inHandler("per action: newfolder/newfile/upload files.create (files.modify to replace), rename files.rename, move files.move, delete files.delete"),
-	"POST /api/files/upload/init":          inHandler("files.create, or files.modify when the target exists"),
 	"PUT /api/files/upload/{id}":           exemptBecause(whyAuthorised),
 	"POST /api/files/upload/{id}/commit":   exemptBecause(whyAuthorised),
 	"DELETE /api/files/upload/{id}":        exemptBecause(whyWithdraw),
 	"POST /api/files/upload/begin":         inHandler("files.create, or files.modify when the target exists"),
-	"POST /api/files/upload/finalize":      exemptBecause(whyAuthorised),
-	"POST /api/files/upload/abort":         exemptBecause(whyWithdraw),
 	"POST /api/files/save-text":            inHandler("files.modify, or files.create for a new file"),
 	"POST /api/files/onlyoffice/config":    inHandler("files.modify for edit mode; without it the document opens read-only"),
 	"POST /api/files/onlyoffice/callback":  exemptBecause(whyDocServer),
@@ -181,13 +185,26 @@ var permRouteTable = map[string]permRoute{
 	"POST /api/files/drafts/{key}/save":    inHandler("files.create on the name it is saved as"),
 	"DELETE /api/files/drafts/{key}":       exemptBecause("discards the caller's own unsaved draft (ownDraft) into their trash — no stored or shared file is touched"),
 	"POST /api/files/e2e/cleanup":          inHandler("files.purge when versions or trash entries are removed; dropping caches needs none"),
-	"POST /api/files/e2e/password-changed": exemptBecause("records a password change the client already wrote through the file API (files.modify there) and tells the owner — writes no file"),
+	"POST /api/files/e2e/password-changed": exemptBecause("kept for clients older than 0.54: answers and records nothing (the server records a password change itself from the key file it sees rewritten) — writes no file"),
 	"POST /api/files/search":               exemptBecause(whyRead),
+	"POST /api/files/search/match":         exemptBecause("the explorer's \"Filter in this folder\" (#207): which of the names the caller sent answer the words - it reads no storage and returns only their indices"),
 	"POST /api/files/ws-ticket":            exemptBecause("a realtime subscription ticket; each folder feed is checked for ≥viewer when joined"),
 	"POST /api/files/e2e/escrow/challenge": exemptBecause(whyE2EHandshake),
 	"POST /api/files/e2e/escrow/used":      exemptBecause(whyE2EHandshake),
 	"POST /api/files/e2e/allowed":          exemptBecause(whyRead),
 	"POST /api/files/e2e/requests":         inHandler("files.encrypt where it is asked: e2epolicy.AnswerFor must answer `request` there (approval policy, the permission held, no approval waiting)"),
+	// The vault (handlers/e2e_vault.go, docs/E2E-VAULT-FORMAT.md →
+	// Permissions and tenancy): a write session can add, change and remove
+	// anything inside, and the server cannot tell which.
+	"POST /api/files/e2e/vault/create":       inHandler("files.create at the parent, and the encryption rule there (files.encrypt, an approval under the approval policy)"),
+	"POST /api/files/e2e/vault/lock":         inHandler("files.create, files.modify and files.delete at the vault folder"),
+	"POST /api/files/e2e/vault/lock/renew":   inHandler("files.create, files.modify and files.delete at the vault folder"),
+	"POST /api/files/e2e/vault/lock/release": exemptBecause(whyWithdraw),
+	"POST /api/files/e2e/vault/lock/break":   inHandler("the vault folder's owner or an administrator of its tenant"),
+	"PUT /api/files/e2e/vault/pack":          inHandler("files.create, files.modify and files.delete at the vault folder, and the write lock's token"),
+	"PUT /api/files/e2e/vault/index":         inHandler("files.create, files.modify and files.delete at the vault folder, and the write lock's token"),
+	"POST /api/files/e2e/vault/delete":       inHandler("files.create, files.modify and files.delete at the vault folder, and the write lock's token"),
+	"PUT /api/files/e2e/vault/prefs":         exemptBecause(whyOwnState),
 
 	// ── sharing and collaboration ──
 	"POST /api/files/share":                                 inHandler("share.links, or share.upload_links for a drop link"),

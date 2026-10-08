@@ -92,7 +92,10 @@ COPY web/ ./web/
 # configs reach outside packages/ and web/ — imports, each one's .d.mts/.d.ts,
 # and the `path.join(root, '…')` paths those modules read — and fails if one is
 # not copied here.
-COPY scripts/vite-fonts-as-files.mjs ./scripts/
+# ⚠ And since 0.54 every package's vite.config.ts (app-ui and react too)
+# imports ../../scripts/vite-dts-strict.mjs, which fails the build on a
+# TypeScript diagnostic in the declarations (Node built-ins only).
+COPY scripts/vite-fonts-as-files.mjs scripts/vite-dts-strict.mjs ./scripts/
 COPY scripts/lib/i18n-catalogue.mjs scripts/lib/i18n-catalogue.d.mts ./scripts/lib/
 COPY backend/internal/srvtext/locales/ ./backend/internal/srvtext/locales/
 

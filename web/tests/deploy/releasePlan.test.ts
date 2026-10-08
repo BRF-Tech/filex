@@ -17,7 +17,7 @@ import { ciParts, gateParts } from '../../../scripts/ci-parts.mjs';
 import { toWslPath } from '../../../scripts/lib/go-build.mjs';
 import { gateCacheKey, inputEntries, matchesInputs, parseLsTree, selectGates } from '../../../scripts/release/checks.mjs';
 import { findBash, shq, slash } from '../../../scripts/release/engine.mjs';
-import plan from '../../../scripts/release/plan.mjs';
+import plan, { storeJobProblems } from '../../../scripts/release/plan.mjs';
 import { STAGES } from '../../../scripts/release/stages.mjs';
 
 const REPO = path.resolve(__dirname, '..', '..', '..');
@@ -373,7 +373,7 @@ describe("this repository's release plan", () => {
 
   it('names the workflow guards by titles that exist, so a rename cannot make the gate vacuous', () => {
     const guards = p.exportGates.find((g: { vitest?: unknown }) => g.vitest).vitest.mustPass as string[];
-    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts', 'releaseArm64.test.ts', 'releaseMacosOnly.test.ts', 'releaseSnapArm64Only.test.ts', 'releaseNpmTrusted.test.ts', 'ciFullMatrix.test.ts', 'releasePromote.test.ts', 'releaseVerifyCircleci.test.ts'].map((f) =>
+    const sources = ['releaseGatesImages.test.ts', 'goreleaserTemplates.test.ts', 'wingetCla.test.ts', 'msstoreSubmit.test.ts', 'releaseArm64.test.ts', 'releaseMacosOnly.test.ts', 'releaseSnapArm64Only.test.ts', 'releaseNpmTrusted.test.ts', 'ciFullMatrix.test.ts', 'releasePromote.test.ts', 'releaseVerifyCircleci.test.ts', 'releaseStoresOnly.test.ts'].map((f) =>
       fs.readFileSync(path.join(REPO, 'web', 'tests', 'deploy', f), 'utf8'),
     );
     expect(guards.length).toBeGreaterThanOrEqual(5);
@@ -496,5 +496,21 @@ describe("this repository's release plan", () => {
     expect(p.signingKeys).toEqual(['EFA3B1262FD992800DBBB5E3A8FEBA97FF786513']);
     expect(p.privateHosts.forbid.length).toBeGreaterThanOrEqual(2);
     for (const a of p.privateHosts.allow) expect(a).toMatch(/^(security|hello)@/);
+  });
+});
+
+// 0.53.0: the tag run had no Store job (GitHub never created its desktop
+// jobs), and only=stores sent the bundle the dry run kept: it is promoted,
+// not bundled there, and a promoted bundle is as good as a built one.
+describe("the Microsoft Store check reads the run's Store job", () => {
+  const steps = (s: Record<string, string>) => Object.entries(s).map(([name, conclusion]) => ({ name, conclusion }));
+  const KEPT = 'They are the files the dry run kept, for this version';
+  it('takes a bundle built in the job, or the one the dry run kept, once submitted without a warning', () => {
+    expect(storeJobProblems(steps({ 'Bundle the Store packages': 'success', 'Submit to the Microsoft Store': 'success' }))).toEqual([]);
+    expect(storeJobProblems(steps({ 'Bundle the Store packages': 'skipped', [KEPT]: 'success', 'Submit to the Microsoft Store': 'success' }))).toEqual([]);
+    expect(storeJobProblems(steps({ 'Bundle the Store packages': 'skipped', [KEPT]: 'skipped', 'Submit to the Microsoft Store': 'success' })).join()).toContain('"Bundle the Store packages": skipped');
+    expect(storeJobProblems(steps({ [KEPT]: 'success', 'Submit to the Microsoft Store': 'skipped' })).join()).toContain('"Submit to the Microsoft Store": skipped');
+    expect(storeJobProblems(steps({ [KEPT]: 'success', 'Submit to the Microsoft Store': 'success' }), 'submission 9 is still Certification').join()).toContain('the run warned: submission 9 is still Certification');
+    expect(storeJobProblems([]).length).toBe(2);
   });
 });

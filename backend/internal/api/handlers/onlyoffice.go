@@ -102,6 +102,10 @@ func (h *OnlyOffice) fetchProbe(w http.ResponseWriter, r *http.Request) {
 // form is what the modal itself sends from inside the explore page —
 // it has the adapter-qualified path handy but not the node id, so the
 // handler must resolve path → node before continuing.
+//
+// `lang` (query or body) and the Accept-Language header are inputs to the
+// editor's language, not the answer: the administrator's fixed language wins
+// over both (onlyoffice/lang.go, docs/ONLYOFFICE.md → The editor's language).
 func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 	if !h.Service.EnabledCtx(r.Context()) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "onlyoffice not configured"})
@@ -277,7 +281,11 @@ func (h *OnlyOffice) Config(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	/* /wiring:e2 */
-	cfg, err := h.Service.BuildConfigForNode(r.Context(), node, user, lang, mode, onlyoffice.WithHead(head))
+	// The editor's language is the server's choice (onlyoffice/lang.go): the
+	// administrator's fixed one, else `lang`, the screen's (Accept-Language),
+	// the account's, the instance's - one rule for every screen.
+	cfg, err := h.Service.BuildConfigForNode(r.Context(), node, user, lang, mode, onlyoffice.WithHead(head),
+		onlyoffice.WithAcceptLanguage(r.Header.Get("Accept-Language")))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -359,7 +367,8 @@ func (h *OnlyOffice) Diagnose(w http.ResponseWriter, r *http.Request) {
 // when the document changed outside it (#184, onlyoffice/session_base.go).
 //
 //	POST /api/files/onlyoffice/session
-//	{ "path": "adapter://rel", "key": "<document.key>", "action": "state"|"mine"|"theirs" }
+//	{ "path": "adapter://rel", "key": "<document.key>", "action": "state"|"mine"|"theirs",
+//	  "token": "<the editor config's token>" }
 //	→ { "stale": bool, "known": bool }
 //
 // `state` (the default) asks whether the session is still on the document's
@@ -372,13 +381,18 @@ func (h *OnlyOffice) Diagnose(w http.ResponseWriter, r *http.Request) {
 // ⚠ Asking needs what opening the document needs (the same tenant, root and
 // viewer checks, the same 404). Answering decides what becomes of a save, so
 // it needs what an editing session needs: files.modify and a token that may
-// write.
+// write - and, since 0.54, to be one of the session's own editors
+// (onlyoffice.Service.MayAnswer: this process handed them an editing session
+// of that key, or `token`, the editor configuration they were handed, says
+// so). Anybody else is answered 403 `not_your_session`; who answered is
+// recorded (audit file.office_session_answered).
 func (h *OnlyOffice) Session(w http.ResponseWriter, r *http.Request) {
 	if !h.Service.EnabledCtx(r.Context()) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "onlyoffice not configured"})
 		return
 	}
-	if auth.UserFrom(r.Context()) == nil {
+	caller := auth.UserFrom(r.Context())
+	if caller == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
@@ -386,6 +400,7 @@ func (h *OnlyOffice) Session(w http.ResponseWriter, r *http.Request) {
 		Path   string `json:"path"`
 		Key    string `json:"key"`
 		Action string `json:"action"`
+		Token  string `json:"token"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
@@ -416,6 +431,11 @@ func (h *OnlyOffice) Session(w http.ResponseWriter, r *http.Request) {
 		if !auth.AllowVerb(w, r, auth.VerbWrite) {
 			return
 		}
+		// Only the session's own editors answer for it.
+		if !h.Service.MayAnswer(r.Context(), node, key, caller.ID, body.Token) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "not_your_session"})
+			return
+		}
 		if body.Action == "mine" {
 			if err := h.Service.RebaseSession(r.Context(), node, key); err != nil {
 				slog.Warn("onlyoffice session: could not read the document now", slog.Int64("storage", node.StorageID), slog.Any("err", err))
@@ -427,6 +447,7 @@ func (h *OnlyOffice) Session(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the answer could not be recorded"})
 			return
 		}
+		h.Service.NoteAnswer(r.Context(), node, caller.ID, body.Action)
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
 		return

@@ -3,6 +3,8 @@
 // ⚠⚠ The shaping runs on EVERY keystroke, so the tests are about what the box
 // holds after one — not about a verdict at submit time. An invalid signature
 // page that only says so on the way out is a page that gets signed twice.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -153,4 +155,27 @@ describe('what a filled field sends back', () => {
     expect(f.font).toBeUndefined();
     expect(withFont([f], 'text-1', 'caveat')[0].font).toBe('caveat');
   });
+});
+
+// ⚠⚠ The host judges the same rule at submit (0.54, #212): it refuses a value
+// that breaks it, in its own words, and this file's verdict is only the hint
+// under the box while the signer types. Both read ONE list of cases — the Go
+// judge in backend/internal/wasmplugin/surface_values_test.go reads the same
+// file — so the hint can never accept what the host refuses, or the other way
+// round.
+describe('the hint and the host read the same cases', () => {
+  const file = path.resolve(__dirname, '../../../backend/internal/wasmplugin/testdata/pdf_rule_cases.json');
+  const { cases } = JSON.parse(readFileSync(file, 'utf8')) as {
+    cases: { value: string; rule: unknown; want: string }[];
+  };
+
+  it('has cases to read', () => {
+    expect(cases.length).toBeGreaterThan(10);
+  });
+
+  for (const c of cases) {
+    it(`${JSON.stringify(c.value)} under ${JSON.stringify(c.rule)} → ${c.want || 'accepted'}`, () => {
+      expect(ruleError(c.value, normalizeRule(c.rule))).toBe(c.want);
+    });
+  }
 });

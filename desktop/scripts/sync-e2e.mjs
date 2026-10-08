@@ -163,7 +163,7 @@ try {
   // The state word: the engine said it is subscribed to the change stream,
   // and the settings card says so in words.
   check('the engine reports the live change stream', status?.live === 'connected',
-    status ? `live=${status.live} (${status.liveDetail ?? ''})` : 'no status at all');
+    status ? `live=${status.live} (${status.liveMessage ?? ''})` : 'no status at all');
   const liveWord = await sync.evaluate(() => {
     const el = document.querySelector('[data-live]');
     return el ? `${el.getAttribute('data-live')}: ${el.textContent}` : null;

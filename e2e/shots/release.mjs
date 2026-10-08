@@ -23,7 +23,7 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const SHOTS_RELEASE = 'v0.53.0';
+export const SHOTS_RELEASE = 'v0.54.0';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 

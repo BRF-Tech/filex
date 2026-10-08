@@ -193,6 +193,7 @@ async function boot(bin) {
       ...SENTINEL_ENV,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
   let log = '';
   child.stdout.on('data', (b) => (log += b));

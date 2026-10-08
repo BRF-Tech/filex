@@ -32,11 +32,14 @@
 
 const STORE_KEY = 'filex:uploads:v1';
 
-/** How long an unfinished record is worth keeping. The server sweeps its own
- *  staging after FILEX_UPLOAD_STAGING_TTL (24 h by default); a note that
- *  outlives the bytes it describes only produces a confusing "resuming…" that
- *  immediately restarts. */
-export const RESUME_TTL_MS = 24 * 60 * 60 * 1000;
+/* How long a record is worth keeping is the SERVER's answer, not a number of
+   this file's: `begin` says when it sweeps this upload's staging
+   (`expires_at`, FILEX_UPLOAD_STAGING_TTL - 24 h by default, but the
+   operator's to change), and the record keeps that moment (`expiresAt`). A
+   note that outlives the bytes it describes only produces a confusing
+   "resuming…" that immediately restarts; one that is dropped while the bytes
+   are still there makes the person send them again. It used to be a fixed 24
+   hours here, wrong both ways the day an administrator changed the TTL. */
 
 export interface ResumeRecord {
   /** Server-side staged upload id. */
@@ -50,7 +53,21 @@ export interface ResumeRecord {
   chunkSize: number;
   /** Last offset the server acknowledged. Display + triage only. */
   offset: number;
+  /**
+   * When the server sweeps this upload's staging (epoch ms) - the `expires_at`
+   * its `begin` answered. Past it the record is dropped. ⚠ A record without
+   * one (written before 0.54, or after a `begin` that did not say) is dropped
+   * too: there is no honest guess at the server's TTL.
+   */
+  expiresAt?: number;
   updatedAt: number;
+}
+
+/** The server's `expires_at` (RFC 3339) as epoch ms; undefined when absent or unreadable. */
+export function resumeExpiry(expiresAt: string | null | undefined): number | undefined {
+  if (!expiresAt) return undefined;
+  const ms = Date.parse(expiresAt);
+  return Number.isFinite(ms) ? ms : undefined;
 }
 
 /** Identity of one (destination, file) pair. */
@@ -107,12 +124,14 @@ function write(store: ResumeStorage | null, data: Store): void {
   }
 }
 
-/** Drop records older than RESUME_TTL_MS. Returns what survived. */
+/** Drop records the server has swept (past their `expiresAt`), and records
+ *  that do not say when that is. Returns what survived. */
 export function pruneResume(store: ResumeStorage | null, now = Date.now()): Store {
   const data = read(store);
   let changed = false;
   for (const [key, rec] of Object.entries(data)) {
-    if (!rec?.uploadId || now - (rec.updatedAt ?? 0) > RESUME_TTL_MS) {
+    const until = rec?.expiresAt;
+    if (!rec?.uploadId || typeof until !== 'number' || !Number.isFinite(until) || now >= until) {
       delete data[key];
       changed = true;
     }

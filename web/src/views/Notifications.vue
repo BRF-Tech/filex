@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Bell, BellRing, RefreshCcw, Send, Webhook } from 'lucide-vue-next';
 import { RouterLink } from 'vue-router';
@@ -8,19 +8,22 @@ import { useNotificationsStore } from '@/stores/notifications';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { formatDate } from '@/lib/format';
-import { useNotificationText } from '@/composables/useNotificationText';
-import { eventSlug } from '@brftech/filex-core';
+import { eventSlug, useNotificationText } from '@brftech/filex-core';
 import type { Severity } from '@/api/types';
 
 import Button from '@/components/ui/Button.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import DigestPolicyCard from '@/components/DigestPolicyCard.vue';
+import PushKeyCard from '@/components/PushKeyCard.vue';
+import { useCapabilitiesStore } from '@/stores/capabilities';
+import { accountLocaleWritten } from '@/i18n';
 import Badge from '@/components/ui/Badge.vue';
 import { DataTable, foreignText, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const notif = useNotificationsStore();
 const toast = useToastStore();
+const caps = useCapabilitiesStore();
 
 const refreshing = ref(false);
 
@@ -37,6 +40,13 @@ async function load() {
 }
 
 onMounted(load);
+// The history is said by the server in the reader's ACCOUNT language: a
+// language picked on screen is written to the account, and once that has
+// landed the history is asked for again.
+watch(locale, async () => {
+  await accountLocaleWritten();
+  void notif.fetchAdminList();
+});
 
 // ── your own notification preferences ────────────────────────────────────
 //
@@ -109,10 +119,13 @@ function scopeLabel(row: {
 }
 
 /**
- * The delivery state, localised. ⚠ `skipped` means "no webhook is set up",
- * which the server records in English (`no webhook URL configured`) for the
- * API's sake; this page says it in the reader's language instead of printing
- * that string, and a real failure keeps the receiver's own error text.
+ * The delivery state, localised. Why a delivery was skipped is the SERVER's
+ * sentence (`webhook_reason`, backend notify/webhook_reason.go: the row keeps
+ * a code - no webhook set up, a digest no target names, the event already
+ * sent with another row, the service stopping - and the server says it in
+ * the screen's language); a real failure is the receiver's own error text.
+ * ⚠ Until 0.54 this page said "no webhook is set up" for every skipped row,
+ * which was wrong for two of the four reasons.
  */
 function webhookLabel(status: string): string {
   const key = `notifications.webhookStatus.${status}`;
@@ -120,15 +133,14 @@ function webhookLabel(status: string): string {
   return out === key ? status : out;
 }
 
-function webhookReason(row: { webhook_status: string; webhook_error?: string }): string {
-  if (row.webhook_status === 'skipped') return t('notifications.webhookNone');
-  // ⚠ The RECEIVER's words, not ours — `Post "https://hooks…/x": dial tcp
-  // 10.0.0.1:443: connection refused` — so they never passed through vue-i18n
-  // and the panel's post-translation hook never isolated their machine runs.
-  // In an Arabic panel a URL's and an address's neutrals take the line's
-  // direction. This was the one text cell on the page not already going
-  // through `foreignText` (the title and body are, in useNotificationText).
-  return row.webhook_error ? foreignText(String(locale.value), row.webhook_error) : '';
+function webhookReason(row: { webhook_status: string; webhook_error?: string; webhook_reason?: string }): string {
+  const said = row.webhook_reason || (row.webhook_status === 'failed' ? row.webhook_error : '') || '';
+  // ⚠ Isolated, as every sentence the server wrote: a failed delivery's
+  // reason is the RECEIVER's words - `Post "https://hooks…/x": dial tcp
+  // 10.0.0.1:443: connection refused` - and in an Arabic panel a URL's and
+  // an address's neutrals would take the line's direction. Display only;
+  // the words are the server's.
+  return said ? foreignText(String(locale.value), said) : '';
 }
 
 function setUnread(v: boolean) {
@@ -140,13 +152,11 @@ async function refreshAfterTest() {
   await Promise.all([notif.fetchAdminList(), notif.fetchAdminUnread()]);
 }
 
-// ⚠ The SAME renderer the bell, the browser toast and the desktop app use.
-// This table has its own `event` column naming the kind (eventLabel, with the
-// raw id kept in its tooltip), so nothing is lost by putting a sentence in the
-// title column — and everything
-// is lost by not: eight of the eleven file events store no title at all, so
-// what stood here was `share.created` twice on the same row, once as data and
-// once pretending to be a title. See lib/notificationText.ts.
+// ⚠ The server's words (backend notify say.go), as the bell shows them: the
+// history is read with this page's language (`lang=`) and every row arrives
+// said in it. This table has its own `event` column naming the kind
+// (eventLabel, with the raw id kept in its tooltip); the title column is the
+// sentence. The composable only names an encrypted item where this tab can.
 const { notificationText } = useNotificationText();
 const tableRows = computed(() =>
   notif.items.map((n) => ({ ...n, text: notificationText(n) })),
@@ -271,6 +281,11 @@ const columns = computed<DataColumn<NotificationRow>[]>(() => [
          held, and which are urgent (backend notify/digest.go). A person
          changes their own in the user settings dialog. -->
     <DigestPolicyCard />
+
+    <!-- #191 - the instance's Web Push key: whether push works here, and
+         its rotation. The instance operator's (caller_admin); a person turns
+         push on for a device in their own settings. -->
+    <PushKeyCard v-if="caps.data?.caller_admin" />
 
     <DataTable
       table-id="admin.notifications"

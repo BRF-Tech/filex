@@ -781,11 +781,14 @@ func TestDigest_TheEmailWaitsForTheWindowAndComesOnce(t *testing.T) {
 	require.Len(t, mails, 1, "the window's email did not come exactly once")
 	require.Equal(t, "sahip@example.test", mails[0].to)
 	require.Equal(t, "tr", mails[0].lang)
-	require.Equal(t, "3 yeni bildirim", mails[0].subject)
+	// The bell's words (say.go): the digest row's title is the subject, its
+	// lines the text.
+	require.Equal(t, "3 bildirim", mails[0].subject)
 	require.Contains(t, mails[0].body, "Gelen: dosya isteğine 3 yükleme")
 	require.Contains(t, mails[0].body, "https://dosya.example.test/admin/")
 
-	// Urgent: at once, the event's own words.
+	// Urgent: at once, in the words the bell says for the row - not the
+	// emitter's ("Yeni dosya yüklemesi").
 	require.NoError(t, svc.UpsertSettings(ctx, &model.NotificationSettings{
 		UserID: owner, InAppEnabled: true, MutedEventsRaw: []byte(`[]`),
 		UrgentOverridesRaw: []byte(`{"drop.received":true}`),
@@ -795,7 +798,8 @@ func TestDigest_TheEmailWaitsForTheWindowAndComesOnce(t *testing.T) {
 	svc.Wait()
 	mails = box.all()
 	require.Len(t, mails, 2)
-	require.Equal(t, "Yeni dosya yüklemesi", mails[1].subject)
+	require.Equal(t, "1 dosya geldi", mails[1].subject)
+	require.True(t, strings.HasPrefix(mails[1].body, "Birisi → Gelen"), "%q", mails[1].body)
 	require.Contains(t, mails[1].body, "https://dosya.example.test/admin/")
 }
 

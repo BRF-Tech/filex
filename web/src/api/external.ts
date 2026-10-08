@@ -7,6 +7,8 @@ export interface ExternalServiceUpdate {
   enabled?: boolean;
   /** The address the document server reaches filex at. '' clears it. */
   callback_url?: string | null;
+  /** ONLYOFFICE's editor language: 'auto' or one of the row's `editor_languages`. */
+  editor_lang?: string;
 }
 
 // Backend wire shape — Go struct without json tags, so fields land
@@ -32,6 +34,9 @@ interface BackendExternal {
   env_managed?: boolean;
   advisories?: ExternalAdvisory[] | null;
   callback_url?: string;
+  editor_lang?: string;
+  editor_languages?: Array<{ code: string; name: string }> | null;
+  editor_lang_env_managed?: boolean;
 }
 interface ListResponse {
   entries: BackendExternal[] | null;
@@ -90,6 +95,14 @@ function toExternal(b: BackendExternal): ExternalService {
     env_managed: b.env_managed === true,
     advisories: b.advisories ?? [],
     callback_url: b.callback_url ?? '',
+    // Only the ONLYOFFICE row carries these; absent, the card shows no field.
+    ...(b.editor_languages
+      ? {
+          editor_lang: b.editor_lang || 'auto',
+          editor_languages: b.editor_languages,
+          editor_lang_env_managed: b.editor_lang_env_managed === true,
+        }
+      : {}),
   };
 }
 
@@ -172,6 +185,7 @@ export const ExternalApi = {
     if (patch.url !== undefined) body.url = patch.url;
     if (patch.jwt_secret !== undefined) body.secret = patch.jwt_secret;
     if (patch.callback_url !== undefined) body.callback_url = patch.callback_url ?? '';
+    if (patch.editor_lang !== undefined) body.editor_lang = patch.editor_lang;
     await api.patch(`/admin/external/${id}`, body);
     const all = await ExternalApi.list();
     const found = all.find((s) => s.id === id);

@@ -17,13 +17,25 @@
 //     day and taps four notifications should end up with one window on the
 //     fourth file, not four windows.
 //
-//   • PUSH — a payload that arrives while no tab is open at all. filex has no
-//     push subscription today (no VAPID key, nothing calls `subscribe()`), so
-//     nothing reaches this handler yet; it is here so that the day something
-//     does, the toast it raises is the SAME branded toast the in-page channel
-//     raises, instead of the browser's "This site has been updated in the
-//     background" placeholder — which is what a push handler's ABSENCE
-//     produces, not silence.
+//   • PUSH - a payload that arrives while no tab is open at all (#191: Web
+//     Push, the person's switch "Push notifications on this device"; the
+//     server pushes what their bell tells them - backend internal/notify
+//     push.go). It raises the SAME branded toast the in-page channel raises,
+//     and it ALWAYS raises one: iOS revokes the subscription of a site whose
+//     push shows nothing, and Chrome shows its own "This site has been
+//     updated in the background" in its place.
+//
+//     ⚠ The words are the SERVER's (internal/notify say.go - the code the
+//     bell, the email and the webhooks take too), already said in the
+//     person's language and laid out as the page's pop-up lays them out:
+//     `title` the instance's name, `body` "<sentence> - <detail>". This file
+//     only shows them; it composes nothing.
+//
+//     The payload (`v: 1`) names the row by `id`; whether it has somewhere to
+//     go is `open`. A tap on one that does opens `<scope>notify/<id>`: the app
+//     finds the row, marks it read and goes where the bell would
+//     (web/src/views/NotificationOpen.vue) - the resolver of where a row goes
+//     is the app's, and this file is never compiled, so it holds no copy.
 //
 // ⚠ Both paths take their icon and badge from PNGs. Chromium's notification
 // decoder has no SVG, so `icon.svg` there is not a small logo, it is none.
@@ -34,12 +46,22 @@
 const FILEX_ICON = new URL('icons/icon-192.png', self.location.href).href;
 const FILEX_BADGE = new URL('icons/badge-96.png', self.location.href).href;
 
+// The worker's own scope (`<base>/admin/`), what a push's addresses hang off.
+function filexScope() {
+  const reg = self.registration;
+  return reg && typeof reg.scope === 'string' && reg.scope ? reg.scope : new URL('./', self.location.href).href;
+}
+
 self.addEventListener('notificationclick', (event) => {
   const notification = event.notification;
   notification.close();
 
   const data = notification.data || {};
   const target = typeof data.url === 'string' && data.url ? data.url : '';
+  // A push's toast (#191) also knows the app's own front door: filex was
+  // closed when it arrived, so a tap on one about nothing in particular opens
+  // filex rather than doing nothing. The page's toasts carry no `home`.
+  const home = typeof data.home === 'string' ? data.home : '';
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
@@ -55,7 +77,10 @@ self.addEventListener('notificationclick', (event) => {
       // bell draws that row as plain text; this is the same row, and the same
       // answer. Focusing a window the person already has open is the most a
       // tap on it may do.
-      if (!target) return open.length ? open[0].focus() : undefined;
+      if (!target) {
+        if (open.length) return open[0].focus();
+        return home ? self.clients.openWindow(home) : undefined;
+      }
 
       const absolute = new URL(target, self.location.origin).href;
       // Prefer a tab already on this origin: focus it and send it where the
@@ -84,16 +109,36 @@ self.addEventListener('push', (event) => {
   // The sender may name the instance (an operator renames it on the Branding
   // page); "filex" is only the fallback, exactly as in the page's own channel.
   const title = payload.title || 'filex';
+  const tag = payload.tag || undefined;
+  // Where a tap goes: the address the sender gave; else, for a row that has
+  // somewhere to go, the row through the app (`notify/<id>`). ⚠ No fallback
+  // address otherwise - the click handler treats "no url" as "nowhere to go",
+  // the same answer the bell gives the same row; a v1 push adds the front
+  // door (`home`), because with filex closed there is no window to focus.
+  let url = typeof payload.url === 'string' ? payload.url : '';
+  if (!url && payload.id && payload.open) url = new URL('notify/' + payload.id, filexScope()).href;
   const options = {
     body: payload.body || '',
     icon: payload.icon || FILEX_ICON,
     badge: payload.badge || FILEX_BADGE,
-    tag: payload.tag || undefined,
-    renotify: payload.tag ? true : undefined,
-    // ⚠ No fallback address. A push with no `url` is a push about nothing in
-    // particular, and the click handler above treats "no url" as "nowhere to
-    // go" — the same answer the bell gives the same row.
-    data: { url: payload.url || '' },
+    tag: tag,
+    data: { url: url, home: payload.v ? filexScope() : '' },
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  const showing =
+    tag && typeof self.registration.getNotifications === 'function'
+      ? self.registration.getNotifications({ tag: tag }).catch(function () {
+          return [];
+        })
+      : Promise.resolve([]);
+  event.waitUntil(
+    showing.then(function (existing) {
+      // ⚠ A row's push REPLACES the page's toast of the same row (one tag
+      // per row: `filex-notification-<id>`) silently, so one row is one
+      // alert; a summary or a test asks to alert again (`renotify`), and so
+      // does a tag nothing shows yet. Android replaces a same-tag toast
+      // silently unless renotify is set.
+      if (tag) options.renotify = payload.renotify === true || !existing || existing.length === 0;
+      return self.registration.showNotification(title, options);
+    }),
+  );
 });

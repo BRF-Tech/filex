@@ -32,6 +32,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/writehook"
@@ -42,6 +43,27 @@ import (
 // synchronously instead", never as a failure — an operator who has not
 // configured staging must still be able to upload.
 var ErrStagingUnavailable = errors.New("staged ingest is not available")
+
+// ingestQuota asks quota.CheckFile for a staged ingest, billed to the account
+// the bytes belong to (quotastore.OwnerFrom: a drop link's creator, an upload
+// ticket's minter, otherwise the caller). As at Begin, what that account still
+// has open in staging counts; as at checkWriteQuota, an overwrite adds only
+// what it grows the file by.
+func (h *StagedUpload) ingestQuota(ctx context.Context, storageID int64, storageKey string, size int64) error {
+	if h.Quota == nil {
+		return nil
+	}
+	owner := quotastore.OwnerFrom(ctx)
+	if owner <= 0 {
+		return nil
+	}
+	pending, err := h.Store.SumOpenStagedUploadBytes(ctx, owner)
+	if err != nil {
+		return fmt.Errorf("quota: %w", err)
+	}
+	add := size - catalogedFileSize(ctx, h.Store, storageID, storageKey) + pending
+	return h.Quota.CheckFile(ctx, owner, size, add)
+}
 
 // StagedThreshold is the size above which a whole-body upload is staged rather
 // than written straight to the driver. It is the same chunk size the chunked
@@ -102,6 +124,12 @@ func (h *StagedUpload) IngestStream(
 		return nil, storage.ErrUnsupported
 	}
 	if err := storage.EnsureFileTarget(ctx, drv, storageKey); err != nil {
+		return nil, err
+	}
+	// The per-file limit and the account's ceiling, here as well as at every
+	// caller's door: this is the one place every whole-body surface's large
+	// file passes, before a byte of src is read.
+	if err := h.ingestQuota(ctx, storageID, storageKey, size); err != nil {
 		return nil, err
 	}
 	// The last moment at which the bytes we are about to replace still exist --

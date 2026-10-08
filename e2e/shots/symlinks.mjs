@@ -19,6 +19,8 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from '@playwright/test';
+import { pinTimes } from './clock.mjs';
+import { syncAndWait } from './fixtures.mjs';
 import { addLocalStorage, bootInstance, client, newContext, shot, signIn, sleep } from './scene.mjs';
 
 const SET = 'symlinks';
@@ -51,12 +53,18 @@ async function main() {
           'or take this picture on Linux/macOS',
       );
     }
-    // ⚠ NOT synced. A listing answered by the driver carries the link's
-    // state (`outside_root`), so the badge can say WHERE the target is and
-    // name the setting that would allow it; a catalogued row has no column for
-    // that state and says only "a link that cannot be opened". Both are
-    // honest; the first is the one worth a picture.
-    await addLocalStorage(admin, 'projects', root);
+    pinTimes(root);
+    // ⚠ Synced, and the sync waited for. Until 0.53.0 the storage was left
+    // unsynced on purpose: a listing answered by the driver carried the
+    // link's state (`outside_root`), so the badge said WHERE the target is,
+    // while a catalogued row had no column for it and said only "Link" and
+    // the general sentence. The price was a "This storage's first sync has
+    // not finished" strip across the README's picture of a storage that is
+    // fine. Since 0.54 the sync records the reason with the row (migration
+    // 00098), so the synced listing - what a person sees every day after the
+    // first scan - says "Outside storage" too, and the picture waits for it.
+    const storage = await addLocalStorage(admin, 'projects', root);
+    await syncAndWait((_token, path, init) => admin.call(path, init), null, storage.id);
 
     const ctx = await newContext(browser);
     const page = await ctx.newPage();
@@ -66,7 +74,14 @@ async function main() {
     await page.getByTestId('view-list').click();
     const link = page.locator('[data-fe-path="projects://archive"]').first();
     await link.waitFor({ timeout: 25_000 });
-    await link.getByTestId('symlink-badge').waitFor();
+    // The reason, not the general "Link": a picture of the general word is a
+    // picture of the 0.53 catalogue, and it fails here rather than ships.
+    const badge = link.locator('[data-testid="symlink-badge"][data-link-state="outside_root"]');
+    await badge.waitFor({ timeout: 15_000 });
+    const words = (await badge.textContent()) ?? '';
+    if (!words.includes('Outside storage')) {
+      throw new Error(`the symlink badge reads "${words.trim()}", expected "Outside storage"`);
+    }
     // Selected, with its details open: the badge's two words, and the whole
     // sentence where somebody reads about the file.
     await link.locator('.fe-list__check').first().click();

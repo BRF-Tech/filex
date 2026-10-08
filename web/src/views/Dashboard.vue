@@ -29,9 +29,8 @@ import EmptyState from '@/components/ui/EmptyState.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import OnlyOfficeSecretAlert from '@/components/OnlyOfficeSecretAlert.vue';
 import { syncStateLabel, syncTone } from '@/lib/syncTone';
-import { auditActionLabel, auditTargetLabel } from '@/lib/auditLabel';
 
-const { t, te, locale } = useI18n();
+const { t, locale } = useI18n();
 const router = useRouter();
 const storages = useStoragesStore();
 const sync = useSyncStore();
@@ -103,7 +102,7 @@ const activityColumns = computed<DataColumn<AuditRow>[]>(() => [
     label: t('audit.fields.action'),
     sortable: true,
     width: 240,
-    sortValue: (r) => auditActionLabel(r.action, t, te),
+    sortValue: (r) => r.label || r.action,
   },
   {
     id: 'user_email',
@@ -325,11 +324,13 @@ const recentSyncs = computed(() => sync.items.slice(0, RECENT_SYNCS));
           </RouterLink>
         </template>
         <template #cell-action="{ row }">
+          <!-- The action and its target in words, as the server said them
+               (handlers/audit_label.go) - the Audit page's words. -->
           <span class="font-medium" :title="row.action" data-testid="dashboard-activity-action">{{
-            auditActionLabel(row.action, t, te)
+            row.label || row.action
           }}</span>
-          <span v-if="row.target_type || row.target_name" class="tbl-sub" data-testid="dashboard-activity-target">
-            {{ auditTargetLabel(row.target_type, row.target_id, t, te, row.target_name) }}
+          <span v-if="row.target_label" class="tbl-sub" data-testid="dashboard-activity-target">
+            {{ row.target_label }}
           </span>
         </template>
         <template #cell-user_email="{ row }">{{ personName({ name: row.user_name, email: row.user_email }) || '-' }}</template>

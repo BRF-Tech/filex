@@ -192,6 +192,13 @@ async function applyAccountPrefs(): Promise<void> {
   applyStoredPalette(prefs.palette);
   applyAccountDensity(prefs.density);
   applyPrefLocale(prefs.locale);
+  // ⚠ No language is written from here. The screen's language IS the
+  // account's (#191), and an account that held none was given the one on
+  // screen by the SERVER at the sign-in (the sign-in carries it as
+  // Accept-Language; handlers/auth.go adoptSignInLanguage). Writing it from
+  // this page raced the sign-in's own navigation (/admin/login -> /drive/ for
+  // a non-admin): the PUT was cut off or sent from pagehide, and the browser
+  // suites hung on it (0.54 full run 001b652e).
 }
 
 onMounted(async () => {

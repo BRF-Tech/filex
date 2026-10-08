@@ -183,8 +183,8 @@ A role has:
 
   | Limit | Enforced |
   |---|---|
-  | Maximum share-link lifetime (days) | A link asked for with no expiry, or a later one, is **capped** (reported as `expiry_clamped`, like the install-wide cap) |
-  | Share links need a password | A link asked for without one gets a **generated PIN**, returned to the creator; an emailed invite link carries it |
+  | Maximum share-link lifetime (days) | A link asked for with no expiry, or a later one, is **capped** (reported as `expiry_clamped`, like the install-wide cap). The person is told the cap up front: `GET /api/capabilities` → `share_link_max_days` is the shorter of this and the install's ceiling, and the share dialog offers only what it allows |
+  | Share links need a password | A link asked for without one gets a **generated PIN**, returned to the creator. A link mailed from the Share dialog never carries its PIN; only the invitation to an address with no account does ([Emailing a link](SHARING.md#emailing-a-link)) |
   | Blocked file types | Upload, create, save or rename **to** a blocked extension is refused on every door (`exe`, `tar.gz`; case-insensitive). Existing files of that type can still be read and deleted |
   | Largest file | Every write door, including the agent API, the text editor and chunked uploads |
   | Require 2FA | See below |

@@ -7,7 +7,10 @@ describe('dashboard', () => {
     // Intercept the dashboard fetch so we can wait for the cards to
     // hydrate. Without this the assertions race against the SPA's
     // initial "…" placeholder state.
-    cy.intercept('GET', '/api/admin/dashboard').as('dash');
+    // `pathname`, not the URL: the page asks `/api/admin/dashboard?lang=<the
+    // screen's language>` since 0.54 (#208), and a plain URL string does not
+    // match a request that carries a query - the wait saw no request at all.
+    cy.intercept({ method: 'GET', pathname: '/api/admin/dashboard' }).as('dash');
     cy.visit('/admin/dashboard');
     cy.wait('@dash', { timeout: 15000 });
   });

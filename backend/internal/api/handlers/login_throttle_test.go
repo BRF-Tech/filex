@@ -110,6 +110,9 @@ func TestLoginCountsDownThenLocksWith429(t *testing.T) {
 	require.Equal(t, "60", r.header.Get("Retry-After"))
 	require.EqualValues(t, 60, r.body["retry_after"])
 	require.Equal(t, "Too many failed attempts: this account is locked. Try again in 1 minute.", r.body["message"])
+	// The same sentence with its time left open, for the sign-in form's own
+	// countdown (0.54 audit A8: the form kept a copy of these words).
+	require.Equal(t, "Too many failed attempts: this account is locked. Try again in {wait}.", r.body["countdown"])
 
 	// The RIGHT password is refused while the lock is in force, from anywhere.
 	for _, ip := range []string{"203.0.113.1", "203.0.113.99"} {

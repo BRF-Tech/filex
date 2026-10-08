@@ -439,3 +439,6 @@ declare global {
 }
 
 export type { ExplorerConfig } from '@brftech/filex-core';
+/* #196 - a host's own sign-out (the desktop app) forgets the menu answers the
+ * explorer remembered on this browser, as the web app's sign-out does. */
+export { clearMenuAnswers } from '@brftech/filex-core';

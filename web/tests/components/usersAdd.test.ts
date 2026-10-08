@@ -27,6 +27,16 @@ const { usersApi, groupsApi } = vi.hoisted(() => {
       update: vi.fn(),
       remove: vi.fn(),
       resetPassword: vi.fn(),
+      // #211 (audit B4): the server's suggestion, GET /api/admin/users/suggest.
+      suggest: vi.fn(async (email: string) => {
+        const answers: Record<string, { username: string; name: string }> = {
+          'Jane.Doe+files@corp.example': { username: 'jane.doe', name: 'Jane Doe' },
+          'john@corp.example': { username: 'john', name: 'John' },
+          'gözlük@corp.example': { username: 'gozluk', name: 'Gözlük' },
+          'new@corp.example': { username: 'new', name: 'New' },
+        };
+        return answers[email] ?? { username: '', name: '' };
+      }),
     },
     groupsApi: {
       list: vi.fn(async () => [
@@ -48,6 +58,14 @@ const { usersApi, groupsApi } = vi.hoisted(() => {
   };
 });
 
+// The server's account check (POST /api/auth/account/check), asked while the
+// Add user form is typed (0.54 #209: the form keeps no rule of its own). A
+// unit test never reaches the network (helpers/noNetwork), so it answers here.
+const checkAccount = vi.fn(async (_q: { email?: string; username?: string; for?: string }) => ({}) as Record<string, { error: string; message: string }>);
+vi.mock('@/api/auth', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/api/auth')>();
+  return { ...real, AuthApi: { ...real.AuthApi, checkAccount: (q: { email?: string; username?: string; for?: string }) => checkAccount(q) } };
+});
 vi.mock('@/api/users', () => ({ UsersApi: usersApi }));
 vi.mock('@/api/groups', () => ({ GroupsApi: groupsApi }));
 vi.mock('@/api/roles', () => ({
@@ -98,6 +116,11 @@ async function openAdd(locale: 'en' | 'tr' = 'en'): Promise<VueWrapper> {
 }
 
 const byTestId = (w: VueWrapper, id: string) => w.find(`[data-testid="${id}"]`);
+/** The suggestion is asked a moment after typing stops (Users.vue SUGGEST_DELAY_MS). */
+const suggested = async () => {
+  await new Promise((r) => setTimeout(r, 300));
+  await flushPromises();
+};
 const inputValue = (w: VueWrapper, name: string) => (w.find(`input[name="${name}"]`).element as HTMLInputElement).value;
 
 beforeEach(() => {
@@ -106,18 +129,28 @@ beforeEach(() => {
 });
 
 describe('Add user: a local account', () => {
-  it('says what it is for, and suggests the name and username from the address', async () => {
+  it('says what it is for, and fills in the name and username the server suggests for the address', async () => {
     const w = await openAdd();
     expect(w.text()).toContain('Add a local account');
     expect(w.text()).toContain('they appear when they sign in, or when their directory syncs');
 
     await w.find('input[name="new-user-email"]').setValue('Jane.Doe+files@corp.example');
-    expect(inputValue(w, 'new-user-name')).toBe('Jane Doe Files');
+    await suggested();
+    expect(usersApi.suggest).toHaveBeenLastCalledWith('Jane.Doe+files@corp.example');
+    expect(inputValue(w, 'new-user-name')).toBe('Jane Doe');
     expect(inputValue(w, 'new-user-username')).toBe('jane.doe');
+
+    // The server's rule, not one of the page's: the letters a name contains
+    // are transliterated, not turned into dots (the page's copy said g.zl.k).
+    await w.find('input[name="new-user-email"]').setValue('gözlük@corp.example');
+    await suggested();
+    expect(inputValue(w, 'new-user-username')).toBe('gozluk');
+    expect(inputValue(w, 'new-user-name')).toBe('Gözlük');
 
     // Typed by hand: the address no longer overwrites it.
     await w.find('input[name="new-user-username"]').setValue('jd');
     await w.find('input[name="new-user-email"]').setValue('john@corp.example');
+    await suggested();
     expect(inputValue(w, 'new-user-username')).toBe('jd');
     expect(inputValue(w, 'new-user-name')).toBe('John');
   });
@@ -126,6 +159,9 @@ describe('Add user: a local account', () => {
     usersApi.create.mockResolvedValue({ id: 9, email: 'new@corp.example' });
     const w = await openAdd();
     await w.find('input[name="new-user-email"]').setValue('new@corp.example');
+    // The username and name sent are the SERVER's suggestion (#211), asked a
+    // moment after the address is typed.
+    await suggested();
     await byTestId(w, 'user-create').trigger('click');
     await flushPromises();
     expect(usersApi.create).not.toHaveBeenCalled();

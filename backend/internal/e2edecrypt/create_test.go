@@ -214,7 +214,7 @@ func TestConversion_AtLevel2KeepsNamesRequired(t *testing.T) {
 func TestRewrites_RefuseAKeyFileTheyCannotRead(t *testing.T) {
 	_, err := StartConversion([]byte("not json"), time.Now(), nil)
 	require.ErrorIs(t, err, ErrNotMarker)
-	_, err = FinishConversion([]byte(`{"v":3,"req":["vault"],"salt":"AAAA","iter":1,"verify":"x","fmk":"wrapped","fmk_pw":"x"}`))
+	_, err = FinishConversion([]byte(`{"v":3,"req":["x-future"],"salt":"AAAA","iter":1,"verify":"x","fmk":"wrapped","fmk_pw":"x"}`))
 	require.Error(t, err, "an unknown required feature is not rewritten")
 }
 

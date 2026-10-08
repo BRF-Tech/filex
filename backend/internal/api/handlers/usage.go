@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/usage"
 )
 
@@ -49,7 +50,8 @@ func (h *Usage) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rep, rerr := h.Svc.Report(r.Context(), from, to)
+	// The report's notes are said in the reader's language (srvtext).
+	rep, rerr := h.Svc.Report(srvtext.WithReader(r.Context(), readerLang(r)), from, to)
 	if rerr != nil {
 		// A misconfiguration (a storage that no longer exists, a provider that
 		// refuses the key) is the operator's to fix, and the message names

@@ -49,3 +49,31 @@ func TestConversionPending(t *testing.T) {
 	require.False(t, ConversionPending([]byte(`not json`)))
 	require.False(t, ConversionPending(nil))
 }
+
+func TestKeepsVaultBlock(t *testing.T) {
+	vault := `{"v":3,"req":["vault"],"salt":"c2FsdA==","iter":600000,"verify":"dmVy","fmk":"wrapped","fmk_pw":"cHc=","vault":{"v":1,"id":"wpU155hSR3hD1u8bSnGv7w","pack":22}}`
+	newPassword := `{"v":3,"req":["vault"],"salt":"bmV3","iter":600000,"verify":"bmV3dg==","fmk":"wrapped","fmk_pw":"bmV3cA==","vault":{"v":1,"id":"wpU155hSR3hD1u8bSnGv7w","pack":22}}`
+	otherPack := `{"v":3,"req":["vault"],"salt":"c2FsdA==","iter":600000,"verify":"dmVy","fmk":"wrapped","fmk_pw":"cHc=","vault":{"v":1,"id":"wpU155hSR3hD1u8bSnGv7w","pack":24}}`
+	level2 := `{"v":3,"req":["names"],"salt":"c2FsdA==","iter":600000,"verify":"dmVy","fmk":"wrapped","fmk_pw":"cHc=","names":{"alg":"AES-SIV-512"}}`
+	cases := []struct {
+		name          string
+		before, after []byte
+		want          bool
+	}{
+		{"a vault's new password", []byte(vault), []byte(newPassword), true},
+		{"a vault's pack size changed", []byte(vault), []byte(otherPack), false},
+		{"a vault turned into level 2", []byte(vault), []byte(level2), false},
+		{"a vault's key file replaced by junk", []byte(vault), []byte("{}"), false},
+		{"level 2 turned into a vault", []byte(level2), []byte(vault), false},
+		{"level 1 turned into a vault", []byte(kfBase), []byte(vault), false},
+		{"a vault key file where there was none", nil, []byte(vault), false},
+		{"a level-1 key file where there was none", nil, []byte(kfBase), true},
+		{"a level-1 password change", []byte(kfBase), []byte(`{"v":2,"salt":"bmV3","iter":600000,"verify":"bmV3dg==","fmk":"wrapped","fmk_pw":"bmV3cA=="}`), true},
+		{"level 1 to level 2", []byte(kfBase), []byte(level2), true},
+	}
+	for _, c := range cases {
+		if got := KeepsVaultBlock(c.before, c.after); got != c.want {
+			t.Errorf("%s: KeepsVaultBlock = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

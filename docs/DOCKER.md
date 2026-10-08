@@ -312,8 +312,10 @@ two ways:
   address, never the LAN. It is the address the sign-in attempt limit counts
   by and the access and audit logs record. Up to 0.49 this header was believed
   from anyone ([CONFIGURATION.md → Trusted proxies](CONFIGURATION.md#trusted-proxies)).
-- **`X-Forwarded-Proto`** is read from any peer: it marks the session cookie
-  `Secure` and picks `https` for the addresses filex builds from the request.
+- **`X-Forwarded-Proto`**: `https` from any peer marks the session cookie
+  `Secure` (it can only add the flag). `http`, which makes a tenant's links -
+  the ones filex mails, too - `http://`, is believed **only from a trusted
+  proxy**, like the client's address (since 0.54).
 
 What `auto` trusts in Docker, measured on Docker 29:
 

@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -210,6 +211,14 @@ func (s *Service) runRename(ctx context.Context, drv storage.Driver, op *Op, src
 	if taken && !op.resumed {
 		return ErrNameTaken
 	}
+	// ⚠ The storage's row gate, from the first byte that moves to the last row
+	// that follows (internal/rowgate, issue #192). Without it a scan running
+	// beside the rename saw the folder half way - listed in its parent before
+	// the bytes moved, listed itself after - judged everything in it gone, and
+	// dropped the rows a moment before SyncRename re-homed them: the renamed
+	// folder opened empty.
+	release := rowgate.Move(op.StorageID)
+	defer release()
 	if taken {
 		// ⚠⚠ Carried on after a restart (op.resumed: this row had begun when
 		// the previous process stopped). The name is held by the rename's own
@@ -242,6 +251,12 @@ func (s *Service) runRestore(ctx context.Context, op *Op, src string) error {
 	if err != nil {
 		return err
 	}
+	// A restore is a two-step change too: the bytes come out of the trash,
+	// then the rows do. A scan between the two would find the bytes back at
+	// their path with no live row and catalogue them as a new file, which
+	// would then hold the place the restored row is going back to (rowgate).
+	release := rowgate.Move(op.StorageID)
+	defer release()
 	return s.restorer.RestoreNode(context.WithoutCancel(ctx), op.StorageID, ids[0])
 }
 

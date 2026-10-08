@@ -279,7 +279,14 @@ test.describe('The admin Notifications page draws its cells in one piece, in eve
       whole.setEnd(node, at + 1 + name.length);
       return {
         found: true,
-        marks: [...text].filter((c) => c === String.fromCharCode(0x2066) || c === String.fromCharCode(0x2069)).length,
+        // An isolate's opening mark (LRI, RLI or FSI) and its closing PDI.
+        // 0.54 (#191): the SERVER says the row and isolates each value in a
+        // right-to-left sentence with FSI…PDI (notify say.go isolate); the
+        // browser's LRI wrapper of 0.53 is gone with the client's sentence.
+        marks: [...text].filter((c) => {
+          const code = c.charCodeAt(0);
+          return code === 0x2066 || code === 0x2067 || code === 0x2068 || code === 0x2069;
+        }).length,
         slashX: Math.round(slash.left),
         firstX: Math.round(first.left),
         lastX: Math.round(last.right),

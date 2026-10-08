@@ -23,8 +23,12 @@
 //     guard the same event would appear twice on the same machine.
 //
 // ⚠ A notification body carries a name, a count and a target — never file
-// CONTENT and never a credential. The strings here come from the server's
-// `title`/`body` fields, which are the same strings the bell shows.
+// CONTENT and never a credential. The strings here are the row's `title` and
+// `body` as the SERVER said them in the reader's language (backend notify
+// say.go) - the same words the bell shows, the desktop app's toast says and a
+// Web Push of the row arrives with (laid out the same way, so a push that
+// replaces this toast says what it said). Only an encrypted item's name may
+// differ: this tab names it where its folder is unlocked, a push cannot.
 
 import { brandBadgeUrl, brandIconUrl, brandName } from './brand';
 import { swLocation } from './serviceWorker';
@@ -178,6 +182,9 @@ export function brandedNotification(opts: BrowserNotifyOptions): {
   // ⚠ The event sentence is never dropped to make room for the name: the two
   // are joined, because "New file: report.pdf" and "2.4 MB, in Documents" are
   // different facts and the toast has room for both.
+  // ⚠ The SAME layout a Web Push of the row arrives in (backend notify
+  // say.go ToastBody, which the push replaces this toast with): the words
+  // are the server's (title and body of the row), only laid out here.
   const body = opts.body ? `${opts.title} - ${opts.body}` : opts.title;
   const options: NotificationOptions = {
     body,
@@ -207,7 +214,7 @@ export function brandedNotification(opts: BrowserNotifyOptions): {
  * FINDING it depended on the page. (An iPhone's installed app is the same
  * case: there the worker is the way to notify.)
  */
-async function swRegistration(): Promise<ServiceWorkerRegistration | null> {
+export async function swRegistration(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
   try {
     const reg = await navigator.serviceWorker.getRegistration(swLocation().scope);
@@ -251,6 +258,16 @@ export function showBrowserNotification(
   }
 }
 
+/** Is a notification with this tag on screen already (a push's, #191)? */
+async function alreadyShown(reg: ServiceWorkerRegistration, tag: string): Promise<boolean> {
+  if (typeof reg.getNotifications !== 'function') return false;
+  try {
+    return (await reg.getNotifications({ tag })).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Raise a notification by whichever route this browser actually has.
  *
@@ -270,8 +287,13 @@ export async function raiseBrowserNotification(
   userId?: number | null,
 ): Promise<'window' | 'sw' | 'none'> {
   if (!canShowBrowserNotification(userId)) return 'none';
+  // #191 - a push for the same row may already be on screen (the push
+  // arrives the moment the row is written, this poll up to 15 s later): the
+  // worker raised it with this very tag, so the row is told once.
+  const known = opts.tag ? await swRegistration() : null;
+  if (known && opts.tag && (await alreadyShown(known, opts.tag))) return 'none';
   if (showBrowserNotification(opts, userId)) return 'window';
-  const reg = await swRegistration();
+  const reg = known ?? (await swRegistration());
   if (!reg) return 'none';
   const { title, options } = brandedNotification(opts);
   try {

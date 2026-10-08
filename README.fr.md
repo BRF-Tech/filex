@@ -143,6 +143,11 @@ déploie pour son onglet de fichiers). filex vise l’entre-deux :
   persan et l’ourdou, l’interface **passe de droite à gauche** - et s’arrête là où
   l’inversion en miroir serait une erreur, dans l’espace du document et dans le texte machine
   ([docs/RTL.md](docs/RTL.md), [écrire un pack](docs/PLUGIN-KIT.md#writing-a-language-pack)).
+  Une personne a une seule langue : celle de son compte est celle de l’écran dans
+  l’application web, l’explorateur et l’application de bureau, une langue choisie dans l’un
+  d’eux la change partout, et l’éditeur ONLYOFFICE s’ouvre lui aussi dans cette langue - ou
+  dans celle qu’un administrateur choisit pour tout le monde
+  ([la langue de l’éditeur](docs/ONLYOFFICE.md#the-editors-language)).
 - **Il porte votre marque, pas la nôtre** - composez un thème à vos couleurs sur l’écran
   **Apparence** et faites-en le thème par défaut : la page de connexion et chaque lien
   public le portent aussi, et une demande de signature venant de votre instance porte
@@ -291,15 +296,15 @@ partage ordinaire.
 
 | Définissez les zones - nommez chacune et dites à qui elle appartient ; le document vient ensuite | Placez-les - choisissez une zone, appuyez sur la page à l’endroit où elle doit aller |
 |---|---|
-| ![Définition des zones d’une demande de signature](https://filex.sh/shots/signing/sign-define-1440.4a966ffefa4f.png) | ![Placement des zones sur le document](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
+| ![Définition des zones d’une demande de signature](https://filex.sh/shots/signing/sign-define-1440.63ea72b13724.png) | ![Placement des zones sur le document](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
 
 | Le lien du partenaire - le seul écran public de filex, au nom de votre instance, protégé par un PIN | …et ce qu’il ouvre : uniquement ses propres zones - ici un nom saisi au clavier dans la police choisie par le demandeur (dessiné et téléversé sont les deux autres possibilités) |
 |---|---|
-| ![L’écran de saisie du PIN du signataire externe](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![Le signataire externe remplissant ses zones](https://filex.sh/shots/signing/sign-outside-fill-1440.54632da00ef4.png) |
+| ![L’écran de saisie du PIN du signataire externe](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![Le signataire externe remplissant ses zones](https://filex.sh/shots/signing/sign-outside-fill-1440.9f50aeb7abef.png) |
 
 | Tant que la demande est en cours - le document gelé pour tout le monde et, dans ses détails, qui a signé | Installation d’une application - chaque autorisation qu’elle demande, en termes simples, avant que rien ne s’exécute |
 |---|---|
-| ![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.518a3bd6651f.png) | ![La vérification des autorisations dans l’assistant d’installation](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
+| ![Le document verrouillé, son panneau Signatures ouvert](https://filex.sh/shots/signing/sign-status-1440.b5bfdbd379c3.png) | ![La vérification des autorisations dans l’assistant d’installation](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
 
 | Une application installée - d’où elle vient, son empreinte, et chaque autorisation qu’elle détient, en termes simples (ses paramètres et ses actions suivent, plus bas dans la page) | Le convertisseur, une autre application - chaque cible sous sa catégorie, trois étapes |
 |---|---|
@@ -311,17 +316,17 @@ partage ordinaire.
 
 | Toutes les applications de l’instance, et parmi elles un **pack de langue** - un manifeste qui n’exécute rien, qui dit quelle part de ce filex il traduit et dont la langue s’en va avec lui |
 |---|
-| ![La liste Applications, un pack de langue parmi les applications](https://filex.sh/shots/langpack/apps-list-1440.c0b6a723e725.png) |
+| ![La liste Applications, un pack de langue parmi les applications](https://filex.sh/shots/langpack/apps-list-1440.50e11eedf3d4.png) |
 
 ### Ce qui est à vous, où que vous soyez
 
 | La cloche - le nombre de notifications non lues affiché dessus, chaque ligne menant là où elle le dit | Toutes vos notifications, dans l’explorateur - pour tout le monde, pas seulement pour les administrateurs |
 |---|---|
-| ![La cloche ouverte, avec son badge de notifications non lues](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![La liste complète des notifications par-dessus l’explorateur](https://filex.sh/shots/signing/notifications-list-1440.cb8cc10769dc.png) |
+| ![La cloche ouverte, avec son badge de notifications non lues](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![La liste complète des notifications par-dessus l’explorateur](https://filex.sh/shots/signing/notifications-list-1440.3176161f2110.png) |
 
 | Mes partages - les liens que vous avez créés, et leurs PIN quand vous devez en transmettre un | Chaque tableau d’administration - un menu **Actions** épinglé par ligne, le même menu qu’ouvre le ⋮ de l’explorateur |
 |---|---|
-| ![Mes partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/my-shares-1440.3cdfc7ee8ef3.png) | ![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.401d5cbfacf8.png) |
+| ![Mes partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/my-shares-1440.6f8676cbb555.png) | ![Admin → Partages, le menu Actions d’une ligne ouvert](https://filex.sh/shots/signing/admin-table-actions-1440.ad8c2e623c72.png) |
 
 ### Votre marque
 
@@ -331,13 +336,13 @@ partage ordinaire.
 
 | …et la page de connexion, avant que quiconque ne se soit connecté | Un lien symbolique que filex ne suit pas le dit - dans la liste, et en toutes lettres dans ses détails |
 |---|---|
-| ![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.84197bec297e.png) | ![Un lien symbolique qui sort du stockage, signalé par un badge](https://filex.sh/shots/symlinks/symlink-badge-1440.f85936372113.png) |
+| ![La page de connexion portant le thème de l’opérateur](https://filex.sh/shots/appearance/themed-signin-1440.1c420dacc12e.png) | ![Un lien symbolique qui sort du stockage, signalé par un badge](https://filex.sh/shots/symlinks/symlink-badge-1440.0d128385d287.png) |
 
 ### Le gestionnaire de fichiers
 
 | Partage - PIN, expiration, limite de téléchargements, `curl` en une ligne | Visionneuse Markdown |
 |---|---|
-| ![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.eaf11836828a.png) | ![Visionneuse Markdown](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
+| ![Boîte de dialogue de partage](https://filex.sh/shots/share-modal.c8a399c36424.png) | ![Visionneuse Markdown](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
 
 | …et ce qu’ouvre la personne à l’autre bout. filex n’a qu’UN écran tourné vers l’extérieur - un fichier partagé, un dossier, une demande de fichiers, la page de signature d’une application et le PIN placé devant n’importe lequel d’entre eux sont tous cette même page, au nom de votre instance |
 |---|
@@ -345,7 +350,7 @@ partage ordinaire.
 
 | Panneau d’administration | Page d’accueil de la démo |
 |---|---|
-| ![Tableau de bord d’administration](https://filex.sh/shots/admin-dashboard.7c334e824b3c.png) | ![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
+| ![Tableau de bord d’administration](https://filex.sh/shots/admin-dashboard.d94a065baab6.png) | ![Page d’accueil de la démo](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
 
 | Le menu d’administration - toutes les pages en trois panneaux, **Fichiers et stockage**, **Utilisateurs et sécurité** et **Système**, avec une courte ligne sous chacune ; un téléphone affiche les mêmes pages dans un tiroir ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)) |
 |---|
@@ -361,7 +366,7 @@ partage ordinaire.
 
 | Sécurité de connexion - la limite de tentatives, les adresses autorisées, les proxys de confiance, les verrouillages et le journal des connexions ([limites de tentatives de connexion](docs/CONFIGURATION.md#sign-in-attempt-limits)) | …et ce que dit le formulaire de connexion d’un compte verrouillé, avec le compte à rebours du verrouillage sur son bouton |
 |---|---|
-| ![Admin → Sécurité de connexion](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png) | ![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png) |
+| ![Admin → Sécurité de connexion](https://filex.sh/shots/loginsecurity/login-security-1440.5a98c09e6f76.png) | ![Le formulaire de connexion d’un compte verrouillé](https://filex.sh/shots/loginsecurity/login-locked-1440.386b07b4543a.png) |
 
 | Qui peut chiffrer - désactivé, administrateurs uniquement, toutes les personnes dont le rôle le permet, ou après l’approbation d’un administrateur ; les demandes en attente, avec leur auteur et leur motif ([qui peut chiffrer](docs/E2E-ENCRYPTION.md#who-may-encrypt)) | …et du côté de la personne : la boîte de dialogue Nouveau dossier demande à un administrateur un seul dossier chiffré, avec un motif |
 |---|---|
@@ -377,23 +382,23 @@ partage ordinaire.
 
 | L’interface commune - là où tout le monde arrive | Recherche dans ce dossier ; `⌘K` / `Ctrl K` transmet la requête à la palette |
 |---|---|
-| ![L’interface commune de filex](https://filex.sh/shots/driveshell/driveshell-hero-1440.d8c44de4f498.png) | ![Recherche dans un dossier](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
+| ![L’interface commune de filex](https://filex.sh/shots/driveshell/driveshell-hero-1440.16742e249165.png) | ![Recherche dans un dossier](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
 
 | Panneau de navigation - Accueil, Partagés avec moi, Mes partages, Récents, Favoris, Corbeille, et les stockages auxquels vous avez accès | Réduit à la barre d’icônes |
 |---|---|
-| ![Panneau de navigation](https://filex.sh/shots/sidenav/sidenav-expanded-1440.ef235f94c521.png) | ![Réduit à une barre d’icônes](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
+| ![Panneau de navigation](https://filex.sh/shots/sidenav/sidenav-expanded-1440.461d5aaaff2a.png) | ![Réduit à une barre d’icônes](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
 
 | Étiquettes - les vôtres, ou celles de votre équipe ; une étiquette ouvre tous les fichiers qui la portent, quel que soit le dossier où ils se trouvent | Corbeille - ce qui a été supprimé, d’où cela venait, et combien de temps il reste avant que cela ne disparaisse |
 |---|---|
-| ![Étiquettes personnelles et d’équipe](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png) | ![La vue Corbeille](https://filex.sh/shots/sidenav/view-trash-1440.c7438b1e66a8.png) |
+| ![Étiquettes personnelles et d’équipe](https://filex.sh/shots/tags/tags-kinds-1440.a9f9fff4d4fd.png) | ![La vue Corbeille](https://filex.sh/shots/sidenav/view-trash-1440.ab3cfb3b01cf.png) |
 
 | Partagés avec moi - les dossiers auxquels d’autres personnes vous ont accordé l’accès, sans instructions de montage | Intégré à la page d’un autre produit |
 |---|---|
-| ![Partagés avec moi](https://filex.sh/shots/sidenav/view-shared-1440.6f68fd5b581d.png) | ![Composant web intégré](https://filex.sh/shots/sidenav/embed-webcomponent-1440.2dc86ba73804.png) |
+| ![Partagés avec moi](https://filex.sh/shots/sidenav/view-shared-1440.475ec2d8b49f.png) | ![Composant web intégré](https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png) |
 
 | Guide de connexion - les guides, construits à partir de *votre* déploiement | Clés d’API - créez les vôtres, dans l’explorateur ou dans une intégration (la session ou la clé d’une personne ; une intégration relayée par un proxy avec une seule clé partagée de type *app* n’a pas cette entrée) |
 |---|---|
-| ![Guide de connexion](https://filex.sh/shots/sidenav/connect-1440.ade9043dddde.png) | ![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.14eb6d484613.png) |
+| ![Guide de connexion](https://filex.sh/shots/sidenav/connect-1440.7327ccaf3ae3.png) | ![Clés d’API](https://filex.sh/shots/sidenav/apikeys-minted-1440.bae083a0679a.png) |
 
 | Accéder à filex depuis n’importe quoi - S3, SFTP, FTPS, NFS, WebDAV. Chaque commande est construite à partir de *votre* déploiement |
 |---|
@@ -514,6 +519,11 @@ Bearer, un hôte qui sert de proxy avec une clé, l’application de bureau et l
 web installée n’ont besoin de rien
 ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#requests-from-other-origins)).
 
+⚠ Gardez les paquets et le serveur à la même version : **`@brftech/filex` 0.54 a besoin
+d’un serveur filex 0.54**. Les fichiers qui s’ouvrent pour être modifiés, les limites de
+saisie et la ligne de version viennent des capacités (capabilities) du serveur, et les
+paquets ne gardent aucune copie à laquelle se replier ([docs/API.md](docs/API.md)).
+
 ## Application de bureau et CLI
 
 L’explorateur est aussi livré sous forme d’**application de bureau Windows / Linux / macOS** -
@@ -566,6 +576,10 @@ le même composant que dans l’interface web et les intégrations, pas une demi
   administrateur. Un clic sur une notification aboutit dans la fenêtre : le dossier, avec
   le fichier sélectionné. La déconnexion reste dans l’application elle-même, sous *Settings → Accounts*
   (Paramètres → Comptes) ([docs/DESKTOP.md](docs/DESKTOP.md#notifications-and-your-account)).
+- **Parle la langue de votre compte** - la fenêtre, le menu de la zone de notification, les
+  notifications et les messages du moteur de synchronisation sous chaque dossier utilisent
+  la langue du compte affiché, et *Settings → Language* (Paramètres → Langue) change celle
+  du compte, si bien que l’application web suit ([docs/DESKTOP.md](docs/DESKTOP.md#language)).
 - **Se connecte par votre navigateur**, donc le SSO et la MFA se comportent exactement
   comme sur le web.
 - **Se met à jour toute seule** - télécharge discrètement, installe quand vous quittez
@@ -593,15 +607,16 @@ sudo snap install filex-app                 # the same snap as the badge above
 ```
 
 La version du Store (*filex File Manager*) est la seule copie Windows dont le code est
-signé - c’est Microsoft qui la signe - et le Store la tient à jour. winget
-(`BRFTech.filex-app`) est soumis avec chaque version et attend son premier examen par les
-modérateurs de winget ; `winget install` ne le trouve donc pas encore. Le programme
+signé - c’est Microsoft qui la signe - et le Store la tient à jour. Le paquet winget de
+l’application de bureau (`BRFTech.filex-app`) est soumis avec chaque version et attend son
+premier examen par les modérateurs de winget ; `winget install BRFTech.filex-app` ne le
+trouve donc pas encore. Le programme
 d’installation, le `.exe` portable, l’AppImage, le `.deb`, le `.rpm` et le `.dmg` sont
 joints à la [dernière version](https://github.com/BRF-Tech/filex/releases/latest) - pas
 encore signés, attendez-vous donc à une invite SmartScreen avec le programme
 d’installation Windows. Détails : [docs/DESKTOP.md](docs/DESKTOP.md). La CLI seule :
-`brew install brf-tech/filex/filex` ([docs/CLI.md](docs/CLI.md) ; son paquet winget,
-`BRFTech.filex`, attend le même examen).
+`brew install brf-tech/filex/filex`, ou `winget install BRFTech.filex` sous Windows
+([docs/CLI.md](docs/CLI.md)).
 
 Sous Linux, le `.deb`, le `.rpm` et l’AppImage ne s’exécutent jamais sans le bac à sable
 de Chromium. Le `.deb` et le `.rpm` n’ont besoin de rien ; à partir d’Ubuntu 23.10,
@@ -621,6 +636,7 @@ est compilé et exécuté sur des machines arm64 avant publication) :
 | Application de bureau - Windows on Arm | `filex-desktop-arm64.exe` (programme d’installation) et `filex-desktop-portable-arm64.exe` - depuis la 0.48.1 ; l’application se met à jour toute seule vers la version arm64 |
 | Application de bureau - macOS | Apple Silicon uniquement (pas de version Intel) |
 | Homebrew | la CLI (`filex`) sur Apple Silicon et sous Linux sur Arm ; l’application de bureau (`filex-app`) sur Apple Silicon |
+| winget | la CLI (`BRFTech.filex`) sous Windows sur Arm - winget choisit lui-même la version arm64 |
 
 Sur une machine Arm, la proposition *Obtenez l’application de bureau* de
 l’application (et sa copie dans les Paramètres) présente d’abord le fichier arm64,
@@ -642,7 +658,10 @@ filex sync add ~/Documents/work docs://work   # the engine the desktop app uses
 filex sync run --watch 30s
 ```
 
-Voir [docs/CLI.md](docs/CLI.md) et [docs/SYNC.md](docs/SYNC.md).
+Voir [docs/CLI.md](docs/CLI.md) et [docs/SYNC.md](docs/SYNC.md). Un programme qui pilote le
+moteur lit `filex sync run --json` : un événement JSON par ligne, chacun avec un code stable
+et la phrase du moteur dans la langue du compte - exactement ce qu’affiche l’application de
+bureau ([le flux d’événements](docs/SYNC.md#the-event-stream---json)).
 
 ## Agents IA / MCP
 
@@ -693,6 +712,12 @@ téléversement** y remédient : un seul appel autorisé fixe la destination et
 de courte durée, à usage unique, qui ne demande **aucun identifiant**, de sorte que même un
 agent sans aucune clé filex peut terminer le transfert avec `curl -T bigfile <url>`.
 Détails : [docs/MCP.md](docs/MCP.md).
+
+Quand filex dit non, il le dit de la même façon à chaque accès : un code `error` stable sur
+lequel brancher et la phrase du serveur dans `message`, dans la langue du lecteur, à
+transmettre telle quelle ([docs/API-ERRORS.md](docs/API-ERRORS.md)). Et un lien qu’un agent
+crée revient avec sa propre commande de téléchargement, les lignes `curl` et PowerShell
+écrites par le serveur ([docs/SHARING.md](docs/SHARING.md)).
 
 ## Applications
 
@@ -840,11 +865,11 @@ de stockage : [docs/PLUGINS.md](docs/PLUGINS.md).
 - **L’interface commune** - une seule mise en page, pour l’opérateur comme pour l’utilisateur final, dans l’application d’administration, l’application de bureau et chaque intégration : une barre supérieure sur toute la largeur avec le bouton de réduction et le logo du produit sur son bord gauche, un seul **champ de recherche** dont la pastille ⌘K / Ctrl+K transmet la requête à la palette de commandes (le champ cherche dans ce dossier ; c’est dans la palette que se trouvent « partout », les recherches enregistrées et les commandes), un menu principal **+ Nouveau** (téléverser des fichiers · nouveau dossier · **nouveau document** · demander des fichiers), une rangée de filtres **Type · Propriétaire · Modifié · Taille** sous le fil d’Ariane, **Dossiers** et **Fichiers** en sections titrées dans la vue grille, un panneau de détails divisé en **Détails** (avec « Personnes ayant accès » et une ligne pour le lien de partage) et **Activité** (historique des versions et commentaires), et une **ligne de stockage** sous la navigation. Le thème, la palette, la langue, la densité, le fuseau horaire, la page de démarrage et les options de notification se trouvent tous dans les **paramètres utilisateur**, accessibles depuis l’avatar - et l’application web conserve votre thème, votre palette, votre densité et votre langue sur votre **compte**, pas dans le navigateur, si bien qu’ils vous attendent dans le suivant ; l’éditeur de raccourcis clavier et *Relancer la visite guidée* sont dans le même menu. Rien n’est retiré du build - une intégration, qui n’a pas de boîte de dialogue de paramètres, garde un menu « ⋯ » qui les contient encore ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Accueil, dans l’interface commune** - la vue sur laquelle tout le monde arrive, administrateurs compris : vos stockages, ce que vous avez ouvert en dernier et ce que vous avez mis en favoris, sous forme de cartes dans la zone de contenu, avec le même panneau de navigation et le même en-tête que les fichiers. Passer d’Accueil à un dossier, ou l’inverse, change le contenu et rien d’autre. Un opérateur qui préfère arriver sur le tableau de bord d’administration le choisit dans ses paramètres de profil.
 - **Panneau de navigation** - le menu **+ Nouveau** comme action principale, les destinations Accueil / Mes fichiers / Partagés avec moi / **Mes partages** / Récents / Favoris / **Brouillons** / Corbeille, les stockages que vous pouvez voir - **dans l’ordre que vous choisissez** (faites glisser une ligne, ou Monter / Descendre / Trier par nom depuis son menu ; conservé sur votre compte), sinon dans l’ordre défini par l’administrateur sur la page Stockages ([docs/STORAGE.md](docs/STORAGE.md#ordering-storages)) - une section **Applications** quand une application installée a un écran d’accueil, et **Guide de connexion** + **Clés d’API** : les guides par protocole et le gestionnaire de clés en libre-service, ouverts depuis l’explorateur lui-même pour que les utilisateurs d’une copie intégrée puissent créer l’identifiant que demandent WebDAV/FTPS/`filex mount` au lieu de s’adresser à un administrateur. Réductible en barre d’icônes (mémorisé par navigateur) depuis la barre supérieure, un tiroir au lieu d’une colonne en dessous de 560 px. Activé par défaut dans l’application web, l’application de bureau et chaque intégration ; `uiProfile: 'simple'` désactive en outre la barre d’onglets, la vue partagée, la vue galerie et la partie « Guide de connexion » sans en retirer aucune du build ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
-- **Partage** - liens publics avec PIN, expiration et limite de téléchargements, sans dépasser la **durée de vie maximale des liens** fixée par l’administrateur (7 jours par défaut - la boîte de dialogue ne propose que ce que le serveur conservera) ; les liens de dossier envoient leur contenu en flux sous forme de ZIP (mis en cache, préchauffé jusqu’à un plafond de taille, purgé au bout d’une semaine) ; liens de dépôt par **demande de fichiers** pour les envois entrants ; endpoint de téléversement compatible ShareX. **Mes partages** liste les liens que vous avez créés - pour tout le monde, pas seulement pour les administrateurs - avec *Copier le lien*, *Copier le PIN* et *Révoquer* : le PIN d’un lien est conservé scellé à côté du hachage qui le protège, si bien que son créateur ou un administrateur peut le relire quand quelqu’un en a de nouveau besoin, et chaque lecture est consignée dans le journal d’audit. Cinq PIN erronés ferment n’importe quel lien public pendant dix minutes. Un lien de téléchargement, une demande de fichiers et la page d’une application sont **un seul écran public à vos couleurs** - le nom, le logo et les couleurs de votre instance, un seul contrôle du PIN, une seule logique d’expiration et un sélecteur de langue ([docs/SHARING.md](docs/SHARING.md)).
-- **Application de bureau + synchronisation de dossiers** - application Windows/Linux/macOS : synchronisation bidirectionnelle résidant dans la zone de notification, **synchronisation sélective** (clic droit → *Conserver sur cet ordinateur*, un dossier racine par compte, le reste en ligne uniquement), plusieurs comptes à la fois, **ouvre les documents Office depuis votre propre disque** dans l’éditeur du serveur, mise à jour automatique (macOS : version non signée, mises à jour par nouveau téléchargement jusqu’à ce qu’elle soit signée). Chaque document s’ouvre dans **sa propre fenêtre** (avec le nom du fichier pour titre), les fenêtres sont **sans bordure** avec les boutons propres à l’application (les feux tricolores natifs sous macOS), et **Settings → Open files with** (Paramètres → Ouvrir les fichiers par) permet de choisir entre simple clic et double-clic pour ouvrir ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
-- **Corbeille et historique des versions** - les suppressions sont réversibles pendant la durée de rétention, les écritures conservent des instantanés ; les deux résident dans le stockage que vous avez déjà monté ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
+- **Partage** - liens publics avec PIN, expiration et limite de téléchargements, sans dépasser la **durée de vie maximale des liens** fixée par l’administrateur (7 jours par défaut - la boîte de dialogue ne propose que ce que le serveur conservera) ; les liens de dossier envoient leur contenu en flux sous forme de ZIP (mis en cache, préchauffé jusqu’à un plafond de taille, purgé au bout d’une semaine) ; liens de dépôt par **demande de fichiers** pour les envois entrants ; endpoint de téléversement compatible ShareX. **Mes partages** liste les liens que vous avez créés - pour tout le monde, pas seulement pour les administrateurs - avec *Copier le lien*, *Copier le PIN* et *Révoquer* : le PIN d’un lien est conservé scellé à côté du hachage qui le protège, si bien que son créateur ou un administrateur peut le relire quand quelqu’un en a de nouveau besoin, et chaque lecture est consignée dans le journal d’audit. Cinq PIN erronés ferment n’importe quel lien public pendant dix minutes. Un lien de téléchargement, une demande de fichiers et la page d’une application sont **un seul écran public à vos couleurs** - le nom, le logo et les couleurs de votre instance, un seul contrôle du PIN, une seule logique d’expiration et un sélecteur de langue ([docs/SHARING.md](docs/SHARING.md)). Chaque lien listé dit où il en est - actif, expiré, épuisé ou révoqué -, et un nouveau lien arrive avec sa propre commande de téléchargement pour `curl` et PowerShell. Un lien envoyé par e-mail depuis la boîte de dialogue de partage est rédigé par le serveur à partir du lien lui-même, dans la langue de chaque destinataire, et ne contient jamais son PIN ([Emailing a link](docs/SHARING.md#emailing-a-link)).
+- **Application de bureau + synchronisation de dossiers** - application Windows/Linux/macOS : synchronisation bidirectionnelle résidant dans la zone de notification, **synchronisation sélective** (clic droit → *Conserver sur cet ordinateur*, un dossier racine par compte, le reste en ligne uniquement), plusieurs comptes à la fois, **ouvre les documents Office depuis votre propre disque** dans l’éditeur du serveur, mise à jour automatique (macOS : version non signée, mises à jour par nouveau téléchargement jusqu’à ce qu’elle soit signée), dans la langue du compte affiché. Chaque document s’ouvre dans **sa propre fenêtre** (avec le nom du fichier pour titre), les fenêtres sont **sans bordure** avec les boutons propres à l’application (les feux tricolores natifs sous macOS), et **Settings → Open files with** (Paramètres → Ouvrir les fichiers par) permet de choisir entre simple clic et double-clic pour ouvrir ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
+- **Corbeille et historique des versions** - les suppressions sont réversibles pendant la durée de rétention, les écritures conservent des instantanés ; les deux résident dans le stockage que vous avez déjà monté ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)). La corbeille se parcourt page par page jusqu’au bout, et *Vider la corbeille* montre d’abord le nombre et la taille, comptés par le serveur, de exactement ce qu’elle va supprimer.
 - **Protection en écriture** - analyse ClamAV facultative de chaque fichier écrit - y compris ceux de l’éditeur intégré, et ceux que la synchronisation du stockage trouve sur le backend sans qu’ils soient passés par filex - assurée par un binaire local ou par un conteneur clamd via le réseau ; s’y ajoute la rétention de la corbeille et des versions, derrière une seule surface d’administration. L’activation, le mode et l’adresse du moteur d’analyse, le plafond de taille et la fenêtre d’analyse de l’éditeur se trouvent dans **Paramètres → Protection** ; les variables `FILEX_CLAMAV*` les initialisent au premier démarrage, puis s’effacent (le chemin du binaire du moteur d’analyse reste réservé à l’environnement, délibérément - c’est une commande que ce serveur exécute) ([docs/PROTECTION.md](docs/PROTECTION.md)).
-- **Dossiers chiffrés de bout en bout** - WebCrypto côté client ; le serveur stocke des données chiffrées et ne reçoit jamais de clé. Un dossier a un **niveau** : contenu seulement (le niveau par défaut - WebDAV, la CLI et la synchronisation de l’application de bureau continuent de fonctionner avec ses noms) ou **contenu et noms** (AES-SIV, le serveur ne conserve donc aucun nom lisible), et ce niveau peut être relevé plus tard, avec reprise possible, depuis les **Paramètres de chiffrement** du dossier, où se change aussi son mot de passe. Un dossier que vous avez déjà est **chiffré sur place**, fichiers de plus de 200 Mo compris ; **n’importe quel fichier peut être chiffré isolément** (un `.fxe` autonome, avec son propre mot de passe et sa propre clé de récupération) ; les fichiers de toute taille sont chiffrés en flux ; un dossier déverrouillé se télécharge sous forme de **zip déchiffré** créé dans le navigateur ; `filex decrypt` ouvre un dossier téléchargé ou un `.fxe` sur votre propre machine, et **`filex encrypt`** crée un dossier chiffré à partir d’un dossier sur disque, ou chiffre un dossier sur le serveur là où il se trouve - pour les dossiers trop volumineux pour un onglet, avec reprise possible, les clés étant créées sur votre machine ([docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)). Chaque dossier reçoit une **clé de récupération**, affichée une seule fois, de sorte qu’un mot de passe oublié n’est pas automatiquement synonyme de données perdues ; un opérateur peut, en option, activer le **séquestre de clés** - à l’installation, ou adopté plus tard sur une installation en service ; il ne s’étend jamais de lui-même aux dossiers existants, mais le choix est proposé à leurs propriétaires au déverrouillage - et son utilisation avertit le propriétaire du dossier ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)). **Qui peut chiffrer**, c’est l’organisation qui en décide : une option que l’opérateur de la plateforme active ou désactive pour chaque locataire, une politique du locataire (désactivé, administrateurs uniquement, toutes les personnes dont le rôle le permet, ou **après l’approbation d’un administrateur** - une demande motivée, approuvée pour une seule personne, un seul dossier et un seul type de chiffrement, une seule fois), et l’autorisation `files.encrypt`, exigée à chaque point d’entrée qui pourrait créer un nouvel élément chiffré, copies comprises ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md#who-may-encrypt)).
+- **Dossiers chiffrés de bout en bout** - WebCrypto côté client ; le serveur stocke des données chiffrées et ne reçoit jamais de clé. Un dossier a un **niveau** : contenu seulement (le niveau par défaut - WebDAV, la CLI et la synchronisation de l’application de bureau continuent de fonctionner avec ses noms) ou **contenu et noms** (AES-SIV, le serveur ne conserve donc aucun nom lisible), et ce niveau peut être relevé plus tard, avec reprise possible, depuis les **Paramètres de chiffrement** du dossier, où se change aussi son mot de passe. Un troisième niveau, le **Vault** (coffre-fort), cache en plus la forme de l’arborescence - le serveur ne stocke que des paquets d’une même taille et un index chiffré, et une seule personne écrit à la fois, sous un verrou qu’il tient ; il est construit et désactivé par défaut (`FILEX_E2E_VAULT`), et les applications web et de bureau, `filex decrypt` et `filex vault mount` l’ouvrent ([le format du Vault](docs/E2E-VAULT-FORMAT.md)). Un dossier que vous avez déjà est **chiffré sur place**, fichiers de plus de 200 Mo compris ; **n’importe quel fichier peut être chiffré isolément** (un `.fxe` autonome, avec son propre mot de passe et sa propre clé de récupération) ; les fichiers de toute taille sont chiffrés en flux ; un dossier déverrouillé se télécharge sous forme de **zip déchiffré** créé dans le navigateur ; `filex decrypt` ouvre un dossier téléchargé ou un `.fxe` sur votre propre machine, et **`filex encrypt`** crée un dossier chiffré à partir d’un dossier sur disque, ou chiffre un dossier sur le serveur là où il se trouve - pour les dossiers trop volumineux pour un onglet, avec reprise possible, les clés étant créées sur votre machine ([docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)). Chaque dossier reçoit une **clé de récupération**, affichée une seule fois, de sorte qu’un mot de passe oublié n’est pas automatiquement synonyme de données perdues ; un opérateur peut, en option, activer le **séquestre de clés** - à l’installation, ou adopté plus tard sur une installation en service ; il ne s’étend jamais de lui-même aux dossiers existants, mais le choix est proposé à leurs propriétaires au déverrouillage - et son utilisation avertit le propriétaire du dossier ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)). **Qui peut chiffrer**, c’est l’organisation qui en décide : une option que l’opérateur de la plateforme active ou désactive pour chaque locataire, une politique du locataire (désactivé, administrateurs uniquement, toutes les personnes dont le rôle le permet, ou **après l’approbation d’un administrateur** - une demande motivée, approuvée pour une seule personne, un seul dossier et un seul type de chiffrement, une seule fois), et l’autorisation `files.encrypt`, exigée à chaque point d’entrée qui pourrait créer un nouvel élément chiffré, copies comprises ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md#who-may-encrypt)).
 - **Mode multilocataire natif** - mode fournisseur/locataire avec isolation par locataire sur une seule instance. Chaque locataire a un **realm** - son nom de connexion, donné à la création et jamais modifié - si bien qu’une connexion désigne son locataire par l’adresse propre à ce locataire (la page web, le `Host` WebDAV, le nom du certificat FTPS) ou par le realm : un champ **Realm** dans le formulaire de connexion, `realm/name` en SFTP. La recherche du compte ne sort jamais du locataire, et un realm saisi sur la page de la plateforme pour un locataire qui a sa propre adresse y est **transféré** avec un ticket à usage unique valable 60 secondes ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md), [realms](docs/MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)). Les locataires s’administrent eux-mêmes dans **Admin → Locataires** et **Mon locataire** : des fournisseurs de connexion liés à un seul locataire ou à plusieurs, l’OIDC et le LDAP propres à un locataire, un sous-domaine de la plateforme pour chaque locataire et des domaines personnalisés prouvés par un CNAME, certifiés par le proxy, par filex lui-même (ACME) ou avec le certificat propre au locataire ([docs/TENANT-ADMIN.md](docs/TENANT-ADMIN.md)).
 - **Des pilotes interchangeables pour tout** - pilotes de stockage / d’authentification / de base de données / de file d’attente à activer par variable d’environnement (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …) ; la connexion par le système d’exploitation (`windows`, `pam`) fait exception, activée depuis le panneau d’administration une fois son test réussi.
 - **Priorité au SSO OIDC** - redirection automatique facultative vers votre IdP avec connexion locale de secours (`?local=1`), et le rôle d’administrateur suit un groupe de l’IdP à chaque connexion.
@@ -853,9 +878,9 @@ de stockage : [docs/PLUGINS.md](docs/PLUGINS.md).
 - **File d’attente d’opérations persistante** - file d’attente à l’épreuve des redémarrages, dans votre propre base de données (SQLite / Postgres / MySQL) ou dans Redis, pool de workers avec nouvelles tentatives + annulation + tableau de bord d’administration. Chaque pilote trie par priorité, de sorte que l’analyse antivirus d’un fichier que quelqu’un vient de téléverser est servie avant les vingt mille qu’un premier import a mises en file d’attente. Non défini, le pilote suit la base de données au lieu de prendre SQLite par défaut - envoyer des instructions SQLite à un serveur Postgres donne une erreur de syntaxe à chaque interrogation, et aucune tâche ne s’exécute jamais.
 - **Arborescence de fichiers adossée à la base de données** - les listes viennent du cache de la base de données (1-5 ms), pas du backend de stockage (~100 ms) ; une synchronisation périodique détecte les modifications faites en dehors de filex, par etag là où le backend en fournit un et par taille + date de modification là où il n’en fournit pas. Les **Chemins exclus de l’analyse** d’un stockage (`.*`, `downloads/incomplete/**`, `*.tmp`) tiennent à l’écart du parcours, du catalogue, de l’index de recherche et de l’antivirus les parties d’une arborescence existante dont filex n’a pas l’usage - un contrôle des coûts, pas un contrôle d’accès ([docs/STORAGE.md](docs/STORAGE.md#scan-exclusions)).
 - **Catalogue différé pour les grandes arborescences locales** - `sync_mode: lazy` se passe du parcours préalable : le dossier que vous ouvrez est listé aussitôt, directement depuis le disque, et catalogué en premier, et le reste l’est par une passe lente en arrière-plan qui cède la priorité aux personnes (ou seulement à mesure que les dossiers sont ouverts). Les dossiers ouverts sont surveillés dans la limite d’un budget, un dossier que personne n’a visité n’est jamais traité comme supprimé, et la recherche, la taille des dossiers et l’espace utilisé disent clairement quand ils ne couvrent pas encore tout ([docs/STORAGE.md](docs/STORAGE.md#lazy-catalogue), [conception](docs/LAZY-CATALOGUE.md)). Idée d’Alex ([#45](https://github.com/BRF-Tech/filex/issues/45)).
-- **Visionneuses et éditeurs** - image/vidéo/audio, PDF, Markdown (vue partagée éditeur + aperçu), CSV (le tableur d’ONLYOFFICE quand il est configuré, un tableau en lecture seule sinon), code (Monaco), Office via ONLYOFFICE, diagrammes Drawio + Mermaid, modèles 3D. Un document qu’ONLYOFFICE ne peut enregistrer que dans un format plus récent (un `.doc` modifié, enregistré en DOCX) est conservé **à côté** de l’original, sous la bonne extension, sans jamais l’écraser, et les personnes qui l’ont modifié en sont informées ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#a-save-in-another-format)). Le bouton **Tester maintenant** d’ONLYOFFICE fait sa requête par le même point d’entrée qu’un document et avertit quand le serveur de documents n’impose pas JWT, et, après *Échec du téléchargement*, l’éditeur dit laquelle des deux pannes que recouvre ce message était en cause ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-editor-shows-download-failed)). Lorsqu’il existe plus d’une application ou visionneuse pour un type de fichier, **Ouvrir avec** et **Choisir une application…** permettent d’en sélectionner une, et *Toujours utiliser cette application* est conservé sur votre compte.
-- **Notifications** - webhooks JSON génériques (indépendants de Slack/Discord) : autant de cibles que voulu, chacune avec son propre secret de signature et son propre abonnement par événement, ainsi qu’une cloche dans l’application avec lu/non lu et une matrice de mise en sourdine par utilisateur. Le nombre de notifications non lues est un **badge sur la cloche** - exact jusqu’à 99, `99+` au-delà, et sur l’icône de l’application de bureau dans le dock, là où le système en a un - une ligne est cliquable précisément lorsqu’elle mène quelque part (une demande de signature ouvre l’écran de signature, pas une page de notifications), et **Tout afficher** ouvre la totalité de vos notifications par-dessus l’explorateur, pour tout le monde et pas seulement pour les administrateurs. Une écriture qui **crée** un fichier et une écriture qui en **remplace** un sont des événements distincts (`file.uploaded` / `file.updated`), et ceux qu’un opérateur tient le plus à recevoir à part - un téléversement infecté mis en quarantaine, un téléversement échoué, un dossier chiffré ouvert avec sa clé de récupération - peuvent faire l’objet d’un abonnement individuel ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
-- **Recherche** - Bleve intégré, plein texte + métadonnées, qui respecte les autorisations. Classement des noms de fichiers à la manière de VS Code : les dossiers comptent, pas l’ordre des mots (`main code` trouve `Code/main.go`), séparateurs et fautes de frappe pardonnés (`invoice 2026` trouve `invoice_2026.pdf`, `mian.go` trouve `main.go`) tandis que les nombres sont pris à la lettre (`2026` ne veut jamais dire `2025`), filtres `tag:`, correspondances exactes classées en premier. Un résultat ⌘K peut être téléchargé (un dossier, en un seul zip) ou glissé vers l’extérieur depuis l’endroit où il se trouve ([docs/SEARCH.md](docs/SEARCH.md)).
+- **Visionneuses et éditeurs** - image/vidéo/audio, PDF, Markdown (vue partagée éditeur + aperçu), CSV (le tableur d’ONLYOFFICE quand il est configuré, un tableau en lecture seule sinon), code (Monaco), Office via ONLYOFFICE, diagrammes Drawio + Mermaid, modèles 3D. Un document qu’ONLYOFFICE ne peut enregistrer que dans un format plus récent (un `.doc` modifié, enregistré en DOCX) est conservé **à côté** de l’original, sous la bonne extension, sans jamais l’écraser, et les personnes qui l’ont modifié en sont informées ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#a-save-in-another-format)). Le bouton **Tester maintenant** d’ONLYOFFICE fait sa requête par le même point d’entrée qu’un document et avertit quand le serveur de documents n’impose pas JWT, et, après *Échec du téléchargement*, l’éditeur dit laquelle des deux pannes que recouvre ce message était en cause ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-editor-shows-download-failed)). L’éditeur s’ouvre dans la langue de chaque personne, ou dans celle que l’administrateur choisit pour tout le monde sous **Services externes → ONLYOFFICE** (**Editor language**, langue de l’éditeur ; `FILEX_ONLYOFFICE_LANG`) ([The editor's language](docs/ONLYOFFICE.md#the-editors-language)). Lorsqu’il existe plus d’une application ou visionneuse pour un type de fichier, **Ouvrir avec** et **Choisir une application…** permettent d’en sélectionner une, et *Toujours utiliser cette application* est conservé sur votre compte.
+- **Notifications** - webhooks JSON génériques (indépendants de Slack/Discord) : autant de cibles que voulu, chacune avec son propre secret de signature et son propre abonnement par événement, ainsi qu’une cloche dans l’application avec lu/non lu et une matrice de mise en sourdine par utilisateur. Le nombre de notifications non lues est un **badge sur la cloche** - exact jusqu’à 99, `99+` au-delà, et sur l’icône de l’application de bureau dans le dock, là où le système en a un - une ligne est cliquable précisément lorsqu’elle mène quelque part (une demande de signature ouvre l’écran de signature, pas une page de notifications), et **Tout afficher** ouvre la totalité de vos notifications par-dessus l’explorateur, pour tout le monde et pas seulement pour les administrateurs. Une écriture qui **crée** un fichier et une écriture qui en **remplace** un sont des événements distincts (`file.uploaded` / `file.updated`), et ceux qu’un opérateur tient le plus à recevoir à part - un téléversement infecté mis en quarantaine, un téléversement échoué, un dossier chiffré ouvert avec sa clé de récupération - peuvent faire l’objet d’un abonnement individuel ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)). **Le serveur rédige chaque notification** : la cloche, l’alerte de l’application de bureau, un push et un e-mail montrent la même phrase, dans la langue du compte du lecteur ; un webhook la reçoit dans la langue réglée pour lui et, en plus, le message non traduit, pour un destinataire qui traduit lui-même ([What a notification says](docs/NOTIFICATIONS.md#what-a-notification-says)). **Web Push** (**Push notifications on this device**, notifications push sur cet appareil, dans *Paramètres utilisateur* → *Notifications*) les apporte sur un téléphone ou dans un navigateur quand filex est fermé (sur un iPhone ou un iPad, l’application web ajoutée à l’écran d’accueil, iOS 16.4 ou ultérieur) : les mêmes types, mises en sourdine et résumés que la cloche ([Web Push](docs/NOTIFICATIONS.md#web-push)).
+- **Recherche** - Bleve intégré, plein texte + métadonnées, qui respecte les autorisations. Classement des noms de fichiers à la manière de VS Code : les dossiers comptent, pas l’ordre des mots (`main code` trouve `Code/main.go`), séparateurs et fautes de frappe pardonnés (`invoice 2026` trouve `invoice_2026.pdf`, `mian.go` trouve `main.go`) tandis que les nombres sont pris à la lettre (`2026` ne veut jamais dire `2025`), filtres `tag:`, correspondances exactes classées en premier. Une recherche est restreinte sur le serveur - par type, type MIME, date, taille, dossier et propriétaire - avant que sa limite ne compte, et la réponse dit combien de résultats il y avait ([Narrowing a search](docs/SEARCH.md#narrowing-a-search)). Un résultat ⌘K peut être téléchargé (un dossier, en un seul zip) ou glissé vers l’extérieur depuis l’endroit où il se trouve ([docs/SEARCH.md](docs/SEARCH.md)).
 - **Des miniatures lisibles** : un PDF montre sa **première page**, ancrée en haut pour que le titre figure dans la carte ; une vidéo, sa première image qui n’est pas noire (une ouverture en fondu produisait auparavant un carré noir, et un clip de moins d’une seconde ne produisait rien du tout alors que la ligne disait encore « prêt ») ; un document Office, le rendu de sa première page ; et un fichier texte, de code ou CSV **remplit la carte de ses premières lignes** plutôt que de répéter l’extension que la ligne affiche déjà. image, vidéo (ffmpeg), PDF (ghostscript), Office (l’ONLYOFFICE connecté) ; les capacités sont prises en compte, et un serveur auquel il manque l’un de ces binaires le dit désormais dans son journal au démarrage au lieu de générer en silence des rectangles colorés. Une miniature en cache est libérée quand le fichier auquel elle appartient est supprimé définitivement, et une réconciliation périodique récupère l’espace occupé par les orphelines qu’une installation plus ancienne a accumulées. Une miniature **suit son fichier** : celle d’un fichier modifié en dehors de filex, ou d’un fichier qui n’a jamais eu d’image, est régénérée quand une liste ou la synchronisation le voit ; le **SVG** est rendu par un moteur intégré sur chaque installation (avec des limites de taille et de temps que fixe un administrateur), et les photos **HEIC/AVIF** passent par ImageMagick ; les images transparentes sont posées sur un damier ; un **dossier montre les derniers fichiers qui y sont arrivés**, affichés avec le dossier dans la grille, la galerie et la liste, et, au survol, ce qu’il contient (un administrateur peut désactiver cela) ; les fichiers texte montrent leurs premières lignes et les archives ce qu’elles contiennent ; un fichier dont l’outil manque est nommé, pas masqué ; et **Admin → Outils → Réparation des miniatures** régénère à la demande les miniatures d’un fichier, d’un dossier ou d’un stockage ([docs/thumbnails.md](docs/thumbnails.md)).
 - **Onglets, thèmes et liens profonds** - plusieurs dossiers ouverts côte à côte, thème clair/sombre/automatique, et une barre d’adresse qui suit le dossier ouvert, pour qu’un lien collé y mène. Huit palettes sont livrées dans la galerie de thèmes, chacune étant un jeu de valeurs pour les variables `--fe-*` plutôt qu’une seconde feuille de style, si bien qu’une page hôte ou une intégration peut en choisir une - ou définir ses propres valeurs - sans dupliquer le moindre CSS ; un opérateur peut ajouter les siennes (voir *Apparence*).
 - **Apparence : vos couleurs, partout** - l’écran **Apparence** du panneau d’administration compose des thèmes nommés - douze couleurs pour le mode clair et pour le mode sombre, un rayon des angles, une pile de polices - prévisualisés au fil de la saisie, et fait de l’un d’eux le **thème par défaut de l’instance**. Le texte d’un bouton coloré est choisi par contraste au lieu d’être supposé blanc, le reste de la palette est dérivé côté serveur, et le thème s’étend à la page de connexion et à chaque lien public - dans ses propres tons, ou dans des couleurs que vous donnez en propre à ces deux pages - parce qu’une image de marque qui s’arrête à la connexion n’en est pas une : une page vue sans être connecté porte le thème par défaut de l’instance, jamais la palette de la dernière personne à avoir utilisé ce navigateur, et, pour une personne connectée, c’est son propre choix qui l’emporte. Les thèmes s’exportent et s’importent sous la forme d’un seul fichier JSON. La **feuille de style personnalisée** est l’outil dangereux juste à côté, et elle est désormais désactivée tant que vous ne l’activez pas, n’est jamais servie à quiconque n’est pas connecté, ne peut rien aller chercher et ne peut pas atteindre l’écran qui la désactive ([docs/INTEGRATION.md](docs/INTEGRATION.md#themes)).
@@ -866,7 +891,7 @@ de stockage : [docs/PLUGINS.md](docs/PLUGINS.md).
 - **Au clavier, et c’est indiqué** - chaque action du menu contextuel et de la barre d’outils affiche la touche qui la déclenche, lue dans le registre, si bien qu’elle suit toute réaffectation. Trente-deux actions sont réaffectables depuis *Paramètres des raccourcis* (enregistrés par navigateur) ; les quelques combinaisons qu’un navigateur se réserve, comme `Ctrl+W`, sont refusées avec un motif au lieu d’être enregistrées comme une touche qui ne déclencherait jamais rien.
 - **Utilisation et coût** - filex ne mesure pas la facture de votre fournisseur ; il lit le rapport que le fournisseur écrit déjà, le normalise et en calcule le prix d’après un tableau que vous pouvez modifier. Les CSV quotidiens de Backblaze B2 sont lus via la même API S3 que filex parle déjà, donc pas de nouvelle dépendance ni de nouveau type d’identifiant. Les offres gratuites sont des champs à part entière plutôt que des constantes dans une formule, et la page garde la ligne au niveau du compte du fournisseur séparée de ses lignes par bucket - les additionner revient à compter deux fois les mêmes transactions, d’un montant que, justement, personne ne remarque ([docs/USAGE.md](docs/USAGE.md)).
 - **Journal d’audit** - chaque modification enregistrée avec son auteur, l’identité d’intégration et les métadonnées.
-- **Client CLI** - le même binaire accède à un serveur distant (`filex client`, `filex sync`) sans extension côté serveur : la copie et le déplacement entre stockages, la corbeille, les versions, les étiquettes, les actions d’application, les archives et vos liens, chaque tâche du serveur étant suivie jusqu’à son terme ; `filex client login --realm` se connecte à un locataire, `filex encrypt` crée des dossiers chiffrés, et une session enregistrée n’est jamais envoyée qu’à l’adresse avec laquelle elle a été enregistrée ([docs/CLI.md](docs/CLI.md)).
+- **Client CLI** - le même binaire accède à un serveur distant (`filex client`, `filex sync`) sans extension côté serveur : la copie et le déplacement entre stockages, la corbeille, les versions, les étiquettes, les actions d’application, les archives et vos liens, chaque tâche du serveur étant suivie jusqu’à son terme ; `filex client login --realm` se connecte à un locataire, `filex encrypt` crée des dossiers chiffrés, `filex vault` monte et range un Vault, `filex sync run --json` transmet à un programme les événements du moteur, un refus affiche la phrase du serveur lui-même, et une session enregistrée n’est jamais envoyée qu’à l’adresse avec laquelle elle a été enregistrée ([docs/CLI.md](docs/CLI.md)).
 - **Mise à jour automatique** - les versions mineures sont annoncées pour une mise à jour en un clic, et les correctifs s’installent tout seuls une fois que vous l’autorisez (`AUTO_UPGRADE=true` ; par défaut, filex ne fait que vérifier et vous prévenir) ; une installation gérée par un gestionnaire de paquets (Homebrew, winget, Snap, un paquet de distribution), ou un conteneur, se voit signaler les nouvelles versions et la commande pour les obtenir, et la page d’administration dit qu’elle ne fera que les annoncer ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Binaire unique** - matrice goreleaser : linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **i18n** - anglais + turc de série, **liens publics compris** : un lien de partage,
@@ -880,7 +905,10 @@ de stockage : [docs/PLUGINS.md](docs/PLUGINS.md).
   la vérification des autorisations d’une installation - chacun adressé au lecteur
   qui a toujours été le sien, avec repli sur l’anglais clé par clé, et une traduction
   dont les espaces réservés ne correspondent pas à ceux de l’anglais n’est pas utilisée
-  à l’exécution, si bien qu’un e-mail ne perd jamais son lien ni son PIN.
+  à l’exécution, si bien qu’un e-mail ne perd jamais son lien ni son PIN. Une personne
+  connectée a une seule langue, celle de son compte : l’écran et les notifications sur
+  tous les canaux la suivent, et l’éditeur ONLYOFFICE aussi, sauf si un administrateur
+  en fixe une.
 - **Packs de langue** - toute autre langue est une **application qui n’exécute rien** :
   un manifeste de chaînes, installé depuis un dépôt GitHub, par téléversement ou depuis
   une URL, comme n’importe quelle autre application, listé sous
@@ -962,6 +990,14 @@ de stockage : [docs/PLUGINS.md](docs/PLUGINS.md).
   liens de partage et de dépôt, les tickets de téléversement, S3 et les scripts ne sont
   pas concernés
   ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#requests-from-other-origins)).
+- **Les mots du serveur, une seule forme pour chaque refus** - un refus répond par un code
+  `error` stable et la phrase du serveur dans la langue du lecteur (`message`), et
+  l’explorateur, le panneau d’administration, l’application de bureau, la CLI et un agent
+  affichent les mêmes mots ([docs/API-ERRORS.md](docs/API-ERRORS.md)). Les règles dont un
+  client gardait des copies - les fichiers qui s’ouvrent pour être modifiés, les limites de
+  saisie, les événements de notification qui ne peuvent pas se produire sur cette
+  installation - sont publiées par le serveur, si bien qu’aucun écran ne les juge
+  autrement ([Rules the server publishes](docs/BACKEND.md#rules-the-server-publishes)).
 
 ## Architecture
 
@@ -976,6 +1012,7 @@ Voir [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 **Clients** - [Application de bureau](docs/DESKTOP.md) ·
 [Synchronisation de dossiers](docs/SYNC.md) · [CLI](docs/CLI.md) ·
+[Flux d’événements du moteur de synchronisation](docs/SYNC.md#the-event-stream---json) ·
 [Intégration / composant intégré](docs/INTEGRATION.md) · [IA et MCP](docs/MCP.md)
 
 **Sans navigateur** - [Protocoles (S3 · SFTP · FTPS · NFS · WebDAV ·
@@ -1009,20 +1046,51 @@ proxys de confiance](docs/CONFIGURATION.md#sign-in-attempt-limits) ·
 [Corbeille et gestion des versions](docs/TRASH-VERSIONING.md) ·
 [Protection](docs/PROTECTION.md) · [Archives](docs/ARCHIVES.md) ·
 [Chiffrement de bout en bout](docs/E2E-ENCRYPTION.md) ·
-[Qui peut chiffrer](docs/E2E-ENCRYPTION.md#who-may-encrypt) · [Recherche](docs/SEARCH.md) ·
+[Qui peut chiffrer](docs/E2E-ENCRYPTION.md#who-may-encrypt) ·
+[Le Vault (niveau 3)](docs/E2E-VAULT-FORMAT.md) ·
+[Modifier des documents Office chiffrés (conception)](docs/E2E-OFFICE.md) · [Recherche](docs/SEARCH.md) ·
 [Temps réel et présence](docs/REALTIME.md) ·
-[Notifications](docs/NOTIFICATIONS.md) · [Miniatures](docs/thumbnails.md) ·
+[Notifications](docs/NOTIFICATIONS.md) · [Web Push](docs/NOTIFICATIONS.md#web-push) ·
+[Miniatures](docs/thumbnails.md) ·
 [Réplication](docs/REPLICATION.md) · [Thèmes et apparence](docs/INTEGRATION.md#themes)
 
 **Exploiter et étendre** - [Déploiement](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) ·
 [Métriques](docs/METRICS.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Spécification de l’API du backend](docs/BACKEND.md) ·
+[Erreurs de l’API](docs/API-ERRORS.md) ·
 [OpenAPI 3.1 (`/api/files`, `/api/ai`)](backend/internal/api/openapi.json) ·
 [API du composant](docs/API.md) · [ONLYOFFICE](docs/ONLYOFFICE.md) ·
+[La langue de l’éditeur](docs/ONLYOFFICE.md#the-editors-language) ·
 [CSV dans ONLYOFFICE](docs/ONLYOFFICE.md#csv-files) ·
 [Requêtes venant d’autres origines](docs/CONFIGURATION.md#requests-from-other-origins)
 
 [Index complet de la documentation](docs/README.md)
+
+## Comment filex est construit
+
+filex a un seul mainteneur, qui le construit avec des agents de programmation IA (Claude
+Code). Le mainteneur décide de ce qu’est filex et de son fonctionnement : l’architecture,
+les modèles de données et de sécurité, et le comportement de chaque fonctionnalité. Les
+agents écrivent l’essentiel du code dans cette direction, dans des langages avec lesquels
+le mainteneur travaille. Environ 82 % des commits du dépôt de développement portent une
+ligne `Co-Authored-By: Claude` ; ce n’est donc pas caché.
+
+C’est du code assisté par IA, pas du code généré sans relecture :
+
+- Chaque modification passe par la chaîne de tests avant d’être intégrée : tests Go (y
+  compris sous le détecteur de concurrence), environ 500 fichiers Vitest, environ 120
+  spécifications Playwright sous Chromium, Firefox et WebKit, Cypress, et des tests de base
+  de données sur SQLite, PostgreSQL et MySQL. Chaque version n’est étiquetée qu’après que la
+  matrice complète de GitHub et une exécution à blanc du workflow de publication ont réussi
+  sur le commit exact.
+- Les modifications touchant à la connexion, aux autorisations, au partage et au
+  chiffrement font l’objet de passes de relecture supplémentaires, et un test rouge est
+  corrigé, pas assoupli.
+- Les signalements de sécurité sont traités ouvertement : voir [SECURITY.md](SECURITY.md)
+  et les avis publiés. Il n’y a pas encore eu d’audit indépendant.
+- Les README en allemand, espagnol, français et chinois ainsi que les packs de langue
+  allemand, espagnol et français sont des traductions automatiques qu’aucun locuteur natif
+  n’a encore relues.
 
 ## Développement
 

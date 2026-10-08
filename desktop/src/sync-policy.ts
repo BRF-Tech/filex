@@ -72,6 +72,12 @@ export function watcherAccounts<A extends PolicyAccount>(accounts: readonly A[],
 //                                       every transfer of the watcher
 //   --window HH:MM-HH:MM                local time, may wrap midnight; rounds
 //                                       only start inside it
+//
+// ⚠ The window is READ by the engine alone (B17, #213): Settings stores what
+// `filex sync window --json` answered (sync.ts checkWindow, main.ts
+// settings:set), and this file passes it on without parsing it. A parser of
+// its own here was stricter than the engine's ("7:00-9:00" and spaces), so a
+// window the engine ran with read as "no window" on the screen.
 
 /** Settings' limit presets, KiB/s: unlimited, 10, 5 and 1 MB/s. */
 export const LIMIT_PRESETS_KIB = [0, 10 * 1024, 5 * 1024, 1024] as const;
@@ -83,7 +89,13 @@ export const WINDOW_PRESETS = ['', '19:00-08:00', '22:00-07:00'] as const;
 export interface WatchPrefs {
   limitDownKiB?: number;
   limitUpKiB?: number;
+  /** The engine's canonical window (checkWindow), '' = any time. */
   syncWindow?: string;
+  /** A language for `--lang`. ⚠ The app passes none (#191): the engine
+   *  then says its messages in the language of the account it syncs, which
+   *  it asks the server for (main.ts currentWatchPrefs). Kept for a caller
+   *  that names one (the engine's own flag, verbatim). */
+  lang?: string;
 }
 
 /** A whole, non-negative KiB/s; anything else (including a string) is 0 —
@@ -93,49 +105,39 @@ export function normLimit(v: unknown): number {
   return Math.floor(v);
 }
 
-const WINDOW_RE = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/;
-
-function windowMinutes(w: string): [start: number, end: number] | null {
-  const m = WINDOW_RE.exec(w);
-  if (!m) return null;
-  const [sh, sm, eh, em] = [m[1], m[2], m[3], m[4]].map(Number) as [number, number, number, number];
-  if (sh > 23 || eh > 23 || sm > 59 || em > 59) return null;
-  const start = sh * 60 + sm;
-  const end = eh * 60 + em;
-  return start === end ? null : [start, end];
+/** The stored window as it is passed on: a string, trimmed, else '' (any
+ *  time). Not a judgement of it — that is the engine's (checkWindow). */
+export function storedWindow(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
 }
 
-/** `HH:MM-HH:MM` that does not start where it ends, or '' — any time. The
- *  engine refuses anything else, and a watcher that will not start is worse
- *  than one with no window. */
-export function normWindow(v: unknown): string {
+/** A language tag for `--lang`, or '' (the engine then asks the server for
+ *  the account's). Only the shape is checked: which languages exist is the
+ *  engine's (and the server's language packs') to know. */
+export function engineLangTag(v: unknown): string {
   if (typeof v !== 'string') return '';
-  const w = v.trim();
-  return windowMinutes(w) ? w : '';
-}
-
-/** Whether a round may start at this minute of the (local) day. The end is
- *  exclusive; a window ending earlier than it starts runs over midnight.
- *  No window is any time. Same rule as the engine's own. */
-export function windowContains(window: string, minuteOfDay: number): boolean {
-  const mm = windowMinutes(window);
-  if (!mm) return true;
-  const [start, end] = mm;
-  return start < end ? minuteOfDay >= start && minuteOfDay < end : minuteOfDay >= start || minuteOfDay < end;
+  const t = v.trim();
+  return /^[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*$/.test(t) ? t : '';
 }
 
 /**
  * The argv of one account's watcher.
  *
- * ⚠ A flag is passed only when it asks for something. `--limit-down 0` would
- * mean the same as no flag to a current engine — and "unknown flag" to one
- * that predates it, which would then not start at all.
+ * `--json`: the engine reports in events, each with its sentence said in the
+ * account's language (syncstatus.ts). ⚠ An engine older than 0.54 does not know the
+ * flag and refuses to start; the app always ships its own engine, so that is
+ * only a FILEX_CLI pointing at an older binary — the folder then says the
+ * engine could not start, with the engine's own words (folderView noStream).
+ *
+ * ⚠ Any other flag is passed only when it asks for something.
  */
 export function watchArgs(accountId: string, prefs: WatchPrefs, interval: string): string[] {
-  const args = ['sync', 'run', '--account', accountId, '--watch', interval, '--quiet'];
+  const args = ['sync', 'run', '--account', accountId, '--watch', interval, '--quiet', '--json'];
+  const lang = engineLangTag(prefs.lang);
   const down = normLimit(prefs.limitDownKiB);
   const up = normLimit(prefs.limitUpKiB);
-  const win = normWindow(prefs.syncWindow);
+  const win = storedWindow(prefs.syncWindow);
+  if (lang) args.push('--lang', lang);
   if (down > 0) args.push('--limit-down', String(down));
   if (up > 0) args.push('--limit-up', String(up));
   if (win) args.push('--window', win);
@@ -143,22 +145,24 @@ export function watchArgs(accountId: string, prefs: WatchPrefs, interval: string
 }
 
 /** Equal for preferences the engine cannot tell apart — a change of this key
- *  is what restarts the watchers. */
+ *  is what restarts the watchers (a new language too: the engine says its
+ *  messages in the one it was started with). */
 export function watchPrefsKey(prefs: WatchPrefs): string {
-  return `${normLimit(prefs.limitDownKiB)}/${normLimit(prefs.limitUpKiB)}/${normWindow(prefs.syncWindow)}`;
+  return `${normLimit(prefs.limitDownKiB)}/${normLimit(prefs.limitUpKiB)}/${storedWindow(prefs.syncWindow)}/${engineLangTag(prefs.lang)}`;
 }
 
 // ── the line under each folder in Settings ──────────────────────────────
 
-/** What to say under one folder. The window turns `kind` into words. */
+/** What to say under one folder. A `message` is the engine's sentence, shown
+ *  as it is; the window words the other kinds (the app's own states). */
 export type FolderView =
   | { kind: 'paused' }
   | { kind: 'signed-out' }
   | { kind: 'starting' }
   | ({ kind: 'active' } & Omit<SyncActivity, 'pairId'>)
-  | { kind: 'busy'; detail: string }
-  | { kind: 'window'; window: string }
-  | { kind: 'error'; message: string; exited?: string; reason?: string; restartAt?: number }
+  | { kind: 'busy'; detail: string; message: string }
+  | { kind: 'window'; window: string; message: string }
+  | { kind: 'error'; message: string; exited?: string; reason?: string; restartAt?: number; noStream?: boolean }
   | { kind: 'pending' }
   | { kind: 'moving' }
   | { kind: 'watching' }
@@ -178,7 +182,9 @@ export function folderView(input: {
   /** Its account's local filex folder is being moved (its watcher is off). */
   moving?: boolean;
   status: SyncStatus | null | undefined;
-  minuteOfDay: number;
+  /** The time now (epoch ms): a wait for the window is over once the engine's
+   *  `opensAt` has passed. */
+  now: number;
 }): FolderView {
   // Before everything: the move is what is happening to it, and its stopped
   // watcher read "stopped" in red for the hours a copy to another drive takes.
@@ -196,7 +202,7 @@ export function folderView(input: {
   // app, or the CLI). Before any error: nothing here runs for the folder, so
   // an error left from before it was taken is not what is true of it now —
   // and this is not a failure, the folder IS being synced.
-  if (st.running && view.busy) return { kind: 'busy', detail: view.busy.detail };
+  if (st.running && view.busy) return { kind: 'busy', detail: view.busy.detail, message: view.busy.message };
   // Its own error, or the engine's (which is every folder's). An engine that
   // stopped on its own carries its exit code, so the page says so in its
   // language, and when the supervisor starts it again.
@@ -212,12 +218,17 @@ export function folderView(input: {
         exited: st.exited,
         ...(own !== unexpectedExitLine(st.exited) ? { reason: own } : {}),
         ...(st.restartAt ? { restartAt: st.restartAt } : {}),
+        ...(st.noStream ? { noStream: true } : {}),
       };
     }
     return { kind: 'error', message: own };
   }
-  if (st.waitingWindow && !windowContains(st.waitingWindow, input.minuteOfDay)) {
-    return { kind: 'window', window: st.waitingWindow };
+  // The engine said when the window opens: until then the folder waits for
+  // it. Past that moment the engine's next pass is due, whatever it has
+  // said since (a window that opened onto nothing to do prints no pass).
+  const ww = st.waitingWindow;
+  if (ww && (ww.opensAt === null || input.now < ww.opensAt)) {
+    return { kind: 'window', window: ww.window, message: ww.message };
   }
   // ⚠ "Watching for changes" only for a folder a pass has finished for: one
   // just added, waiting behind the others for its first sync, read like a

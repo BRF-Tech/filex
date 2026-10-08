@@ -18,6 +18,14 @@ Web Component wrapper, the `@brftech/filex-react` adapter) build against.
 npm i @brftech/filex-core vue
 ```
 
+> ⚠ **`@brftech/filex-core` 0.54 needs a filex 0.54 server.** Which files open for editing
+> (`edit_kinds`), the input limits (`limits`) and the version line
+> (`release`, `commit`, `built`) come from the server's
+> `/api/files/capabilities`; the package keeps no list of its own to fall
+> back on, so against an older server nothing is offered Edit and nothing
+> opens as an office document. Update the server with the package
+> ([API.md](https://github.com/BRF-Tech/filex/blob/main/docs/API.md)).
+
 `vue ^3.4` is a peer dependency. The following are *optional* peers -
 features degrade gracefully if missing:
 
@@ -47,7 +55,7 @@ const config = {
 
   // Or legacy Vuefinder-compat:
   // endpoint: '/api/files/manager',
-  // uploadInit: '/api/files/upload/init',
+  // uploadBegin: '/api/files/upload/begin',
   // …
 
   locale: 'tr',
@@ -312,8 +320,12 @@ pnpm typecheck
 
 Output:
 
-- `dist/filex-core.js` (ESM)
-- `dist/filex-core.umd.cjs` (UMD)
+- `dist/filex-core.js` (ESM) and the chunks beside it (`dist/<name>-<hash>.js`)
+  that it imports: the explorer, and the parts it loads when it needs them -
+  the viewers, the vault, and the dialogs a person opens (the viewer, sharing,
+  settings, search, the encryption dialogs; `lazySurfaces.ts`). They are
+  imported relative to `filex-core.js`, so `dist/` is served or bundled whole.
+- `dist/filex-core.umd.cjs` (UMD, one file: every chunk inlined)
 - `dist/style.css`
 - `dist/index.d.ts` (rolled-up declarations)
 

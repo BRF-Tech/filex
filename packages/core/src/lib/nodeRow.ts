@@ -107,7 +107,23 @@ export function nodeRowToFileNode(
     mime_type: typeof row.mime === 'string' ? row.mime : '',
     ...(perm ? { perm } : {}),
     read_only: readOnly,
-    ...(isSymlink ? { symlink: true } : {}),
+    /* #207 (0.54) — whether the row is starred is the row's own fact: the
+       server puts `starred: true` on every listing and view row it answers
+       (handlers/meta.go), and the explorer no longer fetches a star list of
+       its own to match ids against. Dropped here, every Starred / Recent /
+       tag / Home row read as unstarred, so the menu offered "Star" on a file
+       in Starred and the inline star was hollow. */
+    ...(row.starred === true ? { starred: true } : {}),
+    /* ...and WHY it will not open, under the folder listing's own name: the
+       node row carries the reason the sync recorded (`link_state`, migration
+       00098), so the badge here says "Outside storage" exactly where the
+       folder says it. A row without one reads as the general "Link". */
+    ...(isSymlink
+      ? {
+          symlink: true,
+          ...(typeof row.link_state === 'string' && row.link_state ? { link_state: row.link_state } : {}),
+        }
+      : {}),
     /* issue #104 - an entry the storage could not answer for. The raw node
        row carries the flag and the storage's answer under the same names the
        folder listing uses, so Recent, Starred, a tag view and Home badge it

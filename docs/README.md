@@ -121,7 +121,8 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   requests](CLI.md#plugin-requests), [signing in to a tenant by its
   realm](CLI.md#multi-tenant-servers-the-realm) and
   [`filex encrypt`](CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)
-  from the command line; a saved session goes only to the address it was saved
+  and [`filex vault`](CLI.md#filex-vault---a-vault-on-a-server)
+  from the command line, a refusal printed as the server's own sentence; a saved session goes only to the address it was saved
   with ([connecting](CLI.md#connecting))
 
 ## Authentication & access
@@ -172,7 +173,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   (never saved over: reloaded, or a question) and
   [the editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)
   (`FILEX_ONLYOFFICE_FRAME_ORIGIN`: the editor's script on the Document
-  Server's origin, not in filex's pages) (0.53)
+  Server's origin, not in filex's pages) (0.53);
+  [the editor's language](ONLYOFFICE.md#the-editors-language): each person's
+  own filex language, or one for everybody (`FILEX_ONLYOFFICE_LANG`) (0.54)
 
 ## Features
 
@@ -184,17 +187,24 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   [the App store in a window](DESKTOP.md#the-app-store),
   [a portable Windows copy that installs nothing](DESKTOP.md#portable-windows),
   [the notification bell and your account menu in the window](DESKTOP.md#notifications-and-your-account),
+  [the account's language, which is the app's](DESKTOP.md#language) (0.54),
+  [the sync engine's own sentences under each folder](DESKTOP.md#the-engines-event-stream) (0.54),
   [the web app installed on a phone or a tablet](DESKTOP.md#on-a-phone-or-a-tablet-the-web-app),
   and on Linux [Chromium's sandbox](DESKTOP.md#appimage-on-recent-ubuntu)
   (the one-time AppArmor profile an AppImage needs on recent Ubuntu; the snap
   relies on [its strict confinement instead](DESKTOP.md#the-snap-and-the-sandbox))
-- [Folder sync](SYNC.md) - how a folder on your PC is kept in step with the server
+- [Folder sync](SYNC.md) - how a folder on your PC is kept in step with the server;
+  [the engine's event stream](SYNC.md#the-event-stream---json) a program (the desktop
+  app) reads instead of its lines, and [`filex sync window`](SYNC.md#filex-sync-window)
 - [Uploads](UPLOADS.md) - the staged, resumable upload path: chunked, works on
   every driver, survives a dropped connection
 - [Sharing & file requests](SHARING.md) - public download links + upload/file-drop;
   **My shares** and reading a link's PIN back, the one branded public screen and
   its PIN lock-out, the maximum link life, how the folder-ZIP cache is bounded,
-  and [a link that follows its creator](SHARING.md#a-link-follows-its-creator)
+  and [a link that follows its creator](SHARING.md#a-link-follows-its-creator);
+  a link's state (active, expired, used up, revoked) and the download command
+  the server writes for it, and [emailing a link](SHARING.md#emailing-a-link):
+  the mail written by the server from the link, never with its PIN (0.54)
 - [Thumbnails](thumbnails.md) - image, SVG (a built-in engine, on every
   install), HEIC/AVIF, video, PDF, Office, text and archive previews;
   [folder previews](thumbnails.md#folder-previews); thumbnails that follow
@@ -202,17 +212,27 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   and [Admin → Tools → Thumbnail repair](thumbnails.md#repair-catching-up-existing-files)
 - [Search](SEARCH.md) - embedded full-text index: forgiving filename
   matching (separators, several words in any order, folders, typos), VS
-  Code-style subsequence scoring, ranked results, `tag:` filters, and an index
-  that rebuilds itself after an upgrade without going dark
+  Code-style subsequence scoring, ranked results, `tag:` filters, an index
+  that rebuilds itself after an upgrade without going dark, and
+  [narrowing a search on the server](SEARCH.md#narrowing-a-search) by type,
+  date, size, folder and owner (0.54)
 - [Realtime updates & presence](REALTIME.md) - the WebSocket an open explorer
   runs on: the ticket, the change and presence frames, how a burst is
-  coalesced (and why a plain trailing debounce starves), and the 12 s polling
-  fallback
+  coalesced (and why a plain trailing debounce starves), the 12 s polling
+  fallback, and [`access.changed`](REALTIME.md#when-access-changes), sent when a
+  grant, a role or an encryption policy changes (0.54)
 - [Notifications](NOTIFICATIONS.md) - webhook + in-app bell: the unread badge,
   the full list inside the explorer for everybody, where a click goes, and the
   optional digest (kinds turned off are told once per window, folder by
-  folder; out of the box everything is told at once)
-- [Trash & versioning](TRASH-VERSIONING.md) - soft-delete/restore + file history
+  folder; out of the box everything is told at once);
+  [what a notification says](NOTIFICATIONS.md#what-a-notification-says) - the
+  server's sentence on every channel, in
+  [each receiver's language](NOTIFICATIONS.md#which-language), a webhook's own
+  among them - and [Web Push](NOTIFICATIONS.md#web-push) to a phone or a
+  browser with filex closed (0.54)
+- [Trash & versioning](TRASH-VERSIONING.md) - soft-delete/restore + file history;
+  [the trash endpoints](TRASH-VERSIONING.md#trash-endpoints): a paged trash, and
+  the server's own count of what *Empty trash* deletes (0.54)
 - [Replication](REPLICATION.md) - primary→replica mirroring, the initial copy of a linked storage & reconcile
 - [Quotas](QUOTAS.md) - per-user ceilings: what counts, when it is
   released, and how a public drop link is billed
@@ -232,8 +252,20 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   a tenant's policy, the files.encrypt permission and an administrator's
   approval, asked for with a reason (0.51)
 - [End-to-end encryption roadmap](E2E-ROADMAP.md) - what is built
-  (`filex encrypt` and large files in an in-place conversion since 0.50) and
-  the design of the vault level, what is left, with open questions and estimates
+  (`filex encrypt` and large files in an in-place conversion since 0.50, the
+  vault level in 0.54) and the decisions behind the vault level
+- [Vault format](E2E-VAULT-FORMAT.md) - level 3, built and off by default
+  (`FILEX_E2E_VAULT`): the normative format (packs, the encrypted index, keys
+  and the nonce rule), the server's single-writer lock and API, garbage
+  collection, and the test vectors - a repack among them - the browser, the
+  server and the command line are held to
+- [Editing encrypted office documents](E2E-OFFICE.md) - the design of
+  editing a document in an encrypted folder with ONLYOFFICE in the browser,
+  alone or with others, without a server reading it (the editor's Document
+  Server answered in the browser, a relay that orders sealed entries), and
+  its protocol prototype; the editor's side is an AGPL app of its own
+  (`filex-office-editor`), and filex provides the platform it runs on; not
+  offered anywhere yet
 - [Multi-tenancy](MULTI-TENANCY.md) - provider/tenant mode and its switch on
   Admin → Multi-tenant mode, per-tenant isolation on one instance, and [realms](MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for):
   the tenant's sign-in name - the Realm field, `realm/name` over SFTP, the
@@ -259,6 +291,9 @@ New here? Start with [Installation](INSTALLATION.md), then add a storage
   are also an [OpenAPI 3.1 description](../backend/internal/api/openapi.json),
   held to the router by a test
 - [HTTP / component API](API.md)
+- [API errors](API-ERRORS.md) - the one shape of a refusal (`error` code,
+  `message` written by the server in the reader's language), the codes, a
+  failed queue operation's `error_text`, app locks and sign-in refusals
 - [Themes & appearance](INTEGRATION.md#themes) - the shipped palettes, an
   operator's own themes and instance default (Admin → **Appearance**), and the
   custom stylesheet that is off until you switch it on

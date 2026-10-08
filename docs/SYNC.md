@@ -218,7 +218,15 @@ watcher is restarted after either.
 Settings' **Download limit**, **Upload limit** and **When to sync** presets are
 handed to every watcher as `--limit-down` / `--limit-up` (KiB/s) and
 `--window HH:MM-HH:MM`; a change restarts the watchers. Nothing is passed while
-they are left at *Unlimited* / *Any time*.
+they are left at *Unlimited* / *Any time*. The window is the engine's to read:
+the app asks [`filex sync window --json`](#filex-sync-window) and stores what it
+answers.
+
+The app reads the watcher's [event stream](#the-event-stream---json) (`--json`)
+and shows each event's sentence as the engine said it, in the language of
+the account it syncs: the app passes no `--lang`, and the engine asks the
+server (a language a language pack adds included). An account language that
+changes restarts that account's watchers.
 
 When the server refuses an account's token (HTTP 401 - revoked or expired), the
 engine stops instead of retrying, and the app keeps that account's watcher
@@ -242,7 +250,8 @@ filex sync move <pair-id> <new-local-path>
 filex sync remove <pair-id>
 filex sync run [--pair <id>] [--account <label>] [--watch <interval>] [--live=false] [--dry-run] [--quiet] [--transfers <n>]
                [--limit-down <KiB/s>] [--limit-up <KiB/s>] [--window HH:MM-HH:MM]
-               [--watch-max <duration>] [--full-every <duration>]
+               [--watch-max <duration>] [--full-every <duration>] [--json] [--lang <tag>]
+filex sync window [HH:MM-HH:MM] [--json] [--lang <tag>]
 filex sync trash [--pair <id>] [--restore <path>]
 filex sync confirm <pair-id>
 filex sync discard <pair-id>
@@ -297,9 +306,12 @@ watcher per account rather than one for all of them.
 
 `--quiet` drops the per-file lines and keeps the summary - but progress lines
 still print: inventory counts while the server tree is listed, `transfer: 12/345`,
-settling. The desktop app runs the engine exactly this way and mirrors the last
-line into its panel, and a first sync of a large store spends minutes listing
-before it transfers anything; silence there reads as a broken app.
+settling. A first sync of a large store spends minutes listing before it
+transfers anything; silence there reads as a broken app. (The desktop app gets
+the same reports as `progress` events of the [event stream](#the-event-stream---json).)
+
+`--json` writes the [event stream](#the-event-stream---json) instead of these
+lines; `--lang` is the language of its messages.
 
 A watcher started with `--watch` **re-reads `pairs.json` the moment it
 changes** (and on every tick besides), so a folder paired - or unpaired -
@@ -311,6 +323,83 @@ poll - the behaviour before v0.43.
 
 Removing a pair stops the syncing and **leaves every file where it is**, on both
 sides. Unpairing is not deleting.
+
+## The event stream (`--json`)
+
+`filex sync run --json` writes **one JSON object per line on stdout** instead
+of the plain lines - for a program that supervises the engine. The desktop app
+starts every watcher this way (`--watch 30s --quiet --json`, no `--lang`: the account's language)
+and reads nothing else: until 0.54 it read the plain English lines with regular
+expressions, so a reworded sentence silently broke the status under a folder,
+and the engine's errors reached a Turkish window in English.
+
+```
+{"event":"hello","code":"hello","params":{"protocol":1,"version":"0.54.0","lang":"tr"},"message":"filex eşitleme motoru 0.54.0"}
+{"event":"progress","pair":"pair-1","code":"progress.transfer_eta","params":{"phase":"transfer","done":120,"total":11704,"bytes_done":1200000000,"bytes_total":52600000000,"eta_seconds":29400},"message":"dosyalar aktarılıyor - 120/11.704, 1,2 GB / 52,6 GB - yaklaşık 8 sa 10 dk kaldı"}
+{"event":"pass","pair":"pair-1","code":"pass.done_failed","params":{"planned":2,"applied":1,"failed":1,"duration_ms":412},"message":"2 değişiklikten 1 tanesi yapıldı, 1 tanesi başarısız oldu"}
+{"event":"error","pair":"pair-1","code":"pass.action_failed","params":{"error":"download a.txt: connection reset"},"message":"Bir öğe eşitlenemedi: download a.txt: connection reset"}
+```
+
+- `event` - what kind of report it is; `pair` - the pair it is about, when it is
+  about one; `code` - the exact report, stable across releases; `params` - its
+  figures and facts, typed; `message` - the sentence a person reads.
+- **A program shows `message` and acts on `event`, `code` and `params`. It never
+  parses `message`.**
+- Everything is on stdout, in order: a pass's `pass` event comes first and its
+  `error` events right after it, so a reader can clear a folder's error on a
+  pass with `failed: 0` and set it on each `error`.
+- The run's end is one `fatal` event (`params.exit` is the exit status); nothing
+  more is written to stderr. stderr then carries only what the engine could not
+  say on the stream - a crash, or a flag an older engine does not know.
+
+| `event` | `code`s | `params` |
+|---|---|---|
+| `hello` | `hello` | `protocol` (1), `version`, `lang` (the language of the messages) |
+| `progress` | `progress.inventory`, `progress.listing`, `progress.listing_here`, `progress.plan`, `progress.transfer`, `progress.transfer_bytes`, `progress.transfer_eta`, `progress.settling` | `phase` (inventory, plan, transfer, settling), `here`, `listed`, `folders`, `done`, `total`, `bytes_done`, `bytes_total`, `eta_seconds` - each when the phase has it |
+| `hold` | `hold` | `count` - items held for a decision (see `sync list --json` for the pair's numbers) |
+| `pass` | `pass.in_step`, `pass.done`, `pass.done_failed` | `planned`, `applied`, `uploaded`, `downloaded`, `removed_here`, `removed_server`, `conflicts`, `identical`, `held`, `failed`, `duration_ms` |
+| `error` | `pass.action_failed`, `pass.failed`, `lock.failed` | `error` - the engine's own words (English) |
+| `note` | `pass.raced`, `pass.skipped`, `pass.trashed` | `detail`, `count`, `example` |
+| `lock` | `lock.busy`, `lock.acquired` | `state`, `detail` - who holds the pair |
+| `local` | `local.watched`, `local.too_large`, `local.unavailable` | `state` (watched, too-large, unavailable), `detail`, `interval_seconds` |
+| `live` | `live.connected`, `live.polling`, `live.offline`, `live.off` | `state` (connected, polling, offline), `detail`, `interval_seconds` |
+| `window` | `window.waiting`, `window.closed`, `window.outside` | `window`, `start`, `end`, `opens_at` (RFC 3339: when it opens next) |
+| `fatal` | `signed_out`, `pairs_busy`, `no_pairs`, `pairs_unreadable`, `window.bad`, `window.empty`, `fatal` | `exit`, `error`, and `pairs` / `input` for the codes that have them |
+
+**The language of `message`.** `--lang <tag>` (or `$FILEX_LANG`); without one,
+the account's own language on the server; else English. filex speaks English
+and Turkish itself; any other language is asked of the server - a
+[language pack](PLUGIN-KIT.md) running there that adds it is fetched once when
+the run starts, and a sentence the pack does not translate is English. The
+sentences are the server catalogue's `server.sync.*` keys, so a pack translates
+them like every other sentence the server writes. The `error` parameter (and
+the error inside an `error` event's message) is the engine's own description of
+what failed, in English.
+
+The protocol only changes when a reader would misread the new stream (`hello`'s
+`protocol`). An engine older than 0.54 does not know `--json` and refuses to
+start with `unknown flag: --json`; the desktop app always runs the engine it
+ships, so it meets one only when `FILEX_CLI` points at an older binary, and its
+folders then say that the engine could not start, with that refusal.
+
+### `filex sync window`
+
+```
+filex sync window [HH:MM-HH:MM] [--json] [--lang <tag>]
+```
+
+Reads a sync window exactly the way `sync run --window` does - an hour may have
+one digit and spaces around the parts are allowed (`" 7:00 - 9:00 "` is
+`07:00-09:00`) - and says whether it is open now and when it opens or closes
+next. With `--json` the answer is one object: `ok`, `window` (the canonical
+form to store and to pass to `--window`; `""` is any time), `start`, `end`,
+`over_midnight`, `open`, `opens_at` or `closes_at` (RFC 3339), and `code` /
+`params` / `message` (in the `--lang` language). A window the engine refuses is
+`ok: false` with `code` `window.bad` or `window.empty` - the command still
+exits 0 with `--json`, 1 without. The desktop app asks this before it stores a
+window, and once at start for the one it has stored: its own parser of the
+hours was stricter than the engine's and showed "no window" for a window the
+engine ran with.
 
 ---
 
@@ -355,7 +444,7 @@ saves every second is still synced while it keeps going, at most every two
 seconds rather than once per save.
 
 The watcher prints how changes reach it, and the desktop app shows the same
-word under each synced folder:
+under each synced folder (the `live` event's sentence):
 
 | Line | Meaning |
 |---|---|

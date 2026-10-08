@@ -15,7 +15,9 @@
 //      copy of "is this row read"), and a count handed over by a host that
 //      polls itself refreshes the list only when it disagrees.
 //   3. The transport addresses the server under a sub-path (lesson #594/#595:
-//      a root-relative URL drops FILEX_BASE_PATH) and reads with POST.
+//      a root-relative URL drops FILEX_BASE_PATH) and reads with POST; it
+//      names the language on screen (`lang=`), because the server says every
+//      row in it (#191) - the rows are shown as the server said them.
 //   4. The avatar's rows are ordered by ONE rule for the web page and the
 //      explorer (lib/accountMenu).
 //   5. The explorer draws them ONLY for a host that asked, claims its own "⋯"
@@ -44,12 +46,14 @@ import { unmountAll } from '../helpers/teardown';
 const REPO = path.resolve(__dirname, '../../..');
 const read = (rel: string) => readFileSync(path.join(REPO, rel), 'utf8');
 
+/** A row as the list answers it: the facts and the sentence the SERVER said
+ *  for them, in the bell's language (#191, backend notify say.go). */
 function row(p: Partial<NotificationRowData>): NotificationRowData {
   return {
     id: 1,
     event: 'file.uploaded',
     severity: 'info',
-    title: 'file.uploaded',
+    title: 'Yeni dosya',
     body: '',
     meta: {},
     created_at: '2026-09-27T04:22:00Z',
@@ -85,10 +89,18 @@ beforeEach(() => {
   rows = [
     row({
       id: 67,
+      title: 'Yeni dosya: rapor.txt',
+      body: '/Belgeler/rapor.txt',
       target: { kind: 'file', storage: 'qldemo', path: 'Belgeler/rapor.txt' },
       meta: { node: { name: 'rapor.txt', path: '/Belgeler/rapor.txt' } },
     }),
-    row({ id: 51, event: 'update_available', title: 'filex v0.39.1 available' }),
+    row({
+      id: 51,
+      event: 'update_available',
+      title: 'filex v0.39.1 yayınlandı',
+      body: 'Bu sunucu v0.39.0 sürümünde çalışıyor.',
+      meta: { version: 'v0.39.1', current: 'v0.39.0' },
+    }),
   ];
 });
 
@@ -120,7 +132,9 @@ describe('the core bell runs with no app around it', () => {
     await flushPromises();
     await flushPromises();
     const first = document.body.querySelector<HTMLButtonElement>('[data-testid="notification-row"]')!;
+    // The server's words, as the list brought them.
     expect(first.textContent).toContain('Yeni dosya: rapor.txt');
+    expect(first.textContent).toContain('/Belgeler/rapor.txt');
     first.click();
     await flushPromises();
     expect(api.markRead).toHaveBeenCalledWith(67);
@@ -262,6 +276,35 @@ describe('the explorer’s own transport', () => {
       { url: 'https://example.com/filex/api/notifications/read-all', method: 'POST' },
     ]);
   });
+
+  it('names NO language to the server: the rows are said in the account language', async () => {
+    // #191, translated at the last stop: the server says every row in the
+    // language of the reader's ACCOUNT (backend notify PersonLang). The
+    // screen's language is the account's, so there is nothing to name - and
+    // an embed drawn in its host's language must not turn the person's
+    // notifications into that language either.
+    const urls: string[] = [];
+    const jsonFetch = vi.fn(async (url: string) => {
+      urls.push(url);
+      return { items: [], total: 0 } as never;
+    });
+    const t = notificationsTransport(jsonFetch, 'https://example.com/filex/');
+    await t.list({ limit: 15, offset: 0 });
+    await t.list({ unread: true, limit: 25, offset: 50 });
+    expect(urls).toEqual([
+      'https://example.com/filex/api/notifications?limit=15&offset=0',
+      'https://example.com/filex/api/notifications?unread=true&limit=25&offset=50',
+    ]);
+    expect(urls.join(' ')).not.toContain('lang=');
+    // The explorer names none, and asks again when the host's language (the
+    // account's, written by the host) changes.
+    const fe = read('packages/core/src/FileExplorer.vue');
+    expect(fe).toMatch(/notificationsTransport\(api\.jsonFetch, connectionsBase\(props\.config\)\)/);
+    expect(fe).toMatch(/watch\(locale, \(\) => \{\s*if \(!notifFeed\) return;\s*void notifFeed\.refreshFeed\(\);/);
+    // Nor does the admin panel's own client.
+    const web = read('web/src/api/notifications.ts');
+    expect(web).not.toMatch(/\blang:/);
+  });
 });
 
 describe('the avatar', () => {
@@ -367,11 +410,18 @@ describe('the explorer draws them for a host that asks — and only then', () =>
     };
     const at = (o: Record<string, unknown>, k: string) =>
       k.split('.').reduce<unknown>((a, p) => (a as Record<string, unknown> | undefined)?.[p], o);
-    for (const key of Object.keys(en).filter((k) => k.startsWith('notifications.'))) {
+    // The push devices (#191, Web Push) are a section of core's own settings
+    // dialog only: the admin app draws no such section, so it has no words
+    // of its own for them to agree with (a copy there would be a dead key a
+    // translator translates twice).
+    const coreOnly = (k: string) => k.startsWith('notifications.prefs.push');
+    for (const key of Object.keys(en).filter((k) => k.startsWith('notifications.') && !coreOnly(k))) {
       expect(tr[key], `tr ${key}`).toBeTruthy();
       expect(en[key], `en ${key}`).toBe(at(web.en, key));
       expect(tr[key], `tr ${key}`).toBe(at(web.tr, key));
     }
+    // …and those are still said in both of core's languages.
+    for (const key of Object.keys(en).filter(coreOnly)) expect(tr[key], `tr ${key}`).toBeTruthy();
   });
 });
 

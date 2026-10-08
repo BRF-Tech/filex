@@ -28,6 +28,32 @@ func TestParseSyncWindow(t *testing.T) {
 	}
 }
 
+// B17: what the engine accepts is the only definition of a window (the
+// desktop app asks `filex sync window --json`): a one-digit hour and spaces
+// around the parts, written back in the canonical form; and a refusal says
+// which of the two refusals it is.
+func TestParseSyncWindow_LenientFormsAndTypedRefusals(t *testing.T) {
+	for in, want := range map[string]string{
+		"7:00-9:00":       "07:00-09:00",
+		" 22:00 - 07:00 ": "22:00-07:00",
+		"19:00-8:00":      "19:00-08:00",
+		"\t09:30-17:00\n": "09:30-17:00",
+	} {
+		w, err := parseSyncWindow(in)
+		require.NoError(t, err, in)
+		require.Equal(t, want, w.String(), in)
+	}
+	_, err := parseSyncWindow("07:00-07:00")
+	var we *windowError
+	require.ErrorAs(t, err, &we)
+	require.True(t, we.empty)
+	require.Equal(t, "07:00-07:00", we.input)
+	_, err = parseSyncWindow("25:00-07:00")
+	require.ErrorAs(t, err, &we)
+	require.False(t, we.empty)
+	require.Contains(t, err.Error(), `bad --window "25:00-07:00"`, "the CLI's English line is unchanged")
+}
+
 func TestSyncWindowSameDay(t *testing.T) {
 	w, _ := parseSyncWindow("09:30-17:00")
 	require.False(t, w.contains(at(9, 29)))

@@ -250,9 +250,10 @@ logged; the next run tries again).
 
 | Method & path | Body / query | Notes |
 |---|---|---|
-| `GET /api/files/manager/trash` | `?storage_id=…&limit=…&offset=…` | Lists soft-deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). **`draft: true`** marks one of the caller's own [discarded drafts](#discarded-drafts), whose `path` is then just its name; nobody else is shown it. `total` counts the entries **the caller may see**, and `offset`/`limit` page through those - up to v0.46.0 a member whose trash was interleaved with entries they may not see was told `total` = the length of the filtered first page, and could not reach the rest. `limit` above 500 is read as 50. |
+| `GET /api/files/manager/trash` | `?storage_id=…` or `?storage=<adapter name>`, `&limit=…&offset=…&lang=…` | Lists soft-deleted items. `limit` defaults to 50 (max 500). Each entry shows the **original** `name`/`path` (not the internal trash key), `deleted_at`, `size`, `storage_name`, **`ttl_days`** (days remaining before purge, floored at 0), and who deleted it: **`deleted_by_id`**, **`deleted_by_name`**, and **`deleted_by_self`** (`true` when it was the caller). The three are absent when nobody is recorded (see *Who deleted it* below). Beside the page the answer counts **every** entry the caller may see: **`total`**, **`total_bytes`**, **`newest_deleted_at`**, the same three per storage in **`storages`** (`[{storage_id, storage_name, count, bytes, newest_deleted_at}]` - what a storage's virtual `.trash` row shows) and **`summary`**, the server's sentence for it in the reader's language (`?lang=`, else the account's, else `Accept-Language`). `storage=<name>` narrows it to one storage by its adapter name; a name no storage has lists nothing (up to 0.53 the parameter was not read, so a storage's `.trash` row summed the newest 50 deletions of every storage). **`draft: true`** marks one of the caller's own [discarded drafts](#discarded-drafts), whose `path` is then just its name; nobody else is shown it. `total` counts the entries **the caller may see**, and `offset`/`limit` page through those - up to v0.46.0 a member whose trash was interleaved with entries they may not see was told `total` = the length of the filtered first page, and could not reach the rest. `limit` above 500 is read as 50. |
 | `POST /api/files/manager/restore` | `{ "node_id": 123 }` | Moves the file back to its original path and re-attaches the row. Returns **409** `{ "code": "EXISTS", "name", "path" }` when something already holds that path; nothing moves and the entry stays in the trash. |
-| `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }] }`, followed with `GET /api/files/ops`. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. At most **1000** entries per request: more answer **400** `{ "code": "TOO_MANY", "max": 1000 }`. |
+| `POST /api/files/manager/restore` | `{ "node_ids": [123, 124] }` | Since 0.54: a selection in **one** request, inside it (no queue). Every entry is judged and restored on its own; **200** whatever the mix, `{ "done", "failed", "reason_code", "taken", "summary" }` - `reason_code` is why the first entry that did not come back did not (`exists`, `not_found`, `forbidden`, `failed`), `taken` names the entries whose place is taken, and `summary` is the server's sentence for all of it in the reader's language (*"2 items restored - 1 item was not restored: something already has the name “b.txt”"*). The explorer's Restore on a server without a queue, and its **Undo** of a delete, send this. At most **1000** entries. |
+| `POST /api/files/manager/restore?queued=1` | `{ "node_ids": [123, 124] }` | The same checks for every entry, and one refusal refuses the batch. What they allow is queued, one job per storage: **202** `{ "ops": [{ "kind": "restore", … }], "done", "summary" }` (*"Restoring 3 items…"*), followed with `GET /api/files/ops`, where each job's row carries its own `summary` once it ends. An entry whose place is taken fails on its own, and the job's `error` says so; the others come back. Offered when `capabilities.queued` lists `restore`; the explorer's Restore uses it then. At most **1000** entries per request: more answer **400** `{ "code": "TOO_MANY", "max": 1000 }`. |
 
 An agent has the same two through the AI surface (since 0.50): the MCP tools
 `trash_list` and `trash_restore`, and their REST twins `GET /api/ai/trash` and
@@ -264,7 +265,12 @@ facts a deleted item has: **Deleted** (when - the date column, sortable and
 grouped by it), **Deleted from** (the storage and folder it will be restored
 to) and **Time left** (`ttl_days`: "30 days", "1 day", *Due for deletion* at
 0). A trashed row has no owner in this listing, so the Owner column is not
-drawn there, and **+ New** is gone - nothing is made inside the Trash.
+drawn there, and **+ New** is gone - nothing is made inside the Trash. It
+reads the trash 200 entries at a time: the banner above the list says the
+server's count and size of the whole trash (`summary`), with how many are on
+screen, and **Show more** reads the next page. Up to 0.53 it read the first 50
+and stopped, so older entries could be neither seen nor restored there. The
+admin **Trash** page pages the same listing with its table's pager.
 
 Both are **filtered by access**: a [confined](RBAC.md) (root-locked) caller only
 sees / can restore items whose original path is inside its root, and
@@ -288,12 +294,24 @@ answer to whoever holds a grant on `.filex-trash/`.
 |---|---|---|
 | `POST /api/admin/trash/empty` | `?older_than_days=N&storage_id=…` **or** JSON `{ "older_than_days": N, "storage_id": … }` | Queues a purge of everything deleted more than `N` days before **the moment it is asked for**, in one storage or every storage the caller can reach. **`0` or missing days is everything in the trash at that moment** - a file deleted while the purge runs stays in the trash. Waits up to two seconds: **200** with the final counts when the purge is done by then, otherwise **202** with its progress so far while it carries on as an ops job - see the run fields below. **409** `{ "code": "BUSY", "job": … }` while the caller's tenant already has one queued or running (`job` is that run); another tenant's purge, or the nightly retention, does not refuse it - it waits its turn (`queued: true`). **400** for anything it cannot read - a non-integer or negative day count, a storage id that is not a number, an unknown field - and nothing is purged. |
 | `GET /api/admin/trash/empty` | - | The latest purge the caller's tenant asked for: queued, running or finished. `{ "running": false }` alone when it has asked for none. |
+| `GET /api/admin/trash/empty/preview` | `?older_than_days=N&storage_id=…&lang=…` | **The dry run** (since 0.54): what `POST …/empty` would delete with the same narrowing, nothing deleted - `{ "dry_run": true, "count", "bytes", "storage_id", "older_than_days", "summary" }`. Counted by the purge's own tally over the caller's own reach (every entry of every storage the caller's tenant reaches, other people's deletes included), so `count` is what the purge deletes; `summary` is the confirmation's sentence (*"This permanently deletes 61,844 items (12.3 GB). It cannot be undone."*). The explorer's and the admin page's **Empty the trash?** dialogs show it and keep their button shut until it has answered, and while `count` is 0. **400** for a narrowing it cannot read, like the empty. ⚠ Up to 0.53 the explorer's confirmation counted the rows it had loaded - the first page of 50 - while the purge took the whole trash. |
 | `DELETE /api/admin/trash/{id}` | - | Immediately hard-delete one trashed node (storage object + quota + row). The id of a node that is not in the trash answers **404** `trash entry not found` and nothing is touched (up to v0.46.0 it was hard-deleted like a trash entry). |
-| `DELETE /api/admin/trash/{id}?queued=1` | - | The same ownership check, then the purge is a job of the operations queue: **202** `{ "op": { "kind": "purge", … } }`, followed with `GET /api/files/ops`. A folder is purged one object and one row at a time; inside the request the admin page's client gave up after 30 s. Offered when `capabilities.queued` lists `purge`; the admin Trash page and an operator's **Delete permanently** in the explorer's Trash use it then (the admin page restores with `POST /api/files/manager/restore?queued=1`). The explorer follows the jobs of one press as one: the rows say "Deleting permanently…", no second purge is sent for them, and one notice says what was deleted and what was not, and why, when the last job ends. Once running it is not cancelled half-way. The job purges what is in the trash **when it runs**: an entry restored while the purge waited in the queue is left alone, and the job ends `failed` with `the item is not in the trash`. |
+| `POST /api/admin/trash/purge` | `{ "node_ids": [123, 124] }`, `?queued=1`, `?lang=…` | Since 0.54: a selection deleted for good in **one** request. Every entry gets the checks `DELETE …/{id}` asks (its tenant's, and in the trash); what is refused is counted, not fatal. Inside the request: **200** `{ "done", "failed", "reason_code", "summary" }`. With `queued=1` one `purge` job per storage: **202** with `ops` as well, `done` being the entries handed to the jobs and `summary` *"Deleting 3 items permanently…"*; each job's row says how it ended in its own `summary`. The explorer's **Delete permanently** of a selection sends this (it was one `DELETE` per entry). At most **1000** entries. |
+| `DELETE /api/admin/trash/{id}?queued=1` | - | The same ownership check, then the purge is a job of the operations queue: **202** `{ "op": { "kind": "purge", … } }`, followed with `GET /api/files/ops`. A folder is purged one object and one row at a time; inside the request the admin page's client gave up after 30 s. Offered when `capabilities.queued` lists `purge`; the admin Trash page uses it then (and restores with `POST /api/files/manager/restore?queued=1`); the explorer queues a selection with `POST /api/admin/trash/purge?queued=1`. The rows say "Deleting permanently…", no second purge is sent for them, and each job's `summary` says what was deleted and what was not, and why, when it ends. Once running it is not cancelled half-way. The job purges what is in the trash **when it runs**: an entry restored while the purge waited in the queue is left alone, and the job ends `failed` with `the item is not in the trash`. |
 
 A run reports `{ ok, op_id, running, queued, cancelled, storage_id,
 older_than_days, total, total_bytes, scanned, purged, failed, bytes, started_at,
-finished_at, error }`. `total` / `total_bytes` are the rows in its scope when it
+finished_at, error, summary }`. **`summary`** (since 0.54) is where the run
+stands, said by the server in the reader's language: *"Emptying the trash… 120
+of 61,844"*, *"Trash emptied: 61,844 items deleted for good, 12.3 GB freed."*,
+*"Trash emptied, but 3 items could not be deleted and are still in the
+trash."*, *"Emptying the trash was stopped after 4,000 items; …"*. The explorer
+and the admin page show it as it is - neither builds its own sentence any more,
+and neither sends a person to the server log. A run that could not go on
+answers **500** with `error` (its English record, an operator's second line),
+`message` and `summary` (what a person is shown); **409 BUSY** carries
+`message` too. The operations list's row of a `trash-empty`, `restore` or
+`purge` job carries the same `summary`. `total` / `total_bytes` are the rows in its scope when it
 was asked for and the bytes their files hold; `running: false` is the end -
 `purged` can finish below `total`, because a folder takes the rows inside it
 along. `failed` counts rows that could not be purged (they stay in the trash;
@@ -307,7 +325,8 @@ reads it and `POST /api/files/ops/{op_id}/cancel` stops it (an administrator
 of the tenant that asked; below an administrator nobody sees another person's
 ops) - for an agent, `op_get` / `op_cancel` (`GET /api/ai/ops/{id}`,
 `POST /api/ai/ops/{id}/cancel`), and `admin_trash_restore` /
-`admin_trash_purge` with `queued: true` run as jobs the same way. A stopped run finishes the row in hand and stops;
+`admin_trash_purge` / `admin_trash_purge_batch` with `queued: true` run as jobs
+the same way; `admin_trash_empty_preview` is the dry run. A stopped run finishes the row in hand and stops;
 what it had not reached stays in the trash. It never takes the queue's worker -
 copies, moves, deletes and upload commits keep running beside it - and a
 restart does not forget it: the row is requeued at boot and the run carries on
@@ -469,7 +488,6 @@ pre-write guard, which snapshots what is about to be lost:
 | Browser upload (single POST) | `POST /api/files/manager?action=upload` |
 | Browser upload (staged / chunked) | `POST /api/files/upload/{id}/commit` |
 | Public file-drop link | `POST /d/{token}` |
-| Legacy presigned multipart | `POST /api/files/upload/finalize` |
 | Ticketed upload | `PUT`/`POST /u/{ticket}` |
 | AI / REST write | `POST /api/ai/upload` |
 | MCP `file_write`, `file_zip`, `file_unzip` | `/api/ai/mcp` |

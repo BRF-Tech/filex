@@ -557,7 +557,13 @@ const handlers = {
     need('files:read');
     const p = (params ?? {}) as ReadParams;
     const f = fileAt(p.index);
-    const res = await props.api.fetchResponse(f.path);
+    // Through the server's own door for an interface (#211, audit B19): it
+    // checks the grant and the kind again, as it does for a save. A host api
+    // without it (an older embed) reads the preview as before.
+    const read = props.api.pluginUIRead;
+    const res = typeof read === 'function'
+      ? await read(props.app, props.view, f.path)
+      : await props.api.fetchResponse(f.path);
     const size = Number(res.headers.get('content-length') ?? f.size ?? 0) || (f.size ?? 0);
     const mime = f.mime || res.headers.get('content-type') || '';
     const out = { name: f.name, size, mime };

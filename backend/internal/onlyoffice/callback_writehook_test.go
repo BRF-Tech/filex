@@ -109,6 +109,12 @@ type harness struct {
 	// reindexed records the nodes whose content re-extraction was re-queued,
 	// which is what keeps a document's text findable after an edit.
 	reindexed *[]int64
+	// ds is the stand-in document server, the address the service is
+	// configured with (0.54: a saved document is fetched only from there); it
+	// serves dsBody at any path.
+	ds     *httptest.Server
+	dsMu   sync.Mutex
+	dsBody string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -165,31 +171,41 @@ func newHarness(t *testing.T) *harness {
 		writehook.ConfigureSaveScan(nil)
 	})
 
-	svc := New(store, func(int64) (storage.Driver, error) { return drv, nil },
-		"https://docs.example", "shh", "https://filex.example", time.Hour)
-	svc.AttachSync(protocolsync.New(store, idx, nil, writehook.OriginOnlyOffice))
-
-	return &harness{
-		svc: svc, node: node, root: root,
+	h := &harness{
+		node: node, root: root,
 		sink: sink, frames: frames,
 		scanNow: &scanNow, scanSave: &scanSave, reindexed: &reindexed,
 	}
+	h.ds = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		h.dsMu.Lock()
+		body := h.dsBody
+		h.dsMu.Unlock()
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(h.ds.Close)
+
+	h.svc = New(store, func(int64) (storage.Driver, error) { return drv, nil },
+		h.ds.URL, "shh", "https://filex.example", time.Hour)
+	h.svc.AttachSync(protocolsync.New(store, idx, nil, writehook.OriginOnlyOffice))
+	return h
 }
 
-// save drives one document-server callback end to end: a stand-in document
+// save drives one document-server callback end to end: the stand-in document
 // server serves `body` at the URL the callback points filex at.
 func (h *harness) save(t *testing.T, status int, body string) map[string]any {
 	t.Helper()
-	ds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(body))
-	}))
-	t.Cleanup(ds.Close)
+	h.dsMu.Lock()
+	h.dsBody = body
+	h.dsMu.Unlock()
 
 	// Signed the way a document server with JWT on signs it — an unsigned
-	// callback is refused (TestCallback_UnsignedIsRefused).
-	tok, err := signHS256(map[string]any{"key": "k", "status": status, "url": ds.URL + "/saved.docx"}, "shh")
+	// callback is refused (TestCallback_UnsignedIsRefused) - for a key filex
+	// made for this document (callback_trust.go).
+	key := h.svc.keyFor(context.Background(), h.node)
+	saved := h.ds.URL + "/saved.docx"
+	tok, err := signHS256(map[string]any{"key": key, "status": status, "url": saved}, "shh")
 	require.NoError(t, err)
-	payload := fmt.Sprintf(`{"key":"k","status":%d,"url":%q,"token":%q}`, status, ds.URL+"/saved.docx", tok)
+	payload := fmt.Sprintf(`{"key":%q,"status":%d,"url":%q,"token":%q}`, key, status, saved, tok)
 	req := httptest.NewRequest(http.MethodPost, "/api/files/onlyoffice/callback?node=1",
 		strings.NewReader(payload))
 	resp, err := h.svc.HandleCallback(req, h.node.ID)

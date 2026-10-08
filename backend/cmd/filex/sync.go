@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/brf-tech/filex/backend/internal/cliclient"
 	"github.com/brf-tech/filex/backend/internal/filesync"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // apiAdapter bridges the REST client to the narrow interface the sync engine
@@ -138,16 +139,19 @@ func syncCmd() *cobra.Command {
 	}
 	c.PersistentFlags().StringVar(&opts.url, "url", "", "filex server URL (default: $FILEX_URL or ~/.filex/cli.yaml)")
 	c.PersistentFlags().StringVar(&opts.token, "token", "", "API or session token (default: $FILEX_TOKEN, else the session ~/.filex/cli.yaml saved for this server URL)")
+	var lang string
+	c.PersistentFlags().StringVar(&lang, "lang", "", "language of the messages in --json output, e.g. tr (default: $FILEX_LANG, else the account's language on the server, else English; a language a language pack on the server adds works too)")
 
 	c.AddCommand(
 		syncAddCmd(),
 		syncListCmd(),
 		syncMoveCmd(),
 		syncRemoveCmd(),
-		syncRunCmd(opts),
+		syncRunCmd(opts, &lang),
 		syncTrashCmd(),
 		syncConfirmCmd(),
 		syncDiscardCmd(),
+		syncWindowCmd(&lang),
 	)
 	return c
 }
@@ -271,8 +275,9 @@ func syncRemoveCmd() *cobra.Command {
 // nowFunc is the sync window's clock; tests move it.
 var nowFunc = time.Now
 
-func syncRunCmd(opts *clientOpts) *cobra.Command {
+func syncRunCmd(opts *clientOpts, langArg *string) *cobra.Command {
 	var (
+		asJSON    bool
 		pairID    string
 		account   string
 		dryRun    bool
@@ -302,14 +307,25 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			"syncing (the desktop app, a second copy of it, another terminal) is\n" +
 			"left alone and reported as `<pair>: lock: busy - …`. A single run skips\n" +
 			"it, syncs the rest and exits with status 4; --watch takes the pair over\n" +
-			"once the other process stops (`<pair>: lock: acquired`).",
+			"once the other process stops (`<pair>: lock: acquired`).\n\n" +
+			"With --json every report is one JSON object per line on stdout instead\n" +
+			"- {event, pair, code, params, message} - with the message in the --lang\n" +
+			"language: what the desktop app reads (docs/DESKTOP.md \"The engine's\n" +
+			"event stream\").",
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (retErr error) {
 			// A stop request (Ctrl-C, SIGTERM) cancels the pass in flight, which
 			// still writes its ledger; a plain kill lands between two
 			// checkpoints.
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
+			// Every report goes through rep: the plain lines, or with --json
+			// the event stream (syncevents.go). Until the server can be asked,
+			// it speaks the language asked for if filex ships it.
+			want := langWant(*langArg)
+			rep := &syncReporter{asJSON: asJSON, lang: srvtext.Pick(want), out: cmd.OutOrStdout(), errOut: cmd.ErrOrStderr()}
+			// Whatever the run stops with is said once, as a "fatal" event.
+			defer func() { retErr = rep.fatal(retErr) }()
 			win, err := parseSyncWindow(windowArg)
 			if err != nil {
 				return err
@@ -324,6 +340,10 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			api, err := opts.api(true)
 			if err != nil {
 				return authHint(err)
+			}
+			if asJSON {
+				rep.lang = syncLanguage(ctx, want, api)
+				rep.hello()
 			}
 			api.DownLimit = cliclient.NewRateLimiter(kibPerSecond(limitDown))
 			api.UpLimit = cliclient.NewRateLimiter(kibPerSecond(limitUp))
@@ -347,7 +367,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return err
 			}
 			if len(pairs) == 0 {
-				return fmt.Errorf("no folders are paired; add one with `filex sync add`")
+				return errNoPairs
 			}
 			// ⚠ A 401 is not a bad pass, it is the end: the token was revoked
 			// or has expired, and retrying it only fills the server's log while
@@ -367,10 +387,14 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 			engineFor := func(p filesync.Pair) *filesync.Engine {
 				eng := &filesync.Engine{Pair: p, API: apiAdapter{api}, Store: st, Transfers: transfers,
 					StopOn: cliclient.IsUnauthorized, Lock: locks.get(p.ID)}
-				// Progress prints even with --quiet. The desktop app starts
-				// this command with --quiet and mirrors the LAST stdout line
-				// into its panel; without these lines a big first sync spent
-				// its whole inventory phase looking dead.
+				// Progress prints even with --quiet: without these lines a big
+				// first sync spent its whole inventory phase looking dead. With
+				// --json the figures become "progress" events instead, and the
+				// per-action log is not part of the stream.
+				if rep.asJSON {
+					eng.OnProgress = func(ev filesync.ProgressEvent) { rep.progress(p.ID, ev) }
+					return eng
+				}
 				eng.Progress = func(s string) { fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", p.ID, s) }
 				if !quietOut {
 					eng.Log = func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
@@ -378,7 +402,7 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 				return eng
 			}
 			// runPass is one engine pass; dirs == nil is a full pass.
-			reporter := newPassReporter(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			reporter := newPassReporterFor(rep)
 			runPass := func(ctx context.Context, p filesync.Pair, dirs []string) (filesync.Result, error) {
 				eng := engineFor(p)
 				var res filesync.Result
@@ -404,14 +428,14 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 						if so := signedOut(err); so != nil {
 							return so
 						}
-						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.ID, err)
+						rep.passFailed(p, err)
 					}
 				}
 				return nil
 			}
 			if watch <= 0 {
 				if win != nil && !win.contains(nowFunc()) {
-					fmt.Fprintf(cmd.OutOrStdout(), "sync: outside the sync window %s; nothing was done\n", win)
+					rep.window("window.outside", win, nowFunc())
 					return nil
 				}
 				rctx, cancel := context.WithCancel(ctx)
@@ -434,18 +458,19 @@ func syncRunCmd(opts *clientOpts) *cobra.Command {
 					}
 				}
 				if win != nil && ctx.Err() == nil && rctx.Err() != nil {
-					fmt.Fprintf(cmd.OutOrStdout(), "sync: the sync window %s closed; the rest continues when it opens\n", win)
+					rep.window("window.closed", win, nowFunc())
 				}
 				if len(busy) > 0 {
 					return &exitError{code: exitPairBusy, err: errPairsBusy(busy)}
 				}
 				return nil
 			}
-			return runLive(ctx, cmd, st, api, locks, selected, runPass, watchSettings{
+			return runLive(ctx, cmd, rep, st, api, locks, selected, runPass, watchSettings{
 				interval: watch, watchMax: watchMax, fullEvery: fullEvery, window: win, live: live,
 			})
 		},
 	}
+	c.Flags().BoolVar(&asJSON, "json", false, "print one JSON event per line on stdout instead of the plain lines (for programs: the desktop app)")
 	c.Flags().StringVar(&pairID, "pair", "", "sync only this pair")
 	c.Flags().StringVar(&account, "account", "", "sync only pairs recorded against this account")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "show what would happen without changing anything")
@@ -484,13 +509,14 @@ type watchSettings struct {
 
 // runLive is `sync run --watch` (synclive.go). It holds the lock of every pair
 // it syncs in locks, which runPass hands to each pass (synclock.go).
-func runLive(ctx context.Context, cmd *cobra.Command, st *filesync.Store, api *cliclient.Client,
+func runLive(ctx context.Context, cmd *cobra.Command, rep *syncReporter, st *filesync.Store, api *cliclient.Client,
 	locks *pairLocks,
 	selected func([]filesync.Pair) []filesync.Pair,
 	runPass func(context.Context, filesync.Pair, []string) (filesync.Result, error),
 	ws watchSettings) error {
 	out := cmd.OutOrStdout()
 	loop := &liveLoop{
+		rep:    rep,
 		locker: locks,
 		errOut: cmd.ErrOrStderr(),
 		loadPairs: func() ([]filesync.Pair, error) {
@@ -530,8 +556,10 @@ func runLive(ctx context.Context, cmd *cobra.Command, st *filesync.Store, api *c
 			// No watcher at all: every pair says so, under its own folder.
 			loop.localDown = err
 		}
-		fmt.Fprintf(out, "Watching: changes on either side are synced as they happen; a safety-net check every %s. Ctrl-C to stop.\n", ws.interval)
-	} else {
+		if !rep.asJSON {
+			fmt.Fprintf(out, "Watching: changes on either side are synced as they happen; a safety-net check every %s. Ctrl-C to stop.\n", ws.interval)
+		}
+	} else if !rep.asJSON {
 		fmt.Fprintf(out, "Watching; checking every %s. Ctrl-C to stop.\n", ws.interval)
 	}
 	return loop.Run(ctx)
@@ -579,46 +607,59 @@ func printPlan(ctx context.Context, cmd *cobra.Command, api *cliclient.Client, s
 // desktop the failure is over. Without it the stale error stood under the
 // folder until the next full check.
 type passReporter struct {
-	out, errOut io.Writer
-	failing     map[string]bool
+	rep     *syncReporter
+	failing map[string]bool
 }
 
+// newPassReporter reports in plain lines on out and errOut.
 func newPassReporter(out, errOut io.Writer) *passReporter {
-	return &passReporter{out: out, errOut: errOut, failing: map[string]bool{}}
+	return newPassReporterFor(plainReporter(out, errOut))
+}
+
+// newPassReporterFor reports through rep (plain lines or the event stream).
+func newPassReporterFor(rep *syncReporter) *passReporter {
+	return &passReporter{rep: rep, failing: map[string]bool{}}
 }
 
 func (r *passReporter) pass(p filesync.Pair, targeted bool, res filesync.Result, err error) {
 	if errors.Is(err, filesync.ErrPairBusy) {
 		// Not a failure of the pair: another process on this computer is
-		// syncing it, and this pass touched nothing. Its own line, so the
+		// syncing it, and this pass touched nothing. Its own report, so the
 		// desktop app says so instead of showing an error (synclock.go).
-		fmt.Fprintf(r.errOut, "%s: %s\n", p.ID, lockBusyLine(err))
+		r.rep.lockBusy(true, p.ID, err)
 		return
 	}
 	if err != nil {
 		r.failing[p.ID] = true
-		fmt.Fprintf(r.errOut, "%s: %v\n", p.ID, err)
+		r.rep.passFailed(p, err)
 		return
 	}
 	failed := len(res.Errors) > 0
 	quiet := targeted && res.Planned == 0 && !failed && !r.failing[p.ID]
 	r.failing[p.ID] = failed
 	if !quiet {
-		writeResult(r.out, r.errOut, p, res)
+		r.rep.result(p, res)
 	}
 }
 
-// errPairsBusy is the one-shot run's closing error when it skipped pairs
+// errNoPairs: `filex sync run` with nothing paired.
+var errNoPairs = errors.New("no folders are paired; add one with `filex sync add`")
+
+// pairsBusyError is the one-shot run's closing error when it skipped pairs
 // another process on this computer holds (exitPairBusy).
-func errPairsBusy(ids []string) error {
+type pairsBusyError struct{ ids []string }
+
+func (e *pairsBusyError) Error() string {
 	what, it := "1 pair was", "it"
-	if len(ids) > 1 {
-		what, it = fmt.Sprintf("%d pairs were", len(ids)), "them"
+	if len(e.ids) > 1 {
+		what, it = fmt.Sprintf("%d pairs were", len(e.ids)), "them"
 	}
-	return fmt.Errorf("%s not synced (%s): another filex on this computer is syncing %s - "+
+	return fmt.Sprintf("%s not synced (%s): another filex on this computer is syncing %s - "+
 		"run again once that one has stopped (in the desktop app: Pause sync, or quit it)",
-		what, strings.Join(ids, ", "), it)
+		what, strings.Join(e.ids, ", "), it)
 }
+
+func errPairsBusy(ids []string) error { return &pairsBusyError{ids: ids} }
 
 // printResult is writeResult on a command's own streams.
 func printResult(cmd *cobra.Command, p filesync.Pair, res filesync.Result) {
@@ -627,11 +668,12 @@ func printResult(cmd *cobra.Command, p filesync.Pair, res filesync.Result) {
 
 // writeResult reports one pass.
 //
-// ⚠ The summary says ", N failed" when the pass had errors. The desktop clears
-// a pair's error on its next clean summary, and the error TEXT arrives on
-// stderr — a different pipe, read in no guaranteed order against stdout. Only
-// a summary that carries the verdict itself cannot clear the error it came
-// with.
+// ⚠ The summary says ", N failed" when the pass had errors: a reader that
+// clears a pair's error on its next clean summary gets the error TEXT on
+// stderr — a different pipe, read in no guaranteed order against stdout.
+// Only a summary that carries the verdict itself cannot clear the error it
+// came with. (The desktop app reads the --json stream, one ordered pipe:
+// syncReporter.result.)
 func writeResult(out, errOut io.Writer, p filesync.Pair, res filesync.Result) {
 	if res.Planned == 0 && len(res.Errors) == 0 && res.Held == 0 {
 		fmt.Fprintf(out, "%s: already in step\n", p.ID)

@@ -712,25 +712,22 @@ func (r *Registry) announce(ctx context.Context, p *Installed, info *UpdateInfo)
 			return
 		}
 		meta["version"], meta["from"] = info.Version, p.Row.Version
+		// No sentence here: the server says the notice from these facts, in
+		// each reader's language (internal/notify say.go,
+		// server.notify.app_update_*).
 		switch info.Status {
 		case UpdateAvailable:
-			ev = notify.Event{Event: notify.EventAppUpdateAvailable, Severity: notify.SeverityInfo,
-				Title: p.Row.Name + " " + info.Version + " is available"}
+			ev = notify.Event{Event: notify.EventAppUpdateAvailable, Severity: notify.SeverityInfo}
 		case UpdateNeedsApproval:
 			meta["added"] = strings.Join(info.Added, ", ")
 			meta["adds_module"] = info.AddsModule
-			title := p.Row.Name + " " + info.Version + " needs approval"
-			if len(info.Added) > 0 {
-				title += ": new permission " + strings.Join(info.Added, ", ")
-			}
-			ev = notify.Event{Event: notify.EventAppUpdateNeedsApproval, Severity: notify.SeverityWarning, Title: title}
+			ev = notify.Event{Event: notify.EventAppUpdateNeedsApproval, Severity: notify.SeverityWarning}
 		default:
 			if info.Refusal != nil {
 				meta["error"] = clip(info.Refusal.Message, 300)
 				meta["code"] = info.Refusal.Code
 			}
-			ev = notify.Event{Event: notify.EventAppUpdateFailed, Severity: notify.SeverityWarning,
-				Title: p.Row.Name + " " + info.Version + " could not be installed automatically"}
+			ev = notify.Event{Event: notify.EventAppUpdateFailed, Severity: notify.SeverityWarning}
 		}
 		info.Announced = key
 	default:

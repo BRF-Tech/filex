@@ -6,7 +6,7 @@
 // glance: the running version, whether something newer exists, and who acts —
 // filex itself (patch under an allowing policy), one click here, or a manual
 // upgrade with the commands spelled out.
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import axios from 'axios';
 import {
@@ -23,7 +23,7 @@ import Badge from '@/components/ui/Badge.vue';
 import Spinner from '@/components/ui/Spinner.vue';
 import { DataTable, type DataColumn } from '@brftech/filex-core';
 
-const { t, te, locale } = useI18n();
+const { t, locale } = useI18n();
 const toast = useToastStore();
 
 const loading = ref(true);
@@ -55,6 +55,11 @@ async function load() {
   }
 }
 onMounted(load);
+// The policy's sentences are the server's, in the screen's language: a
+// language switch asks again.
+watch(locale, () => {
+  if (status.value) void load();
+});
 
 async function checkNow() {
   checking.value = true;
@@ -120,33 +125,14 @@ const packageHowTo = computed(() => {
     ? t('updates.packageHowTo', { manager: st.package_manager_name })
     : t('updates.packageHowToUnknown');
 });
-/** The saved policy by its name ("install patches"), not the setting's value. */
-const policyName = computed(() => {
-  const p = s.value?.policy ?? '';
-  return te(`updates.policyName.${p}`) ? t(`updates.policyName.${p}`) : p;
-});
-/** The policy badge says what this install DOES by itself. The server works
- *  that out (`behavior`, and `policy_limit` when it is less than the saved
- *  policy); the page words it and derives nothing from mode + policy (#72: a
- *  Homebrew install read "install patches", which it never does). */
-const policyBadge = computed(() => {
-  const st = s.value;
-  if (st?.policy_limit && st.behavior && te(`updates.behavior.${st.behavior}`)) {
-    return t(`updates.behavior.${st.behavior}`);
-  }
-  return t('updates.policyIs', { policy: policyName.value });
-});
-/** Why the saved policy has no (or less) effect here. It is kept as saved —
- *  the sentence names it. A package manager without a name is "your package
- *  manager". */
-const policyNote = computed(() => {
-  const st = s.value;
-  const limit = st?.policy_limit;
-  if (!st || !limit) return '';
-  const key = limit === 'package' && !st.package_manager_name ? 'packageUnknown' : limit;
-  if (!te(`updates.policyLimit.${key}`)) return '';
-  return t(`updates.policyLimit.${key}`, { policy: policyName.value, manager: st.package_manager_name ?? '' });
-});
+/** The policy badge says what this install DOES by itself, and the note why
+ *  the saved policy has less (or no) effect here. Both are the server's
+ *  sentences (`policy_badge`, `policy_note`: handlers/update.go sayPolicy,
+ *  which words `behavior` and `policy_limit`); the page derives nothing from
+ *  mode + policy (#72: a Homebrew install read "install patches", which it
+ *  never does) and keeps no copy of the words (0.54). */
+const policyBadge = computed(() => s.value?.policy_badge || s.value?.policy_name || s.value?.policy || '');
+const policyNote = computed(() => s.value?.policy_note ?? '');
 /** The manager's command, beside the sentence that names the manager. */
 const policyCommand = computed(() =>
   s.value?.policy_limit === 'package' && s.value.package_manager_name ? s.value.upgrade_command ?? '' : '',

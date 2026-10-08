@@ -39,6 +39,7 @@ import { ALL_SHARING, type SharingHeld } from '../lib/sharingHeld';
 import { publicLinksOff } from '../lib/e2eLinks';
 import { personInitial as initialOfPerson, personName as nameOfPerson } from '../lib/personName';
 import TagPicker from './TagPicker.vue';
+import { clipRunes, serverLimit } from '../lib/serverRules';
 import type { TagKind } from '../lib/tags';
 import PluginInspectorSection from './plugin/PluginInspectorSection.vue';
 
@@ -651,6 +652,13 @@ import type { NodeComment } from '../composables/useFileApi';
 const commentsState = ref<SectionState>('hidden');
 const comments = ref<NodeComment[]>([]);
 const commentDraft = ref('');
+/* The longest comment the server keeps, in characters (`limits.
+   comment_max_runes`, #211 audit B20). `maxlength="5000"` counted UTF-16
+   units: an emoji took two of the server's one. */
+watch(commentDraft, (v) => {
+  const clipped = clipRunes(v, serverLimit('comment_max_runes'));
+  if (clipped !== v) commentDraft.value = clipped;
+});
 const commentBusy = ref(false);
 const commentNodeId = computed<number | null>(() =>
   typeof single.value?.id === 'number' ? (single.value.id as number) : null,
@@ -1242,7 +1250,6 @@ watch(
               v-model="commentDraft"
               type="text"
               class="fe-inspector__comment-input"
-              maxlength="5000"
               :placeholder="t('inspector.comments.placeholder')"
               :aria-label="t('inspector.comments.placeholder')"
               :disabled="commentBusy"

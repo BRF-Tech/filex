@@ -27,6 +27,8 @@
 package handlers
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -61,6 +63,48 @@ const (
 // in the database. ⚠ Enforced HERE and not only in the client: a limit the
 // client applies is a limit the client can skip.
 const maxUserPrefsBytes = 64 << 10
+
+// appStateMaxBytes caps what ONE app's interface keeps for a person (the
+// document's `appState`: a JSON string holding {app: {key: value}}), as
+// compact JSON bytes. The 64 KiB above is the whole document; without a
+// per-app share one app could fill it and the next save of a theme would be
+// refused. Published to the clients as `limits.app_state_max_bytes`
+// (capabilities_rules.go), and enforced here (filex #211, audit B19): it used
+// to live in the page alone (packages/core lib/appState).
+const appStateMaxBytes = 16 << 10
+
+// appStateTooLarge names the first app whose kept state is over
+// appStateMaxBytes, or "" when every one fits (or the document keeps none).
+// A document whose appState is not the shape the page writes is not judged
+// here: it is the page's own value, bounded by the document's size.
+func appStateTooLarge(doc string) string {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(doc), &top); err != nil {
+		return ""
+	}
+	raw, ok := top["appState"]
+	if !ok {
+		return ""
+	}
+	var inner string
+	if err := json.Unmarshal(raw, &inner); err != nil {
+		return ""
+	}
+	var apps map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(inner), &apps); err != nil {
+		return ""
+	}
+	for app, state := range apps {
+		var buf bytes.Buffer
+		if err := json.Compact(&buf, state); err != nil {
+			continue
+		}
+		if buf.Len() > appStateMaxBytes {
+			return app
+		}
+	}
+	return ""
+}
 
 // prefsSurface reads and validates the surface from the query.
 //
@@ -175,6 +219,15 @@ func (h *UserPrefs) Put(w http.ResponseWriter, r *http.Request) {
 	// a surface PUTs its whole document, so a copy it read at boot would undo
 	// a choice made since on another surface (openwith.go). They change one
 	// kind at a time, through /api/me/open-with.
+	if app := appStateTooLarge(doc); app != "" {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+			"error": "app state too large",
+			"code":  "APP_STATE_TOO_LARGE",
+			"app":   app,
+			"max":   appStateMaxBytes,
+		})
+		return
+	}
 	doc = withoutOpenWith(doc)
 	if err := h.Store.SetUserPrefs(r.Context(), u.ID, surface, doc); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -212,4 +265,59 @@ func (h *UserPrefs) mirrorLocale(r *http.Request, id int64, was, tz, doc string)
 		return
 	}
 	_ = h.Store.UpdateUserLocale(r.Context(), id, lang, tz)
+	syncSurfaceLocales(r.Context(), h.Store, id, lang)
+}
+
+// localeDocs is what syncSurfaceLocales needs of the store.
+type localeDocs interface {
+	GetUserPrefs(ctx context.Context, userID int64, surface string) (string, error)
+	SetUserPrefs(ctx context.Context, userID int64, surface, doc string) error
+}
+
+// syncSurfaceLocales keeps every surface's document in step with the
+// account's language once it changed (#191: the app's language IS the
+// account's). ⚠ Without it a language chosen on one surface (the desktop
+// app, the profile form) was undone by another: the web panel ranks its own
+// document's `locale` first and would go on drawing - and, on its next
+// whole-document PUT, write back - the language the person had left. Only a
+// document that HOLDS a language is rewritten; one without reads the
+// account's anyway. Best-effort, like the mirror itself.
+func syncSurfaceLocales(ctx context.Context, store localeDocs, uid int64, lang string) {
+	lang = strings.TrimSpace(lang)
+	if store == nil || lang == "" {
+		return
+	}
+	for _, surface := range []string{SurfaceWeb, SurfaceDesktop} {
+		doc, err := store.GetUserPrefs(ctx, uid, surface)
+		if err != nil || strings.TrimSpace(doc) == "" {
+			continue
+		}
+		if next, changed := docWithLocale(doc, lang); changed {
+			_ = store.SetUserPrefs(ctx, uid, surface, next)
+		}
+	}
+}
+
+// docWithLocale is doc with its `locale` set to lang - changed=false when it
+// holds no language, or this one already.
+func docWithLocale(doc, lang string) (string, bool) {
+	var top map[string]json.RawMessage
+	if json.Unmarshal([]byte(doc), &top) != nil || top == nil {
+		return doc, false
+	}
+	raw, had := top["locale"]
+	if !had {
+		return doc, false
+	}
+	var cur string
+	if json.Unmarshal(raw, &cur) == nil && strings.EqualFold(strings.TrimSpace(cur), lang) {
+		return doc, false
+	}
+	b, _ := json.Marshal(lang)
+	top["locale"] = b
+	out, err := json.Marshal(top)
+	if err != nil {
+		return doc, false
+	}
+	return string(out), true
 }

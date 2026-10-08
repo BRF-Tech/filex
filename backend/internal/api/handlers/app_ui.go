@@ -128,8 +128,8 @@ func (h *AppPlugins) UISave(w http.ResponseWriter, r *http.Request) {
 // owner, syspath.OwnDraft, and CommitVersion holds it to that).
 func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmplugin.Installed, v *wire.View, target string, body io.Reader, size int64, uid int64) {
 	storageID, rels, err := h.resolvePaths(r.Context(), 0, []string{target})
-	if errors.Is(err, errOutsideRoot) {
-		refuseOutsideRoot(w)
+	if errors.Is(err, errOutsideRoot) || errors.Is(err, errSealedPath) {
+		writePathsRefused(w, err)
 		return
 	}
 	if err != nil || len(rels) != 1 {
@@ -146,7 +146,7 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 		return
 	}
 	if st.ReadOnly {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "read_only", "message": "this storage is read-only"})
+		writeReadOnly(w, r, http.StatusConflict)
 		return
 	}
 	if !rootAllows(r.Context(), h.Store, storageID, rel) {
@@ -186,7 +186,7 @@ func (h *AppPlugins) uiSaveOver(w http.ResponseWriter, r *http.Request, p *wasmp
 	}
 	actor := uid
 	if err := h.CommitVersion(r.Context(), storageID, rel, body, size, &actor); err != nil {
-		writeSaveFailure(w, err)
+		writeSaveFailure(w, r, err)
 		return
 	}
 	h.auditUISave(r, p, storageID, rel, size, "version")
@@ -230,7 +230,7 @@ func (h *AppPlugins) uiSaveNew(w http.ResponseWriter, r *http.Request, p *wasmpl
 		if writeE2ERefusal(w, r, err) {
 			return
 		}
-		writeSaveFailure(w, err)
+		writeSaveFailure(w, r, err)
 		return
 	}
 	h.auditUISave(r, p, folder.storage.ID, rel, size, "new")
@@ -266,7 +266,7 @@ func (h *AppPlugins) roomFor(w http.ResponseWriter, r *http.Request, size int64)
 	}
 	if err := h.Quota.CheckCanWrite(r.Context(), quotastore.OwnerFrom(r.Context()), size); err != nil {
 		if errors.Is(err, quota.ErrQuotaExceeded) {
-			writeJSON(w, http.StatusInsufficientStorage, map[string]string{"error": "quota_exceeded", "message": "there is not enough room left in your quota"})
+			writeError(w, r, http.StatusInsufficientStorage, "quota_exceeded", nil)
 			return false
 		}
 		slog.Warn("app ui save: quota check failed", slog.String("err", err.Error()))
@@ -281,18 +281,18 @@ func (h *AppPlugins) roomFor(w http.ResponseWriter, r *http.Request, size int64)
 // ⚠ Security review UI-15: what reaches the interface is a CODE and a
 // sentence of filex's own. The error itself — a path on the server's disk, a
 // driver's or a database's words — goes to the log, never to the app.
-func writeSaveFailure(w http.ResponseWriter, err error) {
+func writeSaveFailure(w http.ResponseWriter, r *http.Request, err error) {
 	// A lock, a name filex keeps, somebody else's draft: the gate's own
 	// answers (answerGate), as every other write says them.
-	if answerGate(w, err) {
+	if answerGate(w, r, err) {
 		return
 	}
 	if strings.HasPrefix(err.Error(), "read_only") {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "read_only", "message": "this storage is read-only"})
+		writeReadOnly(w, r, http.StatusConflict)
 		return
 	}
 	if errors.Is(err, quota.ErrQuotaExceeded) {
-		writeJSON(w, http.StatusInsufficientStorage, map[string]string{"error": "quota_exceeded", "message": "there is not enough room left in your quota"})
+		writeError(w, r, http.StatusInsufficientStorage, "quota_exceeded", nil)
 		return
 	}
 	if !isE2EUndecided(err) { // logged where the rule was asked

@@ -98,6 +98,11 @@ func (s *Service) Plans() []Plan { return s.plans }
 // catalog loaded cleanly).
 func (s *Service) PlansErr() string { return s.plansErr }
 
+// SignupPlan is the plan every new tenant starts on: the catalogue's first
+// plan nobody pays for. It is never the plan a signup asks for: a paid plan is
+// reached only through a payment Stripe confirms (ApplyStripeEvent).
+func (s *Service) SignupPlan() *Plan { return signupPlan(s.plans) }
+
 // PlanByID resolves a plan id; nil when unknown.
 func (s *Service) PlanByID(id string) *Plan {
 	for i := range s.plans {
@@ -116,8 +121,8 @@ type SignupRequest struct {
 	Slug string `json:"slug"`
 	// Name is the display name; defaults to the slug.
 	Name string `json:"name,omitempty"`
-	// Plan is a plan id from the catalog; defaults to the first plan.
-	Plan string `json:"plan,omitempty"`
+	// (No plan: a signup starts on SignupPlan whatever its body says. A
+	// `plan` field a client still sends is ignored.)
 	// Locale is the language the verification mail is written in — the
 	// signing-up visitor's (the handler fills it from the request when the
 	// body does not say). Any language the server speaks; English otherwise.
@@ -142,8 +147,9 @@ type SignupResult struct {
 // e-mail verification. Provisioning reuses the exact primitive the
 // /api/admin/providers lifecycle API uses (db.Store.CreateProvider) — no
 // parallel provisioning path — then stamps the plan snapshot into the
-// migration-00021 columns. Storage linking is deliberately NOT part of the
-// skeleton (see docs/CLOUD.md runbook).
+// migration-00021 columns: SignupPlan's, never one the request names.
+// Storage linking is deliberately NOT part of the skeleton (see
+// docs/CLOUD.md runbook).
 func (s *Service) Signup(ctx context.Context, req SignupRequest) (*SignupResult, error) {
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	if _, err := mail.ParseAddress(email); err != nil || email == "" {
@@ -156,13 +162,9 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (*SignupResult,
 	if reservedSlugs[slug] || slug == model.DefaultProviderSlug {
 		return nil, fmt.Errorf("%w: slug %q is reserved", ErrInvalid, slug)
 	}
-	planID := strings.TrimSpace(req.Plan)
-	if planID == "" {
-		planID = s.plans[0].ID
-	}
-	plan := s.PlanByID(planID)
+	plan := s.SignupPlan()
 	if plan == nil {
-		return nil, fmt.Errorf("%w: unknown plan %q", ErrInvalid, planID)
+		return nil, fmt.Errorf("%w: the plan catalogue has no plan a signup can start on", ErrInvalid)
 	}
 	if existing, err := s.store.GetProviderBySlug(ctx, slug); err != nil {
 		return nil, err

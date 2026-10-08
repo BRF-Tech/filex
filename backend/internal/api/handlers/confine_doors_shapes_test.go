@@ -30,6 +30,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
+	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/testutil"
 )
 
@@ -125,28 +126,6 @@ func TestConfineDoors_AnOpIsCarriedOutWhereItWasJudged(t *testing.T) {
 	code, raw = confRaw(t, f.URL, tok, http.MethodPost, "/api/files/ops", "text/plain", []byte(body))
 	require.Equal(t, http.StatusAccepted, code, raw)
 	cdEventually(t, func() bool { return confExists(f.RootMain, "kutu/hedef/ic.txt") }, "a copy inside the root must still be carried out")
-}
-
-// The multipart upload's init: the target is `path` + `filename`, in the
-// storage `storage_id` names when it is given. The middleware confines only
-// `path`. Refused before the storage is asked (403); inside the root the
-// request reaches the storage, which here (a local disk) answers that it has
-// no multipart upload (501).
-func TestConfineDoors_AnUploadInitStaysInTheRoot(t *testing.T) {
-	f, tok := confinedFix(t)
-
-	for _, s := range []struct{ label, ct, body string }{
-		{"a filename climbing out", "application/json", `{"path":"main://kutu","filename":"../disari/x.bin","size":10}`},
-		{"another storage by id", "application/json", fmt.Sprintf(`{"storage_id":%d,"path":"main://kutu","filename":"x.bin","size":10}`, f.Yan.ID)},
-		{"a path outside, text/plain", "text/plain", `{"path":"main://disari","filename":"x.bin","size":10}`},
-	} {
-		code, raw := confRaw(t, f.URL, tok, http.MethodPost, "/api/files/upload/init", s.ct, []byte(s.body))
-		assert.Equal(t, http.StatusForbidden, code, "%s: %s", s.label, raw)
-	}
-
-	code, raw := confRaw(t, f.URL, tok, http.MethodPost, "/api/files/upload/init", "application/json",
-		[]byte(`{"path":"main://kutu","filename":"x.bin","size":10}`))
-	assert.Equal(t, http.StatusNotImplemented, code, "inside the root the init reaches the storage: %s", raw)
 }
 
 // The text editor's save.
@@ -245,13 +224,32 @@ func TestConfineDoors_GrantsStayInTheRoot(t *testing.T) {
 		for _, s := range []struct{ label, route, body string }{
 			{"a grant", "/api/files/permissions", fmt.Sprintf(`{"path":"alpha://Gizli","user_id":%d,"level":"viewer"}`, colleague)},
 			{"an invitation", "/api/files/permissions/invite", `{"path":"alpha://Gizli","email":"colleague@alpha.test","level":"viewer"}`},
-			{"a share mail", "/api/files/permissions/share-mail", `{"path":"alpha://Gizli","email":"colleague@alpha.test","url":"https://files.example.test/s/abc"}`},
 		} {
 			code, raw := confRaw(t, pf.URL, tok, http.MethodPost, s.route, ct, []byte(s.body))
 			assert.Equal(t, http.StatusForbidden, code, "%s (%q): %s", s.label, ct, raw)
 		}
 	}
 	assert.False(t, granted("Gizli"), "no grant is made outside the root")
+
+	// A share mail names a link, not a path (share_mail.go): the member's own
+	// link on Gizli is outside this token's root, and answers as a link that
+	// does not exist — in either body shape.
+	gizli, err := pf.Store.GetNodeByPath(ctx, pf.StA.ID, pathkey.Hash(pf.StA.ID, "/Gizli"))
+	if err != nil || gizli == nil {
+		gizli, err = pf.Store.CreateNode(ctx, &model.Node{
+			StorageID: pf.StA.ID, Name: "Gizli", Path: "/Gizli", PathHash: pathkey.Hash(pf.StA.ID, "/Gizli"),
+			Type: model.NodeTypeDirectory,
+		})
+		require.NoError(t, err)
+	}
+	member := pf.UserA
+	outside, err := share.NewService(pf.Store).Create(ctx, share.CreateOpts{NodeID: gizli.ID, CreatedBy: &member})
+	require.NoError(t, err)
+	for _, ct := range []string{"text/plain", ""} {
+		code, raw := confRaw(t, pf.URL, tok, http.MethodPost, "/api/files/permissions/share-mail", ct,
+			[]byte(fmt.Sprintf(`{"share":%q,"email":"colleague@alpha.test"}`, outside.Token)))
+		assert.Equal(t, http.StatusNotFound, code, "a share mail (%q): %s", ct, raw)
+	}
 
 	code, raw := confRaw(t, pf.URL, tok, http.MethodPost, "/api/files/permissions", "text/plain",
 		[]byte(fmt.Sprintf(`{"path":"alpha://Ekip","user_id":%d,"level":"viewer"}`, colleague)))

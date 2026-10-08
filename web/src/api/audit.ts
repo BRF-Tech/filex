@@ -1,5 +1,6 @@
 import { api } from './client';
-import type { AuditEntry, PaginatedResponse } from './types';
+import { langParam } from './screenLang';
+import type { AuditEntry, AuditResourceOption, PaginatedResponse } from './types';
 
 export interface AuditListParams {
   user_id?: number;
@@ -15,6 +16,8 @@ interface BackendEntryEnvelope {
   user_email?: string;
   target_name?: string;
   user_name?: string;
+  label?: string;
+  target_label?: string;
 }
 
 interface BackendListResponse {
@@ -22,7 +25,11 @@ interface BackendListResponse {
   total?: number;
   limit?: number;
   offset?: number;
+  resources?: AuditResourceOption[];
 }
+
+/** A page of the log, with the server's "What" filter beside it. */
+export type AuditPage = PaginatedResponse<AuditEntry> & { resources: AuditResourceOption[] };
 
 /**
  * One audit row in the shape the views read.
@@ -64,16 +71,16 @@ export function toServerParams(p: AuditListParams): Record<string, string | numb
 }
 
 export const AuditApi = {
-  async list(params: AuditListParams = {}): Promise<PaginatedResponse<AuditEntry>> {
+  async list(params: AuditListParams = {}): Promise<AuditPage> {
     // Backend returns `{entries, total, limit, offset}` and may wrap
     // each row as `{entry: AuditEntry, user_email}`. Normalize to the
     // paginated envelope the views expect.
     const { data } = await api.get<PaginatedResponse<AuditEntry> | BackendListResponse>(
       '/admin/audit',
-      { params: toServerParams(params) },
+      { params: { ...toServerParams(params), ...langParam() } },
     );
     if ('items' in data && Array.isArray(data.items)) {
-      return data as PaginatedResponse<AuditEntry>;
+      return { resources: [], ...(data as PaginatedResponse<AuditEntry>) };
     }
     const env = data as BackendListResponse;
     const items = (env.entries ?? []).map((row) => {
@@ -86,6 +93,8 @@ export const AuditApi = {
           user_email: r.user_email ?? null,
           user_name: r.user_name ?? null,
           target_name: r.target_name ?? null,
+          label: r.label ?? null,
+          target_label: r.target_label ?? null,
         });
       }
       return toAuditEntry(row as AuditEntry);
@@ -97,6 +106,7 @@ export const AuditApi = {
       total: env.total ?? items.length,
       page: limit > 0 ? Math.floor(offset / limit) + 1 : 1,
       page_size: limit || items.length || 25,
+      resources: env.resources ?? [],
     };
   },
 };

@@ -56,6 +56,9 @@ import {
   labelOfWire,
   parentOfWire,
   permAllowsWrite,
+  vaultBlocked,
+  vaultDeadEnd,
+  vaultOfWire,
 } from '../lib/destinationTree';
 
 const props = defineProps<{
@@ -94,6 +97,16 @@ const props = defineProps<{
   pick?: 'dir' | 'file';
   /** The parent is running the operation: the dialog stays up but inert. */
   busy?: boolean;
+  /**
+   * wiring:e2 vault — the vault folders the explorer knows (opened here, or
+   * remembered). The listings add the ones the server names
+   * (`e2e_vault`, `e2e_vault_root`); `api` lists an open vault from its index.
+   */
+  vaultRoots?: string[];
+  /** wiring:e2 vault — the vault the items are in; null or absent: outside
+   *  every vault. Inside a vault only that vault is a destination; outside,
+   *  no vault is (docs/E2E-VAULT-FORMAT.md: that is an upload or a download). */
+  vaultFrom?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -125,11 +138,22 @@ const picked = ref<string | null>(null);
  */
 let cache = new Map<string, ManagerResponse>();
 
+/* wiring:e2 vault — vault folders the listings of this dialog named. */
+const learnedVaults = ref<string[]>([]);
+function learnVault(root: string): void {
+  const r = String(root ?? '').replace(/\/+$/, '');
+  if (r && !learnedVaults.value.includes(r)) learnedVaults.value = [...learnedVaults.value, r];
+}
+function vaultOf(p: string): string | null {
+  return vaultOfWire(p, [...(props.vaultRoots ?? []), ...learnedVaults.value]);
+}
+
 watch(
   () => props.open,
   (isOpen) => {
     if (!isOpen) return;
     cache = new Map();
+    learnedVaults.value = [];
     void goTo(initialLocation(props.startAt, props.storages));
   },
   { immediate: true },
@@ -145,6 +169,9 @@ async function load(path: string): Promise<ManagerResponse | undefined> {
   if (hit) return hit;
   try {
     let resp = await props.api.index(path);
+    /* wiring:e2 vault */
+    if (typeof resp.e2e_vault_root === 'string' && resp.e2e_vault_root) learnVault(resp.e2e_vault_root);
+    for (const f of resp.files ?? []) if (f.type === 'dir' && f.e2e_vault) learnVault(f.path);
     if (e2eNameView) {
       const root = typeof resp.e2e_root === 'string' && resp.e2e_root ? resp.e2e_root : null;
       resp = { ...resp, files: await e2eNameView.decorate(resp.files ?? [], { root }) };
@@ -176,7 +203,17 @@ async function goTo(path: string): Promise<void> {
   loading.value = false;
   here.value = resp;
   failed.value = !resp;
-  rows.value = destinationRows(resp?.files, props.moving, { files: pickingFile.value });
+  /* wiring:e2 vault — inside a vault the items do not come from, a server
+     listing is the vault's layout on the storage (`v/`, packs): no rows. */
+  const inVault = vaultOf(path);
+  const shown = inVault && inVault !== (props.vaultFrom ?? null) ? [] : resp?.files;
+  rows.value = destinationRows(shown, props.moving, { files: pickingFile.value }).map((row): DestinationRow => {
+    /* wiring:e2 vault — a vault reads as one, and the rule closes what it must. */
+    if (row.kind !== 'dir') return row;
+    const isVault = vaultOf(row.path) === row.path.replace(/\/+$/, '');
+    const dead = !row.blocked && vaultDeadEnd(row.path, props.vaultFrom ?? null, vaultOf);
+    return { ...row, vault: isVault, blocked: dead ? 'vault' : row.blocked };
+  });
 }
 
 const parent = computed(() => parentOfWire(at.value, multiDrive.value));
@@ -186,6 +223,13 @@ const crumbs = computed(() =>
 
 /** Why the CURRENT folder cannot be chosen, or null when it can. */
 const hereBlocked = computed(() => blockedReason(at.value, props.moving));
+/** wiring:e2 vault — why the vault rule refuses the CURRENT folder. A file
+ *  pick reads (an app's chooser): it asks the server for the file by its path,
+ *  which a vault never answers, so it is refused the same way. */
+const hereVault = computed(() => {
+  void learnedVaults.value;
+  return vaultBlocked(at.value, props.vaultFrom ?? null, vaultOf);
+});
 
 const hereWritable = computed(() => {
   if (at.value === DRIVES) return false;
@@ -196,6 +240,7 @@ const hereWritable = computed(() => {
 
 const canChoose = computed(() => {
   if (props.busy || at.value === DRIVES) return false;
+  if (hereVault.value) return false; /* wiring:e2 vault */
   if (pickingFile.value) return picked.value !== null;
   return hereWritable.value && hereBlocked.value === null;
 });
@@ -215,10 +260,13 @@ const reason = computed<string>(() => {
   if (at.value === DRIVES) return t('destpicker.pick_a_drive');
   if (pickingFile.value) {
     if (failed.value) return t('destpicker.unreadable');
+    if (hereVault.value) return t('destpicker.blocked.vault_in'); /* wiring:e2 vault */
     return picked.value === null ? t('destpicker.pick_a_file') : '';
   }
   if (hereBlocked.value === 'self') return t('destpicker.blocked.self');
   if (hereBlocked.value === 'descendant') return t('destpicker.blocked.descendant');
+  if (hereVault.value === 'into') return t('destpicker.blocked.vault_in'); /* wiring:e2 vault */
+  if (hereVault.value === 'out') return t('destpicker.blocked.vault_out');
   if (failed.value) return t('destpicker.unreadable');
   if (here.value && !hereWritable.value) return t('destpicker.readonly_here');
   return '';
@@ -254,6 +302,7 @@ function rowTitle(row: DestinationRow): string {
   if (row.kind === 'file') return row.label;
   if (row.blocked === 'self') return t('destpicker.blocked.self');
   if (row.blocked === 'descendant') return t('destpicker.blocked.descendant');
+  if (row.blocked === 'vault') return t(props.vaultFrom ? 'destpicker.blocked.vault_out' : 'destpicker.blocked.vault_in'); /* wiring:e2 vault */
   if (!row.writable) return t('destpicker.readonly');
   return row.label;
 }
@@ -363,6 +412,8 @@ function choose(): void {
             <!-- eslint-disable-next-line vue/no-v-html -- static markup from lib/fileIcons -->
             <span class="fe-destpick__rowicon" aria-hidden="true" v-html="rowIcon(row)"></span>
             <span class="fe-destpick__rowname"><bdi>{{ row.label }}</bdi></span>
+            <!-- wiring:e2 vault — a vault is said to be one, open or not. -->
+            <span v-if="row.vault" class="fe-destpick__rowtag" data-testid="destpicker-vault-tag">{{ t('destpicker.tag.vault') }}</span>
             <span v-if="row.blocked" class="fe-destpick__rowtag">{{ t('destpicker.tag.blocked') }}</span>
             <span v-else-if="!row.writable" class="fe-destpick__rowtag">{{ t('destpicker.readonly') }}</span>
             <svg

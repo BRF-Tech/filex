@@ -1,0 +1,20 @@
+{
+  "v": 3,
+  "req": [
+    "vault"
+  ],
+  "salt": "5uz6mhwC3E1+CRPdHZJvtQ==",
+  "iter": 1000,
+  "verify": "OJPM7FatvdLz66L2rfJQiIK95JJh6AYHPkRrIi+TA3uJkb87x72r8J+Q0ENs0fs=",
+  "fmk": "wrapped",
+  "fmk_pw": "mr3r+AZ09LD/SDNrEWL6/LJWIAW4Q0yXnsCWx112PC1tfKdjMjK3yuk2ii7OL9m7+Q9uaZk4m1+Mq8ol",
+  "rk": {
+    "salt": "14pakks2EpEvTkWyJ3nr1w==",
+    "blob": "Wwo0RemCPsX7ap63GSB/bWZtvVWL7+gz+LA37HWn03lxanrw9Ro/eZSVqO9uxgkzHTa3wnB3Os2sXTUu"
+  },
+  "vault": {
+    "v": 1,
+    "id": "wpU155hSR3hD1u8bSnGv7w",
+    "pack": 16
+  }
+}

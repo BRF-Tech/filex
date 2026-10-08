@@ -32,7 +32,10 @@ describe('refused changes', () => {
 
   it('a permanent delete refused outright goes the same way (and is emitted too)', () => {
     const purge = fn('purgeSelection');
-    expect(purge).toMatch(/refuseInDialog\(deleteReq, ticket, firstError, \{ op: 'purge' \}, reason \?\? t\('toast\.failed'\)\)/);
+    // A request the server refused whole, and a batch it refused every entry
+    // of - said in the server's words (its `summary`, 0.54 finding A15).
+    expect(purge).toMatch(/refuseInDialog\(deleteReq, ticket, err, \{ op: 'purge' \}\);/);
+    expect(purge).toMatch(/refuseInDialog\(deleteReq, ticket, new Error\(said\.summary\), \{ op: 'purge' \}, said\.summary\)/);
   });
 
   it('an app action that failed is said in the failure words, not its raw message', () => {

@@ -16,12 +16,13 @@ turns a kind off, and that kind is then held for a short window and told in
 minute is one notification, not 30.
 
 - [How it works](#how-it-works)
+- [What a notification says](#what-a-notification-says) - [which language](#which-language) · [the words](#the-words) · [an item inside an encrypted folder](#an-item-inside-an-encrypted-folder) · [who can make one](#who-can-make-one)
 - [Configuration](#configuration)
 - [The webhook](#the-webhook) - [payload](#payload) · [headers](#headers) · [delivery--retry](#delivery--retry)
 - [Event types & severities](#event-types--severities)
 - [Click target](#click-target) - [the field](#the-field) · [which events carry one](#which-events-carry-one) · [where a click goes](#where-a-click-goes)
 - [In-app bell (endpoints)](#in-app-bell-endpoints)
-- [Reaching someone who is not looking at the bell](#reaching-someone-who-is-not-looking-at-the-bell)
+- [Reaching someone who is not looking at the bell](#reaching-someone-who-is-not-looking-at-the-bell) - [browser notifications](#browser-notifications) · [desktop app](#desktop-app) · [Web Push](#web-push)
 - [The digest](#the-digest) - [what is held](#what-is-held) · [urgent kinds](#urgent-kinds) · [the window](#the-window) · [the digest row](#the-digest-row) · [email and webhooks](#email-and-webhooks)
 - [Admin endpoints](#admin-endpoints)
 - [Per-user settings](#per-user-settings)
@@ -55,16 +56,17 @@ The two channels are independent: a webhook failure never affects the bell row,
 and having no destination at all simply means the outbound call is skipped while
 the bell keeps recording.
 
-The bell row is then **read** by three surfaces - the bell itself, a browser
-notification while a tab is open, and the desktop app's native OS notification -
-all of which take a person to the event's
-[click target](#click-target). They are readers of the one feed, not channels
-of their own: nothing extra is sent and nothing extra is polled (see
+The bell row is then **read** by four surfaces - the bell itself, a browser
+notification while a tab is open, the desktop app's native OS notification, and
+a push to a phone or a browser while filex is closed ([Web Push](#web-push),
+for a device whose person turned it on) - all of which take a person to the
+event's [click target](#click-target). They are readers of the one feed, not
+channels of their own: none of them decides anything the bell does not (see
 [Reaching someone who is not looking at the bell](#reaching-someone-who-is-not-looking-at-the-bell)). Webhook errors are recorded **against the notification row**, never
 bubbled up to break the action that triggered the event.
 
-Which rows a person is TOLD about - the badge, the pop-ups, the email - is
-decided in that same read, per person: a kind they hold for
+Which rows a person is TOLD about - the badge, the pop-ups, the pushes, the
+email - is decided in that same read, per person: a kind they hold for
 [the digest](#the-digest) (none, out of the box) is in their list at once but
 counts for nothing until the digest that carries it is written. Every row is
 still written the moment its event happens, and every webhook still receives
@@ -74,6 +76,150 @@ it then.
 > subsystem. When **false**, `Service.Send` is a no-op and every
 > `/api/notifications/…` endpoint returns **503 `{"error":"notifications
 > offline"}`**. Leave it on unless you have a reason not to.
+
+---
+
+## What a notification says
+
+**The server says it, on every channel, with one piece of code**
+(`internal/notify/say.go`, since 0.54). A row keeps what HAPPENED - its
+`event` and its `meta` (the node, the actor, the share, the counts, an app's
+words per language) - and the server makes the sentence when the row is read,
+in the reader's language:
+
+| Channel | Where its words come from |
+|---|---|
+| The bell, the full list, the page's pop-up | `GET /api/notifications` answers each row's `title` and `body` already said (`notify.SayRows`) |
+| The desktop app's window bell and native toast | the same endpoint, shown as it is |
+| An agent (`notifications_list`) | the same endpoint |
+| A [Web Push](#web-push) | the same sentence, laid out as the page's pop-up lays it out |
+| The emails (an urgent drop notice, [the digest's](#email-and-webhooks)) | the same sentence: the title is the subject, the body the text |
+| The webhooks' `title` and `body` | the same sentence, in the language chosen for that webhook (else the instance's), plus the message untranslated (`i18n`) |
+| The administrators' history | the same sentence, in the reader's account language |
+
+No screen composes a sentence: the explorer, the admin panel, the desktop app
+and the service worker show the words they are given (a toast lays out the
+instance's name over "title - body"). One notification therefore says the
+same thing in the bell, on a phone and in an email, a language changed in the
+settings or a language pack installed changes every row at once, and an
+operator alarm reaches a Turkish reader in Turkish. The emitter's own `title`
+and `body` stay on the row as its fallback: an event the catalogue has no
+phrase for (one a later version adds) is said in its emitter's words, and
+only an event that set none is said by its id.
+
+### Which language
+
+**Translated at the last stop** (0.54, the maintainers' rule). A notification
+travels untranslated - its event, its facts and the catalogue keys it is said
+with - up to the point where it reaches its receiver, and only there is it
+said, in the language of the one who receives it:
+
+- **A person, on every channel** - the bell and the full list
+  (`GET /api/notifications`), the administrators' history
+  (`GET /api/admin/notifications`), the desktop app's toast, an agent
+  (`notifications_list`), a [Web Push](#web-push), every email: the language
+  of the person's **account** (`users.locale`), else the instance's
+  (`FILEX_DEFAULT_LOCALE`), else English. An instance-wide notification (an
+  operator alarm) is said for each reader in that reader's language. The
+  request names no language: `lang=` is not read, and an embed drawn in its
+  host's language still gets the person's notifications in the account's.
+- **A webhook** - a receiver no person stands behind: the language chosen for
+  it - a [target's own](#the-webhook) (Admin → Webhooks → Language), or
+  `FILEX_WEBHOOK_LANG` for the legacy webhook - else the instance's. The body
+  also carries the message untranslated ([`i18n`](#payload)).
+- **An email to a bare address** (a share or file-request link mailed to
+  somebody with no account here): the language PICKED for the recipient in
+  the share dialog (*Recipient's language*, optional), else the instance's -
+  never the sender's screen language: the form sends a language only when
+  somebody picked one. An address that belongs to an account reads its
+  owner's language, whatever the form says
+  ([Emailing a link](SHARING.md#emailing-a-link)).
+
+**The account's language is the screen's.** The web panel, the explorer and
+the desktop app read their language from the account, and a language picked
+on any of them is written to the account - so the screen and every
+notification channel always agree. A browser's own copy (`filex.locale`) is
+only the first paint before the account answers and the signed-out page's
+memory; the desktop app has no language of its own (an older install's pinned
+choice is handed to an account that held none, once). An account that holds no
+language is given the one it signs in with, by the server, at the sign-in
+([BACKEND.md](BACKEND.md#post-apiauthlogin-)). An explorer embedded in
+another page speaks the account's language too: the host's `locale` is only
+what it draws until the account answers and the starting value of an account
+with no language ([API.md](API.md#the-explorers-language)). Signed-out pages
+use the browser's language, else the instance's; an embedded explorer with
+nobody signed in (or an app's token) keeps the host's.
+
+A language is one filex ships (English, Turkish) or one an installed
+language pack adds; any other answers in the instance default, then English.
+
+### The words
+
+The phrases are keys of the server catalogue (`internal/srvtext/locales`), the
+same one the emails and the public pages are written from:
+
+- `server.notify.<event>.title` / `.body` - the sentence; `{name}`, `{path}`,
+  `{count}`… are the row's facts (an unresolved one is removed together with
+  the punctuation next to it);
+- `<field>_<category>` - a plural form, by the CLDR category of the row's
+  count (`_one`, `_two`, `_few`…);
+- `<field>_file` - a single encrypted file's wording of an event that also
+  happens to folders (`e2e.escrow_used`, `e2e.password_changed`);
+  `<field>_rejected` - a NO to an encryption request;
+- `server.notify.digest.*` - [the digest's](#the-digest-row) lines;
+  `server.notify.word.*` - the words a sentence falls back on ("Someone", "a
+  file", "🔒 Encrypted item").
+
+A [language pack](PLUGIN-KIT.md#writing-a-language-pack) translates them like
+any server string (`ui_locales[<lang>]`); a key the pack lacks is said in
+English, one key at a time, and a translation that drops or adds a
+placeholder is refused for the English one. A notice an app sends
+(`plugin.notice`) is said in the words the app wrote for the reader's language
+(else English), under the app's label in that language.
+
+**Right to left.** In a right-to-left language the server wraps every value it
+places in a sentence - a name, a path, a reason, an app's words - in FIRST
+STRONG ISOLATE … POP DIRECTIONAL ISOLATE (U+2068 … U+2069), the rule the
+explorer's own strings follow: each keeps its own direction, and a path's
+leading slash stays where it belongs. A translation cannot carry these marks;
+the server adds them, once, for every channel.
+
+### An item inside an encrypted folder
+
+⚠ **The one exception.** Inside an end-to-end encrypted folder whose names
+are encrypted, the server has only the scrambled names, so it cannot say the
+item's name. The sentence is still the server's: the name stands in it as
+"🔒 Encrypted item" (`server.notify.word.locked`; a path as
+`<folder>/…/🔒 Encrypted item`), and that is what a push, an email, a webhook
+and the desktop app's toast say - they have no key. A row read through the
+API also carries `e2e`, where those words stand:
+
+```json
+"e2e": {
+  "title": [{ "text": "New file: " }, { "name": 0 }],
+  "body": [{ "name": 1 }],
+  "names": [
+    { "wire": "team://Vault/<scrambled>", "root": "team://Vault", "part": "name", "locked": "🔒 Encrypted item" },
+    { "wire": "team://Vault/<scrambled>", "root": "team://Vault", "part": "path", "locked": "Vault/🔒 Encrypted item" }
+  ]
+}
+```
+
+A browser whose explorer has that folder unlocked puts the item's real name
+(or its path, for `part: "path"`) in each marked place; every other reader
+uses `locked`, which is exactly what `title` and `body` already say. It builds
+no words - it fills a name into the server's sentence. A row that names no
+encrypted item carries no `e2e`.
+
+### Who can make one
+
+**Only the server makes a notification**, from its own events (a write, a
+share, a drop, an alarm, an app's `notify_send`): no endpoint lets a client
+create one, choose who it is addressed to or supply its words - a client reads
+its own bell, marks rows read and changes its own settings, and the
+administrators' "Send test notification" writes the server's own row
+(`handlers/notifications_text_test.go`
+TestNotifications_NoEndpointTakesItsWordsFromTheClient holds it).
 
 ---
 
@@ -87,6 +233,10 @@ optional - the defaults give you a working in-app bell with no outbound webhook.
 | `FILEX_NOTIFY_ENABLED` | `notify.enabled` | `true` | Master switch. `1`/`true` enables; any other value disables (503 + no-op). |
 | `FILEX_WEBHOOK_URL` | `notify.webhook_url` | `""` | Where each event is POSTed. **Empty = webhook skipped** (the bell still records). |
 | `FILEX_WEBHOOK_TOKEN` | `notify.webhook_token` | `""` | Optional secret. Sent as `Authorization: Bearer <token>` on every webhook POST. |
+| `FILEX_WEBHOOK_LANG` | `notify.webhook_lang` | `""` | The language the legacy webhook's `title` and `body` are said in (`tr`, `en`, a language pack's). Empty = the instance's (`FILEX_DEFAULT_LOCALE`, else English). A webhook v2 target has its own setting. |
+| `FILEX_PUSH_ENABLED` | `notify.push.enabled` | `true` | [Web Push](#web-push). Works only with `FILEX_SECRET_KEY` set: the key pushes are signed with is stored sealed with it. |
+| `FILEX_PUSH_SUBJECT` | `notify.push.subject` | `FILEX_PUBLIC_URL` (https) | The contact a push service may write to about this server: `mailto:ops@example.com` or an https address. Without an https public address: `mailto:filex@<its host>`. |
+| `FILEX_PUSH_HOSTS` | `notify.push.hosts` | `""` | Push services accepted besides the browsers' own, comma separated; `*` accepts any https host that is a name, never an address. |
 
 ```bash
 # In-app bell only (no outbound webhook) - this is the default.
@@ -112,8 +262,10 @@ kinds of destination and they are independent:
   install, receives every event (except `notification.digest`, see
   [Email and webhooks](#email-and-webhooks));
 - any number of **webhook v2 targets** - rows managed in **Admin → Webhooks**,
-  each with its own URL, its own signing secret and its own **per-event
-  allow-list**. A target with an empty allow-list receives everything.
+  each with its own URL, its own signing secret, its own **per-event
+  allow-list** and its own **language** (`lang`, migration 00105: the
+  language its `title` and `body` are said in; empty = the instance's). A
+  target with an empty allow-list receives everything.
 
 The deliveries run in parallel and retry independently; one failing receiver
 does not delay or fail the others.
@@ -136,12 +288,28 @@ document:
 }
 ```
 
+An event the server has a phrase for also carries itself untranslated
+(`i18n`, below) - a `drop.received` told to a target set to English:
+
+```json
+{
+  "event": "drop.received",
+  "title": "1 file received",
+  "body": "Ayşe → Inbox",
+  "i18n": {
+    "lang": "en",
+    "title": { "key": "server.notify.drop.received.title", "count": 1, "vars": { "count": "1" } },
+    "body": { "key": "server.notify.drop.received.body", "vars": { "uploader": "Ayşe", "folder": "Inbox" } }
+  }
+}
+```
+
 | Field | Type | Notes |
 |---|---|---|
 | `event` | string | Event type id (see [Event types](#event-types--severities)). |
 | `severity` | string | `info` · `warning` · `error` · `critical`. |
-| `title` | string | Short headline. Defaults to the event id if the sender left it empty. |
-| `body` | string | Human-readable detail. |
+| `title` | string | The headline - the sentence the bell says for the event ([What a notification says](#what-a-notification-says)), in this destination's language: a target's own `lang`, `FILEX_WEBHOOK_LANG` for the legacy webhook, else the instance's (`FILEX_DEFAULT_LOCALE`, else English). An event with no phrase carries its sender's title, or its id when it set none. |
+| `body` | string | The detail, said the same way. |
 | `meta` | object | Optional, event-specific key/values. **Omitted** when empty. |
 | `ts` | string (RFC 3339) | Event timestamp (UTC). |
 | `at` | string (RFC 3339) | The same timestamp under the webhook v2 field name. **Always present** - it is filled from `ts` on every send. |
@@ -149,6 +317,7 @@ document:
 | `share` | object | The public link the event is about: `token`, `path`. Present on `share.created`. |
 | `actor` | object | Who triggered it, best-effort: `id`, `email`. Omitted on anonymous surfaces such as a public drop. |
 | `target` | object | **Where a click on this notification goes** - `kind` (`file`/`dir`/`share`/`none`) plus `storage`, `path`, `id`. **Always present**; see [Click target](#click-target). |
+| `i18n` | object | **The message untranslated**, for a receiver that translates for itself: `lang` (the language `title`/`body` above are in), `title` and `body`, each `{key, count?, vars?}` - the server catalogue's key (`server.notify.*`, the keys a translator gets in `filex-catalogue-en.json`), the count its plural form is chosen by (CLDR: `<key>_one`, `_few`... in the receiver's language; the plain key is `other`), and the values its `{placeholders}` take. An item inside an encrypted folder is the lock word here too. `body` is absent where the body is not one phrase (a digest: its lines are `meta.groups[].parts`, keys `server.notify.digest.*`); `i18n` is absent for an event the catalogue has no phrase for. |
 
 > The per-user routing field (`UserID`) is **internal only** - it scopes the
 > in-app bell row and is **never** included in the webhook payload.
@@ -195,13 +364,22 @@ user action that produced the event returns immediately.
   enabled target matching the event, the row is marked `skipped` (the in-app
   bell row still exists). A malformed URL fails immediately without retrying.
 - **Shutting down:** an event recorded after filex began to stop is not
-  delivered: the row is marked `skipped`, `webhook_error` says `service stopped
-  before delivery`. Deliveries already under way are cancelled, and stopping
-  waits for them to return.
+  delivered: the row is marked `skipped` with the code `stopped`. Deliveries
+  already under way are cancelled, and stopping waits for them to return.
 
 Each notification row tracks this lifecycle in `webhook_status`
 (`pending → sent | failed | skipped`) and `webhook_error`, both visible in the
-[admin view](#admin-endpoints). That is the **aggregate** across destinations;
+[admin view](#admin-endpoints). For a `skipped` row `webhook_error` is a CODE:
+`no_destination` (no URL, no enabled target takes the event), `digest_unnamed`
+(a digest goes only to a target that names `notification.digest`, and none
+does), `sibling` (the webhooks received this event with another row of it) or
+`stopped` (the server was shutting down). Every row read through the API also
+carries `webhook_reason`: why it was skipped, said by the server in the
+reader's language (`server.webhooks.skipped.<code>`), or a failed delivery's
+error as the receiver gave it. A row written before 0.54 kept the English
+sentence instead of a code; it is said the same way. The admin page prints
+`webhook_reason` - until 0.54 it said "no webhook is set up" for every skipped
+row, which was wrong for two of the four. That is the **aggregate** across destinations;
 each target additionally persists its own last delivery - final HTTP status
 (`0` when there was no response), last error and timestamp - which is what
 **Admin → Webhooks** shows per row.
@@ -263,7 +441,7 @@ of them tickable on a target in **Admin → Webhooks**:
 | `drop.received` | A file arrived through a public "request files" link. |
 | `comment.added` | Somebody commented on a file or folder. `meta` carries `comment_id` and the first 200 characters of the body. |
 | `e2e.escrow_used` | An encrypted folder - or a single encrypted file (`.fxe`) - was opened with the operator's **escrow key** instead of its owner's passphrase - not the recovery key, which the owner holds. `meta` carries `escrow_kid`, `storage`, `folder` (for a file: `file` and `kind: "file"` instead) and, when the caller was signed in, `actor_email`. |
-| `e2e.password_changed` | An encrypted folder's password was changed - or reset with its **recovery key** (`meta.via = "recovery_key"`, severity `warning`) - in the web UI, which announces it once the new key file is written ([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#changing-the-password)). Sent to the folder's **owner**, who may not be the person who changed it. `meta` carries `storage`, `folder`, `via`, `rekey` (the folder key was replaced too) and, when the caller was signed in, `actor_email`. A single encrypted file's password change is the same event, with `file` and `kind: "file"` in place of `folder`, sent to the file's owner. |
+| `e2e.password_changed` | An encrypted folder's password or recovery slot was changed. Said by the **server** from the key file it saw rewritten - on any surface, never from a client's announcement ([E2E-ENCRYPTION.md](E2E-ENCRYPTION.md#who-is-told)). Sent to the folder's **owner**, who may not be the person who changed it - severity `warning` when somebody else made the change - or, when nobody owns the folder, to the administrators. `meta` carries `storage`, `folder`, `changes` (`password`, `recovery_key`, `rekey`, ...), `rekey` (the folder key was replaced too), `origin` (the surface), `versions_deleted` or `versions_kept` (the earlier key files; only the owner's or an administrator's change deletes them) and, when the writer is known, `actor_email`. A single encrypted file's password change is the same event, with `file` and `kind: "file"` in place of `folder`, sent to the file's owner. Up to 0.53 it also carried `via`, the client's word on how the change was proved; the server cannot know that, and it is gone. |
 | `e2e.request_created` | Somebody asked to encrypt a folder or a file under the tenant's `approval` policy ([E2E-ENCRYPTION.md → Who may encrypt](E2E-ENCRYPTION.md#who-may-encrypt)). A tenant's request is one broadcast placed on the folder: the tenant's administrators see it, the platform operator's bell does not (they see it under Admin → Encryption), a member never does. The platform's own request (the supertenant's) is addressed to each of the supertenant's administrators instead, the webhook told once. Webhooks get every tenant's. `meta` carries `requester`, `reason`, `request_id`, `storage` and `target_kind` (`folder` \| `new_folder` \| `file`; for a file the node is the folder it goes into). **Once** per request: asking again while it waits tells nobody. |
 | `e2e.request_decided` | An administrator approved or rejected an encryption request. Sent to the person who asked, and to nobody else. `meta` carries `decision` (`approved` \| `rejected`), `decider`, `note`, `request_id`, `storage` and `target_kind`. A request that lapses unanswered tells nobody; the audit log has it (`e2e_request.expire`). |
 | `notification.digest` | One person's [digest](#the-digest): the notifications of the kinds they did not mark urgent, held for the window and told together. **Only** to a target that ticks it - never to the legacy webhook or a target with an empty list, which received each row already. `meta` carries `count`, `groups` (per folder: `storage`, `path`, `name`, `counts` by event, `parts`, `encrypted`, `e2e_root`), `other` / `other_parts` (the rows that name no folder), `more_folders`, `window_start`, `window_end`, `recipient.id` and, for a digest of one row, `item`. |
@@ -461,8 +639,11 @@ a hash ends up naming a folder called `qldemo:`.
 
 ## Reaching someone who is not looking at the bell
 
-The bell only notifies somebody who is looking at it. Two channels carry the
-same event further, and they are mutually exclusive on any one machine.
+The bell only notifies somebody who is looking at it. Three channels carry the
+same event further: a browser notification while filex is open in a tab, the
+desktop app's native one, and [Web Push](#web-push) while filex is closed. The
+first two are mutually exclusive on any one machine, and a push replaces the
+page's toast of the same row rather than adding a second.
 
 ### Browser notifications
 
@@ -483,7 +664,8 @@ event's [target](#click-target).
   the permission was never granted, and say "on" while nothing ever appeared.
 - **It says WHO is notifying, and shows a logo the browser can decode.** The
   title is the instance's name - the operator's own when they set one on the
-  Branding page - and the event's sentence is the body, because a
+  Branding page - and the event's sentence (the row's title and body, as
+  [the server said them](#what-a-notification-says)) is the body, because a
   notification's second line is the app's identity and the browser fills it in
   only for an *installed* app; everywhere else it prints the bare origin. The
   `icon` and the `badge` are **PNG** (`/admin/icons/icon-192.png`,
@@ -514,10 +696,10 @@ event's [target](#click-target).
   iOS 16.4 or later, once the permission is asked from the button there
   ([On a phone or a tablet](DESKTOP.md#on-a-phone-or-a-tablet-the-web-app)).
 - ⚠ **Only while filex is open.** These notifications ride the bell's poll
-  (below), in a tab or in the installed app. There is no Web Push yet - no
-  push subscription, no key to sign one with - so with filex closed, on a
-  phone above all, nothing arrives. `notify-sw.js` already answers a `push`
-  with the app's own toast, for the day a subscription exists.
+  (below), in a tab or in the installed app. With filex closed - on a phone
+  above all - [Web Push](#web-push) carries the same notifications to a
+  device whose person turned it on; `notify-sw.js` raises its toast, the
+  same branded one.
 - One toast per notification id (`tag: filex-notification-<id>`), so a
   re-render cannot produce two. `renotify` rides with the tag, because Android
   replaces a same-tag notification silently otherwise.
@@ -528,7 +710,10 @@ The desktop window draws the **web app's bell** in its top bar (since
 2026-09-27; the explorer's `config.notifications` - the same NotificationBell,
 NotificationsPanel and feed the web uses, moved into `packages/core`), and the
 main process polls the same endpoint to raise a **native OS notification** for
-each new row - also with the window closed and the app in the tray. Clicking
+each new row - also with the window closed and the app in the tray - saying the
+row's words as the server said them: in the account's language (the app has
+no language of its own - [Which language](#which-language)), a language
+pack's included. Clicking
 either one lands in the window (see *Where a click goes*); a share opens in the
 system browser. A clicked native notification that goes somewhere is **marked
 read** on the way, as the web's browser notification is. **App settings →
@@ -544,6 +729,95 @@ below for why the badge and the tooltip round differently past 99.
 It never double-notifies: the browser channel refuses to fire inside the
 Electron shell, so one event produces one notification on that machine.
 
+### Web Push
+
+With filex closed - a phone in a pocket, a browser with no tab - nothing polls
+the bell. **Push notifications on this device**, in the **Notifications** pane
+of the user-settings dialog, turns Web Push on for that browser: what the
+person's bell tells them reaches the device through the browser's own push
+service (Chrome's, Firefox's, Apple's, Microsoft's), also with filex closed.
+
+- **The same notifications, at the same moment.** A push is one more reader of
+  the person's bell, not a channel with rules of its own
+  (`internal/notify/push.go`): the server reads the unread list exactly as the
+  bell does - the person's own rows, the broadcasts their bell takes (the
+  tenant, the grants), without their muted kinds, nothing at all with the bell
+  switched off - and pushes each device what is new in it. A kind held for
+  [the digest](#the-digest) is quiet in that list, so it is pushed as its
+  digest row, when the window ends; an urgent kind is pushed the moment it is
+  written. A row read before the push goes out is not news and is not pushed.
+- **Once per row per device.** Each device has a mark - the newest row pushed
+  to it or passed over - moved by compare-and-set before anything is sent, so
+  two filex servers on one database never push a row twice. A device that
+  subscribes starts at the newest row there is: it is told what happens from
+  then on, never the history. More than three new rows in one pass are one
+  push ("5 new notifications"); a row older than an hour when the pass reaches
+  it (a server that was down) is passed over.
+- **What it says.** Exactly what the bell says
+  ([What a notification says](#what-a-notification-says)), in the person's
+  account language, laid out as the page's pop-up lays it out: the instance's
+  name (the Branding page's) as the title, `<title> - <body>` as the body
+  ("New file: report.pdf - Reports/report.pdf"; a digest "34 notifications -
+  Reports: 30 files added; …"). The service worker only shows it. A name, a
+  count and where - never file content, never a credential, never an
+  encrypted item's name (the lock word stands there) - and the payload is
+  encrypted for the one browser (RFC 8291): the push service carries
+  ciphertext.
+- **A tap** opens `<scope>notify/<id>`: the app finds the row, marks it read
+  and goes where the bell would (the one resolver, `lib/notificationTarget`).
+  A row with nowhere to go, and a summary, open filex itself. A push whose
+  row's toast the page already raised replaces it silently (one tag per row,
+  `filex-notification-<id>`), and the page raises none for a row a push
+  already showed: one row, one alert.
+- **Devices.** The pane lists the person's devices ("Chrome · Android",
+  "Safari · iPhone") with this one marked; any can be removed, and **Send a
+  test** pushes to all of them. A device the push service says is gone (404 or
+  410) is forgotten at once, one that refuses five pushes in a row too, and a
+  person keeps at most 20 (the oldest goes). Turning the switch off forgets
+  this browser; signing out does too, and signing back in where it was on
+  turns it on again. A second account that turns it on in the same browser
+  profile takes the device over.
+- **iPhone and iPad**: only filex added to the Home Screen (iOS and iPadOS 16.4
+  or later) can receive pushes ([On a phone or a tablet](DESKTOP.md#on-a-phone-or-a-tablet-the-web-app));
+  the switch asks for the permission from the tap itself, the only way Safari
+  asks. Every push shows a notification - iOS stops delivering to a site whose
+  pushes show none.
+- **Not in the desktop app**: its native notifications already reach a closed
+  window from the tray, so it has no such switch. An explorer embedded in
+  another site has none either: the service workers there are that site's.
+
+**The key.** Pushes are signed with the instance's VAPID key (RFC 8292). It is
+made at the first start and its private half is stored **sealed with
+`FILEX_SECRET_KEY`** (`push_vapid_keys`), never in the clear: without
+`FILEX_SECRET_KEY` push stays off and says so - in the pane to an
+administrator, and on **Admin → Notifications**. A key that no longer opens
+(the secret changed) is never replaced behind the operator's back: push says
+`key_unreadable` until it is rotated. **Admin → Notifications → Push
+notifications → Rotate key** (the platform operator's, signed in) makes a new
+one and forgets every device - a subscription is bound to the key it was made
+with; each device subscribes again the next time filex opens on it.
+
+**Which endpoints.** A device's endpoint is an address the browser gives, but
+it reaches the server in a person's request. filex accepts only the browsers'
+push services over https (`fcm.googleapis.com`,
+`updates.push.services.mozilla.com`, `web.push.apple.com`,
+`*.notify.windows.com` and their kin); `FILEX_PUSH_HOSTS` adds others. The
+sender connects directly - not through `HTTP_PROXY` / `HTTPS_PROXY` - and
+refuses an address on the machine or on a private network, so no account can
+make the server post into its own network.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/notifications/push` | `{available, reason, public_key, devices}`. `reason` when not available: `disabled`, `no_secret_key`, `key_unreadable`, `error`. A device is `{id, label, endpoint_hash, service, created_at, last_ok_at}` - never its endpoint or its keys; `endpoint_hash` is the hex SHA-256 of the endpoint, how a browser finds itself in the list. |
+| `POST /api/notifications/push/subscriptions` | This browser: `{endpoint, keys: {p256dh, auth}, label}` (`PushSubscription.toJSON()` and a name) → `201` the device. `400 push_endpoint_refused` or `push_keys_invalid`; `409 push_unavailable` with its `reason`. |
+| `DELETE /api/notifications/push/subscriptions/{id}` | One of the caller's devices → `204`; another person's is `404`. |
+| `POST /api/notifications/push/forget` | `{endpoint}`: this browser, turning push off or signing out → `{removed}`. |
+| `POST /api/notifications/push/test` | A test push to every device of the caller, now → `{sent, failed}`. |
+
+⚠ They are a **session's** own: an API key is answered
+`403 session_required`, because a device receives the person's whole bell and
+a key confined to one folder must not be able to register one.
+
 ### Cost
 
 Both channels ride the bell's existing **15 s** unread-count poll - the one the
@@ -555,6 +829,10 @@ the screens that draw no bell (an app's full page, the standalone editor,
 
 ⚠ **A baseline is taken before anything is announced.** A reload, or an app
 start, must not replay every unread row the user already had as toasts.
+
+Web Push costs the browser nothing at all: the server pushes when a row is
+written (a short wait gathers a burst into one pass), reading the bell only of
+people who have a device.
 
 ⚠ A notification carries **a name, a count and a target** - never file content
 and never a credential. The title and body are the same strings the bell shows.
@@ -576,8 +854,8 @@ says, folder by folder, what changed:
 at once, exactly as before 0.53 - until an administrator or a person turns it
 off.** An upgrade changes nobody's notifications.
 
-The bell, the browser's pop-up, the desktop app and the email all take the same
-digest: it is decided in the one read every one of them makes, not in any of
+The bell, the browser's pop-up, the desktop app, a push and the email all take
+the same digest: it is decided in the one read every one of them makes, not in any of
 them (`internal/notify/digest.go`).
 
 ### What is held
@@ -690,18 +968,27 @@ inside the folder.
 | `item` | A digest of one row: that row's `event`, `title`, `body` and `meta`. |
 | `recipient` | Whose digest it is - for a webhook receiver; the row itself is addressed to that person. |
 
-The title and body are the server's English; the bell, the pop-ups and the
-desktop app say it in the reader's language (`packages/core`
-`lib/notificationText.ts`, the `server.notify.digest.*` keys of the server
-catalogue, which a language pack translates).
+The row's stored title and body are the digest said in the instance's
+language (its fallback); a webhook gets it in its own language (with `i18n`
+carrying the title's key and count), and the bell, the pop-ups, the desktop
+app, a push and the email show it in the person's account language as the
+server says it
+([What a notification says](#what-a-notification-says): the
+`server.notify.notification.digest.title` phrase and the
+`server.notify.digest.*` lines of the server catalogue, which a language pack
+translates).
 
 ### Email and webhooks
 
 - **Email.** An event can ask for an email to its addressee - today the owner
   of a file request, told of each drop (`drop.received`). When the owner holds
   that kind, the email waits too: one email per window, the digest's, in the
-  owner's language, folder by folder, with the link the drop carried. When
-  they mark it urgent, each drop is emailed at once, as before.
+  owner's language, folder by folder, with the link the drop carried - its
+  subject is the digest row's title and its lines are the row's lines, the
+  words the bell says. When they mark it urgent, each drop is emailed at once,
+  in the words the bell says for that row (the title as the subject); with
+  notifications switched off (`FILEX_NOTIFY_ENABLED=false`) the owner still
+  gets that email, in the same words.
 - **Webhooks.** Every webhook receives every event on its own, as before -
   nothing a receiver relies on is held. The digest is an event too,
   `notification.digest`, and it goes **only** to a webhook target that ticks it
@@ -839,7 +1126,7 @@ as before.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/notifications?unread=&limit=&offset=` | Paginated history → `{items, total, limit, offset}`. `unread=true` returns only unread rows. |
+| `GET /api/notifications?unread=&limit=&offset=` | Paginated history → `{items, total, limit, offset}`. `unread=true` returns only unread rows. Each row's `title` and `body` are said in the reader's account language - see [Which language](#which-language); a `lang=` is not read. |
 | `GET /api/notifications/unread-count` | Bell badge number → `{count}`. |
 | `POST /api/notifications/{id}/read` | Mark one notification read for the caller → `204` (also for an id the caller's bell does not show; nothing changes then). |
 | `POST /api/notifications/read-all` | Mark everything up to now read, for the caller → `204`. |
@@ -853,17 +1140,25 @@ Each item in `items` looks like:
   "id": 42,
   "event": "drop.received",
   "severity": "info",
-  "title": "New upload",
-  "body": "alice dropped 3 files into \"Inbox\".",
-  "meta": { "folder": "Inbox", "count": 3 },
+  "title": "3 files received",
+  "body": "alice → Inbox",
+  "meta": { "folder": "Inbox", "count": 3, "uploader": "alice" },
   "target": { "kind": "dir", "storage": "team-bucket", "path": "Inbox" },
+  "opens": true,
   "webhook_status": "sent",
   "created_at": "2026-07-04T09:15:00Z"
 }
 ```
 
-`read_at` is **absent** until the row is marked read - for a broadcast, until
-the CALLER marked it - and then holds the timestamp; `user_id` is present only on user-scoped rows (absent on
+`title` and `body` are the sentence the server says for the row in the
+reader's language ([What a notification says](#what-a-notification-says));
+`e2e` appears only on a row that names an item inside an encrypted folder
+([that section](#an-item-inside-an-encrypted-folder)); `opens` says whether a
+click on the row goes somewhere - the server's one rule (`notify.Opens`), the
+one a push's `open` follows too, so the bell, the page's pop-up and a phone
+agree. `read_at` is **absent**
+until the row is marked read - for a broadcast, until the CALLER marked it -
+and then holds the timestamp; `user_id` is present only on user-scoped rows (absent on
 broadcasts); `webhook_error` appears only when the webhook for that row
 failed; and `target` is **absent** when there is nothing to open - see
 [Click target](#click-target), where an absent target and `{"kind":"none"}`
@@ -888,9 +1183,11 @@ tenant admin reads the tenant's own events in their bell, which is scoped.
 | `POST /api/admin/notifications/test` | Emit an `admin_test` event through **both** channels → `{id}`. Use it to verify the webhook is wired. |
 | `GET /api/admin/notifications/webhook-config` | Current config → `{url, token_set}`. |
 | `PATCH /api/admin/notifications/webhook-config` | Set the webhook URL/token at runtime → `{ok:true}`. |
+| `GET /api/admin/notifications/push` | The instance's [Web Push](#web-push) key and how many devices there are → `{push: {available, reason, public_key, key_created_at}, devices}`. Supertenant-only. |
+| `POST /api/admin/notifications/push/rotate` | A new Web Push key; every device is forgotten → `{push, devices_forgotten}`. Supertenant-only, and a session's (an API key is `403 session_required`). |
 | `GET` / `PATCH /api/admin/notifications/digest` | The [digest](#the-digest)'s defaults - the window and the urgent kinds - for the tenant the caller administers (the instance on a single-tenant install). Open to a tenant's administrator for their own tenant; see [Endpoints](#endpoints). |
 | `GET /api/admin/webhooks` | List the webhook v2 targets (secrets masked to a `secret_set` flag) plus each one's last delivery. |
-| `POST /api/admin/webhooks` | Create a target: `name`, `url`, optional `secret`, optional `events` allow-list, `enabled`. |
+| `POST /api/admin/webhooks` | Create a target: `name`, `url` (`http://` or `https://`, in any case), optional `secret`, optional `events` allow-list, `enabled`, optional `lang` (its language; empty = the instance's). A refusal is **400** `{error, field, message}`: `field` is `name`, `url` or `lang` (a language the server does not speak is `invalid_lang`), `message` the sentence in the reader's language. |
 | `PATCH /api/admin/webhooks/{id}` | Update one target. |
 | `DELETE /api/admin/webhooks/{id}` | Remove one target. |
 | `POST /api/admin/webhooks/{id}/test` | Fire a synthetic `webhook_test` delivery at that one target and return the outcome synchronously. |
@@ -985,7 +1282,11 @@ with **no** muted events. `PATCH` replaces the whole preference (send the full
 > on: `e2e.request_created` for an administrator account, `e2e.request_decided`
 > for everyone). They read the person's own tenant, so an administrator whose
 > tenant is under another policy - the platform operator's included - sees them
-> greyed. Both
+> greyed. Which events cannot happen, why, and who could change it is the
+> SERVER's answer since 0.54: `GET /api/files/capabilities` → `event_off`
+> (`{ "<event>": { reason, fixable, text } }`, the sentence in the reader's
+> language - [BACKEND.md](BACKEND.md#rules-the-server-publishes)); the
+> dialog and Admin → Webhooks only show it. Both
 > screens resend the user's existing list verbatim so opening one cannot clear
 > their mutes. The filtering itself is in force regardless of how the row got
 > written.
@@ -1003,8 +1304,8 @@ with **no** muted events. `PATCH` replaces the whole preference (send the full
 Check, in order:
 1. **Any destination at all?** A row shows `webhook_status: skipped` when
    `FILEX_WEBHOOK_URL` is empty **and** no enabled target matched the event
-   (otherwise `webhook_error` says why: the server was stopping, or the event
-   went out with another row) -
+   (otherwise `webhook_error` holds the code of why - `stopped`, `sibling`,
+   `digest_unnamed` - and `webhook_reason` says it in words) -
    so check the target's `enabled` flag and its event allow-list too, not just
    the env var. Set the URL (env, or `PATCH …/webhook-config`) or add a target
    in **Admin → Webhooks**.
@@ -1040,6 +1341,25 @@ filter on `event`/`severity` at your receiver (the payload carries both).
 ### Test button says the subsystem is offline
 `POST /api/admin/notifications/test` returning 503 means
 `FILEX_NOTIFY_ENABLED` is false. Enable it and restart, then re-test.
+
+### Push notifications do not arrive
+
+- **Admin → Notifications → Push notifications** says why push is off:
+  `no_secret_key` (set `FILEX_SECRET_KEY` and restart), `key_unreadable` (the
+  secret changed: rotate the key), `disabled` (`FILEX_PUSH_ENABLED`).
+- The browser needs a secure origin: filex served over **https** (or
+  `localhost`). On an iPhone or an iPad, only filex added to the Home Screen.
+- The person turned it on **for that device** and the browser's permission is
+  still granted (the pane says "Blocked by this browser" otherwise); **Send a
+  test** answers how many devices took it.
+- The server reaches the push services directly (no proxy): a firewall that
+  blocks outgoing https to `fcm.googleapis.com`, `web.push.apple.com` and the
+  rest blocks every push. A browser whose push service filex does not know is
+  refused when it subscribes (`push_endpoint_refused`): add it with
+  `FILEX_PUSH_HOSTS`.
+- What is pushed is what the bell tells: a muted kind, a bell switched off,
+  or a kind held for the digest (pushed as the digest, when its window ends)
+  is not pushed on its own.
 
 ### Nothing survives a restart
 The in-app bell is durable (a DB row written before `Send` returns) - if the

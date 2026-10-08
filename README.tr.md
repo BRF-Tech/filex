@@ -132,6 +132,10 @@ bir grup çalışması paketi). filex aradaki boşluğu hedefler:
   Arapça, İbranice, Farsça ve Urducada arayüz **sağdan sola döner** - ve aynalamanın
   yanlış olacağı yerde durur: belgenin kendi koordinatlarında ve makine metninde
   ([docs/RTL.md](docs/RTL.md), [paket yazın](docs/PLUGIN-KIT.md#writing-a-language-pack)).
+  Bir kişinin tek bir dili vardır: web uygulamasında, gezginde ve masaüstü uygulamasında
+  ekranın dili hesabın dilidir, herhangi birinde seçilen dil onu her yerde değiştirir ve
+  ONLYOFFICE düzenleyicisi de o dilde açılır - ya da bir yöneticinin herkes için seçtiği
+  dilde ([düzenleyicinin dili](docs/ONLYOFFICE.md#the-editors-language)).
 - **Bizim değil, sizin markanızı taşır** - **Görünüm** ekranında kendi renklerinizle bir
   tema oluşturup varsayılan yapın: oturum açma sayfası ve herkese açık her bağlantı da onu
   taşır, kurulumunuzdan giden bir imza isteği de filex'in değil, sizin adınızı taşır.
@@ -272,15 +276,15 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 
 | Kutuları tanımlayın - her birine ad verin ve kimin olduğunu söyleyin; belge sonra gelir | Kutuları yerleştirin - bir kutu seçin, sayfada gideceği yere dokunun |
 |---|---|
-| ![Bir imza isteğinin kutularını tanımlama](https://filex.sh/shots/signing/sign-define-1440.4a966ffefa4f.png) | ![Kutuları belgeye yerleştirme](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
+| ![Bir imza isteğinin kutularını tanımlama](https://filex.sh/shots/signing/sign-define-1440.63ea72b13724.png) | ![Kutuları belgeye yerleştirme](https://filex.sh/shots/signing/sign-place-1440.696a10b65be8.png) |
 
 | İş ortağının bağlantısı - filex'in herkese açık tek ekranı, kurulumunuzun adıyla, PIN arkasında | …ve açtığı şey: yalnızca kendi kutuları - burada, isteği gönderenin seçtiği yazı tipiyle yazılmış bir ad (öteki iki yol çizmek ve yüklemek) |
 |---|---|
-| ![Dış imzacının PIN ekranı](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![Kutularını dolduran dış imzacı](https://filex.sh/shots/signing/sign-outside-fill-1440.54632da00ef4.png) |
+| ![Dış imzacının PIN ekranı](https://filex.sh/shots/signing/sign-outside-pin-1440.2cd8ccb99483.png) | ![Kutularını dolduran dış imzacı](https://filex.sh/shots/signing/sign-outside-fill-1440.9f50aeb7abef.png) |
 
 | Belge imzadayken - herkes için dondurulmuş, kimin imzaladığı ayrıntılarında | Uygulama kurulurken - istediği her izin, sade bir dille, hiçbir şey çalışmadan önce |
 |---|---|
-| ![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.518a3bd6651f.png) | ![Kurulum sihirbazının izin incelemesi](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
+| ![Belge kilitli, İmzalar paneli açık](https://filex.sh/shots/signing/sign-status-1440.b5bfdbd379c3.png) | ![Kurulum sihirbazının izin incelemesi](https://filex.sh/shots/apps/apps-install-review-1440.cdb1a4ebf8f6.png) |
 
 | Kurulu bir uygulama - nereden geldiği, parmak izi ve sahip olduğu her izin, sade bir dille (ayarları ve işlemleri sayfanın daha aşağısında gelir) | Dönüştürücü, bir başka uygulama - her hedef kendi kategorisinin altında, üç adım |
 |---|---|
@@ -292,17 +296,17 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 
 | Kurulumdaki her uygulama ve aralarında bir **dil paketi** - çalışan hiçbir şeyi olmayan bir manifest; bu filex kurulumunun ne kadarını çevirdiğini söyler, paket gidince dili de gider |
 |---|
-| ![Uygulamalar listesi, uygulamaların arasında bir dil paketi](https://filex.sh/shots/langpack/apps-list-1440.c0b6a723e725.png) |
+| ![Uygulamalar listesi, uygulamaların arasında bir dil paketi](https://filex.sh/shots/langpack/apps-list-1440.50e11eedf3d4.png) |
 
 ### Size ait olanlar, nerede olursanız olun
 
 | Çan - üzerinde okunmamışların sayısı, her satır yazdığı yere götürür | Tüm bildirimleriniz, gezginin içinde - yalnızca yöneticiler için değil, herkes için |
 |---|---|
-| ![Okunmamış rozetini taşıyan çan, açık hâlde](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![Gezginin üzerinde bildirimlerin tam listesi](https://filex.sh/shots/signing/notifications-list-1440.cb8cc10769dc.png) |
+| ![Okunmamış rozetini taşıyan çan, açık hâlde](https://filex.sh/shots/signing/bell-badge-1440.61396b9ab714.png) | ![Gezginin üzerinde bildirimlerin tam listesi](https://filex.sh/shots/signing/notifications-list-1440.3176161f2110.png) |
 
 | Paylaştıklarım - oluşturduğunuz bağlantılar ve birine iletmeniz gerektiğinde bunların PIN'leri | Her yönetim tablosu - satır başına sabitlenmiş tek bir **Aksiyon** menüsü, gezgindeki ⋮ ile açılan menünün aynısı |
 |---|---|
-| ![Paylaştıklarım, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/my-shares-1440.3cdfc7ee8ef3.png) | ![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.401d5cbfacf8.png) |
+| ![Paylaştıklarım, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/my-shares-1440.6f8676cbb555.png) | ![Yönetim → Paylaşımlar, bir satırın Aksiyon menüsü açık](https://filex.sh/shots/signing/admin-table-actions-1440.ad8c2e623c72.png) |
 
 ### Markanız
 
@@ -312,13 +316,13 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 
 | …oturum açma sayfası da, henüz kimse oturum açmadan | filex'in izlemeyeceği bir sembolik bağ bunu söyler - listede, ayrıntılarında da sözle |
 |---|---|
-| ![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.84197bec297e.png) | ![Deponun dışına çıkan bir sembolik bağ, rozetli](https://filex.sh/shots/symlinks/symlink-badge-1440.f85936372113.png) |
+| ![İşletmecinin temasını taşıyan oturum açma sayfası](https://filex.sh/shots/appearance/themed-signin-1440.1c420dacc12e.png) | ![Deponun dışına çıkan bir sembolik bağ, rozetli](https://filex.sh/shots/symlinks/symlink-badge-1440.0d128385d287.png) |
 
 ### Dosya yöneticisi
 
 | Paylaşım - PIN, son kullanma tarihi, indirme limiti, tek satırlık `curl` | Markdown görüntüleyici |
 |---|---|
-| ![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.eaf11836828a.png) | ![Markdown görüntüleyici](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
+| ![Paylaşım iletişim kutusu](https://filex.sh/shots/share-modal.c8a399c36424.png) | ![Markdown görüntüleyici](https://filex.sh/shots/viewer-markdown.1789ecdcfbc5.png) |
 
 | …ve karşı taraftaki kişinin açtığı şey. filex'in dışarıya dönük TEK bir ekranı vardır - paylaşılan bir dosya, bir klasör, bir dosya isteği, bir uygulamanın imzalama sayfası ve bunlardan herhangi birinin önündeki PIN, hepsi bu sayfadır, kurulumunuzun adıyla |
 |---|
@@ -326,7 +330,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 
 | Yönetim paneli | Demo açılış sayfası |
 |---|---|
-| ![Yönetim paneli](https://filex.sh/shots/admin-dashboard.7c334e824b3c.png) | ![Demo açılış sayfası](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
+| ![Yönetim paneli](https://filex.sh/shots/admin-dashboard.d94a065baab6.png) | ![Demo açılış sayfası](https://filex.sh/shots/demo-landing.d2b345f6a229.png) |
 
 | Yönetim menüsü - bütün sayfalar üç panelde, **Dosyalar ve depolama**, **Kişiler ve güvenlik** ve **Sistem**, her sayfanın altında kısa bir satırla; telefonda aynı sayfalar bir çekmecede yer alır ([docs/ADMIN-PANEL.md](docs/ADMIN-PANEL.md)) |
 |---|
@@ -342,7 +346,7 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 
 | Giriş güvenliği - giriş denemesi sınırı, izinli adresler, güvenilir vekil sunucular, kilitler ve oturum açma olayları ([giriş denemesi sınırları](docs/CONFIGURATION.md#sign-in-attempt-limits)) | …ve kilitli bir hesabın oturum açma formunun söylediği; düğmesinde kilidin kalan süresi geri sayar |
 |---|---|
-| ![Yönetim → Giriş güvenliği](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png) | ![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png) |
+| ![Yönetim → Giriş güvenliği](https://filex.sh/shots/loginsecurity/login-security-1440.5a98c09e6f76.png) | ![Kilitli bir hesapta oturum açma formu](https://filex.sh/shots/loginsecurity/login-locked-1440.386b07b4543a.png) |
 
 | Kim şifreleyebilir - kapalı, yalnız yöneticiler, rolü izin veren herkes ya da yönetici onayıyla; bekleyen istekler, kimin neden istediğiyle birlikte ([kim şifreleyebilir](docs/E2E-ENCRYPTION.md#who-may-encrypt)) | …ve isteyen kişinin tarafı: Yeni klasör iletişim kutusu, bir gerekçeyle birlikte, bir yöneticiden tek bir şifreli klasör ister |
 |---|---|
@@ -358,23 +362,23 @@ her ekranı filex çizer, iş ortağının aldığı bağlantı da sıradan bir 
 
 | Kabuk - herkesin karşılaştığı düzen | Bu klasörde arama; `⌘K` / `Ctrl K` sorguyu palete devreder |
 |---|---|
-| ![filex kabuğu](https://filex.sh/shots/driveshell/driveshell-hero-1440.d8c44de4f498.png) | ![Bir klasörde arama](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
+| ![filex kabuğu](https://filex.sh/shots/driveshell/driveshell-hero-1440.16742e249165.png) | ![Bir klasörde arama](https://filex.sh/shots/driveshell/driveshell-search-1440.119e6bd43905.png) |
 
 | Gezinti paneli - Ana sayfa, Benimle paylaşılanlar, Paylaştıklarım, Son kullanılanlar, Yıldızlılar, Çöp kutusu ve erişebildiğiniz depolar | Simge şeridine daraltılmış |
 |---|---|
-| ![Gezinti paneli](https://filex.sh/shots/sidenav/sidenav-expanded-1440.ef235f94c521.png) | ![Bir şeride daraltılmış](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
+| ![Gezinti paneli](https://filex.sh/shots/sidenav/sidenav-expanded-1440.461d5aaaff2a.png) | ![Bir şeride daraltılmış](https://filex.sh/shots/sidenav/sidenav-rail-1440.843a2158380d.png) |
 
 | Etiketler - kendi etiketleriniz ya da ekibinizinkiler; bir etiket, onu taşıyan her dosyayı hangi klasörde durursa dursun açar | Çöp kutusu - neyin silindiği, nereden geldiği ve gitmesine ne kadar kaldığı |
 |---|---|
-| ![Kişisel etiketler ve ekip etiketleri](https://filex.sh/shots/tags/tags-kinds-1440.f363e549a5be.png) | ![Çöp kutusu görünümü](https://filex.sh/shots/sidenav/view-trash-1440.c7438b1e66a8.png) |
+| ![Kişisel etiketler ve ekip etiketleri](https://filex.sh/shots/tags/tags-kinds-1440.a9f9fff4d4fd.png) | ![Çöp kutusu görünümü](https://filex.sh/shots/sidenav/view-trash-1440.ab3cfb3b01cf.png) |
 
 | Benimle paylaşılanlar - başkalarının size yetki verdiği klasörler, bağlama talimatı yok | Başka bir ürünün sayfasına gömülü |
 |---|---|
-| ![Benimle paylaşılanlar](https://filex.sh/shots/sidenav/view-shared-1440.6f68fd5b581d.png) | ![Gömülü web bileşeni](https://filex.sh/shots/sidenav/embed-webcomponent-1440.2dc86ba73804.png) |
+| ![Benimle paylaşılanlar](https://filex.sh/shots/sidenav/view-shared-1440.475ec2d8b49f.png) | ![Gömülü web bileşeni](https://filex.sh/shots/sidenav/embed-webcomponent-1440.c8c25d893d24.png) |
 
 | Nasıl bağlanılır - kılavuzlar, *sizin* kurulumunuzdan üretilir | API anahtarları - kendinizinkini oluşturun, gezginde ya da gömülü bir gezginde (bir kişinin oturumuyla ya da API anahtarıyla; tek bir ortak *uygulama* API anahtarıyla vekil sunucu üzerinden çalışan gömülü bir gezginde bu öğe yer almaz) |
 |---|---|
-| ![Nasıl bağlanılır](https://filex.sh/shots/sidenav/connect-1440.ade9043dddde.png) | ![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.14eb6d484613.png) |
+| ![Nasıl bağlanılır](https://filex.sh/shots/sidenav/connect-1440.7327ccaf3ae3.png) | ![API anahtarları](https://filex.sh/shots/sidenav/apikeys-minted-1440.bae083a0679a.png) |
 
 | filex'e her şeyden erişmek - S3, SFTP, FTPS, NFS, WebDAV. Her komut *sizin* kurulumunuzdan üretilir |
 |---|
@@ -495,6 +499,11 @@ gönderilen bir API anahtarı, anahtarla vekillik eden bir barındıran uygulama
 uygulaması hiçbir şey gerektirmez
 ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#requests-from-other-origins)).
 
+⚠ Paketleri ve sunucuyu aynı sürümde tutun: **`@brftech/filex` 0.54, bir filex 0.54
+sunucusu ister**. Hangi dosyaların düzenlemek için açıldığı, girdi sınırları ve sürüm
+satırı sunucunun yeteneklerinden (capabilities) gelir; paketler geri dönebilecekleri bir
+kopya tutmaz ([docs/API.md](docs/API.md)).
+
 ## Masaüstü uygulaması ve CLI
 
 Gezgin, bir **Windows / Linux / macOS masaüstü uygulaması** olarak da gelir - ayrı, yarım
@@ -541,6 +550,10 @@ bir kopya değil, web arayüzünün ve gömülü gezginlerin gösterdiği bileş
   *Yönetim paneli* bulunur. Bir bildirime tıklamak pencerenin içinde, dosyanın seçili
   olduğu klasöre götürür. Oturumu kapatma, uygulamanın kendi *Ayarlar → Hesaplar*
   bölümünde kalır ([docs/DESKTOP.md](docs/DESKTOP.md#notifications-and-your-account)).
+- **Hesabınızın dilini konuşur** - pencere, sistem tepsisi menüsü, bildirimler ve
+  eşitleme motorunun her klasörün altındaki iletileri ekrandaki hesabın dilini kullanır;
+  *Ayarlar → Dil* hesabın dilini değiştirir, böylece web uygulaması da onu izler
+  ([docs/DESKTOP.md](docs/DESKTOP.md#language)).
 - **Tarayıcınız üzerinden oturum açar**; böylece SSO ve MFA tıpkı web'deki gibi davranır.
 - **Kendini günceller** - sessizce indirir, çıkışta kurar; `FILEX_NO_UPDATE=1` bunu kapatır.
 - **Kurulmadan çalışır**, ihtiyacınız olan buysa: Windows için **taşınabilir** `.exe`,
@@ -565,14 +578,14 @@ sudo snap install filex-app                 # the same snap as the badge above
 ```
 
 Store derlemesi (*filex File Manager*), kod imzalı tek Windows kopyasıdır - onu Microsoft
-imzalar - ve Store onu güncel tutar. winget paketi (`BRFTech.filex-app`) her sürümle
-birlikte gönderiliyor ve winget moderatörlerinin ilk incelemesini bekliyor; bu yüzden
-`winget install` komutu onu henüz bulamıyor. Kurulum programı, taşınabilir `.exe`,
-AppImage, `.deb`, `.rpm` ve `.dmg`
+imzalar - ve Store onu güncel tutar. Masaüstü uygulamasının winget paketi
+(`BRFTech.filex-app`) her sürümle birlikte gönderiliyor ve winget moderatörlerinin ilk
+incelemesini bekliyor; bu yüzden `winget install BRFTech.filex-app` komutu onu henüz
+bulamıyor. Kurulum programı, taşınabilir `.exe`, AppImage, `.deb`, `.rpm` ve `.dmg`
 [son sürüme](https://github.com/BRF-Tech/filex/releases/latest) eklidir - henüz kod imzalı
 değil; Windows kurulum programında bir SmartScreen uyarısı bekleyin. Ayrıntılar:
-[docs/DESKTOP.md](docs/DESKTOP.md). Yalnızca CLI: `brew install brf-tech/filex/filex`
-([docs/CLI.md](docs/CLI.md); CLI'nin winget paketi, `BRFTech.filex`, aynı incelemede).
+[docs/DESKTOP.md](docs/DESKTOP.md). Yalnızca CLI: `brew install brf-tech/filex/filex`,
+Windows'ta ise `winget install BRFTech.filex` ([docs/CLI.md](docs/CLI.md)).
 
 Linux'ta `.deb`, `.rpm` ve AppImage, Chromium'un yalıtım alanı olmadan asla çalışmaz.
 `.deb` ve `.rpm` paketleri hiçbir şey gerektirmez; Ubuntu 23.10 ve sonrasında AppImage
@@ -592,6 +605,7 @@ hiçbir şey gerektirmez ([docs/DESKTOP.md](docs/DESKTOP.md#the-snap-and-the-san
 | Masaüstü uygulaması - Windows on Arm | `filex-desktop-arm64.exe` (kurulum programı) ve `filex-desktop-portable-arm64.exe` - 0.48.1'den beri; uygulama kendini arm64 derlemesine günceller |
 | Masaüstü uygulaması - macOS | Yalnızca Apple Silicon (Intel derlemesi yok) |
 | Homebrew | Apple Silicon'da ve Arm üzerinde Linux'ta CLI (`filex`); Apple Silicon'da masaüstü uygulaması (`filex-app`) |
+| winget | Arm üzerinde Windows'ta CLI (`BRFTech.filex`) - winget arm64 derlemesini kendisi seçer |
 
 Bir Arm makinede uygulamanın *filex masaüstü uygulamasını edinin* teklifi (ve
 Ayarlar'daki kopyası) önce arm64 dosyasını sunar,
@@ -612,7 +626,10 @@ filex sync add ~/Documents/work docs://work   # the engine the desktop app uses
 filex sync run --watch 30s
 ```
 
-Bkz. [docs/CLI.md](docs/CLI.md) ve [docs/SYNC.md](docs/SYNC.md).
+Bkz. [docs/CLI.md](docs/CLI.md) ve [docs/SYNC.md](docs/SYNC.md). Motoru yöneten bir
+program `filex sync run --json` çıktısını okur: satır başına bir JSON olayı, her birinde
+değişmeyen bir kod ve motorun hesabın dilindeki cümlesi - masaüstü uygulaması tam olarak
+bunları gösterir ([olay akışı](docs/SYNC.md#the-event-stream---json)).
 
 ## Yapay zekâ ajanları / MCP
 
@@ -660,6 +677,12 @@ modelin bağlamından geçmesi gerekirdi. **Yükleme biletleri** bunu çözer: y
 tek bir çağrı, hedefi sabitler ve kısa ömürlü, tek kullanımlık, **kimlik bilgisi
 gerektirmeyen** bir URL döndürür; böylece filex API anahtarı olmayan bir ajan bile aktarımı
 `curl -T bigfile <url>` komutuyla tamamlayabilir. Ayrıntılar: [docs/MCP.md](docs/MCP.md).
+
+filex bir şeyi reddettiğinde bunu her kapıda aynı biçimde söyler: dallanmak için
+değişmeyen bir `error` kodu ve sunucunun okuyanın dilindeki cümlesi `message` içinde,
+olduğu gibi aktarılsın diye ([docs/API-ERRORS.md](docs/API-ERRORS.md)). Bir ajanın
+oluşturduğu bağlantı da kendi indirme komutuyla döner: sunucunun yazdığı `curl` ve
+PowerShell satırları ([docs/SHARING.md](docs/SHARING.md)).
 
 ## Uygulamalar
 
@@ -786,11 +809,11 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
 - **Kabuk** - işletmeci için de son kullanıcı için de, yönetim uygulamasında, masaüstü uygulamasında ve her gömülü gezginde tek bir yerleşim: sol kenarında daraltma düğmesi ile ürün logosunun bulunduğu, tam genişlikte bir üst çubuk, ⌘K / Ctrl+K çipi sorguyu komut paletine devreden tek bir **arama alanı** (alan bu klasörde arar; "Her yerde", kayıtlı aramalar ve komutlar ise palette durur), birincil bir **+ Yeni** menüsü (dosya yükle · yeni klasör · **yeni belge** · dosya iste), konum yolunun altında bir **Tür · Sahibi · Değiştirilme · Boyut** filtre satırı, ızgara görünümünde başlıklı bölümler olarak **Klasörler** ve **Dosyalar**, **Ayrıntılar** ("Erişimi olan kişiler" ve bir paylaşım bağlantısı satırıyla) ve **Etkinlik** (sürüm geçmişi ve yorumlar) olarak bölünmüş bir ayrıntılar paneli ve gezintinin altında bir **depolama satırı**. Tema, palet, dil, yoğunluk, saat dilimi, açılış sayfası ve bildirim anahtarlarının hepsi, avatardan ulaşılan **Kullanıcı ayarları**'nda durur - web uygulaması da tema, palet, yoğunluk ve dil seçiminizi tarayıcıda değil, **hesabınızda** tutar, böylece bir sonraki tarayıcıda sizi hazır bekler; kısayol düzenleyicisi ve *Turu tekrar başlat* da aynı menüdedir. Derlemeden hiçbir şey çıkarılmaz - ayarlar iletişim kutusu olmayan gömülü gezgin, bunları yine de barındıran bir "⋯" menüsü taşır ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
 - **Ana sayfa, kabuğun içinde** - yöneticiler dâhil herkes için açılış görünümü: depolarınız, en son açtıklarınız ve yıldızladıklarınız, içerik alanında kartlar olarak, dosyalardakiyle aynı gezinti paneli ve aynı üst çubukla. Ana sayfa ile bir klasör arasında geçiş yapınca içerik değişir, başka hiçbir şey değişmez. Açılış sayfası olarak yönetim panelini tercih eden işletmeci, bunu kullanıcı ayarlarından seçer.
 - **Gezinti paneli** - birincil işlem olarak **+ Yeni** menüsü, Ana sayfa / Dosyalarım / Benimle paylaşılanlar / **Paylaştıklarım** / Son kullanılanlar / Yıldızlılar / **Taslaklar** / Çöp kutusu hedefleri, görebildiğiniz depolar - **kendi sıranızla** (bir satırı sürükleyin ya da menüsünden Yukarı taşı / Aşağı taşı / Ada göre sırala seçeneklerini kullanın; hesabınızda saklanır), yoksa yöneticinin Depolar sayfasında belirlediği sırayla ([docs/STORAGE.md](docs/STORAGE.md#ordering-storages)) - kurulu bir uygulamanın ana ekranı varsa bir **Uygulamalar** bölümü ve **Nasıl bağlanılır** + **API anahtarları**: her protokol için ayrı kılavuzlar ve kullanıcının kendi API anahtarlarını yönettiği ekran; bunlar gezginin içinden açılır, böylece gömülü bir kopyanın kullanıcıları WebDAV/FTPS/`filex mount` için gereken kimlik bilgisini bir yöneticiden istemek yerine kendileri oluşturabilir. Üst çubuktan bir simge şeridine daraltılabilir (her tarayıcıda ayrı hatırlanır), 560px'in altında sütun yerine çekmece olur. Web uygulamasında, masaüstü uygulamasında ve her gömülü gezginde varsayılan olarak açıktır; `uiProfile: 'simple'` ayarı ayrıca sekme şeridini, bölünmüş görünümü, galeri görünüm modunu ve "Nasıl bağlanılır" bölümünü kapatır, ama hiçbirini derlemeden çıkarmaz ([docs/INTEGRATION.md](docs/INTEGRATION.md)).
-- **Paylaşım** - PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, yöneticinin belirlediği **en uzun bağlantı süresi** içinde (varsayılan 7 gün - iletişim kutusu yalnızca sunucunun tutacağı süreleri sunar); klasör bağlantıları ZIP olarak akıtılır (önbelleğe alınır, bir boyut üst sınırına kadar önceden hazırlanır, bir hafta sonra süpürülür); gelen dosyalar için **dosya isteği** yükleme bağlantıları; ShareX uyumlu yükleme ucu. **Paylaştıklarım**, oluşturduğunuz bağlantıları - yalnızca yöneticiler için değil, herkes için - *Bağlantıyı kopyala*, *PIN'i kopyala* ve *İptal et* ile birlikte listeler: bir bağlantının PIN'i, onu koruyan özetin yanında mühürlenerek saklanır; böylece biri ona tekrar ihtiyaç duyduğunda bağlantıyı oluşturan kişi ya da bir yönetici PIN'i yeniden okuyabilir, her okuma da denetim kaydına yazılır. Beş yanlış PIN, herkese açık herhangi bir bağlantıyı on dakikalığına kapatır. Bir indirme bağlantısı, bir dosya isteği ve bir uygulamanın sayfası **kurumsal kimliğinizi taşıyan tek bir herkese açık ekrandır** - kurulumunuzun adı, logosu ve renkleri, tek bir PIN ekranı, tek bir son kullanma tarihi mantığı ve bir dil seçici ([docs/SHARING.md](docs/SHARING.md)).
-- **Masaüstü uygulaması + klasör eşitleme** - Windows/Linux/macOS uygulaması: sistem tepsisinde duran çift yönlü eşitleme, **seçmeli eşitleme** (sağ tık → *Bilgisayarda tut*, hesap başına tek bir kök klasör, gerisi yalnızca çevrimiçi), aynı anda birden çok hesap, sunucunun düzenleyicisinde **Office belgelerini kendi diskinizden açar**, kendini günceller (macOS: imzasız derleme, imzalanana kadar yeniden indirilerek güncellenir). Her belge **kendi penceresinde** açılır (başlığı dosyanın adıdır), pencereler **çerçevesizdir** ve uygulamanın kendi düğmelerini taşır (macOS'te sistemin kendi trafik ışıkları), açmak için tek tık mı çift tık mı kullanılacağını da **Ayarlar → Dosyaları açma** belirler ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
-- **Çöp kutusu ve sürüm geçmişi** - silmeler bir saklama süresi içinde geri alınabilir, yazmalar anlık görüntü bırakır; ikisi de zaten bağladığınız depoda durur ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)).
+- **Paylaşım** - PIN'li, son kullanma tarihli ve indirme limitli herkese açık bağlantılar, yöneticinin belirlediği **en uzun bağlantı süresi** içinde (varsayılan 7 gün - iletişim kutusu yalnızca sunucunun tutacağı süreleri sunar); klasör bağlantıları ZIP olarak akıtılır (önbelleğe alınır, bir boyut üst sınırına kadar önceden hazırlanır, bir hafta sonra süpürülür); gelen dosyalar için **dosya isteği** yükleme bağlantıları; ShareX uyumlu yükleme ucu. **Paylaştıklarım**, oluşturduğunuz bağlantıları - yalnızca yöneticiler için değil, herkes için - *Bağlantıyı kopyala*, *PIN'i kopyala* ve *İptal et* ile birlikte listeler: bir bağlantının PIN'i, onu koruyan özetin yanında mühürlenerek saklanır; böylece biri ona tekrar ihtiyaç duyduğunda bağlantıyı oluşturan kişi ya da bir yönetici PIN'i yeniden okuyabilir, her okuma da denetim kaydına yazılır. Beş yanlış PIN, herkese açık herhangi bir bağlantıyı on dakikalığına kapatır. Bir indirme bağlantısı, bir dosya isteği ve bir uygulamanın sayfası **kurumsal kimliğinizi taşıyan tek bir herkese açık ekrandır** - kurulumunuzun adı, logosu ve renkleri, tek bir PIN ekranı, tek bir son kullanma tarihi mantığı ve bir dil seçici ([docs/SHARING.md](docs/SHARING.md)). Listelenen her bağlantı nerede durduğunu söyler - etkin, süresi dolmuş, hakkı tükenmiş ya da iptal edilmiş - ve yeni bir bağlantı kendi `curl` ve PowerShell indirme komutuyla gelir. Paylaşım penceresindeki e-posta satırından gönderilen bir bağlantının iletisini sunucu bağlantının kendisinden, her alıcının dilinde yazar ve bu ileti bağlantının PIN'ini asla taşımaz ([Bağlantıyı e-postayla göndermek](docs/SHARING.md#emailing-a-link)).
+- **Masaüstü uygulaması + klasör eşitleme** - Windows/Linux/macOS uygulaması: sistem tepsisinde duran çift yönlü eşitleme, **seçmeli eşitleme** (sağ tık → *Bilgisayarda tut*, hesap başına tek bir kök klasör, gerisi yalnızca çevrimiçi), aynı anda birden çok hesap, sunucunun düzenleyicisinde **Office belgelerini kendi diskinizden açar**, kendini günceller (macOS: imzasız derleme, imzalanana kadar yeniden indirilerek güncellenir), ekrandaki hesabın dilinde. Her belge **kendi penceresinde** açılır (başlığı dosyanın adıdır), pencereler **çerçevesizdir** ve uygulamanın kendi düğmelerini taşır (macOS'te sistemin kendi trafik ışıkları), açmak için tek tık mı çift tık mı kullanılacağını da **Ayarlar → Dosyaları açma** belirler ([docs/DESKTOP.md](docs/DESKTOP.md), [docs/SYNC.md](docs/SYNC.md)).
+- **Çöp kutusu ve sürüm geçmişi** - silmeler bir saklama süresi içinde geri alınabilir, yazmalar anlık görüntü bırakır; ikisi de zaten bağladığınız depoda durur ([docs/TRASH-VERSIONING.md](docs/TRASH-VERSIONING.md)). Çöp kutusu tuttuğu her şeyi sayfa sayfa gösterir; *Çöp kutusunu boşalt* da önce tam olarak neyi sileceğinin sunucudaki sayısını ve boyutunu gösterir.
 - **Yazma koruması** - yazılan her dosya için isteğe bağlı ClamAV taraması - yerleşik düzenleyicinin yazdıkları da, filex üzerinden gelmeyip depo senkronunun arka uçta bulduğu dosyalar da dâhil - ClamAV'a yerel bir ikili dosya ya da ağ üzerinden bir clamd konteyneriyle ulaşılır; ayrıca çöp kutusu/sürüm saklama, tek bir yönetim bölümü altında. Aç/kapat anahtarı, virüs tarayıcısının modu ve adresi, boyut üst sınırı ve düzenleyici kayıt tarama penceresi **Ayarlar → Koruma** sayfasında durur; `FILEX_CLAMAV*` değişkenleri ilk açılışta bu ayarların başlangıç değerlerini verir, sonra aradan çekilir (virüs tarayıcısının ikili dosya yolu bilerek yalnızca ortamda bırakılır - bu sunucunun çalıştırdığı bir komuttur) ([docs/PROTECTION.md](docs/PROTECTION.md)).
-- **Uçtan uca şifreli klasörler** - istemci tarafında WebCrypto; sunucu şifreli veri saklar ve hiçbir zaman anahtar almaz. Klasörün bir **seviyesi** vardır: yalnız içerik (varsayılan - WebDAV, CLI ve masaüstü eşitlemesi klasördeki adlarla çalışmayı sürdürür) ya da **içerik ve adlar** (AES-SIV, böylece sunucu okunabilir hiçbir ad tutmaz); seviye sonradan, kaldığı yerden devam edilebilecek biçimde, klasörün **Şifreleme ayarları**'ndan yükseltilebilir, parolası da orada değiştirilir. Zaten var olan bir klasörünüz **yerinde şifrelenir**, 200 MB'tan büyük dosyalar dâhil; **tek bir dosya da kendi başına şifrelenebilir** (kendi parolası ve kurtarma anahtarı olan, kendi kendine yeten bir `.fxe` dosyası); her boyuttaki dosya akış olarak şifrelenir; kilidi açık bir klasör, tarayıcıda oluşturulan **çözülmüş bir zip** olarak iner; `filex decrypt` komutu indirilmiş bir klasörü ya da `.fxe` dosyasını kendi makinenizde açar, **`filex encrypt`** komutu ise diskteki bir klasörden şifreli bir klasör oluşturur ya da sunucudaki bir klasörü bulunduğu yerde şifreler - bir sekmeye sığmayacak kadar büyük klasörler için, kaldığı yerden devam edebilir, anahtarlar makinenizde üretilir ([docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)). Her klasöre, bir kez gösterilen bir **kurtarma anahtarı** verilir, böylece unutulan bir parola kendiliğinden veri kaybı anlamına gelmez; işletmeci isteğe bağlı olarak **anahtar emanetini** etkinleştirebilir - kurulumda ya da çalışan bir kurulumda sonradan devreye alınarak; var olan klasörlere kendiliğinden ulaşmaz, ama sahiplerine kilidi açarken bu seçenek sunulur - ve kullanıldığında klasörün sahibine bildirilir ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)). **Kim şifreleyebilir**, kurumun kararıdır: platform işletmecisinin kiracı başına bir aç/kapat anahtarı, bir kiracı politikası (kapalı, yalnız yöneticiler, rolü izin veren herkes ya da **yönetici onayıyla** - tek bir kişi, tek bir klasör ve tek bir şifreleme türü için bir kereliğine onaylanan, gerekçeli bir istek) ve şifreli yeni bir şey oluşturabilecek her kapıda, kopyalama dâhil, aranan `files.encrypt` izni ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md#who-may-encrypt)).
+- **Uçtan uca şifreli klasörler** - istemci tarafında WebCrypto; sunucu şifreli veri saklar ve hiçbir zaman anahtar almaz. Klasörün bir **seviyesi** vardır: yalnız içerik (varsayılan - WebDAV, CLI ve masaüstü eşitlemesi klasördeki adlarla çalışmayı sürdürür) ya da **içerik ve adlar** (AES-SIV, böylece sunucu okunabilir hiçbir ad tutmaz); seviye sonradan, kaldığı yerden devam edilebilecek biçimde, klasörün **Şifreleme ayarları**'ndan yükseltilebilir, parolası da orada değiştirilir. Üçüncü seviye olan **kasa** ağacın şeklini de gizler - sunucu yalnızca aynı boyuttaki paketleri ve şifreli bir dizini saklar, bir anda tek bir kişi, sunucunun tuttuğu bir kilit altında yazar; kasa hazırdır ve varsayılan olarak kapalıdır (`FILEX_E2E_VAULT`), onu web ve masaüstü uygulamaları, `filex decrypt` ve `filex vault mount` açar ([kasanın biçimi](docs/E2E-VAULT-FORMAT.md)). Zaten var olan bir klasörünüz **yerinde şifrelenir**, 200 MB'tan büyük dosyalar dâhil; **tek bir dosya da kendi başına şifrelenebilir** (kendi parolası ve kurtarma anahtarı olan, kendi kendine yeten bir `.fxe` dosyası); her boyuttaki dosya akış olarak şifrelenir; kilidi açık bir klasör, tarayıcıda oluşturulan **çözülmüş bir zip** olarak iner; `filex decrypt` komutu indirilmiş bir klasörü ya da `.fxe` dosyasını kendi makinenizde açar, **`filex encrypt`** komutu ise diskteki bir klasörden şifreli bir klasör oluşturur ya da sunucudaki bir klasörü bulunduğu yerde şifreler - bir sekmeye sığmayacak kadar büyük klasörler için, kaldığı yerden devam edebilir, anahtarlar makinenizde üretilir ([docs/CLI.md](docs/CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)). Her klasöre, bir kez gösterilen bir **kurtarma anahtarı** verilir, böylece unutulan bir parola kendiliğinden veri kaybı anlamına gelmez; işletmeci isteğe bağlı olarak **anahtar emanetini** etkinleştirebilir - kurulumda ya da çalışan bir kurulumda sonradan devreye alınarak; var olan klasörlere kendiliğinden ulaşmaz, ama sahiplerine kilidi açarken bu seçenek sunulur - ve kullanıldığında klasörün sahibine bildirilir ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md)). **Kim şifreleyebilir**, kurumun kararıdır: platform işletmecisinin kiracı başına bir aç/kapat anahtarı, bir kiracı politikası (kapalı, yalnız yöneticiler, rolü izin veren herkes ya da **yönetici onayıyla** - tek bir kişi, tek bir klasör ve tek bir şifreleme türü için bir kereliğine onaylanan, gerekçeli bir istek) ve şifreli yeni bir şey oluşturabilecek her kapıda, kopyalama dâhil, aranan `files.encrypt` izni ([docs/E2E-ENCRYPTION.md](docs/E2E-ENCRYPTION.md#who-may-encrypt)).
 - **Yerleşik çok kiracılılık** - tek bir kurulumda, her kiracının yalıtıldığı sağlayıcı/kiracı modu. Her kiracının bir **realm**'i vardır - oluşturulurken verilen ve hiç değiştirilmeyen oturum açma adı - böylece her oturum açma, hangi kiracıya ait olduğunu ya o kiracının kendi adresiyle (web sayfası, WebDAV `Host`, FTPS sertifikasının adı) ya da realm ile belirtir: oturum açma formunda bir **Realm** alanı, SFTP üzerinden `realm/name`. Hesap araması kiracının dışına hiç çıkmaz; platformun sayfasında yazılan realm kendi adresi olan bir kiracınınsa, tek kullanımlık, 60 saniyelik bir biletle oraya **aktarılır** ([docs/MULTI-TENANCY.md](docs/MULTI-TENANCY.md), [realm'ler](docs/MULTI-TENANCY.md#realms-which-tenant-a-sign-in-is-for)). Kiracılar, **Yönetim → Kiracılar** ve **Kiracım** sayfalarında kendilerini yönetir: bir ya da birkaç kiracıya bağlı oturum açma sağlayıcıları, kiracının kendi OIDC'si ve LDAP'ı, her kiracı için bir platform alt alan adı ve bir CNAME ile kanıtlanan kendi alan adları; bunların sertifikasını vekil sunucu ya da filex'in kendisi (ACME) sağlar, ya da kiracının kendi sertifikası kullanılır ([docs/TENANT-ADMIN.md](docs/TENANT-ADMIN.md)).
 - **Her şey takılabilir sürücülerle** - depolama / kimlik doğrulama / veritabanı / kuyruk sürücüleri ortam değişkenleriyle isteğe bağlı olarak açılır (`FILEX_AUTH_DRIVERS=local,oidc`, `FILEX_QUEUE_DRIVER=postgres`, …); işletim sistemiyle oturum açma (`windows`, `pam`) bunun istisnasıdır, testini geçtikten sonra yönetim panelinden açılır.
 - **Önce OIDC SSO** - kimlik sağlayıcınıza isteğe bağlı otomatik yönlendirme, yanında kurtarma amaçlı yerel oturum açma (`?local=1`); yönetici rolü de her oturum açmada bir kimlik sağlayıcı grubunu izler.
@@ -799,9 +822,9 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
 - **Kalıcı işlem kuyruğu** - kendi veritabanınızda (SQLite / Postgres / MySQL) ya da Redis'te duran, yeniden başlatmaya dayanıklı kuyruk; yeniden denemeli işçi havuzu + iptal + yönetim paneli. Her sürücü önceliğe göre sıralar; böylece birinin az önce yüklediği bir dosyanın antivirüs taraması, ilk içe aktarmanın kuyruğa aldığı yirmi bin taramadan önce işlenir. Ayarlanmadığında sürücü, varsayılan olarak SQLite'ı seçmek yerine veritabanını izler - SQLite ifadelerini bir Postgres sunucusuna yöneltmek, her yoklamada bir sözdizimi hatası demektir ve hiçbir iş asla çalışmaz.
 - **Veritabanı destekli dosya ağacı** - listelemeler depolama arka ucundan (~100 ms) değil, veritabanı önbelleğinden (1-5 ms) gelir; dönemsel bir senkron, filex dışından yapılan değişiklikleri arka ucun etag bildirdiği yerde etag ile, bildirmediği yerde boyut + değiştirilme zamanı ile yakalar. Bir deponun **Taramadan hariç tutulacak yollar** alanı (`.*`, `downloads/incomplete/**`, `*.tmp`), var olan bir ağacın, filex'in işine yaramayan kısımlarını taramanın, kataloğun, arama indeksinin ve virüs tarayıcısının dışında tutar - erişim denetimi değil, maliyet denetimi ([docs/STORAGE.md](docs/STORAGE.md#scan-exclusions)).
 - **Büyük yerel ağaçlar için tembel katalog** - `sync_mode: lazy` ayarı baştaki taramayı atlar: açtığınız klasör hemen, doğrudan diskten listelenir ve önce o kataloglanır, gerisi ise kullanıcılara yol veren yavaş bir arka plan geçişiyle kataloglanır (ya da yalnızca klasörler açıldıkça). Açılan klasörler bir bütçe dâhilinde izlenir, kimsenin girmediği bir klasör asla silinmiş sayılmaz; arama, klasör boyutları ve kullanım da henüz her şeyi kapsamadıklarında bunu açıkça söyler ([docs/STORAGE.md](docs/STORAGE.md#lazy-catalogue), [tasarım](docs/LAZY-CATALOGUE.md)). Fikir: Alex ([#45](https://github.com/BRF-Tech/filex/issues/45)).
-- **Görüntüleyiciler ve düzenleyiciler** - görsel/video/ses, PDF, Markdown (bölünmüş düzenleyici + önizleme), CSV (ONLYOFFICE yapılandırılmışsa onun hesap tablosu, değilse salt okunur bir tablo), kod (Monaco), OnlyOffice üzerinden Office, Drawio + Mermaid diyagramları, 3D modeller. ONLYOFFICE'in yalnızca daha yeni bir biçimde kaydedebildiği bir belge (düzenlenip DOCX olarak kaydedilen bir `.doc` dosyası) aslının **yanında**, doğru uzantıyla saklanır, asla onun üzerine yazılmaz; belgeyi düzenleyen kişilere de bildirilir ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#a-save-in-another-format)). OnlyOffice'in **Şimdi test et** düğmesi, bir belgenin kullandığı kapının aynısından indirme yapar ve belge sunucusu JWT'yi zorunlu tutmuyorsa uyarır; *Download failed* ("indirme başarısız") iletisinden sonra da düzenleyici, bu iletinin ardındaki iki hatadan hangisinin yaşandığını söyler ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-editor-shows-download-failed)). Bir dosya türü için birden çok uygulama ya da görüntüleyici varsa **Birlikte aç** ve **Uygulama seç…** ile birini seçersiniz; *Her zaman bu uygulamayla aç* seçimi hesabınızda saklanır.
-- **Bildirimler** - genel JSON webhook'ları (Slack/Discord'dan bağımsız): istediğiniz sayıda hedef, her birinin kendi imza gizli anahtarı ve olay bazında kendi aboneliği; ayrıca okunmuş/okunmamış durumu ve kullanıcı başına sessize alma matrisi olan bir uygulama içi çan. Okunmamışların sayısı **çandaki bir rozet** olarak görünür - 99'a kadar kesin sayı, üstünde `99+`, sistemde dock simgesi varsa masaüstü uygulamasının simgesinde de - bir satır yalnızca gidecek bir yeri varsa tıklanabilir (imza isteği bir bildirimler sayfasını değil, imzalama ekranını açar), **Tüm bildirimleri gör** de bildirimlerinizin hepsini gezginin üzerinde açar; yalnızca yöneticiler için değil, herkes için. Bir dosya **oluşturan** yazma ile bir dosyanın **yerine geçen** yazma ayrı olaylardır (`file.uploaded` / `file.updated`); işletmecinin en çok ayrı almak istediği olaylara da - virüslü bir yüklemenin karantinaya alınması, bir yüklemenin başarısız olması, şifreli bir klasörün kurtarma anahtarıyla açılması - tek tek abone olunabilir ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)).
-- **Arama** - gömülü Bleve, tam metin + üst veri, yetkiye duyarlı. VS Code tarzı dosya adı puanlaması: klasörler hesaba katılır, sözcük sırası katılmaz (`main code` sorgusu `Code/main.go` dosyasını bulur), ayırıcılar ve yazım hataları hoş görülür (`invoice 2026` sorgusu `invoice_2026.pdf` dosyasını, `mian.go` sorgusu `main.go` dosyasını bulur) ama sayılar birebir eşleştirilir (`2026` asla `2025` anlamına gelmez), `tag:` filtreleri, tam eşleşmeler ilk sırada. Bir ⌘K sonucu indirilebilir (klasör, tek bir zip olarak) ya da durduğu yerden dışarı sürüklenebilir ([docs/SEARCH.md](docs/SEARCH.md)).
+- **Görüntüleyiciler ve düzenleyiciler** - görsel/video/ses, PDF, Markdown (bölünmüş düzenleyici + önizleme), CSV (ONLYOFFICE yapılandırılmışsa onun hesap tablosu, değilse salt okunur bir tablo), kod (Monaco), OnlyOffice üzerinden Office, Drawio + Mermaid diyagramları, 3D modeller. ONLYOFFICE'in yalnızca daha yeni bir biçimde kaydedebildiği bir belge (düzenlenip DOCX olarak kaydedilen bir `.doc` dosyası) aslının **yanında**, doğru uzantıyla saklanır, asla onun üzerine yazılmaz; belgeyi düzenleyen kişilere de bildirilir ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#a-save-in-another-format)). OnlyOffice'in **Şimdi test et** düğmesi, bir belgenin kullandığı kapının aynısından indirme yapar ve belge sunucusu JWT'yi zorunlu tutmuyorsa uyarır; *Download failed* ("indirme başarısız") iletisinden sonra da düzenleyici, bu iletinin ardındaki iki hatadan hangisinin yaşandığını söyler ([docs/ONLYOFFICE.md](docs/ONLYOFFICE.md#failure-editor-shows-download-failed)). Düzenleyici her kişinin kendi dilinde açılır ya da yöneticinin **Dış servisler → ONLYOFFICE** altında herkes için seçtiği dilde (`FILEX_ONLYOFFICE_LANG`) ([Düzenleyicinin dili](docs/ONLYOFFICE.md#the-editors-language)). Bir dosya türü için birden çok uygulama ya da görüntüleyici varsa **Birlikte aç** ve **Uygulama seç…** ile birini seçersiniz; *Her zaman bu uygulamayla aç* seçimi hesabınızda saklanır.
+- **Bildirimler** - genel JSON webhook'ları (Slack/Discord'dan bağımsız): istediğiniz sayıda hedef, her birinin kendi imza gizli anahtarı ve olay bazında kendi aboneliği; ayrıca okunmuş/okunmamış durumu ve kullanıcı başına sessize alma matrisi olan bir uygulama içi çan. Okunmamışların sayısı **çandaki bir rozet** olarak görünür - 99'a kadar kesin sayı, üstünde `99+`, sistemde dock simgesi varsa masaüstü uygulamasının simgesinde de - bir satır yalnızca gidecek bir yeri varsa tıklanabilir (imza isteği bir bildirimler sayfasını değil, imzalama ekranını açar), **Tüm bildirimleri gör** de bildirimlerinizin hepsini gezginin üzerinde açar; yalnızca yöneticiler için değil, herkes için. Bir dosya **oluşturan** yazma ile bir dosyanın **yerine geçen** yazma ayrı olaylardır (`file.uploaded` / `file.updated`); işletmecinin en çok ayrı almak istediği olaylara da - virüslü bir yüklemenin karantinaya alınması, bir yüklemenin başarısız olması, şifreli bir klasörün kurtarma anahtarıyla açılması - tek tek abone olunabilir ([docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)). **Her bildirimi sunucu söyler**: çan, masaüstü uygulamasının bildirimi, anlık bildirim ve e-posta aynı cümleyi okuyanın hesap dilinde gösterir; bir webhook kendisi için ayarlanan dilde bilgilendirilir ve kendisi çeviren bir alıcı için iletiyi çevrilmemiş hâliyle de alır ([Bir bildirim ne söyler](docs/NOTIFICATIONS.md#what-a-notification-says)). **Web Push** (kullanıcı ayarlarında *Bu cihazda anlık bildirim*) bildirimleri filex kapalıyken bir telefona ya da tarayıcıya getirir (iPhone ya da iPad'de, Ana Ekran'a eklenmiş web uygulaması, iOS 16.4 ve sonrası): çanla aynı türler, aynı sessize almalar ve aynı özet ([Web Push](docs/NOTIFICATIONS.md#web-push)).
+- **Arama** - gömülü Bleve, tam metin + üst veri, yetkiye duyarlı. VS Code tarzı dosya adı puanlaması: klasörler hesaba katılır, sözcük sırası katılmaz (`main code` sorgusu `Code/main.go` dosyasını bulur), ayırıcılar ve yazım hataları hoş görülür (`invoice 2026` sorgusu `invoice_2026.pdf` dosyasını, `mian.go` sorgusu `main.go` dosyasını bulur) ama sayılar birebir eşleştirilir (`2026` asla `2025` anlamına gelmez), `tag:` filtreleri, tam eşleşmeler ilk sırada. Bir arama, sınırı saymaya başlamadan önce sunucuda daraltılır - türe, MIME türüne, tarihe, boyuta, klasöre ve sahibine göre - ve yanıt kaç sonuç bulunduğunu söyler ([Aramayı daraltmak](docs/SEARCH.md#narrowing-a-search)). Bir ⌘K sonucu indirilebilir (klasör, tek bir zip olarak) ya da durduğu yerden dışarı sürüklenebilir ([docs/SEARCH.md](docs/SEARCH.md)).
 - **Okunabilen küçük resimler**: PDF, başlığı kartta kalsın diye üstten hizalanmış **ilk sayfasını** gösterir; video, siyah olmayan ilk karesini (siyahtan açılarak başlayan bir video eskiden siyah bir kare üretirdi, bir saniyeden kısa bir klip ise satır hâlâ "hazır" derken hiçbir şey üretmezdi); Office belgesi, çizilmiş ilk sayfasını; metin, kod ya da CSV dosyası ise satırın zaten yazdığı uzantıyı yinelemek yerine **kartı kendi ilk satırlarıyla doldurur**. Görsel, video (ffmpeg), PDF (ghostscript), Office (bağlı OnlyOffice); sunucunun yeteneklerine göre davranır ve bu ikili dosyalardan biri eksikse sunucu artık sessizce renkli dikdörtgenler çizmek yerine bunu açılışta günlüğüne yazar. Önbelleğe alınmış küçük resim, ait olduğu dosya kalıcı olarak silindiğinde serbest bırakılır, dönemsel bir uzlaştırıcı da eski bir kurulumun biriktirdiği sahipsiz kalanları geri alır. Küçük resim **dosyasını izler**: filex'in dışında değişmiş ya da hiç resmi olmamış bir dosya, bir listeleme ya da senkron onu gördüğünde yeniden çizilir; **SVG** her kurulumda yerleşik bir motorla (bir yöneticinin belirlediği boyut ve süre sınırlarıyla), **HEIC/AVIF** fotoğrafları ise ImageMagick ile çizilir; saydam resimler dama deseni üzerinde durur; **klasör, içine en son gelen dosyaları gösterir**, bunlar ızgarada, galeride ve listede klasörle birlikte çizilir, üzerine gelince de klasör, içinde ne olduğunu gösterir (bir yönetici bunu kapatabilir); metin dosyaları ilk satırlarını, arşivler ise içindekileri gösterir; aracı eksik olan dosya adıyla belirtilir, üstü örtülmez; **Yönetim → Araçlar → Küçük resim onarımı** ise bir dosyayı, bir klasörü ya da bir depoyu istendiğinde yeniden çizer ([docs/thumbnails.md](docs/thumbnails.md)).
 - **Sekmeler, temalar ve derin bağlantılar** - yan yana açık birkaç klasör, aydınlık/karanlık/otomatik tema ve açık klasörü izleyen bir adres çubuğu, böylece yapıştırılan bir bağlantı o klasöre götürür. Tema galerisinde sekiz palet hazır gelir; her biri ikinci bir stil dosyası değil, `--fe-*` değişkenlerinin bir eşlemesidir, böylece barındıran bir sayfa ya da gömülü bir gezgin birini seçebilir - ya da kendi değerlerini verebilir - ve bunun için hiçbir CSS'i çatallaması gerekmez; işletmeci kendi paletlerini ekleyebilir (bkz. *Görünüm*).
 - **Görünüm: sizin renkleriniz, her yerde** - yönetim panelindeki **Görünüm** ekranı, siz yazdıkça önizlenen adlandırılmış temalar oluşturur - açık ve koyu için on iki renk, köşe yarıçapı, yazı tipi yığını - ve birini **kurulum varsayılanı** yapar. Renkli bir düğmenin üzerindeki metin beyaz varsayılmaz, kontrasta göre seçilir; paletin geri kalanı sunucuda türetilir ve tema, oturum açma sayfasına ve herkese açık her bağlantıya ulaşır - kendi tonlarıyla ya da bu iki sayfaya özel olarak verdiğiniz renklerle - çünkü oturum açma sayfasına gelince duran bir marka, marka değildir: oturum açılmamış bir sayfa kurulum varsayılanını taşır, o tarayıcıyı en son kullanan kişinin paletini asla taşımaz ve oturum açmış kişinin kendi seçimi önceliklidir. Temalar tek bir JSON dosyası olarak dışa ve içe aktarılır. Onun yanındaki tehlikeli araç **özel CSS**'tir; artık siz açana kadar kapalıdır, oturum açmamış hiç kimseye sunulmaz, hiçbir şey çekemez ve onu kapatan ekrana ulaşamaz ([docs/INTEGRATION.md](docs/INTEGRATION.md#themes)).
@@ -812,7 +835,7 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
 - **Klavyeyle kullanılır, tuşunu da yazar** - sağ tık menüsündeki ve araç çubuğundaki her eylem, kendisini çalıştıran tuşu yazar; tuş kısayol kaydından okunduğu için yeniden atamaya uyar. Otuz iki işlemin tuşu *Kısayol ayarları* üzerinden yeniden atanabilir (her tarayıcıda ayrı saklanır); tarayıcının kendine ayırdığı, `Ctrl+W` gibi bir avuç kombinasyon, hiç çalışmayacak bir tuş olarak saklanmak yerine nedeni belirtilerek reddedilir.
 - **Kullanım ve maliyet** - filex sağlayıcınızın faturasını kendisi ölçmez; sağlayıcının zaten yazdığı raporu okur, normalleştirir ve düzenleyebileceğiniz bir tabloyla fiyatlandırır. Backblaze B2'nin günlük CSV'leri, filex'in zaten konuştuğu aynı S3 API'si üzerinden okunur; yani yeni bir bağımlılık da yeni bir kimlik bilgisi türü de yok. Ücretsiz kullanım hakları bir formüldeki sabitler değil, ayrı alanlardır ve sayfa, sağlayıcının hesap düzeyindeki satırını kova (bucket) başına satırlarından ayrı tutar - ikisini toplamak aynı işlemleri iki kez sayar; tam da kimsenin fark etmeyeceği kadar ([docs/USAGE.md](docs/USAGE.md)).
 - **Denetim kaydı** - her değişiklik, onu yapanla, entegrasyon kimliğiyle ve üst verisiyle birlikte kaydedilir.
-- **CLI istemcisi** - aynı ikili dosya, sunucu tarafında eklenti gerekmeden uzak bir sunucuya ulaşır (`filex client`, `filex sync`): depolar arasında kopyalama ve taşıma, çöp kutusu, sürümler, etiketler, uygulama işlemleri, arşivler ve bağlantılarınız, her sunucu işi sonuna kadar izlenerek; `filex client login --realm` komutu bir kiracıda oturum açar, `filex encrypt` komutu şifreli klasörler oluşturur ve kaydedilmiş bir oturum, kaydedildiği adresten başka hiçbir yere gönderilmez ([docs/CLI.md](docs/CLI.md)).
+- **CLI istemcisi** - aynı ikili dosya, sunucu tarafında eklenti gerekmeden uzak bir sunucuya ulaşır (`filex client`, `filex sync`): depolar arasında kopyalama ve taşıma, çöp kutusu, sürümler, etiketler, uygulama işlemleri, arşivler ve bağlantılarınız, her sunucu işi sonuna kadar izlenerek; `filex client login --realm` komutu bir kiracıda oturum açar, `filex encrypt` komutu şifreli klasörler oluşturur, `filex vault` bir kasayı bağlar ve toparlar, `filex sync run --json` motorun olaylarını bir programa verir, bir ret sunucunun kendi cümlesiyle yazdırılır ve kaydedilmiş bir oturum, kaydedildiği adresten başka hiçbir yere gönderilmez ([docs/CLI.md](docs/CLI.md)).
 - **Kendini günceller** - ara sürümler tek tıkla yükseltme için duyurulur, yama sürümleri ise siz izin verince kendiliğinden kurulur (`AUTO_UPGRADE=true`; varsayılan olarak filex yalnızca denetler ve size bildirir); paket yöneticisine ait bir kuruluma (Homebrew, winget, Snap, bir dağıtım paketi) ya da bir konteynere yeni sürümler ve onları alacak komut bildirilir, yönetim sayfası da yalnızca duyuracağını söyler ([docs/UPDATES.md](docs/UPDATES.md)).
 - **Tek ikili dosya** - goreleaser matrisi: linux/macOS/Windows × amd64/arm64. CGO=0, modernc.org/sqlite.
 - **i18n** - İngilizce + Türkçe hazır gelir, **herkese açık bağlantılar dâhil**: bir
@@ -825,7 +848,9 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
   JavaScript'siz sayfalar ve kurulum sırasındaki izin incelemesi - her biri, öteden
   beri hitap ettiği okura hitap eder ve anahtar bazında İngilizceye döner; yer
   tutucuları İngilizcedekilerle eşleşmeyen bir çeviri ise çalışma zamanında
-  kullanılmaz, böylece bir e-posta, bağlantısını ya da PIN'ini asla yitirmez.
+  kullanılmaz, böylece bir e-posta, bağlantısını ya da PIN'ini asla yitirmez. Oturum
+  açmış bir kişinin tek bir dili vardır, hesabınki: ekran ve her kanaldaki bildirimler
+  onu izler, bir yönetici bir dili sabitlemedikçe ONLYOFFICE düzenleyicisi de.
 - **Dil paketleri** - diğer her dil, **çalışan hiçbir şeyi olmayan bir uygulamadır**:
   metinlerden oluşan bir manifest, diğer her uygulama gibi bir GitHub reposundan, yüklenen
   bir dosyadan ya da bir URL'den kurulur ve **Eklentiler → Uygulamalar** altında,
@@ -897,6 +922,14 @@ herkese açık bağlantılarını neyin koruduğu. **Uygulama yazmak** (standart
   alır. Anahtarlar, paylaşım ve yükleme bağlantıları, yükleme biletleri, S3 ve betikler
   bundan etkilenmez
   ([docs/CONFIGURATION.md](docs/CONFIGURATION.md#requests-from-other-origins)).
+- **Sunucunun sözü, her ret için tek biçim** - bir ret, değişmeyen bir `error` kodu ve
+  sunucunun okuyanın dilindeki cümlesiyle (`message`) yanıtlanır; gezgin, yönetim paneli,
+  masaüstü uygulaması, CLI ve bir ajan aynı sözleri gösterir
+  ([docs/API-ERRORS.md](docs/API-ERRORS.md)). İstemcilerin eskiden kopyasını tuttuğu
+  kurallar - hangi dosyaların düzenlemek için açıldığı, girdi sınırları, bu kurulumda
+  gerçekleşemeyecek bildirim olayları - sunucu tarafından yayımlanır, böylece hiçbir ekran
+  onları farklı değerlendirmez
+  ([Sunucunun yayımladığı kurallar](docs/BACKEND.md#rules-the-server-publishes)).
 
 ## Mimari
 
@@ -910,8 +943,8 @@ Bkz. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 [Güncellemeler](docs/UPDATES.md) · [Demo modu](docs/DEMO.md)
 
 **İstemciler** - [Masaüstü uygulaması](docs/DESKTOP.md) · [Klasör eşitleme](docs/SYNC.md) ·
-[CLI](docs/CLI.md) · [Entegrasyon / gömme](docs/INTEGRATION.md) ·
-[Yapay zekâ ve MCP](docs/MCP.md)
+[CLI](docs/CLI.md) · [Eşitlemenin olay akışı](docs/SYNC.md#the-event-stream---json) ·
+[Entegrasyon / gömme](docs/INTEGRATION.md) · [Yapay zekâ ve MCP](docs/MCP.md)
 
 **Tarayıcı olmadan** - [Protokoller (S3 · SFTP · FTPS · NFS · WebDAV ·
 `filex mount`)](docs/PROTOCOLS.md) · [WebDAV](docs/WEBDAV.md)
@@ -946,20 +979,46 @@ güvenilir vekil sunucular](docs/CONFIGURATION.md#sign-in-attempt-limits) ·
 [Çöp kutusu ve sürümleme](docs/TRASH-VERSIONING.md) · [Koruma](docs/PROTECTION.md) ·
 [Arşivler](docs/ARCHIVES.md) ·
 [Uçtan uca şifreleme](docs/E2E-ENCRYPTION.md) ·
-[Kim şifreleyebilir](docs/E2E-ENCRYPTION.md#who-may-encrypt) · [Arama](docs/SEARCH.md) ·
+[Kim şifreleyebilir](docs/E2E-ENCRYPTION.md#who-may-encrypt) ·
+[Kasa (3. seviye)](docs/E2E-VAULT-FORMAT.md) ·
+[Şifreli ofis belgelerini düzenlemek (tasarım)](docs/E2E-OFFICE.md) · [Arama](docs/SEARCH.md) ·
 [Gerçek zamanlılık ve kimin açık olduğu](docs/REALTIME.md) ·
-[Bildirimler](docs/NOTIFICATIONS.md) · [Küçük resimler](docs/thumbnails.md) ·
+[Bildirimler](docs/NOTIFICATIONS.md) · [Web Push](docs/NOTIFICATIONS.md#web-push) ·
+[Küçük resimler](docs/thumbnails.md) ·
 [Replikasyon](docs/REPLICATION.md) · [Temalar ve görünüm](docs/INTEGRATION.md#themes)
 
 **İşletme ve genişletme** - [Dağıtım](docs/DEPLOYMENT.md) · [Docker](docs/DOCKER.md) ·
 [Metrikler](docs/METRICS.md) · [Mimari](docs/ARCHITECTURE.md) ·
-[Arka uç API belirtimi](docs/BACKEND.md) ·
+[Arka uç API belirtimi](docs/BACKEND.md) · [API hataları](docs/API-ERRORS.md) ·
 [OpenAPI 3.1 (`/api/files`, `/api/ai`)](backend/internal/api/openapi.json) ·
 [Bileşen API'si](docs/API.md) · [OnlyOffice](docs/ONLYOFFICE.md) ·
+[Düzenleyicinin dili](docs/ONLYOFFICE.md#the-editors-language) ·
 [ONLYOFFICE'te CSV](docs/ONLYOFFICE.md#csv-files) ·
 [Başka kökenlerden gelen istekler](docs/CONFIGURATION.md#requests-from-other-origins)
 
 [Tüm belgelerin dizini](docs/README.md)
+
+## filex nasıl geliştiriliyor
+
+filex'in tek bir geliştiricisi var ve onu yapay zekâ kodlama ajanlarıyla (Claude Code)
+geliştiriyor. filex'in ne olduğuna ve nasıl çalıştığına geliştirici karar veriyor: mimari,
+veri ve güvenlik modeli, her özelliğin davranışı. Kodun çoğunu ajanlar bu yönlendirmenin
+içinde, geliştiricinin bildiği dillerde yazıyor. Geliştirme deposundaki commit'lerin
+yaklaşık %82'sinde `Co-Authored-By: Claude` satırı var; yani gizli bir şey yok.
+
+Yapay zekâ destekli, ama gözden geçirilmemiş üretilmiş kod değil:
+
+- Her değişiklik birleşmeden önce test zincirinden geçer: Go testleri (yarış dedektörü
+  altında da), yaklaşık 500 Vitest dosyası, Chromium, Firefox ve WebKit'te yaklaşık 120
+  Playwright senaryosu, Cypress ve SQLite, PostgreSQL ile MySQL üzerinde veritabanı
+  testleri. Her sürüm, GitHub'ın tam test matrisi ve yayın akışının deneme koşusu aynı
+  commit üzerinde geçtikten sonra etiketlenir.
+- Giriş, yetki, paylaşım ve şifrelemeye dokunan değişiklikler ek inceleme turlarından geçer;
+  kırmızı bir test gevşetilmez, düzeltilir.
+- Güvenlik bildirimleri açıkta ele alınır: [SECURITY.md](SECURITY.md) ve yayımlanmış
+  güvenlik duyuruları. Henüz bağımsız bir denetim yapılmadı.
+- Almanca, İspanyolca, Fransızca ve Çince README'ler ile Almanca, İspanyolca ve Fransızca
+  dil paketleri makine çevirisidir; henüz ana dili konuşan biri gözden geçirmedi.
 
 ## Geliştirme
 

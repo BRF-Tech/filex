@@ -19,7 +19,9 @@
 //   3. paging, the unread filter, mark-one and mark-all all work from there;
 //   4. rule 1 holds in this list too: a row with no target is inert here as
 //      well as in the bell — it is the same row component;
-//   5. a click goes where the row points, through the one resolver.
+//   5. a click goes where the row points, through the one resolver;
+//   6. each row shows the words the SERVER said for it (#191, backend notify
+//      say.go), as they are - this list composes nothing.
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
@@ -83,7 +85,7 @@ function row(p: Partial<NotificationItem>): NotificationItem {
     id: 1,
     event: 'file.uploaded',
     severity: 'info',
-    title: 'file.uploaded',
+    title: 'New file',
     body: '',
     meta: {},
     webhook_status: 'skipped' as NotificationItem['webhook_status'],
@@ -91,6 +93,44 @@ function row(p: Partial<NotificationItem>): NotificationItem {
     read_at: null,
     ...p,
   };
+}
+
+/**
+ * The fake server's 30 rows, newest first, each said in `lang` the way the
+ * real one says them (backend notify say.go, `server.notify.*`), in the
+ * language of the reader's account (the request names none; that is held in
+ * tests/stores/notificationFeed.test.ts). A test names the language its
+ * account reads in.
+ */
+function serverRows(lang: 'en' | 'tr' = 'en'): NotificationItem[] {
+  const turkish = lang === 'tr';
+  const newFile = (name: string) => (turkish ? `Yeni dosya: ${name}` : `New file: ${name}`);
+  return [
+    row({
+      id: 100,
+      event: 'file.uploaded',
+      title: newFile('rapor.pdf'),
+      body: '/depo/rapor.pdf',
+      target: { kind: 'file', storage: 'qldemo', path: 'depo/rapor.pdf' },
+      meta: { node: { name: 'rapor.pdf', path: '/depo/rapor.pdf' } },
+    }),
+    row({
+      id: 99,
+      event: 'update_available',
+      title: turkish ? 'filex v0.43.0 yayınlandı' : 'filex v0.43.0 is available',
+      body: turkish ? 'Bu sunucu v0.42.0 sürümünde çalışıyor.' : 'This server runs v0.42.0.',
+      meta: { version: 'v0.43.0', current: 'v0.42.0' },
+    }),
+    ...Array.from({ length: 28 }, (_, i) =>
+      row({
+        id: 90 - i,
+        event: 'file.uploaded',
+        title: newFile(`f${i}.txt`),
+        body: `/f${i}.txt`,
+        meta: { node: { name: `f${i}.txt`, path: `/f${i}.txt` } },
+      }),
+    ),
+  ];
 }
 
 const PLAIN_USER: User = {
@@ -151,22 +191,7 @@ beforeEach(() => {
   markRead.mockClear();
   markAllRead.mockClear();
   // 30 rows: more than one page of 25, which is what makes paging real.
-  all = [
-    row({
-      id: 100,
-      event: 'file.uploaded',
-      target: { kind: 'file', storage: 'qldemo', path: 'depo/rapor.pdf' },
-      meta: { node: { name: 'rapor.pdf', path: '/depo/rapor.pdf' } },
-    }),
-    row({ id: 99, event: 'update_available', title: 'filex v0.43.0 available', body: 'policy is manual' }),
-    ...Array.from({ length: 28 }, (_, i) =>
-      row({
-        id: 90 - i,
-        event: 'file.uploaded',
-        meta: { node: { name: `f${i}.txt`, path: `/f${i}.txt` } },
-      }),
-    ),
-  ];
+  all = serverRows('en');
 });
 
 describe('NotificationsPanel — a person reads their own notifications', () => {
@@ -281,10 +306,16 @@ describe('NotificationsPanel — a person reads their own notifications', () => 
     expect(screen()).toBeNull();
   });
 
-  it('says what happened in the reader’s language, never a raw event key', async () => {
+  it('shows the words the server said for each row, as they are', async () => {
+    // The server says every row in the language the list was asked in; for a
+    // Turkish reader it answered in Turkish, and the list prints exactly that.
+    all = serverRows('tr');
     const { notif } = await setup('tr');
     await openIt(notif);
+    expect(titles()).toEqual(all.slice(0, 25).map((n) => n.title));
     expect(titles()[0]).toBe('Yeni dosya: rapor.pdf');
-    for (const t of titles()) expect(t).not.toMatch(/^[a-z_]+\.[a-z_.]+$/);
+    const first = rowsOnScreen()[0];
+    expect(first.querySelector('.fx-nrow__body-text')?.textContent?.trim()).toBe('/depo/rapor.pdf');
+    expect(rowsOnScreen()[1].querySelector('.fx-nrow__title')?.textContent?.trim()).toBe('filex v0.43.0 yayınlandı');
   });
 });

@@ -20,6 +20,14 @@ guide: what to set, and why.
 publishes `dist/style.css` for a host that would rather serve the sheet
 itself.)
 
+⚠ **@brftech/filex 0.54 needs a filex 0.54 server.** Which files are office
+documents or text a person edits (`edit_kinds`), the input limits (`limits`)
+and the version line's parts (`release`, `commit`, `built`) come from the
+server's `/api/files/capabilities`; the packages keep no list of their own to
+fall back on. Against an older server nothing is offered Edit, nothing opens
+as an office document and the version line is not drawn - update the server
+with the packages ([BACKEND.md → Rules the server publishes](BACKEND.md#rules-the-server-publishes)).
+
 - [`<filex-explorer>` (Web Component)](#filex-explorer-web-component)
 - [`<FileExplorer>` (Vue 3)](#fileexplorer-vue-3)
 - [`<FileManager>` (React)](#filemanager-react)
@@ -79,7 +87,7 @@ property.
 |----------------|--------|------------|-------|
 | `api-base`     | string | `apiBase`  | base URL of the filex backend; required unless `endpoint` is set |
 | `endpoint`     | string | `endpoint` | legacy explicit manager URL, for hosts with their own routes |
-| `locale`       | string | `locale`   | `tr`, `en`, or any language an installed **language pack** adds (`GET /api/public/branding` → `ui_locales` lists them). Unset ⇒ the browser's language, falling back to `en`. An embed takes its **text direction** from this value, not from the host page - see [RTL](RTL.md) |
+| `locale`       | string | `locale`   | `tr`, `en`, or any language an installed **language pack** adds (`GET /api/public/branding` → `ui_locales` lists them). ⚠ With a person signed in, the explorer speaks the **account's** language instead - this is only the fallback and a starting value ([The explorer's language](#the-explorers-language)). Unset ⇒ the browser's language, falling back to `en`. An embed takes its **text direction** from this value, not from the host page - see [RTL](RTL.md). The ONLYOFFICE editor it opens follows it too, unless the administrator fixed the editor's language ([ONLYOFFICE.md → The editor's language](ONLYOFFICE.md#the-editors-language)) |
 | `theme`        | string | `theme`    | `light \| dark \| auto` (default `auto`) - the **host's** mode, used while the viewer has not pinned one of their own |
 | `trash-visible`| bool   | `trashVisible` | show the Trash entry |
 | `sidenav`      | bool   | `sideNav`  | the navigation panel. Absent leaves the core default (on) alone |
@@ -175,6 +183,27 @@ changes a property nothing renders from - the merge is `{...attributes,
 for a key the config does not carry. That exact mistake shipped in v0.19.0: the
 shell went Turkish while the file list stayed English, and the element reported
 `locale === 'tr'` the whole time.
+
+### The explorer's language
+
+**The account's** (0.54, #191). The server says every notification - the
+bell, a push to the person's phone, an email - in the language of the
+person's account, so an explorer whose chrome spoke its host page's language
+showed one person two languages. With a person's credential (the capabilities'
+`caller_kind` is `user`), the explorer asks `GET /api/auth/me` and draws the
+account's `locale`; the host's `locale` is:
+
+- what it draws until the account answers;
+- what it keeps when nobody is signed in (a public link) or the credential is
+  an app's token (`caller_kind: app` - nobody's account);
+- the **starting value of an account that has no language**: the explorer
+  writes it to the account (`PATCH /api/auth/profile {"locale": ...}`), so the
+  account's notifications and every other surface agree with what it shows;
+- followed when the host changes it while the explorer is mounted (the filex
+  web panel and desktop app write the account first, so the two agree).
+
+A host that wants a different language for its own page draws its own page
+in it; the explorer inside follows the person.
 
 ---
 
@@ -642,8 +671,9 @@ export interface FileNode {
    *  a `local` storage's folder is followed and arrives as its target, so this
    *  never means merely "is a link". `type` stays `'file' | 'dir'`. */
   symlink?: boolean;
-  /** Why: `outside_root` | `broken` | `unresolved`; often absent (read it
-   *  through `linkStateOf`). See docs/STORAGE.md → Symlinks. */
+  /** Why: `outside_root` | `broken` | `unresolved`, as the driver says it
+   *  now or as the last sync recorded it (0.54+). Absent when no reason is
+   *  known (read it through `linkStateOf`). See docs/STORAGE.md → Symlinks. */
   link_state?: string;
   /** An entry the storage could not answer for (0.50, issue #104): listed,
    *  and every operation on it or inside it answers 409 ENTRY_UNAVAILABLE.
@@ -705,6 +735,31 @@ export interface Capabilities {
   /** Document types this build can create. Absent on a server older than the
    *  "New document" feature - treat that as "offer nothing". */
   newdoc_types?: NewDocType[];
+  /** 0.54: the release, the commit and the build time apart (`version`
+   *  keeps the one-line `v0.54.0 (<commit>, <built>)`). */
+  release?: string;
+  commit?: string;
+  built?: string;
+  /** 0.54: how each kind of file is edited - the server's rule
+   *  (docs/BACKEND.md → Rules the server publishes). */
+  edit_kinds?: {
+    office: string[];
+    text: string[];
+    text_names: string[];
+    text_mime_prefixes: string[];
+    text_mimes: string[];
+  };
+  /** 0.54: the numbers an input is held to, in characters or bytes. */
+  limits?: {
+    tag_max_runes: number;
+    comment_max_runes: number;
+    e2e_request_reason_max_runes: number;
+    app_state_max_bytes: number;
+    app_ui_save_chunk_bytes: number;
+  };
+  /** 0.54, signed-in callers: the notification events that cannot happen
+   *  here - why, whether this caller could change it, and the sentence. */
+  event_off?: Record<string, { reason: string; fixable: boolean; text: string }>;
   ffmpeg?: boolean;
   ghostscript?: boolean;
   /* No `libreoffice` since 0.50: filex runs no LibreOffice; office
@@ -718,8 +773,12 @@ export interface Capabilities {
   drawio_url?: string | null;
   max_chunk_mb?: number;
   upload_limit_mb?: number;
-  /** Longest life a new share link may be given, in days (0 = no ceiling). */
+  /** Longest life a new share link may be given on this install, in days (0 = no ceiling). */
   share_max_ttl_days?: number;
+  /** Longest life a new link made by THIS caller may be given, in days (0 =
+   *  no ceiling): the install's ceiling or their permission rules', whichever
+   *  is shorter. The share dialog's expiry choices come from this one. */
+  share_link_max_days?: number;
   /** Present when New document makes DRAFTS for this caller (#71): a signed-in
    *  person, not an app token or a caller confined to a root. `limit` is how
    *  many one person may keep. Absent → New document creates the file. */
@@ -743,6 +802,12 @@ export interface Capabilities {
    *  encryption as before"). What the explorer offers where is asked per path:
    *  `POST /api/files/e2e/allowed` ([BACKEND.md](BACKEND.md#encryption-policy)). */
   e2e_policy?: { available: boolean; policy: string };
+  /** Whether this server serves the vault, encryption level 3
+   *  (`/api/files/e2e/vault`, [BACKEND.md](BACKEND.md#vault-encryption-level-3),
+   *  [E2E-VAULT-FORMAT.md](E2E-VAULT-FORMAT.md)): always present, `true` only
+   *  where `FILEX_E2E_VAULT` is on (off by default). Only then does the explorer
+   *  offer level 3, and only for a new folder. */
+  e2e_vault?: boolean;
 }
 ```
 
@@ -795,10 +860,11 @@ root, path included, as `apiBase`.
 | `GET \| PUT /api/files/manager/view-prefs` | one opaque JSON document per user: view mode, sort, column widths/order/visibility. On the user row rather than in the browser, because `localStorage` is per-BROWSER and a shared machine would hand the next account the previous one's arrangements. Capped at 128 KB, server-side |
 | `GET /api/files/manager?action=index&path=` → `storage_info[].sort_order` | the administrator's position of each drive the caller can open (absent = not placed), beside `read_only`; the `storages` names come in that order. The right source for `config.storages[].sortOrder` in an embed. A person's own order is on their account (`/api/me/prefs`, `storageOrder`), and the explorer applies it itself - [STORAGE.md → Ordering storages](STORAGE.md#ordering-storages) |
 | `GET /api/files/quota/storages` | per-storage usage, RBAC-filtered - "how full is this drive" for somebody who is not an administrator. `{ storages: [{ name, used_bytes, file_count }] }`. It is the right source for `config.storages[].usedBytes` in an embed; `/api/admin/storages` is the operator's |
-| `POST /api/files/manager?action=newfile` | create a document: `{ path, name, type, exact_name? }`, where `type` is an `ext` from `newdoc_types` - or, for an app's row, its `key` (`app:<plugin>:<ext>`, made of the app's template, `400 UNSUPPORTED_TYPE` while the app is not running or its grant lacks the kind). Without `exact_name` the type's extension is appended when the name lacks it; with `exact_name: true` the name is the whole file name - a text type is created under exactly it (`LICENSE`, `test.conf`), and only a type with `ext_required` still gains its extension (#56). A text type named with an `ext_required` type's extension (`x.docx` as `txt`) is `400 EXT_NEEDS_TYPE`. Answers `{ path, name, ext, size, mime }`, where `ext` is the **type** the bytes were made from, not the name's extension - deliberately **not** the re-rendered listing, because a create is followed by "open the thing I just made" and the one fact the client cannot reconstruct is the final path (the name may have gained an extension). `409` on a collision: creation is the one verb where replacing is never the intent |
+| `POST /api/files/manager?action=newfile` | create a document: `{ path, name, type, exact_name? }`, where `type` is an `ext` from `newdoc_types` - or, for an app's row, its `key` (`app:<plugin>:<ext>`, made of the app's template, `400 UNSUPPORTED_TYPE` while the app is not running or its grant lacks the kind). Without `exact_name` the type's extension is appended when the name lacks it; with `exact_name: true` the name is the whole file name - a text type is created under exactly it (`LICENSE`, `test.conf`), and only a type with `ext_required` still gains its extension (#56). A text type named with an `ext_required` type's extension (`x.docx` as `txt`) is `400 EXT_NEEDS_TYPE`. Answers `{ path, name, ext, size, mime }`, where `ext` is the **type** the bytes were made from, not the name's extension - deliberately **not** the re-rendered listing, because a create is followed by "open the thing I just made" and the one fact the client cannot reconstruct is the final path (the name may have gained an extension). `409 { code: "NAME_TAKEN", name, suggested }` on a collision - creation is the one verb where replacing is never the intent - where `suggested` is the first free `name (n).ext` beside it (the numbering a draft saved beside a file of its name gets). With `dry_run: true` nothing is written: every refusal is the same, and a name that passes them answers `200 { dry_run: true, path, name, taken, code?, suggested? }` - `taken` is the create's own existence check (byte for byte on a case-sensitive store), and `suggested` the free name when taken. The New document dialog asks it while a name is typed (0.54) |
 | `GET /api/files/manager?action=changes&path=<storage>://<folder>&since=<cursor>` | `{ cursor, changed }`: has anything under this folder changed since the cursor this caller got last time? No `since` (or a cursor from before a server restart) is always `changed`. One request instead of re-listing a tree; the sync client and the desktop app ask it every round. Same visibility rules as `index`, and a change counts only if the caller can see what it touched. Servers before it answer `501` - walk instead |
 | `POST /api/files/manager?action=rename` | rename one item in place: `{ path, item, name }`. `409 { code: "NAME_TAKEN", name }` when anything already has the name - a rename never replaces it, and is not given a `-copy` name either, because the client's undo assumes the item landed exactly where it was asked to. `503 { code: "EXISTS_CHECK_FAILED" }` when the backend cannot tell. A case-only rename is allowed. With `queued=1` the rename that passes those checks is a job of the operations queue instead: `202 { op }` (kind `rename`); the explorer asks for that for a folder, from a server that lists `rename` under `capabilities.queued` |
 | `GET /api/files/capabilities` → `queued` | the changes this server runs as jobs of its operations queue when asked with `queued=1`: `rename` (above), `restore` (`POST /api/files/manager/restore?queued=1` with `{ node_ids }`) and `purge` (`DELETE /api/admin/trash/{id}?queued=1`), see [TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints). Absent on an older server, which changes inside the request: ask it the old way |
+| `/api/files/e2e/vault/*` and `GET /api/files/capabilities` → `e2e_vault` | the vault, encryption level 3 ([E2E-VAULT-FORMAT.md](E2E-VAULT-FORMAT.md)): `create`, `state`, `list`, `lock` (`renew`, `release`, `break`), `PUT pack`, `PUT index`, `delete` and `prefs`, with the write lock's token in `X-Filex-Vault-Lock`. A pack is up to 16 MiB and an index file up to 64 MiB of request body - a proxy that caps bodies must let those two through. `e2e_vault` is always present and `true` only where the API answers (`FILEX_E2E_VAULT`); while it is `false` every route answers `404 VAULT_DISABLED`. Full reference: [BACKEND.md → Vault](BACKEND.md#vault-encryption-level-3) |
 | `/api/files/drafts` | a new document is a **draft** until its first save (#71): `POST` makes one (the `newfile` body), `GET` lists the caller's own (`{ drafts, count, limit }`), `GET …/count` is the panel's badge, `POST …/{key}/save` puts it in its folder - `409 TARGET_TAKEN` with a `suggested` free `name (2).ext` when the name is taken, never a replace - and `DELETE …/{key}` discards it into the trash. A person's own, only: an app token or a caller confined to a root gets `403 DRAFTS_UNAVAILABLE` and keeps using `newfile`, and `capabilities.drafts` says which a caller is. Full reference: [BACKEND.md → Drafts](BACKEND.md#drafts); what a person sees: [ONLYOFFICE.md → Drafts](ONLYOFFICE.md#drafts-nothing-is-in-the-folder-until-you-save) |
 | `GET /api/files/capabilities` → `newdoc_types` | the document types **this build** can create, from a template registry compiled into the binary. Each row is `{ ext, group, mime, requires, ext_required }` - `ext_required` is `true` where the editor finds the file by its extension (office, diagrams) and `false` for text, which may be named anything (#56). Published to anonymous callers too: it is a static property of the build and names no host. A **signed-in person** is also told the rows running apps add (`new_documents`): `{ ext, key, group: "app", requires: "app", ext_required: true, app: { plugin, view, label } }` - never an anonymous caller or an app token |
 | `GET /api/branding` → `sso_label` | the operator's text for the sign-in page's SSO button (settings key `branding.sso_label`, tenant-overlaid like the rest of branding). Empty means the translated default |

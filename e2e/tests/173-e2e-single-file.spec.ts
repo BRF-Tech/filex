@@ -1024,7 +1024,7 @@ test.describe.serial('E2E single encrypted files — a password change is announ
     await api?.dispose();
   });
 
-  test('the owner is told, the audit log has it twice — announced and seen — and no old header survives', async ({ page }) => {
+  test('the owner is told, the audit log has it twice — the change and the rewrite — and no old header survives', async ({ page }) => {
     test.setTimeout(180_000);
     const stored = `${PWC_NAME}.fxe`;
     const auditBefore = (await auditRows(api, 'e2e.password_change')).length;
@@ -1038,9 +1038,10 @@ test.describe.serial('E2E single encrypted files — a password change is announ
     await page.getByTestId('e2e-password-submit').click();
     await expect(page.getByTestId('e2e-password-form')).toBeHidden({ timeout: 60_000 });
 
-    // Announced by the browser: the owner's bell, and the audit row. Matched
-    // on THIS run's storage too: the engines share one server, and the file
-    // name is the same in each.
+    // Said by the server from the header it saw rewritten (the browser
+    // announces nothing since 0.54): the owner's bell, and the audit row.
+    // Matched on THIS run's storage too: the engines share one server, and
+    // the file name is the same in each.
     const ours = (r: Row) => JSON.stringify(r).includes(stored) && JSON.stringify(r).includes(PWC_STORE);
     await expect
       .poll(async () => (await notifications(api)).some((n) => n.event === 'e2e.password_changed' && ours(n)), {
@@ -1051,7 +1052,7 @@ test.describe.serial('E2E single encrypted files — a password change is announ
     const told = (await notifications(api)).find((n) => n.event === 'e2e.password_changed' && ours(n))!;
     expect(String(told.title)).toBe('Encrypted file password changed');
     const announced = (await auditRows(api, 'e2e.password_change')).filter(ours);
-    expect(announced.length, 'the announcement is in the audit log').toBe(1);
+    expect(announced.length, 'the change is in the audit log').toBe(1);
     expect((await auditRows(api, 'e2e.password_change')).length).toBe(auditBefore + 1);
 
     // Seen by the server itself, whatever the client says: the header was

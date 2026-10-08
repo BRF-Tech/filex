@@ -43,9 +43,20 @@
 
 import { readFileSync } from 'node:fs';
 import { chromium } from '@playwright/test';
+import { PACKS_BEHIND_EXIT } from '../../scripts/lib/shot-scripts.mjs';
 import { bootInstance, client, findApp, installApp, log, newContext, shot, signIn, sleep } from './scene.mjs';
 
 const SET = 'langpack';
+
+/**
+ * A pack is behind this tree - what the SERVER says, before a browser opens:
+ * not a broken scene, a translation that has not caught up. It exits with
+ * PACKS_BEHIND_EXIT, and `pnpm shots` records the scene as `packs-behind`:
+ * the nightly chain reports it as a warning, a release run stays red
+ * (task #187). Anything else that goes wrong here is a plain failure - the
+ * percentage the screen draws included, since the server already said 100%.
+ */
+class PacksBehind extends Error {}
 const ADMIN = { email: 'demo@demo.com', password: 'demo-shots' };
 
 /** Install a data-only app: the manifest, and no module at all. */
@@ -100,7 +111,7 @@ async function main() {
       // that one has drifted.
       for (const l of row.languages ?? []) {
         if ((l.percent ?? 0) !== 100 || (l.unknown ?? 0) > 0) {
-          throw new Error(
+          throw new PacksBehind(
             `${name} (${l.code}) is ${l.percent}% with ${l.unknown ?? 0} strings this filex does not have — ` +
               'this picture says every shipped pack is complete, so re-sync the pack against this tree ' +
               'before shooting it',
@@ -296,5 +307,5 @@ async function main() {
 
 main().catch((err) => {
   console.error('✗', err.stack ?? err.message);
-  process.exit(1);
+  process.exit(err instanceof PacksBehind ? PACKS_BEHIND_EXIT : 1);
 });

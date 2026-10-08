@@ -8,6 +8,11 @@
  * nothing until the person agrees to exactly that name. This is that
  * question, asked the same way from the editor's Save button, from its close
  * question and from the Drafts view.
+ *
+ * wiring:e2 vault — and the explorer's question for an upload into a vault
+ * whose name is taken (`kind="upload"`): a vault keeps no earlier version, so
+ * nothing there is replaced; the file goes up under the free name, or not at
+ * all. One "already there" dialog for both, not a second one.
  */
 import type { LocaleCode, ThemeMode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
@@ -26,6 +31,8 @@ const props = defineProps<{
   folder: string;
   busy?: boolean;
   error?: string | null;
+  /** What is being saved: a draft (the default) or an upload into a vault. */
+  kind?: 'draft' | 'upload';
 }>();
 
 const emit = defineEmits<{
@@ -34,12 +41,13 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useLocale(() => props.locale);
+const upload = () => props.kind === 'upload';
 </script>
 
 <template>
   <Modal :open="open" :locale="locale" :theme="theme" :title="t('draft.taken.title')" size="sm" :busy="busy" @close="emit('cancel')">
     <div class="fe-draftq" data-testid="draft-taken-dialog">
-      <p class="fe-draftq__body">{{ t('draft.taken.body', { name, folder, suggested }) }}</p>
+      <p class="fe-draftq__body">{{ t(upload() ? 'upload.taken.body' : 'draft.taken.body', { name, folder, suggested }) }}</p>
       <p v-if="error" class="fe-form__error" role="alert">{{ error }}</p>
     </div>
     <template #actions>
@@ -54,7 +62,7 @@ const { t } = useLocale(() => props.locale);
         data-testid="draft-taken-confirm"
         @click="emit('confirm')"
       >
-        {{ t('draft.taken.confirm', { name: suggested }) }}
+        {{ t(upload() ? 'upload.taken.confirm' : 'draft.taken.confirm', { name: suggested }) }}
       </button>
     </template>
   </Modal>

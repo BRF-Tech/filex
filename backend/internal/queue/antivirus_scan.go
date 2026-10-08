@@ -312,11 +312,14 @@ func (a *AntivirusScanner) quarantine(ctx context.Context, drv storage.Driver, n
 		slog.Bool("quarantined", quarantined))
 
 	if a.notify != nil {
+		// The facts only: the server says the alarm from them, in each
+		// reader's language (internal/notify say.go,
+		// server.notify.file.infected). The body is the path, as on every
+		// file event.
 		ev := notify.Event{
 			Event:    notify.EventFileInfected,
 			Severity: notify.SeverityWarning,
-			Title:    "Infected file detected",
-			Body:     fmt.Sprintf("%s: %s", n.Path, sig),
+			Body:     n.Path,
 			Meta: map[string]any{
 				"signature":   sig,
 				"quarantined": quarantined,

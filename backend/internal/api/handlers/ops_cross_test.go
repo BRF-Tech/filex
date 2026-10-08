@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/brf-tech/filex/backend/internal/api/handlers"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -182,12 +183,21 @@ func TestOpsHTTP_Copy_IntoReadOnlyStorage_IsRefused(t *testing.T) {
 		"target": "beta://",
 	})
 	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
-	// The refusal has to say what to do about it — a bare code sends the user
-	// back to try the same paste again.
-	var resp map[string]string
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Contains(t, resp["error"], "read-only")
-	require.NotEmpty(t, resp["hint"])
+	// The one refusal shape (internal/apierr, docs/API-ERRORS.md): the code,
+	// the server's sentence in `message`, the storage named in `params`, and
+	// the upper-case `code` the older clients read.
+	var resp struct {
+		Error   string            `json:"error"`
+		Message string            `json:"message"`
+		Code    string            `json:"code"`
+		Params  map[string]string `json:"params"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp), rec.Body.String())
+	require.Equal(t, "read_only", resp.Error, rec.Body.String())
+	require.Equal(t, "READ_ONLY", resp.Code, rec.Body.String())
+	require.Equal(t, "beta", resp.Params["storage"], "the refusal names the read-only destination: %s", rec.Body.String())
+	require.Equal(t, apierr.Text("", "read_only", apierr.Params{"storage": "beta"}), resp.Message, rec.Body.String())
+	require.NotEmpty(t, resp.Message)
 
 	entries, err := os.ReadDir(f.rootB)
 	require.NoError(t, err)

@@ -250,6 +250,9 @@ loop:
     run := create_sync_run(storage_id)
     seen := {}
 
+    # each directory is listed and applied with the storage's row gate held
+    # alone (#192); a folder its parent's listing showed but that is gone when
+    # the walk reaches it counts as a listing that failed, not an empty one
     for entry in storage.Sync(since=last_run_started):
       if entry.path is inside /.filex-trash/, /.versions/ or /.thumbs/:
         skip                                  # filex's own bookkeeping,
@@ -284,11 +287,16 @@ loop:
     # tombstone pass - a node not seen this run is a CANDIDATE, not a verdict
     if seen < 0.7 * last_ok_run.seen:       # the whole listing looks wrong
       skip the pass entirely                # (a failed/aborted run is no baseline)
+    # from here to the drops, the storage's row gate is held alone: no
+    # rename, move, delete or restore filex is making is half way (#192)
     for f in db.files where storage_id=$id and seen_at < run_started:
       if f.path is inside filex's own trees: # never, whatever else went wrong
         keep
-      if f.path is below a folder whose listing failed:
+      if f.path is below a folder whose listing failed, or below a folder
+         its parent's listing showed but that was gone when the walk got there:
         keep                                 # unseen says nothing there
+      if f moved or went since it was listed: # read again first
+        keep                                 # judged where it is next pass
       if f.transfer_state != "stored":      # filex never put the bytes there
         keep
       elif storage.Stat(f.path) is found:   # the listing missed it (folders
@@ -304,10 +312,13 @@ loop:
     for f in rows + (rows deleted in place below each folder in rows):
       if f is a folder and any row still names it as its parent:
         keep                                 # the cascade must not take it
+      elif f, read again, no longer stands where it was confirmed gone:
+        keep                                 # a move re-homed it in between
       else:
         hard_delete(f)                       # quota released; shares, versions,
                                              # comments, tags cascade; search
                                              # doc + thumbnail released
+        log INFO "dropped the row of an object gone from the storage"
 
     finish_sync_run(run)                  # on a context the run's own
                                           # cancellation cannot reach: "ok",
@@ -354,7 +365,55 @@ its row was listed in the Trash with a Restore that could bring nothing back.
 Because dropping a row cannot be undone, folders are confirmed by `Stat` too,
 nothing below a folder whose listing failed is a candidate, and a folder row
 goes only once no row names it as its parent. `Stat` runs only for candidates
-that survive step 1, so a healthy sync costs nothing extra.
+that survive step 1, so a healthy sync costs nothing extra. Every row dropped
+is said in the server log at INFO (the first 50 of a pass one by one, then a
+count).
+
+### The row gate
+
+⚠⚠ **A rename, a move, a delete and a restore change a storage in two steps,
+and the scan must not judge the catalogue between them** (issue #192).
+
+The bytes move first (`Mover.Move`, `trash.Put`) and the rows follow
+(`protocolsync.MoveRows`, `SoftDeleteAndRetag`, the restore). In between, the
+catalogue says one thing and the storage another, and nothing on either side
+can tell that apart from a change made outside filex. A scan running in that
+gap was wrong about rows that were fine. Measured in the 0.53 test run (e2e
+159 and 172, WebKit, under load): a queued folder rename met the fsnotify scan
+two seconds after a write. The scan listed the folder's parent before the
+bytes moved and the folder itself after; "not found" was read as "listed,
+nothing in it", every row below the folder was confirmed gone by a `Stat` of
+the path it still named, and dropped. The renamed folder opened empty, and its
+files came back on the next scan as new rows, without their shares, versions
+or comments. Nothing was logged.
+
+Three rules now stand there:
+
+1. **A folder its parent's listing showed, gone when the walk lists it, is a
+   folder the walk could not list - never an empty one.** Nothing below it is
+   a candidate this pass; the next pass sees the storage as it is.
+2. **Each storage has one row gate** (`internal/rowgate`). A two-step change
+   holds it shared from its first byte to its last row - the queue's rename,
+   move, delete into the trash and restore, and the explorer's rename and
+   move made inside the request. The scan holds it alone while it lists one
+   directory and applies the listing, and while the tombstone pass confirms
+   and drops; the lazy catalogue holds it alone for each folder it
+   reconciles. A judgement therefore sees such a change either wholly before
+   it or wholly after it. Changes do not wait for each other, and a judgement
+   holds the gate for one directory, or one tombstone pass, at a time, so a
+   rename never waits for a whole scan.
+3. **A candidate is read again before it is judged and again before it is
+   dropped**, and kept when it moved or went in between. This covers part of
+   what the gate does not: the protocol servers (WebDAV, SFTP, FTPS, NFS, S3),
+   the AI surface, the explorer's delete inside the request and a second
+   filex process on the same database change a storage without it.
+
+An object store's one-pass listing (`storage.TreeWalker`) is a picture of the
+storage taken when the walk starts. The walk reads directories from it only as
+long as no two-step change has finished on the storage since before the
+picture was taken (`rowgate.Moves`); from the first one on, it asks the
+storage for each directory, so a folder renamed during the walk is not
+catalogued again at its old name.
 
 ### The walk and the trash
 

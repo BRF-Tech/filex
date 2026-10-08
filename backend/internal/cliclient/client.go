@@ -96,7 +96,12 @@ func New(conn Conn) *Client {
 // APIError is a non-2xx response mapped to an error. Body keeps the raw
 // payload so callers can inspect extra fields (e.g. totp_required).
 type APIError struct {
-	Status  int
+	Status int
+	// Code is the refusal's code (`error` in the server's envelope,
+	// internal/apierr), for a program to branch on; "" when it sent none.
+	Code string
+	// Message is what to print: the server's sentence in the reader's
+	// language (`message`), else its `error`, else a clip of the body.
 	Message string
 	Body    []byte
 }
@@ -183,19 +188,29 @@ func (c *Client) getJSONInto(ctx context.Context, p string, q url.Values, what s
 	return raw, nil
 }
 
-// apiErrorFrom extracts the JSON error message when present, otherwise
-// keeps a short plain-text excerpt of the body.
+// apiErrorFrom reads the server's refusal: its sentence (`message`, written
+// by the server in the reader's language) when there is one, else the
+// `error` field, else a short plain-text excerpt of the body.
+//
+// ⚠ `message` first (0.54 audit A2): printing `error` alone showed a person
+// "HTTP 403: permission_denied" while the server had said which role
+// refused what.
 func apiErrorFrom(status int, body []byte) *APIError {
 	var e struct {
-		Error string `json:"error"`
+		Error   any    `json:"error"`
+		Message string `json:"message"`
 	}
 	_ = json.Unmarshal(body, &e)
-	msg := e.Error
+	code, _ := e.Error.(string)
+	msg := strings.TrimSpace(e.Message)
+	if msg == "" {
+		msg = code
+	}
 	if msg == "" {
 		msg = strings.TrimSpace(string(body))
 		if len(msg) > 200 {
 			msg = msg[:200] + "…"
 		}
 	}
-	return &APIError{Status: status, Message: msg, Body: body}
+	return &APIError{Status: status, Code: code, Message: msg, Body: body}
 }

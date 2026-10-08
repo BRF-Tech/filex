@@ -73,6 +73,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/tagname"
 )
@@ -135,9 +136,16 @@ func (c tagCaller) sees(t *model.Tag) bool {
 // tagItem is a tag on the wire: its name as typed and its kind. The id is
 // deliberately not exposed — a client addresses tags by name, and ids would
 // only let one tenant probe the size of another's vocabulary.
+//
+// `key` is the tag's identity (internal/tagname.Key): two names with one key
+// are one tag. Sent with every item (filex #211, audit B12) so a client
+// tells two spellings of one tag apart by the server's rule - full Unicode
+// case folding, the four Latin i's - instead of a copy of it that knew less.
+// It is ignored on the way in.
 type tagItem struct {
 	Name string `json:"name" jsonschema:"the tag as a person reads it; capitals are kept"`
 	Kind string `json:"kind" jsonschema:"personal (only its owner sees it) or team (everyone in the tenant who can see the file)"`
+	Key  string `json:"key,omitempty" jsonschema:"the tag's identity: two names with one key are one tag (answers only; ignored when sent)"`
 }
 
 // tagIdent is (kind, key): the identity a person means by "this tag". Two
@@ -162,7 +170,7 @@ func itemsOf(tags []*model.Tag) []tagItem {
 			continue
 		}
 		seen[id] = true
-		out = append(out, tagItem{Name: t.Name, Kind: t.Kind})
+		out = append(out, tagItem{Name: t.Name, Kind: t.Kind, Key: id.key})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		ki, kj := tagname.Key(out[i].Name), tagname.Key(out[j].Name)
@@ -736,9 +744,11 @@ func (h *Meta) ListAllTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tags": namesOf(items), "items": items})
 }
 
-// TaggedNodes lists the live files carrying a tag (?tag=…), newest-first,
-// capped by ?limit=. ?kind=personal|team narrows to one kind; absent = both
-// (a `#.tag~x` link from before v0.43 keeps working). Empty tag → 400.
+// TaggedNodes lists the live files carrying a tag (?tag=…), one page of
+// ?limit= rows from ?offset=, in ?sort= order (default: the most recently
+// modified first), with `total` and `truncated` (filex 0.54, audit D3).
+// ?kind=personal|team narrows to one kind; absent = both (a `#.tag~x` link
+// from before v0.43 keeps working). Empty tag → 400.
 func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
 	c, ok := tagCallerOf(r.Context())
 	if !ok {
@@ -756,6 +766,11 @@ func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := parseLimit(r.URL.Query().Get("limit"), 500, 1000)
+	offset := parseLimit(r.URL.Query().Get("offset"), 0, 1_000_000)
+	order, ok := listOrderFrom(w, r, listorder.Order{Key: listorder.KeyModified, Desc: true})
+	if !ok {
+		return
+	}
 	ids, display, err := resolveTagIDs(r.Context(), h.Store, c, tag, kind)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -764,18 +779,38 @@ func (h *Meta) TaggedNodes(w http.ResponseWriter, r *http.Request) {
 	if display == "" {
 		display = tag
 	}
-	nodes, err := h.Store.ListNodesByTagIDs(r.Context(), ids, limit)
+	// Every tagged node the caller may see (up to tagFilterMax, the bound
+	// the search's `tag:` filter has too), in the asked order, then the page:
+	// the order is the whole set's, not the page's.
+	nodes, err := h.Store.ListNodesByTagIDs(r.Context(), ids, tagFilterMax)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	capped := len(nodes) >= tagFilterMax
+	nodes = h.tagOps().visibleNodes(r.Context(), nodes)
+	listorder.SortNodes(nodes, order)
+	total := len(nodes)
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	nodes = nodes[offset:end]
 	// ⚠⚠ THE TAG VIEW WAS EMPTY IN EVERY MULTI-STORAGE INSTALL WITHOUT `rows`
 	// (2026-09-13: `?tag=test` answered 3 nodes, the view drew 0): a node row
 	// carries only `storage_id`, and the client drops a row it cannot address.
 	// And without visibleNodes the listing had no ACL step at all — see there.
 	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": h.rows(r.Context(), h.tagOps().visibleNodes(r.Context(), nodes)),
-		"tag":   display,
-		"kind":  kind,
+		"nodes":     h.rows(r.Context(), nodes),
+		"tag":       display,
+		"kind":      kind,
+		"limit":     limit,
+		"offset":    offset,
+		"total":     total,
+		"truncated": end < total || capped,
+		"sort":      order.String(),
 	})
 }

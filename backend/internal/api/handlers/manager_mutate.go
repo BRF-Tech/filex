@@ -27,6 +27,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/throughput"
@@ -208,7 +209,7 @@ func (h *Manager) vfNewFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 
@@ -308,7 +309,7 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 
@@ -376,7 +377,7 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	}
 	if taken {
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "something with that name already exists here",
+			"error": "name_taken",
 			"code":  "NAME_TAKEN",
 			"name":  body.Name,
 		})
@@ -402,7 +403,7 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 			qctx = ops.WithEncryptionSettled(qctx, []string{srcRel})
 		}
 		op, err := h.Ops.Submit(qctx, ops.OpRename, current.ID, []string{srcRel}, dstRel)
-		if answerGate(w, err) {
+		if answerGate(w, r, err) {
 			return
 		}
 		if err != nil {
@@ -416,7 +417,13 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 	// one object at a time, and finished even if the client leaves.
 	ctx, cancel := detachedMutation(r.Context())
 	defer cancel()
-	if err := mv.Move(ctx, srcRel, dstRel); err != nil {
+	// The bytes, then the rows, under the storage's row gate (rowgate, issue
+	// #192): a scan never judges the catalogue while the one has moved and the
+	// other has not. The queue's rename does the same (ops.runRename).
+	if err := rowgate.Change(current.ID,
+		func() error { return mv.Move(ctx, srcRel, dstRel) },
+		func() { h.finishRename(ctx, current.ID, srcRel, dstRel, writehook.OriginManager) },
+	); err != nil {
 		slog.Warn("rename failed",
 			slog.Int64("storage", current.ID),
 			slog.String("from", srcRel),
@@ -425,8 +432,6 @@ func (h *Manager) vfRename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, mapDriverErr(err), map[string]string{"error": "rename: " + clientErrText(err)})
 		return
 	}
-
-	h.finishRename(ctx, current.ID, srcRel, dstRel, writehook.OriginManager)
 	h.vfIndex(w, r, current, parentRel, storageNames, false)
 }
 
@@ -456,7 +461,7 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 	if len(body.Items) == 0 {
@@ -533,7 +538,12 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 		if dstRel == srcRel {
 			continue
 		}
-		if err := mv.Move(ctx, srcRel, dstRel); err != nil {
+		// The bytes, then the rows, under the storage's row gate (rowgate):
+		// see vfRename.
+		if err := rowgate.Change(current.ID,
+			func() error { return mv.Move(ctx, srcRel, dstRel) },
+			func() { h.applyDBMove(ctx, current.ID, srcRel, dstRel) },
+		); err != nil {
 			slog.Warn("move failed",
 				slog.Int64("storage", current.ID),
 				slog.String("from", srcRel),
@@ -542,7 +552,6 @@ func (h *Manager) vfMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, mapDriverErr(err), map[string]string{"error": "move: " + clientErrText(err)})
 			return
 		}
-		h.applyDBMove(ctx, current.ID, srcRel, dstRel)
 		/* bag:b3 event */
 		writehook.OnFileMoved(ctx, current.ID, normalizeDBPath(srcRel), normalizeDBPath(dstRel), path.Base(dstRel),
 			writehook.OriginManager)
@@ -597,7 +606,7 @@ func (h *Manager) vfDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 	if len(body.Items) == 0 {
@@ -771,8 +780,7 @@ func randHex6() string {
 // a temp file. This is the SMALL-FILE fast path and stays that way — every
 // client now sends anything above the chunk size over the staged protocol
 // (/api/files/upload/*, docs/UPLOADS.md), which is resumable and works on
-// every driver. The old presigned `/upload/init` flow is S3-only and no client
-// speaks it any more.
+// every driver. The old presigned `/upload/init` flow was removed in 0.54.
 func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 	// Spilled multipart temp files outlive the response unless dropped here —
 	// see the note in AI.Upload. This is the browser upload path, so it is the
@@ -792,7 +800,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 
@@ -814,7 +822,18 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 	// a file dropped into `.filex-trash/`, a document named `.keepdir` — would
 	// be written and never be seen again.
 	for _, fh := range files {
-		if name, ok := sanitizeUploadName(fh.Filename); ok && gate(w, r, h.ACL, current.ID, writegate.Writes(path.Join(destRel, name)).As(syspath.PutWorkCopy)) {
+		name, ok := sanitizeUploadName(fh.Filename)
+		if !ok {
+			continue
+		}
+		target := writegate.Writes(path.Join(destRel, name)).As(syspath.PutWorkCopy)
+		// A vault's key file is rewritten here and nowhere else (a new
+		// password, a recovery reset, an escrow slot): the claim lets it past
+		// the vault rule, and refuseVaultKeyFile below checks the bytes.
+		if name == e2e.MarkerName {
+			target = target.RewritesKeyFile()
+		}
+		if gate(w, r, h.ACL, current.ID, target) {
 			return
 		}
 	}
@@ -849,10 +868,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			slog.Info("upload refused: quota",
 				slog.Int64("user", quotastore.OwnerFrom(r.Context())),
 				slog.Int64("size", batch))
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
-				"error": "quota exceeded",
-				"code":  "QUOTA_EXCEEDED",
-			})
+			writeQuotaExceeded(w, r)
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -926,6 +942,14 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 			_ = src.Close()
 			return
 		}
+		// The vault's key file (docs/E2E-VAULT-FORMAT.md → The key file): a
+		// rewrite keeps its v, req and vault, and no upload makes a folder a
+		// vault - only POST /api/files/e2e/vault/create does. Asked before the
+		// encryption rule, so a refused write spends no approval.
+		if name == e2e.MarkerName && refuseVaultKeyFile(w, r, drv, fullRel, src) {
+			_ = src.Close()
+			return
+		}
 		// A new key file or `.fxe` is a new encryption (e2e_policy_gate.go);
 		// replacing one that is there never asks. "There" is the rule's own
 		// look — a FILE at the path — not upNeed's: a folder made between the
@@ -950,7 +974,7 @@ func (h *Manager) vfUpload(w http.ResponseWriter, r *http.Request) {
 		// writehook/overwrite.go. wiring:e2 convert — unless this is an
 		// in-place E2E conversion write, whose replaced bytes are the
 		// plaintext being removed (e2e_convert.go checks that it is one).
-		guardCtx := e2eConversionContext(r.Context(), h.Store, drv, current.ID, fullRel,
+		guardCtx := e2eConversionContext(r.Context(), h.Store, h.ACL, drv, current.ID, fullRel,
 			r.FormValue("e2e_convert") == "1", sniff[:n])
 		if err := writehook.BeforeOverwrite(guardCtx, current.ID, fullRel); err != nil {
 			_ = src.Close()

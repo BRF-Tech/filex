@@ -29,6 +29,11 @@ type Op struct {
 	Error   string     `json:"error,omitempty"`
 	Message string     `json:"message,omitempty"`
 	Outputs []OpOutput `json:"outputs,omitempty"`
+	// ErrorCode / ErrorText are the server's code for a failure and its
+	// sentence in the reader's language (internal/apierr): the CLI prints the
+	// sentence; Error is the English detail.
+	ErrorCode string `json:"error_code,omitempty"`
+	ErrorText string `json:"error_text,omitempty"`
 }
 
 // OpOutput is a file an app's action wrote (`adapter://path` or a
@@ -53,7 +58,10 @@ type OpError struct {
 }
 
 func (e *OpError) Error() string {
-	msg := e.Op.Error
+	msg := e.Op.ErrorText
+	if msg == "" {
+		msg = e.Op.Error
+	}
 	if msg == "" {
 		msg = e.Op.Message
 	}

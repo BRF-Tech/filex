@@ -1,4 +1,5 @@
 import { api } from './client';
+import { langParam } from './screenLang';
 import { toAuthProvider, type BackendProvider } from './auth-providers';
 import type { AuthProvider, AuthProviderCheck, AuthProviderField, AuthProviderTestResult } from './types';
 
@@ -111,7 +112,9 @@ export const TenantSelfApi = {
     await api.delete(`/admin/tenant/auth-providers/${name}`, q(tenantId));
   },
   async testProvider(tenantId: number | undefined, name: string, draft: Record<string, unknown>): Promise<AuthProviderTestResult> {
-    const { data } = await api.post<Partial<AuthProviderTestResult>>(`/admin/tenant/auth-providers/${name}/test`, { config: draft }, q(tenantId));
+    const { data } = await api.post<Partial<AuthProviderTestResult>>(`/admin/tenant/auth-providers/${name}/test`, { config: draft }, {
+      params: { ...(tenantId ? { tenant: tenantId } : {}), ...langParam() },
+    });
     return { testable: data.testable === true, ok: data.ok === true, checks: Array.isArray(data.checks) ? data.checks : [] };
   },
   async addDomain(tenantId: number | undefined, domain: string): Promise<TenantDomain> {

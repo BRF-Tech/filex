@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
@@ -138,17 +139,49 @@ func TestFromRequest_OriginComesFromTheProviderRow(t *testing.T) {
 		"the row's host wins over the string the client sent")
 }
 
+// trustOnly makes clientip trust exactly the given proxy list for one test.
+func trustOnly(t *testing.T, list string) {
+	t.Helper()
+	set, err := clientip.ParseList(list)
+	require.NoError(t, err)
+	t.Cleanup(clientip.SetSource(func() *clientip.Set { return set }))
+}
+
+// fromPeer is req with the socket's peer set: who SENT the request decides
+// whether its X-Forwarded-Proto is believed.
+func fromPeer(peer, h string, hdr map[string]string) *http.Request {
+	r := req(h, hdr)
+	r.RemoteAddr = peer
+	return r
+}
+
 func TestScheme(t *testing.T) {
+	trustOnly(t, "loopback")
 	rv := tenanturl.New(newStore(), operator, true)
 	assert.Equal(t, "https://"+host, rv.FromRequest(req(host, nil)))
-	assert.Equal(t, "http://"+host, rv.FromRequest(req(host, map[string]string{"X-Forwarded-Proto": "http"})),
+	assert.Equal(t, "http://"+host, rv.FromRequest(fromPeer("127.0.0.1:40000", host, map[string]string{"X-Forwarded-Proto": "http"})),
 		"the trusted proxy may declare a TLS-less setup")
-	assert.Equal(t, "https://"+host, rv.FromRequest(req(host, map[string]string{"X-Forwarded-Proto": "https"})))
+	assert.Equal(t, "https://"+host, rv.FromRequest(fromPeer("127.0.0.1:40000", host, map[string]string{"X-Forwarded-Proto": "https"})))
 
 	// A TLS-less install (dev / compose without a proxy) keeps http.
 	dev := tenanturl.New(newStore(), "http://localhost:5212", true)
 	assert.Equal(t, "http://"+host, dev.FromRequest(req(host, nil)))
 	assert.Equal(t, "http://localhost:5212", dev.FromRequest(req("evil.example", nil)))
+}
+
+// X-Forwarded-Proto is the trusted proxy's word, as X-Forwarded-For is: from
+// any other sender it is not read, and the tenant's links stay https.
+func TestScheme_ForwardedProtoFromAnUntrustedPeerIsNotRead(t *testing.T) {
+	trustOnly(t, "loopback")
+	rv := tenanturl.New(newStore(), operator, true)
+	proto := map[string]string{"X-Forwarded-Proto": "http"}
+	assert.Equal(t, "https://"+host, rv.FromRequest(fromPeer("203.0.113.9:4000", host, proto)),
+		"a peer that is not a trusted proxy cannot turn a tenant's links into http://")
+	assert.Equal(t, "https://"+host, rv.FromRequest(fromPeer("[2001:db8::9]:4000", host, proto)))
+
+	// The same peer, once it IS the configured proxy, is believed.
+	trustOnly(t, "203.0.113.9")
+	assert.Equal(t, "http://"+host, rv.FromRequest(fromPeer("203.0.113.9:4000", host, proto)))
 }
 
 // ForStorage / ForProvider: the request-less path, used where an e-mail or an

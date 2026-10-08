@@ -161,6 +161,10 @@ func shouldAudit(r *http.Request) bool {
 		switch p {
 		case "/api/auth/login", "/api/auth/logout":
 			return false
+		case "/api/auth/account/check":
+			// Asked while a form is typed: it writes nothing, and a row per
+			// keystroke would bury the log.
+			return false
 		}
 		return true
 	case strings.HasPrefix(p, "/api/files/"):
@@ -170,8 +174,6 @@ func shouldAudit(r *http.Request) bool {
 		switch {
 		case strings.HasPrefix(p, "/api/files/share"),
 			strings.HasPrefix(p, "/api/files/manager"),
-			strings.HasPrefix(p, "/api/files/upload/finalize"),
-			strings.HasPrefix(p, "/api/files/upload/abort"),
 			strings.HasPrefix(p, "/api/files/versions"),
 			strings.HasPrefix(p, "/api/files/archive/extract"),
 			strings.HasPrefix(p, "/api/files/archive/create"),
@@ -419,10 +421,6 @@ func ActionForPath(method, p, id, name string) (string, string, string) {
 		return "file.delete", "node", ""
 	case method == http.MethodPost && p == "/api/files/manager/restore":
 		return "file.restore", "node", ""
-	case method == http.MethodPost && p == "/api/files/upload/finalize":
-		return "file.upload", "node", ""
-	case method == http.MethodPost && p == "/api/files/upload/abort":
-		return "file.upload_abort", "upload", ""
 	case method == http.MethodPost && p == "/api/files/archive/extract":
 		return "file.archive_extract", "node", ""
 	case method == http.MethodPost && p == "/api/files/archive/create":

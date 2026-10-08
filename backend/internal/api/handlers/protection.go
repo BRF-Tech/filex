@@ -51,6 +51,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -61,6 +62,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/dbsetting"
 	"github.com/brf-tech/filex/backend/internal/drafts"
 	"github.com/brf-tech/filex/backend/internal/share"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 )
@@ -98,6 +100,17 @@ func NewProtection(store db.Store) *Protection { return &Protection{Store: store
 type protectionResponse struct {
 	TrashRetentionDays int `json:"trash_retention_days"`
 	VersionsKeepN      int `json:"versions_keep_n"`
+	// The bounds PATCH enforces for the three numbers above and below,
+	// shipped with the values (as the drafts and antivirus numbers' are) so
+	// the form offers exactly the range the API takes. The page checked the
+	// lower bounds itself and never the upper ones, so a value over the top
+	// came back as the API's English (0.54 audit, B8).
+	TrashRetentionDaysMin int `json:"trash_retention_days_min"`
+	TrashRetentionDaysMax int `json:"trash_retention_days_max"`
+	VersionsKeepNMin      int `json:"versions_keep_n_min"`
+	VersionsKeepNMax      int `json:"versions_keep_n_max"`
+	ShareMaxTTLDaysMin    int `json:"share_max_ttl_days_min"`
+	ShareMaxTTLDaysMax    int `json:"share_max_ttl_days_max"`
 	// ShareMaxTTLDays is the longest life a NEW share link may be given
 	// (0 = no ceiling). SharesOverMaxTTL counts existing live links that
 	// outlive it — information for the operator, not something this API
@@ -221,43 +234,53 @@ func (h *Protection) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	var req protectionPatch
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		// A number box sent empty or with a fraction lands here.
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "bad json",
+			"message": srvtext.Text(requestLang(r), "server.protection.whole_number", nil),
+		})
 		return
 	}
 	if req.TrashRetentionDays == nil && req.VersionsKeepN == nil &&
 		req.ShareMaxTTLDays == nil && req.DraftsLimit == nil && req.AVSaveScanWindowMinutes == nil &&
 		req.AVMaxScanMB == nil && req.AVEnabled == nil && req.AVMode == nil &&
 		req.AVClamdAddr == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no fields to update"})
+		// `{"trash_retention_days": null}` - an emptied number box - too.
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":   "no fields to update",
+			"message": srvtext.Text(requestLang(r), "server.protection.whole_number", nil),
+		})
 		return
 	}
-	if v := req.ShareMaxTTLDays; v != nil && (*v < 0 || *v > share.MaxTTLDaysLimit) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "share_max_ttl_days must be between 0 and 3650"})
-		return
-	}
-	if v := req.TrashRetentionDays; v != nil && (*v < protRetentionMin || *v > protRetentionMax) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "trash_retention_days must be between 1 and 3650"})
-		return
-	}
-	if v := req.VersionsKeepN; v != nil && (*v < protKeepNMin || *v > protKeepNMax) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "versions_keep_n must be between 0 and 1000"})
-		return
-	}
-	if v := req.DraftsLimit; v != nil {
-		if err := drafts.LimitSetting.Validate(*v); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
+	// ⚠ Every refusal of a number is the server's sentence (`message`), with
+	// the field and its bounds: the page shows it under the field and has no
+	// range rule of its own.
+	for _, b := range []struct {
+		field    string
+		v        *int
+		min, max int
+		spec     *dbsetting.IntSpec
+	}{
+		{"share_max_ttl_days", req.ShareMaxTTLDays, 0, share.MaxTTLDaysLimit, nil},
+		{"trash_retention_days", req.TrashRetentionDays, protRetentionMin, protRetentionMax, nil},
+		{"versions_keep_n", req.VersionsKeepN, protKeepNMin, protKeepNMax, nil},
+		{"drafts_limit", req.DraftsLimit, drafts.LimitSetting.Min, drafts.LimitSetting.Max, &drafts.LimitSetting},
+		{"av_save_scan_window_minutes", req.AVSaveScanWindowMinutes, antivirus.SaveWindowSetting.Min, antivirus.SaveWindowSetting.Max, &antivirus.SaveWindowSetting},
+		{"av_max_scan_mb", req.AVMaxScanMB, antivirus.MaxScanSetting.Min, antivirus.MaxScanSetting.Max, &antivirus.MaxScanSetting},
+	} {
+		if b.v == nil {
+			continue
 		}
-	}
-	if v := req.AVSaveScanWindowMinutes; v != nil {
-		if err := antivirus.SaveWindowSetting.Validate(*v); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
+		english := ""
+		if b.spec != nil {
+			if err := b.spec.Validate(*b.v); err != nil {
+				english = err.Error()
+			}
+		} else if *b.v < b.min || *b.v > b.max {
+			english = fmt.Sprintf("%s must be between %d and %d", b.field, b.min, b.max)
 		}
-	}
-	if v := req.AVMaxScanMB; v != nil {
-		if err := antivirus.MaxScanSetting.Validate(*v); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		if english != "" {
+			writeProtectionOutOfRange(w, r, b.field, english, b.min, b.max)
 			return
 		}
 	}
@@ -406,6 +429,13 @@ func (h *Protection) snapshot(r *http.Request) protectionResponse {
 		DraftsLimit:        drafts.Limit(ctx, h.Store),
 		DraftsLimitMin:     drafts.MinLimit,
 		DraftsLimitMax:     drafts.MaxLimit,
+
+		TrashRetentionDaysMin: protRetentionMin,
+		TrashRetentionDaysMax: protRetentionMax,
+		VersionsKeepNMin:      protKeepNMin,
+		VersionsKeepNMax:      protKeepNMax,
+		ShareMaxTTLDaysMin:    0,
+		ShareMaxTTLDaysMax:    share.MaxTTLDaysLimit,
 		Antivirus: protectionAntivirusStatus{
 			Enabled:               sc.Supports(),
 			Binary:                sc.BinName(),
@@ -427,4 +457,17 @@ func (h *Protection) snapshot(r *http.Request) protectionResponse {
 			MaxScanMBMax:          antivirus.MaxMaxScanMB,
 		},
 	}
+}
+
+// writeProtectionOutOfRange refuses a number outside its bounds: `error`
+// keeps the English a script has always read, `message` is the sentence in
+// the reader's language, and `field` says which box it is about.
+func writeProtectionOutOfRange(w http.ResponseWriter, r *http.Request, field, english string, min, max int) {
+	said := srvtext.Text(requestLang(r), "server.protection.out_of_range",
+		srvtext.Vars{"min": strconv.Itoa(min), "max": strconv.Itoa(max)})
+	writeJSON(w, http.StatusBadRequest, map[string]string{
+		"error":   english,
+		"field":   field,
+		"message": said,
+	})
 }

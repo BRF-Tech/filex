@@ -180,21 +180,22 @@ function takeLock(file) {
   return { ok: false, why: `cannot take ${file}` };
 }
 
-/** Ends a process and everything it started: it runs in a process group of its own. */
-function killTree(child) {
+/**
+ * Ends a process and everything it started when it runs in a process group of
+ * its own (`group`, the build host); without one only the process itself.
+ */
+function killTree(child, group) {
   if (!child?.pid) return;
-  try {
-    process.kill(-child.pid, 'SIGTERM');
-  } catch {
-    /* gone already */
-  }
-  setTimeout(() => {
+  const stop = (signal) => {
     try {
-      process.kill(-child.pid, 'SIGKILL');
+      if (group) process.kill(-child.pid, signal);
+      else child.kill(signal);
     } catch {
-      /* gone */
+      /* gone already */
     }
-  }, 10_000).unref();
+  };
+  stop('SIGTERM');
+  setTimeout(() => stop('SIGKILL'), 10_000).unref();
 }
 
 /** The pack checkouts: LANGPACKS_PACKS, else the filex-lang-* checkouts beside the tree (in LANGPACKS_ROOT). */
@@ -378,9 +379,17 @@ export async function agentCredential(cfg, { fetch = globalThis.fetch } = {}) {
 
 /**
  * One agent session in `dir`, the prompt on its stdin, in a process group
- * of its own. Its output goes to files beside the night's other logs (never
- * into the directory it works in); a session past its time is ended with
- * everything it started.
+ * of its own on the build host. Its output goes to files beside the night's
+ * other logs (never into the directory it works in); a session past its time
+ * is ended with everything it started.
+ *
+ * ⚠ The process group is the build host's (Linux) alone. Anywhere else - the
+ * test suite on a Windows workstation (#197) - the agent stays in the
+ * driver's console: a detached process there has no console, so the program
+ * the shell starts (cmd.exe -> node) got a NEW, visible console window whose
+ * stdin was that window, not the prompt; windowsHide on the detached shell
+ * does not reach it. web/tests/quality/hiddenConsoleWindows.test.ts holds the
+ * rule for every script.
  */
 function runAgent(cfg, { dir, prompt, timeoutMs, outFile, errFile, round, worklist, credential }) {
   return new Promise((resolve) => {
@@ -421,16 +430,17 @@ function runAgent(cfg, { dir, prompt, timeoutMs, outFile, errFile, round, workli
       }
       resolve({ round, code, timedOut, secs: Math.round((Date.now() - t0) / 1000), ...(why ? { why } : {}), ...summary });
     };
+    const group = process.platform === 'linux';
     let child;
     try {
-      child = spawn(bin, argv, { cwd: dir, env: agentEnv, stdio: ['pipe', outFd, errFd], shell: !!cfg.agent.cmd, detached: true, windowsHide: true });
+      child = spawn(bin, argv, { cwd: dir, env: agentEnv, stdio: ['pipe', outFd, errFd], shell: !!cfg.agent.cmd, detached: group, windowsHide: true });
     } catch (e) {
       finish(127, `could not start the agent: ${e.message}`);
       return;
     }
     timer = setTimeout(() => {
       timedOut = true;
-      killTree(child);
+      killTree(child, group);
     }, Math.max(60_000, timeoutMs));
     child.on('error', (e) => finish(127, `could not start the agent: ${e.message}`));
     child.on('close', (code, signal) => finish(typeof code === 'number' ? code : signal ? 128 : 1));

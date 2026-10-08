@@ -310,10 +310,11 @@ func (h *E2E) EscrowUsed(w http.ResponseWriter, r *http.Request) {
 	if name == "." || name == "/" {
 		name = root
 	}
+	// The facts only: the server says it (folder or file wording, in each
+	// reader's language - internal/notify say.go, server.notify.e2e.escrow_used).
 	ev := notify.Event{
 		Event:    notify.EventE2EEscrowUsed,
 		Severity: notify.SeverityWarning,
-		Title:    "Encrypted folder opened with the escrow key",
 		Body:     root,
 		Node:     &notify.NodeRef{StorageID: st.ID, Path: root, Name: name},
 		// The encrypted folder that was opened.
@@ -326,8 +327,8 @@ func (h *E2E) EscrowUsed(w http.ResponseWriter, r *http.Request) {
 	}
 	if file {
 		// wiring:e2 fxe — the same event for a single encrypted file: it is
-		// the file that was opened, and the notification points at it.
-		ev.Title = "Encrypted file opened with the escrow key"
+		// the file that was opened, and the notification points at it (its
+		// wording, server.notify.e2e.escrow_used.title_file, follows meta.kind).
 		ev.Target = notify.FileTarget(root)
 		delete(ev.Meta, "folder")
 		ev.Meta["file"] = root
@@ -375,14 +376,19 @@ func notEncrypted(rel string) string {
 // folderOwner returns the recorded owner of the encrypted folder's own node
 // (or of the single encrypted file), or nil when there is none.
 func (h *E2E) folderOwner(r *http.Request, storageID int64, rel string) *int64 {
-	if h.Store == nil || rel == "" {
+	return encryptedRootOwner(r.Context(), h.Store, storageID, rel)
+}
+
+// encryptedRootOwner is folderOwner for a caller with a context and a store.
+func encryptedRootOwner(ctx context.Context, store db.Store, storageID int64, rel string) *int64 {
+	if store == nil || rel == "" {
 		return nil
 	}
-	n, err := h.Store.GetNodeByPath(r.Context(), storageID, pathkey.Hash(storageID, rel))
+	n, err := store.GetNodeByPath(ctx, storageID, pathkey.Hash(storageID, rel))
 	if err != nil || n == nil {
 		return nil
 	}
-	owner, err := h.Store.GetNodeOwner(r.Context(), n.ID)
+	owner, err := store.GetNodeOwner(ctx, n.ID)
 	if err != nil {
 		return nil
 	}

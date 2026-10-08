@@ -6,6 +6,9 @@ import { resolve } from 'path';
 // compares the two shipped stylesheets byte for byte, so this build cannot
 // inline the signing faces while core emits them as files.
 import { fontsAsFiles } from '../../scripts/vite-fonts-as-files.mjs';
+// A TypeScript diagnostic in the declaration build fails the build (the same
+// helper every package's dts() uses - see the file for why).
+import { failOnDtsDiagnostics } from '../../scripts/vite-dts-strict.mjs';
 
 /**
  * Vite config for @brftech/filex (Web Component).
@@ -27,6 +30,7 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       rollupTypes: true,
       insertTypesEntry: true,
+      afterDiagnostic: failOnDtsDiagnostics('@brftech/filex'),
     }),
   ],
   resolve: {

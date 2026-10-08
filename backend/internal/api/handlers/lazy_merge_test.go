@@ -54,3 +54,64 @@ func TestMergeListing(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"yeni.txt", "turu-degisti"}, diskNames)
 }
+
+// A link the catalogue knows, listed while the catalogue cannot vouch for its
+// folder (the first sync still running, a lazy folder not caught up). The row
+// carries the reason the last sync recorded (hydrateLinkStates, migration
+// 00098); the storage's listing, read for the merge, is newer and wins when it
+// gives one. Before 0.54 the row knew no reason at all and the same folder
+// said "Outside storage" one moment (driver only) and the general "Link" the
+// next (merged).
+func TestMergedListing_ALinkRowSaysTheStoragesReason(t *testing.T) {
+	rows := []*model.Node{
+		// Recorded before the target came back outside the root.
+		{ID: 1, Name: "archive", Path: "/archive", Type: model.NodeTypeSymlink, LinkState: storage.LinkBroken},
+		// Recorded, and the storage now gives no reason: the record stands.
+		{ID: 2, Name: "old", Path: "/old", Type: model.NodeTypeSymlink, LinkState: storage.LinkOutsideRoot},
+		// Never recorded, no reason from the storage either.
+		{ID: 3, Name: "gone", Path: "/gone", Type: model.NodeTypeSymlink},
+		{ID: 4, Name: "README.md", Path: "/README.md", Type: model.NodeTypeFile, Size: 3},
+	}
+	objs := []storage.Object{
+		{Name: "archive", Kind: storage.KindSymlink, Metadata: map[string]string{storage.MetaLinkState: storage.LinkOutsideRoot}},
+		{Name: "old", Kind: storage.KindSymlink},
+		{Name: "gone", Kind: storage.KindSymlink},
+		{Name: "README.md", Kind: storage.KindFile, Size: 3},
+	}
+	merged, _ := mergeListing(rows, objs)
+	files := projectFileNodes("projects", merged, false, nil, nil, 0)
+
+	byName := map[string]map[string]any{}
+	for _, e := range files {
+		byName[e["basename"].(string)] = e
+	}
+	assert.Equal(t, true, byName["archive"]["symlink"])
+	assert.Equal(t, storage.LinkOutsideRoot, byName["archive"]["link_state"], "the storage said why just now: outside the root")
+	assert.Equal(t, storage.LinkBroken, rows[0].LinkState, "on a copy: the recorded reason is the sync's to update")
+	assert.Equal(t, storage.LinkOutsideRoot, byName["old"]["link_state"], "a link the storage gave no reason for keeps the recorded one")
+	assert.Equal(t, true, byName["gone"]["symlink"])
+	_, said := byName["gone"]["link_state"]
+	assert.False(t, said, "no reason recorded and none given: the general case")
+	_, onFile := byName["README.md"]["link_state"]
+	assert.False(t, onFile, "an ordinary row is not a link")
+}
+
+// The catalogue's own listing - every listing after a storage's first sync -
+// sends the reason the sync recorded for a link row. It used to send
+// `symlink: true` alone, so the explorer said the general "Link" for a link
+// it had just called "Outside storage" in the same folder before the sync.
+func TestProjectFileNodes_ALinkRowSendsItsRecordedReason(t *testing.T) {
+	files := projectFileNodes("projects", []*model.Node{
+		{ID: 1, Name: "archive", Path: "/archive", Type: model.NodeTypeSymlink, LinkState: storage.LinkOutsideRoot},
+		{ID: 2, Name: "gone", Path: "/gone", Type: model.NodeTypeSymlink},
+	}, false, nil, nil, 0)
+	byName := map[string]map[string]any{}
+	for _, e := range files {
+		byName[e["basename"].(string)] = e
+	}
+	assert.Equal(t, true, byName["archive"]["symlink"])
+	assert.Equal(t, storage.LinkOutsideRoot, byName["archive"]["link_state"])
+	assert.Equal(t, "file", byName["archive"]["type"], "the wire type stays the closed file | dir union")
+	_, said := byName["gone"]["link_state"]
+	assert.False(t, said, "a row with no recorded reason sends none")
+}

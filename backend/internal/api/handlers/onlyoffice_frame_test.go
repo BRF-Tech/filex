@@ -22,6 +22,8 @@ type editorAnswer struct {
 	DocumentServerURL string         `json:"documentServerUrl"`
 	Frame             *string        `json:"frame"`
 	Config            map[string]any `json:"config"`
+	// ds is the fixture's document server address (not in the answer).
+	ds string
 }
 
 func openEditorConfig(t *testing.T, cfgMutate func(*config.Config), base string) editorAnswer {
@@ -36,6 +38,7 @@ func openEditorConfig(t *testing.T, cfgMutate func(*config.Config), base string)
 	require.Equal(t, http.StatusOK, status, body)
 	var got editorAnswer
 	require.NoError(t, json.Unmarshal([]byte(body), &got), body)
+	got.ds = editorDocServerOf(t, srv.URL).srv.URL
 	return got
 }
 
@@ -46,7 +49,7 @@ func TestOnlyOfficeConfig_NamesTheFrameOnTheInterfaceOrigin(t *testing.T) {
 	}, "")
 	require.NotNil(t, got.Frame, "the config names the editor's frame")
 	assert.Equal(t, "https://apps.usercontent.example/_appui/_onlyoffice/editor", *got.Frame)
-	assert.Equal(t, "http://ds.test", got.DocumentServerURL)
+	assert.Equal(t, got.ds, got.DocumentServerURL)
 
 	// The signed config, nothing of the page's: the frame adds the events.
 	assert.NotEmpty(t, got.Config["token"], "signed as before")

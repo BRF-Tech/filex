@@ -220,8 +220,9 @@ export const SCREENSHOTS = [
     depicts: ['web/src/views/Plugins.vue', 'web/src/components/plugins/StoragePluginsTab.vue'],
   },
   {
+    // Home, where signing in lands (e2e/shots/driveshell.mjs), inside the shell.
     name: 'driveshell/driveshell-hero-1440.png',
-    depicts: ['packages/core/src/FileExplorer.vue', 'packages/core/src/components/SideNav.vue'],
+    depicts: ['packages/core/src/FileExplorer.vue', 'packages/core/src/components/SideNav.vue', 'packages/core/src/components/HomeView.vue'],
   },
   {
     name: 'driveshell/driveshell-search-1440.png',

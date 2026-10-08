@@ -60,6 +60,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -127,8 +128,11 @@ const (
 	SaveDropped
 )
 
-// keyFor is the document key an editing session of the node gets now.
-func (s *Service) keyFor(node *model.Node) string {
+// keyFor is the document key an editing session of the node gets now: the
+// version part (which file, which version, how many refused saves) sealed
+// with the node's id (sealKey, callback_trust.go), so a callback naming it is
+// known to be this document's.
+func (s *Service) keyFor(ctx context.Context, node *model.Node) string {
 	mtime := int64(0)
 	if node.BackendMtime != nil {
 		mtime = node.BackendMtime.Unix()
@@ -137,8 +141,12 @@ func (s *Service) keyFor(node *model.Node) string {
 	if n := s.refusals(node.ID); n > 0 {
 		keyInput += fmt.Sprintf("|refused-%d", n)
 	}
-	return md5Hex(keyInput)
+	return s.sealKey(ctx, node.ID, md5Hex(keyInput))
 }
+
+// ErrNotThisDocument: a session key filex did not make for the document it is
+// presented with (KeyBelongsTo).
+var ErrNotThisDocument = errors.New("onlyoffice: the session is not this document's")
 
 // md5Hex is the hex MD5 of s - the shape of a document key.
 func md5Hex(s string) string {
@@ -401,7 +409,14 @@ func (s *Service) verdict(ctx context.Context, drv storage.Driver, node *model.N
 // the document's current version? known is false when filex has no record of
 // it (one that expired, or was opened by a filex older than its table) and
 // the answer comes from the key the document would get now.
+//
+// A key filex did not make for this document (KeyBelongsTo) is answered
+// "current, unknown" and nothing is recorded for it: a person who may view
+// one document cannot leave a record under another document's key.
 func (s *Service) SessionState(ctx context.Context, node *model.Node, key string) (stale, known bool) {
+	if !s.KeyBelongsTo(ctx, key, node) {
+		return false, false
+	}
 	if b := s.freshBase(ctx, key); b != nil && b.nodeID == node.ID {
 		if b.drop {
 			return true, true
@@ -412,7 +427,7 @@ func (s *Service) SessionState(ctx context.Context, node *model.Node, key string
 		}
 		return s.verdict(ctx, drv, node, key) == SaveStale, true
 	}
-	if key == s.keyFor(node) {
+	if key == s.keyFor(ctx, node) {
 		return false, false
 	}
 	// On an older version, which one unknown: recorded, so the session's
@@ -429,6 +444,9 @@ func (s *Service) RebaseSession(ctx context.Context, node *model.Node, key strin
 	if key == "" || s.StorageResolver == nil {
 		return fmt.Errorf("onlyoffice: no session")
 	}
+	if !s.KeyBelongsTo(ctx, key, node) {
+		return ErrNotThisDocument
+	}
 	drv, err := s.StorageResolver(node.StorageID)
 	if err != nil {
 		return err
@@ -443,6 +461,9 @@ func (s *Service) RebaseSession(ctx context.Context, node *model.Node, key strin
 // DropSession: the person chose the outside version; the session's save, when
 // it comes, is not written.
 func (s *Service) DropSession(ctx context.Context, node *model.Node, key string) error {
+	if !s.KeyBelongsTo(ctx, key, node) {
+		return ErrNotThisDocument
+	}
 	b := s.freshBase(ctx, key)
 	if b == nil || b.nodeID != node.ID {
 		b = &sessionBase{nodeID: node.ID, unknown: true}

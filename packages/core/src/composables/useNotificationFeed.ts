@@ -18,6 +18,7 @@
  */
 import { computed, ref, type Ref } from 'vue';
 import type { NotificationTarget } from '../lib/notificationTarget';
+import type { NotificationE2E } from '../lib/notificationText';
 
 /** How many of the person's own rows the bell holds. It shows 15; the rest is
  *  headroom for the browser-notification diff, which reads the same list. */
@@ -36,10 +37,18 @@ export interface NotificationRowData {
   id: number;
   event: string;
   severity: string;
+  /** The sentence, said by the server in the reader's language (backend
+   *  notify say.go) - shown as it is. */
   title?: string;
   body?: string;
   meta?: unknown;
   target?: NotificationTarget | null;
+  /** Where an encrypted item's name stands in title/body, for a screen that
+   *  can name it (lib/notificationText). Absent on every other row. */
+  e2e?: NotificationE2E | null;
+  /** Whether a click on the row goes somewhere - the server's verdict
+   *  (backend notify.Opens; lib/notificationTarget rowOpens). */
+  opens?: boolean | null;
   read_at?: string | null;
   created_at: string;
 }
@@ -336,6 +345,13 @@ export interface NotificationFeed<T extends NotificationRowData = NotificationRo
  * `jsonFetch` is `useFileApi(config).jsonFetch`, so the request carries the
  * explorer's auth, its language and its credentials mode, exactly like every
  * listing it makes. `base` is the server root (`connectionsBase(config)`).
+ *
+ * ⚠ No language is named: the server says each row in the language of the
+ * reader's ACCOUNT (backend notify say.go, PersonLang) - the one setting the
+ * bell, the push, the email and the desktop toast all read, whichever surface
+ * set it. An embed whose host draws the explorer in another language still
+ * gets its notifications in the account's (#191, translated at the last
+ * stop: the person's).
  */
 export function notificationsTransport(
   jsonFetch: <R>(url: string, init?: RequestInit) => Promise<R>,

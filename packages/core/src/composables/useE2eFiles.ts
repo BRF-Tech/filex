@@ -850,24 +850,11 @@ export function useE2eFiles(deps: E2eFilesDeps) {
     pwTarget.value = null;
   }
 
-  /** A new header; the body is re-sent unread (streamed). */
   /**
-   * Tell the server the file's password was changed — once the new header is
-   * written — so the audit log records it and the file's OWNER is notified
-   * (POST /api/files/e2e/password-changed, the same announcement as a
-   * folder's). A failed announcement is said, not thrown: the password HAS
-   * changed. The server also sees the rewrite itself (e2e.fxe_header_rewritten).
+   * A new header; the body is re-sent unread (streamed). Nothing is
+   * announced: the server sees the header rewritten, records the change and
+   * tells the file's owner itself (backend e2e/fxewatch, e2e/slotchange).
    */
-  async function announcePassword(path: string, via: 'password' | 'recovery_key') {
-    if (!api.endpoints.e2ePasswordChanged) return;
-    try {
-      await api.e2ePasswordChanged({ path, via, rekey: false });
-    } catch (err) {
-      deps.emitError(messageOf(err), 'fxe-password-announce');
-      deps.toast(t('e2e.password.announce_failed'), true);
-    }
-  }
-
   async function submitPassword(payload: { proof: E2eCredential | null; newPassword: string }) {
     const n = pwTarget.value;
     if (!n || pwBusy.value) return;
@@ -903,7 +890,6 @@ export function useE2eFiles(deps: E2eFilesDeps) {
       ringVer.value++;
       pwTarget.value = null;
       deps.toast(t('e2e.fxe.password_done'));
-      await announcePassword(n.path, via);
       await deps.reload();
     } catch (err) {
       pwError.value = t('e2e.password.failed');

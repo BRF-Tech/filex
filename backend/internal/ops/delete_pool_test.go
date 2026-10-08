@@ -41,6 +41,10 @@ type movingDriver struct {
 	inFlight int
 	peak     int
 	moved    []string
+
+	// afterMove, when set, runs once the bytes have moved and before Move
+	// returns: a change caught between its two steps (rename_gate_test.go).
+	afterMove func()
 }
 
 func (d *movingDriver) Move(ctx context.Context, src, dst string) error {
@@ -60,7 +64,13 @@ func (d *movingDriver) Move(ctx context.Context, src, dst string) error {
 	if d.failFor != "" && strings.Trim(src, "/") == d.failFor {
 		return errors.New("backend refused the move")
 	}
-	return d.Driver.Move(ctx, src, dst)
+	if err := d.Driver.Move(ctx, src, dst); err != nil {
+		return err
+	}
+	if d.afterMove != nil {
+		d.afterMove()
+	}
+	return nil
 }
 
 func (d *movingDriver) stats() (peak int, moved []string) {

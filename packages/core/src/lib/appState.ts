@@ -13,9 +13,21 @@
  */
 import { LIMITS } from '@brftech/filex-app-ui/protocol';
 import { currentPrefs, savePref } from './prefs';
+import { serverLimit } from './serverRules';
 
-/** One app's whole store, as JSON. The account document is 64 KiB in all. */
-export const MAX_APP_STATE_BYTES = 16 << 10;
+/**
+ * One app's whole store, as JSON bytes: the SERVER's number
+ * (`capabilities.limits.app_state_max_bytes`), which PUT /api/me/prefs
+ * enforces (handlers/userprefs.go, #211 - it used to live here alone). Said
+ * here only so the app hears "too large" at once instead of the whole
+ * account document being refused; a server that publishes no number holds
+ * the document to its own 64 KiB and nothing is checked here.
+ */
+function appStateMax(): number | undefined {
+  return serverLimit('app_state_max_bytes');
+}
+
+const utf8 = new TextEncoder();
 
 type Store = Record<string, Record<string, unknown>>;
 
@@ -51,8 +63,9 @@ export function appStateSet(app: string, key: string, value: unknown): void {
   const mine: Record<string, unknown> = { ...(all[app] ?? {}) };
   if (encoded === undefined) delete mine[key];
   else mine[key] = JSON.parse(encoded);
-  if (JSON.stringify(mine).length > MAX_APP_STATE_BYTES) {
-    throw new AppStateTooLarge(`an app keeps at most ${MAX_APP_STATE_BYTES} bytes`);
+  const max = appStateMax();
+  if (max !== undefined && utf8.encode(JSON.stringify(mine)).length > max) {
+    throw new AppStateTooLarge(`an app keeps at most ${max} bytes`);
   }
   const next: Store = { ...all, [app]: mine };
   if (!Object.keys(mine).length) delete next[app];

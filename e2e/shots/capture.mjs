@@ -40,8 +40,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { goBuild } from '../../scripts/lib/go-build.mjs';
-import { SCENE_CONTEXT, stageClock } from './clock.mjs';
+import { SCENE_CONTEXT, sceneServerEnv, stageClock } from './clock.mjs';
 import { seedFixtures, syncAndWait } from './fixtures.mjs';
+import { configureMail, startMailSink } from './mailsink.mjs';
 import { shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -148,6 +149,8 @@ async function boot() {
       FILEX_NFS: '1',
       FILEX_NFS_ADDR: '127.0.0.1:0',
       FILEX_SECRET_KEY: 'screenshots-only-key-not-a-real-secret',
+      // The apps on the scene's clock (clock.mjs, part 5).
+      ...sceneServerEnv(),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -522,6 +525,8 @@ async function demoPass(browser) {
     FILEX_PUBLIC_URL: PUBLIC_URL,
     FILEX_DEMO_MODE: 'true',
     FILEX_SECRET_KEY: 'screenshots-only-key-not-a-real-secret',
+    // The apps on the scene's clock (clock.mjs, part 5).
+    ...sceneServerEnv(),
   };
   delete env.FILEX_DEMO_USER;
   delete env.FILEX_DEMO_PASS;
@@ -546,8 +551,21 @@ async function demoPass(browser) {
 
 async function run() {
   const proc = await boot();
+  let sink = null;
   try {
     const token = await seed();
+    // Mail set up and verified, on an instance this script started: the share
+    // dialog below then offers "send by email" as a configured install does,
+    // instead of an administrator's "Email is not set up" line under it
+    // (share-modal.png, 0.52.0 and 0.53.0). Never on somebody else's instance
+    // (SHOTS_URL): its mail settings are not this script's to overwrite.
+    if (proc) {
+      sink = await startMailSink();
+      await configureMail((path, init) => api(token, path, init), sink.port);
+      log(`mail goes to a sink on :${sink.port}`);
+    } else {
+      log('⚠ SHOTS_URL: mail left as the instance has it - the share dialog may say "Email is not set up"');
+    }
     await backfillThumbs(binPath);
     // SHOTS_SEED_ONLY prepares an instance and stops. Two reasons to want it:
     // a server that has to be reached over a network cannot have its
@@ -744,6 +762,7 @@ async function run() {
   } finally {
     if (proc && !process.env.SHOTS_KEEP) proc.kill();
     if (process.env.SHOTS_KEEP) log('instance left running (SHOTS_KEEP=1)');
+    else if (sink) await sink.close();
   }
 }
 

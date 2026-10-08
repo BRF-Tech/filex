@@ -142,7 +142,7 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 	name, nameOK := sanitizeUploadName(req.Name)
@@ -225,10 +225,7 @@ func (h *StagedUpload) Begin(w http.ResponseWriter, r *http.Request) {
 					slog.Int64("user", userID),
 					slog.Int64("size", req.Size),
 					slog.Int64("pending", pending))
-				writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
-					"error": "quota exceeded",
-					"code":  "QUOTA_EXCEEDED",
-				})
+				writeQuotaExceeded(w, r)
 				return
 			}
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": qerr.Error()})
@@ -377,7 +374,18 @@ func (h *StagedUpload) Put(w http.ResponseWriter, r *http.Request) {
 		"received":   m.Received(),
 		"total_size": m.TotalSize,
 		"state":      row.State,
+		// When the sweeper takes this staging if nothing more arrives: it
+		// sweeps FILEX_UPLOAD_STAGING_TTL after the LAST write, and this was
+		// one. A browser keeps its resume bookmark exactly that long
+		// (packages/core lib/uploadResume) instead of a TTL of its own.
+		"expires_at": h.idleDeadline(time.Now()),
 	})
+}
+
+// idleDeadline is when a staging last written at `at` is swept if nothing
+// more arrives (the sweeper's rule: idle longer than TTL).
+func (h *StagedUpload) idleDeadline(at time.Time) time.Time {
+	return at.Add(h.TTL).UTC()
 }
 
 // ── status ──────────────────────────────────────────────────────────────────
@@ -398,6 +406,8 @@ func (h *StagedUpload) Status(w http.ResponseWriter, r *http.Request) {
 		"chunkSize":  row.ChunkSize,
 		"state":      row.State,
 		"path":       row.StorageKey,
+		// The sweep time, as on a chunk's answer (idleDeadline).
+		"expires_at": h.idleDeadline(row.UpdatedAt),
 	}
 	if row.Error != "" {
 		resp["error"] = row.Error
@@ -484,7 +494,7 @@ func (h *StagedUpload) Commit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 	drv, err := h.Manager.StorageResolver(row.StorageID)
@@ -531,7 +541,7 @@ func (h *StagedUpload) Commit(w http.ResponseWriter, r *http.Request) {
 	// the plaintext it replaces (e2e_convert.go checks that it is one).
 	guardCtx := r.Context()
 	if r.URL.Query().Get("e2e_convert") == "1" {
-		guardCtx = e2eConversionContext(guardCtx, h.Store, drv, row.StorageID, row.StorageKey, true, h.stagedHead(row))
+		guardCtx = e2eConversionContext(guardCtx, h.Store, h.ACL, drv, row.StorageID, row.StorageKey, true, h.stagedHead(row))
 	}
 	if err := writehook.BeforeOverwrite(guardCtx, row.StorageID, row.StorageKey); err != nil {
 		slog.Warn("staged commit refused: snapshot",

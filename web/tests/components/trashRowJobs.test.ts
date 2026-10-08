@@ -98,10 +98,14 @@ async function mountTrash(queued: string[] | undefined) {
   return w;
 }
 
-/** The job ends the way `status` says; the next poll sees it. */
-async function jobEnds(id: number, status: 'ok' | 'failed', error = '') {
+/** The job ends the way `status` says; the next poll sees it. `summary` is
+ *  the server's sentence for how it ended (ops say.go). */
+async function jobEnds(id: number, status: 'ok' | 'failed', error = '', summary = '') {
   const job = jobs.get(id)!;
-  jobs.set(id, { ...job, status, done: status === 'ok' ? 1 : 0, failed: status === 'ok' ? 0 : 1, error });
+  jobs.set(id, {
+    ...job, status, done: status === 'ok' ? 1 : 0, failed: status === 'ok' ? 0 : 1, error,
+    ...(summary ? { summary } : {}),
+  });
   await usePendingOpsStore().poll();
   await flushPromises();
 }
@@ -176,17 +180,18 @@ describe('restore and purge on a server that queues them', () => {
     expect(w.find('[data-testid="trash-working-7"]').exists()).toBe(true);
   });
 
-  it('says why a restore did not happen when the place is taken', async () => {
+  // 0.54 (finding A15): why it did not happen is the job row's `summary`,
+  // the server's sentence; the page no longer matches the job's English error.
+  it("says why a restore did not happen when the place is taken, in the server's words", async () => {
     listed = [entry(7, 'Leon')];
     const w = await mountTrash(QUEUES);
     await openRowMenu(w, 'trash-actions-7');
     await pickMenuItem('trash-actions-7-restore');
     await flushPromises();
 
-    await jobEnds(nextOp, 'failed', 'something already exists at this path: Leon');
-    expect(toasts()).toContain(
-      '“Leon” was not restored: something already has that name. Rename what is there, then restore again.',
-    );
+    const said = '1 item was not restored: something already has the name “Leon”';
+    await jobEnds(nextOp, 'failed', 'something already exists at this path: Leon', said);
+    expect(toasts()).toContain(said);
   });
 });
 

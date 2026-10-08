@@ -281,25 +281,6 @@ func num(v any) int64 {
 
 // ── the gap this suite closes ───────────────────────────────────────────────
 
-// The legacy chunked path needs storage.MultipartUploader; a local driver does
-// not have it, so it answers 501. This is not a bug in that handler — it is the
-// reason the staged path exists, and this test pins it so nobody "fixes" the
-// legacy path by making it lie.
-func TestLegacyChunkedUpload_NonS3Driver_Is501(t *testing.T) {
-	f := newStagedFixture(t)
-	body, _ := json.Marshal(map[string]any{
-		"storage_id": f.storage.ID,
-		"path":       "main://",
-		"filename":   "big.bin",
-		"size":       50 << 20,
-	})
-	resp, err := f.client.Post(f.srv.URL+"/api/files/upload/init", "application/json", bytes.NewReader(body))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode,
-		"the presigned chunked path is S3-only by construction")
-}
-
 // ── begin → chunks → interrupted chunk → resume → commit → bytes ────────────
 
 // The headline test: a chunked, resumable upload onto a NON-S3 driver, with a

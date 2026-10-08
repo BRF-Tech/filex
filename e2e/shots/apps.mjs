@@ -296,6 +296,10 @@ async function main() {
     // ⚠ A window tall enough for the whole dialog: at 1000px its list scrolled
     // to the app's row, and the picture opened on the bottom edges of the
     // office cards above it, their names cut off (0.53.0, Liberation Sans).
+    // ⚠⚠ The window alone did not do it in 0.53.0: the type list also had a
+    // fixed 420px ceiling (core base.css `.fe-newdoc__types`, now 46vh only),
+    // so it scrolled at ANY height. The list is measured below, before the
+    // shutter.
     await page.setViewportSize({ width: 1440, height: 1400 });
     await page.goto(`${inst.url}/admin/explore?storage=demo`);
     await page.getByTestId('sidenav-new').waitFor({ timeout: 25_000 });
@@ -308,6 +312,19 @@ async function main() {
     await appRow.click();
     await page.getByTestId('newdoc-name').fill('Q4 roadmap');
     await sleep(400);
+    // Every group whole, nothing scrolled: the type list is the dialog's one
+    // scroll box, and a list scrolled to the app's row is a picture of cut
+    // tiles (app-new-document-1440.png in 0.52.0 and 0.53.0).
+    const list = await page.locator('.fe-newdoc__types').evaluate((el) => ({
+      scrolled: Math.round(el.scrollTop),
+      hidden: Math.round(el.scrollHeight - el.clientHeight),
+    }));
+    if (list.scrolled > 0 || list.hidden > 1) {
+      throw new Error(
+        `the New document type list scrolls (${list.hidden}px more than it shows, scrolled ${list.scrolled}px): ` +
+          'the picture would open on cut tiles',
+      );
+    }
     await shot(page.locator('.fe-modal__card').filter({ has: newdoc }), SET, 'app-new-document-1440.png');
     await page.keyboard.press('Escape');
     await sleep(300);

@@ -10,8 +10,11 @@
 // release that first ships the scenes. So in CI those scenes are left out, loudly; locally a
 // missing build is refused before an hour of building. Nothing else runs this
 // logic before a tag does, which is the one moment it must not be wrong.
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+import { APP_LOCATIONS } from '../../../e2e/helpers/app-locations.mjs';
 
 import {
   appScenesLeftOutBy,
@@ -152,5 +155,35 @@ describe('the plan, before anything is built', () => {
     });
     expect(excluded.size).toBe(0);
     expect(refused[0]).toMatch(/x\.mjs needs sign .* names no `const SET`/);
+  });
+});
+
+describe("the build host's test chain takes the app scenes too (#187)", () => {
+  // ⚠ Until #187 the chain's shots job ran --without-apps and these six scenes
+  // were taken on the build host itself, in its own typeface (DejaVu Sans
+  // beside the chain's Liberation Sans): one README, two faces. The job now
+  // hands every scene what app-locations.mjs looks for, by the same names.
+  const REPO = path.resolve(__dirname, '../../..');
+  const job = readFileSync(path.join(REPO, 'scripts', 'chain', 'job', 'shots.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const runMjs = readFileSync(path.join(REPO, 'scripts', 'chain', 'run.mjs'), 'utf8');
+
+  it('mounts and points at every app build and language pack a picture can ask for, by its app-locations name', () => {
+    const names = Object.keys(APP_LOCATIONS);
+    expect(job).toContain(`for name in ${names.join(' ')}; do`);
+    for (const [name, spot] of Object.entries(APP_LOCATIONS) as Array<[string, { env: string; dataOnly?: boolean }]>) {
+      // run.mjs mounts the CHAIN_*_DIR setting of each at /w/apps/<name>...
+      const key = /^[a-z]+$/.test(name) ? name : `'${name}'`;
+      expect(runMjs, `run.mjs mounts no ${name}`).toMatch(new RegExp(`${key}: env\\.CHAIN_[A-Z_]+_DIR \\|\\| ''`));
+      // ...and the job points the scenes' variable at its copy of it.
+      const need = spot.dataOnly ? 'filex-app.json' : 'filex-app.json plugin.wasm';
+      expect(job, `shots.sh does not point ${spot.env} at ${name}`).toContain(`${name}) var=${spot.env} need="${need}" ;;`);
+    }
+    expect(job).toContain('export "$var=$APPS/$name"');
+  });
+
+  it('never hands a picture the right-to-left test fixture (lang-ar)', () => {
+    expect(Object.keys(APP_LOCATIONS)).not.toContain('lang-ar');
+    expect(job).not.toMatch(/^[^#]*lang-ar/m);
+    expect(job).not.toContain('FILEX_E2E_LANG_PACK_AR');
   });
 });

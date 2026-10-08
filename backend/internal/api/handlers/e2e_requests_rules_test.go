@@ -158,7 +158,7 @@ func TestE2ERequests_ThePlatformsOwnRequestIsTheOperators(t *testing.T) {
 	skipped := 0
 	for _, n := range rows {
 		assert.NotNil(t, n.UserID, "addressed, not a broadcast")
-		if n.WebhookStatus == string(notify.WebhookStatusSkipped) && n.WebhookError != "no webhook URL configured" {
+		if n.WebhookStatus == string(notify.WebhookStatusSkipped) && n.WebhookError != notify.SkipNoDestination {
 			skipped++
 		}
 	}

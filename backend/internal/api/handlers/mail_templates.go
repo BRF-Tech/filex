@@ -46,10 +46,25 @@ func validityLine(lang string, days int) string {
 	return srvtext.Text(lang, "server.mail.no_expiry", nil)
 }
 
+// pinLine is the mail's PIN paragraph: the PIN itself when the flow holds
+// it (a link the server made a moment ago, Grants.Invite), else — for a link
+// that has one — that a PIN guards it and the sender gives it separately
+// (share_mail.go never mails a PIN), else nothing.
+func pinLine(lang, pin string, pinWithheld bool) string {
+	switch {
+	case pin != "":
+		return srvtext.Text(lang, "server.mail.label.pin", srvtext.Vars{"pin": pin})
+	case pinWithheld:
+		return srvtext.Text(lang, "server.mail.label.pin_separately", nil)
+	}
+	return ""
+}
+
 // shareMailText builds the subject + body for a public share-link notice.
 // The subject/body name the item (file vs folder), show its size (files only),
-// prefix the site name, and include the PIN + validity window when present.
-func shareMailText(lang, siteName, name string, isDir bool, size int64, link, pin string, expiresDays int) (string, string) {
+// prefix the site name, and include the PIN (or that one guards the link) +
+// validity window when present.
+func shareMailText(lang, siteName, name string, isDir bool, size int64, link, pin string, pinWithheld bool, expiresDays int) (string, string) {
 	if name == "" {
 		if isDir {
 			name = "/"
@@ -77,16 +92,12 @@ func shareMailText(lang, siteName, name string, isDir bool, size int64, link, pi
 	if !isDir && size > 0 {
 		facts += "\n" + srvtext.Text(lang, "server.mail.label.size", srvtext.Vars{"size": srvtext.Bytes(lang, size)})
 	}
-	pinLine := ""
-	if pin != "" {
-		pinLine = srvtext.Text(lang, "server.mail.label.pin", srvtext.Vars{"pin": pin})
-	}
 	return subject, mailLines(
 		srvtext.Text(lang, "server.mail.greeting", nil),
 		intro,
 		facts,
 		srvtext.Text(lang, "server.mail.share.download", nil)+"\n"+link,
-		pinLine,
+		pinLine(lang, pin, pinWithheld),
 		validityLine(lang, expiresDays),
 	)
 }
@@ -97,7 +108,7 @@ func shareMailText(lang, siteName, name string, isDir bool, size int64, link, pi
 // (max files, size per file, allowed types, validity) so the sender's terms
 // are clear up front. maxFiles/maxFileSizeMB <= 0 fall back to the drop
 // defaults; an empty allowedExt means all types.
-func dropInviteMailText(lang, siteName, folder, link, pin string, expiresDays, maxFiles, maxFileSizeMB int, allowedExt []string) (string, string) {
+func dropInviteMailText(lang, siteName, folder, link, pin string, pinWithheld bool, expiresDays, maxFiles, maxFileSizeMB int, allowedExt []string) (string, string) {
 	if folder == "" {
 		folder = "/"
 	}
@@ -118,16 +129,12 @@ func dropInviteMailText(lang, siteName, folder, link, pin string, expiresDays, m
 	facts := srvtext.Text(lang, "server.mail.label.folder", srvtext.Vars{"name": folder}) + "\n" +
 		srvtext.Plural(lang, "server.mail.drop_invite.limit", maxFiles, srvtext.Vars{"mb": fmt.Sprint(maxFileSizeMB)}) + "\n" +
 		types
-	pinLine := ""
-	if pin != "" {
-		pinLine = srvtext.Text(lang, "server.mail.label.pin", srvtext.Vars{"pin": pin})
-	}
 	return srvtext.Text(lang, "server.mail.drop_invite.subject", srvtext.Vars{"folder": folder}), mailLines(
 		srvtext.Text(lang, "server.mail.greeting", nil),
 		intro,
 		facts,
 		srvtext.Text(lang, "server.mail.drop_invite.upload", nil)+"\n"+link,
-		pinLine,
+		pinLine(lang, pin, pinWithheld),
 		validityLine(lang, expiresDays),
 	)
 }

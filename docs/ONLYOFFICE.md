@@ -18,6 +18,10 @@ is configured, and is edited there and saved back as the same kind of CSV;
 without it a `.csv` opens in filex's read-only table, as before (see
 [CSV files](#csv-files)).
 
+Since 0.54 the editor opens in each person's own filex language, or in one
+language the administrator chooses for everybody (see
+[The editor's language](#the-editors-language)).
+
 It works in every surface that embeds the explorer - the web app, the
 [desktop app](DESKTOP.md), and any host page using `<filex-explorer>` - because
 they all open the same editor component against the same endpoints. The desktop
@@ -150,8 +154,10 @@ Three pieces cooperate, all signed with one shared secret (HS256 / HMAC-SHA256):
    server, not the user's browser.
 3. **Callback** - on save the Document Server POSTs to
    `POST /api/files/onlyoffice/callback?node=<id>` with a JWT; filex verifies the
-   JWT, downloads the saved revision, and writes it back through the storage
-   driver.
+   JWT, downloads the saved revision **from the Document Server's own address**,
+   and writes it back through the storage driver. Since 0.54 it acts on the
+   signed payload only, and only on a document key it made for that document -
+   see [What a save callback is trusted for](#what-a-save-callback-is-trusted-for).
 
 The shared secret configured in filex - on *Settings → External services*, or
 seeded from `FILEX_ONLYOFFICE_JWT` - **must equal** the Document Server's JWT
@@ -206,7 +212,12 @@ goes through the same shared post-write gate every other surface does. First
 the callback checks that the file is still the version the editing session
 opened; a file that changed since is not written over, the save goes beside it
 ([When the document changes while it is open](#when-the-document-changes-while-it-is-open)).
-Then, in order, it:
+Before a byte is fetched it asks the question every write door asks: not a
+name filex keeps for itself (the desktop's working copy and its owner's draft
+excepted), not a document an app has frozen, and **nothing inside a vault**
+(encryption level 3, [E2E-VAULT-FORMAT.md](E2E-VAULT-FORMAT.md#writes-from-anywhere-else)),
+where only the vault API writes - the save is answered `{"error": 1}` and
+nothing is written, over the document or beside it. Then, in order, it:
 
 1. takes a **version snapshot**, so the revision it is about to replace stays
    recoverable from the file's history - and **refuses the save** if that
@@ -526,6 +537,7 @@ That's it - reopen an Office file in filex and it should launch the editor.
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | `external_services.onlyoffice.callback_url` | no | The address the **Document Server** uses to reach filex. Empty (the default) means `FILEX_PUBLIC_URL`. Set it only when those two must differ - see [When the Document Server needs a different address](#when-the-document-server-needs-a-different-address-from-your-users) |
 | `FILEX_ONLYOFFICE_FRAME_ORIGIN` | `external_services.onlyoffice.frame_origin` | no (recommended) | The Document Server's own origin (`https://docs.example.com`), whose proxy sends `/filex-frame/*` to filex: the editor's `api.js` runs in a frame there, not in filex's page. Read at start - see [The editor in a frame of its own](#the-editor-in-a-frame-of-its-own) |
 | `FILEX_APP_UI_ORIGIN` | `app_ui_origin` | no | The origin app interfaces are served from; when `FILEX_ONLYOFFICE_FRAME_ORIGIN` is empty the editor's frame is served there |
+| `FILEX_ONLYOFFICE_LANG` | `external_services.onlyoffice.editor_lang` | no | The editor's language: `auto` (the default - each person's own filex language) or a language the editor offers (`de`, `fr`, `tr`, `pt-PT`, `zh-TW`, ...) for everybody. Written onto the row at every start, like the URL; see [The editor's language](#the-editors-language) |
 
 Both are optional in the sense that the **admin UI** can supply them instead -
 whichever way they arrive, the value the running process uses is the one in the
@@ -533,6 +545,70 @@ whichever way they arrive, the value the running process uses is the one in the
 returns `env_managed: true` for a service the environment pins.
 
 The signed fetch URL is valid for **1 hour** by default.
+
+---
+
+## The editor's language
+
+Since 0.54 the editor opens in **the language each person uses filex in**:
+a Turkish screen gets ONLYOFFICE's menus and dialogs in Turkish, a German one
+in German - a language pack's language included, as long as ONLYOFFICE has it
+too. Before, the editor was English for everybody whatever filex itself was
+showing ([GitHub Discussion #93](https://github.com/BRF-Tech/filex/discussions/93)).
+
+**The server decides**, the same way for every surface that opens the editor
+(the explorer's viewer, the editor tab, the desktop app's document windows,
+`<filex-explorer>` embeds) - they all ask the same configuration endpoint, and
+the editor configuration it signs carries `editorConfig.lang` and
+`editorConfig.region`. In order, the first that the editor offers wins:
+
+1. **A fixed language the administrator chose** (below). It is everybody's,
+   whatever their screen says.
+2. **The language the request names** (`lang` in the query or the body of
+   `/api/files/onlyoffice/config`).
+3. **The language on the person's screen.** The viewer sends it as the
+   request's `Accept-Language` (the language filex is drawing in, not the one
+   the browser was installed in).
+4. **The person's account language** (Settings → Language).
+5. **The instance's language**, `FILEX_DEFAULT_LOCALE`.
+6. **English.**
+
+A language the editor does not offer is skipped for the next one: a Persian
+screen (a language pack can speak Persian, ONLYOFFICE does not) gets the
+account's or the instance's language, or English. A regional or older tag
+reaches the nearest language the editor has: `de-AT` is `de`, `nb` and `nn`
+are `no`, `zh-HK` and `zh-Hant` are `zh-TW`, `pt-AO` is `pt-PT` (ONLYOFFICE's
+`pt` is Brazilian Portuguese).
+
+`editorConfig.region` sets the spreadsheet's date, time and currency formats
+(and, from Docs 8.2, the default measurement unit). It is the screen's region
+when ONLYOFFICE lists it (`en-GB`, `de-CH`, `es-MX`), else the language's own
+(`tr` → `tr-TR`, `de` → `de-DE`, `pt` → `pt-BR`); for a language ONLYOFFICE
+lists no single region for (Arabic, Catalan, Norwegian, ...) it is left out and
+the editor derives it.
+
+### Choosing one language for everybody
+
+**Admin → External services → ONLYOFFICE → Editor language**: *Automatic*
+(the default) or one of the languages the editor offers, named in themselves
+(Deutsch, Français, Türkçe, ...). Save the card; the next editor anybody opens
+uses it, no restart. The list is ONLYOFFICE's own (its
+[API reference](https://api.onlyoffice.com/docs/docs-api/usage-api/config/editor/#lang)):
+46 languages, `pt-PT` and `zh-TW` among them.
+
+For a compose-managed install, `FILEX_ONLYOFFICE_LANG` (`auto` or a language
+code; `de-DE` and `de_DE` are read as `de`) does the same, the way
+`FILEX_ONLYOFFICE_URL` pins the address: it is written onto the setting at
+every start, a change on the admin page lasts until the next one, and the
+card says so. A value the editor does not offer is logged at start and not
+written. Unset, the setting belongs to the admin page.
+
+Over the API: `GET /api/admin/external` carries `editor_lang`,
+`editor_languages` and `editor_lang_env_managed` on the ONLYOFFICE row, and
+`PATCH /api/admin/external/onlyoffice` takes `{"editor_lang": "de"}` (or
+`"auto"`); a language the editor does not offer is `400 editor_lang_invalid`
+([BACKEND.md → Admin: external services](BACKEND.md#admin-external-services)).
+The MCP tool `admin_external_update` takes the same field.
 
 ---
 
@@ -726,7 +802,12 @@ pinned by the bytes a Docs 9.4.0 saved
 - **A date in an editor language other than English and Turkish**, unless
   that language happens to write it the English or the Turkish way (German
   writes `15/3/2026` as `15.03.2026`, which is the Turkish way, and it is
-  kept; `1.2.2026` as `01.02.2026`, which is not).
+  kept; `1.2.2026` as `01.02.2026`, which is not). Since 0.54 the editor
+  opens in the language of the person who edits
+  ([The editor's language](#the-editors-language)), so this is a person whose
+  filex speaks German, French or another language ONLYOFFICE has - or
+  everybody, when the administrator fixes such a language. The same goes for
+  a regional setting other than the language's own (`en-GB` writes day first).
 - **A date typed as text in the way the other language writes one.** The
   English editor keeps a date typed with dots as text (measured: `01.02.2026`
   and `1.2.2026` typed are saved as typed). Typed as `1.02.2026` over a cell
@@ -910,6 +991,19 @@ A stale session:
   file, as above). Escape puts the question away without answering it; until
   an answer nothing is written over anything.
 
+**Who may answer.** *Write mine* and *Keep the outside version* are taken only
+from one of the session's own editors (since 0.54): somebody filex handed an
+**editing** configuration with that key, for that document. The page sends
+the configuration's signed `token` with the answer, which any filex instance
+can check; without it, the instance that handed the configuration out
+remembers who it was, until it restarts. Anybody else - a person who only
+looked at the document, or one who may edit it but never opened it for
+editing - gets `403 not_your_session`, and the save keeps its default (beside
+the file). Who answered, and what, is in the audit log
+(`file.office_session_answered`). Asking (`action: "state"`) stays open to
+whoever may view the document; a key that is not the document's is answered
+`{"stale": false, "known": false}` and nothing is recorded under it.
+
 "Edits in the editor" means ONLYOFFICE's `onDocumentStateChange` said `true`
 since this editor opened. It stays true when ONLYOFFICE later says `false`:
 that only means the edits reached the Document Server, not the file.
@@ -938,8 +1032,8 @@ A row is removed when its session ends (the last save, or *closed with no
 change*); one whose session never said so is swept two days later (an hourly
 look, on the server's minute maintenance tick). A session filex has no record
 of - opened before this table existed, or its record expired - is judged by
-the key the document would get now: an older key is out of date, and is
-recorded as such.
+the key the document would get now: an older key of that document is out of
+date, and is recorded as such.
 
 The desktop app's "Open with filex" adds the same rule for a document on your
 own disk, where the server cannot see the change
@@ -1391,6 +1485,26 @@ The signed fetch URL is older than its TTL (1h). Reopen the document to mint a
 fresh URL. (This only appears if the Document Server retries a stale fetch much
 later.)
 
+### Failure: saves refused since 0.54
+The filex log says `onlyoffice callback refused:` and why
+([What a save callback is trusted for](#what-a-save-callback-is-trusted-for)):
+
+- `the saved document is not on the document server's address` - the
+  Document Server named its saved document on another origin than the
+  Document Server URL filex is configured with (another scheme, host or
+  port). Make the Document Server hand out its own address: a reverse proxy in
+  front of it has to pass `Host` and `X-Forwarded-Proto` unchanged (the
+  editor's converted copy needs the same), and a cache on an external object
+  store has to be served from the Document Server's address.
+- `token` with `why=the token has expired` - the clocks of the two machines
+  are more than five minutes apart beyond the token's own five-minute life.
+  Sync both with NTP. (`why=an editor configuration is not a callback` or
+  `the token is not a document server callback`: something other than the
+  Document Server posted to the callback.)
+- `the key is not this document's` - a callback for a session of another
+  document, or of an editing session opened before the secret was changed
+  and no longer on record. Reopen the document.
+
 ---
 
 ## Security notes
@@ -1402,7 +1516,8 @@ later.)
   served through one.
 - The **callback is authenticated by JWT** - filex validates the Document
   Server's token before writing anything back, and only acts on the
-  "ready to save" / "force save" statuses.
+  "ready to save" / "force save" statuses. What else it has to be is in
+  [What a save callback is trusted for](#what-a-save-callback-is-trusted-for).
 - The shared secret is the whole trust boundary. Treat it as one wherever it
   lives - an env file with `chmod 600` and not committed, or the stored row,
   which `GET /api/admin/external` redacts to `"***"` and never returns.
@@ -1421,10 +1536,58 @@ later.)
   (draw.io is different: it runs in its own frame, and filex only exchanges
   messages with that frame at its configured origin.)
 
+### What a save callback is trusted for
+
+The callback route is public: the Document Server posts it, not a signed-in
+browser. Since 0.54 filex acts on a callback only when all of this holds:
+
+- **The fields come from the signed token.** `key`, `status`, `url`,
+  `filetype`, `users`, `changesurl` and `history` are read from the verified
+  token's payload - the body's `token`, or the `Authorization: Bearer` token
+  (where the Document Server wraps them in `payload`, its default). The body
+  is read only to find the token; a field next to it is ignored.
+- **The token is a callback.** filex signs every editor configuration with
+  the same secret (the Document Server checks it with that secret), and
+  everybody who opens a document is handed one, to look at it too. A token
+  that carries a part of an editor configuration (`document`, `editorConfig`,
+  `documentType`) is refused, and so is one without a `key` and a numeric
+  `status`.
+- **The key is that document's.** Every document key filex hands out is
+  sealed with the id of its document (an HMAC under the secret, after the
+  version part: `<32 hex>-<32 hex>`), so `?node=`, which is not signed, cannot
+  point a session's save at another document - another tenant's included. A
+  key from before 0.54 (no seal) is taken while filex has its session on
+  record for that document (`office_sessions`). A callback for a key that is
+  not the document's is answered `{"error": 1}` and writes nothing; its
+  *being edited* and *closed with no change* statuses are answered
+  `{"error": 0}` and change nothing.
+- **The saved document comes from the Document Server.** `url` is downloaded
+  only when it is on the Document Server URL's origin (scheme, host and port),
+  the same rule a conversion's result has had since 0.50, and a redirect to
+  another origin is not followed. `changesurl` is never downloaded.
+- **Its times hold.** A token's `exp` and `nbf` are checked, five minutes of
+  clock difference allowed; one with an `iat` and no `exp` may be an hour
+  old. The Document Server signs its callbacks with an `exp` (five minutes by
+  default), but none is required: a token without one is not a forgery, and
+  refusing it would lose the save.
+
+A Document Server that hands out its saved documents on another address - its
+cache on an external object store served from that store's own address, or a
+proxy that rewrites the `Host` it sees - gets
+`the saved document is not on the document server's address` in reply, and
+the save is not written: serve the cache from the Document Server's own
+address (the browser loads the converted document from there too).
+
+Only the Document Server ever needs `/api/files/onlyoffice/callback`. A
+reverse proxy in front of filex can let that path through from the Document
+Server's address alone, as one more layer.
+
 ---
 
 ## See also
 
+- [E2E-OFFICE.md](E2E-OFFICE.md) - editing a document in an encrypted folder
+  (designed, not offered yet)
 - [CONFIGURATION.md](CONFIGURATION.md) - full config/env reference
 - [INSTALLATION.md](INSTALLATION.md) - running filex
 - [DOCKER.md](DOCKER.md) - container deployment

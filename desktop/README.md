@@ -20,10 +20,15 @@ app adds the five things a browser tab cannot do:
    account, supervised by the app and shipped inside it (`build/bin/filex`), so
    the app and a terminal act on one implementation and one pairing file. The
    engine follows the server's change stream and the local file system, so an
-   edit on either side arrives in about a second; its `live:` lines become the
-   *Live / Polling / Offline* word under each synced folder
-   (`src/syncstatus.ts`, which also keeps each folder's own error and clears
-   it on that folder's next clean pass). ⚠ The live path lives in the ENGINE: an installed app
+   edit on either side arrives in about a second. Since 0.54 the app starts it
+   with `--json` (and no `--lang`: the engine asks the server for the
+   account's language) and reads its **events**, one JSON object per line
+   (`src/syncstatus.ts`, [docs/DESKTOP.md → The engine's event
+   stream](../docs/DESKTOP.md#the-engines-event-stream)): it acts on each
+   event's code and figures - the *Live / Polling / Offline* word under each
+   synced folder among them, each folder's own error kept and cleared on that
+   folder's next clean pass - and shows the engine's sentence as it is, never
+   parsing it. ⚠ The live path lives in the ENGINE: an installed app
    gets it only with a build that bundles the new CLI.
    Also on this release: **Pause sync** in the tray menu and Settings,
    remembered across restarts, reboots and the hidden start at sign-in; a
@@ -224,15 +229,19 @@ CLI's command.
 Where the store channels stand is measured, not assumed - the user-facing
 pages ([`README.md`](../README.md), [`docs/DESKTOP.md`](../docs/DESKTOP.md), the
 filex.sh install box and the install prompt in `web/`) show a badge or a
-command only for a listing that installs today. As of 0.47.0: the Microsoft
-Store, the Snap Store (stable) and the Homebrew tap are live; the winget PRs
-pass validation and wait for the moderators' first review, so no page offers
-`winget install` as working; the AUR package is not published (new AUR
-accounts were closed), so no page mentions it. Change those pages when one of
-these moves - `gh pr list -R microsoft/winget-pkgs --search "BRFTech in:title"`
-and `curl -s "https://aur.archlinux.org/rpc/v5/info?arg[]=filex-app-bin"` say
-where they are. The badges themselves are the stores' unmodified artwork in
-`docs/badges/`; filex.sh carries a mirror of them (`site/assets/badges/`,
+command only for a listing that installs today. As of 0.53.0: the Microsoft
+Store, the Snap Store (stable) and the Homebrew tap are live; on winget the
+CLI's package (`BRFTech.filex`, merged with 0.53.0) is live and the desktop
+app's (`BRFTech.filex-app`) passes validation and waits for the moderators'
+first review, so the pages offer `winget install BRFTech.filex` and show
+`winget install BRFTech.filex-app` only as "in review"; the AUR package is not
+published (new AUR accounts were closed), so no page mentions it. Change those
+pages when one of these moves -
+`gh pr list -R microsoft/winget-pkgs --search "BRFTech in:title"` and
+`curl -s "https://aur.archlinux.org/rpc/v5/info?arg[]=filex-app-bin"` say
+where they are, and the winget table in
+`web/tests/composables/installDownloads.test.ts` holds the pages to it. The
+badges themselves are the stores' unmodified artwork in `docs/badges/`; filex.sh carries a mirror of them (`site/assets/badges/`,
 checked by `web/tests/deploy/siteAssets.test.ts`).
 
 `src/channel.ts` recognises a copy that something else updates
@@ -393,10 +402,21 @@ does it for you.
 
 ## Language
 
-*Settings → Language* - System / English / Türkçe, stored in the app state. One
-resolver in the main process decides what "system" means, because three surfaces
-read it: this window, the tray menu (main process) and the explorer inside it (a
-separate component with its own catalogue). Covered by `scripts/lang-e2e.mjs`.
+The app has no language of its own since 0.54: it speaks the language of the
+account on screen (`users.locale`, read from `/api/auth/me` at start, on an
+account switch and on focus at most once a minute, cached as
+`Account.locale`; `src/account-locale.ts`), and the operating system's with
+nobody signed in. *Settings → Language* - English / Türkçe, no *System* -
+writes the account's language (`PUT /api/me/prefs?surface=desktop`), so the
+web app follows; an install from before 0.54 hands its pinned choice to an
+account that had none, once. Three surfaces read the answer: this window, the
+tray menu (main process) and the explorer inside it (a separate component
+with its own catalogue). The sync engine is started without `--lang`, and an
+account's language change restarts that account's watchers
+([docs/DESKTOP.md → Language](../docs/DESKTOP.md#language)). With nobody
+signed in, or an account whose token the server no longer takes, the two
+buttons are disabled: there is no account to write to. Covered by
+`test/account-locale.test.ts` and `scripts/lang-e2e.mjs`.
 
 ## Open with filex
 
@@ -607,7 +627,7 @@ a server and credentials (`FILEX_SERVER`, `FILEX_EMAIL`, `FILEX_PASSWORD`), and
 | `sync-e2e.mjs` | A paired folder actually syncs, both directions |
 | `update-e2e.mjs` | The updater downloads and stages a newer version - and installs silently |
 | `portable-e2e.mjs` | The portable `.exe` is named so it neither overwrites the installer nor carries a version; the real self-extracting `.exe` starts and loads a page; its data lands in one folder beside it; and Settings says this copy does not update itself instead of sitting at “Checking…” |
-| `lang-e2e.mjs` | The language setting moves the shell, the file list and the stored state |
+| `lang-e2e.mjs` | The language setting writes the account on the server and moves the shell and the file list; it survives a restart; a signed-out account cannot choose |
 | `settings-layout-e2e.mjs` | Every segmented setting (bandwidth limits, when to sync, language, how a file opens) stays inside its card, in English and Turkish, at the window's narrowest (720 px) and at 1440: no button cut, none past the card's edge, the strip never over its description |
 | `shell-e2e.mjs` | The shell windows (settings, pickers) open and answer |
 | `dragout-e2e.mjs` | Dragging files OUT: what lands on this computer before an OS drag can start |

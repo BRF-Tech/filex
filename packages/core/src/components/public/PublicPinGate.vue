@@ -23,6 +23,14 @@ const props = defineProps<{
   failure?: '' | 'wrong' | 'locked';
   /** The server's own words for a lock, when it sends any. */
   lockMessage?: string;
+  /**
+   * The longest PIN any link may carry, as the SERVER says it (`pin_max`,
+   * internal/share CheckPINLength). ⚠ Not a number of this box's own: it
+   * used to stop at a hard-coded 12 while the server took a PIN of any length
+   * through the API, so such a link could not be opened from this page.
+   * Absent = the box does not cut what is typed; the server answers.
+   */
+  maxLength?: number;
 }>();
 
 const emit = defineEmits<{
@@ -88,7 +96,7 @@ function submit(): void {
       inputmode="numeric"
       autocomplete="one-time-code"
       spellcheck="false"
-      maxlength="12"
+      :maxlength="maxLength && maxLength > 0 ? maxLength : undefined"
       :disabled="busy || failure === 'locked'"
       :aria-invalid="message() ? 'true' : undefined"
       data-testid="public-page-pin-input"

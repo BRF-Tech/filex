@@ -192,7 +192,16 @@ func (h *Handler) uploadPart(w http.ResponseWriter, r *http.Request, p *protocol
 	sums := newChecksumSet(r.Header)
 
 	m, err := h.cfg.Staging.WriteVariablePart(uploadID, partNumber, sums.Wrap(body), maxPartSize)
+	if err == nil {
+		// A chunked part is held to its declared decoded length, as a PUT is.
+		err = bodyFinish(body)
+	}
 	if err != nil {
+		if bodyMismatched(body) {
+			status, code := chunkedError(ErrDecodedLength)
+			WriteError(w, r, status, code, ErrDecodedLength.Error())
+			return
+		}
 		WriteError(w, r, http.StatusBadRequest, "InvalidArgument", err.Error())
 		return
 	}

@@ -89,20 +89,44 @@ func TestSessionState_WithoutARecordTheKeyDecides(t *testing.T) {
 	ada := h.user(t, "ada@example.com", model.RoleUser)
 
 	// A session this process never handed out (a restart, another replica).
-	stale, known := h.svc.SessionState(ctx, h.node, h.svc.keyFor(h.node))
+	stale, known := h.svc.SessionState(ctx, h.node, h.svc.keyFor(ctx, h.node))
 	assert.False(t, stale, "its key is the one the document would get now")
 	assert.False(t, known)
 
-	stale, known = h.svc.SessionState(ctx, h.node, "an-older-session")
+	// An older key of this document (sealed for it, callback_trust.go).
+	older := h.svc.sealKey(ctx, h.node.ID, md5Hex("an-older-session"))
+	stale, known = h.svc.SessionState(ctx, h.node, older)
 	assert.True(t, stale, "a key the document has moved on from")
 	assert.False(t, known)
 
 	// …and its save, when it comes, is kept beside the file.
-	h.sessionKey = "an-older-session"
+	h.sessionKey = older
 	resp := h.save(t, docxBytes, "docx", idStrings(ada)...)
 	assert.Equal(t, 0, resp["error"])
 	assert.Equal(t, "V1", h.disk(t))
 	assert.Len(t, h.besideFiles(t), 1)
+}
+
+// 0.54: a key filex never made for this document is no session of it. It is
+// answered "current, unknown", nothing is recorded under it, and an answer
+// for it is refused (it used to be recorded as an older session of whatever
+// document the request named).
+func TestSessionState_AKeyThatIsNotThisDocumentsRecordsNothing(t *testing.T) {
+	ctx := context.Background()
+	h := newDocHarness(t, "rapor.docx", docxMime, "V1")
+
+	stale, known := h.svc.SessionState(ctx, h.node, "an-older-session")
+	assert.False(t, stale)
+	assert.False(t, known)
+	row, err := h.store.GetOfficeSession(ctx, "an-older-session")
+	require.NoError(t, err)
+	assert.Nil(t, row, "a record under a key filex never made for this document")
+
+	assert.ErrorIs(t, h.svc.DropSession(ctx, h.node, "an-older-session"), ErrNotThisDocument)
+	assert.ErrorIs(t, h.svc.RebaseSession(ctx, h.node, "an-older-session"), ErrNotThisDocument)
+	row, err = h.store.GetOfficeSession(ctx, "an-older-session")
+	require.NoError(t, err)
+	assert.Nil(t, row)
 }
 
 func TestSessionBase_ASecondOpenerJoinsTheRunningSessionsVersion(t *testing.T) {

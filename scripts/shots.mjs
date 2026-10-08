@@ -8,6 +8,7 @@
 //   pnpm shots --skip packages,web      reuse builds you trust (the verify step still runs)
 //   pnpm shots --no-build [--binary p]  shoot an existing binary (still verified)
 //   pnpm shots --without-apps           leave out the scenes that need app builds (CI's default)
+//   pnpm shots --all --keep-going       a failed scene does not stop the rest (the nightly run); still red
 //   then: node scripts/shots-site.mjs upload  &&  node scripts/shots-site.mjs accept --looked
 //
 // ⚠⚠ Why this exists. The screenshots for v0.41.0 were taken three times by
@@ -85,9 +86,14 @@
 //     from Docker (e2e/shots/scene.mjs → bootInstance({ engines })), and the
 //     private CI's runner cannot run Docker;
 //   · CI's pictures are an artefact that catches a script that no longer fits
-//     the product; the pictures that ship are taken on the build host
-//     (docs/CONTRIBUTING.md → Release process, step 2), where the sibling
-//     checkouts exist.
+//     the product; the pictures that ship are taken in the build host's test
+//     chain (scripts/chain/job/shots.sh, `--with-apps`: since task #187 every
+//     scene, the app builds and language packs mounted, the engines
+//     installed, against the chain's own Document Server).
+//
+// `--keep-going`: a scene that fails does not stop the ones after it. The run
+// is still a failure - its review names every failed scene, and `accept`
+// refuses it - but a night with one broken scene still compares the others.
 //
 // ⚠ The published set is taken on Linux, the build host (PUBLISH_PLATFORM, the
 // owner's decision of 2026-10-06): fonts are the system's, and a README with
@@ -110,6 +116,8 @@ import { goBuild } from './lib/go-build.mjs';
 import { decodePng, diffImages, diffOverlay, pngSize as pngDims } from './lib/png.mjs';
 import {
   DOCUMENT_SERVER_VARS,
+  PACKS_BEHIND,
+  PACKS_BEHIND_EXIT,
   appScenesLeftOutBy,
   documentServerFor,
   findShotScripts,
@@ -119,6 +127,7 @@ import {
 import {
   CACHE_REL,
   MANIFEST_REL,
+  PUBLISH_ENVIRONMENT,
   PUBLISH_PLATFORM,
   REVIEW_REL,
   decideScenes,
@@ -131,6 +140,7 @@ import {
   publishedName,
   publishedUrl,
   readManifest,
+  runFailure,
   sceneDigest,
   scriptInputs,
   sha256,
@@ -160,7 +170,7 @@ const list = (name) => (value(name) ?? '').split(',').map((s) => s.trim()).filte
 
 const BUILD_STEP_IDS = ['packages', 'web', 'embed', 'backend'];
 if (has('help')) {
-  console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 12).join('\n').replace(/^\/\/ ?/gm, ''));
+  console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 13).join('\n').replace(/^\/\/ ?/gm, ''));
   process.exit(0);
 }
 const skip = new Set(has('no-build') ? BUILD_STEP_IDS : list('skip'));
@@ -172,6 +182,7 @@ for (const s of skip) {
   }
 }
 const only = list('only').map((s) => s.replace(/\.mjs$/, ''));
+const keepGoing = has('keep-going');
 const timeoutMs = Number(value('timeout-min') ?? 30) * 60_000;
 const partial = only.length > 0;
 const mode = has('all') ? 'all' : partial ? 'only' : 'incremental';
@@ -640,7 +651,7 @@ async function main() {
   for (const p of plan.values()) counts[p.action] = (counts[p.action] ?? 0) + 1;
   say(`plan: ${Object.entries(counts).map(([a, n]) => `${n} ${a}`).join(', ')}`);
   for (const f of scripts) say(`  ${plan.get(f).action.padEnd(9)} ${f} — ${plan.get(f).why}`);
-  if (excluded.size) say('  left-out scenes keep their published pictures; theirs are taken on the build host (docs/CONTRIBUTING.md → Release process, step 2)');
+  if (excluded.size) say("  left-out scenes keep their published pictures; theirs are taken in the build host's test chain (docs/CONTRIBUTING.md → Release process, step 2)");
 
   // The scenes that need an app build — checked BEFORE the build step: an hour
   // of building is no way to learn that a sibling checkout is missing.
@@ -659,6 +670,9 @@ async function main() {
 
   const results = scripts.map((file) => ({ file, ...plan.get(file), files: [], ok: false, ran: false }));
   let failure = null;
+  // Processes a scene left that could not be ended: the run stops there.
+  let stuck = null;
+  const failed = [];
   let embed = { report: 'nothing was built: no scene was taken' };
   let runBin = null;
 
@@ -703,6 +717,11 @@ async function main() {
       const log = path.join(ARTIFACTS, 'logs', r.file.replace(/\.mjs$/, '.log'));
       const res = await runScript(r.file, scriptEnv(runBin, runTmp, port), log);
       Object.assign(r, res, { ran: true, log, ok: res.code === 0 });
+      // A scene that says its language packs are behind this tree
+      // (PACKS_BEHIND_EXIT, e2e/shots/langpack.mjs) failed for that reason
+      // and no other: recorded, so the nightly chain can tell it from a
+      // broken scene (scripts/chain/job/shots.sh).
+      if (!res.timedOut && res.code === PACKS_BEHIND_EXIT) r.reason = PACKS_BEHIND;
       const after = pngState();
       r.files = [...after].filter(([f, s]) => before.get(f) !== s).map(([f]) => f).sort();
       const { killed, survivors } = sweepRun({ dir: runDir, marker: RUN_ID });
@@ -713,15 +732,19 @@ async function main() {
       const boxes = removeRunContainers(RUN_ID);
       if (boxes.length) say(`${r.file} left container(s) running after it exited — removed: ${boxes.join(', ')}`);
       if (survivors.length) {
-        failure = `could not end processes ${r.file} left behind: ${survivors.map(describeProcess).join('; ')}`;
+        // ⚠ Never gone past, --keep-going or not: the next scene would share
+        // the machine with processes nobody can end.
+        stuck = `could not end processes ${r.file} left behind: ${survivors.map(describeProcess).join('; ')}`;
         break;
       }
       say(`${r.file}: ${r.ok ? 'passed' : r.timedOut ? 'TIMED OUT' : `FAILED (exit ${r.code ?? r.signal})`} · ${r.files.length} picture(s) · ${(r.ms / 1000).toFixed(0)} s${r.checks ? ` · ${r.checks}` : ''}`);
       if (!r.ok) {
-        failure = `e2e/shots/${r.file} ${r.timedOut ? 'timed out' : 'failed'} — see its output above (log: ${toRepo(log)}). Stopping: the rest were not run.`;
-        break;
+        failed.push({ file: r.file, timedOut: r.timedOut, log: toRepo(log), reason: r.reason ?? null });
+        if (!keepGoing) break;
+        say(`${r.file} failed - going on with the rest (--keep-going); the run stays a failure`);
       }
     }
+    failure = [runFailure(failed, { keepGoing }), stuck].filter(Boolean).join('\n') || null;
   } else {
     say('nothing to take: every scene stands as published or as the last run took it — no build needed');
     for (const d of [DIFF, PUBLISH]) fs.rmSync(d, { recursive: true, force: true });
@@ -804,6 +827,7 @@ async function main() {
     mode,
     complete,
     failure,
+    stuck,
     base: manifest.base,
     thresholds,
     scenes: Object.fromEntries(
@@ -814,6 +838,7 @@ async function main() {
           why: r.why,
           digest: r.digest,
           status: statusOf(r),
+          ...(r.reason ? { reason: r.reason } : {}),
           pictures: [...taken].filter(([, t]) => t.scene === r.file).map(([n]) => n).sort(),
           published: Object.values(manifest.pictures).filter((p) => p.scene === r.file).length,
         },
@@ -871,6 +896,12 @@ async function main() {
   if (!publishable) {
     say(`This run is on ${process.platform}: look at it, but the published set is taken on ${PUBLISH_PLATFORM}, the build host -`);
     say('nothing was staged, and accept refuses it. Take them in its test chain: CHAIN_EXTRAS=shots on a targeted run, or the nightly run.');
+  } else if (review.environment !== PUBLISH_ENVIRONMENT) {
+    // Linux, but not the build host's test chain (SHOTS_ENVIRONMENT=chain is
+    // its shots job): another typeface, and accept refuses it (#187).
+    say(`This run is in "${review.environment}", and the published set is taken in "${PUBLISH_ENVIRONMENT}", the build host's test chain:`);
+    say('look at it, but accept refuses it. Take them there: CHAIN_EXTRAS=shots on a targeted run, or the nightly run -');
+    say('or accept this run on purpose with: node scripts/shots-site.mjs accept --looked --outside-chain (a warning still prints).');
   } else if (toLook) {
     say(`Now LOOK at the contact sheet — the ${toLook} changed, new and removed picture(s): English, current, nothing covering them.`);
     say('Then publish them and point every page at them:');

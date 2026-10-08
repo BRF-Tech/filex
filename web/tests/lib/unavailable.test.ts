@@ -74,7 +74,9 @@ describe('reading the row', () => {
 });
 
 describe('the catalogues', () => {
-  const KEYS = ['unavailable.why.file', 'unavailable.why.dir', 'unavailable.withReason', 'unavailable.inspector', 'err.entry_unavailable'];
+  // `err.entry_unavailable` left the client catalogue in 0.54 (#209): the
+  // refusal is the server's sentence (server.error.entry_unavailable).
+  const KEYS = ['unavailable.why.file', 'unavailable.why.dir', 'unavailable.withReason', 'unavailable.inspector'];
 
   it('carries every key in both languages, translated', () => {
     for (const k of KEYS) {
@@ -171,11 +173,14 @@ describe('rows from outside a folder listing', () => {
 });
 
 describe('the server’s refusal, in words', () => {
-  it('409 ENTRY_UNAVAILABLE is not "already exists"', () => {
-    const body = JSON.stringify({ error: 'main://Proje is unavailable: …', code: 'ENTRY_UNAVAILABLE', path: 'main://Proje', reason: REASON });
-    const err = requestFailure(409, body, 'en');
-    expect(err.message).toBe(en['err.entry_unavailable']);
-    expect(requestFailure(409, body, 'tr').message).toBe(tr['err.entry_unavailable']);
+  // ⚠ 0.54 (#209): the server says it (`message`, in the reader's language,
+  // backend handlers/entry_unavailable.go); the client shows it as it came.
+  it('409 ENTRY_UNAVAILABLE is the server’s sentence, not "already exists"', () => {
+    const said = 'Bu öğe kullanılamıyor: depo, öğenin hâlâ var olup olmadığını söyleyemedi. Bir sonraki taramadan sonra yeniden deneyin.';
+    const body = JSON.stringify({ error: 'entry_unavailable', message: said, code: 'ENTRY_UNAVAILABLE', path: 'main://Proje', reason: REASON });
+    const err = requestFailure(409, body, 'tr');
+    expect(err.message).toBe(said);
+    expect(err.message).not.toBe(tr['err.status.409']);
   });
 });
 

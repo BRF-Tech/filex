@@ -28,6 +28,7 @@ they're database records; see [STORAGE.md](STORAGE.md).
 - [Archives](#archives)
 - [Antivirus (ClamAV)](#antivirus-clamav)
 - [Versioning on overwrite](#versioning-on-overwrite)
+- [End-to-end encryption: the vault](#end-to-end-encryption-the-vault)
 - [Downloads from slow storage (prepared copies)](#downloads-from-slow-storage-prepared-copies)
 - [Thumbnails](#thumbnails)
 - [Search](#search)
@@ -198,8 +199,10 @@ and what makes losing the private key unrecoverable.
 ### Trusted proxies
 
 Which peers filex believes about a client's address (`X-Forwarded-For`,
-`X-Real-IP`): the `login.trusted_proxies` setting (the **Sign-in security**
-page), else `FILEX_TRUSTED_PROXIES`, else **`auto`**. `auto` is worked out
+`X-Real-IP`) - and, since 0.54, about how the client arrived (an
+`X-Forwarded-Proto: http`, which turns a tenant's links into `http://`, is
+read from these peers only). The list is the `login.trusted_proxies` setting
+(the **Sign-in security** page), else `FILEX_TRUSTED_PROXIES`, else **`auto`**. `auto` is worked out
 from where filex runs - at start, and again every minute, so a container
 joined to another network with `docker network connect` is noticed - and
 trusts:
@@ -533,9 +536,9 @@ next). Nothing to switch on: it is on by default.
 | **What counts** | A wrong password, and a wrong second-factor code. Not: the form asking for the code, a right password on a disabled account, an API token (not a password). |
 | **What resets** | A success resets the *account's* counter - never the address's, so one valid login between guesses cannot launder a spray. A protocol's cached credential and an API token do not reset it either (a busy client would wipe the counter with every request). |
 
-![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.0c6776745917.png)
+![The sign-in form after a wrong password: how many tries are left](https://filex.sh/shots/loginsecurity/login-remaining-1440.4221dd3d1185.png)
 
-![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.94d4b8117a23.png)
+![The sign-in form on a locked account: the lock counted down on its button](https://filex.sh/shots/loginsecurity/login-locked-1440.386b07b4543a.png)
 
 **The IP allow-list** (`login.ip_allowlist`) is the way back in. An address on it is
 exempt from the per-address limit, and may sign in to **any** locked account (the
@@ -605,7 +608,7 @@ a minute. A database read that fails keeps the last value known (the default whe
 there is none). A `login.*` key written through the generic settings API reaches
 the running limit the same way.
 
-![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-1440.e8cb49e3e6b3.png)
+![Admin → Sign-in security: the limit, allowed addresses, trusted proxies, the locks and the sign-in trail](https://filex.sh/shots/loginsecurity/login-security-1440.5a98c09e6f76.png)
 
 | Key | Default | Range |
 |---|---|---|
@@ -707,6 +710,7 @@ key).
 | `FILEX_ONLYOFFICE_JWT` | Shared JWT secret - must match the Document Server |
 | `FILEX_ONLYOFFICE_CALLBACK_URL` | Address the Document Server uses to reach filex; empty means `FILEX_PUBLIC_URL`. Only needed when the browser's address and the container's address differ |
 | `FILEX_ONLYOFFICE_FRAME_ORIGIN` | The Document Server's own origin (`https://docs.example.com`), whose reverse proxy sends `/filex-frame/*` to filex: the editor's `api.js` then runs in a frame there instead of in filex's page ([ONLYOFFICE.md → The editor in a frame of its own](ONLYOFFICE.md#the-editor-in-a-frame-of-its-own)). The same site as filex is fine. On that host filex answers `/filex-frame/editor` and nothing else. Read at start (not on the admin page); a value that is not an origin, filex's own or `FILEX_APP_UI_ORIGIN` stops the server. YAML: `external_services.onlyoffice.frame_origin` |
+| `FILEX_ONLYOFFICE_LANG` | The editor's language: `auto` (each person's own filex language) or a language the editor offers (`de`, `fr`, `tr`, `pt-PT`, `zh-TW`, ...) for everybody. Re-asserted onto the ONLYOFFICE row at every boot like the URL (an admin-UI edit lasts until the next start); unset, *External services → ONLYOFFICE → Editor language* decides, `auto` by default. A value the editor does not offer is logged and ignored. YAML: `external_services.onlyoffice.editor_lang` ([ONLYOFFICE.md → The editor's language](ONLYOFFICE.md#the-editors-language)) |
 
 The same Document Server draws the thumbnails of office documents (0.50,
 [thumbnails.md → Office through OnlyOffice](thumbnails.md#office-through-onlyoffice));
@@ -733,7 +737,7 @@ requested is not something to open for them.
 
 | Env var | Default | Description |
 |---|---|---|
-| `FILEX_SECRET_KEY` | - | ⚠⚠ **Required once anybody mints an S3 access key.** SigV4 verifies a request by recomputing an HMAC chain from the secret, so unlike a token it cannot be hashed - filex seals it with AES-GCM under this key. With no key configured, minting an access key **fails** rather than storing plaintext. **Changing or losing it stops every existing access key from verifying**, so treat it like the database, not like a password: back it up, do not rotate it casually. Any 32+ random bytes. |
+| `FILEX_SECRET_KEY` | - | ⚠⚠ **Required once anybody mints an S3 access key.** SigV4 verifies a request by recomputing an HMAC chain from the secret, so unlike a token it cannot be hashed - filex seals it with AES-GCM under this key. With no key configured, minting an access key **fails** rather than storing plaintext. **Changing or losing it stops every existing access key from verifying**, so treat it like the database, not like a password: back it up, do not rotate it casually. Any 32+ random bytes. It also seals the [Web Push](NOTIFICATIONS.md#web-push) key: without it push notifications stay off, and a changed key turns them off until the push key is rotated (Admin → Notifications). |
 | `FILEX_S3` | `1` | The S3-compatible endpoint. Set `0` to switch it off. |
 | `FILEX_S3_DOMAIN` | - | Dedicated host for the endpoint, e.g. `s3.example.com`, which also enables virtual-hosted addressing (`bucket.s3.example.com`). Empty leaves the endpoint under `/s3`, path-style only. ⚠⚠ **Never point this at the host the app itself serves** - the whole site then answers as S3. ⚠ Setting it needs a wildcard A record **and** a wildcard certificate for `*.<domain>`; without both, current SDKs (which default to virtual-hosted) fail at TLS with nothing that names the cause. |
 | `FILEX_SFTP` | `0` | The SFTP endpoint. Its own TCP listener, not a route. |
@@ -773,6 +777,7 @@ Drivers that live outside the binary - see [PLUGINS.md](PLUGINS.md).
 | `FILEX_APP_STORE_URLS` | - | Comma-separated app store **origins** (`https://store.example`, no path) trusted by configuration: their install links and license answers are accepted without an administrator approving the store first, signed with the keys in `FILEX_APP_STORE_KEYS` and no others. Set, it is an **allow list** (0.52.0): any other store is refused (`403 store_not_allowed`), not even trusted on first use. Unset, a store is trusted only by an administrator who compared its key fingerprints on its first install link ([APP-PLUGINS.md → Trusted stores](APP-PLUGINS.md#trusted-stores)). A configured store has no remove button in the panel. YAML: `app_store_urls`. |
 | `FILEX_APP_STORE_KEYS` | - | Comma-separated ed25519 **public** keys (hex or standard base64) of the stores in `FILEX_APP_STORE_URLS`, each optionally prefixed with the one use it may sign for: `index:<key>` (install links) or `license:<key>` (license answers); a bare key may sign either. filex reads the store's `/v1/keys.json` for the key ids and accepts a key only when its material is listed here; a key the store publishes that is not here is refused (`store_key_not_configured`), never put to an administrator. Ignored (with a log line) when `FILEX_APP_STORE_URLS` names no store. Not the same setting as `FILEX_PLUGIN_TRUSTED_KEYS`, which checks modules. YAML: `app_store_keys`. |
 | `FILEX_APP_GITHUB_RAW_BASE` | `https://raw.githubusercontent.com` | Where a GitHub install (and a [store link](APP-PLUGINS.md#installing-from-a-store), which names a GitHub repository) reads a repository's files: `<base>/<owner>/<name>/<ref>/filex-app.json`. A mirror of GitHub's raw host for an install that cannot reach it, or the end-to-end tests' fake GitHub. The download guard applies to it like to every address: a loopback mirror needs `FILEX_PLUGIN_LOOPBACK_SOURCES`, a private one is refused. YAML: `app_github_raw_base`. |
+| `FILEX_APP_CLOCK` | - | ⚠ **Screenshots and tests only - never on a server.** An RFC 3339 instant (`2026-09-15T10:30:00Z`): the apps' clock reads it when filex starts and runs at real speed from there - the time inside every app module, and the host's own times it hands an app (a lock's end, a link's expiry, a certificate's not-after, a wake-up's window). The screenshot scenes set it so that what an app writes into its own words ("requested on", "frozen until", the date under a signature) is dated on their clock. Everything filex stores and compares stays on the real clock. The server says in its log at start that the clock is moved. No YAML key. |
 | `FILEX_SECRET_KEY` | - | Also seals a **remote** plugin's bearer token. Without it, registering a remote plugin is refused rather than stored in plaintext (binary plugins get a token minted per start, which is never stored). It seals a [paid app's license key](APP-PLUGINS.md#paid-apps) too: without it a paid app cannot be given a key (`license_key_invalid`), and changing it leaves the stored keys unreadable (enter them again). |
 | `FILEX_PLUGIN_REQUEST_TTL_DAYS` | `14` | How long an [install request](APP-PLUGINS.md#install-requests) - what an API key leaves instead of installing an app or a storage plugin - waits for an administrator before it expires. Checked hourly and whenever the requests are read. YAML: `plugin_request_ttl_days`. |
 
@@ -1085,6 +1090,23 @@ both top-level alongside `upload:` / `cache:`.
 
 ---
 
+## End-to-end encryption: the vault
+
+The third encryption level, the **vault** ([format](E2E-VAULT-FORMAT.md)), is
+built - the web app, the desktop app, the embeds, `filex decrypt` and
+`filex vault mount` open it - and **off** by default: turn it on where people
+should be able to make one.
+
+| Env var | Default | Description |
+|---|---|---|
+| `FILEX_E2E_VAULT` | `0` | Turns the vault on: the API under `/api/files/e2e/vault` ([BACKEND.md](BACKEND.md#vault-encryption-level-3)), `e2e_vault: true` in `GET /api/files/capabilities` (a client offers level 3 only then), and the rule that inside a vault folder only that API writes - every other door (the explorer, the queue, the agent API and MCP, archives, apps, the document server's save, WebDAV, S3, SFTP, FTPS, NFS) is refused there. Off, every vault route answers `404 VAULT_DISABLED`, the capability is `false`, and the doors do not look for vaults: a vault made while it was on is then an ordinary encrypted folder to them, so do not turn it off on an instance whose people use vaults. |
+
+In `config.yaml`: `e2e_vault: true`, top-level. The vault's write lock lives in
+the database (`vault_locks`, migration 00096), so every filex process on one
+database shares it; nothing else needs configuring.
+
+---
+
 ## Downloads from slow storage (prepared copies)
 
 When a **big** file lives on a **slow** backend, filex fetches it to local disk
@@ -1231,6 +1253,10 @@ switching back to that older build afterwards will not work.
 | `FILEX_NOTIFY_ENABLED` | `true` | In-app bell + webhook. |
 | `FILEX_WEBHOOK_URL` | - | The **legacy single** webhook: one JSON POST per event, no event filter. Empty = in-app only, plus whatever targets exist. |
 | `FILEX_WEBHOOK_TOKEN` | - | Sent as `Authorization: Bearer` to that legacy webhook only. |
+| `FILEX_WEBHOOK_LANG` | - | The language the legacy webhook's `title` and `body` are said in (`tr`, `en`, a language pack's). Empty = the instance's (`FILEX_DEFAULT_LOCALE`, else English). A webhook target sets its own in Admin → Webhooks ([Which language](NOTIFICATIONS.md#which-language)). |
+| `FILEX_PUSH_ENABLED` | `true` | [Web Push](NOTIFICATIONS.md#web-push): what a person's bell tells them reaches their phone and browsers while filex is closed, once they turn it on for a device. ⚠ Needs `FILEX_SECRET_KEY` - the VAPID key pushes are signed with is made at the first start and stored sealed with it; without the key push stays off and says so. |
+| `FILEX_PUSH_SUBJECT` | `FILEX_PUBLIC_URL` (https) | The contact a push service may write to about this server: `mailto:ops@example.com` or an https address. Without an https public address: `mailto:filex@<its host>`. |
+| `FILEX_PUSH_HOSTS` | - | Push services accepted besides the browsers' own (Chrome, Firefox, Safari, Edge), comma separated; `*` accepts any https host that is a name, never an address. The sender connects directly, not through `HTTP_PROXY` / `HTTPS_PROXY`. |
 
 ⚠ These two are not the whole notification surface, and have not been for
 several releases: **webhook v2 targets** are rows managed in *Admin → Webhooks*,

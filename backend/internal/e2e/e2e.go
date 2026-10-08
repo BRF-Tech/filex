@@ -45,12 +45,14 @@ var FileMagicPrefix = []byte("filexfxe")
 // FileExtension is the stored-name suffix of a single encrypted file.
 const FileExtension = ".fxe"
 
-// HasEncryptedPrefix reports whether b starts with either magic — a file in
-// an encrypted folder or a single encrypted file. Every pipeline that would
-// read content (thumbnails, content indexing, document editing) treats the
-// two the same: ciphertext it cannot, and must not try to, render.
+// HasEncryptedPrefix reports whether b starts with any of the three magics —
+// a file in an encrypted folder (`filexe2e`), a single encrypted file
+// (`filexfxe`), or a vault's pack or index file (`filexvlt`, vault.go). Every
+// pipeline that would read content (thumbnails, content indexing, document
+// editing) treats them the same: ciphertext it cannot, and must not try to,
+// render.
 func HasEncryptedPrefix(b []byte) bool {
-	return bytes.HasPrefix(b, MagicPrefix) || bytes.HasPrefix(b, FileMagicPrefix)
+	return bytes.HasPrefix(b, MagicPrefix) || bytes.HasPrefix(b, FileMagicPrefix) || bytes.HasPrefix(b, VaultMagicPrefix)
 }
 
 // LooksEncryptedFile reports whether a stored NAME is a single encrypted

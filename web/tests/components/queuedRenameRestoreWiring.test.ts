@@ -46,6 +46,9 @@ describe('queued rename and restore wiring', () => {
     expect(settled, 'the onSettled handler was not found').not.toBe('');
     expect(settled).toMatch(/op\.op_type === 'rename'/);
     expect(settled).toMatch(/op\.op_type === 'restore'/);
-    expect(settled).toMatch(/toast\.restore_partial/);
+    // How a restore job ended is the server's sentence, its row's `summary`
+    // (0.54, finding A15) - no longer `toast.restore_partial` built here.
+    expect(settled).toMatch(/op\.op_type === 'restore' && op\.summary/);
+    expect(settled).not.toMatch(/toast\.restore_partial/);
   });
 });

@@ -375,6 +375,10 @@ var rawBodyRoutes = []struct {
 }{
 	{http.MethodPut, []string{"api", "files", "upload", "*"}},
 	{http.MethodPut, []string{"api", "files", "plugins", "ui", "*", "*", "save"}},
+	// A vault's pack and index file (handlers/e2e_vault.go): up to 16 and
+	// 64 MiB of ciphertext, the vault folder in `?path=`.
+	{http.MethodPut, []string{"api", "files", "e2e", "vault", "pack"}},
+	{http.MethodPut, []string{"api", "files", "e2e", "vault", "index"}},
 }
 
 // rawBody reports whether r is one of rawBodyRoutes. The path is the one chi

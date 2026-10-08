@@ -265,14 +265,18 @@ export const ROOT_FOLDER_KEY = '.root';
 
 /**
  * What a folder with NO memory of its own opens as, when the answer is not
- * simply the default. Only Recent is in here: its promise is "the things you
- * were just in", so opening it alphabetically buries the file the person came
- * back for. A SEED, not an override — the moment someone sorts Recent by name,
- * that is stored against `.recent` like any other folder's choice.
+ * simply the default. EMPTY since 0.54 (task #207, audit D3).
+ *
+ * ⚠ Recent used to be seeded `modified ↓` here, on the reasoning that "the
+ * things you were just in" should not open alphabetically. But `modified` is
+ * when the FILE changed, not when the person opened it: the list was drawn in
+ * a different order from the one the server sent and the Home page showed.
+ * The per-person views (Recent, Starred, Shared with me, a tag) now keep the
+ * SERVER's order - the person's own time on each row, newest first - and a
+ * sort the person chooses there is sent to the server as `sort` (FileExplorer
+ * navSortParam), so nothing needs seeding.
  */
-const SEEDED: Record<string, Omit<FolderPrefs, 't'>> = {
-  '.recent': { k: 'modified', d: 'desc' },
-};
+const SEEDED: Record<string, Omit<FolderPrefs, 't'>> = {};
 
 /** This folder's OWN memory (or its seed), or null — never a default. */
 export function folderPrefs(key: string): Omit<FolderPrefs, 't'> | null {

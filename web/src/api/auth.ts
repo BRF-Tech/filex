@@ -1,6 +1,14 @@
 import { api } from './client';
 import { getApiBaseUrl } from './runtimeConfig';
+import type { AccountCheckAnswer, AccountCheckQuery } from '@brftech/filex-core';
+
 import type { LoginMethods, LoginRequest, LoginResponse, MeResponse, User } from './types';
+
+/** The request options that say which language is on screen, or none. */
+function screenLanguage(lang?: string): { headers: Record<string, string> } | undefined {
+  const code = (lang ?? '').trim();
+  return code ? { headers: { 'Accept-Language': code } } : undefined;
+}
 
 export const AuthApi = {
   async me(): Promise<MeResponse> {
@@ -8,15 +16,22 @@ export const AuthApi = {
     return data;
   },
 
-  async login(payload: LoginRequest): Promise<LoginResponse> {
-    const { data } = await api.post<LoginResponse>('/auth/login', payload);
+  /**
+   * `lang` is the language on screen. It travels as Accept-Language: an
+   * account that holds no language yet is given it by the server at this
+   * sign-in (handlers/auth.go adoptSignInLanguage) - the panel writes no
+   * language afterwards (0.54).
+   */
+  async login(payload: LoginRequest, lang?: string): Promise<LoginResponse> {
+    const { data } = await api.post<LoginResponse>('/auth/login', payload, screenLanguage(lang));
     return data;
   },
 
   /** Redeems a sign-in handed over from the platform's address (see
-   *  LoginHandoff): the session is opened on THIS address. */
-  async handoff(code: string): Promise<LoginResponse> {
-    const { data } = await api.post<LoginResponse>('/auth/handoff', { code });
+   *  LoginHandoff): the session is opened on THIS address. `lang` as for
+   *  `login`. */
+  async handoff(code: string, lang?: string): Promise<LoginResponse> {
+    const { data } = await api.post<LoginResponse>('/auth/handoff', { code }, screenLanguage(lang));
     return data;
   },
 
@@ -66,6 +81,13 @@ export const AuthApi = {
   async updateProfile(patch: Partial<User> & { password?: string }): Promise<User> {
     const { data } = await api.patch<User>('/auth/profile', patch);
     return data;
+  },
+
+  /** Would this address / username be accepted? The server's rules and its
+   *  words (POST /api/auth/account/check, core lib/accountRules). */
+  async checkAccount(q: AccountCheckQuery): Promise<AccountCheckAnswer> {
+    const { data } = await api.post<AccountCheckAnswer>('/auth/account/check', q);
+    return data ?? {};
   },
 
   async changePassword(current: string, next: string): Promise<void> {

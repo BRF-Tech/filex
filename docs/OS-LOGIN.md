@@ -351,7 +351,12 @@ answers `200 {ok, provider, checks, test_ok, super_admin}`, or `409 test_failed`
 `409 test_account_not_platform`. `POST
 /api/admin/auth-providers/windows/test` takes `{config?, test_account}` and
 changes nothing. The same bodies work on `/api/ai/admin/...` and through the
-`admin_auth_providers_update` / `admin_auth_providers_test` MCP tools.
+`admin_auth_providers_update` / `admin_auth_providers_test` MCP tools. Each of
+the `checks` carries `id`, `status` (`ok`, `fail`, `unchecked`), `params` and
+`text`: the step as one sentence in the reader's language (`?lang=` first, then
+the account's language), said by the server for every reader - the panel, a
+tenant's own page and the MCP tool alike. A failed step whose fix the driver
+worded (the PAM steps' `hint`) has that as its `text`.
 
 ---
 

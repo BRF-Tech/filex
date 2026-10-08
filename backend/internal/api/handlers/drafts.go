@@ -35,12 +35,14 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/drafts"
@@ -145,11 +147,8 @@ func viewOfDraft(d *model.Draft, storageName string) draftView {
 }
 
 // refuseNoDrafts answers a caller draftsFor turns away.
-func refuseNoDrafts(w http.ResponseWriter) {
-	writeJSON(w, http.StatusForbidden, map[string]string{
-		"error": "drafts are kept for a person acting for themselves",
-		"code":  draftsUnavailable,
-	})
+func refuseNoDrafts(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusForbidden, "drafts_unavailable", nil, "code", draftsUnavailable)
 }
 
 // storagesByID is the caller's visible storages (tenant-scoped), by id.
@@ -191,7 +190,7 @@ func (h *Manager) visibleDrafts(ctx context.Context, uid int64) ([]draftView, er
 // ListDrafts answers GET /api/files/drafts.
 func (h *Manager) ListDrafts(w http.ResponseWriter, r *http.Request) {
 	if !draftsFor(r) {
-		refuseNoDrafts(w)
+		refuseNoDrafts(w, r)
 		return
 	}
 	ctx := r.Context()
@@ -211,7 +210,7 @@ func (h *Manager) ListDrafts(w http.ResponseWriter, r *http.Request) {
 // badge, asked after every change the explorer makes to a draft.
 func (h *Manager) CountDrafts(w http.ResponseWriter, r *http.Request) {
 	if !draftsFor(r) {
-		refuseNoDrafts(w)
+		refuseNoDrafts(w, r)
 		return
 	}
 	ctx := r.Context()
@@ -228,7 +227,7 @@ func (h *Manager) CountDrafts(w http.ResponseWriter, r *http.Request) {
 // live=true also refuses a draft that is in the trash (discarded).
 func (h *Manager) ownDraft(w http.ResponseWriter, r *http.Request, live bool) (*model.Draft, *model.Storage, bool) {
 	if !draftsFor(r) {
-		refuseNoDrafts(w)
+		refuseNoDrafts(w, r)
 		return nil, nil, false
 	}
 	ctx := r.Context()
@@ -272,7 +271,7 @@ func (h *Manager) GetDraft(w http.ResponseWriter, r *http.Request) {
 // matters.
 func (h *Manager) CreateDraft(w http.ResponseWriter, r *http.Request) {
 	if !draftsFor(r) {
-		refuseNoDrafts(w)
+		refuseNoDrafts(w, r)
 		return
 	}
 	var body vfNewFileBody
@@ -302,12 +301,7 @@ func (h *Manager) CreateDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n >= limit {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": "you already keep as many drafts as this server allows; save or delete some",
-			"code":  draftLimitReached,
-			"limit": limit,
-			"count": n,
-		})
+		writeError(w, r, http.StatusConflict, "draft_limit", apierr.Params{"limit": strconv.Itoa(limit)}, "code", draftLimitReached, "limit", limit, "count", n)
 		return
 	}
 
@@ -414,7 +408,7 @@ func (h *Manager) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	if st.ReadOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 	targetDir := strings.Trim(d.TargetDir, "/")
@@ -450,11 +444,7 @@ func (h *Manager) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	if targetDir != "" {
 		if obj, err := drv.Stat(ctx, targetDir); err != nil || obj.Kind != storage.KindDirectory {
 			if err == nil || errors.Is(err, storage.ErrNotFound) {
-				writeJSON(w, http.StatusConflict, map[string]string{
-					"error":      "the folder this draft is meant for is not there any more",
-					"code":       draftFolderGone,
-					"target_dir": joinAdapterPath(st.Name, targetDir),
-				})
+				writeError(w, r, http.StatusConflict, "draft_folder_gone", nil, "code", draftFolderGone, "target_dir", joinAdapterPath(st.Name, targetDir))
 				return
 			}
 			writeJSON(w, mapDriverErr(err), map[string]string{"error": clientErrText(err)})

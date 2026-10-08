@@ -46,11 +46,25 @@ const BROWSER_DEVICES: Record<string, string> = {
  * capability prefs say "fine pointer that hovers", the value a desktop with a
  * mouse reports). The phone describes that need `hover: none` skip Firefox,
  * which cannot emulate a phone at all.
+ *
+ * ⚠ The HTTP cache in memory and no history database, as Chromium's
+ * Playwright contexts have them. Firefox keeps one profile on disk for the
+ * whole run (/tmp/playwright_firefoxdev_profile-*): six minutes into the
+ * build host's night of 2026-10-07 its cache2 held 815 MB and Firefox had
+ * written 2.2 GB; the Firefox line wrote 33-34 GB to the disk in a 0.53 full
+ * run, half of what the whole run wrote, on a disk that stalls under it
+ * (task #194). No spec reads either: a page's cache and its back/forward
+ * history live in memory either way.
  */
 const ENGINE_USE: Record<string, Project['use']> = {
   firefox: {
     launchOptions: {
-      firefoxUserPrefs: { 'ui.primaryPointerCapabilities': 6, 'ui.allPointerCapabilities': 6 },
+      firefoxUserPrefs: {
+        'ui.primaryPointerCapabilities': 6,
+        'ui.allPointerCapabilities': 6,
+        'browser.cache.disk.enable': false,
+        'places.history.enabled': false,
+      },
     },
   },
 };

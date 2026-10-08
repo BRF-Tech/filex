@@ -219,6 +219,10 @@ func (h *AuthSelf) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 			tz = *req.Timezone
 		}
 		_ = h.Store.UpdateUserLocale(r.Context(), u.ID, l, tz)
+		// One language per person, whichever surface reads it (#191).
+		if req.Locale != nil {
+			syncSurfaceLocales(r.Context(), h.Store, u.ID, l)
+		}
 	}
 	updated, _ := h.Store.GetUser(r.Context(), u.ID)
 	writeJSON(w, http.StatusOK, updated)
@@ -247,8 +251,10 @@ func (h *AuthSelf) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
 		return
 	}
-	if len(req.NewPassword) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "new password too short (min 8)"})
+	// The one password rule (authlocal.CheckPassword), said in the reader's
+	// language; an administrator setting a password asks the same.
+	if p := passwordProblem(req.NewPassword); p != nil {
+		p.write(w, r)
 		return
 	}
 	oldPassword := req.OldPassword

@@ -88,6 +88,11 @@ func TTLDays() int { return int(ApprovalTTL / (24 * time.Hour)) }
 // cut, not refused.
 const maxRequestChars = 2000
 
+// MaxRequestChars is maxRequestChars for the clients: published in
+// `/api/files/capabilities` as `limits.e2e_request_reason_max_runes`, so the
+// request form holds a reason to what is kept instead of a number of its own.
+const MaxRequestChars = maxRequestChars
+
 // sweepEvery is how often StartSweeper closes what is past its time.
 const sweepEvery = time.Hour
 
@@ -552,26 +557,23 @@ func (q *Requests) announce(ctx context.Context, r *model.E2ERequest) {
 	}
 	// The node is the folder in both kinds: a file's request is its folder's.
 	// ⚠ `target_kind`, never `kind`: meta.kind == "file" is what picks the
-	// escrow and password events' file wording in a reader
-	// (notificationText), and these two must not be tied to it.
+	// escrow and password events' file wording (internal/notify say.go), and
+	// these two must not be tied to it.
 	ev := notify.Event{
 		Severity: notify.SeverityInfo,
 		Node:     &notify.NodeRef{StorageID: r.StorageID, Path: r.Path, Name: name},
 		Target:   notify.DirTarget(r.Path),
 		Meta:     map[string]any{"request_id": r.ID, "target_kind": r.Kind, "storage": st},
 	}
-	// The server's own words — what a webhook receiver and a reader with no
-	// phrase for the event see — are the explorer's English phrases
-	// (notificationText): the folder by name, the requester and their reason.
+	// The facts only: the server says the request and its answer from them,
+	// in each reader's language (internal/notify say.go,
+	// server.notify.e2e.request_*) - the folder by name, the requester and
+	// their reason, the decision and its note.
 	if r.Status == model.E2ERequestPending {
 		ev.Event = notify.EventE2ERequestCreated
-		ev.Title = "Encryption request: " + name
-		ev.Body = r.Requester + ": " + r.Reason
 		ev.Meta["requester"], ev.Meta["reason"] = r.Requester, r.Reason
 	} else {
 		ev.Event = notify.EventE2ERequestDecided
-		ev.Title = fmt.Sprintf("Encryption request %s: %s", r.Status, name)
-		ev.Body = r.DecisionNote
 		ev.Meta["decision"], ev.Meta["note"], ev.Meta["decider"] = r.Status, r.DecisionNote, r.Decider
 		uid := r.UserID
 		ev.UserID = &uid

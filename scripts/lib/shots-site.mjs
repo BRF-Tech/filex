@@ -29,6 +29,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SHOTS_RELEASE, SHOTS_ROOT_REL } from '../../e2e/shots/release.mjs';
+import { PACKS_BEHIND } from './shot-scripts.mjs';
 
 /** Where the published pictures live. One directory, never pruned. */
 export const SHOTS_SITE_BASE = 'https://filex.sh/shots/';
@@ -512,7 +513,7 @@ export function decideScenes({ scripts, digests, manifest, previous = null, mode
       continue;
     }
     const prev = previous?.scenes?.[f];
-    const prevOk = prev && ((prev.action === 'shot' && prev.status === 'passed') || prev.action === 'kept');
+    const prevOk = prev && ((prev.action === 'shoot' && prev.status === 'passed') || prev.action === 'kept');
     if (digest && prevOk && prev.digest === digest && keptOk(f, prev)) {
       set('kept', 'the last run took it, and nothing it reads changed since');
       continue;
@@ -524,6 +525,46 @@ export function decideScenes({ scripts, digests, manifest, previous = null, mode
     set('shoot', recorded ? 'something it reads changed since the published set' : 'no digest recorded with the published set');
   }
   return plan;
+}
+
+/**
+ * What a run reports for the scenes that failed (`[{ file, timedOut, log }]`,
+ * in the order they ran), or null when none did.
+ *
+ * Without `keepGoing` the first failure stops the run, and the rest were not
+ * run. With it (`pnpm shots --keep-going`, the nightly run's shots job) every
+ * other scene was still taken - one stale language pack must not leave a
+ * night's other scenes untaken - and every failed scene is named. Either way
+ * the run is a failure, and `accept` refuses it.
+ */
+export function runFailure(failed, { keepGoing = false } = {}) {
+  if (!failed?.length) return null;
+  const one = (f) =>
+    `e2e/shots/${f.file} ${f.timedOut ? 'timed out' : 'failed'}${f.reason === PACKS_BEHIND ? ': its language packs are behind this tree' : ''}`;
+  if (!keepGoing) return `${one(failed[0])} — see its output above (log: ${failed[0].log}). Stopping: the rest were not run.`;
+  return (
+    `${failed.length} scene(s) failed, and every other scene was still taken (--keep-going): ` +
+    failed.map((f) => `${one(f)} (log: ${f.log})`).join('; ')
+  );
+}
+
+/**
+ * The scenes of a failed run that failed ONLY because their language packs
+ * are behind this tree (PACKS_BEHIND, e2e/shots/langpack.mjs), when those are
+ * all of its failures - or null: no failure, another scene failed, timed out
+ * or was not run, or processes were left that could not be ended.
+ *
+ * The nightly chain's shots job reports such a run as a warning, not a red
+ * night (the maintainer, 2026-10-08, task #187): the strings this tree added are
+ * translated the night after, and the rest of the scenes were taken. The run
+ * itself stays a failure - `accept` refuses it - and a release run is red.
+ */
+export function onlyPacksBehind(review) {
+  if (!review?.failure || review.stuck) return null;
+  const notOk = Object.entries(review.scenes ?? {}).filter(([, s]) => s.action === 'shoot' && s.status !== 'passed');
+  if (!notOk.length) return null;
+  if (!notOk.every(([, s]) => s.status === 'failed' && s.reason === PACKS_BEHIND)) return null;
+  return notOk.map(([f]) => f).sort();
 }
 
 /**
@@ -551,7 +592,7 @@ export function nextManifest(manifest, review) {
     for (const s of Object.keys(next.scenes)) if (!review.scenes?.[s]) delete next.scenes[s];
   }
   for (const [s, v] of Object.entries(review.scenes ?? {})) {
-    if ((v.action === 'shot' && v.status === 'passed') || v.action === 'kept') next.scenes[s] = { digest: v.digest };
+    if ((v.action === 'shoot' && v.status === 'passed') || v.action === 'kept') next.scenes[s] = { digest: v.digest };
   }
   if (moved) {
     next.platform = review.platform;
@@ -578,14 +619,17 @@ export const PUBLISH_PLATFORM = 'linux';
  * from one beside pictures from the other is a README in two typefaces. The
  * 0.52.0 set, adopted when the pictures left the repository, was taken on the
  * host; the first night's --all run retakes every one in the chain, once.
+ * Since task #187 the chain takes every scene - the app scenes with the app
+ * builds and language packs it mounts, the ONLYOFFICE scene against its own
+ * Document Server - so no scene has to be taken on the host any more.
  */
 export const PUBLISH_ENVIRONMENT = 'chain';
 
 /**
- * A warning for a run taken outside PUBLISH_ENVIRONMENT, or ''. Not a
- * refusal: the scenes the chain cannot take yet (an app build, a Document
- * Server, the converter's engines) are taken on the build host itself, and a
- * person should know their pictures read in the host's typeface.
+ * A warning for a run taken outside PUBLISH_ENVIRONMENT, or ''. `accept`
+ * refuses such a run (acceptRefusal) unless `--outside-chain` says it is
+ * meant, and then prints this: the chain takes every scene (#187), and a
+ * picture taken anywhere else reads in that place's typeface.
  */
 export function environmentNote(manifest, review) {
   const env = review?.environment ?? 'local';
@@ -593,7 +637,7 @@ export function environmentNote(manifest, review) {
   return (
     `this run was taken in "${env}", and the published set in "${manifest.environment ?? PUBLISH_ENVIRONMENT}" - the build host's chain ` +
     "(its Playwright image and fontconfig, scripts/chain/job/shots.sh): this run's pictures may read in another typeface. " +
-    'Take them in the chain where it can: CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <this checkout>.'
+    'The chain takes every scene: CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <this checkout>.'
   );
 }
 
@@ -607,8 +651,16 @@ export function environmentNote(manifest, review) {
  *   · a manifest whose set came from elsewhere (an older one, recorded in
  *     its `platform`) is replaced only whole - `--all`, every scene taken,
  *     none left out - never a scene at a time.
+ *
+ * ⚠ The environment rule (the maintainer, 2026-10-08, task #187). On Linux too, the
+ * build host itself sets the pages in DejaVu Sans and the chain's Playwright
+ * container in Liberation Sans: a run taken outside the chain
+ * (PUBLISH_ENVIRONMENT; `SHOTS_ENVIRONMENT` unset is "local") is refused,
+ * since the chain takes every scene. `outsideChain` (`accept
+ * --outside-chain`) lets a person take such a run on purpose; accept then
+ * still prints environmentNote.
  */
-export function acceptRefusal(manifest, review, { publishPlatform = PUBLISH_PLATFORM } = {}) {
+export function acceptRefusal(manifest, review, { publishPlatform = PUBLISH_PLATFORM, outsideChain = false } = {}) {
   if (!review) return `there is no run to accept (${REVIEW_REL}) - run pnpm shots first`;
   if (review.failure) return `the run failed: ${review.failure}`;
   if (review.clock === 'real') {
@@ -629,6 +681,15 @@ export function acceptRefusal(manifest, review, { publishPlatform = PUBLISH_PLAT
       `the published set was taken on ${manifest.platform} and this run on ${review.platform}: ` +
       'mixing them puts two typefaces in one README. Take them where the published set was taken, ' +
       `or replace the set whole with pnpm shots --all on ${review.platform}.`
+    );
+  }
+  const env = review.environment ?? 'local';
+  if (env !== PUBLISH_ENVIRONMENT && !outsideChain) {
+    return (
+      `this run was taken in "${env}", and the published set is taken in "${PUBLISH_ENVIRONMENT}" - the build host's test chain ` +
+      '(its Playwright image and fontconfig): a picture from here reads in another typeface. Take them there - ' +
+      'CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <this checkout> - and accept that run; ' +
+      'or, to accept this one on purpose, add --outside-chain.'
     );
   }
   return '';

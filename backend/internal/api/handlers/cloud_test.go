@@ -12,9 +12,16 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -95,12 +102,10 @@ func TestCloud_SignupVerify_E2E(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Len(t, plansOut["plans"], 1)
 
-	// Validation: bad slug / unknown plan / bad email.
+	// Validation: bad slug / bad email. (A plan in the body is not
+	// validated: it is ignored - TestCloud_SignupStartsOnTheSignupPlan.)
 	resp, _ = cloudDo(t, client, "POST", srv.URL+"/api/cloud/signup",
 		map[string]string{"email": "a@b.test", "slug": "Bad Slug!"})
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	resp, _ = cloudDo(t, client, "POST", srv.URL+"/api/cloud/signup",
-		map[string]string{"email": "a@b.test", "slug": "acme", "plan": "nope"})
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	resp, _ = cloudDo(t, client, "POST", srv.URL+"/api/cloud/signup",
 		map[string]string{"email": "not-an-email", "slug": "acme"})
@@ -172,4 +177,74 @@ func TestCloud_BadPlansEnv_SurfacedInStatus(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, status, "plans_error")
 	assert.EqualValues(t, 1, status["plans"], "default catalog stays active")
+}
+
+// TestCloud_SignupStartsOnTheSignupPlan — a signup gets the catalogue's first
+// plan nobody pays for, whatever its body asks for. A paid plan is reached
+// only through a payment Stripe confirms.
+func TestCloud_SignupStartsOnTheSignupPlan(t *testing.T) {
+	srv, client, store := testutil.NewTestServerCfg(t, func(c *config.Config) {
+		c.Cloud.Enabled = true
+		c.Cloud.PlansJSON = `[{"id":"free","name":"Free","limits":{"storage_bytes":1024}},` +
+			`{"id":"pro","name":"Pro","stripe_price_id":"price_pro","limits":{"storage_bytes":1048576}}]`
+	})
+	resp, out := cloudDo(t, client, "POST", srv.URL+"/api/cloud/signup",
+		map[string]string{"email": "owner@paid.test", "slug": "paid-ask", "plan": "pro"})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, "%v", out)
+	assert.Equal(t, "free", out["plan"])
+	p, err := store.GetProviderBySlug(context.Background(), "paid-ask")
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	plan, _, _, err := store.GetProviderPlan(context.Background(), p.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "free", plan, "the signup was given the paid plan it asked for")
+}
+
+// TestCloud_TheWebhookMovesAPlanOnlyOnAVerifiedEvent — the webhook is the one
+// door that changes a plan, and only for an event signed with the endpoint's
+// secret.
+func TestCloud_TheWebhookMovesAPlanOnlyOnAVerifiedEvent(t *testing.T) {
+	const whsec = "whsec_cloud_test"
+	srv, client, store := testutil.NewTestServerCfg(t, func(c *config.Config) {
+		c.Cloud.Enabled = true
+		c.Cloud.StripeSecret = "sk_test_cloud"
+		c.Cloud.StripeWebhookSecret = whsec
+		c.Cloud.PlansJSON = `[{"id":"free","name":"Free"},{"id":"pro","name":"Pro","stripe_price_id":"price_pro","limits":{"max_users":25}}]`
+	})
+	resp, out := cloudDo(t, client, "POST", srv.URL+"/api/cloud/signup",
+		map[string]string{"email": "owner@hook.test", "slug": "hook"})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, "%v", out)
+	id := int64(out["tenant_id"].(float64))
+
+	event := []byte(fmt.Sprintf(`{"id":"evt_1","type":"checkout.session.completed","data":{"object":`+
+		`{"client_reference_id":"%d","subscription":"sub_9","payment_status":"paid","metadata":{"plan":"pro"}}}}`, id))
+	post := func(sig string) int {
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/cloud/billing/webhook", bytes.NewReader(event))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		if sig != "" {
+			req.Header.Set("Stripe-Signature", sig)
+		}
+		r, err := client.Do(req)
+		require.NoError(t, err)
+		_ = r.Body.Close()
+		return r.StatusCode
+	}
+	stamp := strconv.FormatInt(time.Now().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(whsec))
+	mac.Write([]byte(stamp + "."))
+	mac.Write(event)
+	good := "t=" + stamp + ",v1=" + hex.EncodeToString(mac.Sum(nil))
+
+	assert.Equal(t, http.StatusBadRequest, post(""), "an unsigned event")
+	assert.Equal(t, http.StatusBadRequest, post("t="+stamp+",v1="+strings.Repeat("0", 64)), "a forged signature")
+	plan, _, _, err := store.GetProviderPlan(context.Background(), id)
+	require.NoError(t, err)
+	require.Equal(t, "free", plan, "an unverified event moved the plan")
+
+	assert.Equal(t, http.StatusOK, post(good))
+	plan, _, ref, err := store.GetProviderPlan(context.Background(), id)
+	require.NoError(t, err)
+	assert.Equal(t, "pro", plan)
+	assert.Equal(t, "sub_9", ref)
 }

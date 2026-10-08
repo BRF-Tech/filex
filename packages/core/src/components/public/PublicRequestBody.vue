@@ -19,6 +19,7 @@ import { computed, ref } from 'vue';
 import type { LocaleCode } from '../../types/ExplorerConfig';
 import type { PublicRequestInfo } from '../../types/Public';
 import { useLocale } from '../../composables/useLocale';
+import { usePublicText } from '../../composables/usePublicText';
 
 const props = defineProps<{
   info: PublicRequestInfo | null;
@@ -53,7 +54,22 @@ function sendFiles(files: File[]): void {
   emit('files', files, askName.value ? uploaderName.value.trim() : '');
 }
 
-const { t, formatSize } = useLocale(() => props.locale);
+const { formatSize } = useLocale(() => props.locale);
+/* Every sentence on this body is the SERVER's (server.public.*): the same
+   words its no-JavaScript drop page and its refusals say, in every language a
+   pack gives it (composables/usePublicText). */
+const { pt } = usePublicText(() => String(props.locale));
+
+/**
+ * The longest name the server keeps (`limits.name_max`). ⚠ The server's
+ * number, not this box's: the box used to stop at 60 while the server cut
+ * the name to 40 without a word; now the box stops where the server does and
+ * the server refuses anything longer.
+ */
+const nameMax = computed(() => {
+  const n = props.info?.limits?.name_max;
+  return typeof n === 'number' && n > 0 ? n : undefined;
+});
 
 const input = ref<HTMLInputElement | null>(null);
 const over = ref(false);
@@ -71,11 +87,11 @@ const limits = computed(() => {
   // ⚠ The server states MEGABYTES; the screen says it in the same units the
   // rest of the product uses, so "5 MB" here and "5 MB" in the explorer are
   // the same number rather than two roundings of it.
-  if (mb && mb > 0) out.push(t('public.max_size', { size: formatSize(mb * 1_000_000) }));
+  if (mb && mb > 0) out.push(pt('drop_limit_size', { mb }));
   const ext = limitsOf.value.allowed_ext ?? [];
-  if (ext.length) out.push(t('public.accepts', { list: ext.map((e) => e.toUpperCase()).join(', ') }));
+  if (ext.length) out.push(pt('drop_limit_ext', { types: ext.map((e) => e.toUpperCase()).join(', ') }));
   const left = props.info?.uploads_left;
-  if (left !== null && left !== undefined && Number.isFinite(left)) out.push(t('public.files_left', { n: left }));
+  if (left !== null && left !== undefined && Number.isFinite(left)) out.push(pt('files_left', { count: left }));
   return out;
 });
 
@@ -118,18 +134,18 @@ function onDrop(e: DragEvent): void {
          statement of what happens to what they put in it — and none of the
          reassurance that they are not being shown somebody's folder. -->
     <p class="fe-surface__text fe-surface__text--muted" data-testid="public-request-lead">
-      {{ t('public.drop_sub') }}
+      {{ pt('drop_sub') }}
     </p>
 
     <label v-if="askName && !full" class="fe-pdrop__who" data-testid="public-request-name">
-      <span class="fe-pdrop__wholabel">{{ t('public.your_name') }}</span>
+      <span class="fe-pdrop__wholabel">{{ pt('drop_name_label') }}</span>
       <input
         v-model="uploaderName"
         class="fe-pdrop__whoinput"
         type="text"
-        maxlength="60"
+        :maxlength="nameMax"
         autocomplete="name"
-        :placeholder="t('public.your_name_ph')"
+        :placeholder="pt('drop_name_ph')"
         :disabled="disabled"
         data-testid="public-request-name-input"
       />
@@ -162,8 +178,8 @@ function onDrop(e: DragEvent): void {
         <path d="M12 12v9" />
         <path d="m16 16-4-4-4 4" />
       </svg>
-      <p class="fe-pdrop__lead">{{ full ? t('public.request_full') : t('public.drop_here') }}</p>
-      <p v-if="!full" class="fe-surface__text fe-surface__text--muted">{{ t('public.or_choose') }}</p>
+      <p class="fe-pdrop__lead">{{ full ? pt('request_full') : pt('drop_zone_big') }}</p>
+      <p v-if="!full" class="fe-surface__text fe-surface__text--muted">{{ pt('drop_zone_hint') }}</p>
       <input
         ref="input"
         class="fe-pdrop__input"
@@ -200,13 +216,13 @@ function onDrop(e: DragEvent): void {
              bar runs without a value: it is not stuck at 100%. -->
         <template v-else-if="u.state === 'saving'">
           <progress class="fe-pdrop__bar" :max="100"></progress>
-          <span class="fe-pdrop__saving" role="status">{{ t('public.upload_saving') }}</span>
+          <span class="fe-pdrop__saving" role="status">{{ pt('upload_saving') }}</span>
         </template>
-        <span v-else-if="u.state === 'done'" class="fe-pdrop__ok">{{ t('public.upload_done') }}</span>
+        <span v-else-if="u.state === 'done'" class="fe-pdrop__ok">{{ pt('upload_done') }}</span>
         <span v-else-if="u.state === 'unconfirmed'" class="fe-pdrop__unconfirmed" role="status">{{
-          u.error || t('public.upload_unanswered')
+          u.error || pt('upload_unanswered')
         }}</span>
-        <span v-else class="fe-surface__error">{{ u.error || t('public.upload_failed') }}</span>
+        <span v-else class="fe-surface__error">{{ u.error || pt('drop_err_generic') }}</span>
       </li>
     </ul>
   </div>

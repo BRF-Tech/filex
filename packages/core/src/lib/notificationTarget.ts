@@ -254,6 +254,17 @@ export function isNotificationClickable(target: NotificationTarget | null | unde
 }
 
 /**
+ * Does a click on this ROW go somewhere? ⚠ The SERVER says so: every row of
+ * `GET /api/notifications` carries `opens` (backend notify.Opens - the one
+ * rule a push's `open` follows too), so the bell, the page's pop-up and a
+ * phone agree. A row from a server before 0.54 has none and is judged by its
+ * target, as it always was.
+ */
+export function rowOpens(row: { target?: NotificationTarget | null; opens?: boolean | null }): boolean {
+  return typeof row.opens === 'boolean' ? row.opens : isNotificationClickable(row.target);
+}
+
+/**
  * The explorer's own path form for a destination — what goes in the address
  * bar hash, e.g. `qldemo/Documents` (and just `qldemo` for a storage root).
  *

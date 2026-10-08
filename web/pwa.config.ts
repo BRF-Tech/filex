@@ -93,6 +93,20 @@ export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
   // They still load fine over the network on demand — they are simply
   // not part of the offline shell.
   globIgnores: ['**/editor.main-*.js', '**/*.worker-*.js', '**/model-viewer-*.js'],
+  // ⚠ The app's own main chunk (the explorer, packages/core) IS the offline
+  // shell and must be precached, and it has to fit workbox's 2 MiB default,
+  // stated here so it is not raised in passing: vite-plugin-pwa fails the
+  // build when it does not fit. The vault (encryption level 3) took it to
+  // 2.13 MB once and the limit went to 3 MiB (task #94); its code is now
+  // loaded when a vault is opened (composables/useE2eVault.ts →
+  // e2eVaultEngine.ts, web/tests/quality/vaultLazy.test.ts) and the limit is
+  // back. A chunk that grows past it is split, not let in: 0.54's train took
+  // it to 2.12 MB again, and the dialogs a person opens (the viewer, sharing,
+  // settings, search, the encryption dialogs) now load with their first use
+  // (packages/core/lazySurfaces.ts, web/tests/quality/lazySurfaces.test.ts),
+  // 1.89 MB after. `pnpm -C web size` prints the room left after a build
+  // (web/scripts/size.mjs reads the number below).
+  maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
   // ⚠ RELATIVE, resolved against the worker's own URL: `/admin/index.html`
   // at the root, `/filex/admin/index.html` under a base path. The
   // absolute '/admin/index.html' is not in the precache under a base, and

@@ -45,7 +45,6 @@ import {
   wordsIn,
 } from '@brftech/filex-core/src/lib/errorWords';
 import { useLocale } from '@brftech/filex-core/src/composables/useLocale';
-import { renderNotification } from '@brftech/filex-core/src/lib/notificationText';
 
 const LRI = String.fromCharCode(0x2066);
 const PDI = String.fromCharCode(0x2069);
@@ -133,9 +132,9 @@ describe('lib/errorWords — every failure a person reads', () => {
     // failure was drawn raw in an Arabic panel while the same words drawn
     // from a component were right.
     const ar = wordsIn('ar');
-    const said = ar('opc.err.engine_missing_admin', { engine: 'libreoffice' });
+    const said = ar('plugin.failed', { label: 'libreoffice' });
     expect(said).toContain('libreoffice');
-    expect(wordsIn('en')('opc.err.engine_missing_admin', { engine: 'libreoffice' })).not.toContain(LRI);
+    expect(wordsIn('en')('plugin.failed', { label: 'libreoffice' })).not.toContain(LRI);
     expect(typeof ar.foreign, 'the translator carries its direction').toBe('function');
     expect(ar.foreign!('root:<storage>://<folder>')).toBe(`${LRI}root:<storage>://<folder>${PDI}`);
     expect(wordsIn('en').foreign!('root:x://y')).toBe('root:x://y');
@@ -147,6 +146,31 @@ describe('lib/errorWords — every failure a person reads', () => {
     expect(isolatedOnce(said, 'root:<storage>://<folder>'), said).toBe(true);
     // The same refusal for an English reader is untouched.
     expect(serverWords(requestFailure(400, JSON.stringify({ error: 'bad_key', message: 'use root:<a>://<b>' }), 'en'), 'en')).not.toContain(LRI);
+  });
+
+  it("the SERVER's sentence for a failed queue row (`error_text`) is isolated, with its raw second line", () => {
+    // ⚠ 0.54 (#209): a failed row is said by the server (backend
+    // ops/errcode.go); the client no longer has opc.err.* of its own, so the
+    // sentence that reaches an Arabic screen is the server's - and it carries
+    // a program's name, a path, a token syntax like any other.
+    const { t } = useLocale(() => 'ar');
+    // The raw second line carries a machine run (the engine's path): plain
+    // English words alone have nothing to isolate.
+    const said = jobFailure(
+      {
+        error: 'engine libreoffice missing at /usr/bin/soffice',
+        error_code: 'engine_missing',
+        error_engine: 'libreoffice',
+        error_text: AR_SCOPE_UNKNOWN,
+      },
+      t('toast.failed'),
+      t,
+      { callerAdmin: true },
+    );
+    expect(isolatedOnce(said.text, 'root:<storage>://<folder>'), said.text).toBe(true);
+    expect(said.detail).toContain(LRI);
+    const { t: en } = useLocale(() => 'en');
+    expect(jobFailure({ error: 'x', error_code: 'name_taken', error_text: 'use root:<a>://<b>' }, en('toast.failed'), en).text).not.toContain(LRI);
   });
 
   it("a caught failure's sentence AND the administrator's raw second line are isolated", () => {
@@ -176,18 +200,7 @@ describe('lib/errorWords — every failure a person reads', () => {
   });
 });
 
-describe('the notification bell — composed from a row, never from the catalogue', () => {
-  const row = { event: 'file.uploaded', meta: { node: { name: 'تقرير.pdf', path: '/المستندات/tag:2026/تقرير.pdf' } } };
-
-  it("the reader's direction reaches it through the renderer's hook", () => {
-    const said = renderNotification(row, 'en', { lang: 'ar', foreign: (s) => foreignText('ar', s) });
-    expect(said.body).toContain(LRI);
-    expect(isolatedOnce(said.body, 'tag:2026/تقرير.pdf'), said.body).toBe(true);
-  });
-
-  it('a caller that passes no hook gets exactly what it got before — the desktop shell', () => {
-    const said = renderNotification(row, 'en');
-    expect(said.body).toBe('/المستندات/tag:2026/تقرير.pdf');
-    expect(said.title).toBe('New file: تقرير.pdf');
-  });
-});
+// The notification bell is not here any more: since 2026-10-08 the SERVER
+// composes every notification (backend notify say.go) and isolates each value
+// it places in a right-to-left sentence itself - the Go test
+// TestSay_ALanguagePacksWordsFormsAndDirection holds it.

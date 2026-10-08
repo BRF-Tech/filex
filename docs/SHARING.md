@@ -107,7 +107,9 @@ creator and an administrator can read it back - see
 | Option | Meaning |
 |---|---|
 | `password` | Generate a random 8-digit PIN, returned in the response and readable again later ([below](#your-own-links-and-their-pins)). |
-| `expires_at` | Absolute expiry (RFC3339). Capped by the server's **maximum link life** (below). |
+| `pin` | Set the PIN yourself. **4 to 12 characters** - the one PIN rule every door that makes a link is held to (the dialog, the agent API, MCP, a permission rule, an app's page). Anything else is refused with `400 {"error":"pin_length","pin_min":4,"pin_max":12,"message":…}`; the visitor's PIN box stops at the same `pin_max`, which the public page is told (`GET /api/public/s/{token}` → `pin_max`). |
+| `expires_in` | The link's life in **seconds**, counted on the server's clock. What the share dialog sends: a moment worked out on the visitor's own clock drifted with it. |
+| `expires_at` | Absolute expiry (RFC3339); wins over `expires_in`. Either is capped by the **maximum link life** (below). |
 | `max_downloads` | Auto-expire after N downloads. |
 
 **Every new link has a maximum life.** The admin sets it under **Protection →
@@ -118,6 +120,13 @@ gets `now + max`; one asking for more is shortened to it. The response says so -
 request the server changed - and the dialogs only offer choices the server will
 keep (a 7-day server shows *1 day / 7 days*, not *30 days* or *Never*), with the
 real expiry printed under the fresh link.
+
+The ceiling the dialog offers is **the person's own**: `GET /api/capabilities`
+answers `share_link_max_days`, the install's ceiling or the **Maximum
+share-link lifetime** of the permission rules binding the caller ([PERMISSIONS.md → Custom
+roles](PERMISSIONS.md#custom-roles)), whichever is shorter. (`share_max_ttl_days`
+is still there and is the install's setting alone.) Someone held to 3 days is
+offered 3 days, not offered 7 and then told the link was cut.
 
 Apps obey the same ceiling, and are told it: every call an app gets carries
 `share_max_ttl_days`, read from the same setting the clamp reads, so an app's
@@ -145,17 +154,28 @@ Each real byte-serve counts once: the file itself, a folder's "download all"
 ZIP, and a single file fetched from a shared folder's browse page. The gallery
 thumbnails on that page, the ZIP progress poll and the "preparing…" page do not.
 
-**Command line.** The dialog also shows a one-line `curl` for the finished link -
-a share is often made *for a server*, and that reader has no browser:
+**Command line.** A share is often made *for a server*, and that reader has no
+browser - so the answer that creates a download link carries the line that
+fetches it, **written by the server**: `download_command` with `curl` (a POSIX
+shell) and `powershell` (Windows PowerShell 5.1 and 7). The dialog shows both;
+`POST /api/ai/share` and the MCP `file_share` tool return the same field, so an
+agent passes it on instead of assembling its own.
 
 ```bash
 curl -fSL -o 'q3.pdf' 'https://files.example.com/s/<token>?pin=12345678'
 ```
 
-`-L` matters: an S3 storage with presigned URLs turned on answers with a
-redirect to the bucket, and without it curl saves the redirect instead of the file. For a folder link
-the command targets `?zip=wait`, which blocks until the archive is built and
-then streams it.
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri 'https://files.example.com/s/<token>?pin=12345678' -OutFile 'q3.pdf'
+```
+
+The rules are the server's: `-L` matters (an S3 storage with presigned URLs
+turned on answers with a redirect to the bucket, and without it curl saves the
+redirect instead of the file); a folder link targets `?zip=wait`, which blocks
+until the archive is built and then streams it, saved as `<folder>.zip`; the
+PIN rides as `?pin=` and is in the command only on the creator's own answer,
+the one time it is said. A file request has nothing to fetch and gets no
+command.
 
 **Folder ZIPs are cached, and the cache is disposable.** A shared folder's
 archive is built once and kept at `<cache_dir>/sharezips/<node>-<signature>.zip`,
@@ -227,6 +247,14 @@ directly under **Shared with me** (`/drive/my-shares`), and each row's
 **Actions** menu offers **Copy link**, **Copy PIN** and **Revoke**.
 Administrators keep **Shares** for everybody's links, with the same **Copy
 PIN** entry. The listing is `GET /api/shares`.
+
+**Where a link stands is the server's answer.** Every listed link carries
+`share.state`: `active`, `expired` (its time is up), `exhausted` (its download -
+or an app page's visit, or a file request's upload - cap is used up) or
+`revoked`. **My shares** shows that word and offers **Revoke** only on an
+active link. It used to compare the expiry with the browser's clock, so a link
+whose downloads were used up still read as active while every visitor was
+turned away.
 
 **A PIN can be read back.** A PIN is stored twice: as a bcrypt hash, which is
 still the only thing the PIN gate checks, and sealed with AES-256-GCM under
@@ -325,7 +353,21 @@ On the page a JavaScript browser gets:
   submission folder (it used to be one request, and one folder, per file);
 - a refusal the server makes is shown in the server's own words (below);
 - once every byte is sent, the rows say **"Saving…"** while the server writes
-  the files to the storage, one after another. The bar no longer sits at 100%.
+  the files to the storage, one after another. The bar no longer sits at 100%;
+- the **name** box stops at the server's limit, **40 characters**
+  (`GET /api/public/d/{token}` → `limits.name_max`, the no-JavaScript form
+  says the same). A longer name sent some other way is refused
+  (`400 name_too_long`, with `name_max` and the sentence) - it used to be cut
+  to 40 without a word, so the owner read a different name from the one that
+  was typed.
+
+**The page's words are the server's.** Every sentence the JavaScript share and
+file-request pages say - the limits, "Sent", "Saving…", a refused file, the
+footer - comes from the server catalogue's `server.public.*`, the table its
+no-JavaScript pages render, fetched for the visitor's language from
+`GET /api/public/strings?lang=` ([BACKEND.md](BACKEND.md)). A file refused before
+it is sent reads exactly as the server's refusal of it would ("a.pdf is too big
+(max 5 MB)."), and a language pack translates each sentence once.
 
 **Limits & safety** (enforced server-side): per-submission file count and
 per-file size, an optional extension allowlist, an optional PIN, an expiry, a
@@ -364,12 +406,60 @@ somebody whose browser is set to neither.
 ## Emailing a link
 
 After creating a link you can email it to **one or many** recipients:
-`POST /api/files/permissions/share-mail` (editor-gated) with `email` and/or
-`emails: [...]` (comma/space/newline-separated addresses are also split). For a
-drop link (`mode: "drop"`), the invite spells out the folder + the configured
-limits. Returns `{emailed, sent[], failed[]}`. If SMTP isn't configured the UI
-keeps showing the link so you can copy it manually. (SMTP is configured in the
-admin settings.)
+
+```
+POST /api/files/permissions/share-mail
+{"share": "<the link's token>", "emails": ["ada@example.com"]}
+```
+
+- **The request names the link, not what is in the mail.** `share` is the
+  link's token (`token` in the answer of `POST /api/files/share`); a numeric
+  `share_id` (the `uuid` that `GET /api/files/share` lists) works too.
+  `email` and/or `emails: [...]` are the addresses (comma, semicolon, space
+  and newline separate them).
+- **Each recipient reads the mail in their own language** (0.54, #191): an
+  address that is an account here reads its owner's language; any other
+  address reads the language picked for the recipients - the dialog's
+  optional *Recipient's language*, sent as `locale` only when somebody picked
+  one - else the server's (`FILEX_DEFAULT_LOCALE`, else English). The
+  sender's own screen language is never the recipient's. An account opened by
+  an invitation (`POST /api/files/permissions/invite` with `create_user`)
+  starts in that same picked language, else the server's.
+- **The server writes the mail from the link itself**: its address on the
+  tenant's own host, the days it has left, the item's name, whether it is a
+  file or a folder, a file's size, and - for a file request (a `/d/` link) -
+  the upload invitation with the link's own limits (files, size per file,
+  types). Fields an older client still sends (`url`, `pin`, `expires_days`,
+  `is_dir`, `size`, `mode`, `path`) are **not read**; a request that names
+  no link is refused with `400`.
+- **Only a link you manage**: the one you made, or any link in your tenant if
+  you are an administrator - the same rule as revoking it - and only while you
+  still hold what making it took (editor on the item and `share.links`, or
+  `share.upload_links` for a file request). Somebody else's link answers
+  `403`; one outside your tenant or your token's folder, `404`; an expired,
+  used-up or revoked link, `410`.
+- **No PIN in the mail.** A link with a PIN says so, and that the sender
+  gives the PIN separately: the PIN and the link do not travel in the same
+  message. The answer carries `pin_withheld: true`, and the dialog keeps
+  showing the PIN to copy. (An invitation to an address with no account,
+  `POST /api/files/permissions/invite`, is the exception: the server makes
+  that link and its PIN a moment before, nobody else has the PIN, so that mail
+  carries it.)
+- **Limits:** at most **20** addresses per send (`400 too_many_recipients`,
+  nothing is sent) and **100** addresses an hour per account
+  (`429 rate_limited`).
+- **Answer:** `{emailed, sent[], failed[], pin_withheld, message}` -
+  `message` is the outcome in the sender's language, and the refusals carry
+  one too. When mail is not set up or not verified the answer is
+  `503 {"error":"not_configured"}` and the dialog keeps showing the link so you
+  can pass it on yourself. (SMTP is configured in the admin settings.)
+
+The dialog's **Share** button (the operating system's share sheet - WhatsApp,
+Mail, …) hands over the very same words:
+`GET /api/files/permissions/share-message?share=<token>&lang=<tag>` answers
+`{subject, body, pin_withheld}` without sending anything, under the same rule.
+`lang` is the language picked for the recipient; without it the words are in
+the server's language - whoever the sheet reaches is nobody the server knows.
 
 ---
 

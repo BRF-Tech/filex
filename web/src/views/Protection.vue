@@ -8,7 +8,7 @@
 // versus SETTINGS (what was last saved). Three of the settings — the switch,
 // the transport and the clamd address — are in force only after a restart, so
 // the page says so when you change them and keeps a band up until it happens.
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import axios from 'axios';
 import {
@@ -23,7 +23,7 @@ import {
   FilePen,
 } from 'lucide-vue-next';
 
-import { ProtectionApi, type ProtectionAntivirus, type ProtectionPatch } from '@/api/protection';
+import { ProtectionApi, type ProtectionAntivirus, type ProtectionPatch, type ProtectionSettings } from '@/api/protection';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 
@@ -48,6 +48,14 @@ const loadError = ref<string | null>(null);
 const trashDays = ref<number>(30);
 const versionsKeepN = ref<number>(0);
 const shareMaxTtl = ref<number>(7);
+// The three numbers' bounds, as the server sends them with the values (it
+// refuses anything outside them, in words, and the page shows its sentence).
+const trashMin = ref<number | undefined>(undefined);
+const trashMax = ref<number | undefined>(undefined);
+const keepMin = ref<number | undefined>(undefined);
+const keepMax = ref<number | undefined>(undefined);
+const shareMin = ref<number | undefined>(undefined);
+const shareMax = ref<number | undefined>(undefined);
 const sharesOverMax = ref<number>(0);
 // Drafts (issue #71): how many drafts one person may keep. Null = a server from
 // before drafts, and the card is not drawn. Bounds come with the value.
@@ -111,6 +119,12 @@ async function load() {
     const s = await ProtectionApi.get();
     trashDays.value = s.trash_retention_days;
     versionsKeepN.value = s.versions_keep_n;
+    trashMin.value = s.trash_retention_days_min;
+    trashMax.value = s.trash_retention_days_max;
+    keepMin.value = s.versions_keep_n_min;
+    keepMax.value = s.versions_keep_n_max;
+    shareMin.value = s.share_max_ttl_days_min;
+    shareMax.value = s.share_max_ttl_days_max;
     shareMaxTtl.value = s.share_max_ttl_days ?? 0;
     sharesOverMax.value = s.shares_over_max_ttl ?? 0;
     draftsLimit.value = typeof s.drafts_limit === 'number' ? s.drafts_limit : null;
@@ -143,116 +157,73 @@ async function load() {
 
 onMounted(load);
 
-function validInt(v: unknown, min: number): boolean {
-  return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v >= min;
-}
+/* ⚠⚠ No range rule here (0.54 audit, B8). Every number goes to the server as
+ * typed and the server refuses one outside its bounds with a sentence in the
+ * reader's language (`message`: "Enter a whole number from 1 to 3650."), which
+ * lands under the field through extractError. The page checked the lower
+ * bounds itself and never the upper ones, so a value over the top came back
+ * as the API's English. The bounds still reach the inputs (min/max) from the
+ * GET, as hints. */
 
-async function saveTrash() {
-  errTrash.value = null;
-  // Backend floor: trash.retention_days <= 0 silently falls back to the
-  // default (30), so reject anything below 1 up front.
-  if (!validInt(trashDays.value, 1)) {
-    errTrash.value = t('protection.trash.errMin');
-    return;
-  }
-  savingTrash.value = true;
+/**
+ * One number saved: the field's refusal cleared, the patch sent, the answer
+ * read back into the page, "saved" said - or the server's sentence put under
+ * the field. Every number on this page is saved this way; none checks its
+ * own range.
+ */
+async function saveNumber(
+  patch: ProtectionPatch,
+  busy: Ref<boolean>,
+  err: Ref<string | null>,
+  readBack: (s: ProtectionSettings) => void,
+) {
+  err.value = null;
+  busy.value = true;
   try {
-    const s = await ProtectionApi.update({ trash_retention_days: trashDays.value });
-    trashDays.value = s.trash_retention_days;
+    readBack(await ProtectionApi.update(patch));
     toast.success(t('protection.savedOk'));
   } catch (e: unknown) {
-    errTrash.value = extractError(e, t('errors.generic'));
+    err.value = extractError(e, t('errors.generic'));
   } finally {
-    savingTrash.value = false;
+    busy.value = false;
   }
 }
 
-async function saveShare() {
-  errShare.value = null;
-  if (!validInt(shareMaxTtl.value, 0)) {
-    errShare.value = t('protection.share.errMin');
-    return;
-  }
-  savingShare.value = true;
-  try {
-    const s = await ProtectionApi.update({ share_max_ttl_days: shareMaxTtl.value });
+function saveTrash() {
+  return saveNumber({ trash_retention_days: trashDays.value }, savingTrash, errTrash, (s) => {
+    trashDays.value = s.trash_retention_days;
+  });
+}
+
+function saveShare() {
+  return saveNumber({ share_max_ttl_days: shareMaxTtl.value }, savingShare, errShare, (s) => {
     shareMaxTtl.value = s.share_max_ttl_days;
     sharesOverMax.value = s.shares_over_max_ttl ?? 0;
-    toast.success(t('protection.savedOk'));
-  } catch (e: unknown) {
-    errShare.value = extractError(e, t('errors.generic'));
-  } finally {
-    savingShare.value = false;
-  }
+  });
 }
 
 // Drafts: refused, not clamped, when out of range — like the numbers below.
-async function saveDrafts() {
-  errDrafts.value = null;
+function saveDrafts() {
   const v = draftsLimit.value;
-  if (!validInt(v, draftsMin.value) || (v as number) > draftsMax.value) {
-    errDrafts.value = t('protection.drafts.errRange', { min: draftsMin.value, max: draftsMax.value });
-    return;
-  }
-  savingDrafts.value = true;
-  try {
-    const s = await ProtectionApi.update({ drafts_limit: v as number });
+  return saveNumber({ drafts_limit: v as number }, savingDrafts, errDrafts, (s) => {
     draftsLimit.value = s.drafts_limit ?? v;
-    toast.success(t('protection.savedOk'));
-  } catch (e: unknown) {
-    errDrafts.value = extractError(e, t('errors.generic'));
-  } finally {
-    savingDrafts.value = false;
-  }
+  });
 }
 
 // The window is refused, not clamped, when it is out of range — the operator
 // finds out while looking at the field rather than from a log line later.
-async function saveAvWindow() {
-  errAvWindow.value = null;
+function saveAvWindow() {
   const v = avSaveWindow.value;
-  if (
-    !validInt(v, avWindowMin.value) ||
-    v > avWindowMax.value
-  ) {
-    errAvWindow.value = t('protection.av.window.errRange', {
-      min: avWindowMin.value,
-      max: avWindowMax.value,
-    });
-    return;
-  }
-  savingAvWindow.value = true;
-  try {
-    const s = await ProtectionApi.update({ av_save_scan_window_minutes: v });
+  return saveNumber({ av_save_scan_window_minutes: v }, savingAvWindow, errAvWindow, (s) => {
     avSaveWindow.value = s.antivirus?.save_scan_window_minutes ?? v;
-    toast.success(t('protection.savedOk'));
-  } catch (e: unknown) {
-    errAvWindow.value = extractError(e, t('errors.generic'));
-  } finally {
-    savingAvWindow.value = false;
-  }
+  });
 }
 
-async function saveAvMaxScan() {
-  errAvMaxScan.value = null;
+function saveAvMaxScan() {
   const v = avMaxScanMb.value;
-  if (!validInt(v, avMaxScanMbMin.value) || v > avMaxScanMbMax.value) {
-    errAvMaxScan.value = t('protection.av.maxScan.errRange', {
-      min: avMaxScanMbMin.value,
-      max: avMaxScanMbMax.value,
-    });
-    return;
-  }
-  savingAvMaxScan.value = true;
-  try {
-    const s = await ProtectionApi.update({ av_max_scan_mb: v });
+  return saveNumber({ av_max_scan_mb: v }, savingAvMaxScan, errAvMaxScan, (s) => {
     avMaxScanMb.value = s.antivirus?.max_scan_mb ?? v;
-    toast.success(t('protection.savedOk'));
-  } catch (e: unknown) {
-    errAvMaxScan.value = extractError(e, t('errors.generic'));
-  } finally {
-    savingAvMaxScan.value = false;
-  }
+  });
 }
 
 // ⚠⚠ The switch is stored at once and takes effect at the next restart, in
@@ -319,22 +290,10 @@ function applyAntivirus(s: { antivirus?: ProtectionAntivirus }) {
   avRestartPending.value = s.antivirus.restart_pending ?? false;
 }
 
-async function saveVersions() {
-  errVersions.value = null;
-  if (!validInt(versionsKeepN.value, 0)) {
-    errVersions.value = t('protection.versions.errMin');
-    return;
-  }
-  savingVersions.value = true;
-  try {
-    const s = await ProtectionApi.update({ versions_keep_n: versionsKeepN.value });
+function saveVersions() {
+  return saveNumber({ versions_keep_n: versionsKeepN.value }, savingVersions, errVersions, (s) => {
     versionsKeepN.value = s.versions_keep_n;
-    toast.success(t('protection.savedOk'));
-  } catch (e: unknown) {
-    errVersions.value = extractError(e, t('errors.generic'));
-  } finally {
-    savingVersions.value = false;
-  }
+  });
 }
 </script>
 
@@ -378,7 +337,8 @@ async function saveVersions() {
         <Input
           :model-value="trashDays"
           type="number"
-          :min="1"
+          :min="trashMin ?? 1"
+          :max="trashMax"
           :step="1"
           :label="t('protection.trash.label')"
           :hint="t('protection.trash.hint')"
@@ -403,7 +363,8 @@ async function saveVersions() {
         <Input
           :model-value="versionsKeepN"
           type="number"
-          :min="0"
+          :min="keepMin ?? 0"
+          :max="keepMax"
           :step="1"
           :label="t('protection.versions.label')"
           :hint="t('protection.versions.hint')"
@@ -429,7 +390,8 @@ async function saveVersions() {
         <Input
           :model-value="shareMaxTtl"
           type="number"
-          :min="0"
+          :min="shareMin ?? 0"
+          :max="shareMax"
           :step="1"
           :label="t('protection.share.label')"
           :hint="t('protection.share.hint')"

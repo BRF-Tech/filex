@@ -208,7 +208,13 @@ func TestE2EPolicy_AnUndecidedRuleIsAServerFailureAtAnHTTPRoute(t *testing.T) {
 	f := newUndecidedFix(t, errors.New("database is locked"), nil)
 	status, body := fxPost(t, f.url+"/api/files/save-text", f.tok, map[string]any{"path": "main://Gizli/" + e2eKeyFile, "content": kfOne})
 	assert.Equal(t, http.StatusInternalServerError, status, body)
-	assert.Contains(t, body, "could not check the encryption policy")
+	// The one refusal shape (internal/apierr): the code, and the server's
+	// sentence in `message` - never the rule's English error in `error`.
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &got), body)
+	assert.Equal(t, "e2e_policy_undecided", got["error"], body)
+	assert.NotEmpty(t, got["message"], body)
+	assert.NotContains(t, body, "database is locked", "the store's error reached the caller")
 	assert.NoFileExists(t, filepath.Join(f.root, "Gizli", e2eKeyFile))
 	lines := undecidedLines(logs())
 	require.Len(t, lines, 1, "%s", logs())

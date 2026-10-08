@@ -268,6 +268,13 @@ type Config struct {
 	// refused (desktop sync, WebDAV, OnlyOffice saves, the browser) and the
 	// only other lever is an env var plus a restart.
 	VersionsFailOpen bool `yaml:"versions_fail_open"`
+	// E2EVault (FILEX_E2E_VAULT / `e2e_vault`, default OFF) turns on the
+	// third encryption level, the vault (docs/E2E-VAULT-FORMAT.md): the API
+	// under /api/files/e2e/vault, `e2e_vault: true` in the capabilities, and
+	// writegate's rule that only that API writes inside a vault folder. Off,
+	// the routes answer 404 VAULT_DISABLED and no client offers the level.
+	// It stays off until the level works end to end in every client.
+	E2EVault bool `yaml:"e2e_vault"`
 }
 
 // ArchiveConfig contains only operator-owned process settings. User-facing
@@ -375,6 +382,10 @@ type CloudConfig struct {
 	// FILEX_STRIPE_SECRET). Empty → billing endpoints answer 503
 	// "not configured".
 	StripeSecret string `yaml:"stripe_secret"`
+	// StripeWebhookSecret is the webhook endpoint's signing secret (whsec_…,
+	// STRIPE_WEBHOOK_SECRET / FILEX_STRIPE_WEBHOOK_SECRET). A plan changes only
+	// on an event signed with it; empty → the webhook answers 503.
+	StripeWebhookSecret string `yaml:"stripe_webhook_secret"`
 	// BaseHost, when set (FILEX_CLOUD_BASE_HOST, e.g. "filex.cloud"), derives
 	// each signed-up tenant's host as <slug>.<BaseHost>. Empty → the tenant is
 	// provisioned without a host (operator assigns one later).
@@ -567,6 +578,29 @@ type NotifyConfig struct {
 	WebhookURL string `yaml:"webhook_url"`
 	// WebhookToken — optional Authorization: Bearer <token>.
 	WebhookToken string `yaml:"webhook_token"`
+	// WebhookLang (FILEX_WEBHOOK_LANG) is the language the legacy webhook's
+	// title and body are said in; "" is the instance's (FILEX_DEFAULT_LOCALE).
+	WebhookLang string `yaml:"webhook_lang"`
+	// Push is Web Push (task #191): what a person's bell tells them reaches
+	// their phone and browsers while filex is closed (docs/NOTIFICATIONS.md →
+	// Web Push).
+	Push PushConfig `yaml:"push"`
+}
+
+// PushConfig - Web Push. ⚠ It needs FILEX_SECRET_KEY: the VAPID private key
+// is made at the first start and stored sealed with it, never in the clear;
+// without the key push stays off and the settings pane says so.
+type PushConfig struct {
+	// Enabled (FILEX_PUSH_ENABLED, default true).
+	Enabled bool `yaml:"enabled"`
+	// Subject (FILEX_PUSH_SUBJECT) is the contact a push service may write to
+	// about this server: `mailto:ops@example.com` or an https address. Empty:
+	// FILEX_PUBLIC_URL when it is https, else a mailto: at its host.
+	Subject string `yaml:"subject"`
+	// Hosts (FILEX_PUSH_HOSTS) are push services accepted besides the
+	// browsers' own (Chrome, Firefox, Safari, Edge), comma separated; `*`
+	// accepts any https host that is a name, not an address.
+	Hosts string `yaml:"hosts"`
 }
 
 // QueueConfig — persistent op queue. Driver "sqlite" (default) shares
@@ -814,6 +848,13 @@ type OnlyOfficeConfig struct {
 	// interface origin (AppUIOrigin) when there is one, else filex's page.
 	// Read at start (the router dispatches on its host).
 	FrameOrigin string `yaml:"frame_origin"`
+	// EditorLang is the editor's language (FILEX_ONLYOFFICE_LANG, GitHub
+	// Discussion #93): "auto" - each person's own filex language, the default
+	// - or a language ONLYOFFICE offers (de, fr, tr, pt-PT, zh-TW, ...). Like
+	// the URL, a value here is written onto the ONLYOFFICE row at every start
+	// (server.seedExternalDefaults) and an edit on External services lasts
+	// until the next one; empty leaves the setting to the admin page.
+	EditorLang string `yaml:"editor_lang"`
 }
 
 // DrawioConfig — embed URL.
@@ -949,6 +990,7 @@ func Default() Config {
 		},
 		Notify: NotifyConfig{
 			Enabled: true,
+			Push:    PushConfig{Enabled: true},
 		},
 		DAV: DAVConfig{
 			Enabled: true,
@@ -1406,6 +1448,9 @@ func applyEnv(c *Config) {
 	if v := getenvFirst("STRIPE_SECRET", "FILEX_STRIPE_SECRET"); v != "" {
 		c.Cloud.StripeSecret = v
 	}
+	if v := getenvFirst("STRIPE_WEBHOOK_SECRET", "FILEX_STRIPE_WEBHOOK_SECRET"); v != "" {
+		c.Cloud.StripeWebhookSecret = v
+	}
 	if v := os.Getenv("FILEX_CLOUD_BASE_HOST"); v != "" {
 		c.Cloud.BaseHost = v
 	}
@@ -1418,6 +1463,12 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_VERSIONS_FAIL_OPEN"); v != "" {
 		c.VersionsFailOpen = v == "1" || strings.EqualFold(v, "true")
+	}
+	// The vault level (encryption level 3): off unless asked for, both
+	// directions from the environment like every other boolean here (true
+	// only for 1 or true, docs/CONFIGURATION.md → Booleans).
+	if v := strings.TrimSpace(os.Getenv("FILEX_E2E_VAULT")); v != "" {
+		c.E2EVault = v == "1" || strings.EqualFold(v, "true")
 	}
 	if v := os.Getenv("FILEX_LOG_LEVEL"); v != "" {
 		c.Log.Level = v
@@ -1523,6 +1574,9 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_ONLYOFFICE_JWT"); v != "" {
 		c.ExternalServices.OnlyOffice.JWTSecret = v
+	}
+	if v := os.Getenv("FILEX_ONLYOFFICE_LANG"); strings.TrimSpace(v) != "" {
+		c.ExternalServices.OnlyOffice.EditorLang = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("FILEX_DRAWIO_URL"); v != "" {
 		c.ExternalServices.Drawio.URL = v
@@ -1700,6 +1754,18 @@ func applyEnv(c *Config) {
 	}
 	if v := os.Getenv("FILEX_WEBHOOK_TOKEN"); v != "" {
 		c.Notify.WebhookToken = v
+	}
+	if v := os.Getenv("FILEX_WEBHOOK_LANG"); v != "" {
+		c.Notify.WebhookLang = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_PUSH_ENABLED"); v != "" {
+		c.Notify.Push.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v := os.Getenv("FILEX_PUSH_SUBJECT"); v != "" {
+		c.Notify.Push.Subject = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FILEX_PUSH_HOSTS"); v != "" {
+		c.Notify.Push.Hosts = v
 	}
 	if v := os.Getenv("FILEX_DEMO_MODE"); v != "" {
 		c.Demo.Mode = v == "1" || strings.EqualFold(v, "true")

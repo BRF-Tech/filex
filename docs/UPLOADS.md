@@ -11,19 +11,11 @@ The direct path is fine for a 20 KB text file and is not going anywhere. The
 staged path exists because on a slow backend the progress bar shows the
 *backend's* speed, and a 4 GB upload over a flaky link starts from zero.
 
-There used to be a third path - `POST /api/files/upload/init` - which handed the
-browser presigned S3 URLs. It is still served for older embedders, but it
-requires a driver that implements multipart: `local`, `sftp`, `ftp` and `webdav`
-answer `501 storage does not support multipart upload`, and on that path filex
-never sees the bytes at all. **No filex client speaks it any more.** The staged
-path replaces it everywhere and works on **every** driver, including `local`,
-`sftp`, `ftp`, `webdav` and an OS-mounted NAS.
-
-⚠ A [storage plugin](PLUGINS.md) declaring `multipart` also implements that
-interface, so `init` does **not** 501 on it - but it hands back no part URLs
-(its multipart exists for the staged commit, where filex pushes the parts), so
-the browser is left with nothing to PUT to. That is another reason not to reach
-for this path.
+There used to be a third path - `POST /api/files/upload/init`, `/finalize` and
+`/abort` - which handed the browser presigned S3 URLs. No filex client spoke it
+any more, and it was **removed in 0.54.0**. The staged path replaces it
+everywhere and works on **every** driver, including `local`, `sftp`, `ftp`,
+`webdav` and an OS-mounted NAS.
 
 ---
 
@@ -73,8 +65,13 @@ holding the upload id, the destination and the file's identity (name, size,
 `GET /api/files/upload/{id}` gives the offset, and the UI says *"Resuming X from
 62 %"* rather than silently starting over. A file whose size or mtime changed
 does **not** inherit the session - splicing a new tail onto an old head is the
-one way a resumable upload corrupts data. Bookmarks expire after 24 h, matching
-`FILEX_UPLOAD_STAGING_TTL`, so a note never outlives the bytes it describes.
+one way a resumable upload corrupts data. A bookmark lives exactly as long as
+the server keeps the staging it names: every answer - `begin`, each chunk's
+`PUT`, `GET /api/files/upload/{id}` - carries `expires_at`, the moment the
+sweeper takes it if nothing more arrives (the last write +
+`FILEX_UPLOAD_STAGING_TTL`), and the bookmark is dropped then. So a note never
+outlives the bytes it describes, and is never dropped while they are still
+there - whatever TTL the operator set (the browser used to assume 24 h).
 
 The offset in the bookmark is a *hint*, used for display and for deciding a
 session is worth asking about. The byte to continue from is always the server's.
@@ -130,8 +127,8 @@ An older server ignores the field and writes unconditionally.
 POST   /api/files/upload/begin        {path, name, size, mime?, hash?, chunk_size?}
                                       → 200 {id, chunk_size, offset, total_size, expires_at}
 PUT    /api/files/upload/{id}         Content-Range: bytes A-B/total   + the chunk body
-                                      → 200 {offset, received, total_size, state}
-GET    /api/files/upload/{id}         → 200 {offset, received, state, parts, complete, error?}
+                                      → 200 {offset, received, total_size, state, expires_at}
+GET    /api/files/upload/{id}         → 200 {offset, received, state, parts, complete, expires_at, error?}
 POST   /api/files/upload/{id}/commit  → 202 {op_id, node_id, transfer_state:"staged"}
 DELETE /api/files/upload/{id}         → 200 {ok:true}   (abort + delete staging)
 ```
@@ -226,7 +223,8 @@ bytes in place, so retrying costs a request, not the file.
 `e2e_convert=1` on the commit marks it as an end-to-end
 [conversion write](E2E-ENCRYPTION.md#encrypting-a-folder-you-already-have):
 ciphertext replacing the plaintext it was made from, inside a folder whose key
-file says a conversion is under way. Only then is no version kept of what it
+file says a conversion is under way, by the folder's owner or an administrator
+(who may delete its versions anyway). Only then is no version kept of what it
 replaces; anything else is an ordinary overwrite. The browser's in-place
 encryption of a file over 200 MB sends both (`?e2e_convert=1&expect=…`), and
 so does [`filex encrypt`](CLI.md#filex-encrypt---make-a-folder-an-encrypted-folder)

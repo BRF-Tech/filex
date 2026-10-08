@@ -42,30 +42,28 @@ export type TagKind = 'personal' | 'team';
 export interface TagItem {
   name: string;
   kind: TagKind;
+  /** The tag's identity, the server's (`internal/tagname.Key`): two names
+   *  with one key are one tag. A 0.54+ server sends it with every item; it is
+   *  never sent back. */
+  key?: string;
 }
 
 export function isTagKind(v: unknown): v is TagKind {
   return v === 'personal' || v === 'team';
 }
 
-/**
- * Whether two names are one tag, the way the server decides it
- * (`internal/tagname.Key`): whitespace collapsed, NFC, the four Latin i's —
- * I, ı, İ, i — as one letter, then case-insensitive. The server is the
- * authority; the client uses this only so the picker does not offer to add a
- * tag the file already carries under different capitals.
- *
- * ⚠ The i's are mapped BEFORE lower-casing: JS lower-cases `İ` to "i" + U+0307 (a
- * combining dot) and leaves `ı` alone, so `toLowerCase` alone would call
- * "IŞIK" and "ışık" two tags — the Turkish case the server folds together.
+/*
+ * Whether two names are one tag is the SERVER's answer (`internal/tagname.Key`:
+ * whitespace, NFC, the four Latin i's, full case folding - "STRASSE" and
+ * "straße" are one tag). It arrives as each item's `key` (#211, audit B12); the
+ * copy of the rule that stood here knew only part of it and is gone. A name
+ * typed into a box has no key until the server has seen it, so the box sends
+ * it and the server keeps one tag.
  */
-export function tagKey(name: string): string {
-  return String(name ?? '')
-    .normalize('NFC')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/[Iıİ]/g, 'i')
-    .toLowerCase();
+
+/** The key of the item spelled exactly `name`, when the server sent one. */
+export function keyOfName(items: readonly TagItem[], name: string): string | undefined {
+  return items.find((i) => i.name === name)?.key;
 }
 
 /**
@@ -185,6 +183,35 @@ export async function fetchAllTags(opts: TagListOptions = {}): Promise<TagItem[]
   })();
   inflight.set(key, run);
   return run;
+}
+
+/**
+ * One PAGE of the nodes carrying `tag` (task #207, audit D3): `limit` rows
+ * from `offset`, in the server's order (`sort`: '' = most recently modified
+ * first), with the server's `total` and whether more are left (`truncated`).
+ * The tag view used to ask for 200 and could not say there were more.
+ */
+export async function fetchTaggedPage(
+  tag: string,
+  opts: TagListOptions = {},
+  page: { limit?: number; offset?: number; kind?: TagKind | ''; sort?: string } = {},
+): Promise<{ rows: Record<string, unknown>[]; total: number; truncated: boolean }> {
+  const base = opts.apiBase ?? '';
+  const params = new URLSearchParams({ tag, limit: String(page.limit ?? 100), offset: String(page.offset ?? 0) });
+  if (page.kind) params.set('kind', page.kind);
+  if (page.sort) params.set('sort', page.sort);
+  const res = await fetch(`${base}/api/files/manager/tagged?${params}`, {
+    headers: await (opts.authHeaders ?? (() => ({})))(),
+    credentials: opts.authCredentials ?? 'same-origin',
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  const body = await res.json();
+  const rows: Record<string, unknown>[] = Array.isArray(body?.nodes) ? body.nodes : [];
+  return {
+    rows,
+    total: typeof body?.total === 'number' ? body.total : (page.offset ?? 0) + rows.length,
+    truncated: body?.truncated === true,
+  };
 }
 
 /**

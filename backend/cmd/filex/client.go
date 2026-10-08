@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -524,6 +525,21 @@ func clientSearchCmd(opts *clientOpts) *cobra.Command {
 	var scope string
 	var storageID int64
 	var limit int
+	// The server's narrowing (docs/SEARCH.md, "Narrowing a search"): one flag
+	// per parameter, sent as it is typed, applied before --limit counts.
+	filterFlags := []struct{ flag, param, help string }{
+		{"type", "type", "only this kind: file, dir, document, spreadsheet, presentation, pdf, image, video, audio, archive, code, text, other"},
+		{"mime", "mime", "only mime types starting with this (image/, application/pdf)"},
+		{"modified-after", "modified_after", "modified at or after (YYYY-MM-DD, RFC 3339 or unix ms)"},
+		{"modified-before", "modified_before", "modified at or before (YYYY-MM-DD, RFC 3339 or unix ms)"},
+		{"min-size", "min_size", "at least this many bytes"},
+		{"max-size", "max_size", "at most this many bytes"},
+		{"under", "under", "only inside this folder (adapter://dir)"},
+		{"not-under", "not_under", "only outside this folder (adapter://dir)"},
+		{"owner", "owner", "me, system or an account id"},
+		{"hidden", "hidden", "false drops names starting with a dot"},
+	}
+	filterVals := make([]string, len(filterFlags))
 	c := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search file names and indexed content",
@@ -533,7 +549,13 @@ func clientSearchCmd(opts *clientOpts) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := api.Search(cmd.Context(), args[0], scope, storageID, limit)
+			filters := url.Values{}
+			for i, f := range filterFlags {
+				if filterVals[i] != "" {
+					filters.Set(f.param, filterVals[i])
+				}
+			}
+			res, err := api.SearchFiltered(cmd.Context(), args[0], scope, storageID, limit, filters)
 			if err != nil {
 				return authHint(err)
 			}
@@ -550,12 +572,21 @@ func clientSearchCmd(opts *clientOpts) *cobra.Command {
 			for _, hit := range res.Results {
 				fmt.Fprintf(tw, "%s\t%s\t%s\n", hit.Path, hit.Matched, truncateLine(hit.Snippet, 80))
 			}
-			return tw.Flush()
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			if res.Truncated {
+				fmt.Fprintf(cmd.OutOrStdout(), "More matched than --limit %d showed; narrow the search or raise --limit.\n", limit)
+			}
+			return nil
 		},
 	}
 	c.Flags().StringVar(&scope, "scope", "all", "search scope: name | content | all")
 	c.Flags().Int64Var(&storageID, "storage-id", 0, "limit to one storage id (0 = all)")
 	c.Flags().IntVar(&limit, "limit", 50, "maximum number of results")
+	for i, f := range filterFlags {
+		c.Flags().StringVar(&filterVals[i], f.flag, "", f.help)
+	}
 	return quiet(c)
 }
 

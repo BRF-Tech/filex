@@ -247,9 +247,6 @@
     "errOidc": "SSO sign-in failed. Try again, or sign in with password.",
     "noProviders": "No identity providers enabled. Set {env} in your environment.",
     "signedOut": "You are signed out.",
-    "errRemaining": "Email, username or password is wrong. Attempts left before a lock: {n}.",
-    "errLockedAccount": "Too many wrong attempts for this account. Try again in {time}.",
-    "errLockedIp": "Too many wrong attempts from this address. Try again in {time}.",
     "retryIn": "Try again in {time}",
     "realm": "Realm",
     "realmHint": "Your organization's sign-in name. Leave it empty to sign in with this server's own accounts.",
@@ -689,7 +686,11 @@
       "jwtSecret": "JWT secret",
       "jwtSecretHint": "Leave blank to keep the current secret",
       "callbackUrl": "Callback URL (the address the document server reaches filex at)",
-      "callbackUrlHint": "Leave empty to use filex's public URL. Fill it in when the document server cannot resolve that address - a container name such as http://filex:5212 belongs here, never in the public URL, which also builds every share link."
+      "callbackUrlHint": "Leave empty to use filex's public URL. Fill it in when the document server cannot resolve that address - a container name such as http://filex:5212 belongs here, never in the public URL, which also builds every share link.",
+      "editorLang": "Editor language",
+      "editorLangAuto": "Automatic - each person's filex language",
+      "editorLangHint": "Automatic opens the ONLYOFFICE editor in the language each person uses filex in. Choose a language to open it in that one for everybody.",
+      "editorLangEnvHint": "Set by {env}. A change here applies now and lasts until filex restarts, when the environment's value is written back."
     },
     "states": {
       "healthy": "Healthy",
@@ -860,164 +861,6 @@
       "ok": "Active",
       "disabled": "Off",
       "misconfigured": "Misconfigured"
-    },
-    "reasons": {
-      "refused": "the connection was refused (the address or the port may be wrong)",
-      "timeout": "no answer (a firewall or the network)",
-      "dns": "the server name could not be resolved",
-      "tls": "the TLS certificate could not be verified",
-      "other": "an unexpected error",
-      "credentials": "the name or the password was not accepted",
-      "no_such_object": "there is no such entry in the directory",
-      "access": "this account is not allowed to read it",
-      "bad_url": "the address is not valid",
-      "status": "the server answered {status}",
-      "not_json": "the answer is not a discovery document",
-      "account_locked_out": "the account is locked out",
-      "account_disabled": "the account is disabled",
-      "account_expired": "the account has expired",
-      "password_expired": "the password has expired",
-      "password_must_change": "the password must be changed before the next sign-in",
-      "account_restriction": "the account has a sign-in restriction",
-      "logon_hours": "the account may not sign in at this hour",
-      "workstation_restriction": "the account may not sign in on this machine",
-      "network_logon_not_granted": "this machine does not let the account sign in over the network (policy: Access this computer from the network)",
-      "invalid": "the settings are not valid",
-      "invalid_name": "that is not a name filex can use for an account",
-      "forbidden_account": "system, service and built-in accounts (Administrator, Guest, NT AUTHORITY…) can never sign in",
-      "missing": "no test account was given",
-      "no_password": "the test account has no password",
-      "no_group_source": "set the role/group claim (OIDC), the group attribute (LDAP) or the roles header, so there is something to read groups from",
-      "public": "a client without a secret can only be checked when somebody signs in",
-      "unclear": "the provider’s answer ({status}) does not say either way",
-      "no_people": "check the base DN and the user filter"
-    },
-    "checks": {
-      "required": {
-        "ok": "The required fields are filled in.",
-        "fail": "Required and empty: {fields}."
-      },
-      "first_login_open": {
-        "ok": "Anybody who signs in for the first time gets an account."
-      },
-      "first_login_closed": {
-        "ok": "Nobody gets an account by signing in: only people who already have one can sign in."
-      },
-      "first_login_groups": {
-        "ok": "Only members of {groups} get an account on their first sign-in (groups are read from {from})."
-      },
-      "first_login": {
-        "fail": "Only some groups are allowed a first sign-in, but this provider reports no groups - nobody new could ever sign in: {reason}."
-      },
-      "address": {
-        "fail": "“{url}” is not an LDAP address: it must start with ldap:// or ldaps://."
-      },
-      "connect": {
-        "ok": "The directory at {host} answered.",
-        "fail": "Could not connect to {host}: {reason}."
-      },
-      "starttls": {
-        "ok": "StartTLS switched the connection to TLS.",
-        "fail": "StartTLS failed at {host}: {reason}."
-      },
-      "bind": {
-        "ok": "The service account ({dn}) signed in with its password.",
-        "fail": "The service account ({dn}) could not sign in: {reason}."
-      },
-      "bind_anonymous": {
-        "ok": "No service account: the directory was reached anonymously."
-      },
-      "base": {
-        "ok": "The base DN ({dn}) exists and can be read.",
-        "fail": "The base DN ({dn}) could not be read: {reason}."
-      },
-      "discovery": {
-        "ok": "The discovery document was fetched: {url}",
-        "fail": "The discovery document could not be fetched ({url}): {reason}."
-      },
-      "issuer": {
-        "ok": "The provider names the same issuer.",
-        "fail": "The issuer does not match: {configured} here, {announced} announced by the provider."
-      },
-      "endpoints": {
-        "ok": "The sign-in, token and key endpoints are there.",
-        "fail": "The discovery document lacks: {missing}."
-      },
-      "client": {
-        "ok": "The client ID ({client}) and its secret were accepted.",
-        "fail": "The client ({client}) was refused: {reason}.",
-        "unchecked": "The client ({client}) cannot be checked from here: {reason}."
-      },
-      "redirect": {
-        "unchecked": "The redirect URL ({url}) is only checked by the provider during a real sign-in."
-      },
-      "trusted_proxies": {
-        "ok": "The trusted proxy addresses are valid.",
-        "fail": "The trusted proxy list has an entry that is not an address or a range."
-      },
-      "via_proxy": {
-        "ok": "This request came through a trusted proxy ({peer}).",
-        "unchecked": "This request came straight from {peer}, not through the proxy, so the header sign-in cannot be seen from here."
-      },
-      "header": {
-        "ok": "The proxy sends {header}: {user}.",
-        "fail": "The proxy does not send the {header} header."
-      },
-      "secret": {
-        "fail": "A secret stored for this provider cannot be opened - {env} may have changed. Type it again."
-      },
-      "people": {
-        "ok": "{n} person found with {filter}; {mail} with an email ({attr}). | {n} people found with {filter}; {mail} with an email ({attr}).",
-        "fail": "Nobody with an email ({attr}) found with {filter}: {reason}."
-      },
-      "groups": {
-        "ok": "{n} of {of} person lists their groups in {attr}. | {n} of {of} people list their groups in {attr}.",
-        "unchecked": "Nobody lists groups in {attr}. If your directory has groups, set a group search filter."
-      },
-      "groups_search": {
-        "ok": "The group search finds {n} group for {who}. | The group search finds {n} groups for {who}.",
-        "fail": "The group search {filter} failed: {reason}.",
-        "unchecked": "The group search {filter} finds no groups for {who}."
-      },
-      "sync_groups": {
-        "ok": "Directory sync would bring in {n} group. | Directory sync would bring in {n} groups.",
-        "fail": "The search for groups to bring in ({filter}) failed: {reason}.",
-        "unchecked": "No group matches {filter}: directory sync would bring none in."
-      },
-      "config": {
-        "ok": "The settings are well-formed.",
-        "fail": "The configuration is not valid: {detail}"
-      },
-      "pamtester": {
-        "ok": "pamtester is installed and can be run ({path})."
-      },
-      "pam_service": {
-        "ok": "The PAM service file exists ({file})."
-      },
-      "sudo": {
-        "ok": "sudo lets filex run that one command without a password."
-      },
-      "unknown_user": {
-        "ok": "PAM answers an account that does not exist with a clean no, as it should."
-      },
-      "unsupported_os": {
-        "fail": "This server does not run on Windows, so it cannot sign Windows accounts in."
-      },
-      "platform": {
-        "ok": "This machine can check Windows accounts."
-      },
-      "test_account": {
-        "ok": "A test account was given.",
-        "fail": "The test signs a real account in, and cannot start: {reason}. Give an account of this machine (or its domain) and its password - they are used once and never stored."
-      },
-      "logon": {
-        "ok": "The test account ({account}) signed in.",
-        "fail": "The test account could not sign in: {reason} (code {code})."
-      },
-      "account": {
-        "ok": "The test account is an ordinary account: filex accepts it.",
-        "fail": "filex would never accept this account: {reason}."
-      }
     },
     "lockoutNote": "Password sign-in and the installation administrator’s recovery sign-in are set by the environment, not on this page - so nothing here can lock you out. Providers switched on here are added after the environment’s and apply the moment they are saved.",
     "passwordOn": "Password sign-in is on ({from}).",
@@ -1227,213 +1070,6 @@
       "to": "To"
     },
     "noResults": "No matching events",
-    "phrase": "{resource}: {verb}",
-    "resource": {
-      "permission_gap": "Missing permission",
-      "archives": "Archive settings",
-      "ai_file": "File (AI)",
-      "ai_share": "Share link (AI)",
-      "ai_tokens": "API key",
-      "audit": "Audit log",
-      "auth": "Session",
-      "auth_provider": "Sign-in provider",
-      "duplicates": "Duplicates",
-      "embed": "Embedding",
-      "external": "External service",
-      "file": "File",
-      "grants": "Folder access",
-      "notifications": "Notification",
-      "plugins": "Plugin",
-      "profile": "Profile",
-      "protection": "Protection",
-      "providers": "Tenant",
-      "queue": "Job queue",
-      "replica": "Replica",
-      "replication_targets": "Replication target",
-      "rules": "Replication rule",
-      "search": "Search index",
-      "settings": "Settings",
-      "share": "Share link",
-      "shares": "Share link",
-      "sharex": "ShareX upload",
-      "smtp_test": "Mail test",
-      "storage": "Storage",
-      "storages": "Storage",
-      "sync": "Sync run",
-      "totp": "Two-factor sign-in",
-      "trash": "Trash",
-      "update": "Update",
-      "usage": "Usage report",
-      "user": "User",
-      "users": "User",
-      "version": "File version",
-      "versions": "File version",
-      "webhook_config": "Webhook settings",
-      "webhooks": "Webhook",
-      "app_plugins": "App",
-      "app_plugin": "App",
-      "plugin_request": "Plugin request",
-      "plugin_requests": "Plugin request",
-      "auth_providers": "Sign-in provider",
-      "quota": "Quota",
-      "themes": "Theme",
-      "permissions": "Built-in role",
-      "roles": "Role",
-      "permission_rule": "Role",
-      "e2e": "Encryption",
-      "e2e_policy": "Encryption policy",
-      "e2e_tenant": "Tenant encryption",
-      "e2e_request": "Encryption request",
-      "login": "Sign-in",
-      "login_security": "Sign-in security",
-      "group": "Group",
-      "groups": "Group",
-      "group_grant": "Group folder access",
-      "thumbnail": "Thumbnails",
-      "tools": "Tools",
-      "tenant": "Tenant",
-      "tenant_domain": "Own domain",
-      "file_association": "Default apps",
-      "file_types": "Default apps",
-      "app_store": "App store",
-      "tenancy": "Multi-tenant mode"
-    },
-    "verb": {
-      "dismiss": "dismissed",
-      "action": "changed",
-      "archive_add": "added to archive",
-      "archive_create": "archive created",
-      "archive_extract": "archive extracted",
-      "comment_add": "comment added",
-      "comment_delete": "comment deleted",
-      "copy": "copied",
-      "create": "created",
-      "delete": "deleted",
-      "disable": "turned off",
-      "enable": "turned on",
-      "empty": "emptied",
-      "enroll": "set up",
-      "entry_available": "entry available again",
-      "entry_unavailable": "entry unavailable",
-      "grant_revoke": "access revoked",
-      "grant_set": "access granted",
-      "mkdir": "folder created",
-      "move": "moved",
-      "op_cancel": "operation stopped",
-      "password_change": "password changed",
-      "password_reset": "password reset",
-      "quota_recompute": "quota recounted",
-      "quota_set": "quota set",
-      "rebuild": "rebuilt",
-      "restore": "restored",
-      "revoke": "revoked",
-      "star": "starred",
-      "sync_trigger": "sync started",
-      "tags_set": "tags changed",
-      "test": "tested",
-      "unzip": "extracted",
-      "update": "updated",
-      "upload": "uploaded",
-      "upload_abort": "upload cancelled",
-      "verify": "verified",
-      "version_restore": "version restored",
-      "version_snapshot": "version saved",
-      "zip": "compressed",
-      "action_run": "action run",
-      "page_job": "job started from its link",
-      "share_create": "link created",
-      "unlock": "unlocked",
-      "signing_ca_import": "signing certificate imported",
-      "pin_locked": "PIN attempts locked",
-      "pin_revealed": "PIN shown",
-      "tags": "tags changed",
-      "download_link": "downloaded by dragging it out",
-      "download_link_refused": "drag-out download refused",
-      "cross_origin_refused": "request from another site refused",
-      "account_pending": "account opened, waiting for approval",
-      "ui_save": "saved from its interface",
-      "upgrade": "upgraded",
-      "rollback": "put back to the previous version",
-      "permissions_set": "exceptions changed",
-      "defaults_set": "permissions changed",
-      "roles_set": "role changed",
-      "approve": "approved",
-      "reject": "rejected",
-      "expire": "expired",
-      "supersede": "closed because its source changed",
-      "use": "used",
-      "folder_cleanup": "folder cleaned up",
-      "fxe_header_rewritten": "file header rewritten",
-      "key_file_rewritten": "key file rewritten",
-      "unlocked": "lock lifted",
-      "members_add": "members added",
-      "member_remove": "member removed",
-      "sync": "directory synced",
-      "detach": "kept as a filex group",
-      "repair": "repaired",
-      "settings_update": "limits changed",
-      "storage_link": "storage linked",
-      "storage_unlink": "storage unlinked",
-      "tenants_set": "tenants changed",
-      "check": "checked",
-      "certificate_set": "certificate brought",
-      "certificate_delete": "certificate removed",
-      "insecure_auth_set": "insecure providers switched",
-      "reset": "put back to the default",
-      "thumbnail_limits": "thumbnail limits changed",
-      "thumbnail_sent": "sent a file out while drawing a thumbnail",
-      "office_saved_beside": "saved beside, in another format (ONLYOFFICE)",
-      "office_save_refused": "save not written (ONLYOFFICE)",
-      "office_saved_conflict": "saved beside, changed while it was being edited (ONLYOFFICE)",
-      "trust": "trusted",
-      "untrust": "no longer trusted",
-      "install": "installed",
-      "cancel": "cancelled",
-      "license_set": "license key set",
-      "license_held": "held by its license",
-      "license_released": "license holds again",
-      "connect": "connected",
-      "disconnect": "disconnected",
-      "view": "store screen changed",
-      "intent_request": "install link asked for"
-    },
-    "target": {
-      "permission_gap": "Missing permission",
-      "auth_provider": "Sign-in provider",
-      "external": "External service",
-      "comment": "Comment",
-      "grant": "Folder access",
-      "node": "File",
-      "op": "Operation",
-      "profile": "Profile",
-      "search": "Search index",
-      "setting": "Setting",
-      "share": "Share link",
-      "storage": "Storage",
-      "sync_run": "Sync run",
-      "trash": "Trash",
-      "upload": "Upload",
-      "user": "User",
-      "version": "Version",
-      "app_plugin": "App",
-      "file": "File",
-      "permissions": "Built-in role",
-      "permission_rule": "Role",
-      "plugin_request": "Plugin request",
-      "e2e_policy": "Encryption policy",
-      "login": "Sign-in",
-      "login_security": "Sign-in security",
-      "group": "Group",
-      "group_grant": "Group folder access",
-      "settings": "Settings",
-      "providers": "Tenant",
-      "e2e_request": "Encryption request",
-      "tenant_domain": "Own domain",
-      "file_type": "File type",
-      "app_store": "Store",
-      "tenancy": "Multi-tenant mode"
-    },
-    "viaAi": "{resource} (AI)",
     "filterResource": "What",
     "rawRecord": "Raw record"
   },
@@ -1524,6 +1160,7 @@
     "revokedOk": "Link revoked",
     "neverExpires": "Never",
     "expired": "Expired",
+    "exhausted": "Used up",
     "copyFailed": "The browser would not let this page use the clipboard",
     "pinReason": {
       "no_pin": "This link has no PIN.",
@@ -1549,6 +1186,7 @@
     "queryPlaceholder": "Search files… by name, or tag:label",
     "noResults": "No matches",
     "resultCount": "{n} result | {n} results",
+    "moreThanShown": "More matched than shown - narrow the search",
     "scope": "Look in",
     "scopeAll": "All",
     "scopeName": "Name",
@@ -1677,20 +1315,15 @@
     "row_busy": "Something is already being done to this item",
     "empty_modal_title": "Empty trash",
     "empty_modal_body": "This cannot be undone. If you picked a storage, only that one is affected.",
+    "empty_counting": "Counting what is in the trash…",
     "older_than_days": "Older than (days)",
     "all_ages": "any age (leave blank)",
-    "empty_done": "{count} item purged | {count} items purged",
     "older_than_days_invalid": "A whole number of days, or blank for any age.",
     "empty_running": "Emptying the trash…",
-    "emptying_progress": "{done} of {total}",
     "emptying_freed": "{size} freed so far",
     "emptying_note": "It carries on if you leave this page.",
     "empty_busy": "The trash is already being emptied.",
-    "empty_failed": "{count} item could not be purged - see the server log | {count} items could not be purged - see the server log",
-    "empty_stopped": "Emptying the trash stopped: {error}",
-    "emptying_queued": "Emptying the trash… waiting for another purge to finish",
     "empty_stop": "Stop",
-    "stopped_after": "Stopped after {count} item; the rest is still in the trash. | Stopped after {count} items; the rest is still in the trash.",
     "total_count": "Total: {n}"
   },
   "tools": {
@@ -2020,7 +1653,6 @@
       "skipped": "Not sent",
       "pending": "Pending"
     },
-    "webhookNone": "no webhook is set up",
     "webhooksMoved": "Where events are delivered - the default webhook and every target - is set up on the Webhooks page.",
     "webhooksLink": "Open Webhooks",
     "unreadHere": "{n} unread in this list",
@@ -2043,6 +1675,19 @@
       "saved": "Digest settings saved",
       "invalidWindow": "Choose between 1 and 15 minutes.",
       "allUrgent": "Default: every kind is told at once. Nothing is held for a digest."
+    },
+    "push": {
+      "title": "Push notifications",
+      "intro": "What a person's bell tells them reaches their phone and browsers while filex is closed, once they turn it on for a device in their own notification settings. Every push is signed with this server's key.",
+      "on": "On. Devices receiving push notifications: {count}",
+      "keyCreated": "Key made {date}",
+      "offDisabled": "Off: FILEX_PUSH_ENABLED is false.",
+      "offNoSecretKey": "Off: this server has no FILEX_SECRET_KEY. The key pushes are signed with is stored encrypted with it - set it and restart.",
+      "offKeyUnreadable": "Off: the stored key does not open with this FILEX_SECRET_KEY. Rotate it to make a new one.",
+      "offError": "Off: the key could not be read.",
+      "rotate": "Rotate key",
+      "rotateConfirm": "Make a new push key? Every device stops receiving push notifications until filex is opened on it again.",
+      "rotated": "New key made. Devices to subscribe again: {count}"
     }
   },
   "replica": {
@@ -2328,20 +1973,14 @@
       "secret": "Secret",
       "lastStatus": "Last delivery",
       "enabled": "Enabled",
-      "actions": "Actions"
+      "actions": "Actions",
+      "lang": "Language"
     },
+    "langServer": "The server's language",
+    "langHint": "The language this endpoint's title and body are written in. Each delivery also carries the message untranslated (i18n: keys and values), for a receiver that translates for itself.",
     "global": {
       "title": "Default webhook",
       "hint": "Receives every event, with a bearer token if you set one. The targets below can each pick their events and sign deliveries with a secret."
-    },
-    "errName": "Give the webhook a name.",
-    "errUrl": "Enter the address to send the events to.",
-    "errUrlScheme": "The address must start with http:// or https://.",
-    "offReason": {
-      "antivirus": "Virus scanning is off (Protection).",
-      "escrow": "No escrow key is set up for encrypted folders.",
-      "appPlugins": "Apps are switched off on this server.",
-      "e2eApproval": "Only when the encryption policy asks for approval."
     }
   },
   "protection": {
@@ -2353,30 +1992,26 @@
       "title": "Trash retention",
       "desc": "Deleted files are kept in the trash for the number of days set here, then purged permanently.",
       "label": "Retention (days)",
-      "hint": "Minimum 1 day",
-      "errMin": "Enter an integer greater than or equal to 1"
+      "hint": "Minimum 1 day"
     },
     "versions": {
       "title": "Version policy",
       "desc": "Number of versions kept per file. When the limit is exceeded, the oldest versions are removed by the daily cleanup job.",
       "label": "Versions to keep",
-      "hint": "0 = unlimited (no cleanup)",
-      "errMin": "Enter an integer greater than or equal to 0"
+      "hint": "0 = unlimited (no cleanup)"
     },
     "share": {
       "title": "Share links",
       "desc": "The longest life a new share link can be given. A link created without an expiry gets this one; a longer request is shortened to it. Folder archives built for share links are discarded after the same period. Links that already exist are never changed.",
       "label": "Maximum link life (days)",
       "hint": "0 = no limit. Default 7.",
-      "errMin": "Enter an integer greater than or equal to 0",
       "overMax": "{n} existing link outlives this limit. It keeps working - revoke it under Shares if you want it gone. | {n} existing links outlive this limit. They keep working - revoke them under Shares if you want them gone."
     },
     "drafts": {
       "title": "Drafts",
       "desc": "A new document is a draft until its first save: it waits in the Drafts of the person who made it, where nobody else can see it, and nothing is created in its folder until it is saved. This is how many drafts one person may keep; at the limit, New document asks them to save or delete some first.",
       "label": "Drafts per person",
-      "hint": "Between {min} and {max}. Default 50. Takes effect at once, with no restart.",
-      "errRange": "Enter a whole number between {min} and {max}."
+      "hint": "Between {min} and {max}. Default 50. Takes effect at once, with no restart."
     },
     "av": {
       "title": "Antivirus",
@@ -2387,15 +2022,13 @@
         "title": "Largest file scanned",
         "desc": "Files bigger than this are skipped, not blocked - they are stored and served as usual, they are simply never handed to ClamAV. In binary mode each file is copied to a temporary file before the scanner runs, so this is a disk and time budget there as well as a policy; in daemon mode the bytes are streamed straight to clamd.",
         "label": "Megabytes",
-        "hint": "Between {min} and {max} MB. Takes effect on the next file scanned, with no restart.",
-        "errRange": "Enter a whole number between {min} and {max}."
+        "hint": "Between {min} and {max} MB. Takes effect on the next file scanned, with no restart."
       },
       "window": {
         "title": "Editor save-scan window",
         "desc": "A file created in the built-in text editor is scanned straight away. A save to a file that already exists schedules one scan this many minutes later, and further saves inside that window join it rather than queueing more - so a burst of Ctrl+S costs one scan, and that scan reads the file's final state. The trade: a saved file can sit unscanned for up to this long after the last save.",
         "label": "Minutes",
-        "hint": "Between {min} and {max} minutes. Takes effect immediately, with no restart; scans already scheduled keep their original time.",
-        "errRange": "Enter a whole number between {min} and {max}."
+        "hint": "Between {min} and {max} minutes. Takes effect immediately, with no restart; scans already scheduled keep their original time."
       },
       "reachable": "Reachable",
       "unreachable": "Not answering",
@@ -2676,27 +2309,7 @@
       "package": "{manager} install",
       "packageUnknown": "package-manager install"
     },
-    "policyName": {
-      "off": "off",
-      "manual": "announce only",
-      "patch": "install patches",
-      "minor": "install minor releases"
-    },
-    "policyIs": "Policy: {policy}",
-    "checkedAtWhen": "Last checked: {when}",
-    "behavior": {
-      "off": "Checking off",
-      "announce": "Announces only",
-      "patch": "Installs patches",
-      "minor": "Installs minor releases"
-    },
-    "policyLimit": {
-      "disabled": "The saved policy, “{policy}”, has no effect: update checking is switched off on this server, so filex neither looks for new releases nor installs them.",
-      "container": "The saved policy, “{policy}”, has no effect on this install: a container cannot replace its own image, so filex only announces new releases. Pull the new image to upgrade, or let an external updater do it.",
-      "package": "The saved policy, “{policy}”, has no effect on this install: {manager} owns the binary, so filex only announces new releases and {manager} upgrades it:",
-      "packageUnknown": "The saved policy, “{policy}”, has no effect on this install: a package manager owns the binary, so filex only announces new releases. Upgrade it with your package manager.",
-      "zero_major": "The saved policy, “{policy}”, installs patches only while filex is on 0.x: a 0.x minor release may break compatibility, so it is announced and waits for you."
-    }
+    "checkedAtWhen": "Last checked: {when}"
   },
   "desktop": {
     "handoff": "You can return to the desktop app - authorization complete.",
@@ -2921,20 +2534,6 @@
       "clear": "Leave it empty to stop checking.",
       "saved": "Saved: {name} follows {source}.",
       "cleared": "{name} has no update source now."
-    }
-  },
-  "account": {
-    "errors": {
-      "emailRequired": "Enter an email address.",
-      "emailInvalid": "This is not an email address. Write it as name{'@'}example.com.",
-      "usernameEmpty": "Enter a username.",
-      "usernameAt": "A username cannot contain {'@'} - that belongs to an email address.",
-      "usernameShort": "A username needs at least {min} characters.",
-      "usernameLong": "A username can be at most {max} characters.",
-      "usernameDigit": "A username cannot start with a digit.",
-      "usernameChar": "“{char}” cannot be used in a username. Use a-z, 0-9, dot, dash or underscore.",
-      "usernameSpace": "A username cannot contain spaces. Use a-z, 0-9, dot, dash or underscore.",
-      "usernameReserved": "“{name}” is reserved; choose another username."
     }
   },
   "appPlugins": {
@@ -3606,11 +3205,6 @@
   },
   "editor": {
     "missingPath": "Missing {param} query parameter."
-  },
-  "appLock": {
-    "refused": "{app} is holding this file - it cannot be changed until the app lets it go.",
-    "refusedReason": "{app} is holding this file ({reason}) - it cannot be changed until the app lets it go.",
-    "someApp": "An app"
   },
   "forms": {
     "required": "Fill in this field.",

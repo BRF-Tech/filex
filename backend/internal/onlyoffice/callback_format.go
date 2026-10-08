@@ -36,7 +36,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/assoc"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
@@ -292,15 +291,17 @@ func (s *Service) saveBeside(ctx context.Context, drv storage.Driver, writer sto
 // err an *errNotWritten for a save that must not be written.
 func (s *Service) writeBeside(ctx context.Context, drv storage.Driver, writer storage.Writer, node *model.Node, src io.Reader, length int64, key string, users []string, w besideSave) (map[string]any, error) {
 	target := w.target
-	// The same gate the document's own save went through, for the new name.
+	// The same gate the document's own save went through, for the new name -
+	// with the shared resolver's lock view, so a name inside a vault is
+	// refused here too (Service.ACL).
 	gate := writegate.Writes(target).As(syspath.PutWorkCopy)
 	if owner, ok := syspath.DraftOwner(node.Path); ok {
 		gate = writegate.Writes(target).As(syspath.OwnDraft).By(owner)
 	}
-	if gerr := writegate.Check(acl.New(s.Store).Locks(ctx, node.StorageID), 0, gate); gerr != nil {
+	if gerr := writegate.Check(s.aclResolver().Locks(ctx, node.StorageID), 0, gate); gerr != nil {
 		slog.Warn("onlyoffice callback refused: beside", slog.Int64("storage", node.StorageID),
 			slog.String("path", target), slog.String("why", gerr.Error()))
-		return map[string]any{"error": 1, "message": syspath.ErrReserved.Error()}, nil
+		return gateRefusal(gerr), nil
 	}
 	// Who it is written for, and whether they may create it there - checked
 	// now, on the file's own name.

@@ -19,6 +19,15 @@
  * translation without a word. The catalogue in a pack therefore only moves
  * forward together with the answers (scripts/langpacks.mjs apply).
  *
+ * ⚠ A key filex no longer has leaves the translation in `apply` and
+ * `release`, right after the pack's `pack.mjs sync` (staleKeys,
+ * withoutStale). Through 0.53 every pack's sync kept such a key in
+ * `translations/<tag>.json`, and the packs' own validators (validate-de,
+ * validate-fr, style-check) refuse it as UNKNOWN: 0.53 dropped
+ * `tenants.modeOff`, `apply` went red on it and put every pack back, and the
+ * key was deleted by hand in each pack before the translations could land.
+ * filex drops keys every release, so this never waits for a pack's script.
+ *
  * Pure apart from reading files; web/tests/i18n/langPacksSync.test.ts holds
  * it. docs/CONTRIBUTING.md -> Translations and language packs.
  */
@@ -88,7 +97,7 @@ export const TRANSLATOR_RULES = [
   "Follow the item's `syntax`: plain (the explorer: @ and | are ordinary characters), vue-i18n (the admin panel: write {'@'} for @, plural forms split by |, in the CLDR order of the language's categories), shared (drawn by both: no @, no | and no {'...'} at all), server (emails and public pages: {name} only).",
   "`forms_needed` lists the plural categories of the language that the English has no key for. Write a form in `forms` (\"few\": \"...\") only where the language's words change for it; a form left out shows the plain text. Every form keeps the count placeholder unless the category holds one single number and the language says it as a word.",
   'Keep `code` spans, <...> tokens, paths, environment variables and leading or trailing spaces, a trailing ... or :, as the English has them.',
-  "Write the language's own letters and punctuation: every accent, umlaut and cedilla (é, ü, ß, ñ, ç), Arabic in its own script with its own comma and question mark, and the quotation marks the glossary names. Never fall back to a plain ASCII spelling of a word.",
+  "Write the language's own letters and punctuation: every accent, umlaut and cedilla (é, ü, ß, ñ, ç), each language in its own script with its own comma and question mark, and the quotation marks the glossary names. Never fall back to a plain ASCII spelling of a word.",
   "One term per concept: a word the glossary fixes is written that way everywhere. Where the glossary is silent, use the word the pack's translation already uses for the same English term (search it), and never two words for one concept in the pack.",
   'Edit only `text` and `forms` in the worklist. The pack, its catalogue and its manifest are written by `scripts/langpacks.mjs apply`.',
 ];
@@ -234,8 +243,8 @@ export function readPack(dir) {
  *
  *   missing  keys of `next` with no text (new keys, and keys never translated)
  *   changed  keys translated for English that `next` words differently
- *   removed  keys of `prev` that `next` no longer has (the translation keeps
- *            them, `pack.mjs build` leaves them out of the manifest)
+ *   removed  keys of `prev` that `next` no longer has (nothing to translate:
+ *            `apply` and `release` drop them from the translation)
  */
 export function packDiff({ prev, next, translation }) {
   const missing = [];
@@ -407,6 +416,32 @@ export function syncedTranslation(translation, next) {
   return out;
 }
 
+/**
+ * Does filex still have `key`? A key of the catalogue `next`, or a plural
+ * form of one (`<key>_few` ...: a language writes the categories the English
+ * has no key for). The template's `pack.mjs` draws the same line (known()).
+ */
+export function knownKey(key, next) {
+  if (key in next) return true;
+  const f = FORM.exec(key);
+  return !!f && f[1] in next;
+}
+
+/** The keys of a translation filex no longer has, in the translation's order: filled or empty, they go. */
+export function staleKeys(translation, next) {
+  return Object.keys(translation).filter((k) => !knownKey(k, next));
+}
+
+/**
+ * The translation without the keys filex no longer has, everything else in
+ * its order: what `apply` and `release` write right after the pack's
+ * `pack.mjs sync`, which kept them through 0.53 (and the packs' validators
+ * refuse them). A wording worth keeping is in the pack's git history.
+ */
+export function withoutStale(translation, next) {
+  return Object.fromEntries(Object.entries(translation).filter(([k]) => knownKey(k, next)));
+}
+
 /* -- release day ------------------------------------------------------- */
 
 /** 0.1.9 -> 0.1.10. A pack moves one patch version per filex release. */
@@ -501,32 +536,38 @@ export const wrap = (text, width = 72) => {
 
 const bullet = (text) => wrap(text, 70).replace(/\n/g, '\n  ').replace(/^/, '- ');
 
-/** The message of the commit `apply` makes in a pack. */
+/**
+ * The message of the commit `apply` makes in a pack. `diff.removed`: the keys
+ * filex no longer has that the commit drops from the translation.
+ */
 export function applyMessage({ commit, version, translated, total, diff, worklist, validate, trailers = [] }) {
   const lines = [`Sync to filex ${commit}: ${num(translated)} of ${num(total)}`, ''];
   lines.push(
     wrap(
       `Catalogue refreshed from filex ${commit} (${version}) by scripts/langpacks.mjs apply, from the worklist ${worklist}. ` +
         `${diff.missing.length} string(s) translated, ${diff.changed.length} whose English changed translated again, ` +
-        `${diff.removed.length} removed with filex; the pack version stays where it is.`,
+        `${diff.removed.length} key(s) filex no longer has dropped from the translation; the pack version stays where it is.`,
     ),
   );
   lines.push('');
   if (diff.missing.length) lines.push(bullet(`Translated: ${groupKeys(diff.missing)}.`));
   if (diff.changed.length) lines.push(bullet(`English changed, translated again: ${groupKeys(diff.changed)}.`));
-  if (diff.removed.length) lines.push(bullet(`Removed with filex: ${groupKeys(diff.removed)}.`));
+  if (diff.removed.length) lines.push(bullet(`Removed with filex, dropped from the translation: ${groupKeys(diff.removed)}.`));
   lines.push('', wrap(`Validators: \`${validate}\` passed; validate-output.txt is this run's.`));
   if (trailers.length) lines.push('', ...trailers);
   return `${lines.join('\n')}\n`;
 }
 
-/** The message of the commit `release` makes in a pack. */
+/**
+ * The message of the commit `release` makes in a pack. `diff.removed`: the
+ * keys filex no longer has that the commit drops from the translation.
+ */
 export function releaseMessage({ pkgName, version, filex, diff, kept = [], validate, trailers = [] }) {
   const lines = [`${pkgName} ${version}: for filex ${filex}, the catalogue from the release tag`, ''];
   const what = [
     'no new key since the last sync',
     diff.changed.length ? `${diff.changed.length} whose English changed (kept, below)` : 'no English changed',
-    diff.removed.length ? `${diff.removed.length} key(s) filex ${filex} no longer has (${groupKeys(diff.removed, 4)})` : '',
+    diff.removed.length ? `${diff.removed.length} key(s) filex ${filex} no longer has, dropped from the translation (${groupKeys(diff.removed, 4)})` : '',
   ]
     .filter(Boolean)
     .join(', ');

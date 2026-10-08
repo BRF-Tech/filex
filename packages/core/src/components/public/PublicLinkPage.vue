@@ -26,6 +26,7 @@ import { useLocale } from '../../composables/useLocale';
 import { usePublicBranding } from '../../composables/usePublicBranding';
 import { useSystemDark } from '../../composables/useSystemDark';
 import { usePublicRequest, usePublicShare } from '../../composables/usePublicLink';
+import { loadPublicText, providePublicText, publicSentence } from '../../composables/usePublicText';
 import { hasLocale, normalizeLocaleCode } from '../../lib/uiLocales';
 import { localPref, setLocalPref } from '../../lib/prefs';
 import { detectLocale } from '../../locales/resolve';
@@ -81,7 +82,36 @@ function chooseLocale(v: string): void {
   setLocalPref('locale', code);
 }
 
-const { t, formatSize } = useLocale(() => locale.value);
+const { t } = useLocale(() => locale.value);
+
+/* ── the server's words ───────────────────────────────────────────────── */
+
+/**
+ * ⚠⚠ What this page says is the SERVER's (`server.public.*`, the table its
+ * no-JavaScript pages render): fetched for the visitor's language and handed
+ * to the shell and the bodies (composables/usePublicText). A second copy in
+ * this package's catalogue said the same limits in other words.
+ */
+const words = loadPublicText({ base: props.base ?? appBase(), locale: () => locale.value });
+providePublicText(words);
+/**
+ * The page waits for the words ONCE, on its first paint: a card drawn before
+ * they land would show its buttons blank. ⚠ Not again when the visitor picks
+ * another language - the table is swapped under the open page, so somebody
+ * three steps into an app's wizard is not sent back through "loading".
+ */
+const wordsArrived = ref(false);
+watch(
+  () => words.ready.value,
+  (v) => {
+    if (v) wordsArrived.value = true;
+  },
+  { immediate: true },
+);
+/** One server sentence, for the callbacks below (not a component's render). */
+function said(key: string, vars: Record<string, string | number> = {}): string {
+  return publicSentence(words.table.value, words.lang.value || locale.value, key, vars);
+}
 
 /* ── the instance's identity ──────────────────────────────────────────── */
 
@@ -123,18 +153,22 @@ const request =
   props.kind === 'request'
     ? usePublicRequest(props.token ?? '', {
         ...opts,
-        errorText: () => t('public.upload_failed'),
-        unansweredText: () => t('public.upload_unanswered'),
+        errorText: () => said('drop_err_generic'),
+        unansweredText: () => said('upload_unanswered'),
       })
     : null;
 
-/** The words for a file the drop page will not send (lib/dropLimits). */
+/**
+ * The words for a file the drop page will not send (lib/dropLimits) - the
+ * server's own refusal sentences (`drop_err_*`), the ones it answers the same
+ * file with, so the page says "a.pdf is too big (max 5 MB)." whether the
+ * check ran here or there.
+ */
 function refusedText(r: DropRefusal): string {
-  if (r.code === 'ext') return t('public.refused_ext', { name: r.name });
-  // The same number the limits line states, in the same units.
-  if (r.code === 'too_large') return t('public.refused_too_large', { size: formatSize(r.mb * 1_000_000) });
-  if (r.count <= 0) return t('public.request_full');
-  return t('public.refused_too_many', { count: r.count });
+  if (r.code === 'ext') return said('drop_err_ext', { name: r.name });
+  if (r.code === 'too_large') return said('drop_err_too_large', { name: r.name, mb: r.mb });
+  if (r.count <= 0) return said('request_full');
+  return said('drop_err_too_many', { count: r.count });
 }
 const link = (share ?? request)!;
 
@@ -258,7 +292,7 @@ onMounted(() => {
 
 <template>
   <PublicShell
-    :status="link.status.value"
+    :status="wordsArrived ? link.status.value : 'loading'"
     :locale="locale"
     :theme="resolvedTheme"
     :brand-name="brand.name.value"
@@ -272,6 +306,7 @@ onMounted(() => {
     :subject="subject"
     :expires-at="link.info.value?.expires_at ?? null"
     :visits-left="shareInfo?.visits_left ?? requestInfo?.uploads_left ?? null"
+    :pin-max="link.info.value?.pin_max ?? null"
     :pin-busy="link.pinBusy.value"
     :pin-failure="link.pinFailure.value"
     :lock-message="link.lockMessage.value"

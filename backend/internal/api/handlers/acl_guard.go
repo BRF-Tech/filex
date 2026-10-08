@@ -3,11 +3,13 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // aclAllowName reports whether the request's user has at least `need` on rel
@@ -135,8 +137,15 @@ func aclLockWithin(ctx context.Context, resolver *acl.Resolver, store db.Store, 
 
 // lockedAnswer writes the 423 a locked source gets: who holds the lock and
 // why, so the client can say more than "forbidden".
-func lockedAnswer(w http.ResponseWriter, l *model.AppPluginLock, rel string) {
-	body := map[string]any{"error": "locked", "message": "locked by app " + l.PluginName + ": " + rel, "plugin": l.PluginName, "path": l.Rel}
+//
+// ⚠ The sentence is the server's (lockedMessage), in the reader's language:
+// the explorer, the admin panel, WebDAV's and the CLI's reader all print the
+// same "e-Signature locked this file until 2026-10-03 14:00: signatures are
+// being collected". It used to be the English "locked by app sign: <path>",
+// which the explorer replaced with its own words and the admin panel with
+// the app's bare id (0.54 audit A3). The fields stay for a program.
+func lockedAnswer(w http.ResponseWriter, r *http.Request, l *model.AppPluginLock, rel string) {
+	body := map[string]any{"error": "locked", "message": lockedMessage(r, l), "plugin": l.PluginName, "path": l.Rel}
 	// The refusal is read by a person too (the toast says who is holding the
 	// file), so it carries the app's label beside its name — see lockView.
 	if label := lockAppLabel(l.PluginName); len(label) > 0 {
@@ -153,4 +162,47 @@ func lockedAnswer(w http.ResponseWriter, l *model.AppPluginLock, rel string) {
 		body["until"] = l.Until
 	}
 	writeJSON(w, http.StatusLocked, body)
+}
+
+// lockedMessage is a lock said in the reader's language: the app's label
+// (its manifest name when it has none, "An app" when not even that), the
+// app's own reason in the reader's language when it gave one, and the end of
+// the lock on the reader's clock.
+func lockedMessage(r *http.Request, l *model.AppPluginLock) string {
+	lang := langOf(r)
+	app := lockAppLabel(l.PluginName).Get(lang)
+	if app == "" {
+		app = l.PluginName
+	}
+	if app == "" {
+		app = srvtext.Text(lang, "server.applock.some_app", nil)
+	}
+	plain, words := lockReasonOf(l)
+	reason := words.Get(lang)
+	if reason == "" {
+		reason = plain
+	}
+	vars := srvtext.Vars{"app": app}
+	key := "server.applock.held"
+	if reason != "" {
+		key += "_reason"
+		vars["reason"] = reason
+	}
+	if l.Until != nil {
+		key += "_until"
+		vars["date"] = readerClock(r, *l.Until)
+	}
+	return srvtext.Text(lang, key, vars)
+}
+
+// readerClock is a moment as the reader's clock shows it: in the account's
+// time zone when it chose one, else UTC and saying so. Numbers only
+// (2026-10-03 14:00), which read the same in every language.
+func readerClock(r *http.Request, t time.Time) string {
+	if u := auth.UserFrom(r.Context()); u != nil && u.Timezone != "" {
+		if loc, err := time.LoadLocation(u.Timezone); err == nil {
+			return t.In(loc).Format("2006-01-02 15:04")
+		}
+	}
+	return t.UTC().Format("2006-01-02 15:04") + " UTC"
 }

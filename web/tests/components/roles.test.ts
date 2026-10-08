@@ -107,12 +107,15 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
     },
   ];
   const usersApi = {
-    list: vi.fn(async () => ({
-      items: people,
-      total: people.length,
-      page: 1,
-      page_size: 25,
-    })),
+    // The search is the server's (GET /admin/users?q=, #207): a `q` answers
+    // the accounts it matches, without one every account.
+    list: vi.fn(async (params: { q?: string } = {}) => {
+      const q = (params.q ?? "").toLowerCase();
+      const items = q
+        ? people.filter((p) => [p.email, p.username, p.display_name].some((v) => v.toLowerCase().includes(q)))
+        : people;
+      return { items, total: items.length, page: 1, page_size: 25 };
+    }),
     get: vi.fn(async (id: number) => people.find((p) => p.id === id)),
     create: vi.fn(async (b: { email: string; role: string }) => ({ id: 9, display_name: '', username: '', ...b })),
     update: vi.fn(async (id: number, b: object) => ({
@@ -126,6 +129,14 @@ const { catalogue, noDelete, roles, people, usersApi } = vi.hoisted(() => {
 });
 
 vi.mock("@/api/roles", () => ({ RolesApi: roles }));
+// The server's account check (POST /api/auth/account/check), asked while the
+// Add user form is typed (0.54 #209: the form keeps no rule of its own). A
+// unit test never reaches the network (helpers/noNetwork), so it answers here.
+const checkAccount = vi.fn(async (_q: { email?: string; username?: string; for?: string }) => ({}) as Record<string, { error: string; message: string }>);
+vi.mock('@/api/auth', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/api/auth')>();
+  return { ...real, AuthApi: { ...real.AuthApi, checkAccount: (q: { email?: string; username?: string; for?: string }) => checkAccount(q) } };
+});
 vi.mock("@/api/users", () => ({ UsersApi: usersApi }));
 vi.mock("@/api/groups", () => ({
   GroupsApi: { list: vi.fn(async () => []), forUser: vi.fn(async () => []), memberships: vi.fn(async () => ({})) },
@@ -650,13 +661,17 @@ describe("Users filter", () => {
     return s as HTMLElement;
   }
 
-  it("search narrows the list by address (the server returns every account)", async () => {
+  // 0.54 (#207): the search is the SERVER's (GET /admin/users?q=), asked
+  // once typing pauses; the page filters no address of its own.
+  it("search narrows the list by address (the server answers the matches)", async () => {
     await mountAt(Users);
     expect(shown()).toEqual(["admin@local", "demo@local", "bob@local"]);
     const box = q<HTMLInputElement>('input[placeholder="Search"]');
     box.value = "BOB";
     box.dispatchEvent(new Event("input"));
+    await new Promise((r) => setTimeout(r, 300));
     await flushPromises();
+    expect(usersApi.list).toHaveBeenLastCalledWith(expect.objectContaining({ q: "BOB" }));
     expect(shown()).toEqual(["bob@local"]);
     // …and together with the role filter.
     await choose(await filterSelect(), "custom:7");

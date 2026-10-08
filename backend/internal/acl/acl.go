@@ -116,6 +116,36 @@ type Resolver struct {
 	// no separate wiring step to forget. Nil only for a nil store (tests),
 	// where Set.Can falls back to the level check alone.
 	perms *perm.Loader
+	// vaults finds the vault folder a path is in (internal/vaultlock.Finder,
+	// AttachVaults); nil when vaults are off, and every Set it builds then
+	// answers "in no vault".
+	vaults VaultFinder
+}
+
+// VaultFinder answers which vault folder (docs/E2E-VAULT-FORMAT.md) holds a
+// path on a storage, or is it: internal/vaultlock.Finder.
+type VaultFinder interface {
+	VaultRoot(ctx context.Context, storageID int64, rel string) (root string, ok bool)
+}
+
+// AttachVaults gives every Set this resolver builds - the lock views every
+// write door hands writegate.Check (Locks), and the request sets (LoadSet) -
+// the answer to "is this path inside a vault", so writegate refuses a write
+// there whichever door it comes through. Called once at wiring, when vaults
+// are on (FILEX_E2E_VAULT).
+func (r *Resolver) AttachVaults(f VaultFinder) {
+	if r != nil {
+		r.vaults = f
+	}
+}
+
+// vaultLookup binds the resolver's finder to one request and storage, or nil.
+func (r *Resolver) vaultLookup(ctx context.Context, storageID int64) func(rel string) (string, bool) {
+	if r == nil || r.vaults == nil {
+		return nil
+	}
+	f := r.vaults
+	return func(rel string) (string, bool) { return f.VaultRoot(ctx, storageID, CleanRel(rel)) }
 }
 
 // New returns a Resolver backed by store.
@@ -163,6 +193,20 @@ type Set struct {
 	// admin short-circuit does not apply: a document under signature must
 	// not change under the signers, whoever is asking.
 	locks map[string]*model.AppPluginLock
+	// vaults answers VaultRoot for this storage (Resolver.AttachVaults); nil =
+	// in no vault.
+	vaults func(rel string) (string, bool)
+}
+
+// VaultRoot is the vault folder rel is inside of, or is - writegate.Vaults,
+// so every lock view and request set a door hands writegate.Check refuses a
+// write inside a vault. ok is false with no vault finder wired, and on a nil
+// Set.
+func (s *Set) VaultRoot(rel string) (string, bool) {
+	if s == nil || s.vaults == nil {
+		return "", false
+	}
+	return s.vaults(rel)
 }
 
 // LoadSet builds the ACL set for user u on storage s. For admins and RBAC-off
@@ -183,8 +227,9 @@ func (r *Resolver) LoadSet(ctx context.Context, u *model.User, s *model.Storage)
 	}
 	if s != nil {
 		// Locks come before the admin/RBAC-off short-circuit on purpose:
-		// they bind everyone. See loadLocks.
+		// they bind everyone. See loadLocks. So does the vault rule.
 		set.locks = r.loadLocks(ctx, s.ID)
+		set.vaults = r.vaultLookup(ctx, s.ID)
 	}
 	if u == nil || u.IsAdmin() || s == nil || !s.RBACEnabled {
 		return set, nil
@@ -243,7 +288,7 @@ func (r *Resolver) Locks(ctx context.Context, storageID int64) *Set {
 	if r == nil {
 		return nil
 	}
-	return &Set{locks: r.loadLocks(ctx, storageID)}
+	return &Set{locks: r.loadLocks(ctx, storageID), vaults: r.vaultLookup(ctx, storageID)}
 }
 
 // loadLocks reads the live locks of one storage, keyed by clean rel.

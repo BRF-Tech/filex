@@ -67,15 +67,17 @@ async function openView(page: Page, view: 'starred' | 'recent', answers: RegExp)
     page.waitForResponse((r) => answers.test(r.url()) && r.ok()),
     button.click(),
   ]);
-  // ⚠⚠ The answer above is not proof enough on its own. The explorer's mount
-  // also asks `star/list` (loadStarred, `?limit=500`, for the inline stars),
-  // and on a busy machine THAT answer can land after the click and satisfy
-  // the wait before the view has even started loading — "not busy" is then
-  // true of the OUTGOING folder, the right-click hits the folder's row, and
-  // the menu carries the folder-only Paste (measured on the merged v0.43.0
-  // tree, full suite, 1 run in 3). The view marks its panel row
-  // `aria-current="page"` in the same tick it sets `loading` (loadNavView),
-  // so once the row says so, "not busy" can only mean the view's own rows.
+  // ⚠⚠ The answer above is not proof enough on its own. Up to 0.53 the
+  // explorer's mount also asked `star/list` (`?limit=500`, for the inline
+  // stars), and on a busy machine THAT answer could land after the click and
+  // satisfy the wait before the view had even started loading — "not busy"
+  // was then true of the OUTGOING folder, the right-click hit the folder's
+  // row, and the menu carried the folder-only Paste (measured on the merged
+  // v0.43.0 tree, full suite, 1 run in 3). 0.54 (#207) asks no such list (a
+  // row says itself whether it is starred), but Home asks the same endpoint
+  // as the Starred view. The view marks its panel row `aria-current="page"`
+  // in the same tick it sets `loading` (loadNavView), so once the row says
+  // so, "not busy" can only mean the view's own rows.
   await expect(button).toHaveAttribute('aria-current', 'page');
   // The listing is `aria-busy` from the click until the rows of the answer
   // are drawn (FileExplorer `loading`, DataTable / GridView).
@@ -83,21 +85,29 @@ async function openView(page: Page, view: 'starred' | 'recent', answers: RegExp)
 }
 
 /**
- * Open Home and wait for ITS OWN answers — recent (`?limit=50`) and starred
- * (`star/list?limit=200`) — before anything on it is aimed at.
+ * Open Home and wait for ITS OWN answers — the first page of recent and of
+ * starred — before anything on it is aimed at.
  *
  * ⚠ Home draws each card's grid as soon as it has ANY list, even while a
  * fresh load is still in flight (HomeView: `v-if="shownRecent.length"` comes
  * before the loading line), and swaps the fresh rows in when they land. So a
- * card can be on screen from earlier data and be redrawn a moment later. The
- * limits are matched exactly because the explorer also asks
- * `star/list?limit=500` for its inline stars, which would satisfy a looser
- * wait without saying anything about Home (the trap openView's note names).
+ * card can be on screen from earlier data and be redrawn a moment later.
+ *
+ * 0.54 (#207): Home asks the views' own pages (FileExplorer fetchNavRows,
+ * `?limit=<page>&offset=0`) — the `?limit=50` / `?limit=200` this used to
+ * match are gone, and so is the explorer's `star/list?limit=500` a loose wait
+ * had to be kept from. The first page is matched by its `offset=0`, the page
+ * size left to the explorer.
  */
 async function openHome(page: Page) {
+  const firstPage = (r: { url(): string; ok(): boolean }, path: string) => {
+    if (!r.ok()) return false;
+    const u = new URL(r.url());
+    return u.pathname.endsWith(path) && u.searchParams.get('offset') === '0';
+  };
   await Promise.all([
-    page.waitForResponse((r) => /\/api\/files\/manager\/recent\?limit=50\b/.test(r.url()) && r.ok()),
-    page.waitForResponse((r) => /\/api\/files\/manager\/star\/list\?limit=200\b/.test(r.url()) && r.ok()),
+    page.waitForResponse((r) => firstPage(r, '/api/files/manager/recent')),
+    page.waitForResponse((r) => firstPage(r, '/api/files/manager/star/list')),
     page.getByTestId('sidenav-view-home').click(),
   ]);
   await expect(page.getByTestId('home-view')).toBeVisible();
@@ -111,9 +121,9 @@ async function menuVerbsOn(page: Page, scope: ReturnType<Page['locator']>) {
   await expect(row).toBeVisible();
   /*
    * ⚠⚠ The row must have STOPPED MOVING before the pointer lands on it, and
-   * "visible" does not say that. A virtual view re-renders when the inline
-   * star list (`star/list?limit=500`, the request openView's note above
-   * already names) answers AFTER the view's own rows are drawn: the row slides
+   * "visible" does not say that. A virtual view re-rendered when the inline
+   * star list (`star/list?limit=500`, up to 0.53, the request openView's note
+   * above names) answered AFTER the view's own rows were drawn: the row slides
    * out from under the click, the contextmenu handler finds nothing selected,
    * and the EMPTY-BACKGROUND menu opens instead — in Starred that menu is one
    * item, so the failure reads "menu lacks /^rename$/i — got [Show hidden

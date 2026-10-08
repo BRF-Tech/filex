@@ -11,15 +11,16 @@
  * is two places for the `is-static` class to be forgotten, and a row that looks
  * clickable and is not is exactly the defect this rule exists to kill.
  *
- * ⚠ The verdict itself is not taken locally: `isNotificationClickable` lives
- * in `lib/notificationTarget.ts`, which the browser toast and the desktop
- * shell import too. This file decides how the answer LOOKS, never what it is.
+ * ⚠ The verdict itself is not taken locally: the SERVER says it on every row
+ * (`opens`, backend notify.Opens - the rule a push follows too), read through
+ * `rowOpens` in `lib/notificationTarget.ts`, which the browser toast uses too.
+ * This file decides how the answer LOOKS, never what it is.
  */
 import { computed } from 'vue';
 
 import { formatWhen, useLocale } from '../composables/useLocale';
 import { useNotificationText } from '../composables/useNotificationText';
-import { isNotificationClickable } from '../lib/notificationTarget';
+import { rowOpens } from '../lib/notificationTarget';
 import type { NotificationRowData } from '../composables/useNotificationFeed';
 
 const props = defineProps<{
@@ -30,14 +31,14 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'open', item: NotificationRowData): void }>();
 
 const { t } = useLocale(() => props.locale);
-// ⚠ The same renderer as the browser toast and the desktop shell. A row's
-// stored title is written once, on the server, in one language — and for most
-// file events it is not written at all, so what a raw render shows is the
-// event id (`share.created`). The sentence is composed by the READER.
-const { notificationText } = useNotificationText(() => props.locale);
+// ⚠ The SERVER's words: the row arrives with its title and body said in this
+// reader's language (backend notify say.go) - what the page's pop-up, the
+// desktop app's toast and a push to their phone say too. Nothing here
+// composes a sentence; an encrypted item is named where this tab can.
+const { notificationText } = useNotificationText();
 
 const text = computed(() => notificationText(props.item));
-const clickable = computed(() => isNotificationClickable(props.item.target));
+const clickable = computed(() => rowOpens(props.item));
 const unread = computed(() => !props.item.read_at);
 /** THE date format of the product (core formatWhen), with the clock. */
 const when = computed(() => formatWhen(props.item.created_at, props.locale, { time: true }) || '-');

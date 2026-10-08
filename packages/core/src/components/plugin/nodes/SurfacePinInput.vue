@@ -3,12 +3,17 @@
  * SurfacePinInput — a plugin surface's `pin-input` node: a short code, 4..8
  * characters, into `data.values[id]`. One input with the browser's one-time
  * code affordances rather than N boxes: paste works, screen readers read one
- * field, and the length is enforced by the same line that draws it.
+ * field.
+ *
+ * ⚠ The length is the HOST's: the server writes every `pin-input` node's
+ * `length` (clamped to the contract's 4..8, 6 when the app named none;
+ * wasmplugin.PinLength) before the screen leaves it, and refuses a code of
+ * any other length at submit in its own words. This box only draws that
+ * number — it does not decide it.
  */
 import { computed } from 'vue';
 import type { LocaleCode } from '../../../types/ExplorerConfig';
 import { useLocale } from '../../../composables/useLocale';
-import { pinLength } from '../../../lib/surfaceValues';
 
 const props = defineProps<{
   id: string;
@@ -25,7 +30,11 @@ const emit = defineEmits<{
 
 const { t } = useLocale(() => props.locale);
 
-const len = computed(() => pinLength(props.length));
+/** The host's length; nothing to hold the box to when a node carries none. */
+const len = computed<number | undefined>(() => {
+  const n = Number(props.length);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+});
 
 function onInput(ev: Event) {
   const raw = (ev.target as HTMLInputElement).value.replace(/\s+/g, '').slice(0, len.value);

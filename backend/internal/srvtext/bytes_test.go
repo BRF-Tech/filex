@@ -26,3 +26,11 @@ func TestBytes_AUnitWordComesFromThePack(t *testing.T) {
 	withPacks(t, StaticPacks{"fr": {"server.unit.mb": "Mo"}})
 	assert.Equal(t, "1,5 Mo", Bytes("fr", 1_500_000))
 }
+
+// A count in a sentence the server writes for the desktop (the sync engine's
+// event stream, #213) is grouped the way the window grouped it.
+func TestNumber_TheLanguagesGrouping(t *testing.T) {
+	assert.Equal(t, "48,211", Number("en", 48211))
+	assert.Equal(t, "48.211", Number("tr", 48211))
+	assert.Equal(t, "7", Number("tr", 7))
+}

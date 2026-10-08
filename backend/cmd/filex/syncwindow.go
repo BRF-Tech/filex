@@ -1,10 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // syncWindow is the `--window HH:MM-HH:MM` of `filex sync run`: the part of
@@ -17,8 +22,27 @@ type syncWindow struct {
 	start, end int // minutes after midnight
 }
 
-// parseSyncWindow reads "HH:MM-HH:MM". An empty string is no window (any
-// time), returned as nil.
+// windowError is a window parseSyncWindow refuses: input as given, and
+// whether it was refused for starting where it ends (empty) rather than for
+// not being HH:MM-HH:MM. Its text is the English line the CLI always said;
+// the event stream and `filex sync window --json` say it in the reader's
+// language from the two cases (syncevents.go).
+type windowError struct {
+	input string
+	empty bool
+	msg   string
+}
+
+func (e *windowError) Error() string { return e.msg }
+
+// parseSyncWindow reads "HH:MM-HH:MM" (an hour may have one digit, and
+// spaces around the parts are allowed: " 7:00 - 9:00 "). An empty string is
+// no window (any time), returned as nil.
+//
+// ⚠ The ONLY reader of a window: the desktop app asks `filex sync window
+// --json` (judgeSyncWindow) instead of keeping a parser of its own, which
+// was stricter than this one and showed "no window" for a window the engine
+// ran with (B17).
 func parseSyncWindow(s string) (*syncWindow, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -26,18 +50,19 @@ func parseSyncWindow(s string) (*syncWindow, error) {
 	}
 	a, b, ok := strings.Cut(s, "-")
 	if !ok {
-		return nil, fmt.Errorf("bad --window %q: want HH:MM-HH:MM", s)
+		return nil, &windowError{input: s, msg: fmt.Sprintf("bad --window %q: want HH:MM-HH:MM", s)}
 	}
 	start, err := parseClock(a)
 	if err != nil {
-		return nil, fmt.Errorf("bad --window %q: %w", s, err)
+		return nil, &windowError{input: s, msg: fmt.Sprintf("bad --window %q: %v", s, err)}
 	}
 	end, err := parseClock(b)
 	if err != nil {
-		return nil, fmt.Errorf("bad --window %q: %w", s, err)
+		return nil, &windowError{input: s, msg: fmt.Sprintf("bad --window %q: %v", s, err)}
 	}
 	if start == end {
-		return nil, fmt.Errorf("bad --window %q: it starts where it ends; leave it out to sync at any time", s)
+		return nil, &windowError{input: s, empty: true,
+			msg: fmt.Sprintf("bad --window %q: it starts where it ends; leave it out to sync at any time", s)}
 	}
 	return &syncWindow{start: start, end: end}, nil
 }
@@ -102,4 +127,54 @@ func (w *syncWindow) opensAfter(t time.Time) time.Time {
 		start = start.AddDate(0, 0, 1)
 	}
 	return start
+}
+
+// syncWindowCmd is `filex sync window [HH:MM-HH:MM]`: the engine's own judgement
+// of a --window - whether it accepts it, its canonical form, and when it opens
+// or closes next. With --json it is what the desktop app asks before storing
+// a window (desktop/src/sync.ts checkWindow); without, a line for a person.
+func syncWindowCmd(langArg *string) *cobra.Command {
+	var asJSON bool
+	c := &cobra.Command{
+		Use:   "window [HH:MM-HH:MM]",
+		Short: "Check a sync window (--window of `sync run`) and say when it opens and closes",
+		Long: "Reads a sync window the way `filex sync run --window` does - local time,\n" +
+			"the end exclusive, a window ending earlier than it starts runs over\n" +
+			"midnight, an hour may have one digit (7:00-9:00) - and says whether it is\n" +
+			"open now and when it opens or closes next. No window (an empty argument)\n" +
+			"is any time.\n\n" +
+			"With --json the answer is one JSON object: ok, window (the canonical\n" +
+			"HH:MM-HH:MM to store), start, end, over_midnight, open, opens_at or\n" +
+			"closes_at (RFC 3339), and code/params/message (the message in the --lang\n" +
+			"language). A refused window is ok:false with code window.bad or\n" +
+			"window.empty, and the command still exits 0.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			spec := ""
+			if len(args) == 1 {
+				spec = args[0]
+			}
+			ans := judgeSyncWindow(spec, nowFunc(), srvtext.Pick(langWant(*langArg)))
+			out := cmd.OutOrStdout()
+			if asJSON {
+				enc := json.NewEncoder(out)
+				enc.SetEscapeHTML(false)
+				enc.SetIndent("", "  ")
+				return enc.Encode(ans)
+			}
+			switch {
+			case !ans.OK:
+				return ans.err
+			case ans.Window == "":
+				fmt.Fprintln(out, "No sync window: sync runs at any time.")
+			case ans.Open:
+				fmt.Fprintf(out, "%s: open now; closes at %s.\n", ans.Window, ans.End)
+			default:
+				fmt.Fprintf(out, "%s: closed now; opens at %s.\n", ans.Window, ans.Start)
+			}
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&asJSON, "json", false, "print the answer as JSON")
+	return quiet(c)
 }

@@ -33,19 +33,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { test, expect, type Page } from '@playwright/test';
-import { loginAs } from '../helpers/auth';
+import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { apiLogin, loginAs } from '../helpers/auth';
 import { seedLocalStorage, dropStorageByName, storageRoot } from '../helpers/seed';
 
 const STORAGE = `e2e-symlink-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORAGE}`;
 
 /** The link states the wire may carry. `unknown` is the client's word for a
- *  `symlink: true` row with no `link_state` — what the DB-backed listing sends
- *  once a storage has been scanned, because `model.Node` has no column for it. */
+ *  `symlink: true` row with no `link_state`: a row catalogued before 0.54
+ *  until its folder's next scan, or a driver that gives no reason. Since 0.54
+ *  the scan records the reason with the row (migration 00098), so the listing
+ *  the catalogue answers names it too - the last test below holds that. */
 const STATES = ['outside_root', 'broken', 'unresolved', 'unknown'];
 
 let canSymlink = true;
+let storageId = 0;
 
 test.beforeAll(async ({ request }) => {
   await dropStorageByName(request, STORAGE);
@@ -74,7 +77,7 @@ test.beforeAll(async ({ request }) => {
     return;
   }
 
-  await seedLocalStorage(request, STORAGE, MOUNT);
+  storageId = (await seedLocalStorage(request, STORAGE, MOUNT)).id;
 });
 
 test.afterAll(async ({ request }) => {
@@ -92,6 +95,26 @@ async function openStorage(page: Page) {
 
 const rowFor = (page: Page, name: string) =>
   page.locator(`[data-fe-path="${STORAGE}://${name}"]`).first();
+
+/** Starts a full scan of the storage and waits for a run that had not finished
+ *  before it to finish "ok" (the 180-thumbnails pattern). ⚠ A run still
+ *  walking when this starts counts: the storage is `fsnotify`, and "Scan now"
+ *  answers 202 without a new run while one is already walking. */
+async function scanAndWait(request: APIRequestContext, id: number) {
+  const runs = async () => {
+    const res = await request.get(`/api/admin/storages/${id}/sync-runs?limit=50`);
+    expect(res.ok()).toBeTruthy();
+    return ((await res.json()) as { entries?: Array<{ id: number; status: string }> }).entries ?? [];
+  };
+  const before = new Set((await runs()).filter((r) => r.status !== 'running').map((r) => r.id));
+  const started = await request.post(`/api/admin/storages/${id}/sync`);
+  expect(started.status(), await started.text()).toBeLessThan(300);
+  await expect
+    .poll(async () => (await runs()).find((r) => !before.has(r.id) && r.status !== 'running')?.status ?? 'pending', {
+      timeout: 60_000,
+    })
+    .toBe('ok');
+}
 
 test.describe('A symlink filex will not follow', () => {
   test('is badged, and the badge carries the reason in full', async ({ page }) => {
@@ -160,5 +183,32 @@ test.describe('A symlink filex will not follow', () => {
     test.skip(!canSymlink, 'this host cannot create symlinks');
     await openStorage(page);
     await expect(rowFor(page, 'plain.txt').getByTestId('symlink-badge')).toHaveCount(0);
+  });
+
+  // ⚠⚠ The steady state. Once the storage has been scanned its folders are
+  // answered by the catalogue, and until 0.54 the catalogue kept only THAT a
+  // row is a link filex will not follow: the badge that said "Outside storage"
+  // before the first scan said the general "Link" every day after it. The scan
+  // now records the reason with the row (migration 00098).
+  test('after the storage is scanned, the badge still names the reason', async ({ page, request }) => {
+    test.skip(!canSymlink, 'this host cannot create symlinks');
+    test.setTimeout(90_000);
+    await apiLogin(request);
+    await scanAndWait(request, storageId);
+
+    // The wire first: the catalogue's listing carries the reason.
+    const res = await request.get(`/api/files/manager?action=index&path=${encodeURIComponent(`${STORAGE}://`)}`);
+    expect(res.ok(), await res.text()).toBeTruthy();
+    const body = (await res.json()) as { files?: Array<{ basename: string; symlink?: boolean; link_state?: string }> };
+    const escape = body.files?.find((f) => f.basename === 'escape');
+    expect(escape?.symlink, 'the out-of-root link is listed and flagged').toBe(true);
+    expect(escape?.link_state, 'the scanned listing dropped the reason').toBe('outside_root');
+
+    // Then the screen: the reason, not the general word.
+    await openStorage(page);
+    const badge = rowFor(page, 'escape').getByTestId('symlink-badge');
+    await expect(badge).toHaveAttribute('data-link-state', 'outside_root');
+    await expect(badge).toContainText('Outside storage');
+    expect(await badge.getAttribute('aria-label')).toContain('Follow symlinks that leave this folder');
   });
 });

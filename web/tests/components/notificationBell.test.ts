@@ -11,8 +11,12 @@
 //      left of the avatar — not a second bell (a duplicate list of the same rows
 //      is how the two start to disagree).
 //   2. The count is on the button, in its accessible name as well.
-//   3. A row says what happened in the reader's language — never a raw event
-//      key like `share.created`, which is what the bell used to print.
+//   3. A row shows the words the SERVER said for it (#191, backend notify
+//      say.go: the list answers each row already said in the language the
+//      screen asked in). The bell used to print a raw event key like
+//      `share.created`, and later composed its own sentence from the event and
+//      its meta; it now composes nothing - an item inside an encrypted folder
+//      is named in the place the server marked, where this tab can name it.
 //   4. Clicking a row goes to its target (*"tıklandığında yollarına gitmesini
 //      istiyorum"*) and marks it read — for a non-admin.
 //   5. The two things a non-admin must NOT be sent to: "View all" (the admin
@@ -30,6 +34,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 import { createMemoryHistory, createRouter } from 'vue-router';
 
+import { notificationText } from '@brftech/filex-core/src/lib/notificationText';
 import NotificationBell from '@/components/NotificationBell.vue';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationsStore } from '@/stores/notifications';
@@ -62,7 +67,7 @@ function row(p: Partial<NotificationItem>): NotificationItem {
     id: 1,
     event: 'file.uploaded',
     severity: 'info',
-    title: 'file.uploaded',
+    title: 'New file',
     body: '',
     meta: {},
     webhook_status: 'skipped' as NotificationItem['webhook_status'],
@@ -70,6 +75,52 @@ function row(p: Partial<NotificationItem>): NotificationItem {
     read_at: null,
     ...p,
   };
+}
+
+/**
+ * A file that arrived, as the list answers it: the facts (event, meta,
+ * target) and the sentence the SERVER said for them, in `lang` (backend
+ * notify say.go, `server.notify.file.uploaded.*`).
+ */
+function arrived(id: number, name: string, lang: 'en' | 'tr' = 'en', p: Partial<NotificationItem> = {}): NotificationItem {
+  return row({
+    id,
+    event: 'file.uploaded',
+    title: lang === 'tr' ? `Yeni dosya: ${name}` : `New file: ${name}`,
+    body: `/${name}`,
+    meta: { node: { name, path: `/${name}` } },
+    ...p,
+  });
+}
+
+/**
+ * The rows the fake server holds, each said in `lang` - the language of the
+ * reader's account, which the real server reads itself (the request names
+ * none; that is held in tests/stores/notificationFeed.test.ts). A test names
+ * the language its account reads in.
+ */
+function serverRows(lang: 'en' | 'tr' = 'en'): NotificationItem[] {
+  const turkish = lang === 'tr';
+  return [
+    arrived(67, 'olcum.txt', lang, {
+      body: '/agentbell-olcum2/olcum.txt',
+      target: { kind: 'file', storage: 'qldemo', path: 'agentbell-olcum2/olcum.txt' },
+      meta: { node: { name: 'olcum.txt', path: '/agentbell-olcum2/olcum.txt' } },
+    }),
+    row({
+      id: 66,
+      event: 'share.created',
+      title: turkish ? 'Paylaşım bağlantısı oluşturuldu' : 'Share link created',
+      target: { kind: 'share', id: 'abc' },
+    }),
+    row({
+      id: 51,
+      event: 'update_available',
+      title: turkish ? 'filex v0.39.1 yayınlandı' : 'filex v0.39.1 is available',
+      body: turkish ? 'Bu sunucu v0.39.0 sürümünde çalışıyor.' : 'This server runs v0.39.0.',
+      meta: { version: 'v0.39.1', current: 'v0.39.0' },
+    }),
+  ];
 }
 
 const USER: User = {
@@ -133,17 +184,7 @@ function shownTitles(): string[] {
 beforeEach(() => {
   markRead.mockClear();
   listCalls.mockClear();
-  rows = [
-    row({
-      id: 67,
-      event: 'file.uploaded',
-      title: 'file.uploaded',
-      target: { kind: 'file', storage: 'qldemo', path: 'agentbell-olcum2/olcum.txt' },
-      meta: { node: { name: 'olcum.txt', path: '/agentbell-olcum2/olcum.txt' } },
-    }),
-    row({ id: 66, event: 'share.created', title: 'share.created', target: { kind: 'share', id: 'abc' } }),
-    row({ id: 51, event: 'update_available', title: 'filex v0.39.1 available', body: 'policy is manual' }),
-  ];
+  rows = serverRows('en');
 });
 
 describe('Explore puts the existing bell in its header', () => {
@@ -169,20 +210,52 @@ describe('NotificationBell', () => {
     expect(w.find('[data-testid="notification-bell"]').attributes('aria-label')).toBe('Notifications - 3 unread');
   });
 
-  it('lists what happened in words, never a raw event key — in both languages', async () => {
+  it('lists the words the server said, in the language it was asked in - both languages', async () => {
     for (const locale of ['en', 'tr'] as const) {
+      rows = serverRows(locale);
       const { w } = await setup({ locale });
       await openPanel(w);
       const panel = document.body.querySelector('[data-testid="notification-panel"]');
       expect(panel, 'the panel did not open').not.toBeNull();
       // Teleported: it must not live inside the header, whose `.fe` clips it.
       expect(panel!.parentElement).toBe(document.body);
-      const titles = Array.from(panel!.querySelectorAll('.fx-nrow__title')).map((e) => e.textContent!.trim());
-      expect(titles).toHaveLength(3);
-      for (const t of titles) expect(t).not.toMatch(/^[a-z_]+\.[a-z_.]+$/);
-      expect(titles[0]).toBe(locale === 'tr' ? 'Yeni dosya: olcum.txt' : 'New file: olcum.txt');
+      expect(shownTitles()).toEqual(rows.map((r) => r.title));
+      expect(shownTitles()[0]).toBe(locale === 'tr' ? 'Yeni dosya: olcum.txt' : 'New file: olcum.txt');
+      const bodies = Array.from(panel!.querySelectorAll('.fx-nrow__body-text')).map((e) => e.textContent!.trim());
+      expect(bodies).toEqual(rows.filter((r) => r.body).map((r) => r.body));
       unmountAll();
     }
+  });
+
+  it('shows the server’s title and body as they are - it composes nothing from the event or its meta', async () => {
+    // ⚠ Red on the code before #191: the bell composed its own sentence from
+    // `event` and `meta` (core lib/notificationText renderNotification), and
+    // fell back on the row's title only for an event its phrase table did not
+    // know. The facts still travel with the row; here
+    // they disagree with the words on purpose, so a screen that composed from
+    // them would say "other.txt".
+    rows = [
+      row({
+        id: 70,
+        event: 'file.uploaded',
+        title: 'Yeni dosya: olcum.txt',
+        body: '/agentbell-olcum2/olcum.txt',
+        target: { kind: 'file', storage: 'qldemo', path: 'agentbell-olcum2/olcum.txt' },
+        meta: { node: { name: 'other.txt', path: '/elsewhere/other.txt' } },
+      }),
+      // An event no catalogue on this side knows: its words are still shown.
+      row({ id: 71, event: 'future.kind', title: 'Something new happened', body: 'in Belgeler' }),
+    ];
+    const { w } = await setup({ locale: 'tr' });
+    await openPanel(w);
+    const onScreen = Array.from(document.body.querySelectorAll<HTMLElement>('[data-testid="notification-row"]'));
+    expect(onScreen).toHaveLength(2);
+    expect(onScreen[0].querySelector('.fx-nrow__title')!.textContent!.trim()).toBe('Yeni dosya: olcum.txt');
+    expect(onScreen[0].querySelector('.fx-nrow__body-text')!.textContent!.trim()).toBe('/agentbell-olcum2/olcum.txt');
+    expect(onScreen[0].textContent).not.toContain('other.txt');
+    expect(onScreen[1].querySelector('.fx-nrow__title')!.textContent!.trim()).toBe('Something new happened');
+    expect(onScreen[1].querySelector('.fx-nrow__body-text')!.textContent!.trim()).toBe('in Belgeler');
+    expect(onScreen[1].textContent).not.toContain('future.kind');
   });
 
   it('a click goes to the file, in its folder, with the row selected — and marks it read', async () => {
@@ -230,10 +303,7 @@ describe('NotificationBell', () => {
     await flushPromises();
     expect(document.body.querySelector('[data-testid="notification-panel"]')).toBeNull();
 
-    rows = [
-      row({ id: 68, event: 'file.uploaded', meta: { node: { name: 'arrived.txt', path: '/arrived.txt' } } }),
-      ...rows,
-    ];
+    rows = [arrived(68, 'arrived.txt'), ...rows];
     await openPanel(w);
     expect(shownTitles()).toHaveLength(4);
     expect(shownTitles()[0]).toBe('New file: arrived.txt');
@@ -246,10 +316,7 @@ describe('NotificationBell', () => {
     await openPanel(w);
     expect(shownTitles()).toHaveLength(3);
 
-    rows = [
-      row({ id: 69, event: 'file.uploaded', meta: { node: { name: 'live.txt', path: '/live.txt' } } }),
-      ...rows,
-    ];
+    rows = [arrived(69, 'live.txt'), ...rows];
     // What the App-level watcher runs every 15 s.
     await notif.syncUnread();
     await flushPromises();
@@ -304,5 +371,64 @@ describe('NotificationBell', () => {
     const manage = document.body.querySelector<HTMLAnchorElement>('[data-testid="notification-manage"]');
     expect(manage).not.toBeNull();
     expect(manage!.getAttribute('href')).toBe('/admin/notifications');
+  });
+});
+
+describe('core notificationText - the server’s words, with an encrypted name where this tab can say it', () => {
+  // #191: the server says every row, and inside an end-to-end encrypted folder
+  // it has only scrambled names, so it says "🔒 Encrypted item" and marks where
+  // each name stands (`e2e`). The one thing a screen still does is put the real
+  // name in that place when its explorer has the folder unlocked. ⚠ Red on the
+  // code before: lib/notificationText exported a phrase table and a renderer,
+  // and no `notificationText`.
+  it('names the item in the places the server marked, and otherwise shows the plain words', () => {
+    const LOCKED = '🔒 Encrypted item';
+    const wire = 'qldemo://Kasa/9fQx/Zr2k';
+    const root = 'qldemo://Kasa';
+    const said = {
+      event: 'file.uploaded',
+      title: `New file: ${LOCKED}`,
+      body: `Kasa/…/${LOCKED}`,
+      // The facts disagree with the words on purpose: nothing may be built from them.
+      meta: { node: { name: 'other.txt', path: 'Elsewhere/other.txt' } },
+      e2e: {
+        title: [{ text: 'New file: ' }, { name: 0 }],
+        body: [{ name: 1 }],
+        names: [
+          { wire, root, part: 'name', locked: LOCKED },
+          { wire, root, part: 'path', locked: `Kasa/…/${LOCKED}` },
+        ],
+      },
+    };
+    const plain = { title: said.title, body: said.body };
+
+    // A tab that has the folder unlocked: the real name and path, in the server's sentence.
+    const asked: Array<[string, string]> = [];
+    const unlocked = (w: string, r: string) => {
+      asked.push([w, r]);
+      return { name: 'maaslar.xlsx', path: 'Kasa/Bordro/maaslar.xlsx' };
+    };
+    expect(notificationText(said, unlocked)).toEqual({ title: 'New file: maaslar.xlsx', body: 'Kasa/Bordro/maaslar.xlsx' });
+    expect(asked).toContainEqual([wire, root]);
+
+    // No resolver, a folder this tab has not unlocked, a resolver that fails:
+    // the server's words, as they are.
+    expect(notificationText(said)).toEqual(plain);
+    expect(notificationText(said, () => null)).toEqual(plain);
+    expect(
+      notificationText(said, () => {
+        throw new Error('locked');
+      }),
+    ).toEqual(plain);
+
+    // A row with no `e2e` is its title and body, whatever the resolver knows.
+    const ordinary = { event: 'share.created', title: 'Share link created', body: '', meta: { node: { name: 'x.txt' } } };
+    expect(notificationText(ordinary, unlocked)).toEqual({ title: 'Share link created', body: '' });
+
+    // ⚠ Nothing is composed from the event or its meta: a row the server said
+    // no words for has none on this side either.
+    const unsaid = { event: 'file.uploaded', meta: { node: { name: 'rapor.pdf', path: 'Belgeler/rapor.pdf' } } };
+    expect(notificationText(unsaid)).toEqual({ title: '', body: '' });
+    expect(notificationText(unsaid, unlocked)).toEqual({ title: '', body: '' });
   });
 });

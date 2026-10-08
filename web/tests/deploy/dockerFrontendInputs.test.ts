@@ -37,10 +37,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const REPO = path.resolve(__dirname, '../../..');
+// Every package's config, found rather than listed: the images build them all
+// (`pnpm -r --filter='./packages/*' build`), and a fixed list had missed
+// packages/app-ui until 0.54 gave every config an import from scripts/.
 const BUILD_CONFIGS = [
-  'packages/core/vite.config.ts',
-  'packages/webcomponent/vite.config.ts',
-  'packages/react/vite.config.ts',
+  ...fs
+    .readdirSync(path.join(REPO, 'packages'))
+    .map((d) => `packages/${d}/vite.config.ts`)
+    .filter((c) => fs.existsSync(path.join(REPO, c))),
   'web/vite.config.ts',
 ];
 const IMAGES = ['docker/Dockerfile', 'docker/Dockerfile.slim'];
@@ -154,9 +158,20 @@ describe('the Docker images build the frontend from what they copy', () => {
   it('the build configs reach files outside packages/ and web/ (the fixture is live)', () => {
     // Without this the loop below could pass on an empty list: a traversal
     // broken by a refactor would find nothing and call every image complete.
+    expect(BUILD_CONFIGS).toEqual(
+      expect.arrayContaining([
+        'packages/app-ui/vite.config.ts',
+        'packages/core/vite.config.ts',
+        'packages/react/vite.config.ts',
+        'packages/webcomponent/vite.config.ts',
+        'web/vite.config.ts',
+      ]),
+    );
     expect(outsideInputs()).toEqual(
       expect.arrayContaining([
         'scripts/vite-fonts-as-files.mjs',
+        // 0.54: every package's dts() fails the build on a diagnostic
+        'scripts/vite-dts-strict.mjs',
         'scripts/lib/i18n-catalogue.mjs',
         'scripts/lib/i18n-catalogue.d.mts',
         'backend/internal/srvtext/locales/',

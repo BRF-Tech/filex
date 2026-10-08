@@ -89,7 +89,12 @@ func newHarnessCfg(t *testing.T, multiTenant bool, tweak func(*s3api.Config)) *h
 		store = tenantstore.New(store)
 	}
 
-	res := protocolauth.New(store, acl.New(store), multiTenant)
+	// ONE ACL resolver for the sign-in and the gateway, as production shares
+	// d.ACL between them (api/routes.go): a principal's sets are built by the
+	// sign-in's, so a rule attached to the gateway's alone (the vault's,
+	// Resolver.AttachVaults) would never reach a request.
+	aclRes := acl.New(store)
+	res := protocolauth.New(store, aclRes, multiTenant)
 	box, err := secretbox.New("test-environment-secret-key")
 	if err != nil {
 		t.Fatalf("secretbox: %v", err)
@@ -102,7 +107,7 @@ func newHarnessCfg(t *testing.T, multiTenant bool, tweak func(*s3api.Config)) *h
 		Enabled:     true,
 		Store:       store,
 		Auth:        res,
-		ACL:         acl.New(store),
+		ACL:         aclRes,
 		E2EPolicy:   e2epolicy.New(e2epolicy.Options{Store: store, ACL: acl.New(store), MultiTenant: multiTenant}),
 		MultiTenant: multiTenant,
 		Domain:      "s3.filex.test",

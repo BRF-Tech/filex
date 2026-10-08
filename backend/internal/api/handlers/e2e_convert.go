@@ -62,17 +62,26 @@ func readSmall(ctx context.Context, drv storage.Driver, rel string) []byte {
 }
 
 // e2eConversionContext marks ctx so the overwrite it guards keeps no version
-// — when, and only when, the write is a conversion write:
+// — when, and only when, the write is a conversion write by somebody who may
+// drop the folder's history:
 //
 //   - the client asked for it (`e2e_convert=1`);
 //   - the file is inside an encrypted folder whose key file says a
 //     conversion is under way;
 //   - the bytes it replaces are plaintext (no `filexe2e` magic), and the
-//     bytes it writes are ciphertext (the magic).
+//     bytes it writes are ciphertext (the magic);
+//   - the writer may delete the folder's versions anyway
+//     (e2eMayDropHistory: its owner or an administrator, as for the cleanup).
 //
 // Anything else is an ordinary overwrite and keeps its version as always: the
 // flag cannot be used to overwrite history anywhere else.
-func e2eConversionContext(ctx context.Context, store db.Store, drv storage.Driver, storageID int64, rel string, requested bool, newHead []byte) context.Context {
+//
+// ⚠ The key file's `conv.pending` is the CLIENT's word - anybody who may write
+// the folder may write a key file that says it - so it only says which writes
+// a conversion makes; the right to keep no version is the server's to decide,
+// from who is writing. Up to 0.53 the flag was enough, and an editor who did
+// not own a folder could overwrite its files with no version kept.
+func e2eConversionContext(ctx context.Context, store db.Store, resolver *acl.Resolver, drv storage.Driver, storageID int64, rel string, requested bool, newHead []byte) context.Context {
 	if !requested || drv == nil || store == nil || !e2e.HasMagicPrefix(newHead) {
 		return ctx
 	}
@@ -88,7 +97,27 @@ func e2eConversionContext(ctx context.Context, store db.Store, drv storage.Drive
 	if len(old) == 0 || e2e.HasMagicPrefix(old) {
 		return ctx
 	}
+	if !e2eMayDropHistory(ctx, store, resolver, storageID, root) {
+		return ctx
+	}
 	return versioning.WithoutSnapshot(ctx)
+}
+
+// e2eMayDropHistory is the right to remove an encrypted folder's history for
+// good - the one POST /api/files/e2e/cleanup asks before it deletes versions:
+// the folder's owner or an administrator, a token that may `delete`, and
+// files.purge on the folder.
+func e2eMayDropHistory(ctx context.Context, store db.Store, resolver *acl.Resolver, storageID int64, root string) bool {
+	actor := auth.UserFrom(ctx)
+	if actor == nil || !auth.TokenAllows(ctx, auth.VerbDelete) {
+		return false
+	}
+	owner := encryptedRootOwner(ctx, store, storageID, root)
+	mine := owner != nil && *owner == actor.ID
+	if !mine && !actor.IsAdmin() {
+		return false
+	}
+	return aclCanID(ctx, resolver, store, storageID, root, perm.FilesPurge).ok
 }
 
 // ── cleanup ────────────────────────────────────────────────────────────────

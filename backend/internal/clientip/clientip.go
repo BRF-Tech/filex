@@ -389,6 +389,19 @@ func ProxyItself(r *http.Request) bool {
 	return r.Header.Get("X-Forwarded-For") == "" && r.Header.Get("X-Real-IP") == "" && r.Header.Get("Forwarded") == ""
 }
 
+// PeerTrusted reports whether the socket's peer is a trusted proxy: the only
+// sender whose X-Forwarded-* headers are believed (X-Forwarded-Proto as much
+// as X-Forwarded-For). Unlike ProxyItself it does not ask whether the request
+// was forwarded - a proxy passing a visitor's request on is exactly the
+// sender whose X-Forwarded-Proto says how the visitor arrived.
+func PeerTrusted(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	peer, ok := parseHostPort(r.RemoteAddr)
+	return ok && trusted().Contains(peer)
+}
+
 func forwardedChain(r *http.Request) []string {
 	var out []string
 	for _, line := range r.Header.Values("X-Forwarded-For") {

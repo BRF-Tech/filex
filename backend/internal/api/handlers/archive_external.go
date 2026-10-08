@@ -310,7 +310,7 @@ func (a *Archive) Create(w http.ResponseWriter, r *http.Request) {
 		if err := packSourceRefusal(r.Context(), a.ACL, a.Store, storageID, rel); err != nil {
 			var pr *packRefusal
 			if !errors.As(err, &pr) {
-				answerGate(w, err)
+				answerGate(w, r, err)
 				return
 			}
 			if !pr.v.WritePerm(w, r) {

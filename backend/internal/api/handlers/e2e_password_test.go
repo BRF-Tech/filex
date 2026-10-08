@@ -1,10 +1,11 @@
 package handlers_test
 
-// wiring:e2 password — the web UI announces a folder password change once the
-// new key file is written; the server records it in the audit log and tells
-// the folder's OWNER (e2e.password_changed), who may not be the person who
-// changed it. Not a gate — the server never sees a password — but not free
-// either: the path must be an encrypted folder.
+// wiring:e2 password — up to 0.53 the web UI announced a folder password
+// change and this door turned the announcement into an audit row and the
+// owner's notification, on the client's word alone (`via`, `rekey`, and no
+// change needed at all). Since 0.54 the server records a change itself, from
+// the key file it sees rewritten (e2e/slotchange); the door is kept for older
+// clients, answers, and records nothing.
 
 import (
 	"bytes"
@@ -45,7 +46,10 @@ func postPasswordChanged(t *testing.T, h *handlers.E2E, u *model.User, body map[
 	return rec
 }
 
-func TestE2ePasswordChanged_AuditsAndTellsTheOwner(t *testing.T) {
+// A client's word is not a record: an announcement - even of a reset with the
+// recovery key, which nothing happened to back - tells nobody and writes no
+// audit row. Before 0.54 it told the owner (a warning) and audited it.
+func TestE2ePasswordChanged_AnAnnouncementTellsNobodyAndRecordsNothing(t *testing.T) {
 	fx, storageID := seedE2eTree(t)
 	ctx := context.Background()
 
@@ -62,37 +66,22 @@ func TestE2ePasswordChanged_AuditsAndTellsTheOwner(t *testing.T) {
 	t.Cleanup(func() { handlers.SetNotifySink(nil) })
 	h := handlers.NewE2E(fx.store, nil)
 
-	// A path INSIDE the folder names the folder it sits in.
+	// An older client still calls it after a password change: answered, so it
+	// shows no error.
 	rec := postPasswordChanged(t, h, other, map[string]any{"path": "alpha://kasa/alt", "via": "recovery_key", "rekey": true})
 	require.Equal(t, 200, rec.Code, rec.Body.String())
-	assert.JSONEq(t, `{"ok":true,"notified":true}`, rec.Body.String())
+	assert.JSONEq(t, `{"ok":true}`, rec.Body.String())
 
 	select {
 	case ev := <-sink.got:
-		assert.Equal(t, notify.EventE2EPasswordChanged, ev.Event)
-		assert.Equal(t, notify.SeverityWarning, ev.Severity, "a reset with the recovery key is a warning")
-		require.NotNil(t, ev.UserID)
-		assert.Equal(t, owner.ID, *ev.UserID, "the OWNER is told, not the person who changed it")
-		assert.Equal(t, "kasa", ev.Meta["folder"])
-		assert.Equal(t, "recovery_key", ev.Meta["via"])
-		assert.Equal(t, true, ev.Meta["rekey"])
-		assert.Equal(t, "other@example.com", ev.Meta["actor_email"])
-	case <-time.After(5 * time.Second):
-		t.Fatal("no notification was sent")
+		t.Fatalf("an announcement must tell nobody, got %v", ev.Event)
+	case <-time.After(300 * time.Millisecond):
 	}
-
 	rows, err := fx.store.ListAuditRecent(ctx, 10)
 	require.NoError(t, err)
-	var found *model.AuditEntry
 	for _, r := range rows {
-		if r.Action == "e2e.password_change" {
-			found = r
-		}
+		assert.NotEqual(t, "e2e.password_change", r.Action, "an announcement writes no audit row")
 	}
-	require.NotNil(t, found, "the change is in the audit log")
-	require.NotNil(t, found.UserID)
-	assert.Equal(t, other.ID, *found.UserID)
-	assert.Equal(t, "recovery_key", found.Metadata["via"])
 }
 
 func TestE2ePasswordChanged_RefusesWhatIsNotAnEncryptedFolder(t *testing.T) {

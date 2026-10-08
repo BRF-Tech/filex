@@ -259,6 +259,7 @@ function release(fx: Fixture, args: string[], extraEnv: Record<string, string> =
         FIXTURE_GH: path.join(fx.root, 'gh'), FIXTURE_GH_CI: 'success',
         ...extraEnv,
       },
+      windowsHide: true,
     });
     let out = '';
     child.stdout.on('data', (d) => (out += d));

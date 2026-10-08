@@ -54,6 +54,9 @@ export interface PendingOp {
   error_code?: string;
   /** The engine a job needed and the server lacks (`error_code: engine_missing`). */
   error_engine?: string;
+  /** The server's sentence for the failure, in the reader's language
+   *  (backend ops/errcode.go): what lib/errorWords `opFailure` shows. */
+  error_text?: string;
   cancellable: boolean;
   started_at: string | null;
   finished_at: string | null;
@@ -66,6 +69,10 @@ export interface PendingOp {
   label?: string;
   /** The last `job_progress` message. */
   message?: string;
+  /** Where a trash job (restore, permanent delete, "empty the trash") stands,
+   *  said by the server in the reader's language (0.54, findings A4/A15):
+   *  what the explorer says when the job ends. Absent on other rows. */
+  summary?: string;
   /** Files the job committed, once finished. */
   outputs?: PendingOpOutput[];
   /**
@@ -154,6 +161,7 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     error_message: str(raw.error_message, raw.error),
     error_code: str(raw.error_code) ?? undefined,
     error_engine: str(raw.error_engine) ?? undefined,
+    error_text: str(raw.error_text) ?? undefined,
     cancellable: raw.cancellable === true,
     started_at: str(raw.started_at),
     finished_at: str(raw.finished_at),
@@ -162,6 +170,7 @@ export function normalizeOp(raw: Record<string, unknown>): PendingOp {
     action: str(raw.action) ?? undefined,
     label: str(raw.label) ?? undefined,
     message: str(raw.message) ?? undefined,
+    summary: str(raw.summary) ?? undefined,
     outputs,
     ...(open ? { open } : {}),
   };

@@ -24,11 +24,27 @@
 // ("… dondurulmuş; imzalar toplanırken kimse değiştiremez") was never real.
 // The reserved-name rule had just been written into the same doors, one call
 // each; the lock rule now rides in that call.
+//
+// A third rule rides in it since the vault (encryption level 3,
+// docs/E2E-VAULT-FORMAT.md → Writes from anywhere else): inside a vault folder
+// only the vault API writes. Its packs and index files are written whole,
+// once, under a write lock the server keeps; a file dropped into `v/`, a pack
+// renamed or deleted from WebDAV, an archive extracted into the vault would be
+// writes the vault's index knows nothing about - at best litter, at worst a
+// pack an index still names, gone. Every door asks Check already, so every
+// door refuses them: the explorer's file API, the queue, uploads, the agent
+// API and MCP, ShareX, tickets, file requests, archives, apps, the document
+// server, WebDAV, SFTP, FTPS, NFS and S3. The vault folder ITSELF stays an
+// ordinary encrypted folder - renamed, moved, deleted whole or copied - and
+// its key file is rewritten through its usual door (a password change, an
+// escrow slot), which claims RewritesKeyFile and checks what it writes.
 package writegate
 
 import (
 	"context"
 	"errors"
+	"path"
+	"strings"
 
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -47,6 +63,12 @@ type Target struct {
 	Person int64
 	// named: the path is named by the write but not changed by it.
 	named bool
+	// vault: the vault API's own write (ForVault) - the one writer of what is
+	// inside a vault folder.
+	vault bool
+	// keyFile: a rewrite of a vault's key file through its usual door
+	// (RewritesKeyFile), which checks the new bytes itself.
+	keyFile bool
 }
 
 // Writes is a path the write changes: its content is created or replaced, or
@@ -68,6 +90,20 @@ func (t Target) As(v syspath.Verb) Target { t.Verb = v; return t }
 // By names the person the write is for (syspath.RefusedBy): the owner of a
 // draft is the only one whose OwnDraft claim is honoured.
 func (t Target) By(person int64) Target { t.Person = person; return t }
+
+// ForVault claims the vault API's exception: the target is a pack, an index
+// file, the temporary index or the vault's own folder and key file, written
+// by POST/PUT /api/files/e2e/vault/* under its write lock. Filex's own names
+// and app locks are judged as for every write. No other door claims it.
+func (t Target) ForVault() Target { t.vault = true; return t }
+
+// RewritesKeyFile claims that the write replaces a vault's key file with new
+// bytes the door has checked keep its `v`, `req` and `vault` (e2e.
+// SameVaultBlock) - the password change, the reset with the recovery key, an
+// escrow slot added or declined, which the browser writes through the
+// explorer's upload. Without the claim a vault's key file is never written,
+// renamed, moved or deleted on its own (ErrVaultKeyFile).
+func (t Target) RewritesKeyFile() Target { t.keyFile = true; return t }
 
 // Locks answers which app lock covers a path: on it (Lock) or on it or
 // anything under it (LockWithin). *acl.Set implements it; a nil *acl.Set
@@ -93,10 +129,86 @@ func (e *LockedError) Error() string {
 
 func (e *LockedError) Unwrap() error { return ErrLocked }
 
+// Vaults answers which vault folder holds a path, or is it (root "" for a
+// vault at the storage's root): acl.Set does, through the resolver's vault
+// finder (internal/vaultlock.Finder), when a Locks value implements it.
+type Vaults interface {
+	VaultRoot(rel string) (root string, ok bool)
+}
+
+// ErrVaultPath is what a refused write wraps when it touches something
+// strictly inside a vault folder: only the vault API writes there.
+var ErrVaultPath = errors.New("inside a vault, only the vault API writes")
+
+// ErrVaultKeyFile is what a refused write wraps when it would change a
+// vault's key file without the door's RewritesKeyFile claim - or when a
+// door's check of the new bytes failed (e2e.SameVaultBlock).
+var ErrVaultKeyFile = errors.New("a vault's key file keeps its v, req and vault, and is not removed or moved on its own")
+
+// VaultPathError names the vault folder and the path that refused a write.
+type VaultPathError struct {
+	Root string
+	Rel  string
+	// KeyFile: the path is the vault's key file (ErrVaultKeyFile).
+	KeyFile bool
+}
+
+func (e *VaultPathError) Error() string {
+	if e.KeyFile {
+		return ErrVaultKeyFile.Error() + ": " + e.Rel
+	}
+	return ErrVaultPath.Error() + ": " + e.Rel
+}
+
+func (e *VaultPathError) Unwrap() error {
+	if e.KeyFile {
+		return ErrVaultKeyFile
+	}
+	return ErrVaultPath
+}
+
+// cleanRel is a target's path in the one spelling the vault rule compares:
+// no leading or trailing slash, "" for the storage's root.
+func cleanRel(rel string) string {
+	rel = strings.Trim(path.Clean("/"+strings.Trim(rel, "/")), "/")
+	if rel == "." {
+		return ""
+	}
+	return rel
+}
+
+// vaultRule refuses t when it names something strictly inside a vault folder
+// and is not the vault API's (ForVault). The vault folder itself is not
+// inside it. Its key file is refused as a change of the key file
+// (ErrVaultKeyFile) unless the target is only named or claims
+// RewritesKeyFile.
+func vaultRule(v Vaults, t Target) error {
+	if t.vault {
+		return nil
+	}
+	rel := cleanRel(t.Rel)
+	root, ok := v.VaultRoot(rel)
+	if !ok {
+		return nil
+	}
+	root = cleanRel(root)
+	if rel == root {
+		return nil
+	}
+	if rel == strings.TrimPrefix(root+"/"+syspath.E2EKeyFile, "/") {
+		if t.named || t.keyFile {
+			return nil
+		}
+		return &VaultPathError{Root: root, Rel: rel, KeyFile: true}
+	}
+	return &VaultPathError{Root: root, Rel: rel}
+}
+
 // Check reports whether a write that names targets may happen: nil, a
-// *syspath.ReservedError, or a *LockedError. Reserved names are judged first
-// and without a database: a name that can never be written is refused the
-// same way whether or not anything is locked.
+// *syspath.ReservedError, a *VaultPathError or a *LockedError. Reserved names
+// are judged first and without a database: a name that can never be written
+// is refused the same way whether or not anything is locked. The vault rule
+// comes next, when locks can answer it (Vaults), then the app locks.
 //
 // app is the app plugin doing the write — 0 for a person, a protocol client
 // or a document server. A lock held by that same app does not stop it: the
@@ -113,6 +225,13 @@ func Check(locks Locks, app int64, targets ...Target) error {
 	}
 	if locks == nil {
 		return nil
+	}
+	if v, ok := locks.(Vaults); ok {
+		for _, t := range targets {
+			if err := vaultRule(v, t); err != nil {
+				return err
+			}
+		}
 	}
 	for _, t := range targets {
 		if t.named {

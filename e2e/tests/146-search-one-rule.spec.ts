@@ -8,9 +8,10 @@
  * letter, as tags do: `kış` did not find `KIŞ LİSTESİ.xlsx` on any path,
  * because the default lower case of `I` is `i`, not `ı`.
  *
- * The toolbar search asks the server; the "Filter in this folder…" box
- * filters the listing in the browser (lib/fileFilters). Both must give the
- * same answer.
+ * The toolbar search asks the server; since 0.54 the "Filter in this
+ * folder…" box asks it too (lib/nameFilter -> POST /api/files/search/match,
+ * the search's own name rule; before, it matched in the browser with a rule
+ * of its own). Both must give the same answer.
  */
 import { test, expect, type Page } from '@playwright/test';
 import { loginAs, apiLogin } from '../helpers/auth';

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e" /* wiring:e2 */
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/filebody"
+	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
@@ -433,8 +435,34 @@ func (a *aiOps) RootInfo(ctx context.Context) aiRootInfo {
 }
 
 // List returns the directory entries under `p`. Driver-direct (not cache)
-// so freshly-written files show immediately.
+// so freshly-written files show immediately. In the server's one order
+// (listorder.Default: folders first, then by name) - the driver's own order
+// differed from the explorer's and the CLI's (filex 0.54, audit Y3).
 func (a *aiOps) List(ctx context.Context, p string) ([]aiEntry, error) {
+	return a.ListSorted(ctx, p, listorder.Default)
+}
+
+// ListSorted is List in the given order.
+func (a *aiOps) ListSorted(ctx context.Context, p string, order listorder.Order) ([]aiEntry, error) {
+	entries, err := a.listUnsorted(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	sortAIEntries(entries, order)
+	return entries, nil
+}
+
+// sortAIEntries orders entries by the server's one rule (listorder).
+func sortAIEntries(entries []aiEntry, order listorder.Order) {
+	fields := func(e aiEntry) listorder.Fields {
+		return listorder.Fields{Name: e.Name, Path: e.Path, Dir: e.Type == "dir", Size: e.Size, Modified: e.LastModified}
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return listorder.Less(fields(entries[i]), fields(entries[j]), order)
+	})
+}
+
+func (a *aiOps) listUnsorted(ctx context.Context, p string) ([]aiEntry, error) {
 	s, rel, err := a.resolveStorage(ctx, p)
 	if err != nil {
 		return nil, err
@@ -681,7 +709,10 @@ func (a *aiOps) WriteStream(ctx context.Context, p string, src io.Reader, size i
 	if err := a.plaintextRefusal(ctx, s, aiParent(rel)); err != nil {
 		return nil, err
 	}
-	if err := checkUploadSize(ctx, a.store, size); err != nil {
+	// The per-file limit and the account's ceiling, before a byte of src is
+	// read: one question for every surface this funnel serves, billed to
+	// quotastore.OwnerFrom (an upload ticket's minter, else the caller).
+	if err := checkWriteQuota(ctx, a.store, size, catalogedFileSize(ctx, a.store, s.ID, rel)); err != nil {
 		return nil, err
 	}
 	name := path.Base(rel)
@@ -1337,6 +1368,9 @@ func (a *aiOps) visibleEntries(ctx context.Context, s *model.Storage, rows []*mo
 		if !tagFilterAccepts(tags, n.ID) {
 			continue
 		}
+		if !tags.AcceptsNode(n) {
+			continue // outside the search's narrowing (kind, size, date, folder, owner)
+		}
 		if confined && !root.Within(s.Name, n.Path) {
 			continue // outside the token's confinement root
 		}
@@ -1376,6 +1410,11 @@ type aiShareResult struct {
 	// `filex decrypt`); say so when you pass the link on. An encrypted FOLDER
 	// and anything inside one is never linked (publicLinkRefusal).
 	Encrypted bool `json:"encrypted,omitempty"`
+	// DownloadCommand is the one line that fetches the link's file from a
+	// terminal (curl and PowerShell), built by the server that knows its
+	// rules - a folder's archive, the PIN, an S3 redirect (share_command.go).
+	// An agent hands it on as it is instead of assembling its own.
+	DownloadCommand *shareDownloadCommand `json:"download_command,omitempty"`
 }
 
 // CreateShare mints a public share link for a file/folder. Honors the token's
@@ -1448,6 +1487,9 @@ func (a *aiOps) CreateShare(ctx context.Context, p string, pin bool, expiresInDa
 		ExpiresAt:    sh.ExpiresAt,
 		MaxDownloads: sh.MaxDownloads,
 		Encrypted:    encrypted,
+		// opts.PIN: the PIN this call generated or the permission rule
+		// forced - the creator's own answer, the one time it is said.
+		DownloadCommand: downloadCommandFor(url, opts.PIN, node.Name, node.Type == model.NodeTypeDirectory),
 	}, nil
 }
 

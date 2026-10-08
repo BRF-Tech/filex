@@ -6,17 +6,19 @@
  * minutes later on an object store), and about a restore that had brought
  * back two of five items. An undo now says which it was: nothing (it ran to
  * its end), `queued` (the operations centre follows it, and says when it
- * ends), or how many of how many it brought back.
+ * ends), or the server's own sentence for it (`summary`).
+ *
+ * ⚠ 0.54 (finding A15): the undo of a delete is one restore request, and the
+ * server answers what came back and what did not and why — that sentence is
+ * shown as it is. The "{done} of {total}" this file composed is gone.
  */
-export type UndoOutcome = void | { queued?: boolean; done?: number; total?: number };
+export type UndoOutcome = void | { queued?: boolean; summary?: string };
 
 export function sayUndo(
   out: UndoOutcome,
   t: (key: string, vars?: Record<string, string | number>) => string,
 ): string {
   if (out && out.queued) return t('toast.undo_queued');
-  if (out && typeof out.done === 'number' && typeof out.total === 'number' && out.done < out.total) {
-    return t('toast.undo_partial', { done: out.done, total: out.total });
-  }
+  if (out && out.summary) return out.summary;
   return t('toast.undone');
 }

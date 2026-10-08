@@ -42,11 +42,37 @@ export interface PresenceMessage {
   users: PresenceUser[];
 }
 
+/**
+ * wiring:e2 vault - a vault committed a generation, or its write lock changed
+ * hands (docs/E2E-VAULT-FORMAT.md → "Audit and events"). `path` is the vault
+ * folder's wire path; nothing below it is ever named.
+ */
+export interface VaultMessage {
+  type: 'vault.generation' | 'vault.lock';
+  path: string;
+  generation?: number;
+  held?: boolean;
+  holder?: { name?: string; client?: string; label?: string } | null;
+}
+
 /** An app's approved version changed (instance-wide, not about any folder). */
 export interface AppUpdatedMessage {
   type: 'app.updated';
   app: string;
   version: string;
+}
+
+/**
+ * #196 - what this person may do may have changed: a grant, a role, a group, a
+ * permission rule, the tenant's encryption policy or an approval. The explorer
+ * asks the answers its menus depend on again (lib/menuAnswers). It names no
+ * path, no person and no reason; `scope: 'all'` says everybody connected was
+ * told (a change whose people the server did not look up), so the explorers
+ * spread their questions over a moment.
+ */
+export interface AccessChangedMessage {
+  type: 'access.changed';
+  scope?: 'all';
 }
 
 export interface WsTicket {
@@ -58,6 +84,10 @@ export interface RealtimeHandlers {
   onChange?: (msg: ChangeMessage) => void;
   onPresence?: (msg: PresenceMessage) => void;
   onAppUpdated?: (msg: AppUpdatedMessage) => void;
+  /** wiring:e2 vault */
+  onVault?: (msg: VaultMessage) => void;
+  /** #196 - `all`: everybody connected heard it, not only this person. */
+  onAccessChanged?: (ev: { all: boolean }) => void;
   onStatus?: (connected: boolean) => void;
   /** Fires true when the live socket is unavailable (consumer should poll),
    *  false when a live socket is (re)established. */
@@ -162,6 +192,11 @@ export class RealtimeClient {
       else if (m?.type === 'app.updated') {
         const a = msg as Partial<AppUpdatedMessage>;
         if (typeof a.app === 'string' && typeof a.version === 'string') this.opts.handlers.onAppUpdated?.(a as AppUpdatedMessage);
+      } else if (m?.type === 'vault.generation' || m?.type === 'vault.lock') {
+        const v = msg as Partial<VaultMessage>;
+        if (typeof v.path === 'string') this.opts.handlers.onVault?.(v as VaultMessage);
+      } else if (m?.type === 'access.changed') {
+        this.opts.handlers.onAccessChanged?.({ all: (msg as Partial<AccessChangedMessage>).scope === 'all' });
       }
       // pong / error frames are intentionally ignored by the UI.
     };

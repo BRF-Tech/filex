@@ -112,7 +112,10 @@ func jsonFn(name string, perm Permission, h jsonHandler) HostFunc {
 				stack[0] = writeJSON(p, errEnvelope(err))
 				return
 			}
-			stack[0] = writeJSON(p, out)
+			// The host's own times in the answer (a lock's end, a link's
+			// expiry) on the apps' clock - the real one unless FILEX_APP_CLOCK
+			// moved it (appclock.go).
+			stack[0] = writeJSON(p, s.reg.appClock().reply(out))
 		},
 		[]extism.ValueType{extism.ValueTypePTR}, []extism.ValueType{extism.ValueTypePTR})
 	fn.SetNamespace(hostNamespace)

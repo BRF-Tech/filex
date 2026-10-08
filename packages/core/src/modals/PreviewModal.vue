@@ -32,7 +32,8 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import Modal from './Modal.vue';
 import StarButton from '../components/StarButton.vue';
 import { ensureMonaco, getMonaco, ensureHighlight } from '../composables/useMonacoLoader';
-import { useLocale } from '../composables/useLocale';
+import { localeTag, useLocale } from '../composables/useLocale';
+import { resolveLocale } from '../locales/resolve';
 import { browserProbeURL } from '../lib/externalReach';
 import {
   OFFICE_DOWNLOAD_ERROR,
@@ -46,10 +47,9 @@ import {
 } from '../lib/officeDiagnosis';
 import { fileIconTile } from '../lib/fileIcons';
 import { actionIconSvg } from '../lib/actionIcons';
-import { OFFICE_EXTS } from '../lib/serviceGate';
 import { requestFailure, sayFailure } from '../lib/errorWords';
 import { createArchivePreviewCache } from '../lib/archivePreviewCache';
-import { isTextualMime } from '../lib/textMime';
+import { isOfficeExt, isTextEditable, isTextualMime } from '../lib/serverRules';
 import { withAppBase } from '../lib/appBase';
 import { draftKeyOf } from '../lib/internalPaths';
 import { draftFolderLabel, draftsClient, type DraftDto } from '../lib/drafts';
@@ -279,10 +279,10 @@ const CODE_LANGS: Record<string, string> = {
 // CSV/TSV land in the rich viewer (`csv` kind below) instead of the
 // legacy plain-text path so the user gets a proper table preview.
 const TEXT_PLAIN = ['txt', 'log'];
-/* The document server's formats — ONE list, shared with the explorer's menu
- * (lib/serviceGate), so a type previewed as "office" is exactly a type whose
+/* The document server's formats are the SERVER's answer (lib/serverRules
+ * `isOfficeExt`, `capabilities.edit_kinds`, #211) - the one the explorer's
+ * menu reads too, so a type previewed as "office" is exactly a type whose
  * Open needs ONLYOFFICE. */
-const OFFICE = OFFICE_EXTS;
 
 /**
  * Lazy viewer map — extension → component loader. Each loader is a
@@ -344,7 +344,7 @@ function picksViewer(e: string): boolean {
   return (
     IMAGE.includes(e) || VIDEO.includes(e) || AUDIO.includes(e) || e === 'pdf' ||
     e === 'md' || e === 'markdown' || e in CODE_LANGS || e in VIEWER_MAP ||
-    OFFICE.includes(e) || TEXT_PLAIN.includes(e)
+    isOfficeExt(e) || TEXT_PLAIN.includes(e) || isTextEditable({ extension: e })
   );
 }
 
@@ -384,7 +384,12 @@ const kind = computed<PreviewKind>(() => {
   // viewer's place (the host decided it matches: its `applies` rule).
   if (appView.value) return 'app';
   const e = ext(props.file);
-  if (!e) return 'other';
+  // A name that is text on its own (`Makefile`, `Dockerfile`) - the server's
+  // list (#211) - opens in the text editor; anything else nameless is 'other'.
+  if (!e) {
+    if (!isTextEditable({ basename: props.file?.basename, extension: '' })) return 'other';
+    return props.openMode !== 'view' ? 'code' : 'text';
+  }
   // 0.51 - ONLYOFFICE, when the host opens the file there (a .csv).
   if (props.inOffice) return 'office';
   if (IMAGE.includes(e)) return 'image';
@@ -402,8 +407,11 @@ const kind = computed<PreviewKind>(() => {
   if (e === 'md' || e === 'markdown') return 'markdown';
   if (e in CODE_LANGS) return 'code';
   if (e in VIEWER_MAP) return 'viewer';
-  if (OFFICE.includes(e)) return 'office';
+  if (isOfficeExt(e)) return 'office';
   if (TEXT_PLAIN.includes(e)) return wantEdit ? 'code' : 'text';
+  // Text the server saves (`.properties`, `.lua`, a `Makefile`) that has no
+  // highlighter of its own here: the plain editor, not "Download".
+  if (isTextEditable({ basename: props.file?.basename, extension: e })) return wantEdit ? 'code' : 'text';
   return 'other';
 });
 
@@ -513,31 +521,30 @@ function buildAndOpenStandalone(mode: 'view' | 'edit'): void {
 }
 
 /**
- * Extensions that have a meaningful "edit" surface. Read-only kinds
- * (image/video/audio/3D/archive) don't surface an "Edit" button.
+ * Whether this file has an "edit" surface here: an office document (the
+ * document server), or text the built-in editor opens and save-text saves -
+ * a draw.io or Mermaid diagram included, which their viewers save as text.
+ * Both are the server's answer (lib/serverRules, #211): the list that stood
+ * here offered Edit on `.graphql` and `.mmd`, which save-text then refused
+ * with a 415, and none on `.properties`, `.lua` or a `Makefile`, which it
+ * saves. Read-only kinds (image, video, audio, 3D, archive) have none.
  */
-const EDITABLE_EXTS = new Set([
-  // OnlyOffice — open the in-page office editor (or new tab) with
-  // edit permissions.
-  'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt',
-  'odt', 'ods', 'odp', 'rtf',
-  // Drawio / mermaid round-trip via the new-tab route.
-  'drawio', 'dio', 'mmd', 'mermaid',
-  // Code / text / markdown — Monaco / split editor.
-  'md', 'markdown', 'txt', 'log',
-  'json', 'jsonc', 'yaml', 'yml', 'xml', 'svg', 'html', 'htm',
-  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'svelte',
-  'css', 'scss', 'sass', 'less',
-  'php', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift',
-  'cpp', 'c', 'h', 'hpp', 'cs', 'dart',
-  'sh', 'bash', 'sql',
-  'toml', 'ini', 'conf', 'cfg', 'env',
-  'dockerfile', 'graphql', 'gql',
-]);
+/* The viewers here that EDIT what they show (and save it as text): a diagram's.
+ * Any other viewer only shows its file (the table a .csv is drawn as), so text
+ * the server saves but this client has no editor for in that viewer is not
+ * offered Edit. Which components exist is this client's own knowledge, not a
+ * rule of the server's. */
+const EDITING_VIEWERS = new Set(['drawio', 'dio', 'mmd', 'mermaid']);
 
-const canEditKind = computed<boolean>(() =>
-  !!props.file && (EDITABLE_EXTS.has(ext(props.file)) || props.inOffice === true),
-);
+const canEditKind = computed<boolean>(() => {
+  const f = props.file;
+  if (!f) return false;
+  if (props.inOffice === true) return true;
+  const e = ext(f);
+  if (isOfficeExt(e)) return true;
+  if (!isTextEditable({ basename: f.basename, extension: e, mime_type: f.mime_type })) return false;
+  return kind.value !== 'viewer' || EDITING_VIEWERS.has(e);
+});
 
 /**
  * 0.51 - a .csv being edited in ONLYOFFICE is saved as a CSV: what that keeps
@@ -554,7 +561,7 @@ const csvOfficeNote = computed(() => kind.value === 'office' && ext(props.file) 
  */
 const editNeeds = computed<'' | 'onlyoffice' | 'drawio'>(() => {
   const e = ext(props.file);
-  if ((OFFICE.includes(e) || props.inOffice) && !props.onlyOfficeBase) return 'onlyoffice';
+  if ((isOfficeExt(e) || props.inOffice) && !props.onlyOfficeBase) return 'onlyoffice';
   if ((e === 'drawio' || e === 'dio') && !props.drawioUrl) return 'drawio';
   return '';
 });
@@ -1328,6 +1335,7 @@ async function mountOnlyOfficeEditor(): Promise<void> {
   // A new editor has no edits of its own (#184).
   setOfficeEdited(false);
   officeKey = null;
+  officeToken = null;
   if (!props.file || kind.value !== 'office') return;
   /* ⚠ BOTH halves. The standalone /files/edit route always handed over the
    * config ENDPOINT and left the base null when the capabilities probe said
@@ -1341,7 +1349,15 @@ async function mountOnlyOfficeEditor(): Promise<void> {
   if (!officeEl.value) return;
 
   try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // ⚠ The language on SCREEN (useFileApi rawRequest says why the
+      // browser's own is not it). The server chooses the editor's language
+      // with it, after the administrator's fixed one (backend
+      // onlyoffice/lang.go, GitHub Discussion #93): ONLYOFFICE was English
+      // whatever this screen spoke.
+      'Accept-Language': localeTag(resolveLocale(props.locale)),
+    };
     if (props.authHeaders) Object.assign(headers, await props.authHeaders());
     const res = await fetch(props.onlyOfficeConfigEndpoint, {
       method: 'POST',
@@ -1395,6 +1411,7 @@ async function mountOnlyOfficeEditor(): Promise<void> {
     // host the dead-editor cleanup looks in.
     officeHostEl = (document.getElementById(mountId) ?? officeEl.value).parentElement;
     officeKey = typeof config?.document?.key === 'string' ? config.document.key : null;
+    officeToken = typeof config?.token === 'string' ? config.token : null;
 
     config.events = {
       onError: (err: any) => onOfficeEvent('onError', err, gen),
@@ -1480,6 +1497,8 @@ function mountOfficeFrame(address: string, config: unknown, gen: number): void {
   disposeOnlyOfficeEditor();
   const key = (config as { document?: { key?: unknown } } | null)?.document?.key;
   officeKey = typeof key === 'string' ? key : null;
+  const token = (config as { token?: unknown } | null)?.token;
+  officeToken = typeof token === 'string' ? token : null;
   const session = newFrameSession();
   const el = buildOfficeFrame(address, session, props.file?.basename || 'ONLYOFFICE');
   const link = linkOfficeFrame({
@@ -1591,6 +1610,9 @@ function closeDeadOfficeEditor(): void {
 const officeEdited = ref(false);
 /** The ONLYOFFICE `document.key` the editor on screen was opened with. */
 let officeKey: string | null = null;
+/** That editor configuration's signed `token`: sent with an answer, it shows
+ *  the server this person was handed the editing session (0.54). */
+let officeToken: string | null = null;
 /** The change waiting for an answer, and whether its question is on screen
  *  (Escape puts it away; the line under the bar brings it back). */
 const outsideAsk = ref<OutsideChange | null>(null);
@@ -1639,7 +1661,8 @@ async function checkOutsideOnServer(): Promise<void> {
 function tellServer(choice: OutsideChoice, key: string | null, path: string): void {
   const endpoint = sessionEndpoint.value;
   if (!endpoint || !key || (choice !== 'mine' && choice !== 'theirs')) return;
-  void officeSession(authedFetch, endpoint, { path, key, action: choice });
+  const token = key === officeKey && officeToken ? officeToken : undefined;
+  void officeSession(authedFetch, endpoint, { path, key, action: choice, token });
 }
 
 function setOfficeEdited(v: boolean): void {

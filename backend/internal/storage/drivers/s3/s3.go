@@ -3,7 +3,8 @@
 // Tested against AWS S3, Hetzner Object Storage (path-style endpoint,
 // nbg1.your-objectstorage.com), MinIO, Backblaze B2 (S3 compat), and
 // Cloudflare R2. Multipart uploads are exposed via the optional
-// MultipartUploader interface for browser-direct chunked uploads.
+// PartUploader interface, which the staged upload's commit pushes parts
+// through.
 package s3
 
 import (
@@ -923,8 +924,11 @@ func (d *Driver) PresignUpload(ctx context.Context, p string, _ int64) (storage.
 	}, nil
 }
 
-// InitMultipart implements storage.MultipartUploader.
-func (d *Driver) InitMultipart(ctx context.Context, p string, _ int64, partCount int) (string, []string, error) {
+// InitMultipart implements storage.MultipartUploader. It hands out no part
+// URLs: every part is pushed by filex itself (UploadPart, from the staged
+// upload's commit), and the presigned browser upload that once read them was
+// removed in 0.54.
+func (d *Driver) InitMultipart(ctx context.Context, p string, _ int64, _ int) (string, []string, error) {
 	resp, err := d.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(d.key(p)),
@@ -932,26 +936,11 @@ func (d *Driver) InitMultipart(ctx context.Context, p string, _ int64, partCount
 	if err != nil {
 		return "", nil, err
 	}
-	uploadID := aws.ToString(resp.UploadId)
-	urls := make([]string, partCount)
-	for i := 1; i <= partCount; i++ {
-		req, err := d.presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
-			Bucket:     aws.String(d.bucket),
-			Key:        aws.String(d.key(p)),
-			UploadId:   aws.String(uploadID),
-			PartNumber: aws.Int32(int32(i)),
-		}, s3.WithPresignExpires(24*time.Hour))
-		if err != nil {
-			return "", nil, err
-		}
-		urls[i-1] = req.URL
-	}
-	return uploadID, urls, nil
+	return aws.ToString(resp.UploadId), nil, nil
 }
 
 // UploadPart implements storage.PartUploader — the server-side half of
-// multipart, used by the staged upload path. (The browser-direct flow uses the
-// presigned URLs from InitMultipart and never comes through here.)
+// multipart, used by the staged upload path.
 //
 // size is always known at this point (it comes from the staging manifest), so
 // the body goes out with a Content-Length instead of chunked.

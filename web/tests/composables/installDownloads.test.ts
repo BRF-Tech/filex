@@ -7,9 +7,11 @@
 // ⚠ Linux leads the same way with the Snap Store (live 2026-09-26, stable),
 // and offers the .rpm the release has always attached; macOS offers the
 // Homebrew tap after the .dmg - `brew upgrade` is what keeps a Mac copy
-// current. winget and the AUR are NOT offered: neither installs today (the
-// winget PRs wait for review, the AUR package is unpublished), and a row that
-// leads nowhere is worse than no row.
+// current. The AUR is NOT offered: its package is unpublished, and a row that
+// leads nowhere is worse than no row. Nor is winget: the prompt offers the
+// desktop app, and the desktop app's winget package (BRFTech.filex-app) still
+// waits for its first review; only the CLI's (BRFTech.filex) is on winget,
+// since 0.53.0. WINGET below says which one is live and holds the pages to it.
 // ⚠ 0.50: the processor. Windows and Linux files come as x64 and arm64; the
 // browser's answer (client hints, or Firefox's "aarch64") picks which one a
 // row offers, and the other one sits beside it. Every link to a release file,
@@ -41,6 +43,19 @@ const key = (label: string) => label.split(' · ')[0];
 const RELEASE = new Set<string>(releaseAssets('0.0.0'));
 const DOWNLOAD = 'https://github.com/BRF-Tech/filex/releases/latest/download/';
 const ALL_ASSETS = Object.values(DESKTOP_ASSETS).flatMap((byArch) => Object.values(byArch) as string[]);
+
+/**
+ * Which winget package installs today - measured, not assumed. 2026-10-08:
+ * microsoft/winget-pkgs merged "New version: BRFTech.filex 0.53.0" (#448254,
+ * manifests/b/BRFTech/filex/0.53.0), while "New version: BRFTech.filex-app
+ * 0.53.0" (#448327) still waits for a moderator's first review. When the
+ * desktop package merges, set it to true: the tests below then name every
+ * line that still calls it "in review" (README, docs/DESKTOP.md, filex.sh).
+ */
+const WINGET: Record<'BRFTech.filex' | 'BRFTech.filex-app', boolean> = {
+  'BRFTech.filex': true,
+  'BRFTech.filex-app': false,
+};
 
 describe('the desktop downloads the install prompt offers', () => {
   it('leads with the Microsoft Store on Windows, then the installer and the portable build', () => {
@@ -99,11 +114,14 @@ describe('the desktop downloads the install prompt offers', () => {
   });
 
   it('offers no channel that does not install today', () => {
+    // The prompt offers the desktop app, so winget waits for BRFTech.filex-app;
+    // the CLI's package being live does not put a winget row here.
+    const nowhere = WINGET['BRFTech.filex-app'] ? /aur\.archlinux\.org/ : /winget|aur\.archlinux\.org/;
     for (const p of ['windows', 'linux', 'mac'] as const) {
       for (const a of [null, 'x64', 'arm64'] as const) {
         for (const x of desktopDownloadsFor(p, t, a)) {
-          expect(x.href, `${p}/${a}: ${x.label}`).not.toMatch(/winget|aur\.archlinux\.org/);
-          if (x.other) expect(x.other.href, `${p}/${a}: ${x.label} (other)`).not.toMatch(/winget|aur\.archlinux\.org/);
+          expect(x.href, `${p}/${a}: ${x.label}`).not.toMatch(nowhere);
+          if (x.other) expect(x.other.href, `${p}/${a}: ${x.label} (other)`).not.toMatch(nowhere);
         }
       }
     }
@@ -341,6 +359,45 @@ describe('download links lead to files a release carries', () => {
   });
 });
 
+/* ── winget: each page says where each package stands ────────────────────── */
+
+type WingetId = keyof typeof WINGET;
+
+/** `winget install <id>` and nothing longer: BRFTech.filex is a prefix of BRFTech.filex-app. */
+const wingetInstall = (id: WingetId) => new RegExp(`winget install ${id.split('.').join('[.]')}(?![A-Za-z0-9_.-])`);
+
+/** Words a line uses for a package winget does not find yet. */
+const NOT_YET = /not installable yet|in review|waiting for|does not find it|will be/i;
+
+/** The sentences of a page that give `winget install <id>`: blocks split at blank lines, a
+ *  table row on its own, and each of those at the end of a sentence (". ", "; ", ": "). */
+function wingetSentences(text: string, id: WingetId): string[] {
+  const re = wingetInstall(id);
+  return text
+    .replace(/\r/g, '')
+    .split(/\n[ \t]*\n/)
+    .flatMap((block) => (block.trimStart().startsWith('|') ? block.split('\n') : [block]))
+    .flatMap((block) => block.split(/(?<=[.;:])\s+/))
+    .filter((s) => re.test(s));
+}
+
+describe('winget: every page offers a live package as working and a waiting one as "in review"', () => {
+  const PAGES: Array<[string, WingetId[]]> = [
+    ['README.md', ['BRFTech.filex', 'BRFTech.filex-app']],
+    ['docs/CLI.md', ['BRFTech.filex']],
+    ['docs/DESKTOP.md', ['BRFTech.filex-app']],
+  ];
+
+  it.each(PAGES.flatMap(([page, ids]) => ids.map((id) => [page, id] as const)))('%s: %s', (page, id) => {
+    const said = wingetSentences(readFileSync(path.join(REPO, page), 'utf8'), id);
+    expect(said, `${page} never gives "winget install ${id}"`).not.toEqual([]);
+    for (const s of said) {
+      if (WINGET[id]) expect(s, `${page} still calls ${id} not installable`).not.toMatch(NOT_YET);
+      else expect(s, `${page} offers ${id} as if winget found it`).toMatch(NOT_YET);
+    }
+  });
+});
+
 /* ── filex.sh ────────────────────────────────────────────────────────────── */
 
 // `site/` is withheld from the public export: there the page is not a surface.
@@ -367,6 +424,26 @@ describe.skipIf(!sitePresent)('filex.sh lists the same files and marks them by t
 
   it('links no release file the release check does not require', () => {
     expect(linkedFiles(html).filter((f) => !RELEASE.has(f))).toEqual([]);
+  });
+
+  it('gives a live winget package as a command and a waiting one only in the "in review" row', () => {
+    const from = html.indexOf('<div class="install-row install-soon">');
+    const to = html.indexOf('<div class="dl" id="downloads">');
+    expect(from, 'site/index.html has no "install-soon" row').toBeGreaterThan(-1);
+    expect(to, 'site/index.html has no downloads block').toBeGreaterThan(from);
+    const soon = html.slice(from, to);
+    const rest = html.slice(0, from) + html.slice(to);
+    expect(soon).toMatch(/in review/);
+    for (const id of Object.keys(WINGET) as WingetId[]) {
+      const re = wingetInstall(id);
+      if (WINGET[id]) {
+        expect(rest, `filex.sh does not give "winget install ${id}"`).toMatch(re);
+        expect(soon, `filex.sh still lists ${id} as in review`).not.toMatch(re);
+      } else {
+        expect(soon, `filex.sh does not list ${id} as in review`).toMatch(re);
+        expect(rest, `filex.sh offers ${id} as if winget found it`).not.toMatch(re);
+      }
+    }
   });
 
   /** The page's detection script, run on its own with a stub window. */

@@ -175,9 +175,9 @@ one order, decided in three layers - the most personal wins:
 3. **Creation order**, when neither has been set - what every install showed
    before this existed.
 
-![A storage row's order menu in the navigation panel](https://filex.sh/shots/sidenav/storage-order-menu-1440.e1a6747973ba.png)
+![A storage row's order menu in the navigation panel](https://filex.sh/shots/sidenav/storage-order-menu-1440.6aeee0490716.png)
 
-![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](https://filex.sh/shots/sidenav/admin-storages-order-1440.46981beab527.png)
+![The admin Storages table while a row is dragged by its handle: the row in hand is faded, the line shows where it lands](https://filex.sh/shots/sidenav/admin-storages-order-1440.18320ebce8d8.png)
 
 A storage the person's own order does not name - one added after they
 arranged theirs, or one they could not see then - keeps the position the
@@ -488,16 +488,31 @@ named in the operation's result ([Moving files between
 storages](#moving-files-between-storages)).
 
 **What that looks like.** Such a row carries a badge in the list, the grid and
-the gallery alike - *Outside storage*, *Broken link* or *Remote link* - and its
-tooltip, its screen-reader label and the details panel all say the same
-sentence: what it is, why it will not open, and, for an out-of-root link, that
-an administrator can allow it with *Follow symlinks that leave this folder* in
-the storage's settings. A **broken** link reads differently on purpose: nothing
-can be configured back into working there, so it says the target no longer
-exists and has to be repaired or removed on the server. Opening such a row is
-refused in words, with the same sentence, rather than doing nothing - doing
-nothing was the original complaint ([issue #34](https://github.com/BRF-Tech/filex/issues/34):
-a 0-byte file that would not open and said why to nobody).
+the gallery alike - and on Recent, Starred, a tag view and search results - and
+its tooltip, its screen-reader label and the details panel all say the same
+sentence: what it is and why it will not open. The badge names the reason:
+*Outside storage*, *Broken link* or *Remote link*, and for an out-of-root link
+the sentence adds that an administrator can allow it with *Follow symlinks that
+leave this folder* in the storage's settings. A **broken** link reads
+differently on purpose: nothing can be configured back into working there, so it
+says the target no longer exists and has to be repaired or removed on the
+server. Opening such a row is refused in words, with the same sentence, rather
+than doing nothing - doing nothing was the original complaint
+([issue #34](https://github.com/BRF-Tech/filex/issues/34): a 0-byte file that
+would not open and said why to nobody).
+
+**Where the reason comes from.** A listing read from the storage itself -
+before the storage's first sync has finished, or a folder the catalogue has not
+caught up with - takes it from the driver as it lists the link. Every other
+listing is answered by the catalogue, and the sync records the driver's reason
+with the link's row each time it lists the folder, so those listings name it
+too. It is the reason the **last sync** saw: a link whose target is deleted or
+comes back reads the new reason after the next sync of its folder (a listing
+read from the storage shows it at once). A link the sync has no reason for
+says *Link* and the general sentence (its target is outside the storage,
+missing, or on a remote server filex cannot resolve): a link row catalogued
+before 0.54, until the next sync of its folder fills the reason in - nothing
+needs to be done by hand - or a storage plugin whose driver gives no reason.
 
 > ⚠ **Turning `follow_symlinks` on extends the storage.** Everything behind the
 > link becomes part of it - including deletion, quota accounting, full-text

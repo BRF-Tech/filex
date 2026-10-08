@@ -147,7 +147,7 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	att := loginguard.Attempt{Identifier: req.Email, Realm: lr.CounterRealm(), IP: clientIP(r), Protocol: loginguard.ProtoWeb}
 	if h.Guard != nil {
 		if v := h.Guard.Check(r.Context(), att); v.Blocked {
-			h.writeLocked(w, v.Scope, v.RetryAfter, v.Message(requestLang(r)))
+			h.writeLocked(w, r, v.Scope, v.RetryAfter, v.Message(requestLang(r)))
 			return
 		}
 	}
@@ -270,11 +270,45 @@ func (h *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	if h.handOff(w, r, lr, user, token) {
 		return
 	}
+	h.adoptSignInLanguage(r, user)
 	h.setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user":  user,
 		"token": token,
 	})
+}
+
+// adoptSignInLanguage gives an account that holds NO language the one its
+// sign-in arrived in: the request's Accept-Language (the web panel sends the
+// language on its screen; a browser back from an identity provider sends its
+// own list), when filex offers it. An account that has a language keeps it,
+// and a sign-in in a language filex does not offer leaves the account without
+// one - it reads the instance's (FILEX_DEFAULT_LOCALE) until somebody picks.
+//
+// ⚠ The server decides it, at the one moment every client passes through.
+// Up to the 0.54 full run the web panel wrote its screen's language to such
+// an account after the sign-in, from the page the sign-in itself was leaving
+// (/admin/login -> /drive/ for a non-admin): the write was cut off by that
+// navigation or sent from pagehide, and the browser suites waited on it for
+// ever (Chromium networkidle, a WebKit "internal error" on the navigation).
+// Every browser sign-in ends here: the password and its driver chain (local,
+// LDAP, recovery), the realm handoff, the OIDC callback.
+func (h *Auth) adoptSignInLanguage(r *http.Request, u *model.User) {
+	if h == nil || h.Store == nil || r == nil || u == nil || strings.TrimSpace(u.Locale) != "" {
+		return
+	}
+	lang := srvtext.FromAcceptLanguage(r.Header.Get("Accept-Language"))
+	if lang == "" {
+		return
+	}
+	if err := h.Store.UpdateUserLocale(r.Context(), u.ID, lang, u.Timezone); err != nil {
+		slog.Warn("sign-in: the account's language could not be recorded",
+			slog.Int64("user_id", u.ID), slog.String("err", err.Error()))
+		return
+	}
+	// One language per person, whichever surface reads it (#191).
+	syncSurfaceLocales(r.Context(), h.Store, u.ID, lang)
+	u.Locale = lang
 }
 
 // loginRealm resolves the tenant a sign-in is for, on a multi-tenant install;
@@ -381,6 +415,7 @@ func (h *Auth) Handoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	auth.AuditHandoff(ctx, h.Store, auth.AuditHandoffUsed, t, host, "")
+	h.adoptSignInLanguage(r, u)
 	h.setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusOK, map[string]any{"user": u, "token": token})
 }
@@ -441,7 +476,7 @@ func (h *Auth) loginFailed(w http.ResponseWriter, r *http.Request, att loginguar
 	body["message"] = o.Message(lang)
 	switch {
 	case o.Locked:
-		h.writeLocked(w, o.Scope, o.RetryAfter, body["message"].(string))
+		h.writeLocked(w, r, o.Scope, o.RetryAfter, body["message"].(string))
 	case o.Unlimited:
 		writeJSON(w, http.StatusUnauthorized, body)
 	default:
@@ -452,13 +487,17 @@ func (h *Auth) loginFailed(w http.ResponseWriter, r *http.Request, att loginguar
 	}
 }
 
-// writeLocked answers a refused attempt: 429, Retry-After, and the sentence.
-func (h *Auth) writeLocked(w http.ResponseWriter, scope string, wait time.Duration, message string) {
+// writeLocked answers a refused attempt: 429, Retry-After, and the sentence -
+// worded for the moment of the answer (`message`, for an API client's log)
+// and with its `{wait}` left open (`countdown`) for the sign-in form, which
+// fills it with its own clock as the lock runs down (loginguard.Countdown).
+func (h *Auth) writeLocked(w http.ResponseWriter, r *http.Request, scope string, wait time.Duration, message string) {
 	secs := loginguard.RetryAfterSeconds(wait)
 	w.Header().Set("Retry-After", strconv.Itoa(secs))
 	writeJSON(w, http.StatusTooManyRequests, map[string]any{
 		"error":       "too many attempts",
 		"message":     message,
+		"countdown":   loginguard.Countdown(requestLang(r), scope),
 		"locked":      true,
 		"scope":       scope,
 		"retry_after": secs,
@@ -607,6 +646,7 @@ func (h *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		writeOIDCBounce(w, r, target)
 		return
 	}
+	h.adoptSignInLanguage(r, usr)
 	h.setSessionCookie(w, r, token)
 	// Land on the panel via a 200 HTML bounce rather than a 302. A
 	// TLS-terminating CDN (Cloudflare, measured live) strips a Domain-scoped

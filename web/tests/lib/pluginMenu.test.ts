@@ -120,9 +120,11 @@ describe('pluginMenuRows', () => {
        iste…" were all offered; the first answered with 409 read_only and a
        toast gone in 2.5 s. An action that can only be refused is not offered
        — the built-in verbs follow the same rule. */
-    const convert: PluginActionRow = { plugin: 'convert', id: 'convert', label: { en: 'Convert…' }, applies: { kind: 'file' }, output_mode: 'sibling' };
-    const fill: PluginActionRow = { plugin: 'sign', id: 'fill', label: { en: 'Fill' }, applies: { kind: 'file' }, output_mode: 'version' };
-    const verify: PluginActionRow = { plugin: 'sign', id: 'verify', label: { en: 'Verify' }, applies: { kind: 'file' }, output_mode: 'none' };
+    // `read_only_ok` is the server's answer on each row
+    // (wasmplugin.OffersOnReadOnly): false for what writes beside its file.
+    const convert: PluginActionRow = { plugin: 'convert', id: 'convert', label: { en: 'Convert…' }, applies: { kind: 'file' }, output_mode: 'sibling', read_only_ok: false };
+    const fill: PluginActionRow = { plugin: 'sign', id: 'fill', label: { en: 'Fill' }, applies: { kind: 'file' }, output_mode: 'version', read_only_ok: false };
+    const verify: PluginActionRow = { plugin: 'sign', id: 'verify', label: { en: 'Verify' }, applies: { kind: 'file' }, output_mode: 'none', read_only_ok: true };
     const all = [convert, fill, verify];
     expect(actionsOnly(pluginMenuRows(all, [pdf], { locale: 'en' })).map((r) => r.key)).toEqual([
       'plugin:convert/convert',
@@ -190,8 +192,8 @@ describe('pluginMenuRows', () => {
   it('a flow that ends in a write (applies.writable) is not offered on a read-only storage', () => {
     /* "İmza iste…" writes nothing now, but the signed document at the end:
        on a read-only storage its first screen could only refuse. */
-    const request: PluginActionRow = { plugin: 'sign', id: 'request', label: { en: 'Request signatures…' }, applies: { kind: 'file', writable: true }, output_mode: 'none', min_role: 'editor' };
-    const verify: PluginActionRow = { plugin: 'sign', id: 'verify', label: { en: 'Verify' }, applies: { kind: 'file' }, output_mode: 'none' };
+    const request: PluginActionRow = { plugin: 'sign', id: 'request', label: { en: 'Request signatures…' }, applies: { kind: 'file', writable: true }, output_mode: 'none', min_role: 'editor', read_only_ok: false };
+    const verify: PluginActionRow = { plugin: 'sign', id: 'verify', label: { en: 'Verify' }, applies: { kind: 'file' }, output_mode: 'none', read_only_ok: true };
     expect(actionsOnly(pluginMenuRows([request, verify], [pdf], { locale: 'en', readOnly: true })).map((r) => r.key)).toEqual([
       'plugin:sign/verify',
     ]);
@@ -202,12 +204,29 @@ describe('pluginMenuRows', () => {
   it('an action whose result may go elsewhere IS offered on a read-only storage', () => {
     /* The maintainer, 2026-09-22: "Dönüştür…" on a read-only storage — the wizard asks
        where the result should go. */
-    const convert: PluginActionRow = { plugin: 'convert', id: 'convert', label: { en: 'Convert…' }, applies: { kind: 'file' }, output_mode: 'sibling', output_elsewhere: true };
+    const convert: PluginActionRow = { plugin: 'convert', id: 'convert', label: { en: 'Convert…' }, applies: { kind: 'file' }, output_mode: 'sibling', output_elsewhere: true, view: 'wizard', read_only_ok: true };
     expect(actionsOnly(pluginMenuRows([convert], [pdf], { locale: 'en', readOnly: true })).map((r) => r.key)).toEqual([
       'plugin:convert/convert',
     ]);
-    const without = { ...convert, output_elsewhere: false };
+    const without = { ...convert, output_elsewhere: false, read_only_ok: false };
     expect(pluginMenuRows([without], [pdf], { locale: 'en', readOnly: true })).toEqual([]);
+  });
+
+  it("on a read-only storage the menu shows what the SERVER says a click there may do (read_only_ok, #212)", () => {
+    /* 0.54 audit B9: the menu rebuilt the rule from output_mode and
+       output_elsewhere and offered every "elsewhere" action; the run lets one
+       through only when it opens a screen that asks where the result goes. An
+       elsewhere action with no screen was offered and then refused with 409
+       read_only. The row now carries the server's answer and the menu reads
+       nothing else. Red before #212: the row below was offered. */
+    const direct: PluginActionRow = { plugin: 'convert', id: 'to-pdf', label: { en: 'To PDF' }, applies: { kind: 'file' }, output_mode: 'sibling', output_elsewhere: true, read_only_ok: false };
+    expect(pluginMenuRows([direct], [pdf], { locale: 'en', readOnly: true })).toEqual([]);
+    expect(actionsOnly(pluginMenuRows([direct], [pdf], { locale: 'en' })).map((r) => r.key)).toEqual(['plugin:convert/to-pdf']);
+    // The other way round: whatever the row's own fields suggest, a row the
+    // server says is fine there is offered (red before: a `sibling` row was
+    // left out by the menu's own reading).
+    const fine: PluginActionRow = { plugin: 'convert', id: 'peek', label: { en: 'Peek' }, applies: { kind: 'file' }, output_mode: 'sibling', read_only_ok: true };
+    expect(actionsOnly(pluginMenuRows([fine], [pdf], { locale: 'en', readOnly: true })).map((r) => r.key)).toEqual(['plugin:convert/peek']);
   });
 
   it('draws an action the server lacks a piece for as a greyed row saying what is missing', () => {
@@ -221,6 +240,7 @@ describe('pluginMenuRows', () => {
       label: { en: 'Sign…' },
       applies: { kind: 'file', ext: ['pdf'] },
       output_mode: 'sibling',
+      read_only_ok: false,
       gated: [{ ext: ['docx', 'odt'], needs: { kind: 'engine', id: 'libreoffice', name: 'LibreOffice' } }],
     };
     const docx = { type: 'file', extension: 'docx', basename: 'letter.docx' };

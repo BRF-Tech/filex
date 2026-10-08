@@ -29,6 +29,7 @@ import { loginAs } from '../helpers/auth';
 import { dropStorageByName, newAuthedRequest, seedLocalStorage, storageRoot } from '../helpers/seed';
 import { setAccountViewMode } from '../helpers/prefs';
 import { settled } from '../helpers/stable';
+import { cataloguedIn, holdsThroughScans, scanNow } from '../helpers/scan';
 
 const STORE = `e2e-names-${Date.now()}`;
 const MOUNT = `/tmp/filex-${STORE}`;
@@ -49,6 +50,8 @@ const SECRET_BODY = 'içerik: çok gizli, 2027\n';
 let prefsBefore: Record<string, unknown> = {};
 /** Kasa's recovery key, shown once when the first test creates it. */
 let kasaRecoveryKey = '';
+/** The storage's id, for its "Scan now". */
+let storeId = 0;
 
 /** The entries of `rel` AS THE SERVER STORES THEM — its storage directory. */
 function disk(rel: string): string[] {
@@ -228,7 +231,7 @@ test.describe.serial('E2E encrypted names — what the server keeps', () => {
 
   test.beforeAll(async ({ request, playwright, baseURL }) => {
     await dropStorageByName(request, STORE);
-    await seedLocalStorage(request, STORE, MOUNT);
+    storeId = (await seedLocalStorage(request, STORE, MOUNT)).id;
     api = await newAuthedRequest(playwright, baseURL ?? '');
     const got = await api.get(PREFS);
     const doc = got.ok() ? (await got.json()).prefs : {};
@@ -305,19 +308,30 @@ test.describe.serial('E2E encrypted names — what the server keeps', () => {
     expect(disk('Kasa')).toEqual([folderStored]);
 
     // ── rename the folder: its id stays, nothing inside it is touched ──
+    // ⚠ Each rename runs beside a scan of the storage, on purpose (issue
+    // #192): in the 0.53 run (WebKit) the fsnotify scan met the rename back
+    // by chance, the folder's row of Rapor.txt was dropped, and the folder
+    // opened empty below. Its catalogue row is held by id through the scans.
     const folderId = STORED_DIR.exec(folderStored)![1];
+    const inside = await cataloguedIn(api, STORE, `Kasa/${folderStored}`);
+    expect(inside.map(([, name]) => name), 'the moved file is catalogued in the folder').toEqual([inSub]);
     await rowVerb(page, 'Sözleşmeler', /^Rename$/);
     const folderRename = page.getByRole('dialog', { name: /^Rename$/ });
     await folderRename.getByRole('textbox').fill('Anlaşmalar');
-    await folderRename.getByRole('button', { name: /^Save$/ }).click();
+    await Promise.all([folderRename.getByRole('button', { name: /^Save$/ }).click(), scanNow(api, storeId)]);
     const [renamedFolder] = await pollDisk('Kasa', (n) => n.length === 1 && n[0] !== folderStored, 'the folder rename');
     expect(STORED_DIR.exec(renamedFolder)?.[1], 'the folder keeps its id').toBe(folderId);
     expect(disk(`Kasa/${renamedFolder}`), 'its contents are not renamed').toEqual([inSub]);
+    await holdsThroughScans(api, STORE, storeId, `Kasa/${renamedFolder}`, inside);
     await rowVerb(page, 'Anlaşmalar', /^Rename$/);
     await page.getByRole('dialog', { name: /^Rename$/ }).getByRole('textbox').fill('Sözleşmeler');
-    await page.getByRole('dialog', { name: /^Rename$/ }).getByRole('button', { name: /^Save$/ }).click();
+    await Promise.all([
+      page.getByRole('dialog', { name: /^Rename$/ }).getByRole('button', { name: /^Save$/ }).click(),
+      scanNow(api, storeId),
+    ]);
     [folderStored] = await pollDisk('Kasa', (n) => n.length === 1 && n[0] !== renamedFolder, 'renamed back');
     await expect(row(page, 'Sözleşmeler')).toBeVisible();
+    await holdsThroughScans(api, STORE, storeId, `Kasa/${folderStored}`, inside);
 
     // ── the same name in another folder is another stored name ────────
     await uploadFile(page, 'Rapor.txt', 'kökteki rapor\n');
@@ -559,19 +573,30 @@ test.describe.serial('E2E encrypted names — what the server keeps', () => {
     await expect(form).toBeHidden({ timeout: 30_000 });
     await expect(row(page, 'Sözleşmeler')).toBeVisible();
 
-    // The owner (the admin who made the folder) was told, twice — once a warning.
+    // The owner (the admin who made the folder) was told, twice. 0.54 (#204):
+    // the SERVER says it, from what it saw change in the key file
+    // (e2e/keyfilewatch + e2e/slotchange), never from the browser's
+    // announcement - the browser's `via` (password / recovery_key) is gone.
+    // What the server can see is the slot that changed: both rewrites changed
+    // the password slot alone (a recovery-key reset re-wraps the folder key
+    // under the new password and leaves the recovery slot as it was). Both
+    // were made by the owner, so neither is a warning.
     await expect
       .poll(async () => {
         const r = await api.get('/api/notifications?limit=50');
-        const items = ((await r.json()).items ?? []) as Array<{ event: string; severity?: string; meta?: { via?: string; storage?: string } }>;
+        const items = ((await r.json()).items ?? []) as Array<{
+          event: string;
+          severity?: string;
+          meta?: { changes?: string[]; storage?: string };
+        }>;
         // This run's storage only: the engines share one server and one
         // administrator, and spec 173's .fxe password changes notify them too.
         return items
           .filter((n) => n.event === 'e2e.password_changed' && n.meta?.storage === STORE)
-          .map((n) => n.meta?.via ?? n.severity)
+          .map((n) => `${(n.meta?.changes ?? []).join('+')}/${n.severity}`)
           .sort();
       }, { timeout: 20_000 })
-      .toEqual(['password', 'recovery_key']);
+      .toEqual(['password/info', 'password/info']);
 
     // The reset is not optional: closing it locks the folder again.
     await page.locator('.fe-e2e-strip').getByRole('button', { name: 'Lock', exact: true }).click();

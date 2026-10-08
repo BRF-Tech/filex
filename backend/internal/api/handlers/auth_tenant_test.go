@@ -164,8 +164,20 @@ func TestOIDCCallback_MultiTenant_HonorsForwardedProtoHTTP(t *testing.T) {
 	_, store := testutil.NewTestDB(t)
 	seedProvider(t, store, &model.Provider{Slug: "tenant-c", Host: "files.tenant-c.test", AuthType: model.AuthTypeOIDC})
 	a := handlers.NewAuth(store, nil, &fakeOIDC{err: errors.New("boom")}, "https://operator.test", true, "")
+	// The header is the trusted proxy's word (internal/clientip): sent from
+	// loopback, which every trusted-proxy list holds by default, it is read.
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=x&state=y", nil)
+	req.Host = "files.tenant-c.test"
+	req.RemoteAddr = "127.0.0.1:40000"
+	req.Header.Set("X-Forwarded-Proto", "http")
+	rec := httptest.NewRecorder()
+	a.OIDCCallback(rec, req)
+	require.Equal(t, http.StatusFound, rec.Code)
+	assert.Equal(t, "http://files.tenant-c.test/admin/login?error=oidc", rec.Header().Get("Location"))
+
+	// From a sender that is not a trusted proxy the same header is not read.
 	loc := callbackLocation(t, a, "files.tenant-c.test", map[string]string{"X-Forwarded-Proto": "http"})
-	assert.Equal(t, "http://files.tenant-c.test/admin/login?error=oidc", loc)
+	assert.Equal(t, "https://files.tenant-c.test/admin/login?error=oidc", loc)
 }
 
 // logoutClear drives Logout (public, always clears) and returns the raw

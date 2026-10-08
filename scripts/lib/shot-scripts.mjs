@@ -49,6 +49,17 @@ export function scriptNeeds(dir, file) {
   return { apps, set, documentServer };
 }
 
+/**
+ * The exit code of a shot script whose language packs are behind this tree
+ * (e2e/shots/langpack.mjs: a pack under 100%, or carrying keys this filex no
+ * longer has), and the reason `pnpm shots` records for that scene in its
+ * review. Not a broken scene: the translation has not caught up with the
+ * strings this tree added. The nightly chain reports it as a warning; a
+ * release run stays red (the maintainer, 2026-10-08, task #187).
+ */
+export const PACKS_BEHIND_EXIT = 3;
+export const PACKS_BEHIND = 'packs-behind';
+
 /** The variables that name the document server a picture is taken against. */
 export const DOCUMENT_SERVER_VARS = ['SHOTS_ONLYOFFICE_URL', 'SHOTS_ONLYOFFICE_JWT', 'SHOTS_ONLYOFFICE_CALLBACK_HOST'];
 

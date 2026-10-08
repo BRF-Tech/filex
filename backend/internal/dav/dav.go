@@ -371,11 +371,14 @@ func (h *Handler) preGate(r *http.Request, p *principal) (int, string) {
 		return status, msg
 	}
 
-	// ⚠⚠ The quota, which /dav did not enforce at all until 2026-08-16 while
-	// every other write surface did (manager, AI, ShareX, S3, SFTP, FTPS, NFS).
-	// A user at their limit could keep writing indefinitely by mapping a drive
-	// — and because syncWrite counts the bytes afterwards, the number in the
-	// admin panel just kept climbing past the ceiling.
+	// ⚠⚠ The quota, which /dav did not enforce at all until 2026-08-16. Every
+	// write surface asks it before the bytes land: the manager and the staged
+	// upload, S3, SFTP, FTPS, NFS, and since 0.54 the agent API's write funnel
+	// (/api/ai/upload, MCP file_write, ShareX, /u/{ticket}) and the text
+	// editor, which until then held only the per-file limit. A user at their
+	// limit could keep writing indefinitely by mapping a drive — and because
+	// syncWrite counts the bytes afterwards, the number in the admin panel just
+	// kept climbing past the ceiling.
 	//
 	// Checked HERE, from Content-Length, rather than at Close: this is before
 	// the client has uploaded anything, and it is the only place that can

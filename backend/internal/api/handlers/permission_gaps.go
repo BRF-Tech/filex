@@ -160,7 +160,7 @@ func (h *PermissionsAdmin) RestoreGap(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		perm.Invalidate()
+		perm.InvalidateFor(r.Context())
 	}
 	h.noteGapsSaved(ctx, []perm.Gap{g}, nil, nil)
 	h.ListGaps(w, r)

@@ -33,7 +33,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/e2e"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/ops"
+	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/syspath"
+	"github.com/brf-tech/filex/backend/internal/writegate"
 )
 
 // The wire codes an agent matches on. REST answers them in `code` (409), the
@@ -69,6 +71,11 @@ func aiErrCode(err error) string {
 		// The explorer's word for it (writeReserved): one of filex's own
 		// names, or here also an encrypted folder's key file (Keyless).
 		return "RESERVED_NAME"
+	case errors.Is(err, writegate.ErrVaultKeyFile):
+		// The explorer's words for writegate's vault rule (answerVaultGate).
+		return "VAULT_KEYFILE"
+	case errors.Is(err, writegate.ErrVaultPath):
+		return "VAULT_PATH"
 	case errors.Is(err, errEntryUnavailable):
 		// An entry the storage could not answer for (entry_unavailable.go,
 		// #104); the REST answer also names it (writeAIError).
@@ -77,6 +84,11 @@ func aiErrCode(err error) string {
 		// A move whose destination and every name beside it are taken; the
 		// explorer's move answers the same code (manager_mutate.go, task #116).
 		return "NO_FREE_NAME"
+	case errors.Is(err, quota.ErrFileTooLarge):
+		// Before ErrQuotaExceeded, which it wraps: the explorer's two codes.
+		return "FILE_TOO_LARGE"
+	case errors.Is(err, quota.ErrQuotaExceeded):
+		return "QUOTA_EXCEEDED"
 	}
 	return ""
 }

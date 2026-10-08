@@ -41,28 +41,14 @@ export function gateOnService(available: boolean, callerAdmin: boolean, reason: 
   return { hidden: true };
 }
 
-/**
- * The extensions the document server opens. ⚠ The ONE list: the preview
- * modal decides "this is an office document" from it and the explorer's menu
- * decides "Open needs ONLYOFFICE" from it — two lists would let a .rtf be
- * previewed as office and still offered an Open that cannot work.
+/*
+ * "Is this an office document" is not answered here any more: the list that
+ * stood here (ten extensions) disagreed with the explorer's own (nine) and
+ * with the server's (`.docm`, `.xlsm`, `.pptm`, `.ppsx`, `.xlsb` were not
+ * office documents to the menu). The server publishes the rule
+ * (`capabilities.edit_kinds`) and lib/serverRules `isOfficeExt` reads it
+ * (filex #211, audit B2).
  */
-export const OFFICE_EXTS: readonly string[] = [
-  'docx',
-  'doc',
-  'xlsx',
-  'xls',
-  'pptx',
-  'ppt',
-  'odt',
-  'ods',
-  'odp',
-  'rtf',
-];
-
-export function isOfficeExt(ext: string | null | undefined): boolean {
-  return OFFICE_EXTS.includes(String(ext ?? '').toLowerCase());
-}
 
 /** What the capabilities answer says about the document server. */
 export interface OnlyOfficeCaps {

@@ -26,6 +26,7 @@ import type { LocaleCode } from '../types/ExplorerConfig';
 import type { E2eRequestDto, E2eRequestKind } from '../types/FileNode';
 import { useLocale } from '../composables/useLocale';
 import { sayFailure } from '../lib/errorWords';
+import { clipRunes, serverLimit } from '../lib/serverRules';
 import Modal from '../modals/Modal.vue';
 
 /** The one call this dialog makes — `useFileApi().e2eRequest`, or a test's. */
@@ -67,10 +68,16 @@ const leadText = computed(() =>
       : t('e2e.request.lead'),
 );
 
-/** The server cuts a reason at this length; the box stops there instead. */
-const REASON_MAX = 2000;
+/** The server cuts a reason at its length (`limits.e2e_request_reason_max_runes`,
+ *  #211 audit B20); the box stops there instead, counting characters as the
+ *  server does. A server that publishes no number cuts it alone. */
+const reasonMax = computed(() => serverLimit('e2e_request_reason_max_runes'));
 
 const reason = ref('');
+watch(reason, (v) => {
+  const clipped = clipRunes(v, reasonMax.value);
+  if (clipped !== v) reason.value = clipped;
+});
 const busy = ref(false);
 const err = ref<string | null>(null);
 
@@ -123,7 +130,6 @@ async function submit() {
           v-model="reason"
           class="fe-input"
           rows="4"
-          :maxlength="REASON_MAX"
           :placeholder="t('e2e.request.reason_placeholder')"
           :disabled="busy"
           data-testid="e2e-request-reason"

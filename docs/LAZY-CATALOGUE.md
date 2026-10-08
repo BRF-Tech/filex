@@ -132,6 +132,16 @@ of folder reconciles run side by side. Two reconciles of the SAME folder never
 do: a per-folder lock dedupes them, and a request that arrives while one runs
 marks it dirty so it runs once more afterwards.
 
+What they do share is the storage's **row gate** (`internal/rowgate`, issue
+#192), one folder at a time: a reconcile holds it alone from the folder's
+listing to its delete pass's last drop, and the full scan holds it alone for
+each directory it lists and applies. A rename, a move, a delete or a restore
+filex is making on the storage holds it shared from its first byte to its last
+row, so a folder is never judged while such a change is half way - the bytes
+moved, the rows not yet - and two judgements of the same storage take turns
+([ARCHITECTURE.md → The row gate](ARCHITECTURE.md#the-row-gate)).
+The gate is taken before the folder's transaction opens, never inside it.
+
 Running beside a full scan is safe because every create in both paths tolerates
 losing the race: a unique-key refusal re-reads the row the other one wrote and
 carries on with it (`walk`, `EnsureDirChain`). Inside a folder's transaction the

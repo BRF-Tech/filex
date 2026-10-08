@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/dbsetting"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 )
 
@@ -196,9 +197,15 @@ type Report struct {
 	Days       []Day  `json:"days"`
 	Totals     Totals `json:"totals"`
 	Cost       Cost   `json:"cost"`
+	// Buckets and Trend are the page's bucket table and daily trend, added
+	// up here with the same source rule as Totals (PerBucket, Trend): the
+	// page draws them and adds up nothing.
+	Buckets []BucketTotal `json:"buckets"`
+	Trend   []TrendPoint  `json:"trend"`
 	// Notes are things the operator should know about THIS answer: a range
 	// with no published report yet, a cached result, a provider that reports
-	// nothing for some days.
+	// nothing for some days. Said in the reader's language (srvtext
+	// `server.usage.note.*`, the language srvtext.WithReader put on ctx).
 	Notes []string `json:"notes,omitempty"`
 }
 
@@ -221,17 +228,18 @@ func (s *Service) Report(ctx context.Context, from, to time.Time) (Report, error
 	}
 	rep.Days = days
 	rep.Totals = SumBuckets(days)
+	rep.Buckets = PerBucket(days)
+	rep.Trend = Trend(days)
 	rep.Cost = Estimate(rep.Totals, set.Pricing)
+	lang := srvtext.Pick(srvtext.Reader(ctx))
 	if !fresh {
-		rep.Notes = append(rep.Notes, "served from cache")
+		rep.Notes = append(rep.Notes, srvtext.Text(lang, "server.usage.note.cached", nil))
 	}
 	if len(days) == 0 {
-		rep.Notes = append(rep.Notes,
-			"the provider has published no report for this range yet - B2 writes each day's file the following day")
+		rep.Notes = append(rep.Notes, srvtext.Text(lang, "server.usage.note.no_report", nil))
 	}
 	if set.PricingIsDefault {
-		rep.Notes = append(rep.Notes,
-			"prices are filex's defaults ("+set.Pricing.Note+"), not your contract - check them against your invoice")
+		rep.Notes = append(rep.Notes, srvtext.Text(lang, "server.usage.note.default_prices", srvtext.Vars{"source": set.Pricing.Note}))
 	}
 	return rep, nil
 }

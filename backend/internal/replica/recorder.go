@@ -83,14 +83,6 @@ func (n *Notifier) service() notify.Service {
 	return n.svc()
 }
 
-// where is " on <storage>" when the storage is known.
-func (n *Notifier) where() string {
-	if n.storageName == "" {
-		return ""
-	}
-	return " on " + n.storageName
-}
-
 func (n *Notifier) meta(m map[string]any) map[string]any {
 	if n.storageID != 0 {
 		m["storage_id"] = n.storageID
@@ -105,11 +97,11 @@ func (n *Notifier) NotifyReplicaFail(ctx context.Context, path, op string, err e
 	if svc == nil {
 		return
 	}
+	// The facts only: the server says the alarm from them, in each reader's
+	// language (internal/notify say.go, server.notify.replica_fail).
 	_, _ = svc.Send(ctx, notify.Event{
 		Event:    notify.EventReplicaFail,
 		Severity: notify.SeverityWarning,
-		Title:    "Replica " + op + " failed",
-		Body:     "Path " + path + n.where() + " - " + err.Error(),
 		Meta: n.meta(map[string]any{
 			"path":    path,
 			"op":      op,
@@ -126,11 +118,10 @@ func (n *Notifier) NotifyPrimaryReadFail(ctx context.Context, path string, err e
 	if svc == nil {
 		return
 	}
+	// The facts only (notify say.go, server.notify.primary_read_fail).
 	_, _ = svc.Send(ctx, notify.Event{
 		Event:    notify.EventPrimaryReadFail,
 		Severity: notify.SeverityError,
-		Title:    "Primary read failed, served from replica",
-		Body:     "Path " + path + n.where() + " was served from replica after primary error: " + err.Error(),
 		Meta: n.meta(map[string]any{
 			"path":          path,
 			"primary_error": err.Error(),

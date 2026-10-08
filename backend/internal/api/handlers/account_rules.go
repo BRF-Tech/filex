@@ -1,9 +1,9 @@
 // Package handlers — account_rules.go
 //
-// What an account's e-mail and username may be, and how a refusal is said.
-// Used by the self-service profile (auth_self.go) and by an administrator
-// adding a user (users.go), so the two forms refuse the same things in the
-// same words.
+// What an account's e-mail, username and password may be, and how a refusal
+// is said. Used by the self-service profile and password change (auth_self.go)
+// and by an administrator adding or editing a user (users.go), so the forms
+// refuse the same things in the same words.
 //
 // ⚠⚠ Why this file exists (release-candidate sweep, 2026-09-21):
 //
@@ -29,6 +29,7 @@ import (
 	"net/mail"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/auth/drivers/local"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/identity"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
@@ -79,6 +80,18 @@ func validEmailAddress(s string) bool {
 // `self` (0 = a new account). The address is expected normalised (trimmed,
 // lower-case).
 func emailProblem(ctx context.Context, store db.Store, email string, self int64) *accountProblem {
+	if p := emailFormatProblem(email); p != nil {
+		return p
+	}
+	if other, err := store.GetUserByEmail(ctx, email); err == nil && other != nil && other.ID != self {
+		return emailTaken(email)
+	}
+	return nil
+}
+
+// emailFormatProblem is emailProblem without asking whether the address is
+// taken: what anybody may be told about it (account_check.go).
+func emailFormatProblem(email string) *accountProblem {
 	if email == "" {
 		return &accountProblem{status: http.StatusBadRequest, code: "email_required", field: "email",
 			key: "server.account.email_required"}
@@ -86,9 +99,6 @@ func emailProblem(ctx context.Context, store db.Store, email string, self int64)
 	if !validEmailAddress(email) {
 		return &accountProblem{status: http.StatusBadRequest, code: "email_invalid", field: "email",
 			key: "server.account.email_invalid", vars: srvtext.Vars{"email": email}}
-	}
-	if other, err := store.GetUserByEmail(ctx, email); err == nil && other != nil && other.ID != self {
-		return emailTaken(email)
 	}
 	return nil
 }
@@ -115,9 +125,9 @@ func usernameTaken(name string) *accountProblem {
 		key: "server.account.username_taken", vars: srvtext.Vars{"name": name}}
 }
 
-// usernameRefusal says identity.Check's answer in the reader's language. The
-// browser says the same things while the person types (web/src/lib/
-// accountRules.ts); this is what reaches someone the browser did not stop.
+// usernameRefusal says identity.Check's answer in the reader's language - on
+// a save, and while the person types (POST /api/auth/account/check,
+// account_check.go): the browser keeps no copy of the rule or its words.
 func usernameRefusal(p *identity.Problem, name string) *accountProblem {
 	bad := func(key string, vars srvtext.Vars) *accountProblem {
 		return &accountProblem{status: http.StatusBadRequest, code: "username_invalid", field: "username",
@@ -148,6 +158,19 @@ func usernameRefusal(p *identity.Problem, name string) *accountProblem {
 		return bad("username_char", srvtext.Vars{"char": string(p.Char)})
 	}
 	return bad("username_reserved", srvtext.Vars{"name": name})
+}
+
+// passwordProblem checks a password chosen for an account against the one
+// rule (local.CheckPassword): the person's own change, an administrator adding
+// an account and an administrator setting one all ask it here, and all refuse
+// in the same words, which name the number.
+func passwordProblem(pw string) *accountProblem {
+	if local.CheckPassword(pw) == nil {
+		return nil
+	}
+	n := local.MinPasswordLen
+	return &accountProblem{status: http.StatusBadRequest, code: "password_too_short", field: "password",
+		key: "server.account.password_short", count: &n}
 }
 
 // isUniqueViolation recognises the unique-constraint error of every driver

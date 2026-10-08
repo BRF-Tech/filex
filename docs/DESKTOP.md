@@ -38,7 +38,7 @@ The desktop app is **`filex-app`** in every one of them; plain `filex` is the
 | Ubuntu and other Linux with snapd | `sudo snap install filex-app` | The Snap Store build above, for x64 and arm64 (snapd picks the one for the machine). The sign-in is stored in your keyring once the snap may reach it: `sudo snap connect filex-app:password-manager-service` (the app says so when it is needed). Inside the snap the app runs without Chromium's own sandbox and relies on the snap's strict confinement; there is nothing to connect for it ([the snap and the sandbox](#the-snap-and-the-sandbox)). |
 | macOS 13+ (Apple Silicon) | `brew install brf-tech/filex/filex-app` | Homebrew tap [`BRF-Tech/homebrew-filex`](https://github.com/BRF-Tech/homebrew-filex); `brew upgrade` keeps it current (the Mac app does not update itself). The first launch is blocked once, as below: the app is not signed with a Developer ID. |
 | Windows 10/11 | [Microsoft Store](https://apps.microsoft.com/detail/9PKXDJLVZWXW) - *filex File Manager* | **The one Windows build that is code-signed**: Microsoft signs it, so there is no SmartScreen prompt, and the Store installs and updates it. On a machine that also has the installer below, both read the same accounts and folders; Settings says so. |
-| Windows 10/11 | `winget install BRFTech.filex-app` - **not installable yet** | The same per-user installer as the download below, updating itself the same way. Every release submits it, and the package is still waiting for its first review by the winget moderators: until that is approved, `winget` does not find it. |
+| Windows 10/11 | `winget install BRFTech.filex-app` - **not installable yet** | The same per-user installer as the download below, updating itself the same way. Every release submits it, and the desktop app's package is still waiting for its first review by the winget moderators: until that is approved, `winget` does not find it. The [CLI](CLI.md)'s package, `BRFTech.filex`, is on winget already. |
 
 ### Download
 
@@ -242,8 +242,11 @@ app - a new row in the bell raises a notification once you allow it in
 **Settings → Notifications** ([browser notifications](NOTIFICATIONS.md#browser-notifications)).
 On an iPhone or iPad that works only in the app added to the Home Screen,
 never in a Safari tab, and the permission is asked there, from that button.
-⚠ There is no Web Push yet: with filex closed, nothing arrives until it is
-opened again.
+With filex closed, **Push notifications on this device** in the same pane
+carries them on ([Web Push](NOTIFICATIONS.md#web-push)): the same
+notifications the bell tells you, at the same moment, on that phone - on an
+iPhone or iPad, again only in the app added to the Home Screen (iOS 16.4 or
+later).
 
 ## Signing in
 
@@ -653,18 +656,38 @@ meaning in the app and are not drawn.
 
 ## Language
 
-*Settings → Language* - **System**, **English** or **Türkçe**. System follows
-your operating system, which is what the app did when there was nothing to
-choose, so nothing changes until you pick.
+**The app's language is your account's** (0.54). There is no language of the
+app's own: the window, the tray menu, the file list inside the window, the
+notifications and the sync engine's messages all speak the language of the
+account on screen - the same one the web panel, your phone's push
+notifications and your emails use.
 
-The choice moves the whole app at once: this window, the tray menu (built by a
+*Settings → Language* - **English** or **Türkçe** - **changes your account's
+language** on the server, so the web panel follows too. With nobody signed in
+- or an account the server has signed out, until you reconnect it - there is
+no account to change: the app speaks your operating system's language (or the
+account's last known one) and the choice is greyed out. A language changed somewhere else (the
+web panel, another computer) reaches the app when you start it, switch
+accounts or bring the window forward.
+
+An install from before 0.54 that had pinned a language here hands it to its
+account once, if the account had none of its own; an account that already has
+a language keeps it.
+
+The change moves the whole app at once: this window, the tray menu (built by a
 different process), and the file list inside it (a separate component with its
-own catalogue). A Turkish shell around an English file list is one app
-pretending to be two - which is what it used to look like before any of this
-was translated.
+own catalogue). Switching takes effect immediately and **keeps the folder you
+are looking at**; nothing reloads.
 
-Switching takes effect immediately and **keeps the folder you are looking at**;
-nothing reloads.
+What the sync engine says under each synced folder - the phase, an error, how
+changes reach it - is said **by the engine**
+([The engine's event stream](#the-engines-event-stream)), in the language of
+the account it syncs: the app starts it without `--lang` and the engine asks
+the server. A changed account language restarts that account's engines, and
+their next lines come in the new language. When the account's language is one
+a language pack on your server adds, the sync lines and the notifications come
+in it even though the window itself only draws English and Turkish (the window
+then uses the operating system's of the two).
 
 ---
 
@@ -766,6 +789,26 @@ Under each folder in *Settings* the same line says what is true of it now:
 - "watching for changes" only once a pass has left it in step;
 - "moving to the new filex folder…" while the filex folder is moved.
 
+### The engine's event stream
+
+Every line about what the engine is doing - a phase with its figures, a folder
+another filex syncs, the sync window, an error, *Live* / *Polling* / *Offline*,
+a folder that cannot be watched - is the engine's own sentence. The app starts
+each watcher with `filex sync run --json` (no `--lang`: the engine speaks the account's language) and reads **events**
+(`{event, pair, code, params, message}`, one per line,
+[the full list](SYNC.md#the-event-stream---json)): it acts on the code and the
+figures and shows the message as it is. It no longer reads the engine's plain
+English lines - a sentence reworded in the engine used to break the line under
+a folder without a word, and its errors reached a Turkish window in English.
+The words the window keeps are its own states: paused, signed out, waiting for
+the first check, watching, moving, and that the engine stopped (with the
+engine's reason after it).
+
+The app always runs the engine it ships with. An engine older than 0.54 (only
+possible with `FILEX_CLI` pointing at another binary) does not know `--json`;
+the folder then says the engine could not start and may be older than the app,
+followed by the engine's own refusal.
+
 An engine that stops on its own is started again after 5 s, 15 s, a minute,
 then every five minutes, and the line says so. The tray icon's tooltip carries
 the pause, whether a pass is running or a folder is failing, and the unread
@@ -823,13 +866,16 @@ rows for the engine:
   (22:00-07:00), in this computer's local time. Outside those hours no new round
   starts and the folder reads *waiting for the sync window*; a round still
   running when they end stops the way Ctrl-C stops it - what it finished is
-  recorded - and carries on in the next window.
+  recorded - and carries on in the next window. The hours are read by the
+  engine alone ([`filex sync window`](SYNC.md#filex-sync-window)): the app
+  stores the engine's answer, and a stored window the engine refuses is cleared
+  at start, with the engine's reason under the row.
 
 A change restarts the watchers at once, so it applies to a transfer already
 running. The line under each folder in Settings says what the engine is doing
 with that folder right now - listing the server, moving files, finishing up,
 waiting for the window - or the error from its last round. While files move it
-reads, for example, *moving files - 120/11704, 1.2 GiB of 52.6 GiB - about
+reads, for example, *moving files - 120/11,704, 1.2 GB of 52.6 GB - about
 8 h 10 min left*: the byte counts appear once there are bytes to move, the
 estimate after the first few seconds of transfer, from the average rate so far
 (so a limit or a busy line shows up in it).

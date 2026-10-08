@@ -56,8 +56,48 @@ const SnapshotTTL = 3 * time.Second
 var generation atomic.Uint64
 
 // Invalidate drops every Loader's cached defaults and rules. Call it after
-// writing either.
-func Invalidate() { generation.Add(1) }
+// writing either. Prefer InvalidateFor, which says whose people the change can
+// concern: Invalidate tells the hook nothing about it, which the server reads
+// as "anybody, on every tenant".
+func Invalidate() { InvalidateFor(context.Background()) }
+
+// InvalidateFor is Invalidate for a write made by ctx's caller about the named
+// accounts. It tells the invalidate hook (the realtime hub: open explorers ask
+// their menu answers again, #196) who may be concerned: the named accounts
+// when there are any, else the people of the caller's tenant (ctx's tenant
+// scope), else - a platform-level change, or a single-tenant install -
+// everybody.
+func InvalidateFor(ctx context.Context, userIDs ...int64) {
+	generation.Add(1)
+	if fn := invalidateHook.Load(); fn != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		(*fn)(ctx, userIDs)
+	}
+}
+
+// InvalidateHook is told after every invalidation: the writer's context and
+// the accounts it named (none: the writer's tenant, or everybody).
+type InvalidateHook func(ctx context.Context, userIDs []int64)
+
+// invalidateHook is package-level like generation, because the writes that
+// invalidate live in several packages (handlers, group, auth) and none of
+// them holds the hub.
+var invalidateHook atomic.Pointer[InvalidateHook]
+
+// SetInvalidateHook installs fn to be called after every invalidation; nil
+// removes it. fn must not block: it runs on the request that wrote the change.
+// The server wires the realtime hub here (api.BuildRouter), so a role, a rule
+// or a group membership edited reaches the open explorers it can concern as an
+// `access.changed` frame (internal/realtime/access.go).
+func SetInvalidateHook(fn InvalidateHook) {
+	if fn == nil {
+		invalidateHook.Store(nil)
+		return
+	}
+	invalidateHook.Store(&fn)
+}
 
 // NewLoader returns a Loader backed by store.
 func NewLoader(store db.Store) *Loader { return &Loader{Store: store} }

@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..947da4c24c422e7d7385441728e80a177b88ce6b 100644
+index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..036369d99463721398b9d7c49dfb46a4082658e3 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -1,51 +1,104 @@
@@ -266,7 +266,7 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..947da4c24c422e7d7385441728e80a17
 +        run: bash scripts/build-wasm-fixture.sh
 +      - name: The shard, under -race
 +        run: |
-+          set -uo pipefail
++          set +e -uo pipefail
 +          args=$(node scripts/test-shards.mjs go --profile race --shard "$SHARD" --format args) || exit 1
 +          mapfile -t A <<< "$args"
 +          [ "${#A[@]}" -gt 0 ] && [ -n "${A[0]}" ] || { echo "::error::shard $SHARD has no arguments"; exit 1; }
@@ -431,7 +431,7 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..947da4c24c422e7d7385441728e80a17
        - uses: actions/setup-node@v4
          with:
            node-version: "22"
-@@ -149,6 +427,80 @@ jobs:
+@@ -149,6 +427,84 @@ jobs:
          working-directory: desktop
          run: node --experimental-strip-types --test test/*.test.ts
  
@@ -503,16 +503,20 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..947da4c24c422e7d7385441728e80a17
 +      - uses: actions/upload-artifact@v4
 +        with:
 +          name: e2e-build
++          # packages/core/dist too: 173 builds a real .fxe with the product's
++          # own library (v0.53.0's first full matrix: "Cannot find module
++          # packages/core/dist/filex-core.js" in Playwright chromium 2/4).
 +          path: |
 +            bin/filex
 +            backend/internal/wasmplugin/testdata/echo/echo.wasm
++            packages/core/dist
 +          if-no-files-found: error
 +          retention-days: 3
 +
    browser:
      name: Browser E2E (Cypress)
      runs-on: ubuntu-latest
-@@ -164,7 +516,7 @@ jobs:
+@@ -164,7 +520,7 @@ jobs:
            cache: pnpm
        - uses: actions/setup-go@v5
          with:
@@ -521,7 +525,7 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..947da4c24c422e7d7385441728e80a17
            cache-dependency-path: backend/go.sum
  
        # The Cypress binary is a ~250 MB download that is NOT in node_modules —
-@@ -199,13 +551,8 @@ jobs:
+@@ -199,13 +555,8 @@ jobs:
        # trace. `video` is on when CI=true (web/cypress.config.ts).
        #
        # ⚠ The server's own log is in there too, and it is the half that says
@@ -537,7 +541,7 @@ index b10edc9893dcb4ff0b1c797ee3cf5bf8befa32e4..947da4c24c422e7d7385441728e80a17
        - name: Upload failure screenshots + video
          if: failure()
          uses: actions/upload-artifact@v4
-@@ -216,26 +563,252 @@ jobs:
+@@ -216,26 +567,252 @@ jobs:
              web/cypress/videos
              e2e/.artifacts/server.log
            # ⚠ e2e/.artifacts is a dot-directory: upload-artifact v4.4+ leaves

@@ -197,6 +197,11 @@ all, and the file permissions each operation
   composite ETags, `x-amz-meta-mtime`, multipart uploads on filex's own staging area,
   the modern `x-amz-checksum-*` contract (header *and* trailer), and directory markers so
   `mkdir` works over `s3fs`.
+- `aws-chunked` bodies (`STREAMING-…` payloads) are decoded, their chunk signatures
+  verified, and held to the `x-amz-decoded-content-length` they declare: that number is
+  what the quota and the per-file limit are asked with, so a body (or a part) that is
+  longer or shorter is refused with `400 IncompleteBody` and nothing is kept. The
+  catalogue records the size that landed on the storage (since 0.54.0).
 - Path-style and virtual-hosted addressing both work.
 
 > ⚠ **Give the endpoint its own hostname** (`FILEX_S3_DOMAIN=s3.example.com`) if you can.

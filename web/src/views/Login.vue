@@ -460,7 +460,7 @@ function startOidc(c?: LoginSSO) {
       </div>
 
       <p class="mt-10 text-center text-xs text-zinc-500 dark:text-zinc-500 inline-flex items-center justify-center gap-1 w-full">
-        <Mail class="h-3 w-3" /> {{ productVersionLine(caps.data.version) }}
+        <Mail class="h-3 w-3" /> {{ productVersionLine(caps.data.release) }}
       </p>
     </div>
 
@@ -710,7 +710,7 @@ function startOidc(c?: LoginSSO) {
              line either (InstallPrompt.vue → checkFit; measured under the card
              at 1440×900, 2026-09-21). -->
         <p class="lg-version" data-install-keep>
-          <Box class="lg-i16" aria-hidden="true" /> {{ productVersionLine(caps.data.version) }}
+          <Box class="lg-i16" aria-hidden="true" /> {{ productVersionLine(caps.data.release) }}
         </p>
       </div>
     </div>

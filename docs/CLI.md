@@ -9,13 +9,16 @@ filex client login | ls | upload | download | mkdir | rm | mv | cp | search | sh
 filex client trash | versions | tag | actions | run | archive | plugins
 ```
 
-The same binary also carries three commands that are not part of `client`:
+The same binary also carries commands that are not part of `client`:
 [`filex sync`](SYNC.md), which keeps a local folder in step with the server,
 [`filex mount`](#filex-mount---the-server-as-a-folder), which attaches the server
-as a folder (or a drive letter on Windows) without copying anything, and
+as a folder (or a drive letter on Windows) without copying anything,
 [`filex decrypt`](#filex-decrypt---an-encrypted-folder-offline), which turns a
-downloaded end-to-end encrypted folder - or a single encrypted `.fxe` file -
-back into plain files, offline.
+downloaded end-to-end encrypted folder - or a single encrypted `.fxe` file, or
+a vault straight from the server - back into plain files,
+[`filex encrypt`](#filex-encrypt---make-a-folder-an-encrypted-folder), and
+[`filex vault`](#filex-vault---a-vault-on-a-server), which opens a vault (the
+third encryption level) as a drive on this machine.
 
 The commands that run on the server machine against its own database
 (`filex serve`, `filex migrate`, `filex admin`, `filex storage`) are not
@@ -53,17 +56,20 @@ app is `filex-app`):
 
 ```bash
 brew install brf-tech/filex/filex     # macOS and Linux - Homebrew tap BRF-Tech/homebrew-filex
+winget install BRFTech.filex          # Windows 10/11 - x64 and arm64
 ```
 
 On macOS the binary is not signed with an Apple Developer ID, so macOS may
 refuse its first run: allow it once in System Settings → Privacy & Security
 (*Open Anyway*).
 
-On Windows the package will be `winget install BRFTech.filex` (it puts `filex`
-on the PATH; open a new terminal after it). Every release submits it, and it is
-**not installable yet**: a new winget package waits for its first review by the
-winget moderators, and until that is approved `winget` does not find it. Take
-`filex-windows-amd64.exe` from the release meanwhile, as above.
+On Windows `winget install BRFTech.filex` installs the release's own binary,
+x64 or arm64 as the machine is (winget picks it), and puts `filex` on the PATH -
+open a new terminal after it. It has been on winget since 0.53.0. Every release
+submits its version to `microsoft/winget-pkgs`, and
+`winget upgrade BRFTech.filex` finds it once that pull request is merged, so
+winget can trail the GitHub Release for a while; the release binaries above are
+there at once.
 
 A binary installed this way upgrades itself with `filex self-update`
 ([UPDATES.md](./UPDATES.md)). A filex that came from a package manager
@@ -442,6 +448,8 @@ filex client search "meeting notes" --scope content
 filex client search report --scope name --limit 20 --storage-id 2
 filex client search "invoice 2026"              # finds invoice_2026.pdf
 filex client search "report tag:accounting"     # narrow to a tag
+filex client search report --type file --min-size 104857600 --modified-after 2026-10-01
+filex client search plan --under docs://Projects --owner me --hidden false
 ```
 
 ```
@@ -460,6 +468,17 @@ finds `Code/main.go`; without the index every word has to be in the file's own
 name) - a single typo is forgiven, and `tag:` / `-tag:` filter by tag. Results
 arrive in rank order, exact filename matches first - quote a query that contains
 spaces.
+
+The narrowing flags are the server's (`docs/SEARCH.md` → Narrowing a search),
+applied before `--limit` counts a result: `--type` (`file`, `dir`, `document`,
+`spreadsheet`, `presentation`, `pdf`, `image`, `video`, `audio`, `archive`,
+`code`, `text`, `other`), `--mime`, `--modified-after` / `--modified-before`
+(`YYYY-MM-DD`, RFC 3339 or Unix milliseconds), `--min-size` / `--max-size`
+(bytes), `--under` / `--not-under` (`adapter://dir`), `--owner` (`me`, `system`
+or an account id) and `--hidden false`. A value the server cannot read is
+refused (`400 bad_filter`), never ignored. When more matched than `--limit`
+showed, the table ends with a line saying so (`--json` carries `truncated` and
+`total`).
 
 ### share
 
@@ -579,6 +598,8 @@ filex decrypt ~/Downloads/one-file --marker ./Kasa/.filex-e2e.json
 pass show kasa | filex decrypt ./Kasa --password-stdin
 filex decrypt ~/Downloads/Rapor.pdf.fxe             # → ~/Downloads/Rapor.pdf
 filex decrypt ./encrypted-3fa2c1d0.fxe -o ./x.pdf   # a hidden-name file, to a name you pick
+filex decrypt docs://Kasa -o ./Kasa-plain           # a vault, straight from the server
+filex decrypt ./Kasa --generation 41 -o ./Kasa-41   # a vault's older state, still kept
 ```
 
 **What it takes.** The encrypted folder itself, a `.zip` of it (download the
@@ -608,6 +629,33 @@ header version `0x02`) are decrypted as a stream - memory stays flat whatever
 their size - and a truncated, reordered or extended one is damage like any
 other. A folder that needs a feature this build does not know is refused with
 the feature named and exit status `7` - update filex.
+
+### A vault
+
+A [vault](E2E-VAULT-FORMAT.md) (the third encryption level) keeps its files in
+encrypted packs and its tree in an encrypted index, so it is decrypted **whole**
+- the vault folder, or a `.zip` of it, never a part of it.
+
+- **A copy** (`filex decrypt ./Kasa`): offline, like any encrypted folder. The
+  packs are checked against their names and size as they are read.
+- **On the server** (`filex decrypt docs://Kasa`): nothing to download first.
+  The command asks the server which generation is the latest, fetches its
+  index, and then only the byte ranges of the packs the files need, over the
+  same connection `filex client` uses (`--url` / `--token`, `FILEX_URL` /
+  `FILEX_TOKEN`, or the session `filex client login` saved). It takes **no
+  lock**: somebody may be writing in the vault meanwhile, and nothing is
+  written on the server. Without `-o` the output is `<vault name>-decrypted`
+  in the current folder.
+- **Which state.** The latest generation that verifies. When the newest one is
+  damaged (a commit that broke half way on a storage without an atomic rename,
+  or worse), the command waits two seconds, tries once more, then decrypts the
+  newest one that verifies and says so in a warning. `--generation N` takes an
+  older generation the vault still keeps (the three newest are always kept,
+  older ones for 15 minutes after they were replaced).
+- **All or nothing**, exactly as for a folder: one damaged pack and nothing is
+  written (exit `6`). A vault written by a newer filex is refused (exit `7`).
+
+Every file gets its original modification time back.
 
 ### A single encrypted file (`.fxe`)
 
@@ -644,6 +692,8 @@ variant. `--quiet` drops the warnings, not the summary.
 | `--recovery-key` | unlock with the recovery key instead of the password |
 | `--password-stdin` | read the password (or recovery key) as one line from stdin |
 | `-q`, `--quiet` | print only the summary |
+| `--generation` | a vault only: decrypt this older generation instead of the latest |
+| `--url`, `--token` | a vault on a server only: as for `filex client` |
 
 > ⚠ **The operator's escrow key is not accepted.** Escrow use in the web UI
 > notifies the folder's owner before it opens anything; an offline tool cannot,
@@ -695,7 +745,8 @@ then every file. Each file is downloaded, encrypted as it arrives (the
 plaintext never touches this disk; the ciphertext waits in a temporary file),
 and sent back over itself as a conversion write: only if it is still the file
 that was listed (`expect`), and with no plaintext version kept
-(`e2e_convert`). At `--level 2` the names are encrypted after the contents. At
+(`e2e_convert`; for the folder's owner or an administrator - anyone else's
+write keeps a version, as for any overwrite). At `--level 2` the names are encrypted after the contents. At
 the end the key file drops `conv` and the server removes what it held from
 before - thumbnails and search text always, older versions and trash entries
 unless `--keep-versions` / `--keep-trash` (only the folder's owner or an
@@ -739,6 +790,98 @@ new file (`0600`, never overwritten) instead.
 > ⚠ The folder name itself is never encrypted, at either level: an encrypted
 > folder's own name is public, in the browser too.
 
+## `filex vault` - a vault on a server
+
+A **vault** is the third level of [end-to-end encryption](E2E-ENCRYPTION.md): a
+folder whose files and subfolders the server never sees - only packs of one
+size and an encrypted index ([format](E2E-VAULT-FORMAT.md)). It is made in the
+web app or the desktop app. From the terminal:
+
+```bash
+filex vault mount docs://Kasa                   # Windows: the first free drive letter
+filex vault mount docs://Kasa Z:
+filex vault mount docs://Kasa ~/Kasa            # macOS; Linux with davfs2
+filex vault mount docs://Kasa --no-os-mount     # only print the address
+filex vault prune docs://Kasa                   # delete what it no longer needs
+pass show kasa | filex vault mount docs://Kasa --password-stdin
+```
+
+Both unlock the vault with its password (asked on the terminal without echo,
+or one line with `--password-stdin`) or `--recovery-key`, and use the
+connection `filex client` uses. Everything is decrypted and encrypted on this
+machine.
+
+### `filex vault mount`
+
+The vault is served from a **WebDAV server on this machine** - `127.0.0.1`, a
+random port and a random 128-bit address that is its only key; the server
+refuses a request for any other host name - and the command asks the system to
+mount it: `net use` on Windows, `mount_webdav` on macOS (at the folder you
+name, or `~/filex-vaults/<vault>`), GNOME's `gio mount` on Linux, or davfs2 at
+the folder you name (davfs2 needs root, or a `user` line for the address in
+`/etc/fstab`). When none of that works it prints the address for a WebDAV
+client. No FUSE, nothing to install.
+
+- **Reading takes no lock.** Files are read in byte ranges and kept as
+  decrypted 1 MiB chunks in a small cache (`--cache-chunks`). While the mount
+  does not write, it follows what others commit (it asks the server every 30
+  seconds).
+- **The first change takes the vault's write lock** - not the mount: mounting
+  to look never stops anybody else from writing. When somebody else holds the
+  lock, the change fails with "access denied" and the command says who. The
+  lock goes back after your idle time (the setting in the web app, 3 minutes
+  unless you changed it); the next change takes it again if it is free.
+- ⚠ **Saved is not committed here.** The system writes file by file and waits
+  for each, so the mount answers once a file's bytes are in its spool and
+  commits them to the vault within 5 seconds of the last write (changes made
+  within 2 seconds of each other share a commit). A crash in that window loses
+  those writes, as a disk's write cache would. The spool is a temporary folder
+  (`--spool-dir`); each file in it is encrypted with a key that only the
+  running command holds.
+- **15 minutes with nothing done through the mount**: it commits what is
+  pending, gives the lock back, unmounts, drops the keys and exits. Ctrl-C does
+  the same at once.
+- **Lost lock.** When the server ends the lock (your idle time, the owner broke
+  it, the connection was gone for 45 seconds), what was not committed yet is
+  dropped and listed on the terminal; the mount shows the last committed state.
+- `.DS_Store`, `._*`, `Thumbs.db` and `desktop.ini` are kept in the mount's
+  memory and never written to the vault.
+- A damaged newest state, or a vault written by a newer filex, is mounted
+  read-only, and the command says why.
+
+> ⚠ **Windows.** The mount needs Windows' own WebDAV client, the WebClient
+> service; the command warns when it is disabled (`sc config WebClient start=
+> demand`, then `net start WebClient`, as administrator; on Windows Server,
+> install the WebDAV Redirector feature). By default that client refuses to
+> open files over 50 MB (`FileSizeLimitInBytes`); the command warns and prints
+> the `reg add` that raises it to 4 GB, the most Windows allows. Larger files
+> cannot be opened through a Windows WebDAV drive at all - use `filex decrypt`
+> for them.
+
+| Flag | What it does |
+|---|---|
+| `--read-only` | never write: the write lock is never taken |
+| `--cache-chunks` | how many decrypted 1 MiB chunks to keep in memory (default 32) |
+| `--spool-dir` | where written files wait for their commit (default: the system temp folder) |
+| `--no-os-mount` | do not ask the system to mount it: print the address |
+| `--debug` | log every WebDAV request |
+| `--recovery-key`, `--password-stdin`, `--url`, `--token` | as for `filex decrypt` |
+
+### `filex vault prune`
+
+Takes the write lock and runs a full
+[collection](E2E-VAULT-FORMAT.md#garbage-collection): the index files of
+generations nobody needs any more, the packs only those generations used, and
+packs no generation ever used (an interrupted upload, a lost lock). The three
+newest generations, and every generation replaced less than 15 minutes ago, are
+kept for readers still working on them. Then, when more than half of the
+vault's packs is dead space and the live bytes of the emptiest packs fit in
+fewer packs, it copies them into new packs - nothing is encrypted again - and
+commits a generation that points there; the old packs go at a later prune.
+Writers already do a smaller pass after every commit; `prune` is the full one.
+Deletions are for good: no trash, no version. When somebody else holds the
+lock, it says who and stops.
+
 ## JSON output
 
 Every command accepts `--json` and then prints the server's raw JSON response
@@ -758,6 +901,13 @@ Errors go to **stderr** and the process exits **1**. A `401` appends a hint:
 filex: HTTP 401: unauthorized - token missing/expired; run `filex client login`
 ```
 
+What follows the status is the server's sentence (`message`, since 0.54), in
+the account's language, else the `Accept-Language` it was sent with -
+`HTTP 403: This storage is read-only.` rather than the code it used to print
+(`HTTP 403: permission_denied`). A failed operation prints the operation's
+`error_text` the same way. The codes and the rules:
+[API-ERRORS.md](API-ERRORS.md).
+
 `filex sync run` has two statuses of its own, for a supervisor that acts on
 *why* it stopped ([Folder sync](SYNC.md#troubleshooting)):
 
@@ -766,8 +916,13 @@ filex: HTTP 401: unauthorized - token missing/expired; run `filex client login`
 | `3` | The server refused the token (HTTP 401): sign in again rather than retry. |
 | `4` | At least one pair was skipped because another filex on this computer is syncing it; the other pairs ran. `--watch` never exits with it - it waits and takes the pair over. |
 
-`filex decrypt` has three, so a script can tell a typo from a broken folder
-([above](#filex-decrypt---an-encrypted-folder-offline)):
+With `--json` it writes [an event per line](SYNC.md#the-event-stream---json)
+instead of its plain lines, and the error it stops with is the last of them (a
+`fatal` event, its `params.exit` the status above) rather than a line on
+stderr. `--lang` / `$FILEX_LANG` sets the language of the events' messages.
+
+`filex decrypt` (and `filex vault`) has three, so a script can tell a typo from
+a broken folder ([above](#filex-decrypt---an-encrypted-folder-offline)):
 
 | Status | Meaning |
 |---|---|

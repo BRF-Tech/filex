@@ -21,6 +21,13 @@ type Notification struct {
 	WebhookError  string          `json:"webhook_error,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
 
+	// WebhookReason is, at read time, the webhook cell's second half in the
+	// reader's language (notify.WebhookReason): why a delivery was skipped,
+	// in the server's words - WebhookError keeps the code (no_destination,
+	// digest_unnamed, sibling, stopped) - or a failed delivery's error as the
+	// receiver gave it. Never stored.
+	WebhookReason string `json:"webhook_reason,omitempty"`
+
 	// Target is derived from MetaJSON at read time (HydrateTarget), never
 	// stored in a column of its own. Absent on rows that have nothing to
 	// open — the client reads a missing `target` as kind "none".
@@ -45,6 +52,53 @@ type Notification struct {
 	// person who did it — kept in the history, shown in no bell). Empty on a
 	// row addressed to somebody, and on every row a bell hands out.
 	Audience string `json:"audience,omitempty"`
+
+	// E2E is set, at read time, on a row whose sentence names an item inside
+	// an end-to-end encrypted folder (notify.SayRows): Title and Body then say
+	// "🔒 Encrypted item" there, and E2E says where those words stand, so a
+	// browser that has the folder unlocked puts the item's real name in their
+	// place. Never stored.
+	E2E *NotificationE2E `json:"e2e,omitempty"`
+
+	// Opens says, at read time, whether a click on the row goes somewhere
+	// (notify.Opens - the one rule the bell's rows, the page's pop-up and a
+	// push follow). Never stored.
+	Opens *bool `json:"opens,omitempty"`
+}
+
+// NotificationE2E is the one part of a notification's text the server cannot
+// say: the name of an item inside an end-to-end encrypted folder, which it
+// only has scrambled. The sentence is still the server's (internal/notify
+// say.go); Title and Body here are that sentence cut at the names, and Names
+// is what each name is. A reader with the folder's key fills a name in; a
+// reader without it uses the name's Locked text, which is exactly what the
+// row's own title and body already say.
+type NotificationE2E struct {
+	Title []NotificationTextPart `json:"title"`
+	Body  []NotificationTextPart `json:"body"`
+	Names []NotificationE2EName  `json:"names"`
+}
+
+// NotificationTextPart is one piece of a sentence: either words (Text) or the
+// name at Names[Name].
+type NotificationTextPart struct {
+	Text string `json:"text,omitempty"`
+	Name *int   `json:"name,omitempty"`
+}
+
+// NotificationE2EName is one name inside an encrypted folder.
+type NotificationE2EName struct {
+	// Wire is the item as listings address it, "<storage>://<path>", its
+	// encrypted segments as stored.
+	Wire string `json:"wire"`
+	// Root is the encrypted folder it is in, "<storage>://<root>".
+	Root string `json:"root"`
+	// Part is "name" (the item's own name) or "path" (where it is, from the
+	// encrypted folder down).
+	Part string `json:"part"`
+	// Locked is what the name reads as without the folder's key: the lock
+	// word, or "<root>/…/<lock word>" for a path.
+	Locked string `json:"locked"`
 }
 
 // NotificationTargetKind says WHAT a notification is about, so a click on it
@@ -337,6 +391,12 @@ type WebhookTarget struct {
 	Events    string    `json:"events"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
+
+	// Lang is the language the target's `title` and `body` are said in
+	// (migration 00105): a webhook is a receiver no person stands behind, so
+	// it has the language chosen for it here, and "" is the instance's
+	// (FILEX_DEFAULT_LOCALE, else English). notify say.go.
+	Lang string `json:"lang"`
 
 	// Last-delivery persistence (migration 00019). All nil until the
 	// first delivery attempt (real dispatch or admin test-fire).

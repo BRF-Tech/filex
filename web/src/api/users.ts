@@ -61,6 +61,14 @@ export const UsersApi = {
     };
   },
 
+  // What the Add user form fills in from an address (#211, audit B4): the
+  // username the server's identity rule gives - the one a first SSO sign-in
+  // gets too - and a display name. Both empty until the address has its @.
+  async suggest(email: string): Promise<{ username: string; name: string }> {
+    const { data } = await api.get<{ username?: string; name?: string }>('/admin/users/suggest', { params: { email } });
+    return { username: data?.username ?? '', name: data?.name ?? '' };
+  },
+
   async get(id: number): Promise<User> {
     const { data } = await api.get<User>(`/admin/users/${id}`);
     return data;

@@ -1,11 +1,16 @@
 // The gate that keeps audit rows readable.
 //
 // The dashboard's "Recent activity" card printed the wire names the server
-// stores — `user.update` over `admin@… · user:12` — in English on a Turkish
-// panel. src/lib/auditLabel.ts composes a label from a translated resource and
-// verb instead; this file reads the Go that WRITES the rows and fails when a
-// fixed action name or target type has no translation in either language, so
-// a new audit case cannot ship as a raw name.
+// stores - `user.update` over `admin@… · user:12` - in English on a Turkish
+// panel. Since 0.54 the SERVER says every row (handlers/audit_label.go: a
+// translated resource and verb joined by one phrase, `label` and
+// `target_label` on each row, and the "What" filter's `resources`) in the
+// screen's language; the panel composes nothing. This file reads the Go that
+// WRITES the rows and fails when a fixed action name or target type has no
+// words in either language of the SERVER catalogue
+// (backend/internal/srvtext/locales), so a new audit case cannot ship as a raw
+// name. How a row reads (the phrase, the AI mark, the target's kind and name)
+// is held by handlers/audit_label_test.go.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,10 +18,10 @@ import { fileURLToPath } from 'node:url';
 
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
-import { auditActionLabel, auditResourceOptions, auditTargetLabel, splitAction } from '@/lib/auditLabel';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIDDLEWARE = path.resolve(here, '../../../backend/internal/auth/audit_middleware.go');
+const LABELS = path.resolve(here, '../../../backend/internal/api/handlers/audit_label.go');
 
 /** Every `return "<action>", "<target type>", …` the middleware writes.
  *  ⚠ Names may carry digits (`e2e.folder_cleanup`): a pattern of `[a-z_]` alone
@@ -28,16 +33,20 @@ function backendPairs(source: string): Array<{ action: string; target: string }>
   return out;
 }
 
-function lookup(catalogue: Record<string, unknown>) {
-  const get = (key: string): unknown =>
-    key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], catalogue);
-  const te = (key: string) => typeof get(key) === 'string';
-  const t = (key: string, values: Record<string, unknown> = {}) =>
-    String(get(key) ?? key).replace(/\{(\w+)\}/g, (_, k) => String(values[k] ?? ''));
-  return { t, te };
-}
+const SERVER: Record<'en' | 'tr', Record<string, string>> = {
+  en: JSON.parse(fs.readFileSync(path.resolve(here, '../../../backend/internal/srvtext/locales/en.json'), 'utf8')),
+  tr: JSON.parse(fs.readFileSync(path.resolve(here, '../../../backend/internal/srvtext/locales/tr.json'), 'utf8')),
+};
 
 const keyOf = (s: string) => s.replace(/[.-]/g, '_');
+
+/** `ai.file.move` → resource `ai.file`, verb `move` (handlers auditSplit). */
+function splitAction(action: string): { resource: string; verb: string } {
+  const i = action.lastIndexOf('.');
+  if (i <= 0) return { resource: action, verb: '' };
+  return { resource: action.slice(0, i), verb: action.slice(i + 1) };
+}
+
 const pairs = backendPairs(fs.readFileSync(MIDDLEWARE, 'utf8'));
 
 describe('audit labels', () => {
@@ -45,29 +54,22 @@ describe('audit labels', () => {
     expect(pairs.length).toBeGreaterThan(30);
   });
 
-  for (const [lang, catalogue] of [['en', en], ['tr', tr]] as const) {
-    const { t, te } = lookup(catalogue as Record<string, unknown>);
+  for (const lang of ['en', 'tr'] as const) {
+    const has = (k: string) => typeof SERVER[lang][k] === 'string' && SERVER[lang][k] !== '';
 
     it(`every fixed action has a ${lang} resource and verb`, () => {
       const missing: string[] = [];
       for (const { action } of pairs) {
         const { resource, verb } = splitAction(action);
-        if (!te(`audit.resource.${keyOf(resource)}`)) missing.push(`resource ${resource} (${action})`);
-        if (!te(`audit.verb.${keyOf(verb)}`)) missing.push(`verb ${verb} (${action})`);
+        if (!has(`server.audit.resource.${keyOf(resource)}`)) missing.push(`resource ${resource} (${action})`);
+        if (!has(`server.audit.verb.${keyOf(verb)}`)) missing.push(`verb ${verb} (${action})`);
       }
       expect([...new Set(missing)]).toEqual([]);
     });
 
     it(`every target type has a ${lang} name`, () => {
-      const missing = [...new Set(pairs.map((p) => p.target).filter((x) => x && !te(`audit.target.${x}`)))];
+      const missing = [...new Set(pairs.map((p) => p.target).filter((x) => x && !has(`server.audit.target.${x}`)))];
       expect(missing).toEqual([]);
-    });
-
-    it(`${lang}: a label is a sentence, not the wire name`, () => {
-      const label = auditActionLabel('user.password_reset', t, te);
-      expect(label).not.toContain('user.password_reset');
-      expect(label).not.toContain('_');
-      expect(auditTargetLabel('user', '12', t, te)).toMatch(/#12$/);
     });
   }
 
@@ -75,9 +77,11 @@ describe('audit labels', () => {
     expect(backendPairs('return "e2e.folder_cleanup", "node", nil')).toEqual([{ action: 'e2e.folder_cleanup', target: 'node' }]);
   });
 
-  it('an action the catalogue has never heard of is still readable', () => {
-    const { t, te } = lookup(en as Record<string, unknown>);
-    expect(auditActionLabel('mystery-things.frobnicate', t, te)).toBe('mystery things: frobnicate');
+  it('the panel keeps no copy of the words, and no composer', () => {
+    for (const cat of [en, tr] as Array<{ audit: Record<string, unknown> }>) {
+      for (const gone of ['resource', 'verb', 'target', 'phrase', 'viaAi']) expect(cat.audit[gone], `audit.${gone}`).toBeUndefined();
+    }
+    expect(fs.existsSync(path.resolve(here, '../../src/lib/auditLabel.ts'))).toBe(false);
   });
 });
 
@@ -171,6 +175,17 @@ function handlerRows(): { actions: string[]; targets: string[] } {
 const segments = adminSegments(fs.readFileSync(ROUTES, 'utf8'));
 const written = handlerRows();
 
+/** The catalogue keys whose wire resource is not the key itself, as
+ *  handlers/audit_label.go spells them (auditWireResource). */
+function wireResources(src: string): Record<string, string[]> {
+  const block = /var auditWireResource = map\[string\]\[\]string\{([\s\S]*?)\n\}/.exec(src)?.[1] ?? '';
+  const out: Record<string, string[]> = {};
+  for (const m of block.matchAll(/"([a-z0-9_]+)":\s*\{([^}]*)\}/g)) {
+    out[m[1]] = [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  }
+  return out;
+}
+
 describe('audit labels — every writer, not only the middleware', () => {
   it('reads the routes and the handlers (a parse that finds nothing proves nothing)', () => {
     expect(segments.length).toBeGreaterThan(15);
@@ -183,11 +198,11 @@ describe('audit labels — every writer, not only the middleware', () => {
     expect(written.targets).toContain('e2e_policy');
   });
 
-  for (const [lang, catalogue] of [['en', en], ['tr', tr]] as const) {
-    const { te } = lookup(catalogue as Record<string, unknown>);
+  for (const lang of ['en', 'tr'] as const) {
+    const has = (k: string) => typeof SERVER[lang][k] === 'string' && SERVER[lang][k] !== '';
 
     it(`every admin route segment has a ${lang} resource name`, () => {
-      const missing = segments.filter((s) => !te(`audit.resource.${keyOf(s)}`));
+      const missing = segments.filter((s) => !has(`server.audit.resource.${keyOf(s)}`));
       expect(missing).toEqual([]);
     });
 
@@ -195,88 +210,26 @@ describe('audit labels — every writer, not only the middleware', () => {
       const missing: string[] = [];
       for (const action of written.actions) {
         const { resource, verb } = splitAction(action);
-        if (!te(`audit.resource.${keyOf(resource)}`)) missing.push(`resource ${resource} (${action})`);
-        if (!te(`audit.verb.${keyOf(verb)}`)) missing.push(`verb ${verb} (${action})`);
+        if (!has(`server.audit.resource.${keyOf(resource)}`)) missing.push(`resource ${resource} (${action})`);
+        if (!has(`server.audit.verb.${keyOf(verb)}`)) missing.push(`verb ${verb} (${action})`);
       }
       expect([...new Set(missing)]).toEqual([]);
     });
 
     it(`every target type a handler writes has a ${lang} name`, () => {
-      expect(written.targets.filter((x) => !te(`audit.target.${x}`))).toEqual([]);
+      expect(written.targets.filter((x) => !has(`server.audit.target.${x}`))).toEqual([]);
     });
   }
 
-  it('a target the generic fallback names by its route reads as that resource', () => {
-    // ActionForPath's last case: `return seg + "." + verb, seg, id` - the
-    // segment of /api/admin/<seg>/..., e.g. `app-plugins` for an app's install.
-    const { t, te } = lookup(tr as Record<string, unknown>);
-    expect(auditTargetLabel('app-plugins', null, t, te)).toBe('Uygulama');
-    expect(auditTargetLabel('app-plugins', 'board', t, te)).toBe('Uygulama “board”');
-    const resources = Object.keys((tr as { audit: { resource: Record<string, string> } }).audit.resource);
-    const raw = resources.filter((r) => {
-      if (te(`audit.target.${r}`)) return false;
-      return auditTargetLabel(r.replace(/_/g, '-'), null, t, te) !== t(`audit.resource.${r}`);
-    });
-    expect(raw).toEqual([]);
-  });
-
-  it('a row names its target when the server said which one', () => {
-    const { t, te } = lookup(tr as Record<string, unknown>);
-    expect(auditTargetLabel('user', '12', t, te, 'ayse@example.com')).toBe('Kullanıcı “ayse@example.com”');
-    expect(auditTargetLabel('user', '12', t, te)).toBe('Kullanıcı #12');
-  });
-
-  // What the scans above cannot say: that a row READS right. They hold every name
-  // to a label's existence; this holds the encryption rows to their sentences.
-  it('the encryption rows read as sentences, and say which policy, tenant or request', () => {
-    const { t: tEn, te: teEn } = lookup(en as Record<string, unknown>);
-    const { t: tTr, te: teTr } = lookup(tr as Record<string, unknown>);
-    expect(auditActionLabel('e2e_policy.update', tEn, teEn)).toBe('Encryption policy: updated');
-    expect(auditActionLabel('e2e_tenant.update', tEn, teEn)).toBe('Tenant encryption: updated');
-    expect(auditActionLabel('e2e_request.use', tEn, teEn)).toBe('Encryption request: used');
-    expect(auditActionLabel('e2e_policy.update', tTr, teTr)).toBe('Şifreleme politikası: güncellendi');
-    expect(auditActionLabel('e2e_tenant.update', tTr, teTr)).toBe('Kiracı şifrelemesi: güncellendi');
-    expect(auditActionLabel('e2e_request.approve', tTr, teTr)).toBe('Şifreleme isteği: onaylandı');
-    // …and the three housekeeping rows the server has written since v0.48.0.
-    expect(auditActionLabel('e2e.folder_cleanup', tEn, teEn)).toBe('Encryption: folder cleaned up');
-    expect(auditActionLabel('e2e.fxe_header_rewritten', tEn, teEn)).toBe('Encryption: file header rewritten');
-    expect(auditActionLabel('e2e.key_file_rewritten', tEn, teEn)).toBe('Encryption: key file rewritten');
-    expect(auditActionLabel('e2e.folder_cleanup', tTr, teTr)).toBe('Şifreleme: klasör temizlendi');
-    expect(auditActionLabel('e2e.fxe_header_rewritten', tTr, teTr)).toBe('Şifreleme: dosya başlığı yeniden yazıldı');
-    expect(auditActionLabel('e2e.key_file_rewritten', tTr, teTr)).toBe('Şifreleme: anahtar dosyası yeniden yazıldı');
-    // A tenant's ceiling is a tenant row; a policy is a policy row; an instance's own policy has no id.
-    expect(auditTargetLabel('providers', '3', tEn, teEn, 'acme')).toBe('Tenant “acme”');
-    expect(auditTargetLabel('e2e_policy', '3', tEn, teEn, 'acme')).toBe('Encryption policy “acme”');
-    expect(auditTargetLabel('e2e_policy', '', tEn, teEn)).toBe('Encryption policy');
-    expect(auditTargetLabel('e2e_request', '7', tTr, teTr, 'Dosyalar://Maaşlar')).toBe('Şifreleme isteği “Dosyalar://Maaşlar”');
-  });
-
-  // The multi-tenant switch's two rows (task #167). Its actions are the
-  // constants ActionEnable / ActionDisable of internal/tenancy, which the
-  // handler scan above does not read (it knows `AuditAction…` names), so
-  // `tenancy.enable` would have reached the panel as the raw verb.
-  it('the multi-tenant switch reads as a sentence, in both languages', () => {
-    const { t: tEn, te: teEn } = lookup(en as Record<string, unknown>);
-    const { t: tTr, te: teTr } = lookup(tr as Record<string, unknown>);
-    expect(auditActionLabel('tenancy.enable', tEn, teEn)).toBe('Multi-tenant mode: turned on');
-    expect(auditActionLabel('tenancy.disable', tEn, teEn)).toBe('Multi-tenant mode: turned off');
-    expect(auditActionLabel('tenancy.enable', tTr, teTr)).toBe('Çok kiracılı mod: açıldı');
-    expect(auditActionLabel('tenancy.disable', tTr, teTr)).toBe('Çok kiracılı mod: kapatıldı');
-    expect(auditTargetLabel('tenancy', null, tTr, teTr)).toBe('Çok kiracılı mod');
-  });
-
-  it('an action taken through the AI admin surface reads as the same action, marked (AI)', () => {
-    const { t, te } = lookup(tr as Record<string, unknown>);
-    const label = auditActionLabel('ai.user.create', t, te);
-    expect(label).toContain('Kullanıcı');
-    expect(label).toContain('(AI)');
-    expect(label).not.toContain('ai user');
-  });
-
+  // The server's "What" filter: a resource key's prefixes are the key itself
+  // unless auditWireResource spells the way back (`.` and `-` both fold to `_`).
   it('the resource filter reaches every resource a row can be written under', () => {
-    const { t } = lookup(en as Record<string, unknown>);
-    const prefixes = auditResourceOptions((en as { audit: { resource: Record<string, unknown> } }).audit.resource, t)
-      .flatMap((o) => o.value.split(','));
+    const wire = wireResources(fs.readFileSync(LABELS, 'utf8'));
+    expect(Object.keys(wire)).toContain('login_security');
+    const prefixes = Object.keys(SERVER.en)
+      .filter((k) => k.startsWith('server.audit.resource.'))
+      .map((k) => k.slice('server.audit.resource.'.length))
+      .flatMap((key) => (wire[key] ?? [key]).map((w) => `${w}.`));
     const wanted = [
       ...segments,
       ...written.actions.map((a) => splitAction(a).resource),

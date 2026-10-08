@@ -88,6 +88,10 @@ func (h *Manager) vfIndexMerged(w http.ResponseWriter, r *http.Request, s *model
 	if err != nil {
 		return false
 	}
+	// The reason the catalogue recorded for each link row, BEFORE the merge:
+	// mergeListing lays the storage's own reason over it, which is the newer
+	// word whenever the storage gives one.
+	hydrateLinkStates(r.Context(), h.Store, nodes)
 	rows, diskOnly := mergeListing(nodes, objs)
 	// A drifted row here is the disk's copy (mergeListing): the refresher sees
 	// the file that is there and records THAT as the thumbnail's source.
@@ -117,6 +121,11 @@ func (h *Manager) vfIndexMerged(w http.ResponseWriter, r *http.Request, s *model
 //     carries the disk's size, date and etag: the person sees the file that is
 //     there, and the upload precondition accepts that signature
 //     (uploadExpectHolds). The stored row is the reconcile's to update.
+//   - A link row says why it will not open in the storage's words when the
+//     storage gives a reason for the entry (storage.MetaLinkState), on a copy
+//     like a drifted file's: the row's own LinkState is what the last sync
+//     recorded (hydrateLinkStates), and the listing just read is newer. A link
+//     the storage gives no reason for keeps the recorded one.
 //   - An entry with no row (or a row of another kind) is the disk's.
 //   - A row with no entry is dropped — it is not there — unless it is an
 //     upload whose bytes are still on their way to the storage, or an entry
@@ -136,6 +145,14 @@ func mergeListing(nodes []*model.Node, objs []storage.Object) (rows []*model.Nod
 			continue
 		}
 		delete(byName, o.Name)
+		if n.Type == model.NodeTypeSymlink {
+			if st := o.Metadata[storage.MetaLinkState]; st != "" && st != n.LinkState {
+				c := *n
+				c.LinkState = st
+				rows = append(rows, &c)
+				continue
+			}
+		}
 		if n.Type == model.NodeTypeFile && syncpkg.ObjectDrift(n, o) {
 			c := *n
 			c.Size = o.Size

@@ -8,9 +8,8 @@ import type { WebhookTarget } from '@/api/types';
 import { extractError } from '@/api/client';
 import { useToastStore } from '@/stores/toast';
 import { formatDate, formatRelative } from '@/lib/format';
-import { WEBHOOK_EVENTS, eventOffReason, webhookEventKey } from '@brftech/filex-core';
+import { WEBHOOK_EVENTS, availableLocales, webhookEventKey } from '@brftech/filex-core';
 import { useCapabilitiesStore } from '@/stores/capabilities';
-import { useAuthStore } from '@/stores/auth';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -18,29 +17,24 @@ import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Checkbox from '@/components/ui/Checkbox.vue';
 import Modal from '@/components/ui/Modal.vue';
+import Select from '@/components/ui/Select.vue';
 import GlobalWebhookCard from '@/components/GlobalWebhookCard.vue';
 import { DataTable, type ContextAction, type DataColumn } from '@brftech/filex-core';
 
 const { t, locale } = useI18n();
 const caps = useCapabilitiesStore();
-const auth = useAuthStore();
 
 /**
- * The line under an event's box: its wire name, and — when the service it
- * depends on is off here — why it will not fire yet (lib/webhookEvents
- * eventOffReason). ⚠ The box stays tickable: an operator may subscribe ahead
- * of switching the service on. The settings dialog offered these to people
- * as if they could happen (QA #39).
- *
- * The account is read from the auth store, not from `caller_admin`: this
- * screen is admin-only (the router's `requiresAdmin`, with no `adminPerm` on
- * this page), so whoever is here is an administrator account — of a tenant, of
- * the supertenant, or of a single-tenant install — and the note for a new
- * encryption request then depends on the tenant's policy alone.
+ * The line under an event's box: its wire name, and — when what it depends on
+ * is off here — why it will not fire yet, in the server's words
+ * (`capabilities.event_off`, #211 audit B16; the server judges it for this
+ * administrator's account). ⚠ The box stays tickable: an operator may
+ * subscribe ahead of switching the service on. The settings dialog offered
+ * these to people as if they could happen (QA #39).
  */
 function eventNote(ev: string): string {
-  const off = eventOffReason(ev, { ...caps.data, account_admin: auth.isAdmin });
-  return off ? `${ev} - ${t(off)}` : ev;
+  const off = caps.data.event_off?.[ev];
+  return off?.text ? `${ev} - ${off.text}` : ev;
 }
 const toast = useToastStore();
 
@@ -57,6 +51,13 @@ const formSecretSet = ref(false);
 const formClearSecret = ref(false);
 const formEnabled = ref(true);
 const formEvents = ref<Set<string>>(new Set());
+// #191: the language this endpoint is told in - a webhook is a receiver no
+// person stands behind, so it has one of its own; '' is the server's.
+const formLang = ref('');
+const langOptions = computed(() => [
+  { value: '', label: t('webhooks.langServer') },
+  ...availableLocales().map((o) => ({ value: o.code, label: o.label || o.code })),
+]);
 const saving = ref(false);
 
 async function load() {
@@ -116,6 +117,7 @@ const columns = computed<DataColumn<WebhookTarget>[]>(() => [
 
 function openCreate() {
   formTried.value = false;
+  fieldErrors.value = {};
   formFailure.value = '';
   editingId.value = null;
   formName.value = '';
@@ -125,11 +127,13 @@ function openCreate() {
   formClearSecret.value = false;
   formEnabled.value = true;
   formEvents.value = new Set();
+  formLang.value = '';
   showForm.value = true;
 }
 
 function openEdit(target: WebhookTarget) {
   formTried.value = false;
+  fieldErrors.value = {};
   formFailure.value = '';
   editingId.value = target.id;
   formName.value = target.name;
@@ -139,6 +143,7 @@ function openEdit(target: WebhookTarget) {
   formClearSecret.value = false;
   formEnabled.value = target.enabled;
   formEvents.value = new Set(target.events);
+  formLang.value = target.lang ?? '';
   showForm.value = true;
 }
 
@@ -150,33 +155,36 @@ function toggleEvent(ev: string, on: boolean) {
 }
 
 /*
- * ⚠ Name and URL are required and SAID to be (the star), checked before the
- * request, and every refusal is shown in the dialog. Before: neither box was
- * marked, an empty save answered with a toast drawn BEHIND the dialog's
- * backdrop, and a URL that was not http(s) came back as the server's English
- * ("url must start with http:// or https://") — release-candidate sweep,
- * 2026-09-21. The URL rule is the server's (validWebhookURL).
+ * ⚠ Name and URL are required and SAID to be (the star), and every refusal is
+ * shown in the dialog, under the box it is about. The rules and their words
+ * are the SERVER's (handlers/webhooks_admin.go: a refusal names its `field`
+ * and says why in `message`, in the reader's language): the page checks
+ * nothing itself. ⚠ It did until 0.54, with a case-sensitive copy of the
+ * scheme rule that disagreed with the server's - `HTTPS://x` passed here and
+ * was refused there (0.54 audit, B10).
  */
 const formTried = ref(false);
 const formFailure = ref('');
+const fieldErrors = ref<{ name?: string; url?: string }>({});
 watch([formName, formUrl], () => {
   formFailure.value = '';
+  fieldErrors.value = {};
 });
-const nameError = computed(() =>
-  formTried.value && !formName.value.trim() ? t('webhooks.errName') : '',
-);
-const urlError = computed(() => {
-  const u = formUrl.value.trim();
-  if (!u) return formTried.value ? t('webhooks.errUrl') : '';
-  return /^https?:\/\/[^\s/]+/i.test(u) ? '' : t('webhooks.errUrlScheme');
-});
+const nameError = computed(() => fieldErrors.value.name ?? '');
+const urlError = computed(() => fieldErrors.value.url ?? '');
+
+/** The box a refusal is about, when the server named one. */
+function refusedField(e: unknown): 'name' | 'url' | null {
+  const field = (e as { response?: { data?: { field?: unknown } } })?.response?.data?.field;
+  return field === 'name' || field === 'url' ? field : null;
+}
 
 async function save() {
   formTried.value = true;
   formFailure.value = '';
+  fieldErrors.value = {};
   const name = formName.value.trim();
   const url = formUrl.value.trim();
-  if (nameError.value || urlError.value) return;
   saving.value = true;
   try {
     const events = Array.from(formEvents.value);
@@ -187,9 +195,10 @@ async function save() {
         secret: formSecret.value || undefined,
         events,
         enabled: formEnabled.value,
+        lang: formLang.value,
       });
     } else {
-      const payload: Record<string, unknown> = { name, url, events, enabled: formEnabled.value };
+      const payload: Record<string, unknown> = { name, url, events, enabled: formEnabled.value, lang: formLang.value };
       // Secret is write-only: absent keeps the stored one, '' clears it.
       if (formClearSecret.value) payload.secret = '';
       else if (formSecret.value) payload.secret = formSecret.value;
@@ -199,7 +208,10 @@ async function save() {
     showForm.value = false;
     await load();
   } catch (e: unknown) {
-    formFailure.value = extractError(e, t('errors.generic'));
+    const said = extractError(e, t('errors.generic'));
+    const field = refusedField(e);
+    if (field) fieldErrors.value = { [field]: said };
+    else formFailure.value = said;
   } finally {
     saving.value = false;
   }
@@ -414,6 +426,13 @@ function onRowAction(key: string, row: WebhookTarget) {
             />
           </div>
         </div>
+        <Select
+          v-model="formLang"
+          :options="langOptions"
+          :label="t('webhooks.fields.lang')"
+          :hint="t('webhooks.langHint')"
+          data-testid="webhook-lang"
+        />
         <Toggle v-model="formEnabled" :label="t('webhooks.fields.enabled')" />
         <p v-if="formFailure" class="error-text" role="alert" data-testid="webhook-form-error">{{ formFailure }}</p>
         <div class="flex justify-end gap-2">

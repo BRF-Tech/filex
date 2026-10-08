@@ -140,7 +140,7 @@ func (h *ExternalAdmin) List(w http.ResponseWriter, r *http.Request) {
 		if secret != "" {
 			secret = redactedSecret
 		}
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			// Historical PascalCase wire shape — web/src/api/external.ts reads
 			// both cases, but existing installs' admin bundles read only these.
 			"Name":        row.Name,
@@ -159,7 +159,13 @@ func (h *ExternalAdmin) List(w http.ResponseWriter, r *http.Request) {
 			// anything; an operator must be able to see a browser-unreachable
 			// address the moment the page paints.
 			"advisories": h.advisories(r.Context(), row.Name, row.URL, external.CallbackURLFromOptions(row.OptionsJSON), nil),
-		})
+		}
+		if row.Name == external.OnlyOffice {
+			for k, v := range h.editorLangFields(row.OptionsJSON) {
+				entry[k] = v
+			}
+		}
+		out = append(out, entry)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entries":    out,
@@ -176,6 +182,27 @@ type extPatchReq struct {
 	// field rather than as a hand-assembled options blob so a client cannot
 	// wipe the row's other options by writing only this one.
 	CallbackURL *string `json:"callback_url,omitempty"`
+	// EditorLang is ONLYOFFICE's editor language: "auto" (each person's own
+	// filex language) or one of the languages List offers (editor_languages).
+	// Its own field for the same reason as CallbackURL. ONLYOFFICE only.
+	EditorLang *string `json:"editor_lang,omitempty"`
+}
+
+// editorLangFields is what the ONLYOFFICE row of List says about the editor's
+// language: the setting in force (anything stored that ONLYOFFICE does not
+// offer reads as "auto", as the editor treats it), the languages it may be
+// set to - the server's list, names included, so the page has no copy - and
+// whether FILEX_ONLYOFFICE_LANG pins it.
+func (h *ExternalAdmin) editorLangFields(optionsJSON string) map[string]any {
+	lang, ok := onlyoffice.NormalizeEditorLang(external.EditorLangFromOptions(optionsJSON))
+	if !ok {
+		lang = onlyoffice.EditorLangAuto
+	}
+	return map[string]any{
+		"editor_lang":             lang,
+		"editor_languages":        onlyoffice.EditorLanguages(),
+		"editor_lang_env_managed": h.EnvManaged[external.EnvPinEditorLang],
+	}
 }
 
 // Update upserts a row and re-runs the health probe.
@@ -235,6 +262,27 @@ func (h *ExternalAdmin) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		options = merged
 	}
+	// ONLYOFFICE's editor language: "auto" or a language ONLYOFFICE offers,
+	// written the way its list writes it. Anything else is refused rather than
+	// stored to be read as "auto" later: the administrator would be shown the
+	// language they typed while every editor ignored it.
+	if req.EditorLang != nil {
+		lang, ok := onlyoffice.NormalizeEditorLang(*req.EditorLang)
+		if !ok || name != external.OnlyOffice {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":   "editor_lang_invalid",
+				"message": srvtext.Text(langOf(r), "server.external.editor_lang_invalid", nil),
+			})
+			return
+		}
+		merged, err := external.WithEditorLang(options, lang)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		options = merged
+		auth.AddAuditDetail(r.Context(), "editor_lang", lang)
+	}
 	if err := h.Store.UpsertExternalService(r.Context(), name, enabled, url, secret, options, nowOrZero(), "unknown"); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -257,6 +305,12 @@ func (h *ExternalAdmin) Update(w http.ResponseWriter, r *http.Request) {
 		// env-pinned service is "switched off until the next restart".
 		auth.AddAuditDetail(r.Context(), "env_managed", true)
 		auth.AddAuditDetail(r.Context(), "note", note)
+	}
+	// The editor language has a variable of its own: a change to a pinned one
+	// lasts until the next start, like the rest of a pinned row.
+	if req.EditorLang != nil && h.EnvManaged[external.EnvPinEditorLang] {
+		resp["editor_lang_env_managed"] = true
+		auth.AddAuditDetail(r.Context(), "editor_lang_env_managed", true)
 	}
 	auth.AddAuditDetail(r.Context(), "enabled", enabled)
 	writeJSON(w, http.StatusOK, resp)

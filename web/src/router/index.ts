@@ -305,6 +305,21 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'blank', breadcrumb: 'nav.apps' },
   },
   {
+    /**
+     * #191 - where the tap on a push notification lands
+     * (web/public/notify-sw.js opens `<worker scope>notify/<id>`). The worker
+     * has no page to call back into and cannot resolve where a row goes; this
+     * view finds the row in the person's own list, marks it read and goes
+     * where the bell would (lib/notificationNav - the one resolver), or to
+     * the front door when the row has nowhere to go. ⚠ NOT `public: true`:
+     * the list is the person's, and a tap with no session ends at sign-in.
+     */
+    path: '/notify/:id?',
+    name: 'notify-open',
+    component: () => import('@/views/NotificationOpen.vue'),
+    meta: { layout: 'blank' },
+  },
+  {
     // Standalone editor — the SFC's "Open" / double-click opens this in
     // a new tab. Reads `?path=<adapter>://<rel>&type=<ext>&mode=edit`
     // from the URL and mounts the right viewer fullscreen with

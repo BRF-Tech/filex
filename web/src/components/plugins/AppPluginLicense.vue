@@ -16,7 +16,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { BadgeCheck, RefreshCw, Save } from 'lucide-vue-next';
 
-import { AppStoreApi, licenseRuns, storeRefusal, type AppLicense } from '@/api/appStore';
+import { AppStoreApi, storeRefusal, type AppLicense } from '@/api/appStore';
 import { extractError } from '@/api/client';
 import { storeSentence } from '@/lib/storeRefusal';
 import { useToastStore } from '@/stores/toast';
@@ -47,7 +47,10 @@ onMounted(load);
 watch(() => props.pluginId, () => void load());
 
 const shown = computed(() => !!lic.value?.required);
-const runs = computed(() => (lic.value ? licenseRuns(lic.value.status) : true));
+/* Whether the app runs is the server's verdict (`held`, appstore View.Held:
+ * the same judge that holds the app), never a second reading of the status
+ * here. */
+const runs = computed(() => (lic.value ? !lic.value.held : true));
 const tone = computed<'emerald' | 'amber' | 'rose'>(() => {
   const s = lic.value?.status;
   if (s === 'valid') return 'emerald';

@@ -13,9 +13,12 @@
  * (lesson #417). `filex` is the SOFTWARE's name, not the operator's brand:
  * the line answers "which filex is this", which a renamed instance is too.
  *
- * ⚠ The SERVER's own release (`GET /api/files/capabilities` → `version`,
- * without the commit and build time it adds — parseServerVersion): a
- * development build says `0.1.0-dev`, and that is the honest answer. The
+ * ⚠ The SERVER's own release (`GET /api/files/capabilities` → `release`, the
+ * release alone; 0.54, #211 audit A11 - the commit and the build time are
+ * `commit` and `built` beside it, and nothing parses the one-line `version`
+ * any more): a development build says `0.1.0-dev`, and that is the honest
+ * answer. A server older than 0.54 sends no `release`, and the line is not
+ * drawn: unknown is said by saying nothing. The
  * one value it will not print is the client's own placeholder, `0.0.0` —
  * the capabilities store holds it until the real
  * answer lands, and a menu opened in that moment would otherwise announce a
@@ -28,46 +31,14 @@ export const PRODUCT_NAME = 'filex';
 /** The client's "not known yet" — never a real server's answer. */
 const PLACEHOLDER = '0.0.0';
 
-/** The parts of the server's version string. A part it left out is ''. */
-export interface ServerVersion {
-  /** `v0.46.0`, `0.1.0-dev` — the release, as the server spells it. */
-  release: string;
-  /** The full commit hash the build was made from. */
-  commit: string;
-  /** The build time, as the build stamped it (ISO 8601). */
-  built: string;
-}
-
-/**
- * `v0.46.0 (a2d7e34d19…, 2026-09-26T03:41:30Z)` → its parts.
- *
- * ⚠ That is the REAL shape of `capabilities.version` (backend
- * internal/version.String): the release, then the commit and the build time
- * in brackets, either of which a build may leave out. Printed whole, the 40
- * hex digits and the timestamp gave the avatar menu a sideways scroll bar and
- * ran off the About page (the maintainer, 2026-09-26).
- */
-export function parseServerVersion(version: string | null | undefined): ServerVersion {
-  const v = String(version ?? '').trim();
-  const m = /^(\S+)\s*\(([^)]*)\)$/.exec(v);
-  if (!m) return { release: v, commit: '', built: '' };
-  let commit = '';
-  let built = '';
-  for (const part of m[2].split(',').map((p) => p.trim())) {
-    if (/^\d{4}-\d{2}-\d{2}/.test(part)) built = part;
-    else if (part && !commit) commit = part;
-  }
-  return { release: m[1], commit, built };
-}
-
 /** A commit hash as git shows it short: seven characters. */
 export function shortCommit(commit: string): string {
   return /^[0-9a-f]{8,}$/i.test(commit) ? commit.slice(0, 7) : commit;
 }
 
-/** `filex 0.43.0` — the release only — or '' while the version is not known. */
-export function productVersionLine(version: string | null | undefined): string {
-  const { release } = parseServerVersion(version);
-  if (!release || release === PLACEHOLDER) return '';
-  return `${PRODUCT_NAME} ${release}`;
+/** `filex 0.43.0` from the server's `release`, or '' while it is not known. */
+export function productVersionLine(release: string | null | undefined): string {
+  const r = String(release ?? '').trim();
+  if (!r || r === PLACEHOLDER) return '';
+  return `${PRODUCT_NAME} ${r}`;
 }

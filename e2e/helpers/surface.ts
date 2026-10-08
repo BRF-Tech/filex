@@ -324,7 +324,9 @@ export function autoFill(s: Surface, given: Record<string, unknown> = {}): Recor
     const id = (n.props?.id as string) ?? n.id;
     if (!id || id in given || values[id] !== undefined) return;
     if (n.type === 'signature-pad') values[id] = { png_b64: ONE_PIXEL_PNG, mode: 'draw' };
-    if (n.type === 'pin-input') values[id] = '1234';
+    // ⚠ A code of the node's own length: the host writes `length` onto
+    // every pin-input (4..8) and refuses any other (0.54, #212).
+    if (n.type === 'pin-input') values[id] = '12345678'.slice(0, Number(n.props?.length) || 6);
     if (n.type === 'people-picker') values[id] = [{ email: 'admin@local', name: 'Admin' }];
     if (n.type === 'pdf-fields') values[id] = pdfFieldsValue(n);
   });
@@ -341,14 +343,25 @@ export function autoFill(s: Surface, given: Record<string, unknown> = {}): Recor
  * takes text. (docs/PLUGIN-KIT.md, the `pdf-fields` row.)
  */
 function pdfFieldsValue(n: Node): unknown {
-  const declared = (n.props?.fields as { id: string; type?: string; required?: boolean }[]) ?? [];
+  const declared =
+    (n.props?.fields as {
+      id: string;
+      type?: string;
+      required?: boolean;
+      assignee?: string;
+      rule?: { kind?: string; min?: number; max?: number };
+    }[]) ?? [];
   if ((n.props?.mode as string) === 'fill') {
+    // ⚠ What a signer's browser sends (lib/pdfFields fillValues): only THEIR
+    // boxes, each in its type's shape and inside its rule. The host judges
+    // exactly that since 0.54 (#212): another signer's box is dropped, a
+    // tick is a bool, a date is YYYY-MM-DD, a text box obeys its rule.
+    const signer = n.props?.signer as string | undefined;
     const drawn = new Set(['signature', 'initials', 'stamp']);
     return {
-      fields: declared.map((f) => ({
-        id: f.id,
-        value: drawn.has(f.type ?? 'signature') ? ONE_PIXEL_PNG : 'e2e',
-      })),
+      fields: declared
+        .filter((f) => !f.assignee || f.assignee === signer)
+        .map((f) => ({ id: f.id, value: fillValueOf(f, drawn) })),
     };
   }
   if (declared.length) return declared;
@@ -367,6 +380,24 @@ function pdfFieldsValue(n: Node): unknown {
       ...(assignee ? { assignee } : {}),
     },
   ];
+}
+
+/** One box's value, as a signer would fill it. */
+function fillValueOf(
+  f: { type?: string; rule?: { kind?: string; min?: number; max?: number } },
+  drawn: Set<string>,
+): unknown {
+  const type = f.type ?? 'signature';
+  if (drawn.has(type)) return ONE_PIXEL_PNG;
+  if (type === 'checkbox') return true;
+  if (type === 'date') return new Date().toISOString().slice(0, 10);
+  const kind = f.rule?.kind;
+  let v = kind === 'number' ? '42' : kind === 'email' ? 'e2e@example.com' : 'e2e';
+  const min = Number(f.rule?.min) || 0;
+  const max = Number(f.rule?.max) || 0;
+  if (kind !== 'email') while (v.length < min) v += kind === 'number' ? '1' : 'e';
+  if (max && v.length > max) v = v.slice(0, max);
+  return v;
 }
 
 /** Open a view (`event: "open"`) on a file. */

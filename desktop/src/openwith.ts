@@ -42,7 +42,10 @@ import nodePath from 'node:path';
  * FILE_EXTENSIONS (winget), or the app appears in "Open with" on one OS and
  * not the others (test/extension-lists.test.ts and test/pkg-manifests.test.ts
  * fail when they disagree); scripts/openwith-e2e.mjs counts them, and
- * docs/DESKTOP.md and the README list them.
+ * docs/DESKTOP.md and the README list them. It is the one list of file kinds
+ * the desktop keeps on purpose - the operating system is told it at install
+ * time, before any server is reached - and every entry is held to the
+ * server's own document types (web/tests/lib/serverRuleVectors.test.ts, #211).
  */
 export const OFFICE_EXTENSIONS = [
   'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'rtf', 'csv',
@@ -952,7 +955,9 @@ async function stash(
 
 /**
  * The formats a save may come back in beside the working copy: the ones the
- * server's callback keeps (callback_format.go besideTypes).
+ * server's callback keeps (callback_format.go besideTypes). Held to that list
+ * by the shared drift file (backend/internal/api/handlers/testdata/
+ * rule-mirrors.json, web/tests/lib/serverRuleVectors.test.ts - #211).
  */
 export const BESIDE_FORMATS: ReadonlySet<string> = new Set([
   'docx', 'xlsx', 'pptx', 'docm', 'xlsm', 'pptm', 'odt', 'ods', 'odp',

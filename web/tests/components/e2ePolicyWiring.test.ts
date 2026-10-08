@@ -32,10 +32,12 @@ describe('the explorer asks before it offers encryption', () => {
     // A server that says nothing of the policy in its capabilities predates it.
     expect(at).toMatch(/if \(!policy\) return 'allowed';/);
     expect(at).toMatch(/void askE2eAnswers\(\[\{ path, kind \}\]\);/);
-    expect(at).toMatch(/return e2eAnswers\.value\[e2eAskKey\(path, kind\)\] \?\? 'denied';/);
+    // #196 - this page's answer, else the remembered one (lib/menuAnswers),
+    // else 'denied' while nothing is known.
+    expect(at).toMatch(/return e2eKnownAt\(path, kind\) \?\? 'denied';/);
     // The per-folder permission question skips administrators; this one must not.
     expect(at).not.toMatch(/callerAdmin|heldPermissions|isAdmin/);
-    expect(fn('askE2eAnswers')).toMatch(/await api\.e2eAllowedAt\(missing\)/);
+    expect(fn('askE2eAnswers')).toMatch(/await api\.e2eAllowedAt\(missing, \{/);
   });
 
   // ⚠ `capabilities.e2e_policy` is the row of the CALLER'S OWN tenant. For the
@@ -88,11 +90,20 @@ describe('the explorer asks before it offers encryption', () => {
     expect(fn('onE2eRequestSent')).toMatch(/answer\.created \? t\('e2e\.request\.sent'\) : t\('e2e\.request\.already'\)/);
   });
 
-  it('forgets the answers whenever the listing is read again', () => {
+  it('asks the answers of a listing again when it is read, without forgetting the ones it has (#196)', () => {
     // load() follows the newest listing (lib/listingTickets); each read is one
-    // loadListing.
+    // loadListing. An approval granted meanwhile reaches the explorer as an
+    // access.changed frame (a new era); without a live socket every read is
+    // one. The rows' answers are asked once the listing is on screen, and the
+    // menu shows the remembered ones meanwhile instead of none.
     expect(fn('load')).toMatch(/tickets\.follow\(\(\) => loadListing\(path\)\)/);
-    expect(fn('loadListing')).toMatch(/forgetE2eAnswers\(\);/);
+    const listing = fn('loadListing');
+    expect(listing).not.toMatch(/forgetE2eAnswers\(\);/);
+    expect(listing).toMatch(/if \(!realtime\.connected\.value\) menuAnswers\.stale\(\);/);
+    expect(listing).toMatch(/prefetchMenuAnswers\(\);/);
+    // The policy and the permission list still forget them: other rules,
+    // other answers.
+    expect(explorer).toMatch(/capabilitiesData\.value\?\.e2e_policy\?\.policy,\s*\],\s*forgetE2eAnswers,/);
   });
 
   it('says a refused encryption in the server’s words, not a bare "could not create"', () => {

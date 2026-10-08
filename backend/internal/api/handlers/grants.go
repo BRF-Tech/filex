@@ -3,10 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -46,6 +46,12 @@ type Grants struct {
 	// on the operator's host that login cannot succeed, and the operator's
 	// hostname leaks to every tenant that adds a user.
 	Tenants tenanturl.Resolver
+
+	// mailRate holds each account to shareMailHourlyRecipients addresses an
+	// hour (share_mail.go), made on first use so a Grants built as a literal
+	// is held to it too.
+	mailRateOnce sync.Once
+	mailRate     *ipLimiter
 }
 
 // AttachTenants wires the shared per-request origin resolver (internal/tenanturl).
@@ -258,6 +264,9 @@ func (h *Grants) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// grantCreateReq is what a grant request carries. ⚠ No `is_dir`: whether a
+// grant is a folder's is the item's fact, read from the catalogue
+// (grantIsDir), and a client that still sends the field is not asked.
 type grantCreateReq struct {
 	Path   string `json:"path"`
 	UserID int64  `json:"user_id"`
@@ -265,12 +274,26 @@ type grantCreateReq struct {
 	// of the two.
 	GroupID int64  `json:"group_id"`
 	Level   string `json:"level"`
-	IsDir   *bool  `json:"is_dir,omitempty"`
+}
+
+// grantIsDir says whether a grant on (st, rel) is a folder's — from the
+// catalogue, never from the request. The storage root is a folder; a path the
+// catalogue has not seen is recorded as one too, the default a grant always
+// had when nobody said otherwise.
+func (h *Grants) grantIsDir(ctx context.Context, st *model.Storage, rel string) bool {
+	if rel == "" {
+		return true
+	}
+	n, err := h.Store.GetNodeByPath(ctx, st.ID, pathkey.Hash(st.ID, normalizeDBPath(rel)))
+	if err != nil || n == nil {
+		return true
+	}
+	return n.Type == model.NodeTypeDirectory
 }
 
 // Create (upsert) a grant for a user — or a group — on a path.
 //
-//	POST /api/files/permissions {path, user_id | group_id, level, is_dir?}
+//	POST /api/files/permissions {path, user_id | group_id, level}
 func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 	var req grantCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -321,10 +344,6 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a viewer account can only be granted viewer access"})
 		return
 	}
-	isDir := true
-	if req.IsDir != nil {
-		isDir = *req.IsDir
-	}
 	var createdBy *int64
 	if u := auth.UserFrom(r.Context()); u != nil {
 		id := u.ID
@@ -333,7 +352,7 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 	g, err := h.Store.CreateFileGrant(r.Context(), &model.FileGrant{
 		StorageID:  st.ID,
 		PathPrefix: rel,
-		IsDir:      isDir,
+		IsDir:      h.grantIsDir(r.Context(), st, rel),
 		UserID:     req.UserID,
 		Level:      req.Level,
 		CreatedBy:  createdBy,
@@ -342,6 +361,8 @@ func (h *Grants) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// #196 - the person's open explorers ask their menu answers again.
+	emitAccessChanged(req.UserID)
 	writeJSON(w, http.StatusOK, g)
 }
 
@@ -355,23 +376,20 @@ func (h *Grants) createGroupGrant(w http.ResponseWriter, r *http.Request, st *mo
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "group not found"})
 		return
 	}
-	isDir := true
-	if req.IsDir != nil {
-		isDir = *req.IsDir
-	}
 	var createdBy *int64
 	if u := auth.UserFrom(r.Context()); u != nil {
 		id := u.ID
 		createdBy = &id
 	}
 	created, err := h.Store.CreateGroupFileGrant(r.Context(), &model.FileGrant{
-		StorageID: st.ID, PathPrefix: rel, IsDir: isDir, GroupID: g.ID, Level: req.Level, CreatedBy: createdBy,
+		StorageID: st.ID, PathPrefix: rel, IsDir: h.grantIsDir(r.Context(), st, rel), GroupID: g.ID, Level: req.Level, CreatedBy: createdBy,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	created.GroupName = g.Name
+	emitGroupAccessChanged(r.Context(), h.Store, g.ID) // #196
 	writeJSON(w, http.StatusOK, created)
 }
 
@@ -430,6 +448,7 @@ func (h *Grants) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	emitAccessChanged(g.UserID) // #196
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -454,6 +473,7 @@ func (h *Grants) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	emitAccessChanged(g.UserID) // #196
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -496,6 +516,7 @@ func (h *Grants) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	emitGroupAccessChanged(r.Context(), h.Store, g.GroupID) // #196
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -514,6 +535,7 @@ func (h *Grants) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	emitGroupAccessChanged(r.Context(), h.Store, g.GroupID) // #196
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -686,6 +708,7 @@ func (h *Grants) AdminDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	emitGroupAccessChanged(r.Context(), h.Store, g.GroupID) // #196
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -728,6 +751,7 @@ func (h *Grants) AdminDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	emitAccessChanged(g.UserID) // #196
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -807,9 +831,9 @@ type inviteReq struct {
 	Email      string `json:"email"`
 	Level      string `json:"level"`
 	CreateUser bool   `json:"create_user,omitempty"`
-	Role       string `json:"role,omitempty"` // new-user role when CreateUser (default "user")
-	IsDir      *bool  `json:"is_dir,omitempty"`
-	Locale     string `json:"locale,omitempty"` // composer UI locale (mail language fallback)
+	Role       string `json:"role,omitempty"`   // new-user role when CreateUser (default "user")
+	Locale     string `json:"locale,omitempty"` // the language PICKED for the recipient (an account opened here starts in it); absent: the server's
+	// No `is_dir`: the item says what it is (grantIsDir).
 }
 
 // Invite grants access to an email address. Three outcomes (owner/admin only):
@@ -850,10 +874,7 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		id := caller.ID
 		createdBy = &id
 	}
-	isDir := true
-	if req.IsDir != nil {
-		isDir = *req.IsDir
-	}
+	isDir := h.grantIsDir(r.Context(), st, rel)
 
 	// ── Existing account → direct grant. ──
 	if u, err := h.Store.GetUserByEmail(r.Context(), email); err == nil && u != nil && userInTenant(r.Context(), u) {
@@ -871,8 +892,10 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
 			return
 		}
-		// Prefer the recipient's own language; fall back to the composer's.
-		loc := srvtext.Pick(u.Locale, req.Locale, userLang(r))
+		emitAccessChanged(u.ID) // #196
+		// The recipient's own language: an account reads its owner's choice
+		// (translated at the last stop, never in the sender's).
+		loc := srvtext.Pick(u.Locale)
 		subject, body := itemGrantText(loc, st.Name+"://"+rel, h.Tenants.FromRequest(r)+"/admin/explore")
 		emailed := h.tryMail(mailer.WithLanguage(r.Context(), loc), email, subject, body)
 		writeJSON(w, http.StatusOK, map[string]any{"mode": "granted", "user_id": u.ID, "emailed": emailed})
@@ -907,11 +930,13 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": herr.Error()})
 			return
 		}
-		// The new account starts in the language the composer is using — any
-		// language this server speaks, a pack's included (it used to be
-		// forced to tr/en, which made a Spanish composer's invitee TURKISH).
-		// It is also the language of the welcome mail below.
-		loc := srvtext.Pick(req.Locale, userLang(r))
+		// The new account starts in the language PICKED for it where it was
+		// invited (req.Locale) - any language this server speaks, a pack's
+		// included - else the instance's (FILEX_DEFAULT_LOCALE); never the
+		// composer's own screen language (#191: the form sends a language only
+		// when somebody picked one). It is also the language of the welcome
+		// mail below.
+		loc := srvtext.Pick(req.Locale)
 		newU, cerr := h.Store.CreateUser(r.Context(), email, hash, role, loc, model.TimezoneUnset)
 		if cerr != nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "could not create user: " + cerr.Error()})
@@ -980,51 +1005,23 @@ func (h *Grants) Invite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": serr.Error()})
 		return
 	}
-	days := 0
-	if sh.ExpiresAt != nil {
-		days = int(time.Until(*sh.ExpiresAt).Hours()/24 + 0.5)
-	}
-	url := h.Tenants.FromRequest(r) + "/s/" + sh.Token
-	lang := srvtext.Pick(req.Locale, userLang(r))
+	url := publicLinkOf(h.Tenants.FromRequest(r), sh)
+	// Translated at the last stop: the recipient's language (recipientLang),
+	// never the sender's.
+	lang := recipientLang(r.Context(), h.Store, email, req.Locale)
 	// A PIN the rules required goes in the mail with the link; without it the
-	// recipient could not open what they were sent.
-	subject, body := shareMailText(lang, h.siteName(r.Context()), baseName(rel), isDir, 0, url, pin, days)
+	// recipient could not open what they were sent. ⚠ This is the one mail
+	// that carries a PIN: the server made it a moment ago and nobody else has
+	// it — the inviter is never shown it. Share-mail (share_mail.go) mails a
+	// link that already exists and never carries one.
+	size := int64(0)
+	if node.Type != model.NodeTypeDirectory {
+		size = node.Size
+	}
+	subject, body := shareMailText(lang, h.siteName(r.Context()), baseName(rel), node.Type == model.NodeTypeDirectory,
+		size, url, pin, false, linkDaysLeft(sh.ExpiresAt, time.Now()))
 	emailed := h.tryMail(mailer.WithLanguage(r.Context(), lang), email, subject, body)
 	writeJSON(w, http.StatusOK, map[string]any{"mode": "shared", "url": url, "emailed": emailed})
-}
-
-type shareMailReq struct {
-	Path        string   `json:"path"`
-	Email       string   `json:"email"`            // single recipient (back-compat)
-	Emails      []string `json:"emails,omitempty"` // multiple recipients
-	URL         string   `json:"url"`
-	Pin         string   `json:"pin,omitempty"`
-	ExpiresDays int      `json:"expires_days,omitempty"`
-	Locale      string   `json:"locale,omitempty"`
-	IsDir       bool     `json:"is_dir,omitempty"`
-	Size        int64    `json:"size,omitempty"`
-	Mode        string   `json:"mode,omitempty"` // "download" (default) | "drop"
-}
-
-// parseRecipients merges the single `email` + `emails[]` inputs, splitting each
-// on commas/semicolons/whitespace/newlines, lowercasing, validating (@) and
-// deduping — so one textarea of addresses or a chips array both work.
-func parseRecipients(single string, list []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, chunk := range append([]string{single}, list...) {
-		for _, part := range strings.FieldsFunc(chunk, func(r rune) bool {
-			return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
-		}) {
-			e := strings.ToLower(strings.TrimSpace(part))
-			if e == "" || !strings.Contains(e, "@") || seen[e] {
-				continue
-			}
-			seen[e] = true
-			out = append(out, e)
-		}
-	}
-	return out
 }
 
 // baseName returns the last path segment (the file/folder name).
@@ -1042,82 +1039,19 @@ func (h *Grants) siteName(ctx context.Context) string {
 	return strings.TrimSpace(v)
 }
 
-// ShareMail emails an already-created public share link to an address. It does
-// NOT create a share — it delivers a link the caller just made (with their
-// chosen expiry/PIN) in the share tab. Gated editor+ on the path, the same
-// capability that created the link. Best-effort: returns {emailed:false} when
-// SMTP isn't verified so the UI keeps showing the link for manual delivery.
-//
-//	POST /api/files/permissions/share-mail {path, email, url}
-func (h *Grants) ShareMail(w http.ResponseWriter, r *http.Request) {
-	var req shareMailReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
-		return
-	}
-	st, rel, ok := h.resolvePath(w, r, req.Path)
-	if !ok {
-		return
-	}
-	if !h.requireEditor(w, r, st, rel, perm.ShareLinks) {
-		return
-	}
-	recipients := parseRecipients(req.Email, req.Emails)
-	if len(recipients) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "valid email required"})
-		return
-	}
-	link := strings.TrimSpace(req.URL)
-	if link == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing url"})
-		return
-	}
-	if h.Mailer == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": "not_configured"})
-		return
-	}
-	// Use the composer's selected UI language (req.Locale). We intentionally do
-	// NOT override with the recipient's stored locale here: a link often goes to
-	// people outside the system, and the sender picks the language. A drop link
-	// ("mode":"drop") is an upload invite, so it uses the upload-worded body.
-	// ⚠ Any language the server speaks — a pack's too (srvtext.Pick); a tag it
-	// does not speak falls to the composer's account language, then the
-	// instance default, then English.
-	lang := srvtext.Pick(req.Locale, userLang(r))
-	var subject, body string
-	if req.Mode == model.ShareKindDrop {
-		// Look the drop link's configured limits back up from the token so the
-		// invite spells them out (X files, Y MB per file, allowed types).
-		var maxFiles, maxSizeMB int
-		var allowedExt []string
-		if tok := dropTokenFromURL(link); tok != "" {
-			if sh, err := h.Store.GetShareByToken(r.Context(), tok); err == nil && sh != nil && sh.IsDrop() {
-				ds := parseDropSettings(sh.DropSettings)
-				maxFiles, maxSizeMB, allowedExt = ds.MaxFiles, ds.MaxFileSizeMB, ds.AllowedExt
-			}
+// recipientLang is the language an email to one address is written in -
+// translated at the last stop, for the one who reads it (#191): the language
+// of the account that address belongs to (its owner chose it; an account that
+// chose none reads the instance's), else the language the form that composed
+// the mail sent for it (chosen), else the instance's (FILEX_DEFAULT_LOCALE,
+// else English). An account's own setting always outranks the form.
+func recipientLang(ctx context.Context, store interface {
+	GetUserByEmail(context.Context, string) (*model.User, error)
+}, email, chosen string) string {
+	if store != nil {
+		if u, err := store.GetUserByEmail(ctx, strings.TrimSpace(email)); err == nil && u != nil {
+			return srvtext.Pick(u.Locale)
 		}
-		subject, body = dropInviteMailText(lang, h.siteName(r.Context()), baseName(rel), link, req.Pin, req.ExpiresDays, maxFiles, maxSizeMB, allowedExt)
-	} else {
-		subject, body = shareMailText(lang, h.siteName(r.Context()), baseName(rel), req.IsDir, req.Size, link, req.Pin, req.ExpiresDays)
 	}
-	var sent, failed []string
-	reason := ""
-	for _, email := range recipients {
-		if err := h.Mailer.Send(mailer.WithLanguage(r.Context(), lang), email, subject, body); err != nil {
-			// Distinguish "SMTP not set up / not verified" (show the link) from a
-			// transient send failure (worth retrying) so the UI can say which.
-			reason = "send_failed"
-			if errors.Is(err, mailer.ErrNotConfigured) || errors.Is(err, mailer.ErrNotVerified) {
-				reason = "not_configured"
-			}
-			failed = append(failed, email)
-			continue
-		}
-		sent = append(sent, email)
-	}
-	if len(sent) == 0 {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"emailed": false, "error": reason, "failed": failed})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"emailed": true, "sent": sent, "failed": failed})
+	return srvtext.Pick(chosen)
 }

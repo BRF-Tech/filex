@@ -12,6 +12,7 @@ import {
   normalizeLocaleCode,
   flushPrefs,
   pluralChoiceIndex,
+  registerPersonalForget,
   savePref,
   setLocalPref,
 } from '@brftech/filex-core';
@@ -49,12 +50,25 @@ const STORAGE_KEY = 'filex.locale';
  *
  *   pref    — the account's preference document (`/api/me/prefs`), the
  *             single source of truth for a signed-in person;
+ *   account — `users.locale` from `/api/auth/me` (the same choice: the server
+ *             mirrors the document's `locale` into it, and older accounts
+ *             have only this);
  *   device  — this browser's `filex.locale` (the first-paint mirror, and the
  *             only memory a signed-out window has);
- *   account — `users.locale` from `/api/auth/me` (older accounts);
  *   server  — the instance default (`FILEX_DEFAULT_LOCALE`, capabilities).
  *
  * Then the browser's own language, then English.
+ *
+ * ⚠⚠ THE SCREEN'S LANGUAGE IS THE ACCOUNT'S (the maintainers' rule,
+ * 2026-10-08, #191): the account's language OUTRANKS this browser's, and a
+ * language picked here is written to the account. The server says every
+ * notification - bell, push, email, desktop toast - in the account's
+ * language, so a browser that kept a language of its own would show its
+ * screen in one language and its notifications in another. The device copy
+ * is only the first paint before the account answers, and the signed-out
+ * window's memory. An account that holds no language yet is given the one on
+ * screen by the server, at the sign-in (the sign-in carries it as
+ * Accept-Language; handlers/auth.go adoptSignInLanguage).
  *
  * ⚠⚠ HELD, not judged on arrival. Each of these used to be checked against
  * the offered list the moment it arrived and silently DROPPED when it failed —
@@ -79,7 +93,7 @@ try {
 
 /** The language the interface should be in, from everything known so far. */
 export function chosenLocale(): Locale {
-  for (const c of [held.pref, held.device, held.account, held.server]) {
+  for (const c of [held.pref, held.account, held.device, held.server]) {
     if (c && acceptableLocale(c)) return normalizeLocaleCode(c);
   }
   // `detectLocale` walks the browser's list against what is OFFERED — the
@@ -265,9 +279,33 @@ export function setStoredLocale(locale: Locale): void {
   // not dragged like a slider, and the account's copy OUTRANKS this browser's
   // on the next load — a reload inside the 400 ms debounce would read the
   // old language back from the server and undo the pick.
-  void flushPrefs();
+  // ⚠ Kept BEFORE `settle()`: what watches the language (a notification
+  // list) waits on it, to ask the server again only once the account says
+  // the new language (`accountLocaleWritten`).
+  accountWrite = flushPrefs().catch(() => undefined);
   settle();
 }
+
+let accountWrite: Promise<void> = Promise.resolve();
+
+/**
+ * Resolves once the last language picked here has reached the account (or
+ * failed to). A screen that asks the server for words said in the account's
+ * language - the notification lists, #191 - asks AFTER this, or it gets the
+ * old language back.
+ */
+export function accountLocaleWritten(): Promise<void> {
+  return accountWrite;
+}
+
+// The session ended: the person's language (the account's answers) goes with
+// them. The device mirror is removed by `forgetPersonalPrefs` itself (it is a
+// personal mirror).
+registerPersonalForget(() => {
+  held.pref = '';
+  held.account = '';
+  settle();
+});
 
 /**
  * The account's language has arrived from `/api/me/prefs`. Outranks every
@@ -291,6 +329,8 @@ export function applyPrefLocale(loc?: string | null): void {
 export function applyAccountLocale(loc?: string | null): void {
   if (!loc) return;
   held.account = loc;
+  // The first-paint mirror follows the account (it outranks this browser).
+  setLocalPref('locale', loc);
   settle();
 }
 

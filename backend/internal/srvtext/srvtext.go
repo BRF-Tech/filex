@@ -103,6 +103,15 @@ func BuiltinLanguages() []string {
 	return out
 }
 
+// Has reports whether key is a key of the catalogue - the English table
+// carries it. A caller that composes a sentence out of optional parts (a
+// notification's variant wording, internal/notify say.go) asks this before
+// Template, which answers a missing key with the key itself.
+func Has(key string) bool {
+	_, ok := builtin["en"][key]
+	return ok
+}
+
 // Keys is every key of the English catalogue, sorted.
 func Keys() []string {
 	out := make([]string, 0, len(builtin["en"]))

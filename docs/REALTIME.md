@@ -74,6 +74,42 @@ offers to reload (the new interface has a new address). Like every frame it is
 sent without blocking: a socket that is not reading misses it and gets the new
 version the next time it opens the app.
 
+### When access changes
+
+Since 0.54 an open explorer keeps the answers its right-click menu depends on -
+which per-folder permissions are held at a path (`POST /api/files/manager
+?action=allowed`), may this person start encrypting there (`POST
+/api/files/e2e/allowed`) - so a menu opens on them at once
+([INTEGRATION.md → Menus that hold still](INTEGRATION.md#menus-that-hold-still)).
+The server says when they may have gone stale:
+
+```json
+{"type":"access.changed"}
+{"type":"access.changed","scope":"all"}
+```
+
+| Sent to | When |
+|---|---|
+| every socket of the person named (`{"type":"access.changed"}`) | a grant to them is made, changed or revoked (`/api/files/permissions`, an invitation of an existing account, an administrator's revoke); their role or their own permission exceptions change; an encryption request of theirs is approved or rejected; an approval of theirs is spent at a create door |
+| the members of a group | a grant to the group is made, changed or revoked |
+| every socket of **one tenant's** accounts (`"scope":"all"`) | a tenant administrator changes a permission rule, a group or the tenant's encryption policy; the operator switches that tenant's encryption ceiling |
+| every open socket (`"scope":"all"`) | the same changes made at the platform level (the platform's own administrators, the platform's policy), and any of them on a single-tenant install |
+
+⚠ A tenant's change never reaches another tenant's sockets, nor the platform's
+own accounts: the frame names nothing, but its timing alone would tell them
+that something changed there.
+
+The frame names **no path, no person and no reason**: it tells a client to ask
+again, with its own credential, and the server answers as it answers any
+question - nothing about what changed, or where, reaches anybody. Changes that
+arrive within 250 ms of each other are one frame. A client that hears
+`"scope":"all"` spreads its questions over up to two seconds, so a role edit
+does not make every open explorer ask in the same instant. Like every frame it
+is sent without blocking, and only to the process that made the change: a
+socket that missed it (it was down, or connected to another filex process on
+the same database) asks again when it reconnects, and an answer ages out after
+30 seconds in any case.
+
 ## Coalescing: what a burst looks like on the wire
 
 A folder can change far more often than a listing is worth re-fetching, and two

@@ -39,9 +39,20 @@ import { fileURLToPath } from 'node:url';
 
 import { postNotify } from '../lib/notify.mjs';
 import { mergeEnv, parseEnvFile } from './env.mjs';
-import { S3_LIVE_KEYS, s3LiveFile } from './nightly-lib.mjs';
+import {
+  cgroupDirOf,
+  describeOutside,
+  diskDelta,
+  diskOf,
+  loadRecord,
+  outsideContainers,
+  readCgroup,
+  readDisk,
+  readPressure,
+} from './host.mjs';
+import { S3_LIVE_KEYS, STALL, hostLine, s3LiveFile, stallWords } from './nightly-lib.mjs';
 import { CHAIN_DIR, PROFILES, WEIGHTS, buildPlan, expectedMinutes, loadLists, trackWeight } from './plan.mjs';
-import { pickJobs, poolBudget, readyJobs, simulate } from './schedule.mjs';
+import { hostBudget, pickJobs, poolBudget, poolCeiling, readyJobs, simulate } from './schedule.mjs';
 
 const REPO = path.resolve(CHAIN_DIR, '..', '..');
 
@@ -119,6 +130,25 @@ function settings(env, args) {
     reserveGb: num('CHAIN_MEM_RESERVE_GB', 1),
     memWaitMin: num('CHAIN_MEM_WAIT_MIN', 20),
     poolMax: num('CHAIN_POOL_MAX', 3),
+    // The pool starts nothing while the host is stalled (PSI "full", avg10,
+    // a fraction of the time; 0 turns a check off), for at most waitMin
+    // minutes at a time, and leaves startGapS seconds between two starts so
+    // the pressure of one shows before the next (task #194).
+    psi: {
+      memMax: num('CHAIN_PSI_MEM_MAX', 0.1),
+      ioMax: num('CHAIN_PSI_IO_MAX', 0.4),
+      waitMin: num('CHAIN_PSI_WAIT_MIN', 5),
+    },
+    startGapS: num('CHAIN_START_GAP_S', 20),
+    // The disk whose write latency the run records (/proc/diskstats name);
+    // default: the one CHAIN_ROOT is on.
+    disk: env.CHAIN_DISK || '',
+    // vitest forks in the web job (0: vitest's own default, one per core but one).
+    webWorkers: num('CHAIN_WEB_WORKERS', 8),
+    // The most a Go test job's /tmp and a Playwright line's e2e/test-results
+    // may hold, in GiB: tmpfs (KIND `tmp`, `results`; 0: on the disk, as
+    // before #194).
+    tmpfsGb: num('CHAIN_TMPFS_GB', 3),
     cpus: num('CHAIN_CPUS', Math.min(12, os.cpus().length)),
     goUser: { uid, gid },
     images: {
@@ -163,6 +193,9 @@ function settings(env, args) {
       query: env.CHAIN_TEMP_QUERY || '',
       max: num('CHAIN_TEMP_MAX', 72),
       waitMin: num('CHAIN_TEMP_WAIT_MIN', 30),
+      // At most this long in a whole run: a sensor that never comes down
+      // under load cost 30 min before every Playwright line (task #194).
+      totalMin: num('CHAIN_TEMP_WAIT_TOTAL_MIN', 30),
     },
     notify: {
       url: env.CHAIN_NOTIFY_URL || '',
@@ -219,10 +252,10 @@ function git(src, args) {
 
 // ── --plan ──────────────────────────────────────────────────────────────────
 
-function budgetOf(cfg, plan) {
+function budgetOf(cfg, plan, memGb = cfg.memGb) {
   const trackGb = trackWeight(plan.track);
   const dbGb = plan.pool.some((j) => j.db) ? WEIGHTS.db : 0;
-  return { memGb: cfg.memGb, trackGb, dbGb, poolMax: cfg.poolMax };
+  return { memGb, trackGb, dbGb, poolMax: cfg.poolMax };
 }
 
 function hm(minutes) {
@@ -231,7 +264,9 @@ function hm(minutes) {
 }
 
 function printPlan(cfg, plan) {
-  const b = budgetOf(cfg, plan);
+  const avail = memAvailableGb();
+  const hb = hostBudget({ memGb: cfg.memGb, availGb: avail, reserveGb: cfg.reserveGb });
+  const b = budgetOf(cfg, plan, hb.gb);
   const sim = simulate(plan, { ...b, minutes: expectedMinutes });
   const sha = git(cfg.src, ['rev-parse', '--short', 'HEAD']) || '?';
   const when = new Map(sim.timeline.map((e) => [e.name, `${hm(e.start)}-${hm(e.end)}`]));
@@ -240,7 +275,8 @@ function printPlan(cfg, plan) {
   const out = [];
   out.push(`profile ${plan.profile} · ${cfg.src} (${sha})`);
   out.push(
-    `memory budget ${b.memGb} GiB: browser round ${b.trackGb}, databases ${b.dbGb} while a Go or migration job is left, ` +
+    `memory budget ${b.memGb} GiB${hb.cut ? ` (CHAIN_MEM_GB ${cfg.memGb}, but MemAvailable is ${avail.toFixed(1)} GiB now, less the ${cfg.reserveGb} GiB reserve)` : ''}: ` +
+      `browser round ${b.trackGb}, databases ${b.dbGb} while a Go or migration job is left, ` +
       `the pool the rest (at most ${b.poolMax} jobs at once); a job also waits while MemAvailable is under its weight + ${cfg.reserveGb} GiB`,
   );
   out.push('', `${'pool'.padEnd(w + 2)}${'needs'.padEnd(needsW)}GiB   ~min  expected`);
@@ -276,7 +312,26 @@ function docker(args, opts = {}) {
   return spawnSync('docker', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...opts });
 }
 
-/** Per job kind: image, script, container memory cap, CPU weight, and what it needs mounted. */
+/**
+ * Per job kind: image, script, container memory cap, CPU weight, and what it
+ * needs mounted.
+ *
+ * ⚠ `tmp`: the job's /tmp is a tmpfs (CHAIN_TMPFS_GB; task #194). On the
+ * container's own disk a Go test's t.TempDir() - its SQLite databases, its
+ * stores - waited on every fsync for a disk that stopped for seconds at a
+ * time (lesson #1232: a queue test and a storage stall test red on it). The
+ * build directory stays on the disk (GOTMPDIR): a test binary per package at
+ * -p 6 would take memory the budget does not count. Not the browser lines'
+ * /tmp: spec 173 writes a 1.1 GB file and a 207 MB one there.
+ *
+ * ⚠ `results`: Playwright's output directory (e2e/test-results, a part's
+ * shard-i-of-N under it) is a tmpfs of the same size. With trace and video
+ * "retain-on-failure" Playwright records every test and deletes what passed:
+ * on the night of 2026-10-07 the Chromium line's test runner wrote 9.3 GB in
+ * 27 min and deleted as much, and the line wrote 7.3 GB to the disk in that
+ * time. Only a red test's files stay, and e2e.sh copies them to the run
+ * before the container ends.
+ */
 export const KIND = {
   build: { image: 'node', script: 'build.sh', mem: '10g', goroot: true, env: { NODE_OPTIONS: '--max-old-space-size=5120' } },
   // ⚠ The CPU weight of a browser: vitest holds every test to a wall-clock
@@ -287,20 +342,20 @@ export const KIND = {
   web: { image: 'pw', script: 'web.sh', mem: '8g', shares: 4096 },
   docs: { image: 'node', script: 'docs.sh', mem: '6g' },
   e2etsc: { image: 'pw', script: 'e2etsc.sh', mem: '4g' },
-  go: { image: 'go', script: 'go.sh', mem: '8g', user: true },
+  go: { image: 'go', script: 'go.sh', mem: '8g', user: true, tmp: true },
   migrate: { image: 'go', script: 'migrate.sh', mem: '2g', user: true },
   'shards-check': { image: 'node', script: 'shards-check.sh', mem: '4g', goroot: true },
   'race-build': { image: 'go', script: 'race-build.sh', mem: '6g', user: true },
-  race: { image: 'go', script: 'race.sh', mem: '6g', user: true },
+  race: { image: 'go', script: 'race.sh', mem: '6g', user: true, tmp: true },
   cypress: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true },
-  local: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true },
-  nopub: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true },
-  s3: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true },
+  local: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true },
+  nopub: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true },
+  s3: { image: 'pw', script: 'e2e.sh', mem: '9g', shares: 4096, browser: true, results: true },
   // The nightly extras (plan.mjs NIGHTLY_EXTRAS). ds-go runs as root: the
   // Document Server's secret file is root's, 0600; so does s3-live, for the
   // bucket's key (etc/s3-live.env, 0600 - never a `-e` argument).
-  'ds-go': { image: 'go', script: 'ds-go.sh', mem: '6g', apps: true, dsEnv: true },
-  's3-live': { image: 'go', script: 's3-live.sh', mem: '6g', s3Live: true },
+  'ds-go': { image: 'go', script: 'ds-go.sh', mem: '6g', apps: true, dsEnv: true, tmp: true },
+  's3-live': { image: 'go', script: 's3-live.sh', mem: '6g', s3Live: true, tmp: true },
   shots: { image: 'pw', script: 'shots.sh', mem: '9g', shares: 4096, browser: true, goroot: true },
   // ⚠ A host job is no container: e2e/realenv/run.sh starts containers of its
   // own with this host's Docker, and mounts the tree by its path HERE.
@@ -380,7 +435,22 @@ class Chain {
     this.peakHeldGb = 0;
     this.started = iso();
     this.t0 = Date.now();
+    // CHAIN_MEM_GB until measureHost() has looked at the host (run()).
     this.budget = budgetOf(cfg, plan);
+    this.hostInfo = { configured: cfg.memGb, availStart: null, cut: false, outside: '' };
+    // What the host went through (host.mjs): the worst of the run, and each
+    // running job's tally (`load`, kept in its record when it ends).
+    this.hostState = {
+      memFullMax: null, ioFullMax: null, diskWriteMsMax: null, stallSamples: 0,
+      poolHeldMs: 0, tempWaitMs: 0,
+    };
+    this.load = new Map();
+    this.disk = null;
+    this.diskDev = '';
+    this.diskPrev = null;
+    this.lastPressureLog = 0;
+    this.lastPoolStart = 0;
+    this.psiHeldSince = 0;
     for (const j of [...plan.pool, ...plan.track]) this.status[j.name] = 'pending';
   }
 
@@ -393,7 +463,7 @@ class Chain {
   // ── setup ──
 
   prepare() {
-    for (const d of ['logs', 'out', 'bin', 'tmp', 'etc', 'home-go', 'vgw-data', 'fc/fontconfig']) {
+    for (const d of ['logs', 'out', 'bin', 'tmp', 'etc', 'home-go', 'vgw-data', 'fc/fontconfig', 'cid']) {
       fs.mkdirSync(path.join(this.dir, d), { recursive: true });
     }
     // Not the Go toolchain's directory: `docker cp` creates it, and into an
@@ -477,6 +547,39 @@ class Chain {
       docker(['rm', '-f', ...ids]);
     }
     docker(['network', 'rm', `${this.P}-ds`]);
+  }
+
+  /**
+   * The host before the chain starts anything (task #194): the budget is
+   * CHAIN_MEM_GB, or what MemAvailable leaves above the reserve when that is
+   * less; the containers that are not this chain's are named with what they
+   * hold (an Android emulator held 3.2 GiB through every 0.53 run); and the
+   * disk the run writes to is the one whose write latency it records.
+   */
+  measureHost() {
+    const avail = memAvailableGb();
+    const hb = hostBudget({ memGb: this.cfg.memGb, availGb: avail, reserveGb: this.cfg.reserveGb });
+    this.budget = budgetOf(this.cfg, this.plan, hb.gb);
+    let outside = '';
+    const ps = docker(['ps', '--no-trunc', '--format', '{{.ID}}\t{{.Names}}\t{{.Label "filex-chain"}}']);
+    if (ps.status === 0) {
+      const list = outsideContainers(ps.stdout, this.P).map((c) => {
+        const cg = readCgroup(cgroupDirOf(c.id));
+        return { name: c.name, gb: cg ? cg.wsBytes / 2 ** 30 : NaN };
+      });
+      if (list.length) outside = describeOutside(list);
+    }
+    this.hostInfo = { configured: this.cfg.memGb, availStart: avail, cut: hb.cut, outside };
+    this.disk = diskOf(this.dir, { name: this.cfg.disk });
+    this.diskDev = this.disk ? `${this.disk.major}:${this.disk.minor}` : '';
+    this.diskPrev = this.disk ? { c: this.disk, t: Date.now() } : null;
+    const why = hb.cut ? ` - CHAIN_MEM_GB is ${this.cfg.memGb}, but MemAvailable is ${avail.toFixed(1)} GiB, less the ${this.cfg.reserveGb} GiB reserve` : '';
+    this.log(
+      `budget ${this.budget.memGb} GiB${why}: browser round ${this.budget.trackGb}, databases ${this.budget.dbGb}, pool max ${this.budget.poolMax}; ` +
+        `MemAvailable now ${Number.isFinite(avail) ? avail.toFixed(1) : '?'} of ${(os.totalmem() / 2 ** 30).toFixed(1)} GiB`,
+    );
+    if (outside) this.log(`outside the chain: ${outside}`);
+    this.log(`disk ${this.disk ? `${this.disk.name} (${this.diskDev})` : 'unknown: no write latency recorded'}; PSI ${readPressure() ? 'read' : 'not available: no pressure recorded'}`);
   }
 
   label() {
@@ -635,6 +738,9 @@ class Chain {
       ...(k.env || {}),
       ...job.env,
     };
+    if (job.kind === 'web' && c.webWorkers > 0) env.VITEST_WORKERS = String(c.webWorkers);
+    // The Go build directory on the run's disk, as before /tmp became a tmpfs (KIND `tmp`).
+    if (k.tmp && k.image === 'go' && c.tmpfsGb > 0) env.GOTMPDIR = '/w/run/tmp';
     if (job.kind === 'go') {
       Object.assign(env, {
         GO_P: String(c.goP),
@@ -682,15 +788,28 @@ class Chain {
       });
     }
     const envArgs = Object.entries(env).flatMap(([key, v]) => ['-e', `${key}=${v}`]);
+    const tmp = [];
+    // exec: a Go test runs what it writes there (a fake virus scanner, a plugin binary).
+    if (k.tmp && c.tmpfsGb > 0) tmp.push('--tmpfs', `/tmp:rw,exec,nosuid,nodev,size=${c.tmpfsGb}g,mode=1777`);
+    // Over the tree's own e2e/test-results: Playwright empties it at its start
+    // and, finding a mount point (EBUSY), removes what is in it instead.
+    if (k.results && c.tmpfsGb > 0) tmp.push('--tmpfs', `/w/src/e2e/test-results:rw,nosuid,nodev,size=${c.tmpfsGb}g,mode=1777`);
     return [
-      'run', '--rm', '--name', `${this.P}-${job.name}`, ...this.label(),
+      // --cidfile: the container's id, for its cgroup (sample(): what the job holds and writes).
+      'run', '--rm', '--cidfile', this.cidFile(job), '--name', `${this.P}-${job.name}`, ...this.label(),
       '--network', `container:${this.P}-net`, '--memory', k.mem, '--cpus', String(c.cpus),
       '--cpu-shares', String(k.shares ?? 1024), '--shm-size', '2g', '--init',
-      ...user, ...mounts, ...envArgs, '-w', '/w/src', c.images[k.image], 'bash', `/w/chain/job/${k.script}`,
+      ...tmp, ...user, ...mounts, ...envArgs, '-w', '/w/src', c.images[k.image], 'bash', `/w/chain/job/${k.script}`,
     ];
   }
 
+  cidFile(job) {
+    return path.join(this.dir, 'cid', `${job.name}.cid`);
+  }
+
   beforeJob(job) {
+    // docker run refuses a --cidfile that exists.
+    fs.rmSync(this.cidFile(job), { force: true });
     if (job.kind !== 'migrate' || !this.dbUp) return;
     const pw = ['-e', `PGPASSWORD=${this.secret}`];
     docker(['exec', ...pw, `${this.P}-pg`, 'psql', '-U', 'filex', '-d', 'postgres', '-c', 'DROP DATABASE IF EXISTS chainmig']);
@@ -706,6 +825,7 @@ class Chain {
     const image = k.host ? 'host' : this.cfg.images[k.image];
     const start = Date.now();
     this.beforeJob(job);
+    this.load.set(job.name, { cidFile: k.host ? null : this.cidFile(job), cg: null, hostMemFull: null, hostIoFull: null, diskWriteMs: null });
     fs.writeFileSync(logFile, `JOBSTART ${iso()} ${job.name} ${image} ${k.script}\n`);
     this.log(`JOBSTART ${job.name} lane=${lane} weight=${job.weight}GiB image=${image}`);
     const rc = await new Promise((resolve) => {
@@ -735,15 +855,24 @@ class Chain {
       child.on('exit', (code) => finish(code ?? 128));
     });
     this.running.delete(job.name);
+    const tally = this.load.get(job.name);
+    this.load.delete(job.name);
+    fs.rmSync(this.cidFile(job), { force: true });
     fs.appendFileSync(logFile, `JOBEXIT=${rc} ${iso()}\n`);
     const secs = Math.round((Date.now() - start) / 1000);
     const summary = this.stopping ? 'stopped' : summaryOf(logFile);
+    const warnings = this.stopping ? [] : jobWarnings(readOr(logFile).slice(-65536));
+    const load = tally ? loadRecord(tally) : null;
     this.status[job.name] = rc === 0 && !this.stopping ? 'passed' : 'failed';
     this.records[job.name] = {
       name: job.name, lane, kind: job.kind, weight_gb: job.weight, status: this.status[job.name], exit: rc,
       start: new Date(start).toISOString(), end: iso(), secs, log: logFile, out: path.join(this.dir, 'out', job.name), summary,
+      ...(load ? { load } : {}),
+      ...(warnings.length ? { warnings } : {}),
     };
     this.log(`JOBEXIT ${job.name} rc=${rc} ${fmtSecs(secs)} ${summary}`);
+    for (const w of warnings) this.log(`JOBWARN ${job.name}: ${w}`);
+    if (load) this.log(loadLine(job.name, load));
     this.writeResult(false);
     return rc;
   }
@@ -759,15 +888,94 @@ class Chain {
     });
   }
 
-  /** Every 5 s: the lowest MemAvailable seen; every 5 min, a MEM line in chain.log. */
+  /**
+   * Every 5 s: the lowest MemAvailable seen; the host's memory and IO
+   * pressure and the run disk's write latency, the worst of the run and of
+   * each running job; each job container's memory, writes and stalls (its
+   * cgroup); a PRESSURE line in chain.log, at most one a minute, while the
+   * host is stalled; every 5 min, a MEM line.
+   */
   sample() {
+    const now = Date.now();
     const avail = memAvailableGb();
     this.minAvailGb = Math.min(this.minAvailGb, avail);
-    const now = Date.now();
+    const p = readPressure();
+    const counters = this.disk ? readDisk(this.disk) : null;
+    const d = counters && this.diskPrev ? diskDelta(this.diskPrev.c, counters, (now - this.diskPrev.t) / 1000) : null;
+    if (counters) this.diskPrev = { c: counters, t: now };
+    const writeMs = d && d.writeMs !== null ? d.writeMs : null;
+    const h = this.hostState;
+    const max = (a, b) => (b === null || b === undefined ? a : a === null ? b : Math.max(a, b));
+    if (p) {
+      h.memFullMax = max(h.memFullMax, p.memFull);
+      h.ioFullMax = max(h.ioFullMax, p.ioFull);
+    }
+    h.diskWriteMsMax = max(h.diskWriteMsMax, writeMs);
+    for (const [name, l] of this.load) {
+      if (!this.running.has(name)) continue;
+      if (p) {
+        l.hostMemFull = max(l.hostMemFull, p.memFull);
+        l.hostIoFull = max(l.hostIoFull, p.ioFull);
+      }
+      l.diskWriteMs = max(l.diskWriteMs, writeMs);
+      if (l.cidFile && !l.cg) l.cg = cgroupDirOf((readOr(l.cidFile) || '').trim());
+      const c = l.cg ? readCgroup(l.cg, this.diskDev) : null;
+      if (!c) continue;
+      l.wsBytes = max(l.wsBytes ?? null, c.wsBytes);
+      l.peakBytes = max(l.peakBytes ?? null, c.peakBytes);
+      if (c.wbytes !== null) l.wbytes = c.wbytes;
+      if (c.memFullS !== null) l.memFullS = c.memFullS;
+      if (c.ioFullS !== null) l.ioFullS = c.ioFullS;
+    }
+    const names = [...this.running.keys()].join(',') || '-';
+    const over = [];
+    if (p && p.memFull >= STALL.memFull) over.push(`memory full ${p.memFull.toFixed(2)}`);
+    if (p && p.ioFull >= STALL.ioFull) over.push(`io full ${p.ioFull.toFixed(2)}`);
+    if (writeMs !== null && writeMs >= STALL.diskWriteMs) over.push(`disk writes ${Math.round(writeMs)} ms on ${this.disk.name}`);
+    if (over.length) {
+      h.stallSamples += 1;
+      if (now - this.lastPressureLog >= 60_000) {
+        this.lastPressureLog = now;
+        this.log(`PRESSURE ${over.join(', ')}; MemAvailable ${avail.toFixed(1)} GiB; running=${names}`);
+      }
+    }
     if (now - (this.lastMemLog ?? 0) < 300_000) return;
     this.lastMemLog = now;
-    const names = [...this.running.keys()].join(',') || '-';
     this.log(`MEM available=${avail.toFixed(1)}GiB lowest=${this.minAvailGb.toFixed(1)}GiB running=${names}`);
+  }
+
+  /**
+   * Whether the pool may start a job now: CHAIN_START_GAP_S since its last
+   * start, and the host not stalled (PSI "full" over CHAIN_PSI_MEM_MAX or
+   * CHAIN_PSI_IO_MAX) - for at most CHAIN_PSI_WAIT_MIN at a time, then it
+   * starts one anyway. ⚠ In the 0.53 runs four jobs started within six
+   * seconds of the build, and the minute after was the run's worst.
+   */
+  admit() {
+    const now = Date.now();
+    if (now - this.lastPoolStart < this.cfg.startGapS * 1000) return false;
+    const { memMax, ioMax, waitMin } = this.cfg.psi;
+    const p = readPressure();
+    const over = [];
+    if (p && memMax > 0 && p.memFull > memMax) over.push(`memory full ${p.memFull.toFixed(2)} > ${memMax}`);
+    if (p && ioMax > 0 && p.ioFull > ioMax) over.push(`io full ${p.ioFull.toFixed(2)} > ${ioMax}`);
+    const held = this.psiHeldSince ? now - this.psiHeldSince : 0;
+    if (over.length === 0) {
+      if (this.psiHeldSince) this.log(`the pool goes on: the host's pressure came down after ${Math.round(held / 1000)}s`);
+      this.hostState.poolHeldMs += held;
+      this.psiHeldSince = 0;
+      return true;
+    }
+    if (!this.psiHeldSince) {
+      this.psiHeldSince = now;
+      this.log(`the pool starts nothing while the host is stalled: ${over.join(', ')} (PSI avg10)`);
+      return false;
+    }
+    if (held < waitMin * 60_000) return false;
+    this.log(`the pool waited ${waitMin} min for the pressure to come down (${over.join(', ')}): starting one job anyway`);
+    this.hostState.poolHeldMs += held;
+    this.psiHeldSince = 0;
+    return true;
   }
 
   skip(job, why) {
@@ -778,8 +986,15 @@ class Chain {
 
   // ── the browser round ──
 
+  /**
+   * Before a Playwright line: wait (at most CHAIN_TEMP_WAIT_MIN) for
+   * CHAIN_TEMP_QUERY to come down to CHAIN_TEMP_MAX, and at most
+   * CHAIN_TEMP_WAIT_TOTAL_MIN in the whole run. ⚠ Task #194: the night of
+   * 2026-10-07 read an NVMe sensor that stays at 85-90 C while the pool
+   * writes, and every Playwright line would have waited its 30 min.
+   */
   async cool(job) {
-    const { prom, query, max, waitMin } = this.cfg.temp;
+    const { prom, query, max, waitMin, totalMin } = this.cfg.temp;
     if (!prom || !query) return;
     const read = async () => {
       try {
@@ -790,13 +1005,17 @@ class Chain {
         return NaN;
       }
     };
+    const limit = Math.max(0, Math.min(waitMin * 60_000, totalMin * 60_000 - this.hostState.tempWaitMs));
     const t0 = Date.now();
     let t = await read();
-    while (Number.isFinite(t) && t > max && Date.now() - t0 < waitMin * 60_000 && !this.stopping) {
+    while (Number.isFinite(t) && t > max && Date.now() - t0 < limit && !this.stopping) {
       await sleep(30_000);
       t = await read();
     }
-    this.log(`temperature before ${job.name}: ${Number.isFinite(t) ? `${Math.round(t)} C` : 'unknown'} after ${Math.round((Date.now() - t0) / 1000)}s`);
+    const waited = Date.now() - t0;
+    this.hostState.tempWaitMs += waited;
+    const spent = limit <= 0 && Number.isFinite(t) && t > max ? ` - not waiting: this run has waited CHAIN_TEMP_WAIT_TOTAL_MIN (${totalMin} min) already` : '';
+    this.log(`temperature before ${job.name}: ${Number.isFinite(t) ? `${Math.round(t)} C` : 'unknown'} after ${Math.round(waited / 1000)}s${spent}`);
   }
 
   async trackMemory(job) {
@@ -860,12 +1079,14 @@ class Chain {
       if (this.dbUp && dbJobs.every(settled)) this.dbDown();
       const trackActive = this.status.build === 'passed' && !this.trackDone;
       const budget = poolBudget({ memGb: this.budget.memGb, trackActive, trackGb: this.budget.trackGb, dbUp: this.dbUp, dbGb: this.budget.dbGb });
+      const ceiling = poolCeiling({ memGb: this.budget.memGb, dbUp: this.dbUp, dbGb: this.budget.dbGb });
       const runningPool = [...this.running.values()].map((r) => r.job).filter((j) => pool.includes(j));
       let avail = memAvailableGb();
       const holding = runningPool.reduce((s, j) => s + j.weight, 0) + (trackActive ? this.budget.trackGb : 0) + (this.dbUp ? this.budget.dbGb : 0);
       this.peakHeldGb = Math.max(this.peakHeldGb, holding);
-      if (!this.trackWaiting) {
-        for (const job of pickJobs({ ready, running: runningPool, budget, maxJobs: this.cfg.poolMax })) {
+      const picks = this.trackWaiting ? [] : pickJobs({ ready, running: runningPool, budget, ceiling, maxJobs: this.cfg.poolMax });
+      if (picks.length && this.admit()) {
+        for (const job of picks) {
           if ((runningPool.length > 0 || this.running.size > 0) && avail - job.weight < this.cfg.reserveGb) {
             const why = `${job.name} held: MemAvailable ${avail.toFixed(1)} GiB, weight ${job.weight} + reserve ${this.cfg.reserveGb}`;
             if (held !== job.name) this.log(why);
@@ -875,7 +1096,10 @@ class Chain {
           held = '';
           avail -= job.weight;
           runningPool.push(job);
+          this.lastPoolStart = Date.now();
           this.startJob(job, 'pool');
+          // One start per CHAIN_START_GAP_S: the next waits to see this one's pressure.
+          if (this.cfg.startGapS > 0) break;
         }
       }
       if (pool.every((j) => settled(j.name))) break;
@@ -906,10 +1130,11 @@ class Chain {
       ok: final ? jobs.every((j) => j.status === 'passed') && !this.stopping : null,
       stopped: this.stopping,
       budget: {
-        mem_gb: this.budget.memGb, browser_round_gb: this.budget.trackGb, databases_gb: this.budget.dbGb,
+        mem_gb: this.budget.memGb, configured_gb: this.cfg.memGb, browser_round_gb: this.budget.trackGb, databases_gb: this.budget.dbGb,
         pool_max: this.budget.poolMax, reserve_gb: this.cfg.reserveGb,
         mem_total_gb: round2(os.totalmem() / 2 ** 30), min_mem_available_gb: round2(this.minAvailGb), peak_held_gb: round2(this.peakHeldGb),
       },
+      host: this.hostResult(),
       counts: {
         passed: jobs.filter((j) => j.status === 'passed').length,
         failed: jobs.filter((j) => j.status === 'failed').length,
@@ -919,6 +1144,31 @@ class Chain {
       jobs,
       log: path.join(this.dir, 'chain.log'),
       env_file: this.envFile || null,
+    };
+  }
+
+  /**
+   * result.json `host` (task #194): the budget the run took and why, and the
+   * worst the host went through - the numbers the task's acceptance reads
+   * (memory "full" under 0.1, no write of a second or more).
+   */
+  hostResult() {
+    const h = this.hostState;
+    const heldNow = this.psiHeldSince ? Date.now() - this.psiHeldSince : 0;
+    return {
+      budget_gb: this.budget.memGb,
+      configured_gb: this.cfg.memGb,
+      budget_cut: this.hostInfo.cut,
+      mem_available_start_gb: round2(this.hostInfo.availStart),
+      reserve_gb: this.cfg.reserveGb,
+      outside: this.hostInfo.outside || null,
+      disk: this.disk?.name ?? null,
+      mem_full_max: round2(h.memFullMax),
+      io_full_max: round2(h.ioFullMax),
+      disk_write_ms_max: Number.isFinite(h.diskWriteMsMax) ? Math.round(h.diskWriteMsMax) : null,
+      stalled_secs: h.stallSamples * 5,
+      pool_held_secs: Math.round((h.poolHeldMs + heldNow) / 1000),
+      temp_wait_secs: Math.round(h.tempWaitMs / 1000),
     };
   }
 
@@ -935,17 +1185,20 @@ class Chain {
     const { url, keyFile, group, source } = this.cfg.notify;
     if (!url) return;
     const bad = r.jobs.filter((j) => j.status !== 'passed');
+    const warned = r.jobs.filter((j) => j.warnings?.length);
     const lines = [
       `${r.counts.passed}/${r.counts.total} jobs green on ${r.sha.slice(0, 8)} ${r.subject}`,
-      ...bad.slice(0, 25).map((j) => `${j.status === 'skipped' ? 'skipped' : 'RED'} ${j.name}: ${j.summary ?? ''}`),
+      ...bad.slice(0, 25).map((j) => `${j.status === 'skipped' ? 'skipped' : 'RED'} ${j.name}: ${j.summary ?? ''}${stallWords(j.load) ? ` (the host stalled: ${stallWords(j.load)})` : ''}`),
+      ...warned.flatMap((j) => j.warnings.map((w) => `WARNING ${j.name}: ${w}`)),
+      hostLine(r.host),
       `result: ${path.join(this.dir, 'result.json')}`,
-    ];
+    ].filter(Boolean);
     // The one poster every maintainer tool shares (scripts/lib/notify.mjs).
     await postNotify(
       { url, keyFile, group, source },
       {
-        severity: r.ok ? 'success' : 'danger',
-        title: `filex chain ${r.profile}: ${r.ok ? 'green' : r.stopped ? 'stopped' : 'RED'} in ${r.wall} (${r.sha.slice(0, 8)})`,
+        severity: r.ok ? (warned.length ? 'warning' : 'success') : 'danger',
+        title: `filex chain ${r.profile}: ${r.ok ? (warned.length ? 'green, with warnings' : 'green') : r.stopped ? 'stopped' : 'RED'} in ${r.wall} (${r.sha.slice(0, 8)})`,
         message: lines.join('\n'),
       },
       { log: (m) => this.log(m), keyVar: 'CHAIN_NOTIFY_KEY_FILE' },
@@ -974,14 +1227,13 @@ class Chain {
     fs.mkdirSync(this.dir, { recursive: true });
     this.prepare();
     this.log(`chain ${this.runId} start: profile=${this.plan.profile} src=${this.cfg.src} ${this.sha.slice(0, 8)} ${this.subject}${this.dirty ? ` (+${this.dirty} uncommitted)` : ''}`);
-    this.log(
-      `budget ${this.budget.memGb} GiB: browser round ${this.budget.trackGb}, databases ${this.budget.dbGb}, pool max ${this.budget.poolMax}; ` +
-        `MemAvailable now ${memAvailableGb().toFixed(1)} of ${(os.totalmem() / 2 ** 30).toFixed(1)} GiB; lock ${process.env.CHAIN_LOCK_HELD || 'none'}`,
-    );
+    this.log(`lock ${process.env.CHAIN_LOCK_HELD || 'none'}`);
     // Not SIGHUP: started under nohup the run must outlive the session that started it.
     for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => this.stop(sig));
     try {
       this.removeLeftovers();
+      // Before the sidecars: what the host has when the chain holds nothing.
+      this.measureHost();
       this.ensureImages();
       await this.servicesUp();
     } catch (e) {
@@ -1003,10 +1255,34 @@ class Chain {
   }
 }
 
+/**
+ * A job's warnings: its `JOBWARN ...` lines (job/common.sh warn), in order.
+ * A green job's way to say something a person must read - the nightly shots
+ * job when only its language packs are behind the tree (task #187).
+ */
+export function jobWarnings(text) {
+  return String(text ?? '')
+    .split('\n')
+    .filter((l) => l.startsWith('JOBWARN '))
+    .map((l) => l.slice(8).replace(/\r$/, '').trim())
+    .filter(Boolean);
+}
+
 function summaryOf(logFile) {
   const text = readOr(logFile).slice(-65536);
   const lines = text.split('\n').filter((l) => l.startsWith('SUMMARY '));
   return lines.length ? lines.at(-1).slice(8).trim() : '(no SUMMARY line)';
+}
+
+/** The LOAD line of a job in chain.log: what it held and wrote, and what the host went through meanwhile. */
+function loadLine(name, load) {
+  const f = (v, unit) => (v === null || v === undefined ? '?' : `${v}${unit}`);
+  const stalled = stallWords(load);
+  return (
+    `LOAD ${name} mem=${f(load.mem_gb, 'GiB')} peak=${f(load.mem_peak_gb, 'GiB')} wrote=${f(load.written_gb, 'GiB')} ` +
+    `host-mem-full=${f(load.host_mem_full, '')} host-io-full=${f(load.host_io_full, '')} disk-write=${f(load.disk_write_ms, 'ms')}` +
+    `${stalled ? ` STALLED (${stalled})` : ''}`
+  );
 }
 
 function fmtSecs(s) {

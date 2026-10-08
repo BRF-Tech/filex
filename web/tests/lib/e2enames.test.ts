@@ -377,8 +377,10 @@ describe('required features', () => {
   const names = { alg: 'AES-SIV-512', enc: 'b64url', long: 220, key: 'AAAA', root_id: 'AAAAAAAAAAAAAAAAAAAAAA' };
 
   it('names a feature this build does not know, and refuses to open', () => {
-    const text = JSON.stringify({ ...base, req: ['names', 'vault'], names });
-    expect(parseMarkerDetailed(text)?.unsupported).toEqual(['vault']);
+    // Not `vault`: this build knows the vault (level 3), and a key file that
+    // asks for it beside anything else is malformed, not "unknown".
+    const text = JSON.stringify({ ...base, req: ['names', 'x-future'], names });
+    expect(parseMarkerDetailed(text)?.unsupported).toEqual(['x-future']);
     expect(parseMarker(text)).toBeNull();
   });
 

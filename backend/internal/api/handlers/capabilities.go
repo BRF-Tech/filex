@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/archivecli"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/auth/drivers/multioidc"
@@ -55,6 +56,11 @@ type Capabilities struct {
 	// encryption at all, and its policy (internal/e2epolicy). Nil publishes
 	// nothing, which is what a server from before the policy said.
 	E2EPolicy *e2epolicy.Service
+	// E2EVault is FILEX_E2E_VAULT: published as `e2e_vault`, always, true
+	// only on a server that serves the vault API (/api/files/e2e/vault). A
+	// client offers encryption level 3 only there
+	// (docs/E2E-VAULT-FORMAT.md → Audit and events).
+	E2EVault bool
 	// Tenants + PublicURLSet feed `public_url`: the address this deployment is
 	// reached at, for the connection guides (see Get). Zero values publish
 	// nothing, which is what every test that builds this handler by hand gets.
@@ -75,6 +81,10 @@ type Capabilities struct {
 	// empty publishes nothing, and the explorer changes inside the request as
 	// it always did.
 	Queued []string
+	// ACL resolves the permission rules binding the caller, for
+	// `share_link_max_days` (linkCeilingDays). Nil = the install's ceiling
+	// alone, which is what every test that builds this handler by hand gets.
+	ACL *acl.Resolver
 }
 
 // NewCapabilities constructs a Capabilities handler.
@@ -171,6 +181,9 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// that puts it in force, never before: the screens follow what the server
 	// enforces.
 	merged["multi_tenant"] = h.MultiTenant
+	// The vault level (encryption level 3): true only where its API answers.
+	// Always present, so a client never guesses from an absence.
+	merged["e2e_vault"] = h.E2EVault
 
 	// Per-tenant branding: identify only the tenant this host belongs to.
 	if h.MultiTenant && h.Store != nil {
@@ -201,6 +214,11 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// instead of letting someone pick "30 days" and get 7.
 	if h.Store != nil {
 		merged["share_max_ttl_days"] = share.NewService(h.Store).MaxTTLDays(r.Context())
+		// The CALLER's ceiling (0 = none): the install's, or the permission
+		// rules binding them (ShareLinkMaxDays), whichever is shorter. The
+		// share dialog derives its expiry choices from this one, so a person
+		// held to 7 days is not offered 30 and then told it was cut.
+		merged["share_link_max_days"] = linkCeilingDays(r.Context(), h.Store, h.ACL)
 	}
 	if h.Archive != nil {
 		// ⚠ What this server can MAKE, not only what the policy allows: every
@@ -342,6 +360,9 @@ func (h *Capabilities) Get(w http.ResponseWriter, r *http.Request) {
 	// whoever receives the link (issue #32 — a compose file setting a variable
 	// filex has never read, and links to localhost:5212 on a public host).
 	merged["public_url_configured"] = h.PublicURLSet
+
+	// The rules the clients used to keep copies of (capabilities_rules.go).
+	h.publishRules(r, c, merged)
 
 	writeJSON(w, http.StatusOK, merged)
 }

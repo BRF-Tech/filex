@@ -133,12 +133,14 @@ func TestSessionBase_TheSweepRemovesRowsWhoseSessionNeverEnded(t *testing.T) {
 func TestSessionBase_AnExpiredRowIsNoRecord(t *testing.T) {
 	ctx := context.Background()
 	h := newDocHarness(t, "rapor.docx", docxMime, "V1")
+	// An older key of this document (sealed for it, callback_trust.go).
+	longGone := h.svc.sealKey(ctx, h.node.ID, md5Hex("long-gone"))
 	require.NoError(t, h.store.PutOfficeSession(ctx, &model.OfficeSession{
-		DocKey: "long-gone", NodeID: h.node.ID, Size: 1, ExpiresUnix: time.Now().Add(-time.Minute).Unix(),
+		DocKey: longGone, NodeID: h.node.ID, Size: 1, ExpiresUnix: time.Now().Add(-time.Minute).Unix(),
 	}))
 	// A session whose record expired (two days with no end): judged by the
 	// key the document would get now - an older key is stale.
-	stale, known := h.svc.SessionState(ctx, h.node, "long-gone")
+	stale, known := h.svc.SessionState(ctx, h.node, longGone)
 	assert.False(t, known)
 	assert.True(t, stale)
 }

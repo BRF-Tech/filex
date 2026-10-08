@@ -222,6 +222,29 @@ describe('the frame (AppFrame.vue)', () => {
     expect(api.pluginUISave).not.toHaveBeenCalled();
   });
 
+  // #211 (audit B19): the read goes through the server's door for an
+  // interface, which checks the grant and the kind as it does for a save.
+  it('reads the file through the server, not the preview, when the host has the door', async () => {
+    const pluginUIRead = vi.fn(async () => new Response('from the server', { headers: { 'content-length': '15' } }));
+    const api = apiStub({ pluginUIRead });
+    mount(AppFrame, {
+      props: {
+        api, app: 'sketch', view: 'editor', placement: 'viewer', ui: UI, locale: 'en',
+        files: [{ path: 'main://doc.sketch', name: 'doc.sketch', size: 15 }],
+      },
+      attachTo: document.body,
+    });
+    await settle();
+    const f = document.querySelector('iframe') as HTMLIFrameElement;
+    const win = fakeWindow();
+    Object.defineProperty(f, 'contentWindow', { get: () => win });
+    hello(win);
+    const port = win.sent[0].ports[0];
+    expect((await ask(port, 1, 'file.read', { as: 'text' })).result.text).toBe('from the server');
+    expect(pluginUIRead).toHaveBeenCalledWith('sketch', 'editor', 'main://doc.sketch');
+    expect(api.fetchResponse).not.toHaveBeenCalled();
+  });
+
   it('writes a draft where the host says, and refuses a view-only opening', async () => {
     const { api } = mountFrame({ savePath: 'main://.filex-drafts/1/abcdef12/doc.sketch' });
     await settle();

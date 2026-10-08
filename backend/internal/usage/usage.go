@@ -129,6 +129,35 @@ type Totals struct {
 	AccountOps struct {
 		A, B, C, D int64
 	} `json:"account_ops"`
+	// AccountOpsTotal is A+B+C+D of AccountOps, the one number the page
+	// prints beside the bucket table.
+	AccountOpsTotal int64 `json:"account_ops_total"`
+}
+
+// BucketTotal is one bucket's usage over a window: a row of the page's
+// bucket table. A bucket the provider reports in two regions is two rows
+// (Location), never one added up.
+type BucketTotal struct {
+	// Label names the row as the table prints it: the bucket, with its
+	// region in brackets when the provider reports one, "-" for an unnamed
+	// bucket.
+	Label    string `json:"label"`
+	Bucket   string `json:"bucket"`
+	Location string `json:"location,omitempty"`
+	// AvgStoredBytes is the bucket's mean daily storage reading over the
+	// window's days (storage is a reading, so it is averaged, not summed).
+	AvgStoredBytes  float64 `json:"avg_stored_bytes"`
+	UploadedBytes   int64   `json:"uploaded_bytes"`
+	DownloadedBytes int64   `json:"downloaded_bytes"`
+	// Ops is every transaction class together (A+B+C+D).
+	Ops int64 `json:"ops"`
+}
+
+// TrendPoint is one day of the storage trend: every bucket's reading that
+// day, together.
+type TrendPoint struct {
+	Date        string  `json:"date"`
+	StoredBytes float64 `json:"stored_bytes"`
 }
 
 // SumBuckets totals the BUCKET rows and reports the account rows separately.
@@ -175,6 +204,7 @@ func SumBuckets(days []Day) Totals {
 		}
 	}
 
+	t.AccountOpsTotal = t.AccountOps.A + t.AccountOps.B + t.AccountOps.C + t.AccountOps.D
 	t.Days = len(perDay)
 	var sum float64
 	for _, v := range perDay {
@@ -187,6 +217,88 @@ func SumBuckets(days []Day) Totals {
 		t.AvgStoredBytes = sum / float64(t.Days)
 	}
 	return t
+}
+
+// bucketRows is the rows SumBuckets adds up: the bucket rows of the
+// preferred source. ⚠ The page's bucket table and trend were summed in the
+// browser from every bucket row, of whichever source - the filter SumBuckets
+// applies was not there - so the day a measured source is added beside a
+// provider's report the table would have added an estimate to an invoice.
+func bucketRows(days []Day) []Day {
+	if len(days) == 0 {
+		return nil
+	}
+	source := preferredSource(days)
+	out := make([]Day, 0, len(days))
+	for _, d := range days {
+		if d.Source == source && d.Scope != ScopeAccount {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// PerBucket is the bucket table: one row per bucket (and region) over the
+// window, largest mean storage first. The mean is over the days the window
+// has rows for, the same day count Totals reports.
+func PerBucket(days []Day) []BucketTotal {
+	rows := bucketRows(days)
+	if len(rows) == 0 {
+		return []BucketTotal{}
+	}
+	dates := map[string]bool{}
+	by := map[string]*BucketTotal{}
+	order := []string{}
+	for _, d := range rows {
+		dates[d.Date.UTC().Format("2006-01-02")] = true
+		key := d.Bucket + "|" + d.Location // a bucket name has no "|"
+		b, ok := by[key]
+		if !ok {
+			label := d.Bucket
+			if label == "" {
+				label = "-"
+			}
+			if d.Location != "" {
+				label += " (" + d.Location + ")"
+			}
+			b = &BucketTotal{Label: label, Bucket: d.Bucket, Location: d.Location}
+			by[key] = b
+			order = append(order, key)
+		}
+		b.AvgStoredBytes += storedReading(d)
+		b.UploadedBytes += d.UploadedBytes
+		b.DownloadedBytes += d.DownloadedBytes
+		b.Ops += d.OpsA + d.OpsB + d.OpsC + d.OpsD
+	}
+	n := float64(len(dates))
+	out := make([]BucketTotal, 0, len(order))
+	for _, k := range order {
+		b := *by[k]
+		b.AvgStoredBytes /= n
+		out = append(out, b)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].AvgStoredBytes != out[j].AvgStoredBytes {
+			return out[i].AvgStoredBytes > out[j].AvgStoredBytes
+		}
+		return out[i].Label < out[j].Label
+	})
+	return out
+}
+
+// Trend is the daily storage trend: one point per day, every bucket of the
+// preferred source together, in date order.
+func Trend(days []Day) []TrendPoint {
+	by := map[string]float64{}
+	for _, d := range bucketRows(days) {
+		by[d.Date.UTC().Format("2006-01-02")] += storedReading(d)
+	}
+	out := make([]TrendPoint, 0, len(by))
+	for date, v := range by {
+		out = append(out, TrendPoint{Date: date, StoredBytes: v})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
+	return out
 }
 
 // storedReading is the day's storage number in bytes: byte-hours divided by

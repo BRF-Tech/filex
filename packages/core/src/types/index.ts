@@ -17,6 +17,7 @@ export type {
 export type {
   FileNode,
   ShareInfo,
+  ShareDownloadCommand,
   UploadLimits,
   Capabilities,
   UploadInitResponse,

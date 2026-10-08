@@ -70,6 +70,10 @@ type AppPlugins struct {
 	// the listing carries its rules, and an interface switched off for a
 	// kind is refused on it (openAllowed). Nil: every viewer opens its kinds.
 	Assoc *assoc.Service
+	// Preview serves a file's bytes the way the explorer's preview does
+	// (GET /api/files/manager?action=preview) - the read UIRead hands an
+	// interface once the app's own checks pass. Nil: UIRead answers 404.
+	Preview http.HandlerFunc
 }
 
 // NewAppPlugins constructs the handler and wires it as the registry's sink.
@@ -238,7 +242,7 @@ func (h *AppPlugins) checkOutputFolder(w http.ResponseWriter, r *http.Request, q
 		return nil, false
 	}
 	if st.ReadOnly {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "read_only", "message": "the chosen folder's storage is read-only"})
+		writeReadOnly(w, r, http.StatusConflict)
 		return nil, false
 	}
 	if rel != "" {
@@ -450,8 +454,11 @@ func (h *AppPlugins) authorise(w http.ResponseWriter, r *http.Request, pluginNam
 	// version), or — for a flow that ends in a write (applies.writable, the
 	// signing request) — the file itself later on.
 	writesSource := writes || applies.Writable
-	if writesSource && st.ReadOnly && !(opening && action.View != "" && action.Output.Elsewhere) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "read_only", "message": "this storage is read-only"})
+	// ⚠ A menu click (opening) is let through exactly where the menu offers
+	// the row (wasmplugin.OffersOnReadOnly, sent as `read_only_ok`): one
+	// rule, so the menu never shows what this refuses.
+	if writesSource && st.ReadOnly && !(opening && wasmplugin.OffersOnReadOnly(action, applies)) {
+		writeReadOnly(w, r, http.StatusConflict)
 		return nil, false
 	}
 	need := pluginACLNeed(action, writesSource)
@@ -562,6 +569,18 @@ func (h *AppPlugins) resolvePaths(ctx context.Context, storageID int64, paths []
 			}
 		}
 		rel = strings.Trim(path.Clean("/"+rel), "/")
+		// ⚠ filex's own folders are not an app's input: the trash, the
+		// version history, the thumbnail cache and the drafts area (other
+		// than the caller's own draft, which their editor works on) have
+		// their own APIs, keyed by something other than a path, and the
+		// explorer never offers an app on them. A crafted run, screen or
+		// interface call naming `.filex-trash/…` or `.versions/…` gets the
+		// answer every by-path door gives a sealed path: not found. Asked
+		// AFTER the root check, so a `root:` token still gets one answer for
+		// everything outside its root.
+		if sealedFor(ctx, rel) {
+			return 0, nil, errSealedPath
+		}
 		if rel != "" && rel != "." {
 			out = append(out, rel)
 		}
@@ -576,11 +595,20 @@ func (h *AppPlugins) resolvePaths(ctx context.Context, storageID int64, paths []
 // `root:`, answered 403 by writePathsRefused.
 var errOutsideRoot = errors.New("outside this token's root")
 
+// errSealedPath is resolvePaths' refusal of a path inside one of filex's own
+// folders (syspath.Sealed), answered 404 by writePathsRefused.
+var errSealedPath = errors.New("not found")
+
 // writePathsRefused answers a resolvePaths error: 403 for a path outside the
-// token's root, 400 for a request that names its paths wrongly.
+// token's root, 404 for one inside filex's own folders, 400 for a request
+// that names its paths wrongly.
 func writePathsRefused(w http.ResponseWriter, err error) {
 	if errors.Is(err, errOutsideRoot) {
 		refuseOutsideRoot(w)
+		return
+	}
+	if errors.Is(err, errSealedPath) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
 	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -879,13 +907,18 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 	// be queued out of it. The browser does the same on its way out, but that
 	// is a convenience for the person at the screen — THIS is the boundary,
 	// and a crafted request meets it here.
-	if missing, gerr := gateSurfaceValues(req.Event, req.State, req.Data, func(in wire.ViewEventInput) (*wire.Surface, error) {
+	// ⚠ The same gate judges every ANSWER against the screen it came from
+	// (surface_values.go): a type, an option, min/max, a PIN's length, a PDF
+	// text box's rule. An answer that does not fit refuses the event in the
+	// reader's words — the screen's own declarations are the rule, not the
+	// browser that drew them.
+	if verdict, gerr := gateSurfaceValues(req.Event, req.State, req.Data, func(in wire.ViewEventInput) (*wire.Surface, error) {
 		return h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), pluginLang(r), in)
 	}); gerr != nil {
 		h.callFail(w, gerr)
 		return
-	} else if len(missing) > 0 {
-		writeSurfaceRequired(w, missing)
+	} else if verdict.refused() {
+		writeSurfaceRefused(w, pluginLang(r), verdict)
 		return
 	}
 	s, err := h.Registry.ViewEvent(r.Context(), pluginName, viewID, req.StorageID, rels, auth.UserFrom(r.Context()), pluginLang(r),
@@ -903,6 +936,7 @@ func (h *AppPlugins) viewEvent(w http.ResponseWriter, r *http.Request, req *view
 		return
 	}
 	h.checkSurfaceOpen(r, s)
+	markSurfaceProblems(req.Event, s, req.Data, pluginLang(r))
 	writeJSON(w, http.StatusOK, map[string]any{"surface": s})
 }
 

@@ -260,7 +260,7 @@ func ApplyStartingRole(ctx context.Context, store startingRoleStore, driver stri
 		slog.Warn(driver+": starting role: give role", slog.Int64("user_id", user.ID), slog.String("err", err.Error()))
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(ctx, user.ID)
 }
 
 // FirstLoginCheck is the provider test's step for the first-login rule. Its ID

@@ -10,9 +10,11 @@
  * 2026-09-21, QA #25): the preview taught the operator a page that does not
  * exist. Anything the public page changes, this changes with it.
  *
- * Nothing is fetched: the "link" handed to the body is a fixed one-file share
- * (only the fields the one-document branch reads), and the accent goes
- * through the same derivation the page uses (accentStyleOf).
+ * The "link" handed to the body is a fixed one-file share (only the fields
+ * the one-document branch reads), and the accent goes through the same
+ * derivation the page uses (accentStyleOf). The one thing fetched is what the
+ * page SAYS - the server's public sentences in the previewed language
+ * (composables/usePublicText) - because the page has no words of its own.
  *
  * ⚠ Inert: a preview is looked at, not used. The page's controls (the
  * download button, the language picker) must not act from inside the admin
@@ -27,6 +29,8 @@ import type { PublicShareInfo } from '../../types/Public';
 import type { PublicLinkStore } from '../../composables/usePublicLink';
 import { accentStyleOf, DEFAULT_BRAND_NAME } from '../../composables/usePublicBranding';
 import { publicLayoutFor } from '../../lib/publicLayout';
+import { appBase } from '../../lib/appBase';
+import { loadPublicText, providePublicText } from '../../composables/usePublicText';
 import PublicShell from './PublicShell.vue';
 import PublicShareBody from './PublicShareBody.vue';
 
@@ -65,6 +69,9 @@ const link = computed(
 );
 
 const name = computed(() => props.brandName?.trim() || DEFAULT_BRAND_NAME);
+
+/* The page's words are the server's, as on the real page (PublicLinkPage). */
+providePublicText(loadPublicText({ base: appBase(), locale: () => String(props.locale) }));
 </script>
 
 <template>

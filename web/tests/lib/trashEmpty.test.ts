@@ -9,6 +9,7 @@
 // longer the end; a status whose `running` is false is.
 import { describe, expect, it, vi } from 'vitest';
 import { emptyTrashAndFollow, TrashEmptyBusy } from '@brftech/filex-core/src/lib/trashEmpty';
+import { serverWords } from '@brftech/filex-core/src/lib/errorWords';
 
 function reply(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -121,16 +122,64 @@ describe('emptyTrashAndFollow', () => {
     ).rejects.toBeInstanceOf(TrashEmptyBusy);
   });
 
-  it("any other refusal is thrown in the server's own words", async () => {
-    await expect(
-      emptyTrashAndFollow({
-        start: async () => reply(400, { error: 'older_than_days must be a whole number of days, 0 or more' }),
-        status: vi.fn(),
-        sleep: noWait,
-      }),
-    ).rejects.toThrow('older_than_days must be a whole number of days, 0 or more');
-    await expect(
-      emptyTrashAndFollow({ start: async () => new Response('<html>', { status: 504 }), status: vi.fn(), sleep: noWait }),
-    ).rejects.toThrow('504');
+  it("any other refusal is said in the server's own words - never a bare status (A4)", async () => {
+    const refused = await emptyTrashAndFollow({
+      start: async () =>
+        reply(400, {
+          error: 'older_than_days must be a whole number of days, 0 or more',
+          message: 'older_than_days must be a whole number of days, 0 or more',
+        }),
+      status: vi.fn(),
+      sleep: noWait,
+      locale: 'en',
+    }).catch((e: unknown) => e);
+    expect(serverWords(refused, 'en')).toBe('older_than_days must be a whole number of days, 0 or more');
+
+    // A run that stopped answers 500 with the server's sentence for it, not
+    // its English record ("3 items could not be purged; see the server log").
+    const stopped = await emptyTrashAndFollow({
+      start: async () =>
+        reply(500, {
+          error: '3 items could not be purged',
+          message: 'None of the 3 items could be deleted; they are still in the trash.',
+          summary: 'None of the 3 items could be deleted; they are still in the trash.',
+        }),
+      status: vi.fn(),
+      sleep: noWait,
+      locale: 'en',
+    }).catch((e: unknown) => e);
+    expect(serverWords(stopped, 'en')).toBe('None of the 3 items could be deleted; they are still in the trash.');
+
+    // A proxy's page is not the server's sentence: the status is said in the
+    // reader's words, never printed as "504".
+    const proxy = await emptyTrashAndFollow({
+      start: async () => new Response('<html>', { status: 504 }),
+      status: vi.fn(),
+      sleep: noWait,
+      locale: 'en',
+    }).catch((e: unknown) => e);
+    expect((proxy as { status?: number }).status).toBe(504);
+    const said = serverWords(proxy, 'en');
+    expect(said).not.toBe('504');
+    expect(said).not.toMatch(/^\d+$/);
+    expect(said.length).toBeGreaterThan(10);
+  });
+
+  it("a run's own sentence rides along on every look, and BUSY hands the server's words to onBusy", async () => {
+    const onBusy = vi.fn();
+    const end = await emptyTrashAndFollow({
+      start: async () =>
+        reply(409, {
+          code: 'BUSY',
+          message: 'The trash is already being emptied.',
+          job: { running: true, total: 2, scanned: 1, summary: 'Emptying the trash… 1 of 2' },
+        }),
+      status: async () =>
+        reply(200, { running: false, total: 2, scanned: 2, purged: 2, failed: 0, started_at: 'x', summary: 'Trash emptied: 2 items deleted for good.' }),
+      onBusy,
+      sleep: noWait,
+    });
+    expect(onBusy).toHaveBeenCalledWith('The trash is already being emptied.');
+    expect(end?.summary).toBe('Trash emptied: 2 items deleted for good.');
   });
 });

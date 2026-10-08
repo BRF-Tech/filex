@@ -23,9 +23,11 @@
  *
  * Pure types plus one transport; no Vue.
  */
-import type { EventPossibility } from './webhookEvents';
+import type { EventOff } from './serverRules';
 import type { ExternalServiceStatus } from '../types/FileNode';
 import type { PluginActionsResponse } from '../types/Plugins';
+import type { WebPushController } from './webPush';
+import type { AccountCheckAnswer, AccountCheckQuery } from './accountRules';
 
 /** The signed-in person, as the dialog reads and writes it. */
 export interface SettingsUser {
@@ -79,23 +81,32 @@ export interface SettingsNotificationDigest {
   admin_events: string[];
 }
 
-/** What the server says it can do — the fields the dialog reads. ⚠ Not
- *  `account_admin`: that one is the account's role, which the host gives as
- *  `isAdmin`, and the server publishes nothing of the kind. */
-export interface SettingsCapabilities extends Omit<EventPossibility, 'account_admin'> {
+/** What the server says it can do — the fields the dialog reads. */
+export interface SettingsCapabilities {
   version?: string;
+  /** The release alone (`v0.54.0`), for the version line (#211). */
+  release?: string;
+  /** The notification events that cannot happen here, by event: why, whether
+   *  this caller could change it, and the server's sentence (#211, audit B16). */
+  event_off?: Record<string, EventOff>;
   caller_admin?: boolean;
   demo_mode?: boolean;
   /** 0.51 - the document server (Default apps: whether a choice of ONLYOFFICE
    *  for a .csv is available, lib/serviceGate onlyOfficeUsable). */
   onlyoffice_url?: string | null;
   external?: { onlyoffice?: ExternalServiceStatus };
+  /** wiring:e2 vault - the server has the vault API (the idle-time row). */
+  e2e_vault?: boolean;
 }
 
 /** The account's own endpoints — every one of them open to every signed-in
  *  account (backend routes.go, "authenticated user routes"). */
 export interface UserSettingsApi {
   updateProfile(patch: Partial<SettingsUser>): Promise<SettingsUser>;
+  /** `POST /api/auth/account/check`: whether an address / a username would
+   *  be accepted, in the server's words (lib/accountRules). Optional: a host
+   *  without it checks on Save only. */
+  checkAccount?(q: AccountCheckQuery): Promise<AccountCheckAnswer>;
   changePassword(current: string, next: string): Promise<void>;
   enrollTotp(): Promise<{ secret: string; qr_svg: string; recovery_codes?: string[] }>;
   verifyTotp(code: string): Promise<void>;
@@ -110,6 +121,14 @@ export interface UserSettingsApi {
    * choices without judging them.
    */
   pluginActions?(): Promise<PluginActionsResponse>;
+  /**
+   * wiring:e2 vault - `GET / PUT /api/files/e2e/vault/prefs`: how long a
+   * vault this person writes to stays theirs while they do nothing, in
+   * minutes (1-10, 3 until set). Kept on the server for the person, not per
+   * browser. Absent: the row is not drawn.
+   */
+  vaultIdle?(): Promise<number>;
+  setVaultIdle?(minutes: number): Promise<number>;
 }
 
 export type SettingsThemeMode = 'light' | 'auto' | 'dark';
@@ -185,6 +204,15 @@ export interface UserSettingsHost {
     setEnabled(on: boolean): void;
     ask(): Promise<BrowserNotifyPermission>;
   };
+  /**
+   * Push notifications on this device (#191, lib/webPush): what the bell
+   * tells the person reaches this phone or browser while filex is closed.
+   * Given by a host that runs filex's own service worker (the web app, in a
+   * tab or installed); not by the desktop app, whose native notifications
+   * already reach a closed window, nor by an explorer embedded in another
+   * site, whose workers are that site's.
+   */
+  readonly webPush?: WebPushController;
 }
 
 /**
@@ -209,6 +237,7 @@ export function userSettingsApi(
   });
   return {
     updateProfile: (patch) => jsonFetch<SettingsUser>(`${root}/api/auth/profile`, json('PATCH', patch)),
+    checkAccount: (q) => jsonFetch<AccountCheckAnswer>(`${root}/api/auth/account/check`, json('POST', q)),
     changePassword: async (current, next) => {
       await jsonFetch(`${root}/api/auth/password`, json('POST', { current_password: current, new_password: next }));
     },
@@ -224,5 +253,8 @@ export function userSettingsApi(
     updateNotificationSettings: (prefs) =>
       jsonFetch<SettingsNotificationPrefs>(`${root}/api/notifications/settings`, json('PATCH', prefs)),
     pluginActions: () => jsonFetch<PluginActionsResponse>(`${root}/api/files/plugins/actions`),
+    vaultIdle: async () => (await jsonFetch<{ idle_minutes: number }>(`${root}/api/files/e2e/vault/prefs`)).idle_minutes,
+    setVaultIdle: async (minutes) =>
+      (await jsonFetch<{ idle_minutes: number }>(`${root}/api/files/e2e/vault/prefs`, json('PUT', { idle_minutes: minutes }))).idle_minutes,
   };
 }

@@ -83,10 +83,10 @@ func TestSurfaceGateDropsTheValueOfAHiddenField(t *testing.T) {
 		"new_name": "../../etc/passwd",
 	}}
 
-	missing, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
+	verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
 
 	require.NoError(t, err)
-	assert.Empty(t, missing)
+	assert.Empty(t, verdict.Missing)
 	assert.Equal(t, 1, calls, "the host asks the plugin once what the screen looks like")
 	got := valuesOf(t, data)
 	assert.NotContains(t, got, "new_name",
@@ -103,10 +103,10 @@ func TestSurfaceGateKeepsTheValueOfAVisibleField(t *testing.T) {
 		"new_name": "rapor.pdf",
 	}}
 
-	missing, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
+	verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
 
 	require.NoError(t, err)
-	assert.Empty(t, missing)
+	assert.Empty(t, verdict.Missing)
 	got := valuesOf(t, data)
 	assert.Equal(t, "rapor.pdf", got["new_name"], "the person answered a question they were asked")
 	assert.Equal(t, "new", got["output"])
@@ -121,10 +121,10 @@ func TestSurfaceGateRefusesAnEmptyRequiredWhenField(t *testing.T) {
 		"new_name": "   ",
 	}}
 
-	missing, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
+	verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{"new_name"}, missing,
+	assert.Equal(t, []string{"new_name"}, verdict.Missing,
 		"the condition holds and the box is empty, so the job is refused and the field is named")
 	assert.Equal(t, "   ", valuesOf(t, data)["new_name"],
 		"a refused event is not also rewritten: the caller answers, the values are left as they came")
@@ -136,10 +136,10 @@ func TestSurfaceGateDoesNotDemandAFieldItIsHiding(t *testing.T) {
 	calls := 0
 	data := map[string]any{"values": map[string]any{"output": "version", "new_name": ""}}
 
-	missing, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
+	verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
 
 	require.NoError(t, err)
-	assert.Empty(t, missing, "a hidden field cannot be filled, so it cannot block the job")
+	assert.Empty(t, verdict.Missing, "a hidden field cannot be filled, so it cannot block the job")
 	assert.NotContains(t, valuesOf(t, data), "new_name")
 }
 
@@ -163,10 +163,10 @@ func TestSurfaceGateHidesAFieldWhoseParentIsHidden(t *testing.T) {
 		"mode": "read", "stamp": "on", "stamp_text": "PAID",
 	}}
 
-	missing, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, fields...), &calls))
+	verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, fields...), &calls))
 
 	require.NoError(t, err)
-	assert.Empty(t, missing)
+	assert.Empty(t, verdict.Missing)
 	got := valuesOf(t, data)
 	assert.NotContains(t, got, "stamp", "hidden by its own show_when")
 	assert.NotContains(t, got, "stamp_text",
@@ -190,10 +190,10 @@ func TestSurfaceGateKeepsAWholeVisibleChain(t *testing.T) {
 		"mode": "sign", "stamp": "on", "stamp_text": "PAID",
 	}}
 
-	missing, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, fields...), &calls))
+	verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, fields...), &calls))
 
 	require.NoError(t, err)
-	assert.Empty(t, missing)
+	assert.Empty(t, verdict.Missing)
 	assert.Equal(t, map[string]any{"mode": "sign", "stamp": "on", "stamp_text": "PAID"}, valuesOf(t, data))
 }
 
@@ -206,10 +206,10 @@ func TestSurfaceGateDoesNotBlockOnAHiddenRequiredField(t *testing.T) {
 		ShowWhen: &wire.Condition{Key: "output", Equals: []string{"new"}}}
 	data := map[string]any{"values": map[string]any{"output": "version"}}
 
-	missing, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), hidden), &calls))
+	verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(screenOf(t, outputField(), hidden), &calls))
 
 	require.NoError(t, err)
-	assert.Empty(t, missing, "a hidden required field cannot be filled — use required_when (contract)")
+	assert.Empty(t, verdict.Missing, "a hidden required field cannot be filled — use required_when (contract)")
 }
 
 // Value SHAPES, as the browser reads them: a multi select holds a list and any
@@ -240,8 +240,12 @@ func TestSurfaceGateReadsValuesTheWayTheBrowserDoes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
 			cond := tc.cond
+			// `k` is a multi select with no options listed: every shape
+			// below is an answer it may hold, so this measures how the
+			// condition READS a value and nothing about whether the value
+			// fits (surface_values_test.go asks that).
 			fields := []wire.Field{
-				{Key: "k", Type: "string", Label: "K"},
+				{Key: "k", Type: "select", Multi: true, Label: "K"},
 				{Key: "dependent", Type: "string", Label: "Dependent", ShowWhen: &cond},
 			}
 			vals := map[string]any{"dependent": "kept?"}
@@ -271,10 +275,10 @@ func TestSurfaceGateLeavesNonSubmitEventsAlone(t *testing.T) {
 			calls := 0
 			data := map[string]any{"values": map[string]any{"output": "version", "new_name": "sneaky"}}
 
-			missing, err := gateSurfaceValues(event, nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
+			verdict, err := gateSurfaceValues(event, nil, data, drawnBy(screenOf(t, outputField(), nameField()), &calls))
 
 			require.NoError(t, err)
-			assert.Empty(t, missing)
+			assert.Empty(t, verdict.Missing)
 			assert.Zero(t, calls, "no job can come out of this event, so it buys no extra plugin call")
 			assert.Contains(t, valuesOf(t, data), "new_name")
 		})
@@ -287,18 +291,18 @@ func TestSurfaceGateSkipsWhatItCannotMeasure(t *testing.T) {
 	t.Run("no values", func(t *testing.T) {
 		calls := 0
 		data := map[string]any{"row_id": "r1"}
-		missing, err := gateSurfaceValues("action", nil, data, drawnBy(screenOf(t, outputField()), &calls))
+		verdict, err := gateSurfaceValues("action", nil, data, drawnBy(screenOf(t, outputField()), &calls))
 		require.NoError(t, err)
-		assert.Empty(t, missing)
+		assert.Empty(t, verdict.Missing)
 		assert.Zero(t, calls)
 	})
 	t.Run("a screen with no fields", func(t *testing.T) {
 		calls := 0
 		data := map[string]any{"values": map[string]any{"note": "hello"}}
 		blank := &wire.Surface{Nodes: []wire.Node{{Type: "text", Props: map[string]any{"text": "hi"}}}}
-		missing, err := gateSurfaceValues("submit", nil, data, drawnBy(blank, &calls))
+		verdict, err := gateSurfaceValues("submit", nil, data, drawnBy(blank, &calls))
 		require.NoError(t, err)
-		assert.Empty(t, missing)
+		assert.Empty(t, verdict.Missing)
 		assert.Equal(t, "hello", valuesOf(t, data)["note"], "nothing declared, nothing dropped")
 	})
 }
@@ -311,10 +315,10 @@ func TestSurfaceGateCarriesADrawFailureRatherThanFailingOpen(t *testing.T) {
 	data := map[string]any{"values": map[string]any{"output": "version", "new_name": "sneaky"}}
 	boom := func(wire.ViewEventInput) (*wire.Surface, error) { return nil, assert.AnError }
 
-	missing, err := gateSurfaceValues("submit", nil, data, boom)
+	verdict, err := gateSurfaceValues("submit", nil, data, boom)
 
 	require.Error(t, err)
-	assert.Empty(t, missing)
+	assert.Empty(t, verdict.Missing)
 }
 
 // Forms are collected across the WHOLE tree, layout nodes included — a form

@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ExternalLink, FileText, Github } from 'lucide-vue-next';
 
-import { parseServerVersion, shortCommit } from '@brftech/filex-core';
+import { shortCommit } from '@brftech/filex-core';
 
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import LogoMark from '@/components/LogoMark.vue';
@@ -16,13 +16,16 @@ const caps = useCapabilitiesStore();
 
 const data = computed(() => caps.data);
 
-/* The server says `v0.46.0 (<40-digit commit>, <build time>)`. The release
-   is the headline; the commit, shortened as git shows it, and the build day
-   go on the quiet line below. The copy button still copies the whole string,
-   which is what a bug report wants (the maintainer, 2026-09-26: it ran off the card). */
-const ver = computed(() => parseServerVersion(data.value.version));
+/* The server says the release, the commit and the build time apart
+   (`release`, `commit`, `built`; 0.54, #211 audit A11 - the page parsed
+   `v0.46.0 (<40-digit commit>, <build time>)` itself before). The release is
+   the headline; the commit, shortened as git shows it, and the build day go
+   on the quiet line below. The copy button still copies the whole `version`
+   string, which is what a bug report wants (the maintainer, 2026-09-26: it
+   ran off the card). */
+const release = computed(() => data.value.release ?? '');
 const buildLine = computed(
-  () => [shortCommit(ver.value.commit), ver.value.built.slice(0, 10)].filter(Boolean).join(' · ') || data.value.build,
+  () => [shortCommit(data.value.commit ?? ''), (data.value.built ?? '').slice(0, 10)].filter(Boolean).join(' · ') || data.value.build,
 );
 
 interface ToolEntry {
@@ -85,7 +88,7 @@ function authName(d: string): string {
       <div class="card card-body">
         <p class="text-xs uppercase tracking-wide text-zinc-500">{{ t('about.version') }}</p>
         <p class="mt-1 flex items-center gap-2">
-          <span class="text-lg font-semibold tabular-nums" data-testid="about-version">{{ ver.release }}</span>
+          <span class="text-lg font-semibold tabular-nums" data-testid="about-version">{{ release }}</span>
           <CopyButton :value="data.version" size="xs" />
         </p>
         <p v-if="buildLine" class="mt-1 text-xs font-mono text-zinc-500" :title="data.version" data-testid="about-build">{{ buildLine }}</p>

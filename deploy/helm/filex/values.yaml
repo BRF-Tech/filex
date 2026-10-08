@@ -124,6 +124,9 @@ onlyoffice:
   # the cluster. Set it when they differ, e.g. a Service DNS name:
   #   callbackUrl: http://filex.default.svc.cluster.local:5212
   callbackUrl: ""
+  # The editor's language: empty or "auto" opens it in each person's own
+  # filex language; a code (de, fr, tr, pt-PT, zh-TW, ...) is everybody's.
+  editorLang: ""
 
 # draw.io — diagram editing, embedded as an iframe.
 drawio:

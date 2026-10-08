@@ -19,8 +19,8 @@ function fakeApi() {
     listPermissions: vi.fn(async () => ({ direct: [], inherited: [], storage_rbac: true })),
     listShares: vi.fn(async () => ({ shares: [] })),
     createShare: vi.fn(async (body: { kind?: string }) => {
-      const uuid = String(++seq);
-      return { share: { url: `https://files.example/${body.kind === 'drop' ? 'd' : 's'}/${uuid}`, password_pin: null, expires_at: null } };
+      const token = `tok${++seq}`;
+      return { share: { uuid: token, token, url: `https://files.example/${body.kind === 'drop' ? 'd' : 's'}/${token}`, password_pin: null, expires_at: null } };
     }),
     revokeShare: vi.fn(async () => {}),
     shareMail: vi.fn(

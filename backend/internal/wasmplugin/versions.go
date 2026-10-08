@@ -269,13 +269,13 @@ func (r *Registry) afterUpgrade(ctx context.Context, p *Installed, old *model.Ap
 	if r.notify != nil {
 		nm := labelMeta(p.Row.Name, p.Manifest.Label)
 		nm["version"], nm["from"] = p.Row.Version, old.Version
-		body := "from " + old.Version
 		if in.Rollback {
 			nm["rollback"] = true
-			body = "back from " + old.Version
 		}
+		// No sentence here: the server says it from these facts, in each
+		// reader's language (internal/notify say.go, server.notify.app_updated).
 		if _, err := r.notify.Send(context.WithoutCancel(ctx), notify.Event{Event: notify.EventAppUpdated, Severity: notify.SeverityInfo,
-			Title: p.Row.Name + " is now " + p.Row.Version, Body: body, Meta: nm}); err != nil {
+			Meta: nm}); err != nil {
 			r.log.Warn("app-plugins: update notice not sent", slog.String("plugin", p.Row.Name), slog.Any("err", err))
 		}
 	}

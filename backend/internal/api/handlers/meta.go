@@ -6,9 +6,9 @@
 // — have their own file, tags.go.
 //
 //	POST /api/files/manager/star        body {node_id, starred: bool}
-//	GET  /api/files/manager/star/list?storage_id=…&limit=
+//	GET  /api/files/manager/star/list?storage_id=…&limit=&offset=&sort=
 //	POST /api/files/manager/recent      body {node_id}
-//	GET  /api/files/manager/recent?limit=
+//	GET  /api/files/manager/recent?limit=&offset=&sort=
 package handlers
 
 import (
@@ -22,7 +22,9 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/nodefilter"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/thumb"
 )
@@ -101,6 +103,17 @@ type metaRow struct {
 	// path — absent for every other node. The client needs it to name a row
 	// whose name is encrypted (see e2eRoots).
 	E2eRoot string `json:"e2e_root,omitempty"`
+	// Kind is what the row is (nodefilter.KindOf), as on a folder listing.
+	Kind string `json:"kind,omitempty"`
+	// Starred: the caller starred this node (one query per response,
+	// starredAmong). Omitted otherwise.
+	Starred bool `json:"starred,omitempty"`
+	// StarredAt / OpenedAt: when the caller starred / last opened it, in
+	// milliseconds - the order the Starred and Recent views are in. Before
+	// 0.54 neither was on the wire, and the explorer drew "Recent" in the
+	// file's modification order (audit D3).
+	StarredAt int64 `json:"starred_at,omitempty"`
+	OpenedAt  int64 `json:"opened_at,omitempty"`
 }
 
 // rows turns the store's node rows into the wire shape: storage NAME,
@@ -126,6 +139,9 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 	sets := map[int64]*acl.Set{}
 	roots := newE2eRoots(h.Store)
 	hydrateThumbs(ctx, h.Store, h.ThumbRefresh, nodes)
+	// A link row says why it will not open (`link_state` on the node, read
+	// by packages/core lib/nodeRow), as the folder listing does.
+	hydrateLinkStates(ctx, h.Store, nodes)
 	for _, n := range nodes {
 		if n == nil {
 			continue
@@ -147,7 +163,7 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 		if syspath.Hidden(n.Path) {
 			continue
 		}
-		row := metaRow{Node: n}
+		row := metaRow{Node: n, Kind: nodefilter.KindOf(n.Name, n.Mime, n.Type == model.NodeTypeDirectory)}
 		if n.Type == model.NodeTypeFile && thumbServable(n.Thumb) {
 			row.ThumbURL = thumbURL(h.ThumbSigner, n.ID, n.Thumb)
 		} else if n.Type == model.NodeTypeFile {
@@ -200,7 +216,66 @@ func (h *Meta) rows(ctx context.Context, nodes []*model.Node) []metaRow {
 			out[i].AppState = b.State
 		}
 	}
+	ids := make([]int64, len(out))
+	for i := range out {
+		ids[i] = out[i].ID
+	}
+	starred := starredAmong(ctx, h.Store, ids)
+	for i := range out {
+		out[i].Starred = starred[out[i].ID]
+	}
 	return out
+}
+
+// userMetaList answers one page of a per-person view (Starred, Recent): the
+// rows in the asked order (newest first by default), each stamped with the
+// person's own time by stamp, and `total` / `offset` / `truncated` so the
+// explorer can say the list goes on and load the rest (audit D3). A
+// storage_id narrows the page to one storage.
+func (h *Meta) userMetaList(w http.ResponseWriter, r *http.Request, userID int64, key string, defLimit, maxLimit int, stamp func(*metaRow, time.Time)) {
+	q := r.URL.Query()
+	limit := parseLimit(q.Get("limit"), defLimit, maxLimit)
+	offset := parseLimit(q.Get("offset"), 0, 1_000_000)
+	order, ok := listOrderFrom(w, r, listorder.Newest)
+	if !ok {
+		return
+	}
+	entries, total, err := h.Store.UserNodeMetaPage(r.Context(), userID, key, order, limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	at := make(map[int64]time.Time, len(entries))
+	nodes := make([]*model.Node, 0, len(entries))
+	for _, e := range entries {
+		n, gerr := h.Store.GetNode(r.Context(), e.NodeID)
+		if gerr != nil || n == nil || n.DeletedAt != nil {
+			continue
+		}
+		at[n.ID] = e.At
+		nodes = append(nodes, n)
+	}
+	nodes = confineNodesToTenant(r.Context(), nodes)
+	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
+	if v := q.Get("storage_id"); v != "" {
+		if storageID, perr := strconv.ParseInt(v, 10, 64); perr == nil && storageID > 0 {
+			nodes = filterByStorage(nodes, storageID)
+		}
+	}
+	rows := h.rows(r.Context(), nodes)
+	for i := range rows {
+		if t, ok := at[rows[i].ID]; ok && !t.IsZero() {
+			stamp(&rows[i], t)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes":     rows,
+		"limit":     limit,
+		"offset":    offset,
+		"total":     total,
+		"truncated": offset+len(entries) < total,
+		"sort":      order.String(),
+	})
 }
 
 // Tags live in tags.go (personal + team, v0.43.0).
@@ -262,29 +337,16 @@ func (h *Meta) SetStar(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ListStarred returns the user's starred nodes (newest-first by star time).
+// ListStarred returns one page of the user's starred nodes, newest star
+// first unless ?sort= asks otherwise, each with `starred_at`.
 func (h *Meta) ListStarred(w http.ResponseWriter, r *http.Request) {
 	u := auth.UserFrom(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
 		return
 	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 50, 500)
-	nodes, err := h.Store.ListNodesByUserMeta(r.Context(), u.ID, userMetaKeyStarred, limit)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	nodes = confineNodesToTenant(r.Context(), nodes)
-	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
-	if v := r.URL.Query().Get("storage_id"); v != "" {
-		if storageID, err := strconv.ParseInt(v, 10, 64); err == nil && storageID > 0 {
-			nodes = filterByStorage(nodes, storageID)
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": h.rows(r.Context(), nodes),
-		"limit": limit,
+	h.userMetaList(w, r, u.ID, userMetaKeyStarred, 50, 500, func(row *metaRow, t time.Time) {
+		row.StarredAt = t.UnixMilli()
 	})
 }
 
@@ -325,24 +387,16 @@ func (h *Meta) SetRecent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// ListRecent returns nodes the current user opened recently (newest-first).
+// ListRecent returns one page of the nodes the current user opened, the
+// latest opening first unless ?sort= asks otherwise, each with `opened_at`.
 func (h *Meta) ListRecent(w http.ResponseWriter, r *http.Request) {
 	u := auth.UserFrom(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
 		return
 	}
-	limit := parseLimit(r.URL.Query().Get("limit"), 20, 200)
-	nodes, err := h.Store.ListNodesByUserMeta(r.Context(), u.ID, userMetaKeyOpened, limit)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	nodes = confineNodesToTenant(r.Context(), nodes)
-	nodes = confineNodesToRoot(r.Context(), h.Store, nodes)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": h.rows(r.Context(), nodes),
-		"limit": limit,
+	h.userMetaList(w, r, u.ID, userMetaKeyOpened, 20, 200, func(row *metaRow, t time.Time) {
+		row.OpenedAt = t.UnixMilli()
 	})
 }
 

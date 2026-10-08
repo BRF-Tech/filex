@@ -243,14 +243,17 @@ const (
 	// event that is not a constant here is invisible to everything that reads
 	// this block. catalog_test.go now refuses that shape.
 	EventE2EEscrowUsed EventType = "e2e.escrow_used"
-	// EventE2EPasswordChanged fires when an encrypted folder's password was
-	// changed — or reset with its recovery key — in the web UI, which
-	// announces it after writing the new key file (the change happens in the
-	// browser; the server sees no password). It goes to the folder's OWNER,
-	// who may not be the person who changed it: a change you did not make is
-	// how you learn somebody else holds your password or recovery key. Meta
-	// carries {storage, folder, via: "password"|"recovery_key", rekey} and,
-	// when the caller was signed in, actor_email.
+	// EventE2EPasswordChanged fires when the password or the recovery slot
+	// of an encrypted folder's key file (or of a single encrypted file's
+	// header) changed. The SERVER sends it, from the rewrite it saw
+	// (e2e/slotchange via e2e/keyfilewatch and e2e/fxewatch), never from a
+	// client's announcement - the change happens in the browser, the server
+	// sees no password. It goes to the folder's OWNER, who may not be the
+	// person who changed it (a warning then): a change you did not make is how
+	// you learn somebody else holds your password or recovery key. Meta
+	// carries {storage, folder | file + kind, changes, rekey, origin,
+	// versions_deleted | versions_kept} and, when the writer is known,
+	// actor_email.
 	EventE2EPasswordChanged EventType = "e2e.password_changed"
 	// EventE2ERequestCreated fires when somebody asks to encrypt in a folder
 	// under their tenant's `approval` policy (internal/e2epolicy
@@ -452,10 +455,16 @@ type Event struct {
 	// is told once, with the first row (e2epolicy announce).
 	NoWebhook bool `json:"-"`
 
+	// I18n is the event untranslated - the catalogue keys its title and body
+	// are said with and their values (say.go Message) - set on a webhook body
+	// only, beside the sentence said in the receiver's language.
+	I18n *Message `json:"i18n,omitempty"`
+
 	// Mail asks for the addressee (UserID) to be told by email as well. When
 	// they hold this kind for their digest (digest.go) the email waits too
-	// and comes as the digest's, once for the window; otherwise Title and
-	// Body go at once, the Link under them. Kept in the row's meta (`mail`)
+	// and comes as the digest's, once for the window; otherwise the words
+	// their bell says (say.go) go at once, in their language, the Link under
+	// them. Kept in the row's meta (`mail`)
 	// so a server that restarts mid-window still knows; never in the webhook
 	// body.
 	Mail *Mail `json:"-"`
@@ -463,7 +472,10 @@ type Event struct {
 
 // Mail is how an event asks for an email to its addressee (Event.Mail).
 type Mail struct {
-	// Lang is the language Title and Body are written in — the addressee's.
+	// Lang is the addressee's language as the emitter knew it. ⚠ Not what
+	// the mail is said in: that is decided at the last stop, from the
+	// addressee's account (PersonLang) - an emitter's guess never outranks
+	// the person's own setting (#191).
 	Lang string `json:"lang,omitempty"`
 	// Link is put under the text: where the person acts on it.
 	Link string `json:"link,omitempty"`
@@ -485,8 +497,9 @@ const (
 	// WebhookStatusFailed — exhausted retries; the operator should
 	// investigate.
 	WebhookStatusFailed WebhookStatus = "failed"
-	// WebhookStatusSkipped — no webhook URL configured. The in-app
-	// row still exists.
+	// WebhookStatusSkipped — not delivered, and webhook_error says why as a
+	// code (webhook_reason.go: no_destination, digest_unnamed, sibling,
+	// stopped). The in-app row still exists.
 	WebhookStatusSkipped WebhookStatus = "skipped"
 )
 

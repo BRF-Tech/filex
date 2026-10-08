@@ -1,6 +1,15 @@
 /**
  * gorunum:v1-advsearch — the model behind the Advanced search dialog.
  *
+ * ⚠⚠ 0.54 (task #207, audit D6): the split described below is HISTORY. Every
+ * choice in `filters` now travels to the server as a parameter
+ * (`advFilterParams`: type, modified_after/before, min/max_size, under,
+ * not_under, owner, hidden) and the server applies it to each candidate
+ * BEFORE it cuts its page, on `/api/files/search` and on the manager's
+ * `action=search` alike, and MCP `file_search` and the CLI take the same
+ * parameters. The browser no longer narrows search hits; the count is the
+ * server's rows and its `truncated` says whether the page was cut.
+ *
  * Kept out of the component so the two halves of a search can be read (and
  * tested) side by side, because the honesty of the whole feature lives in the
  * split:
@@ -45,7 +54,7 @@
  *     quotes and is matched with them.
  */
 import type { DriveFilters, PeopleOption } from './fileFilters';
-import { EMPTY_FILTERS } from './fileFilters';
+import { EMPTY_FILTERS, modifiedWindow, sizeBounds } from './fileFilters';
 import { splitList } from './listInput';
 
 /** Which fields the backend consults. Mirrors `search.ParseScope`. */
@@ -130,6 +139,39 @@ export function advQueryString(req: AdvSearchRequest): string {
   return parts.join(' ');
 }
 
+/**
+ * The narrowing as the server reads it (internal/nodefilter Parse): one
+ * parameter per choice, absent when the choice narrows nothing. Dates are the
+ * viewer's own clock turned into epoch milliseconds here - "today" is their
+ * midnight, which only the browser knows - and the server compares them.
+ *
+ * `showHidden` is the explorer's "show hidden files" choice: off sends
+ * `hidden=false`, so dot names are dropped before the page is cut rather than
+ * after (a page of 250 hits could otherwise shrink to a handful).
+ */
+export function advFilterParams(
+  f: DriveFilters,
+  now: number = Date.now(),
+  opts: { showHidden?: boolean } = {},
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (f.type && f.type !== 'any') out.type = f.type === 'folder' ? 'dir' : f.type;
+  const w = modifiedWindow(f, now);
+  if (w?.after !== undefined) out.modified_after = String(Math.floor(w.after));
+  if (w?.before !== undefined) out.modified_before = String(Math.floor(w.before));
+  const b = sizeBounds(f);
+  if (b?.min !== undefined) out.min_size = String(Math.max(0, Math.floor(b.min)));
+  if (b?.max !== undefined) out.max_size = String(Math.max(0, Math.floor(b.max)));
+  const base = (f.pathBase ?? '').replace(/\/+$/, '');
+  if (base && f.pathMode === 'here') out.under = base;
+  if (base && f.pathMode === 'skip') out.not_under = base;
+  const who = f.people ?? 'any';
+  if (who === 'me' || who === 'system') out.owner = who;
+  else if (who.startsWith('u:')) out.owner = who.slice(2);
+  if (opts.showHidden === false) out.hidden = 'false';
+  return out;
+}
+
 /** Nothing for the server to answer — no text and no tag filter. */
 export function advSearchEmpty(req: AdvSearchRequest): boolean {
   return advQueryString(req) === '';
@@ -164,6 +206,8 @@ export function parseTagList(raw: string): string[] {
  * function always made — a full page is a cut page.
  */
 export function advSearchTruncated(returned: number, limit: number, serverSaid?: boolean): boolean {
+  // (0.54: the server narrows before it cuts, so its flag covers the
+  // narrowing too.)
   if (typeof serverSaid === 'boolean') return serverSaid;
   return returned >= limit;
 }

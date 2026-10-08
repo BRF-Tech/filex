@@ -5,7 +5,7 @@
 // while the page it previewed is left-aligned and plain. It now mounts the
 // public shell and share body `/s/<token>` mounts (core PublicLinkPreview),
 // fed the unsaved form values.
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
@@ -19,6 +19,22 @@ import Branding from '@/views/Branding.vue';
 import { useSettingsStore } from '@/stores/settings';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
+import { fillPublic, isPublicStrings, publicStringsAnswer, publicTable } from '../helpers/publicStrings';
+
+/* The preview says what the real page says: the server's public sentences,
+   fetched for the previewed language (core usePublicText). Answered here, so
+   the request is not left in flight at teardown. */
+beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) =>
+      isPublicStrings(String(url))
+        ? new Response(JSON.stringify(publicStringsAnswer('tr')), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        : new Response('{}', { status: 404 }),
+    ),
+  );
+});
+afterEach(() => vi.unstubAllGlobals());
 
 async function mountBranding(values: Record<string, string>) {
   const pinia = createPinia();
@@ -48,6 +64,13 @@ describe('Corporate identity preview', () => {
     expect(preview.find('[data-testid="public-brand"]').text()).toContain('Acme Bulut');
     expect(preview.find('[data-testid="public-share-download"]').exists()).toBe(true);
     expect(preview.find('[data-testid="public-footer-text"]').text()).toBe('© Acme');
+    // ⚠ The page's own words are the SERVER's, in the previewed language
+    // (#210): the line the real page ends on, not a client copy of it.
+    await vi.waitFor(() =>
+      expect(preview.find('[data-testid="public-footer-powered"]').text()).toBe(
+        fillPublic(publicTable('tr').served_by, { name: 'Acme Bulut' }),
+      ),
+    );
     // The accent reaches the shell the way the page's own branding does —
     // ⚠ the TINT and the ink on it too, not only the solid button. With only
     // `--fe-primary` the operator's colour lit the Download button while the

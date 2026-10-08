@@ -32,6 +32,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/share"
 	"github.com/brf-tech/filex/backend/internal/sharezip"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/syspath"
 	"github.com/brf-tech/filex/backend/internal/tenanturl"
@@ -147,7 +148,9 @@ type shareCreateReq struct {
 	Path     string `json:"path,omitempty"`     // <adapter>://<rel>
 	Password *bool  `json:"password,omitempty"` // bool: generate-PIN flag
 
-	// Legacy shape (embed.js + early integrators).
+	// Legacy shape (embed.js + early integrators) - except expires_in, which
+	// the share dialog sends too: a LENGTH counted on the server's clock, so
+	// a browser whose clock is off does not shorten (or stretch) the link.
 	NodeID    int64  `json:"node_id,omitempty"`
 	PIN       string `json:"pin,omitempty"`
 	ExpiresIn int    `json:"expires_in,omitempty"` // seconds from now
@@ -184,6 +187,10 @@ type shareCreateRespInner struct {
 	// echoing a date the user never picked.
 	ExpiryClamped bool `json:"expiry_clamped,omitempty"`
 	MaxDownloads  *int `json:"max_downloads,omitempty"`
+	// DownloadCommand is the one line that fetches a DOWNLOAD link's file
+	// from a terminal (share_command.go), the PIN in it when this answer
+	// carries one. Absent for a file-drop link, which has nothing to fetch.
+	DownloadCommand *shareDownloadCommand `json:"download_command,omitempty"`
 }
 
 // HandleCreate mints a new share token.
@@ -294,7 +301,7 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "code": codeE2EEncrypted})
 			return
 		}
-		if !answerGate(w, err) {
+		if !answerGate(w, r, err) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		}
 		return
@@ -367,6 +374,10 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	sh, err := h.Service.Create(r.Context(), opts)
 	if err != nil {
+		if share.IsPINLength(err) {
+			writePINLengthRefusal(w, r)
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -396,6 +407,11 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if node != nil {
 		inner.Filename = node.Name
 		inner.Path = node.Path
+	}
+	// The command carries the PIN this request set or was given (the
+	// creator's own answer, the one time the PIN is said at all).
+	if !sh.IsDrop() && node != nil {
+		inner.DownloadCommand = downloadCommandFor(linkURL, opts.PIN, node.Name, node.Type == model.NodeTypeDirectory)
 	}
 
 	/* bag:b3 event */
@@ -441,6 +457,23 @@ func (h *Share) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		"expires_at":     inner.ExpiresAt,
 		"expiry_clamped": inner.ExpiryClamped,
 		"max_downloads":  inner.MaxDownloads,
+		// null for a drop link, which has nothing to fetch
+		"download_command": inner.DownloadCommand,
+	})
+}
+
+// writePINLengthRefusal answers a PIN outside the one PIN rule
+// (share.CheckPINLength): 400 `pin_length`, the bounds as numbers for a
+// client that wants them and the sentence in the reader's language.
+func writePINLengthRefusal(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"error":   "pin_length",
+		"pin_min": share.PINMinLen,
+		"pin_max": share.PINMaxLen,
+		"message": srvtext.Text(requestLang(r), "server.share.pin_length", srvtext.Vars{
+			"min": strconv.Itoa(share.PINMinLen),
+			"max": strconv.Itoa(share.PINMaxLen),
+		}),
 	})
 }
 

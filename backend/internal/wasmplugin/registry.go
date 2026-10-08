@@ -96,6 +96,11 @@ type Options struct {
 	// `engines:libreoffice`): the connected OnlyOffice Document Server's
 	// conversion API (office.go). Nil = no office engine on this server.
 	Office OfficeConverter
+	// Clock is the apps' clock (appclock.go). The zero value reads
+	// FILEX_APP_CLOCK, and with that unset it is the real clock. ⚠
+	// Screenshots and tests only: an app on a moved clock dates its
+	// signatures and reminders with a time that is not now.
+	Clock AppClock
 }
 
 const (
@@ -337,6 +342,21 @@ func New(o Options) (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !o.Clock.On() {
+		c, cerr := AppClockFromEnv()
+		if cerr != nil {
+			o.Log.Warn("app-plugins: " + cerr.Error() + "; the apps keep the real clock")
+		}
+		o.Clock = c
+	}
+	if o.Clock.On() {
+		// Said at start, every start: a moved clock on a real server would
+		// date signatures and reminders wrongly, and this line is where an
+		// operator who set it by mistake finds out.
+		o.Log.Warn("app-plugins: the apps' clock is moved ("+EnvAppClock+") - for screenshots and tests only",
+			slog.Time("app_now", o.Clock.Now().UTC()), slog.Duration("offset", o.Clock.Offset()))
+	}
+	rt.clock = o.Clock
 	box, err := secretbox.New(o.SecretKey)
 	if err != nil {
 		rt.Close(context.Background())
@@ -356,6 +376,14 @@ func New(o Options) (*Registry, error) {
 }
 
 func (r *Registry) spoolRoot() string { return filepath.Join(r.opts.Dir, "spool") }
+
+// appClock is the apps' clock (appclock.go); the real clock on a nil registry.
+func (r *Registry) appClock() AppClock {
+	if r == nil {
+		return AppClock{}
+	}
+	return r.opts.Clock
+}
 
 func (r *Registry) maxUIBytes() int64 { return r.opts.MaxUIBytes }
 
@@ -1751,6 +1779,13 @@ const secretMask = "***"
 
 // PutSettings stores values. A secret field sent as "***" keeps its current
 // value; other secret values are sealed. Unknown keys are dropped.
+//
+// ⚠ Every value sent is judged against its manifest Field first
+// (CheckSetting: type, options, min/max, a required field left empty) and
+// the whole save is refused with a *SettingError naming the first field that
+// does not fit — nothing is stored. The admin panel draws these fields with
+// the same rules, but an API key or a crafted request never ran that screen,
+// and an app reads its settings trusting the types its manifest declared.
 func (r *Registry) PutSettings(ctx context.Context, id int64, values map[string]string) error {
 	p, ok := r.ByID(id)
 	if !ok {
@@ -1771,6 +1806,11 @@ func (r *Registry) PutSettings(ctx context.Context, id int64, values map[string]
 				next[f.Key] = cur
 			}
 			continue
+		}
+		if !(f.Secret && v == secretMask) {
+			if prob := CheckSetting(f, v); prob != nil {
+				return &SettingError{FieldProblem: *prob}
+			}
 		}
 		if f.Secret {
 			if v == secretMask {

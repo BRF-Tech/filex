@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite';
 import dts from 'vite-plugin-dts';
 import { resolve } from 'path';
+// A TypeScript diagnostic in the declaration build fails the build (the same
+// helper every package's dts() uses - see the file for why).
+import { failOnDtsDiagnostics } from '../../scripts/vite-dts-strict.mjs';
 
 /**
  * Tiny adapter package — externalizes both React AND `@brftech/filex`
@@ -15,6 +18,7 @@ export default defineConfig({
       include: ['src/**/*.ts', 'src/**/*.tsx'],
       rollupTypes: true,
       insertTypesEntry: true,
+      afterDiagnostic: failOnDtsDiagnostics('@brftech/filex-react'),
     }),
   ],
   build: {

@@ -19,7 +19,8 @@ import { computed } from 'vue';
 import { productVersionLine } from '../lib/productVersion';
 
 const props = defineProps<{
-  /** The server's version string (capabilities). Unknown → nothing drawn. */
+  /** The server's release (`capabilities.release`, `v0.54.0`). Unknown →
+   *  nothing drawn. */
   version?: string | null;
 }>();
 

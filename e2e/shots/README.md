@@ -80,11 +80,13 @@ pnpm shots --all                  # every scene: the nightly run, a major releas
 pnpm shots --only roles,groups    # these; the rest stand as published or as last taken
 pnpm shots --no-build             # shoot bin/filex as it is (still verified)
 pnpm shots --without-apps         # leave out the scenes that need app builds (CI does)
+pnpm shots --all --keep-going     # a failed scene does not stop the rest; the run still fails (the nightly run)
 ```
 
 A run that failed half way is not wasted: the scenes it took before the
 failure are **kept** by the next run, so after a fix `pnpm shots` takes the
-failed scene and the ones after it.
+failed scene and the ones after it. With `--keep-going` the ones after it are
+taken in the same run, and the review names every scene that failed.
 
 ## Publishing
 
@@ -93,7 +95,7 @@ failed scene and the ones after it.
 | Command | What it does |
 |---|---|
 | `upload [--dry-run]` | Sends the staged files to `https://filex.sh/shots/` and reads every one back over HTTPS. Add-only: a name that is already there holds these bytes, nothing is overwritten or deleted. The transfer itself is `scripts/shots-upload.sh`, which lives in the maintainers' checkout only. |
-| `accept --looked` | The reviewed run becomes the published set: refuses a run not taken on Linux, and unless every new and changed picture answers with exactly its bytes, then writes `manifest.json` and points every page at the new URLs. `--looked` is your word that you opened the contact sheet. |
+| `accept --looked [--outside-chain]` | The reviewed run becomes the published set: refuses a failed run, a run not taken on Linux, a run taken outside the build host's test chain (unless `--outside-chain`, which still warns), and unless every new and changed picture answers with exactly its bytes, then writes `manifest.json` and points every page at the new URLs. `--looked` is your word that you opened the contact sheet. |
 | `verify [--live]` | Every page links the manifest's current file, no repository path and no older hash; `--live` reads every linked URL back. The release audit runs it with `--live`. |
 | `relink [--write]` | Points every link at the current file; `--write` refuses while a target is not published (`--offline` skips that read). |
 | `adopt <dir> [--rev <rev>] [--rewrite] [--platform <os>]` | Stages a folder of pictures as published: how the 0.52.0 set left the repository. `--platform` records the system the folder was taken on. |
@@ -136,29 +138,37 @@ records it (`"platform": "linux"`, `"environment": "chain"`):
   look at while you work on a screen - but stages nothing for the site, and
   `accept` refuses it, partial or whole;
 - a run on Linux outside the chain (`SHOTS_ENVIRONMENT` is not `chain`) is
-  accepted with a warning: the scenes the chain cannot take yet - those that
-  need an app build, a Document Server or the converter's engines - are taken
-  on the build host itself, and their pictures read in its typeface. ⚠ Its
-  environment then goes into the manifest (`"environment": "local"`), and
-  `web/tests/deploy/shotsSite.test.ts` holds the manifest to `chain`: take
-  those scenes in the chain's Playwright image with its fontconfig
-  (`scripts/chain/run.mjs` `FONTS_CONF`) and `SHOTS_ENVIRONMENT=chain`, in one
-  run with the rest;
+  refused too (decided 2026-10-08): its pictures read in that machine's
+  typeface, and no scene needs it - since task #187 the chain's shots job
+  takes the scenes that need an app build or a language pack (from the
+  directories the chain's settings name), a Document Server (the chain's own)
+  or the converter's engines (installed in its container), in one run with
+  the rest. `accept --looked --outside-chain` takes such a run on purpose and
+  still prints the warning; ⚠ its environment then goes into the manifest
+  (`"environment": "local"`), and `web/tests/deploy/shotsSite.test.ts` holds
+  the manifest to `chain`;
 - a manifest whose set came from another platform is replaced only whole
   (`--all`, every scene taken), never a scene at a time;
 - `adopt <dir> --platform <os>` records where an adopted folder was taken.
 
 Every night the chain's shots job (`scripts/chain/job/shots.sh`, `pnpm shots
---all`) takes every scene it can and keeps the pictures, the review and the
-contact sheet in the run's `out/shots/`, so the changes since the published
-set are known the morning after they land. A release takes them the same
-way, into its own checkout:
+--all --keep-going`) takes every scene and keeps the pictures, the review and
+the contact sheet in the run's `out/shots/`, so the changes since the
+published set are known the morning after they land. A release takes them the
+same way, into its own checkout:
 
 ```bash
 CHAIN_EXTRAS=shots bash scripts/chain/run.sh --profile targeted --src <the release checkout>
 ```
 
-then `upload` and `accept` from that checkout. ⚠ The 0.52.0 set, adopted when
+then `upload` and `accept` from that checkout. `CHAIN_SHOTS_ONLY=a,b` on the
+same command takes only those scripts (a release whose language packs are
+behind takes the rest, and the published language pack picture stands).
+A language pack behind the tree fails `langpack.mjs` (it exits 3, and the
+review records the scene as `packs-behind`): on a release's run that is red,
+in the nightly run - when it is the only failed scene - a warning in the
+morning report, since the strings the day added are translated the night
+after. ⚠ The 0.52.0 set, adopted when
 the pictures left the repository, was taken on the build host itself (DejaVu
 Sans): the first night's `--all` shows every picture of it changed, and
 accepting that run moves the set to the chain - once.
@@ -188,14 +198,22 @@ and the pixel comparison would put it in front of a person every time.
 - **the fixtures' files** carry fixed dates before `SCENE_NOW`
   (`fixtureTime`, by path): `pinTimes(root)` after the last write into a
   storage folder and before its sync - `seedFixtures` and `writeOfficeFile`
-  do it for their own files.
+  do it for their own files;
+- **an app's own words** - "Requested on Sep 15", "frozen until Sep 22", the
+  date under a signature box - are dated by the app itself, so every filex a
+  script starts gets `...sceneServerEnv()` in its environment:
+  `FILEX_APP_CLOCK` puts the apps on `SCENE_NOW`, and the server hands them
+  its own times (a lock's end, a link's expiry) on the same clock
+  (`backend/internal/wasmplugin/appclock.go`). A date the server writes into
+  its own sentences stays on the real clock.
 
 Every browser context a script makes is created with `...SCENE_CONTEXT` and
 put on the clock with `stageClock(ctx)` - `scene.mjs`'s `newContext` does
 both; `web/tests/deploy/shotsFixtures.test.ts` fails on a context that does
-not. `SHOTS_REAL_CLOCK=1` leaves the browsers on the real clock, to tell a
-scene that breaks on the clock from one that breaks on its own; `accept`
-refuses such a run.
+not, and on a filex started without `...sceneServerEnv()` (`bootInstance`
+adds it). `SHOTS_REAL_CLOCK=1` leaves the browsers and the apps on the real
+clock, to tell a scene that breaks on the clock from one that breaks on its
+own; `accept` refuses such a run.
 
 ## Writing a scene
 

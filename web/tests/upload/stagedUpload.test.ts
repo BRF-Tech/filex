@@ -4,7 +4,7 @@
 // mounts the same component — the admin SPA, the desktop app's explorer and the
 // work.example.com / fishapp embeds. The core package has no test runner of its own,
 // so it is exercised here, in the app that ships it (same arrangement as
-// tests/lib/shareCli.test.ts).
+// tests/lib/connectionGuides.test.ts).
 //
 // What these assert is deliberately BYTES, not endpoints. "Did it resume?" is a
 // question about how much crossed the wire; a test that only checked which URLs
@@ -349,22 +349,64 @@ describe('staged upload (browser)', () => {
 describe('staged upload — resume bookmarks', () => {
   beforeEach(() => vi.useRealTimers());
 
-  it('discards a bookmark older than the server keeps its staging', async () => {
-    const { saveResume, loadResume, RESUME_TTL_MS } = await import(
-      '@brftech/filex-core/src/lib/uploadResume'
-    );
+  it('keeps a bookmark exactly as long as the SERVER keeps its staging (its expires_at)', async () => {
+    const { saveResume, loadResume } = await import('@brftech/filex-core/src/lib/uploadResume');
     const store = memoryStorage();
     const now = 1_000_000_000;
+    // An operator who set FILEX_UPLOAD_STAGING_TTL to 2 hours: the old fixed
+    // 24 hours here kept the bookmark 22 hours past the bytes it described.
+    const expiresAt = now + 2 * 60 * 60 * 1000;
     saveResume(
       store,
       'k',
-      { uploadId: 'up-1', path: 'main://', name: 'a.bin', size: 10, lastModified: 1, chunkSize: 4, offset: 4 },
+      { uploadId: 'up-1', path: 'main://', name: 'a.bin', size: 10, lastModified: 1, chunkSize: 4, offset: 4, expiresAt },
       now,
     );
     expect(loadResume(store, 'k', now + 60_000)?.uploadId).toBe('up-1');
-    // Past the TTL the staging is gone server-side; a "resuming…" that
+    expect(loadResume(store, 'k', expiresAt - 1)?.uploadId).toBe('up-1');
+    // Past the server's moment the staging is gone; a "resuming…" that
     // immediately restarts is worse than an honest fresh upload.
-    expect(loadResume(store, 'k', now + RESUME_TTL_MS + 1)).toBeNull();
+    expect(loadResume(store, 'k', expiresAt)).toBeNull();
+  });
+
+  it('a server that keeps staging for 3 days keeps the bookmark past 24 hours', async () => {
+    const { saveResume, loadResume } = await import('@brftech/filex-core/src/lib/uploadResume');
+    const store = memoryStorage();
+    const now = 1_000_000_000;
+    const day = 24 * 60 * 60 * 1000;
+    saveResume(
+      store,
+      'k',
+      { uploadId: 'up-1', path: 'main://', name: 'a.bin', size: 10, lastModified: 1, chunkSize: 4, offset: 4, expiresAt: now + 3 * day },
+      now,
+    );
+    expect(loadResume(store, 'k', now + day + 1)?.uploadId).toBe('up-1');
+  });
+
+  it('a bookmark that does not say when the server sweeps it is not kept', async () => {
+    const { saveResume, loadResume } = await import('@brftech/filex-core/src/lib/uploadResume');
+    const store = memoryStorage();
+    saveResume(store, 'k', { uploadId: 'up-1', path: 'main://', name: 'a.bin', size: 10, lastModified: 1, chunkSize: 4, offset: 4 }, 1);
+    expect(loadResume(store, 'k', 2)).toBeNull();
+  });
+
+  it('the bookmark carries the expires_at the server answered at begin', async () => {
+    const server = new FakeStagedServer();
+    // An operator's TTL of 90 minutes, not the default day.
+    server.stagingTtlMs = 90 * 60 * 1000;
+    const restore = installXHR(server);
+    try {
+      const store = memoryStorage();
+      const data = pattern(CHUNK * 3);
+      for (let i = 0; i < 4; i++) server.failChunkAt(CHUNK, { kind: 'status', code: 500 });
+      const up = useUploadChunked(config, fakeApi(server), store);
+      await expect(up.uploadFile({ path: 'main://docs', file: makeFile(data) })).rejects.toThrow();
+      const bookmark = up.resumableFor('main://docs', makeFile(data));
+      expect(bookmark?.expiresAt).toBeGreaterThan(Date.now() + 80 * 60 * 1000);
+      expect(bookmark?.expiresAt).toBeLessThanOrEqual(Date.now() + 90 * 60 * 1000);
+    } finally {
+      restore();
+    }
   });
 
   it('fingerprints on name, size and mtime together', async () => {

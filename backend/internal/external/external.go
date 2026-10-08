@@ -64,15 +64,60 @@ type Settings struct {
 	// came back (issue #17, third round). Stored in options_json so no
 	// migration is needed and the row keeps one shape.
 	CallbackURL string
+	// EditorLang is the administrator's ONLYOFFICE editor language: "" or
+	// "auto" (each person's own) or a language code, AS STORED - the
+	// onlyoffice package reads it (onlyoffice.NormalizeEditorLang) and treats
+	// anything it does not offer as "auto". Set on External services or by
+	// FILEX_ONLYOFFICE_LANG; in options_json like CallbackURL, so no migration.
+	EditorLang string
 }
 
 // OptionKeyCallbackURL is where CallbackURL lives inside options_json.
 const OptionKeyCallbackURL = "callback_url"
 
+// OptionKeyEditorLang is where EditorLang lives inside options_json.
+const OptionKeyEditorLang = "editor_lang"
+
+// EnvPinEditorLang is the key, in the "pinned by the environment" map the
+// admin handler is given (api.envManagedExternal), that says
+// FILEX_ONLYOFFICE_LANG pins ONLYOFFICE's editor language. The map's other
+// keys are service names; this one is a field of one.
+const EnvPinEditorLang = OnlyOffice + ".editor_lang"
+
 // CallbackURLFromOptions reads the callback URL out of a row's options blob.
 // A malformed blob reads as empty rather than failing: this is configuration
 // the operator can retype, not a reason to refuse to serve documents.
 func CallbackURLFromOptions(optionsJSON string) string {
+	return strings.TrimRight(optionString(optionsJSON, OptionKeyCallbackURL), "/")
+}
+
+// WithCallbackURL returns optionsJSON with the callback URL set (or removed,
+// when url is empty), preserving every other key the blob carries.
+func WithCallbackURL(optionsJSON, rawURL string) (string, error) {
+	return withOption(optionsJSON, OptionKeyCallbackURL, strings.TrimRight(strings.TrimSpace(rawURL), "/"))
+}
+
+// EditorLangFromOptions reads the editor language out of a row's options
+// blob, as stored ("" when absent or the blob is malformed).
+func EditorLangFromOptions(optionsJSON string) string {
+	return optionString(optionsJSON, OptionKeyEditorLang)
+}
+
+// WithEditorLang returns optionsJSON with the editor language set, or
+// removed when lang is "" or "auto" (the default needs no key), preserving
+// every other key the blob carries. The caller has checked lang
+// (onlyoffice.NormalizeEditorLang).
+func WithEditorLang(optionsJSON, lang string) (string, error) {
+	lang = strings.TrimSpace(lang)
+	if strings.EqualFold(lang, "auto") {
+		lang = ""
+	}
+	return withOption(optionsJSON, OptionKeyEditorLang, lang)
+}
+
+// optionString is one string option out of a row's options blob, trimmed.
+// A malformed blob reads as empty rather than failing.
+func optionString(optionsJSON, key string) string {
 	if strings.TrimSpace(optionsJSON) == "" {
 		return ""
 	}
@@ -80,13 +125,13 @@ func CallbackURLFromOptions(optionsJSON string) string {
 	if err := json.Unmarshal([]byte(optionsJSON), &opts); err != nil {
 		return ""
 	}
-	v, _ := opts[OptionKeyCallbackURL].(string)
-	return strings.TrimRight(strings.TrimSpace(v), "/")
+	v, _ := opts[key].(string)
+	return strings.TrimSpace(v)
 }
 
-// WithCallbackURL returns optionsJSON with the callback URL set (or removed,
-// when url is empty), preserving every other key the blob carries.
-func WithCallbackURL(optionsJSON, rawURL string) (string, error) {
+// withOption returns optionsJSON with one string option set (or removed, when
+// value is empty), preserving every other key the blob carries.
+func withOption(optionsJSON, key, value string) (string, error) {
 	opts := map[string]any{}
 	if strings.TrimSpace(optionsJSON) != "" {
 		if err := json.Unmarshal([]byte(optionsJSON), &opts); err != nil {
@@ -94,11 +139,10 @@ func WithCallbackURL(optionsJSON, rawURL string) (string, error) {
 			return "", fmt.Errorf("external: options_json is not an object: %w", err)
 		}
 	}
-	clean := strings.TrimRight(strings.TrimSpace(rawURL), "/")
-	if clean == "" {
-		delete(opts, OptionKeyCallbackURL)
+	if value == "" {
+		delete(opts, key)
 	} else {
-		opts[OptionKeyCallbackURL] = clean
+		opts[key] = value
 	}
 	out, err := json.Marshal(opts)
 	if err != nil {
@@ -179,6 +223,7 @@ func (r *Resolver) Get(ctx context.Context, name string) Settings {
 			URL:         url,
 			Secret:      row.SecretEnc,
 			CallbackURL: CallbackURLFromOptions(row.OptionsJSON),
+			EditorLang:  EditorLangFromOptions(row.OptionsJSON),
 		}
 	}
 	r.mu.Lock()

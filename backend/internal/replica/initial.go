@@ -541,12 +541,11 @@ func (s *Service) tellWaiting(ctx context.Context, c *model.ReplicaInitialCopy, 
 		name = st.Name
 	}
 	label := storageLabel(c.StorageID, name)
+	// The facts only: the server says the alarm from them, in each reader's
+	// language (internal/notify say.go, server.notify.replica_fail).
 	_, _ = s.notifier.Send(ctx, notify.Event{
 		Event:    notify.EventReplicaFail,
 		Severity: notify.SeverityWarning,
-		Title:    "Replica copy failed",
-		Body: fmt.Sprintf("The initial copy of %s to its replication target is waiting and will resume on its own: %s",
-			label, why.Error()),
 		Meta: map[string]any{
 			"path":       label,
 			"op":         "copy",

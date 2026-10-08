@@ -188,3 +188,45 @@ func TestChunkedVariantSupport(t *testing.T) {
 		t.Error("UNSIGNED-PAYLOAD is not chunked")
 	}
 }
+
+// exactBody holds a decoded chunked body to the length its client declared:
+// exactly that many bytes pass, and a body that goes on past it or stops short
+// of it is refused. finish catches the longer body a driver that reads only
+// `size` bytes never looks for.
+func TestExactBody_HoldsAChunkedBodyToItsDeclaredLength(t *testing.T) {
+	sr := chunkReq(time.Now())
+	body := []byte("0123456789")
+	frame := func() *chunkedReader {
+		return newChunkedReader(strings.NewReader(buildChunked(sr, "", body, 4, false)), sr, "", "", false)
+	}
+
+	eb := newExactBody(frame(), int64(len(body)))
+	got, err := io.ReadAll(eb)
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("an exact body: %q, %v", got, err)
+	}
+	if err := eb.finish(); err != nil {
+		t.Fatalf("finish on an exact body: %v", err)
+	}
+
+	eb = newExactBody(frame(), 4)
+	if _, err := io.ReadAll(eb); !errors.Is(err, ErrDecodedLength) {
+		t.Fatalf("a body longer than declared, read to the end: %v", err)
+	}
+
+	eb = newExactBody(frame(), 4)
+	if _, err := io.ReadFull(eb, make([]byte, 4)); err != nil {
+		t.Fatalf("the declared bytes: %v", err)
+	}
+	if err := eb.finish(); !errors.Is(err, ErrDecodedLength) {
+		t.Fatalf("a body longer than declared, caught at finish: %v", err)
+	}
+
+	eb = newExactBody(frame(), 20)
+	if _, err := io.ReadAll(eb); !errors.Is(err, ErrDecodedLength) {
+		t.Fatalf("a body shorter than declared: %v", err)
+	}
+	if !eb.mismatched() {
+		t.Fatal("a short body is not marked")
+	}
+}

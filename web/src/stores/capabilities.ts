@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { CapabilitiesApi } from '@/api/capabilities';
 import type { Capabilities } from '@/api/types';
 import { applyServerDefaultLocale } from '@/i18n';
+import { takeServerRules } from '@brftech/filex-core';
 
 const EMPTY: Capabilities = {
   version: '0.0.0',
@@ -38,6 +39,9 @@ export const useCapabilitiesStore = defineStore('capabilities', () => {
       // builds without auth_drivers) doesn't leave the field undefined
       // and crash callers that read `.length` / `.includes(...)`.
       data.value = { ...EMPTY, ...res };
+      // The server's rules for the core components on these pages - how a
+      // file is edited, the input limits (lib/serverRules, #211).
+      takeServerRules(res);
       loaded.value = true;
       applyServerDefaultLocale(data.value.default_locale);
     } catch {

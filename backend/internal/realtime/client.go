@@ -52,6 +52,12 @@ type Client struct {
 	ConfineAdapter string
 	ConfineRel     string
 
+	// Tenant is the provider id of the tenant this connection's account
+	// belongs to on a multi-tenant install, 0 for the platform's own accounts
+	// and on a single-tenant install. A tenant's `access.changed` news reaches
+	// only its own sockets (access.go). Set once before any hub interaction.
+	Tenant int64
+
 	// Guarded by Hub.mu.
 	room string // current room key ("" = not subscribed)
 	path string // display path the client subscribed to ("<adapter>://<dir>")

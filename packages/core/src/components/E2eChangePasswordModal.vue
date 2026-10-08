@@ -61,6 +61,12 @@ const props = defineProps<{
    * that changes, it has no folder key to replace, and the words say so.
    */
   subject?: 'folder' | 'file';
+  /**
+   * wiring:e2 vault — the folder is a vault: its folder key derives every key
+   * in it, so it is never re-keyed (a new key is a new vault). Only the
+   * password slot changes, and "re-key on purpose" is not offered.
+   */
+  vault?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -95,7 +101,7 @@ watch(
 
 const isFile = computed(() => props.subject === 'file');
 /** A re-key is what this change will be. */
-const rekey = computed(() => !isFile.value && (props.needsRekey || rotate.value));
+const rekey = computed(() => !isFile.value && !props.vault && (props.needsRekey || rotate.value));
 const title = computed(() =>
   props.mode === 'reset'
     ? t('e2e.password.reset_title')
@@ -230,7 +236,7 @@ function submit() {
         <p>{{ mode === 'reset' || useRecovery ? t('e2e.password.rekey_rk_kept') : t('e2e.password.rekey_rk_new') }}</p>
         <p v-if="hasEscrow">{{ t('e2e.password.rekey_escrow') }}</p>
       </div>
-      <label v-if="!needsRekey && !isFile" class="fe-e2e-ack">
+      <label v-if="!needsRekey && !isFile && !vault" class="fe-e2e-ack">
         <input v-model="rotate" type="checkbox" data-testid="e2e-password-rotate" :disabled="busy" />
         <span>{{ t('e2e.password.rotate_label') }}</span>
       </label>

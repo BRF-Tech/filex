@@ -312,3 +312,34 @@ func TestAppStoreURLsSetEvenWhenItNamesNoStore(t *testing.T) {
 		}
 	}
 }
+
+// The vault level (encryption level 3, docs/E2E-VAULT-FORMAT.md) is off until
+// it works end to end: FILEX_E2E_VAULT turns it on, and back off.
+func TestE2EVaultIsOffUnlessAsked(t *testing.T) {
+	if Default().E2EVault {
+		t.Fatal("the vault must default to off")
+	}
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.E2EVault {
+		t.Fatal("no variable: the vault stays off")
+	}
+	t.Setenv("FILEX_E2E_VAULT", "1")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.E2EVault {
+		t.Fatal("FILEX_E2E_VAULT=1 must turn the vault on")
+	}
+	t.Setenv("FILEX_E2E_VAULT", "false")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.E2EVault {
+		t.Fatal("FILEX_E2E_VAULT=false must turn it off again")
+	}
+}

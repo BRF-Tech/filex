@@ -731,11 +731,11 @@ Everything after that is HTTP with `Authorization: Bearer <token>`:
 > makes every multipart call answer 404 - which is what the Python example did
 > until conformance caught it.
 
-> ⚠ `part_urls` is for the browser-chunked upload endpoint
-> (`POST /api/files/upload/init`), which hands them straight to the client. The
-> path that actually exercises a plugin's multipart today is the **staged
-> upload commit**, and it holds the bytes itself, so it pushes each part through
-> `multipart/part` and ignores `part_urls`. Returning none is normal.
+> ⚠ `part_urls` is ignored. It belonged to the browser-chunked upload endpoint
+> (`POST /api/files/upload/init`), which was removed in 0.54.0. The path that
+> exercises a plugin's multipart is the **staged upload commit**, and it holds
+> the bytes itself, so it pushes each part through `multipart/part`. Returning
+> none is normal.
 
 Errors are `{"error": <code>, "message": <text>}`. Codes filex understands:
 `not_found`, `read_only`, `unsupported`, `invalid`, and **`no_instance`** -

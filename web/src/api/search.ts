@@ -12,14 +12,27 @@ export type SearchHitEx = SearchHit & {
   is_dir?: boolean;
 };
 
+/**
+ * What `/api/files/search` reads (docs/SEARCH.md). ⚠ No page / page_size: the
+ * server never read them (audit D7) - it answers ONE page of `limit` rows and
+ * says whether more matched (`truncated`).
+ */
 export interface SearchParams {
   q: string;
   storage_id?: number;
-  mime?: string;
-  page?: number;
-  page_size?: number;
+  limit?: number;
   /** bul:s3 — name | content | all (backend default: all). */
   scope?: SearchScope;
+  /** The server's narrowing (applied before the limit): `file` / `dir` or a
+   *  kind (`image`, `spreadsheet`...), a mime prefix. */
+  type?: string;
+  mime?: string;
+}
+
+/** One answer of the search, as the server gives it. */
+export interface SearchPage extends PaginatedResponse<SearchHitEx> {
+  /** More matched than came back; `total` is then a lower bound. */
+  truncated: boolean;
 }
 
 export interface SearchIndexStats {
@@ -39,18 +52,21 @@ export interface SearchIndexStats {
 }
 
 export const SearchApi = {
-  async query(params: SearchParams): Promise<PaginatedResponse<SearchHitEx>> {
+  async query(params: SearchParams): Promise<SearchPage> {
     // The backend exposes search at `/api/files/search` (admin route
     // `/admin/search` only carries stats + rebuild).
     //
-    // ⚠ It returns `{results: Node[]}` — NOT a paginated `{items}` envelope,
-    // and a Node (name/updated_at/no score) not a SearchHit
-    // (filename/score). Adapt it here; otherwise SearchTest.vue blows up on
-    // `results.items.length` (undefined) and the whole page goes blank.
+    // ⚠ It returns `{results: Node[], truncated, total}` — not a paginated
+    // `{items}` envelope, and a Node (name/updated_at) rather than a SearchHit
+    // (filename). Adapted here; every NUMBER is the server's (audit D7): this
+    // used to make up `total: items.length`, `score: 0` and an empty storage
+    // name, and drop `truncated`, so the admin search test's "more hits than
+    // shown" guard never fired and every score read 0.000.
     const { data } = await api.get<{
       results: Array<{
         id: number;
         storage_id: number;
+        storage?: string;
         name: string;
         path: string;
         size?: number;
@@ -60,19 +76,22 @@ export const SearchApi = {
         snippet?: string;
         matched?: 'name' | 'content' | 'both';
         type?: string;
+        score?: number;
       }>;
+      truncated?: boolean;
+      total?: number;
     }>('/files/search', { params });
     const nodes = data.results ?? [];
     const items: SearchHitEx[] = nodes.map((n) => ({
       id: String(n.id),
       storage_id: n.storage_id,
-      storage_name: '',
+      storage_name: n.storage ?? '',
       path: n.path,
       filename: n.name,
       size: n.size ?? 0,
       mime: n.mime ?? '',
       modified_at: n.backend_mtime || n.updated_at || '',
-      score: 0,
+      score: typeof n.score === 'number' ? n.score : 0,
       // bul:s3 — contract fields, undefined-safe on older backends.
       snippet: typeof n.snippet === 'string' ? n.snippet : undefined,
       matched: n.matched,
@@ -80,9 +99,10 @@ export const SearchApi = {
     }));
     return {
       items,
-      total: items.length,
-      page: params.page ?? 1,
-      page_size: params.page_size ?? 25,
+      total: typeof data.total === 'number' ? data.total : items.length,
+      truncated: data.truncated === true,
+      page: 1,
+      page_size: params.limit ?? items.length,
     };
   },
 

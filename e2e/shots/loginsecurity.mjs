@@ -32,8 +32,24 @@
 //
 // Environment: FILEX_BIN, SHOTS_OUT, SHOTS_KEEP (see apps.mjs).
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { chromium } from '@playwright/test';
-import { bootInstance, client, layoutProblems, log, mustSay, newContext, setLanguage, shot, signIn, sleep } from './scene.mjs';
+import { REPO, bootInstance, client, layoutProblems, log, mustSay, newContext, setLanguage, shot, signIn, sleep } from './scene.mjs';
+
+/**
+ * The server's own sentence for `key` (backend/internal/srvtext, English), its
+ * `{name}`s filled from `vars`. ⚠ The sign-in form's refusal is the SERVER's
+ * words since 0.54 (#209 A8: one refusal shape, the sentence in `message`):
+ * the scene reads them from the catalogue, so a reworded sentence is not a
+ * red scene on a page that is right.
+ */
+const SERVER_EN = JSON.parse(readFileSync(join(REPO, 'backend/internal/srvtext/locales/en.json'), 'utf8'));
+function serverSays(key, vars = {}) {
+  const tpl = SERVER_EN[key];
+  if (typeof tpl !== 'string') throw new Error(`the server catalogue has no ${key}`);
+  return tpl.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? String(vars[name]) : m));
+}
 
 const SET = 'loginsecurity';
 const ADMIN = { email: 'demo@demo.com', password: 'demo-shots' };
@@ -203,7 +219,10 @@ async function main() {
     await form.fill('#password', 'still-wrong');
     await form.click('button[type="submit"]');
     await form.getByRole('alert').waitFor({ timeout: 15_000 });
-    await mustSay(form.getByRole('alert'), 'the sign-in form after a wrong password', ['Attempts left before a lock: 2']);
+    // ece made two wrong attempts above and this is the third, of five.
+    await mustSay(form.getByRole('alert'), 'the sign-in form after a wrong password', [
+      serverSays('server.login.failed_remaining', { count: 2, limit: 5 }),
+    ]);
     await sleep(400);
     await shot(form, SET, 'login-remaining-1440.png');
 
@@ -211,7 +230,10 @@ async function main() {
     await form.fill('#password', 'not-the-password');
     await form.click('button[type="submit"]');
     await form.getByRole('alert').waitFor({ timeout: 15_000 });
-    await mustSay(form.getByRole('alert'), 'the sign-in form on a locked account', ['Too many wrong attempts for this account', 'Try again in']);
+    // The sentence up to its `{wait}`, which the form counts down.
+    await mustSay(form.getByRole('alert'), 'the sign-in form on a locked account', [
+      serverSays('server.login.locked').split('{wait}')[0].trim(),
+    ]);
     const button = form.locator('button[type="submit"]');
     if (await button.isEnabled()) throw new Error('the sign-in button is still enabled while the lock holds');
     await mustSay(button, 'the locked sign-in button', ['Try again in']);

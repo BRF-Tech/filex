@@ -1,97 +1,84 @@
 /**
  * accountRules — what an account's e-mail address and username may be,
- * checked WHILE the person types.
+ * checked WHILE the person types, by the SERVER.
  *
- * ⚠⚠ The server is the authority (backend/internal/identity.Check for the
- * username, handlers/account_rules.go for both) and refuses the same things
- * in the same words; this is its mirror, so the form can say what is wrong
- * before Save instead of after. A rule added there is added here, or the
- * form lets through what the save then refuses. The reverse — a rule only
- * here — would refuse a name the server accepts, which is worse.
+ * ⚠⚠ The server is the only authority and the only author (0.54 audit B15 +
+ * A12). This file used to be a mirror of its rules (backend identity.Check,
+ * handlers/account_rules.go) with a copy of their sentences in two
+ * catalogues beside the server's own `server.account.*`: three copies of
+ * every sentence, and the e-mail rule had already drifted - the browser let
+ * `a,b@x` and `ada.@x` through and the save refused them. Now a form asks
+ * `POST /api/auth/account/check` while it is typed and shows what the server
+ * says, in the reader's language; the save refuses the same things in the
+ * same words.
  *
- * Why it exists (release-candidate sweep, 2026-09-21): the profile saved
- * "bu-bir-eposta-degil" as an address and answered "Profil kaydedildi", and a
- * username with "ş" came back, after Save, as the server's raw English
- * (`invalid username: 'ş' is not allowed …`). The Appearance page's theme
- * identifier already said its problem under the box while it was typed; this
- * is that behaviour for the two account fields, used by every form that
- * asks for them (the profile, an administrator adding a user).
- *
- * Returns i18n keys + params, never sentences: the words live in the
- * locale files, in both languages.
+ * Why the check exists at all (release-candidate sweep, 2026-09-21): the
+ * profile saved "bu-bir-eposta-degil" as an address and answered "Profil
+ * kaydedildi", and a username with "ş" came back, after Save, as the server's
+ * raw English. A form says the problem under the box while it is typed.
  */
-
-/** Username bounds — identity.MinLen / identity.MaxLen. */
-export const USERNAME_MIN = 3;
-export const USERNAME_MAX = 32;
-
-/**
- * identity.reserved: names an operator or a protocol means something else by.
- * Exported for the test that reads the Go map and fails when the two differ.
- */
-export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
-  'admin', 'administrator', 'root', 'filex', 'api', 'www', 'ftp', 'sftp', 'webdav',
-  'dav', 's3', 'nfs', 'smb', 'system', 'support', 'help', 'null', 'undefined',
-  'anonymous', 'guest', 'nobody',
-]);
-
-/** A problem to say: the i18n key under `account.errors.` and its params. */
-export interface AccountProblem {
-  key: string;
-  params?: Record<string, string | number>;
-}
 
 /** identity.Normalize: trimmed, lower-case — what the server will store. */
 export function normalizeUsername(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-function allowedChar(c: string): boolean {
-  return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c === '.' || c === '-' || c === '_';
+/** One field the server would refuse: its code and its sentence. */
+export interface AccountFieldRefusal {
+  error: string;
+  message: string;
 }
 
+/** The check's answer: a field is present only when it would be refused. */
+export interface AccountCheckAnswer {
+  email?: AccountFieldRefusal;
+  username?: AccountFieldRefusal;
+}
+
+/** What a form asks about: only the fields sent are checked. `for` is whose
+ *  account the values are meant for - the caller's own (the default), or an
+ *  account an administrator is about to create. */
+export interface AccountCheckQuery {
+  email?: string;
+  username?: string;
+  for?: 'self' | 'new';
+}
+
+/** How long typing must pause before the server is asked. */
+export const ACCOUNT_CHECK_DELAY_MS = 250;
+
 /**
- * Why this username would be refused, null when it would not. The same
- * order as identity.Check, so the first thing said is the thing the server
- * would say.
+ * A checker for one form: call it with the values in the boxes after every
+ * change; it waits until the typing pauses, asks the server once
+ * (`ask` - POST /api/auth/account/check through the form's own client) and
+ * resolves with the answer. A call a newer one replaced resolves with null,
+ * and so does a request that failed: the save still judges, so a check that
+ * could not be made says nothing rather than something wrong.
  */
-export function usernameProblem(raw: string, current?: string): AccountProblem | null {
-  const name = normalizeUsername(raw);
-  // Keeping the name the account already holds is not claiming it: the first
-  // administrator holds the reserved "admin" (server identity.ClaimBootstrap),
-  // and its settings form must not call its own name refused.
-  if (current && name === normalizeUsername(current)) return null;
-  if (name === '') return { key: 'usernameEmpty' };
-  if (name.includes('@')) return { key: 'usernameAt' };
-  // ⚠ Measured in BYTES, as the server measures it (Go's len): "9ş" is three
-  // bytes, so the server says "starts with a digit", not "too short", and
-  // counting characters here would say the other sentence.
-  const bytes = new TextEncoder().encode(name).length;
-  if (bytes < USERNAME_MIN) return { key: 'usernameShort', params: { min: USERNAME_MIN } };
-  if (bytes > USERNAME_MAX) return { key: 'usernameLong', params: { max: USERNAME_MAX } };
-  if (name[0] >= '0' && name[0] <= '9') return { key: 'usernameDigit' };
-  for (const c of name) {
-    if (!allowedChar(c)) {
-      return c === ' ' ? { key: 'usernameSpace' } : { key: 'usernameChar', params: { char: c } };
+export function accountChecker(
+  ask: (q: AccountCheckQuery) => Promise<AccountCheckAnswer>,
+  delayMs = ACCOUNT_CHECK_DELAY_MS,
+): (q: AccountCheckQuery) => Promise<AccountCheckAnswer | null> {
+  let seq = 0;
+  let pending: { timer: ReturnType<typeof setTimeout>; resolve: (a: AccountCheckAnswer | null) => void } | null = null;
+  return (q) => {
+    const mine = ++seq;
+    if (pending) {
+      clearTimeout(pending.timer);
+      pending.resolve(null);
+      pending = null;
     }
-  }
-  if (RESERVED_USERNAMES.has(name)) return { key: 'usernameReserved', params: { name } };
-  return null;
-}
-
-/**
- * Why this e-mail address would be refused, null when it would not.
- * handlers.validEmailAddress: one `@` with something on both sides, no
- * spaces, no "Name <addr>" form. A dotless domain is fine — `admin@local`
- * is the first administrator's address.
- */
-export function emailProblem(raw: string): AccountProblem | null {
-  const email = raw.trim();
-  if (email === '') return { key: 'emailRequired' };
-  if (/[\s<>]/.test(email)) return { key: 'emailInvalid' };
-  const at = email.lastIndexOf('@');
-  if (at <= 0 || at === email.length - 1 || email.indexOf('@') !== at) return { key: 'emailInvalid' };
-  return null;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pending = null;
+        ask(q).then(
+          (ans) => resolve(mine === seq ? (ans ?? {}) : null),
+          () => resolve(null),
+        );
+      }, delayMs);
+      pending = { timer, resolve };
+    });
+  };
 }
 
 /**
@@ -117,19 +104,4 @@ export function refusalField(err: unknown): { field: string; message: string } |
   }
   if (!data || typeof data.field !== 'string' || typeof data.message !== 'string') return null;
   return { field: data.field, message: data.message };
-}
-
-/**
- * The EXPLORER catalogue's key for a problem above — what the settings dialog
- * (components/UserSettingsDialog.vue) prints under the box.
- *
- * ⚠ Two of them are not `account.errors.*` there: their words carry an `@`,
- * which the admin app's catalogue (vue-i18n) has to write as `{'@'}` and this
- * catalogue writes plainly — and a key both catalogues share must read the
- * same in both (web/tests/i18n/langPackCatalogue.test.ts). They live under
- * `account.problem.*` instead.
- */
-const OWN_WORDING = new Set(['emailInvalid', 'usernameAt']);
-export function accountProblemKey(key: string): string {
-  return OWN_WORDING.has(key) ? `account.problem.${key}` : `account.errors.${key}`;
 }

@@ -14,7 +14,12 @@ import { resolve } from 'node:path';
 
 import { usePublicRequest } from '@brftech/filex-core/src/composables/usePublicLink';
 import PublicRequestBody from '@brftech/filex-core/src/components/public/PublicRequestBody.vue';
-import { en } from '@brftech/filex-core/src/locales/en';
+import { ref } from 'vue';
+import { PUBLIC_TEXT } from '@brftech/filex-core/src/composables/usePublicText';
+import { publicTable } from '../helpers/publicStrings';
+
+/** The server's public sentences (server.public.*): the page's only words. */
+const pub = publicTable('en');
 
 class FakeXHR {
   static last: FakeXHR | null = null;
@@ -150,11 +155,13 @@ describe('the rows on the page', () => {
           { name: 'b.pdf', size: 10, percent: 100, state: 'unconfirmed' },
         ],
       },
+      // What PublicLinkPage hands down after GET /api/public/strings.
+      global: { provide: { [PUBLIC_TEXT as symbol]: { table: ref(pub), lang: ref('en'), ready: ref(true) } } },
     });
     const rows = w.findAll('.fe-pdrop__item');
-    expect(rows[0].text()).toContain(en['public.upload_saving']);
+    expect(rows[0].text()).toContain(pub.upload_saving);
     expect(rows[0].find('progress').attributes('value'), 'the bar should not sit at 100%').toBeUndefined();
-    expect(rows[1].text()).toContain(en['public.upload_unanswered']);
+    expect(rows[1].text()).toContain(pub.upload_unanswered);
     expect(rows[1].find('.fe-surface__error').exists(), 'it is not drawn as a failure').toBe(false);
   });
 

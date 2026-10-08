@@ -76,6 +76,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/trash"
 	"github.com/brf-tech/filex/backend/internal/update"
 	"github.com/brf-tech/filex/backend/internal/usage"
+	"github.com/brf-tech/filex/backend/internal/vaultlock"
 	"github.com/brf-tech/filex/backend/internal/versioning"
 	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/internal/writegate"
@@ -272,6 +273,16 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.ACL == nil {
 		d.ACL = acl.New(d.Store)
 	}
+	// The vault (encryption level 3, docs/E2E-VAULT-FORMAT.md → Writes from
+	// anywhere else): inside a vault folder only the vault API writes. The
+	// resolver's sets are what every write door hands writegate - the
+	// explorer, the queue, the agent API and MCP, archives, apps, and the
+	// WebDAV, S3, SFTP, FTPS and NFS servers, which share this resolver - so
+	// attaching the finder here is the one wire every door needs. Only while
+	// vaults are on: the finder reads the catalogue on every write.
+	if d.Cfg.E2EVault {
+		d.ACL.AttachVaults(vaultlock.NewFinder(d.Store, d.StorageResolver))
+	}
 	// Who may encrypt: one service behind every door that can create an
 	// encrypted folder's key file or a `.fxe` (see Deps.E2EPolicy). Built here
 	// when nil, like ACL, so a Deps assembled by hand — tests, embedders — is
@@ -284,8 +295,9 @@ func BuildRouter(d *Deps) http.Handler {
 			Drivers: d.StorageResolver,
 			// An approval spent at a create door is one audit row,
 			// e2e_request.use, naming the approval and the folder it was
-			// spent on (e2epolicy requests.go UseRecorder).
-			OnUse: e2epolicy.UseRecorder(d.Store),
+			// spent on (e2epolicy requests.go UseRecorder) - and the person's
+			// open explorers stop offering it (#196, an access.changed frame).
+			OnUse: e2eApprovalSpent(e2epolicy.UseRecorder(d.Store)),
 		})
 	}
 	// Permission-rule settings the session layer enforces (Require 2FA).
@@ -486,9 +498,6 @@ func BuildRouter(d *Deps) http.Handler {
 		// (thumbs.folder_previews) is on.
 		mh.FolderPreviews = d.Thumbs
 	}
-	uh := handlers.NewUpload(d.Store, d.StorageResolver, d.Thumbs)
-	uh.AttachACL(d.ACL)
-	uh.E2EPolicy = d.E2EPolicy
 	// Staged uploads — the driver-agnostic resumable path (docs/UPLOADS.md).
 	// It is handed the manager so the committed bytes fire the same post-write
 	// hooks (search index, thumbnail, writehook, realtime) as vfUpload rather
@@ -617,6 +626,7 @@ func BuildRouter(d *Deps) http.Handler {
 	oh.StorageResolver = d.StorageResolver
 	apH := handlers.NewAppPlugins(d.AppPlugins, d.Store, d.ACL, d.Ops, d.StorageResolver, d.Index, d.Thumbs)
 	apH.Assoc = d.Assoc
+	apH.Preview = mh.List
 	apH.Quota = d.Quota
 	apH.E2EPolicy = d.E2EPolicy
 	// Plugin install requests (internal/pluginreq): ONE service behind the
@@ -705,6 +715,10 @@ func BuildRouter(d *Deps) http.Handler {
 		// resolver the fetch endpoint above serves it from: a saved CSV is
 		// compared with the bytes the editor was given (onlyoffice/csv_keep.go).
 		d.OnlyOffice.AttachBody(d.Body)
+		// ⚠⚠ The save gates ask THIS resolver, the one the vault rule is
+		// attached to above (AttachVaults): a fresh acl.New knows no vault, and
+		// a save into a vault folder went through (#94).
+		d.OnlyOffice.AttachACL(d.ACL)
 	}
 	th := handlers.NewThumb(d.Store, d.Thumbs)
 	th.AttachACL(d.ACL)
@@ -725,9 +739,14 @@ func BuildRouter(d *Deps) http.Handler {
 		}
 	}
 	ch.E2EEscrow = d.E2EEscrow /* wiring:e2 */
+	// The caller's own link ceiling (`share_link_max_days`) reads their
+	// permission rules.
+	ch.ACL = d.ACL
 	// Who may encrypt here (`e2e_policy`, a signed-in caller's): the tenant
 	// ceiling and the policy, internal/e2epolicy.
 	ch.E2EPolicy = d.E2EPolicy
+	// The vault level (encryption level 3): `e2e_vault`, FILEX_E2E_VAULT.
+	ch.E2EVault = d.Cfg.E2EVault
 	// ⚠ Only a non-nil mailer: a nil *mailer.Service stored in the interface
 	// would make the field say "not ready" on a build that never had mail
 	// wired, which is a different fact from "the operator has not set it up".
@@ -950,7 +969,7 @@ func BuildRouter(d *Deps) http.Handler {
 	// versions that still open the file with the old secret. Installed every
 	// time, nil-or-not: the observer list is process-wide.
 	{
-		watch := &fxewatch.Watch{Audit: d.Store}
+		watch := &fxewatch.Watch{Audit: d.Store, Owners: d.Store, Notify: d.Notify}
 		if d.Versions != nil {
 			watch.Versions = d.Versions
 			watch.Resolver = d.Versions.Resolver
@@ -979,6 +998,9 @@ func BuildRouter(d *Deps) http.Handler {
 	// One added language's strings, fetched when somebody picks it (the
 	// branding answer only LISTS the languages apps add).
 	r.Get("/api/public/ui-locales/{code}", pubAPI.UILocale)
+	// The public pages' sentences in one language (server.public.*): the
+	// JavaScript pages read the same table the no-JavaScript ones render.
+	r.Get("/api/public/strings", pubAPI.Strings)
 	r.Route("/api/public/s/{token}", func(r chi.Router) {
 		r.Get("/", pubAPI.Share)
 		r.Post("/pin", pubAPI.PIN)
@@ -1184,6 +1206,8 @@ func BuildRouter(d *Deps) http.Handler {
 	if d.Cfg.Cloud.Enabled {
 		cloudSvc := cloudpkg.New(d.Store, d.Mailer, d.Cfg.Cloud.PlansJSON, d.Cfg.Cloud.BaseHost)
 		cloudH := handlers.NewCloud(cloudSvc, cloudpkg.NewStripe(d.Cfg.Cloud.StripeSecret), d.Cfg.MultiTenant)
+		cloudH.WebhookSecret = d.Cfg.Cloud.StripeWebhookSecret
+		cloudH.Origin = tenants.ForProvider
 		r.Route("/api/cloud", cloudH.Register)
 		ch.CloudEnabled = true
 	}
@@ -1208,6 +1232,19 @@ func BuildRouter(d *Deps) http.Handler {
 	mh.AttachChangeLog(changes)
 	emitter := changes.Wrap(sizes.Wrap(hub))
 	handlers.SetChangeEmitter(emitter)
+	// A vault's own frames (vault.generation, vault.lock) go straight to the
+	// hub: they are not changes of anybody's folder listing.
+	handlers.SetVaultEmitter(hub)
+	// #196 - "what you may do may have changed" (realtime/access.go): a grant,
+	// an encryption policy or approval (the handlers), and every write that
+	// invalidates the cached permissions - a role, a rule, a group, a
+	// person's role - through perm's hook: to the accounts it names, else the
+	// writer's tenant, else (the platform's change) everybody. The frame names
+	// nothing; open explorers ask their menu answers again.
+	handlers.SetAccessEmitter(hub)
+	perm.SetInvalidateHook(func(ctx context.Context, userIDs []int64) {
+		handlers.EmitAccessChangedFor(ctx, userIDs...)
+	})
 	// The lazy catalogue announces what its folder reconciles find through
 	// the same chain: a change made outside filex reaches open explorers,
 	// the size refresher and the desktop's tree_change watchers.
@@ -1264,12 +1301,14 @@ func BuildRouter(d *Deps) http.Handler {
 	// immediate scan, never to no scan.
 	writehook.ConfigureSaveScan(d.AVScanAfterSave)
 	// wiring:e2 keyfile — every rewrite of an encrypted folder's key file is
-	// audited by the server itself, and a changed password or recovery slot
-	// deletes the key file's old versions (they wrap the folder key under the
-	// old secret). Set explicitly, nil-or-not: process-wide state must not be
-	// inherited from another router built in the same process.
+	// audited by the server itself; a changed password or recovery slot tells
+	// the folder's owner and, when the writer is its owner or an
+	// administrator, deletes the key file's old versions (they wrap the
+	// folder key under the old secret; e2e/slotchange). Set explicitly,
+	// nil-or-not: process-wide state must not be inherited from another
+	// router built in the same process.
 	{
-		watch := &keyfilewatch.Watch{Audit: d.Store}
+		watch := &keyfilewatch.Watch{Audit: d.Store, Owners: d.Store, Notify: d.Notify}
 		if d.Versions != nil {
 			watch.Versions = d.Versions
 			watch.Resolver = d.Versions.Resolver
@@ -1363,6 +1402,10 @@ func BuildRouter(d *Deps) http.Handler {
 		r.With(accountWrite).Post("/api/auth/totp/enroll", authSelf.TotpEnroll)
 		r.With(accountWrite).Post("/api/auth/totp/verify", authSelf.TotpVerify)
 		r.With(accountWrite).Post("/api/auth/totp/disable", authSelf.TotpDisable)
+		// "Would this address / username be accepted?" while a form is being
+		// typed: the save's own rules and words (handlers/account_check.go,
+		// 0.54 audit B15). Writes nothing, so a read token may ask.
+		r.Post("/api/auth/account/check", authSelf.CheckAccount)
 
 		// ────── self-service CREDENTIAL surfaces ──────
 		// Every route in this group answers the same question — "show me, and
@@ -1503,6 +1546,14 @@ func BuildRouter(d *Deps) http.Handler {
 			r.Post("/read-all", notifH.MarkAllRead)
 			r.Get("/settings", notifH.GetSettings)
 			r.Patch("/settings", notifH.UpdateSettings)
+			// Web Push (task #191, handlers/notification_push.go): this
+			// browser as one of the caller's devices. A session's own -
+			// every handler refuses an API key.
+			r.Get("/push", notifH.PushStatus)
+			r.Post("/push/subscriptions", notifH.PushSubscribe)
+			r.Delete("/push/subscriptions/{id}", notifH.PushRemove)
+			r.Post("/push/forget", notifH.PushForget)
+			r.Post("/push/test", notifH.PushTest)
 		})
 
 		r.Route("/api/files", func(r chi.Router) {
@@ -1534,6 +1585,10 @@ func BuildRouter(d *Deps) http.Handler {
 			// GET is provided for the SPA's `?q=` polling form.
 			r.Post("/search", sxh.Search)
 			r.Get("/search", sxh.Search)
+			// The explorer's "Filter in this folder" box asks the search's own
+			// name rule which of the rows it holds answer the typed words
+			// (filex 0.54, task #207): one matcher, on the server.
+			r.Post("/search/match", sxh.MatchNames)
 
 			// Ops queue. POST submits a new op, GET ?status=running
 			// returns the polling tray's list. /ops/{id} is the per-row
@@ -1560,6 +1615,10 @@ func BuildRouter(d *Deps) http.Handler {
 				// writes the file, so the token needs `write` too.
 				r.With(write, handlers.RequirePermission(d.ACL, perm.PluginsRun)).Put("/ui/{plugin}/{view}/save", apH.UISave)
 				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Post("/ui/{plugin}/{view}/call", apH.UICall)
+				// What an interface reads of the file it was opened with:
+				// files:read and the kind checked here, then the preview
+				// read (handlers/app_ui_read.go).
+				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Get("/ui/{plugin}/{view}/read", apH.UIRead)
 				// What an app reads about its own license, fx.license.get()
 				// (handlers/app_store_intent.go).
 				r.With(handlers.RequirePermission(d.ACL, perm.PluginsRun)).Get("/license/{plugin}", handlers.NewAppStore(d.AppStore, handlers.NewAppPluginsAdmin(d.AppPlugins, d.AppPluginsDisabledReason), d.Cfg.Demo.Mode).AppLicense)
@@ -1570,12 +1629,9 @@ func BuildRouter(d *Deps) http.Handler {
 			r.With(write).Post("/move", oh.SubmitMove)
 			r.With(del).Post("/delete", oh.SubmitDelete)
 
-			// Legacy S3-presigned chunked upload — untouched. It is what the
-			// current web client speaks, and it still works wherever the
-			// driver is S3.
-			r.With(write).Post("/upload/init", uh.Init)
-			r.With(write).Post("/upload/finalize", uh.Finalize)
-			r.With(write).Post("/upload/abort", uh.Abort)
+			// The presigned S3 multipart upload (/upload/init, /finalize,
+			// /abort) was removed in 0.54: no client spoke it any more. Every
+			// upload is the staged one below, whose bytes pass through filex.
 
 			// Staged uploads — driver-agnostic and resumable (docs/UPLOADS.md).
 			// `begin` is declared before the `{id}` routes so chi cannot route
@@ -1648,6 +1704,8 @@ func BuildRouter(d *Deps) http.Handler {
 			r.With(write).Delete("/permissions/groups/{id}", grantsH.DeleteGroup)
 			r.With(write).Post("/permissions/invite", grantsH.Invite)
 			r.With(write).Post("/permissions/share-mail", grantsH.ShareMail)
+			// The share mail's words without the mail, for the OS share sheet.
+			r.Get("/permissions/share-message", grantsH.ShareMessage)
 
 			// Per-user metadata: starred flag, recently-opened — and tags,
 			// which since v0.43.0 are PERSONAL (the caller's own, like a
@@ -1752,6 +1810,28 @@ func BuildRouter(d *Deps) http.Handler {
 			// "Encrypt…" or a file's encryption: changes nothing, so `read`.
 			r.Post("/e2e/allowed", e2ePolH.Allowed)
 
+			// The vault (encryption level 3): handlers/e2e_vault.go,
+			// docs/E2E-VAULT-FORMAT.md → API. Registered whatever
+			// FILEX_E2E_VAULT says, so the route table is one table; while
+			// it is off every route answers 404 VAULT_DISABLED. Reads (state,
+			// list) are `read`; a write session's every call is `write`, and
+			// the garbage collector's delete - files gone for good - also
+			// `delete`. The idle time is the person's own setting (`read`,
+			// like the other preference documents).
+			vaultH := handlers.NewE2EVault(mh, d.Cfg.E2EVault)
+			r.With(write).Post("/e2e/vault/create", vaultH.Create)
+			r.Get("/e2e/vault/state", vaultH.State)
+			r.Get("/e2e/vault/list", vaultH.List)
+			r.With(write).Post("/e2e/vault/lock", vaultH.Lock)
+			r.With(write).Post("/e2e/vault/lock/renew", vaultH.Renew)
+			r.With(write).Post("/e2e/vault/lock/release", vaultH.Release)
+			r.With(write).Post("/e2e/vault/lock/break", vaultH.Break)
+			r.With(write).Put("/e2e/vault/pack", vaultH.PutPack)
+			r.With(write).Put("/e2e/vault/index", vaultH.PutIndex)
+			r.With(write, del).Post("/e2e/vault/delete", vaultH.Delete)
+			r.Get("/e2e/vault/prefs", vaultH.GetPrefs)
+			r.Put("/e2e/vault/prefs", vaultH.PutPrefs)
+
 			// Quota — current user's usage + limit.
 			r.Get("/quota/me", quotaH.Me)
 			// Per-STORAGE usage, RBAC-filtered — "how full is this drive" for
@@ -1832,6 +1912,10 @@ func BuildRouter(d *Deps) http.Handler {
 				r.With(users).Get("/users/", ush.List)
 				r.With(users).Post("/users", ush.Create)
 				r.With(users).Post("/users/", ush.Create)
+				// What the Add user form fills in from an address: the
+				// username identity.Suggest gives (an SSO first sign-in's
+				// too) and a display name (handlers/users_suggest.go).
+				r.With(users).Get("/users/suggest", ush.Suggest)
 				r.With(users).Get("/users/{id}", ush.Get)
 				r.With(users).Patch("/users/{id}", ush.Update)
 				r.With(users).Delete("/users/{id}", ush.Delete)
@@ -2251,6 +2335,12 @@ func BuildRouter(d *Deps) http.Handler {
 					// The progress of the empty POST started: a large trash is
 					// purged in the background and the page polls this.
 					r.Get("/empty", trashH.EmptyStatus)
+					// What the empty would delete, counted by the purge's own
+					// tally over the caller's reach: the confirmation's number.
+					r.Get("/empty/preview", trashH.EmptyPreview)
+					// Several entries deleted for good in one request (the
+					// explorer's "Delete permanently" of a selection).
+					r.Post("/purge", trashH.PurgeBatch)
 					r.Delete("/{id}", trashH.Purge)
 				})
 
@@ -2297,6 +2387,11 @@ func BuildRouter(d *Deps) http.Handler {
 					// (handlers/notification_digest.go).
 					r.Get("/digest", notifH.AdminDigest)
 					r.Patch("/digest", notifH.AdminUpdateDigest)
+					// The instance's Web Push key: how many devices, and a
+					// rotation (handlers/notification_push.go). The
+					// platform's administrators only (requireSupertenant).
+					r.Get("/push", notifH.AdminPush)
+					r.Post("/push/rotate", notifH.AdminPushRotate)
 				})
 
 				// Webhook v2 targets — multi-destination, event-filtered,
@@ -2971,10 +3066,15 @@ func ftpsFacts(cfg config.Config, live func() string) handlers.FTPSFacts {
 // live but is reverted the next time filex starts. The admin API says so
 // instead of letting the operator discover it after a restart — the whole point
 // of issue #17 was a UI that looked like it had saved something it had not.
+//
+// ONLYOFFICE's editor language has a variable of its own
+// (FILEX_ONLYOFFICE_LANG, re-asserted the same way), so it is a key of its
+// own: external.EnvPinEditorLang.
 func envManagedExternal(cfg config.Config) map[string]bool {
 	return map[string]bool{
-		external.OnlyOffice: cfg.ExternalServices.OnlyOffice.URL != "",
-		external.Drawio:     cfg.ExternalServices.Drawio.URL != "",
+		external.OnlyOffice:       cfg.ExternalServices.OnlyOffice.URL != "",
+		external.Drawio:           cfg.ExternalServices.Drawio.URL != "",
+		external.EnvPinEditorLang: strings.TrimSpace(cfg.ExternalServices.OnlyOffice.EditorLang) != "",
 	}
 }
 
@@ -3138,4 +3238,20 @@ func plainHostPort(h string) bool {
 		}
 	}
 	return true
+}
+
+// e2eApprovalSpent is OnUse for the encryption rule: record the approval as
+// spent (record, e2epolicy.UseRecorder) and tell the person's open explorers,
+// whose menus offered it, to ask again (#196). The frame goes through the
+// handlers' access emitter, which BuildRouter wires to the hub further down;
+// until then it is a no-op.
+func e2eApprovalSpent(record func(ctx context.Context, r *model.E2ERequest, u *model.User, dir string)) func(ctx context.Context, r *model.E2ERequest, u *model.User, dir string) {
+	return func(ctx context.Context, r *model.E2ERequest, u *model.User, dir string) {
+		if record != nil {
+			record(ctx, r, u, dir)
+		}
+		if u != nil {
+			handlers.EmitAccessChanged(u.ID)
+		}
+	}
 }

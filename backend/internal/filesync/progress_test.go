@@ -76,6 +76,67 @@ func TestTransferProgressCarriesBytes(t *testing.T) {
 	}
 }
 
+// The same reports reach OnProgress as figures, so `filex sync run --json`
+// can say them in the reader's language: the desktop app used to recover
+// these numbers from the English lines with regular expressions (#213).
+func TestOnProgressCarriesTheFiguresOfEveryLine(t *testing.T) {
+	r := newRig(t)
+	r.writeRemote("a.txt", strings.Repeat("a", 1000))
+	r.writeRemote("b.txt", strings.Repeat("b", 2000))
+	r.writeLocal("c.txt", strings.Repeat("c", 3000))
+	var lines []string
+	var events []ProgressEvent
+	r.engine.Progress = func(s string) { lines = append(lines, s) }
+	r.engine.OnProgress = func(ev ProgressEvent) { events = append(events, ev) }
+
+	r.run()
+
+	if len(events) != len(lines) {
+		t.Fatalf("one event per line: %d events, %d lines (%q)", len(events), len(lines), lines)
+	}
+	byPhase := map[string]ProgressEvent{}
+	for _, ev := range events {
+		byPhase[ev.Phase] = ev // the last of each phase
+	}
+	if ev := byPhase["inventory"]; ev.Here != 1 {
+		t.Errorf("inventory: one item here, got %+v", ev)
+	}
+	if ev := byPhase["plan"]; ev.Total != 3 {
+		t.Errorf("plan: three changes, got %+v", ev)
+	}
+	if ev := byPhase["transfer"]; ev.Done != 3 || ev.Total != 3 || ev.BytesDone != 6000 || ev.BytesTotal != 6000 || ev.HasETA {
+		t.Errorf("transfer: 3/3, 6000 of 6000 bytes, no estimate when done; got %+v", ev)
+	}
+	if ev := byPhase["settling"]; ev.Done != 3 || ev.Total != 3 {
+		t.Errorf("settling: 3 of 3, got %+v", ev)
+	}
+}
+
+// An engine with no line reader still reports its figures (the --json
+// stream sets only OnProgress).
+func TestOnProgressWithoutProgressLines(t *testing.T) {
+	r := newRig(t)
+	r.writeRemote("a.txt", "a")
+	var phases []string
+	r.engine.OnProgress = func(ev ProgressEvent) { phases = append(phases, ev.Phase) }
+
+	r.run()
+
+	if strings.Join(phases, ",") == "" || phases[0] != "inventory" {
+		t.Fatalf("phases = %q", phases)
+	}
+}
+
+func TestEtaLeftAgreesWithEtaText(t *testing.T) {
+	if _, ok := etaLeft(0, 100, time.Minute); ok {
+		t.Error("nothing done yet must give no estimate")
+	}
+	left, ok := etaLeft(25, 100, 10*time.Minute)
+	if !ok || left != 30*time.Minute {
+		t.Errorf("a quarter in 10 minutes leaves 30, got %v %v", left, ok)
+	}
+}
+
 // The watcher compares a fresh local walk with what the last run reported;
 // the two must agree when nothing changed, and differ when something did.
 func TestLocalFingerprintMatchesTheRunsOwn(t *testing.T) {

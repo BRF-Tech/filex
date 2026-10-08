@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 import {
   initialValues,
   looksLikeEmail,
-  pinLength,
   storageFieldOf,
 } from '@brftech/filex-core/src/lib/surfaceValues';
 import type { SurfaceNode } from '@brftech/filex-core/src/types/Plugins';
@@ -85,15 +84,9 @@ describe('storageFieldOf', () => {
   });
 });
 
-describe('pinLength', () => {
-  it('clamps to the contract: 4..8, default 6', () => {
-    expect(pinLength(undefined)).toBe(6);
-    expect(pinLength('nope')).toBe(6);
-    expect(pinLength(2)).toBe(4);
-    expect(pinLength(12)).toBe(8);
-    expect(pinLength(5.7)).toBe(5);
-  });
-});
+// A `pin-input`'s length is no longer worked out here: the host clamps it to
+// 4..8 (wasmplugin.PinLength, TestSanitizeSurface_WritesThePinLengthTheBrowserDraws)
+// and the box draws what it was sent (surfaceRenderer.test.ts).
 
 describe('looksLikeEmail', () => {
   it('accepts an address and refuses the obvious non-addresses', () => {

@@ -19,13 +19,16 @@
 // the bell, open or closed, is reading that same array.
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
+import { accountLocaleWritten } from '@/i18n';
 import {
   NOTIFY_POLL_MS as POLL_MS,
   appBase,
-  isNotificationClickable,
   notificationHref,
   resolveNotificationTarget,
+  rowOpens,
+  useNotificationText,
 } from '@brftech/filex-core';
 
 import { useAuthStore } from '@/stores/auth';
@@ -33,7 +36,7 @@ import { useNotificationsStore } from '@/stores/notifications';
 import { openNotificationTarget } from '@/lib/notificationNav';
 import { currentMountBase } from '@/router';
 import { canShowBrowserNotification, raiseBrowserNotification } from '@/lib/browserNotify';
-import { useNotificationText } from '@/composables/useNotificationText';
+import { reconcileWebPush } from '@/lib/webPush';
 
 /** Same cadence the bell has always polled at — core's, the one every
  *  surface that polls the bell uses (the explorer's own loop included). */
@@ -43,12 +46,11 @@ export function useNotificationWatcher() {
   const auth = useAuthStore();
   const notif = useNotificationsStore();
   const router = useRouter();
-  // ⚠ The sentence is composed HERE, in the reader's language, not taken from
-  // the row. The row's title is written once on the server in one language,
-  // and for eight of the eleven file events it is not written at all — Send
-  // substitutes the event id, which is how `{title: "file.uploaded"}` reached
-  // a real OS notification (measured 2026-09-12). Same renderer as the bell
-  // and the desktop shell; see lib/notificationText.ts.
+  // ⚠ The words are the SERVER's: each row of the feed arrives with its title
+  // and body said in this reader's language (backend notify say.go), the
+  // same words the bell shows and a push to their phone says. Nothing here
+  // composes a sentence; the composable only names an encrypted item where
+  // this tab has its folder unlocked (core lib/notificationText).
   const { notificationText } = useNotificationText();
 
   let handle: number | null = null;
@@ -90,7 +92,7 @@ export function useNotificationWatcher() {
       // service worker may notify there is no callback to run, and the worker
       // can open nothing but a URL. Same resolver for both, so the two cannot
       // land in two different places.
-      const goes = isNotificationClickable(n.target);
+      const goes = rowOpens(n);
       const url = goes ? notificationHref(resolveNotificationTarget(n.target), currentMountBase(), appBase()) : '';
       void raiseBrowserNotification(
         {
@@ -128,6 +130,10 @@ export function useNotificationWatcher() {
 
   function start(): void {
     if (handle != null) return;
+    // #191 - where the person turned push on for this browser, keep its
+    // subscription true (a rotated key, one the browser dropped). Asks
+    // nothing and sends nothing where they did not.
+    void reconcileWebPush(auth.user?.id);
     void prime().then(poll);
     handle = window.setInterval(() => void poll(), NOTIFY_POLL_MS);
   }
@@ -147,6 +153,21 @@ export function useNotificationWatcher() {
   watch(
     () => auth.isAuthenticated,
     (on) => (on ? start() : stop()),
+  );
+  // ⚠ The rows are said by the server in the ACCOUNT's language (backend
+  // notify PersonLang). A language picked on screen is written to the
+  // account, so once that write has landed (`accountLocaleWritten`) the list
+  // is asked again - the bell, and the full list when it is open, read in
+  // the new language at once rather than at the next arrival.
+  const { locale } = useI18n();
+  watch(
+    () => String(locale.value),
+    async () => {
+      if (!auth.isAuthenticated) return;
+      await accountLocaleWritten();
+      void notif.refreshFeed();
+      if (notif.panelOpen) void notif.fetchMine();
+    },
   );
   onBeforeUnmount(stop);
 

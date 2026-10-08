@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -26,9 +25,10 @@ import (
 // lets go of the lock and this watcher adopts the pair like a newly added one:
 // a full pass first.
 //
-// The lines, on stdout, are the contract with desktop/src/syncstatus.ts:
+// The lines, on stdout, for a person in a terminal (with --json, the "lock"
+// events lock.busy / lock.acquired the desktop app reads, syncevents.go):
 //
-//	<pair>: lock: busy — <why>    another process holds the pair; nothing runs for it here
+//	<pair>: lock: busy - <why>    another process holds the pair; nothing runs for it here
 //	<pair>: lock: acquired        …not any more: this process syncs it now
 //
 // ⚠ Busy is reported only after lockGrace. The desktop app restarts its
@@ -53,11 +53,16 @@ var (
 // lockBusyLine is the line that says a pair is busy (without the pair id), in
 // the lock's own words whatever wrapped them on the way here.
 func lockBusyLine(err error) string {
+	return "lock: busy - " + lockBusyDetail(err)
+}
+
+// lockBusyDetail is the lock's own words for a busy pair (who holds it).
+func lockBusyDetail(err error) string {
 	var be *filesync.BusyError
 	if errors.As(err, &be) {
 		err = be
 	}
-	return "lock: busy - " + err.Error()
+	return err.Error()
 }
 
 // pairLocker is what the watcher needs from pairLocks.
@@ -154,7 +159,7 @@ func (l *liveLoop) claim(wanted []filesync.Pair) []filesync.Pair {
 			if b != nil {
 				delete(l.busy, p.ID)
 				if b.reported {
-					fmt.Fprintf(l.out, "%s: lock: acquired\n", p.ID)
+					l.say().lockAcquired(p.ID)
 				}
 			}
 			active = append(active, p)
@@ -167,14 +172,14 @@ func (l *liveLoop) claim(wanted []filesync.Pair) []filesync.Pair {
 		if errors.Is(err, filesync.ErrPairBusy) {
 			if !b.reported && now.Sub(b.since) >= l.lockGrace {
 				b.reported = true
-				fmt.Fprintf(l.out, "%s: %s\n", p.ID, lockBusyLine(err))
+				l.say().lockBusy(false, p.ID, err)
 			}
 		} else if msg := err.Error(); msg != b.lastErr {
 			// Not another process: the lock file itself cannot be had (a
 			// permission, a full disk). It is this pair's error until the
 			// lock is taken and a pass completes.
 			b.lastErr = msg
-			fmt.Fprintf(l.errOut, "%s: %s\n", p.ID, msg)
+			l.say().lockFailed(p.ID, msg)
 		}
 		if b.reported || b.lastErr != "" {
 			b.next = now.Add(l.lockRetry)

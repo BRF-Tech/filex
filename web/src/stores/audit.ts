@@ -1,14 +1,13 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { AuditApi, type AuditListParams } from '@/api/audit';
-import type { AuditEntry, PaginatedResponse } from '@/api/types';
+import { AuditApi, type AuditListParams, type AuditPage } from '@/api/audit';
 import { extractError } from '@/api/client';
 import { t } from '@/i18n';
 
-const EMPTY: PaginatedResponse<AuditEntry> = { items: [], total: 0, page: 1, page_size: 25 };
+const EMPTY: AuditPage = { items: [], total: 0, page: 1, page_size: 25, resources: [] };
 
 export const useAuditStore = defineStore('audit', () => {
-  const page = ref<PaginatedResponse<AuditEntry>>(EMPTY);
+  const page = ref<AuditPage>(EMPTY);
   const loading = ref(false);
   const error = ref<string | null>(null);
 

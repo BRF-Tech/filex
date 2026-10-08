@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
@@ -183,7 +185,7 @@ func TestAnswerE2E_AnUndecidedRuleIsLoggedWithoutThePath(t *testing.T) {
 			require.True(t, door.ask(w, r, e2epolicy.New(e2epolicy.Options{Store: c.store})), "%s let the write on", door.name)
 			require.Equal(t, c.code, w.Code, "%s: %s", door.name, w.Body.String())
 			if c.code == http.StatusInternalServerError {
-				assert.Contains(t, w.Body.String(), "could not check the encryption policy", door.name)
+				assertE2EUndecided(t, w, r, door.name)
 			}
 		}
 	}
@@ -239,7 +241,7 @@ func TestRefuseE2EWriteAt_AStorageRowThatCannotBeReadIsUndecided(t *testing.T) {
 	done, w := ask(drv, "Gizli/yeni.fxe")
 	require.True(t, done, "the write went on")
 	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "could not check the encryption policy")
+	assertE2EUndecided(t, w, httptest.NewRequest(http.MethodPost, "/", nil).WithContext(auth.WithUser(ctx, u)), "refuseE2EWriteAt")
 	for _, rel := range []string{"Gizli/notlar.txt", "Kasa/.filex-e2e.json"} {
 		done, w = ask(drv, rel)
 		require.False(t, done, "%s: %d %s", rel, w.Code, w.Body.String())
@@ -318,6 +320,18 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// assertE2EUndecided: an HTTP door answers an undecided rule in the one
+// refusal shape (internal/apierr, 0.54 audit A1/A2) - the code
+// e2e_policy_undecided and the server's sentence in the reader's language,
+// never the rule's English error in `error`.
+func assertE2EUndecided(t *testing.T, w *httptest.ResponseRecorder, r *http.Request, label string) {
+	t.Helper()
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got), "%s: %s", label, w.Body.String())
+	assert.Equal(t, "e2e_policy_undecided", got["error"], "%s: %s", label, w.Body.String())
+	assert.Equal(t, apierr.Text(langOf(r), "e2e_policy_undecided", nil), got["message"], "%s: %s", label, w.Body.String())
 }
 
 // e2eLogLines is what the HTTP doors logged about the rule.

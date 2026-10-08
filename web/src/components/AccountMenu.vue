@@ -32,7 +32,7 @@ const caps = useCapabilitiesStore();
   <AccountMenu
     :actions="actions"
     :user="auth.user"
-    :version="caps.data.version"
+    :version="caps.data.release"
     :locale="locale"
     :fallback-label="fallbackLabel"
     @select="emit('select', $event)"

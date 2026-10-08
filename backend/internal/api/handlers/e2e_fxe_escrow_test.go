@@ -148,7 +148,8 @@ func TestE2eEscrow_ASingleEncryptedFileIsAnnouncedToItsOwner(t *testing.T) {
 	case ev := <-sink.got:
 		assert.Equal(t, notify.EventE2EEscrowUsed, ev.Event)
 		assert.Equal(t, notify.SeverityWarning, ev.Severity)
-		assert.Equal(t, "Encrypted file opened with the escrow key", ev.Title)
+		// The file's wording, said by the server from the facts (notify say.go).
+		assert.Equal(t, "Encrypted file opened with the escrow key", notify.SayEvent("en", ev).Title)
 		require.NotNil(t, ev.UserID)
 		assert.Equal(t, owner.ID, *ev.UserID, "the file's OWNER is told, not the operator")
 		assert.Equal(t, "Rapor 2027.pdf.fxe", ev.Meta["file"])

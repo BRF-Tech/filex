@@ -91,6 +91,7 @@ func pruneNodes(nodes []wire.Node, depth int, budget *int) []wire.Node {
 		}
 		*budget--
 		scrubProps(n.Props)
+		normalizeValueProps(&n)
 		if len(n.Children) > 0 {
 			n.Children = pruneNodes(n.Children, depth+1, budget)
 		}

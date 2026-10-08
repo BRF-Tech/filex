@@ -26,6 +26,7 @@ import { attachViewPrefsHttp } from '@brftech/filex-core';
 import { useAuthStore } from '@/stores/auth';
 import en from '@/locales/en.json';
 import { AuthApi } from '@/api/auth';
+import { i18n } from '@/i18n';
 
 describe('stores/auth', () => {
   beforeEach(() => {
@@ -74,6 +75,25 @@ describe('stores/auth', () => {
     expect(attachViewPrefsHttp, "the person's view document is attached").toHaveBeenCalledTimes(1);
   });
 
+  it('a sign-in carries the language on screen, for the server to give an account that has none (0.54)', async () => {
+    // The panel writes no language after a sign-in any more: the server gives
+    // an account without one the sign-in's (handlers/auth.go
+    // adoptSignInLanguage), so the sign-in must say which is on screen.
+    (AuthApi.login as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { id: 2, email: 'p@x', display_name: 'P', role: 'user', created_at: '', updated_at: '' },
+      token: 'token-p',
+    });
+    (AuthApi.me as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: { id: 2, email: 'p@x', display_name: 'P', role: 'user', created_at: '', updated_at: '' },
+      permissions: [],
+    });
+    const store = useAuthStore();
+    await store.login({ email: 'p@x', password: 'pw' });
+    const [, lang] = (AuthApi.login as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(lang).toBe(i18n.global.locale.value);
+    expect(lang).toBeTruthy();
+  });
+
   it('login(failure) sets error + leaves user null', async () => {
     (AuthApi.login as ReturnType<typeof vi.fn>).mockRejectedValue({
       response: { data: { error: 'invalid credentials' } },
@@ -113,7 +133,7 @@ describe('stores/auth', () => {
     (AuthApi.me as ReturnType<typeof vi.fn>).mockResolvedValue({ user, permissions: [] });
     const store = useAuthStore();
     expect(await store.redeemHandoff('T')).toBe(true);
-    expect(AuthApi.handoff).toHaveBeenCalledWith('T');
+    expect(AuthApi.handoff).toHaveBeenCalledWith('T', i18n.global.locale.value);
     expect(store.user?.email).toBe('alex@acme.local');
     expect(sessionStorage.getItem('filex.bearer')).toBe('tok-h');
 

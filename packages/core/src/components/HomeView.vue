@@ -36,7 +36,7 @@ import type { FileNode } from '../types/FileNode';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { fileIconTile } from '../lib/fileIcons';
-import { nameMatches } from '../lib/fileFilters';
+import { useServerNameFilter, type MatchNamesFn } from '../lib/nameFilter';
 import GridView from './GridView.vue';
 
 export interface HomeStorage {
@@ -67,12 +67,15 @@ const props = defineProps<{
    * with the fewest, longest-lived names in it would be the box that misses
    * the one thing people look for here.
    *
-   * ⚠ Through `lib/fileFilters`'s own `nameMatches`, which is the predicate the
-   * listing's box uses — so an accent folds here exactly as it folds there.
-   * Optional: an embedder that draws no filter row passes nothing and sees
-   * everything, which is what this view has always done.
+   * ⚠ Through the server's name rule (`lib/nameFilter`, task #207), the one
+   * the listing's box and the search use — so a name answers here exactly as
+   * it answers there. Optional: an embedder that draws no filter row passes
+   * nothing and sees everything, which is what this view has always done.
    */
   nameFilter?: string;
+  /** The server question the box is answered by (FileApi `matchNames`).
+   *  Absent: the local rule (lib/fileFilters nameMatches) stands in. */
+  matchNames?: MatchNamesFn;
   /** Authenticated thumb resolver (useThumbs.src) — the grid needs it in an
    *  embed, where a bare root-relative `thumb_url` is not authenticated. */
   thumbSrc?: (n: FileNode) => string | null;
@@ -95,15 +98,27 @@ const { t, formatSize } = useLocale(() => props.locale);
  */
 const needle = computed(() => (props.nameFilter ?? '').trim());
 const filtering = computed(() => needle.value !== '');
-const shownStorages = computed(() =>
-  props.storages.filter((s) => nameMatches(s.label || s.name, needle.value)),
+const storageFilter = useServerNameFilter<HomeStorage>(
+  () => needle.value,
+  () => props.storages,
+  (s) => s.label || s.name,
+  () => props.matchNames,
 );
-const shownRecent = computed(() =>
-  props.recent.filter((n) => nameMatches(n.basename || '', needle.value)),
+const recentFilter = useServerNameFilter<FileNode>(
+  () => needle.value,
+  () => props.recent,
+  (n) => n.basename || '',
+  () => props.matchNames,
 );
-const shownStarred = computed(() =>
-  props.starred.filter((n) => nameMatches(n.basename || '', needle.value)),
+const starredFilter = useServerNameFilter<FileNode>(
+  () => needle.value,
+  () => props.starred,
+  (n) => n.basename || '',
+  () => props.matchNames,
 );
+const shownStorages = computed(() => storageFilter.apply(props.storages));
+const shownRecent = computed(() => recentFilter.apply(props.recent));
+const shownStarred = computed(() => starredFilter.apply(props.starred));
 /** True when a block has rows but the filter hid all of them — a different
  *  fact from "you have starred nothing", and it must not borrow that sentence. */
 function filteredEmpty(total: number, shown: number): boolean {

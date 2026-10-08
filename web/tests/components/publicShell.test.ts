@@ -15,6 +15,7 @@ import { mount } from '@vue/test-utils';
 
 import PublicLink from '@/views/public/PublicLink.vue';
 import { resetLocales } from '@brftech/filex-core';
+import { fillPublic, isPublicStrings, publicStringsAnswer, publicTable } from '../helpers/publicStrings';
 
 function answer(status: number, body: unknown) {
   return {
@@ -32,6 +33,8 @@ function router(routes: Record<string, unknown>, fallback: number = 404) {
     for (const [key, body] of Object.entries(routes)) {
       if (url === key) return answer(200, body);
     }
+    // The page's own sentences are the server's (GET /api/public/strings).
+    if (isPublicStrings(url)) return answer(200, publicStringsAnswer('en'));
     return answer(fallback, { error: 'not_found' });
   });
 }
@@ -566,5 +569,44 @@ describe('the public shell — one frame for every link', () => {
     await vi.waitFor(() => expect(w.find('[data-testid="public-page-pin"]').exists()).toBe(true));
     expect(w.find('[data-testid="public-page-title"]').exists()).toBe(false);
     expect(w.text()).not.toContain('redundancy-list.pdf');
+  });
+});
+
+describe('the server’s words and rules on the public page (#210)', () => {
+  it('the footer and the meta line are the server catalogue’s sentences', async () => {
+    fetchMock.mockImplementation(
+      router({
+        '/api/public/s/tok123': {
+          kind: 'file',
+          needs_pin: false,
+          unlocked: true,
+          node: { name: 'contract.pdf' },
+          visits_left: 3,
+        },
+      }),
+    );
+    const w = open('share');
+    await vi.waitFor(() => expect(w.find('[data-testid="public-page-meta"]').exists()).toBe(true));
+    const pub = publicTable('en');
+    expect(w.find('[data-testid="public-page-meta"]').text()).toContain(fillPublic(pub.visits_left, { count: 3 }));
+    expect(w.find('[data-testid="public-footer-powered"]').text()).toBe(fillPublic(pub.served_by, { name: 'filex' }));
+  });
+
+  it('the PIN box stops where the SERVER’s PIN rule does (pin_max), not at a number of its own', async () => {
+    fetchMock.mockImplementation(
+      router({ '/api/public/s/tok123': { kind: 'file', needs_pin: true, unlocked: false, pin_max: 12 } }),
+    );
+    const w = open('share');
+    await vi.waitFor(() => expect(w.find('[data-testid="public-page-pin-input"]').exists()).toBe(true));
+    expect(w.find('[data-testid="public-page-pin-input"]').attributes('maxlength')).toBe('12');
+  });
+
+  it('without pin_max the box does not cut what is typed - the server answers', async () => {
+    fetchMock.mockImplementation(
+      router({ '/api/public/s/tok123': { kind: 'file', needs_pin: true, unlocked: false } }),
+    );
+    const w = open('share');
+    await vi.waitFor(() => expect(w.find('[data-testid="public-page-pin-input"]').exists()).toBe(true));
+    expect(w.find('[data-testid="public-page-pin-input"]').attributes('maxlength')).toBeUndefined();
   });
 });

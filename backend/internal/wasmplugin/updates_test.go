@@ -496,7 +496,9 @@ func TestUpdates_ANewPermissionWaitsForApproval(t *testing.T) {
 	require.Len(t, nf.events, 1)
 	assert.Equal(t, notify.EventAppUpdateNeedsApproval, nf.events[0].Event)
 	assert.Equal(t, "http:example.org", nf.events[0].Meta["added"])
-	assert.Contains(t, nf.events[0].Title, "new permission http:example.org")
+	// The words are the server's (notify say.go), from the facts above.
+	assert.Equal(t, "http:example.org", notify.SayEvent("en", nf.events[0]).Body)
+	assert.Contains(t, notify.SayEvent("en", nf.events[0]).Title, "needs your approval")
 }
 
 // A newer MODULE that asks for nothing new is not installed by itself either:

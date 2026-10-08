@@ -29,6 +29,7 @@ import (
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
 	"github.com/brf-tech/filex/backend/internal/quotastore"
 	"github.com/brf-tech/filex/backend/internal/realtime"
+	"github.com/brf-tech/filex/backend/internal/rowgate"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
 )
@@ -310,9 +311,13 @@ func (lc *lazyCatalogue) run(ctx context.Context) {
 // reconciles of the same folder never run at once, and a request that
 // arrives while one runs makes it go round once more when it finishes.
 //
-// ⚠ It takes no storage-wide lock. A full scan (RunOnce holds runMu) and any
-// number of folder reconciles run side by side, and every create on both sides
-// tolerates losing the race to the other (catalogueEntry, EnsureDirChain).
+// ⚠ It takes no storage-wide RUN lock. A full scan (RunOnce holds runMu) and
+// any number of folder reconciles run side by side, and every create on both
+// sides tolerates losing the race to the other (catalogueEntry,
+// EnsureDirChain). What they do share is the storage's row gate
+// (internal/rowgate), one folder at a time: each folder's listing and what it
+// changes in the catalogue happen while no rename, move or delete filex is
+// making on the storage is half way, and two of them take turns.
 func (lc *lazyCatalogue) reconcile(ctx context.Context, dir string, why lazyReason) (folderResult, error) {
 	dir = db.CatalogueFolderPath(dir)
 	opened := why == reasonOpen
@@ -389,6 +394,13 @@ func (lc *lazyCatalogue) reconcileOnce(ctx context.Context, dir string, why lazy
 	}
 	res.First = !prior.Catalogued()
 
+	// The storage's gate, alone, from the listing to the delete pass's last
+	// drop (rowgate.Judge, issue #192): a rename, a move or a delete filex is
+	// making on the storage is wholly before this folder's listing or wholly
+	// after it. Taken before the transaction (applyListing's) opens, never
+	// inside it - see rowgate.
+	release := rowgate.Judge(st.ID)
+	defer release()
 	objs, err := s.driver.List(ctx, dir)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {

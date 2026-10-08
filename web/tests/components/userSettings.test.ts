@@ -31,9 +31,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { createI18n } from 'vue-i18n';
 
 import { activeTimeZone as coreActiveTimeZone, registerLocale, resetLocales } from '@brftech/filex-core';
-import { eventFixableBy, eventOffReason } from '@brftech/filex-core/src/lib/webhookEvents';
-import { en as coreEn } from '@brftech/filex-core/src/locales/en';
-import { tr as coreTr } from '@brftech/filex-core/src/locales/tr';
+import { ACCOUNT_CHECK_DELAY_MS } from '@brftech/filex-core/src/lib/accountRules';
 import { formatDate } from '@/lib/format';
 import { startRouteName } from '@/lib/startPage';
 import UserSettingsModal from '@/components/UserSettingsModal.vue';
@@ -42,7 +40,6 @@ import { useNotificationsStore } from '@/stores/notifications';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import en from '@/locales/en.json';
-import tr from '@/locales/tr.json';
 import type { NotificationSettings, User } from '@/api/types';
 import { answerAccountPrefs } from '../helpers/accountPrefs';
 import { api } from '@/api/client';
@@ -92,9 +89,32 @@ vi.mock('@/api/quota', () => ({
 }));
 
 const updateProfile = vi.fn();
+/**
+ * The server's account check (POST /api/auth/account/check), answering the
+ * way the server does for the values these tests type: its code and its
+ * sentence. ⚠ 0.54 (#209, B15/A12): the form keeps no rule and no sentence
+ * of its own - this stand-in IS where the words come from.
+ */
+const checkAccount = vi.fn(async (q: { email?: string; username?: string }) => {
+  const out: Record<string, { error: string; message: string }> = {};
+  const email = (q.email ?? '').trim();
+  if (q.email !== undefined && email !== 'kaya@example.com' && !/^[^@\s]+@[^@\s]+$/.test(email)) {
+    out.email = { error: 'email_invalid', message: `“${email}” is not an email address. Write it as name@example.com.` };
+  }
+  if (q.username !== undefined && q.username.includes('ş')) {
+    out.username = { error: 'username_invalid', message: '“ş” cannot be used in a username. Use a-z, 0-9, dot, dash or underscore.' };
+  }
+  return out;
+});
+/** Typing pauses, the server answers. */
+async function checked() {
+  await new Promise((r) => setTimeout(r, ACCOUNT_CHECK_DELAY_MS + 50));
+  await flushPromises();
+}
 vi.mock('@/api/auth', () => ({
   AuthApi: {
     updateProfile: (...a: unknown[]) => updateProfile(...a),
+    checkAccount: (...a: unknown[]) => checkAccount(...(a as [{ email?: string; username?: string }])),
     changePassword: vi.fn().mockResolvedValue(undefined),
     enrollTotp: vi.fn(),
     verifyTotp: vi.fn(),
@@ -240,232 +260,88 @@ describe('UserSettingsModal', () => {
   // ⚠ Measured in the release-candidate sweep (2026-09-21): the dialog offered
   // "A virus is found in a file" with scanning off and "…opened with the
   // escrow key" with no escrow key — switches that can never fire.
-  it('offers only the events that can happen on this instance', async () => {
+  //
+  // #211 (audit B16): which events cannot happen, why, and who could change
+  // that is the SERVER's answer (`capabilities.event_off`, backend
+  // capabilities_rules.go eventsOff - its rule is tested there, in Go). The
+  // dialog only shows it: not offered when the caller cannot fix it, greyed
+  // with the server's sentence when they can.
+  const SERVICE_EVENTS = ['file.infected', 'e2e.escrow_used', 'plugin.notice'];
+  const off = (reason: string, fixable: boolean, text = `${reason} is off here.`) => ({ reason, fixable, text });
+
+  async function notificationsPane(eventOff: Record<string, ReturnType<typeof off>>, account: User = NON_ADMIN) {
     const auth = useAuthStore();
-    auth.user = NON_ADMIN;
+    auth.user = account;
     const caps = useCapabilitiesStore();
     const notif = useNotificationsStore();
-    caps.data = { ...caps.data, antivirus: false, e2e_escrow: { enabled: false }, app_plugins: { enabled: false } };
+    caps.data = { ...caps.data, event_off: eventOff };
     const w = mountModal();
     await notif.fetchSettings();
     await w.vm.$nextTick();
     await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
-    for (const ev of ['file.infected', 'e2e.escrow_used', 'plugin.notice']) {
+    return { w, caps };
+  }
+
+  it('offers only the events the server says can happen', async () => {
+    const { w, caps } = await notificationsPane({
+      'file.infected': off('antivirus', false),
+      'e2e.escrow_used': off('escrow', false),
+      'plugin.notice': off('app_plugins', false),
+    });
+    for (const ev of SERVICE_EVENTS) {
       expect(w.find(`[data-testid="user-settings-event-${ev}"]`).exists(), `${ev} offered with its service off`).toBe(false);
     }
     expect(w.find('[data-testid="user-settings-event-share.created"]').exists()).toBe(true);
 
-    caps.data = { ...caps.data, antivirus: true, e2e_escrow: { enabled: true }, app_plugins: { enabled: true } };
+    caps.data = { ...caps.data, event_off: {} };
     await w.vm.$nextTick();
-    for (const ev of ['file.infected', 'e2e.escrow_used', 'plugin.notice']) {
+    for (const ev of SERVICE_EVENTS) {
       expect(w.find(`[data-testid="user-settings-event-${ev}"]`).exists(), `${ev} missing with its service on`).toBe(true);
     }
   });
 
   // QA #39, the admin half of the rule every "needs a service" entry follows
-  // (core lib/serviceGate): an administrator, who can switch the service on,
-  // sees the switch GREYED with the reason — not hidden, not live.
-  it('shows an administrator the impossible events greyed, with the reason', async () => {
-    const auth = useAuthStore();
-    auth.user = NON_ADMIN;
-    const caps = useCapabilitiesStore();
-    const notif = useNotificationsStore();
-    caps.data = {
-      ...caps.data,
-      caller_admin: true,
-      antivirus: false,
-      e2e_escrow: { enabled: true },
-      app_plugins: { enabled: true },
-    };
-    const w = mountModal();
-    await notif.fetchSettings();
-    await w.vm.$nextTick();
-    await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
+  // (core lib/serviceGate): whoever can switch the service on sees the switch
+  // GREYED with the reason — not hidden, not live — in the server's words.
+  it('shows the events the caller could switch on greyed, with the server’s sentence', async () => {
+    const { w } = await notificationsPane({
+      'file.infected': off('antivirus', true, 'Virus scanning is off (Protection).'),
+    });
     const sw = w.find('[data-testid="user-settings-event-file.infected"]');
-    expect(sw.exists(), 'an administrator is shown the event').toBe(true);
+    expect(sw.exists(), 'shown to whoever could fix it').toBe(true);
     expect(sw.attributes('disabled'), 'but it cannot be switched').toBeDefined();
     expect(sw.attributes('aria-checked')).toBe('false');
-    expect(w.find('[data-testid="user-settings-event-off-file.infected"]').text()).toContain('Virus scanning is off');
+    expect(w.find('[data-testid="user-settings-event-off-file.infected"]').text()).toBe('Virus scanning is off (Protection).');
     const live = w.find('[data-testid="user-settings-event-share.created"]');
     expect(live.attributes('disabled')).toBeUndefined();
     expect(w.find('[data-testid="user-settings-event-off-e2e.escrow_used"]').exists()).toBe(false);
   });
 
-  // The two encryption-request events (backend internal/e2epolicy) exist only
-  // under the `approval` policy — the default is `permitted` — and
-  // `e2e.request_created` is sent to ADMINISTRATOR accounts alone (notify
-  // bell.go bellFor: a tenant's own administrators, the supertenant's, a
-  // single-tenant install's). Offered to everybody, both were switches that can
-  // never fire for nearly everyone: the shape the two tests above pin for the
-  // service events, and the one lib/webhookEvents `eventPossible` warns against.
-  //
-  // ⚠ "An administrator" here is the ACCOUNT's role, not
-  // `capabilities.caller_admin`: that one is the server's "may set the instance
-  // up", which on a multi-tenant install is the supertenant's alone — and a
-  // tenant's own administrator, the person these requests are for, reads false.
-  describe('the encryption request switches', () => {
-    const CREATED = 'e2e.request_created';
-    const DECIDED = 'e2e.request_decided';
-    const policy = (p: string, available = true) => ({ e2e_policy: { available, policy: p } });
-    // Every way the policy can fail to ask for approval: the tenant's other
-    // choices, the operator's switch off under `approval`, and a server that
-    // says nothing of the policy (older, or an anonymous fetch).
-    const NOT_APPROVAL: Array<[string, Record<string, unknown>]> = [
-      ['permitted', policy('permitted')],
-      ['admins only', policy('admins')],
-      ['off', policy('off')],
-      ['approval, but the operator has switched it off', policy('approval', false)],
-      ['no policy in the capabilities', {}],
-    ];
-
-    // Who is asking: the account (its role) and what the server says of the
-    // caller. The two administrators are the ones a multi-tenant install tells
-    // apart: the supertenant (the operator) and a tenant's own administrator.
-    const MEMBER = { account: NON_ADMIN, caller_admin: false };
-    const SUPERTENANT = { account: ADMIN, caller_admin: true };
-    const TENANT_ADMIN = { account: ADMIN, caller_admin: false };
-    const ADMINS: Array<[string, typeof SUPERTENANT]> = [
-      ['the supertenant', SUPERTENANT],
-      ['a tenant’s own administrator', TENANT_ADMIN],
-    ];
-
-    async function pane(who: typeof MEMBER, caps: Record<string, unknown>) {
-      const auth = useAuthStore();
-      auth.user = who.account;
-      const store = useCapabilitiesStore();
-      const notif = useNotificationsStore();
-      store.data = { ...store.data, caller_admin: who.caller_admin, ...caps };
-      const w = mountModal();
-      await notif.fetchSettings();
-      await w.vm.$nextTick();
-      await w.find('[data-testid="user-settings-tab-notifications"]').trigger('click');
-      return w;
+  // The dialog keeps no rule of its own any more: the account's role and the
+  // capabilities' other fields decide nothing. An administrator account with
+  // scanning "off" in some other field is offered the switch live when the
+  // server lists nothing, and a member the server calls able to fix it is
+  // shown it greyed.
+  it('follows the server’s answer and nothing else', async () => {
+    const { w: adminPane, caps } = await notificationsPane({}, ADMIN);
+    caps.data = { ...caps.data, antivirus: false, caller_admin: true };
+    await adminPane.vm.$nextTick();
+    for (const ev of [...SERVICE_EVENTS, 'e2e.request_created', 'e2e.request_decided']) {
+      const sw = adminPane.find(`[data-testid="user-settings-event-${ev}"]`);
+      expect(sw.exists(), ev).toBe(true);
+      expect(sw.attributes('disabled'), ev).toBeUndefined();
     }
-    const sw = (w: VueWrapper, ev: string) => w.find(`[data-testid="user-settings-event-${ev}"]`);
-    const why = (w: VueWrapper, ev: string) => w.find(`[data-testid="user-settings-event-off-${ev}"]`);
+    for (const w of live.splice(0)) w.unmount();
 
-    it.each(NOT_APPROVAL)('offers a member neither switch — policy: %s', async (_name, caps) => {
-      const w = await pane(MEMBER, caps);
-      expect(sw(w, CREATED).exists(), `${CREATED} offered`).toBe(false);
-      expect(sw(w, DECIDED).exists(), `${DECIDED} offered`).toBe(false);
-      // The rest of the list is still there — nothing else went with them.
-      expect(sw(w, 'share.created').exists()).toBe(true);
+    const { w: memberPane } = await notificationsPane({
+      'e2e.request_created': off('e2e_approval', false),
+      'e2e.request_decided': off('e2e_approval', true, 'Only when the encryption policy asks for approval.'),
     });
-
-    it('under approval offers a member only the answer to their own request', async () => {
-      const w = await pane(MEMBER, policy('approval'));
-      expect(sw(w, CREATED).exists(), 'a new request reaches administrators, not this person').toBe(false);
-      const decided = sw(w, DECIDED);
-      expect(decided.exists(), 'the answer to their own request').toBe(true);
-      expect(decided.attributes('disabled')).toBeUndefined();
-      expect(decided.attributes('aria-checked')).toBe('true');
-      expect(why(w, DECIDED).exists()).toBe(false);
-    });
-
-    // Sent to the administrator ROLE (bellFor), so a delegated administrator —
-    // an admin.* permission without the role, let into some admin pages — is
-    // not sent one, and is not offered the switch.
-    it('does not offer a delegated administrator the switch for a new request', async () => {
-      const auth = useAuthStore();
-      auth.permissions = ['admin.users', 'admin.monitor'];
-      const w = await pane(MEMBER, policy('approval'));
-      expect(auth.hasAdminArea, 'the admin area is open to them').toBe(true);
-      expect(sw(w, CREATED).exists()).toBe(false);
-      expect(sw(w, DECIDED).exists()).toBe(true);
-    });
-
-    it.each(ADMINS)('under approval offers %s both, switchable', async (_who, who) => {
-      const w = await pane(who, policy('approval'));
-      for (const ev of [CREATED, DECIDED]) {
-        expect(sw(w, ev).exists(), `${ev} offered`).toBe(true);
-        expect(sw(w, ev).attributes('disabled'), `${ev} switchable`).toBeUndefined();
-        expect(sw(w, ev).attributes('aria-checked')).toBe('true');
-        expect(why(w, ev).exists(), `${ev} has no reason to give`).toBe(false);
-      }
-    });
-
-    // Both can change what is missing — the tenant's policy is its own
-    // administrators' to set (Admin → Encryption) — so both are shown the
-    // switch greyed with the reason, where a member is offered nothing.
-    it.each(ADMINS.flatMap(([who, w]) => NOT_APPROVAL.map(([state, caps]) => [who, state, w, caps] as const)))(
-      'shows %s both greyed, with the reason — policy: %s',
-      async (_who, _state, who, caps) => {
-        const w = await pane(who, caps);
-        for (const ev of [CREATED, DECIDED]) {
-          expect(sw(w, ev).exists(), `${ev} shown to an administrator`).toBe(true);
-          expect(sw(w, ev).attributes('disabled'), `${ev} cannot be switched`).toBeDefined();
-          expect(sw(w, ev).attributes('aria-checked')).toBe('false');
-          expect(why(w, ev).text()).toBe(coreEn['webhooks.offReason.e2eApproval']);
-        }
-      },
+    expect(memberPane.find('[data-testid="user-settings-event-e2e.request_created"]').exists()).toBe(false);
+    expect(memberPane.find('[data-testid="user-settings-event-e2e.request_decided"]').attributes('disabled')).toBeDefined();
+    expect(memberPane.find('[data-testid="user-settings-event-off-e2e.request_decided"]').text()).toBe(
+      'Only when the encryption policy asks for approval.',
     );
-
-    // A service is the INSTANCE's to set up, so only the one who may set the
-    // instance up sees its switch greyed: a tenant's own administrator, who
-    // gets the encryption rows greyed above, is not offered the virus one.
-    const SERVICES_OFF = { antivirus: false, e2e_escrow: { enabled: false }, app_plugins: { enabled: false } };
-    const SERVICE_EVENTS = ['file.infected', 'e2e.escrow_used', 'plugin.notice'];
-
-    it('does not offer a tenant’s own administrator a switch for a service that is off', async () => {
-      const w = await pane(TENANT_ADMIN, { ...SERVICES_OFF, ...policy('permitted') });
-      for (const ev of SERVICE_EVENTS) expect(sw(w, ev).exists(), `${ev} offered`).toBe(false);
-      // …while the encryption rows, greyed for them, are there.
-      expect(sw(w, CREATED).attributes('disabled')).toBeDefined();
-    });
-
-    it('still shows whoever may set the instance up a service’s switch greyed', async () => {
-      const w = await pane(SUPERTENANT, { ...SERVICES_OFF, ...policy('permitted') });
-      for (const ev of SERVICE_EVENTS) expect(sw(w, ev).attributes('disabled'), `${ev} greyed`).toBeDefined();
-    });
-
-    it('says the reason in both languages, in the dialog’s catalogue and the admin app’s', () => {
-      const key = 'webhooks.offReason.e2eApproval';
-      expect(coreEn[key]).toBe('Only when the encryption policy asks for approval.');
-      expect(coreTr[key]).toBe('Yalnız şifreleme politikası onay istediğinde.');
-      // The admin webhook screen reads the same sentence from the app's own bundle.
-      expect(en.webhooks.offReason.e2eApproval).toBe(coreEn[key]);
-      expect(tr.webhooks.offReason.e2eApproval).toBe(coreTr[key]);
-    });
-
-    it('is the approval policy, and for a new request an administrator account, that makes them possible — the rule, without the dialog', () => {
-      const asks = { e2e_policy: { available: true, policy: 'approval' } };
-      const REASON = 'webhooks.offReason.e2eApproval';
-      expect(eventOffReason(CREATED, { ...asks, account_admin: true })).toBeNull();
-      expect(eventOffReason(DECIDED, asks)).toBeNull();
-      expect(eventOffReason(DECIDED, { ...asks, account_admin: true })).toBeNull();
-      // The answer to a request needs no administrator; a new request does.
-      expect(eventOffReason(CREATED, asks)).toBe(REASON);
-      expect(eventOffReason(CREATED, { ...asks, account_admin: false })).toBe(REASON);
-      // ⚠ Not `caller_admin`: that is the supertenant's on a multi-tenant
-      // install, and says nothing of whether a request is sent to this account.
-      expect(eventOffReason(CREATED, { ...asks, caller_admin: true })).toBe(REASON);
-      expect(eventOffReason(CREATED, { ...asks, caller_admin: false, account_admin: true })).toBeNull();
-      // `null` is what a caller that cannot be asked sends.
-      for (const ev of [CREATED, DECIDED]) {
-        expect(eventOffReason(ev, { account_admin: true, e2e_policy: null }), ev).toBe(REASON);
-        expect(eventOffReason(ev, { account_admin: true, e2e_policy: { policy: 'approval' } }), ev).toBe(REASON);
-        expect(eventOffReason(ev, { account_admin: true, e2e_policy: { available: false, policy: 'approval' } }), ev).toBe(
-          REASON,
-        );
-      }
-    });
-
-    it('names who could fix what an event waits for — the tenant’s administrators for the policy, whoever sets the instance up for a service', () => {
-      // A tenant's own administrator sets their tenant's policy…
-      for (const ev of [CREATED, DECIDED]) {
-        expect(eventFixableBy(ev, { account_admin: true, caller_admin: false }), ev).toBe(true);
-        expect(eventFixableBy(ev, { account_admin: true, caller_admin: true }), ev).toBe(true);
-        expect(eventFixableBy(ev, { account_admin: false, caller_admin: false }), ev).toBe(false);
-        // …and `caller_admin` alone is no answer for them.
-        expect(eventFixableBy(ev, { account_admin: false, caller_admin: true }), ev).toBe(false);
-      }
-      // …but cannot switch a service on: that is the instance's, the server's answer.
-      for (const ev of SERVICE_EVENTS) {
-        expect(eventFixableBy(ev, { account_admin: true, caller_admin: false }), ev).toBe(false);
-        expect(eventFixableBy(ev, { account_admin: true, caller_admin: true }), ev).toBe(true);
-        expect(eventFixableBy(ev, { account_admin: false, caller_admin: false }), ev).toBe(false);
-      }
-    });
   });
 
   it('mutes one event without disturbing the bell flag or the other mutes', async () => {
@@ -646,7 +522,8 @@ describe('UserSettingsModal', () => {
   // Release-candidate sweep, 2026-09-21: "bu-bir-eposta-degil" was saved as
   // the address with "Profil kaydedildi"; a username with "ş" came back after
   // Save as the server's raw English in a toast. Both are now said under
-  // their box while typed, and Save waits.
+  // their box while typed, and Save waits. ⚠ 0.54 (#209): in the SERVER's
+  // words - the form asks POST /api/auth/account/check as it is typed.
   it('says what is wrong with the address under its box, and does not save it', async () => {
     const auth = useAuthStore();
     auth.user = NON_ADMIN;
@@ -655,9 +532,11 @@ describe('UserSettingsModal', () => {
 
     expect(w.find('[data-testid="profile-email-error"]').exists()).toBe(false);
     await w.find('[data-testid="profile-email"]').setValue('bu-bir-eposta-degil');
+    await checked();
+    expect(checkAccount).toHaveBeenCalledWith(expect.objectContaining({ email: 'bu-bir-eposta-degil' }));
     const err = w.find('[data-testid="profile-email-error"]');
     expect(err.exists()).toBe(true);
-    expect(err.text()).toBe('This is not an email address. Write it as name@example.com.');
+    expect(err.text()).toBe('“bu-bir-eposta-degil” is not an email address. Write it as name@example.com.');
     expect(w.find('[data-testid="profile-email"]').attributes('aria-invalid')).toBe('true');
 
     const save = w.find('[data-testid="user-settings-save-profile"]');
@@ -667,6 +546,7 @@ describe('UserSettingsModal', () => {
 
     // A dotless domain is an address: the first administrator's is admin@local.
     await w.find('[data-testid="profile-email"]').setValue('kaya@local');
+    await checked();
     expect(w.find('[data-testid="profile-email-error"]').exists()).toBe(false);
     expect(w.find('[data-testid="user-settings-save-profile"]').attributes('disabled')).toBeUndefined();
   });
@@ -678,6 +558,7 @@ describe('UserSettingsModal', () => {
     await w.vm.$nextTick();
 
     await w.find('[data-testid="profile-username"]').setValue('ayşe');
+    await checked();
     const err = w.find('[data-testid="profile-username-error"]');
     expect(err.text()).toBe('“ş” cannot be used in a username. Use a-z, 0-9, dot, dash or underscore.');
     expect(err.text()).not.toContain('invalid username');
@@ -708,6 +589,7 @@ describe('UserSettingsModal', () => {
 
     // Typing again is a new question; the old answer goes.
     await w.find('[data-testid="profile-email"]').setValue('free@example.com');
+    await checked();
     expect(w.find('[data-testid="profile-email-error"]').exists()).toBe(false);
   });
 

@@ -42,7 +42,7 @@ func TestDemoGuardBlocks(t *testing.T) {
 		// that is what they came for, and the nightly restore is what makes it
 		// safe.
 		{"POST", "/api/files/manager", false},
-		{"POST", "/api/files/upload/init", false},
+		{"POST", "/api/files/upload/begin", false},
 		{"POST", "/api/files/share", false},
 		{"DELETE", "/api/files/share/3", false},
 		{"POST", "/api/files/manager/tags", false},

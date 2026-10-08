@@ -9,7 +9,7 @@ import { mount } from '@vue/test-utils';
 
 import PublicLink from '@/views/public/PublicLink.vue';
 import { resetLocales } from '@brftech/filex-core';
-import { en } from '@brftech/filex-core/src/locales/en';
+import { isPublicStrings, publicStringsAnswer, publicTable } from '../helpers/publicStrings';
 
 function answer(status: number, body: unknown) {
   return {
@@ -26,6 +26,8 @@ function router(routes: Record<string, unknown>) {
     for (const [key, body] of Object.entries(routes)) {
       if (url === key) return answer(200, body);
     }
+    // The page's words: the server's public sentences (server.public.*).
+    if (isPublicStrings(url)) return answer(200, publicStringsAnswer('en'));
     return answer(404, { error: 'not_found' });
   });
 }
@@ -61,7 +63,9 @@ describe('a link to an entry the storage could not answer for', () => {
     );
     const w = open();
     await vi.waitFor(() => expect(w.find('[data-testid="public-share-unavailable"]').exists()).toBe(true));
-    expect(w.get('[data-testid="public-share-unavailable"]').text()).toContain(en['public.unavailable']);
+    // The sentence the server's own page says for the same link
+    // (err_unavailable_body), not a second wording of the client's.
+    expect(w.get('[data-testid="public-share-unavailable"]').text()).toContain(publicTable('en').err_unavailable_body);
     expect(w.find('[data-testid="public-share-download"]').exists()).toBe(false);
     expect(w.find('.fe-ppage__shot').exists(), 'an image link would ask the server for the bytes').toBe(false);
   });

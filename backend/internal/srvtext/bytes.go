@@ -8,6 +8,16 @@ import (
 // byteUnits are the catalogue keys of the unit words, smallest first.
 var byteUnits = []string{"server.unit.bytes", "server.unit.kb", "server.unit.mb", "server.unit.gb", "server.unit.tb", "server.unit.pb"}
 
+// Number writes a count the way the interface does: the language's own digit
+// grouping ("48,211" in English, "48.211" in Turkish) — the explorer's
+// toLocaleString. Plural fills `{count}` with bare digits; a caller that
+// wants them grouped passes this as the `count` var.
+// A sentence about a count (a trash of 61,844 items) fills its `{count}` with
+// this rather than the bare digits Plural writes.
+func Number(lang string, n int64) string {
+	return message.NewPrinter(tagOf(lang)).Sprint(number.Decimal(n))
+}
+
 // Bytes writes a byte count the way the interface does — the explorer's
 // formatByteSize (packages/core/src/composables/useLocale.ts): base 1000,
 // whole bytes, two decimals below 10 and one above (trailing zeros dropped),

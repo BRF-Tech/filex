@@ -48,6 +48,11 @@ type ActionRow struct {
 	// (manifest output.elsewhere), so the action is offered on a read-only
 	// storage too — its screen asks where the result should go.
 	OutputElsewhere bool `json:"output_elsewhere,omitempty"`
+	// ReadOnlyOK is the server's answer to "does the menu offer this action
+	// on a file of a read-only storage?" (OffersOnReadOnly): the same rule
+	// the run applies (handlers authorise), sent with the row so the menu
+	// shows exactly what a click would be let do. Always sent.
+	ReadOnlyOK bool `json:"read_only_ok"`
 	// Gated is what the action WOULD also be offered on once a requirement
 	// the server lacks is met — the extensions LibreOffice would add to the
 	// signing app's "Sign…", say. Sent to administrators only: the owner's
@@ -64,6 +69,26 @@ type ActionRow struct {
 	// not hold, so the menu never offers what the run would refuse.
 	Requires        string `json:"requires,omitempty"`
 	RequiresDefault string `json:"-"`
+}
+
+// OffersOnReadOnly reports whether an action may be STARTED from the menu on
+// a file of a read-only storage: it writes nothing there (its manifest
+// output is neither `sibling` nor `version`, and its rule is not `writable`),
+// or it opens a screen whose result may go into a folder the person chooses
+// (`view` + `output.elsewhere`), which then asks where.
+//
+// ⚠⚠ ONE rule for the menu and the run. The run (handlers authorise, a menu
+// click with no params) refuses exactly what this answers false for, and the
+// action list carries the answer (ActionRow.ReadOnlyOK) — the explorer used to
+// rebuild it from `output_mode` and `output_elsewhere` and offered every
+// "elsewhere" action, including one with no screen, which the run then
+// refused with 409 read_only.
+func OffersOnReadOnly(a *wire.Action, applies wire.Applies) bool {
+	if a == nil {
+		return true
+	}
+	writes := a.Output.Mode == "sibling" || a.Output.Mode == "version" || applies.Writable
+	return !writes || (a.View != "" && a.Output.Elsewhere)
 }
 
 // UIRef is how a client opens an app's own interface.
@@ -144,6 +169,7 @@ func (r *Registry) ActionsFor(ctx context.Context, isAdmin bool) (*ActionsAnswer
 				Label: e.Action.Label, Icon: e.Action.Icon, Applies: e.Applies, View: e.Action.View,
 				Confirm: e.Action.Confirm, MinRole: e.Action.MinRole, Danger: e.Action.Danger,
 				OutputMode: e.Action.Output.Mode, OutputElsewhere: e.Action.Output.Elsewhere,
+				ReadOnlyOK: OffersOnReadOnly(e.Action, e.Applies),
 			}
 			if isAdmin {
 				row.Gated = e.Gated

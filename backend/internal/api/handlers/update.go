@@ -62,6 +62,18 @@ type updateStatusResponse struct {
 	// patches", which it never does).
 	Behavior    string `json:"behavior"`
 	PolicyLimit string `json:"policy_limit,omitempty"`
+
+	// PolicyName, PolicyBadge and PolicyNote are the three sentences the
+	// page prints about the policy, said here in the reader's language
+	// (sayPolicy): the saved policy by its name, the badge (what the install
+	// does by itself when that is less than the policy, else "Policy: …"),
+	// and why the saved policy has less or no effect on this install. The
+	// page kept its own copy of these words (updates.policyName.* and
+	// updates.policyLimit.*) beside the server's `server.update.policy.*`
+	// until 0.54.
+	PolicyName  string `json:"policy_name"`
+	PolicyBadge string `json:"policy_badge"`
+	PolicyNote  string `json:"policy_note,omitempty"`
 }
 
 type updateRelease struct {
@@ -95,7 +107,7 @@ func (h *Update) Status(w http.ResponseWriter, r *http.Request) {
 	if !requireSupertenant(w, r, updateIsInstanceWide) {
 		return
 	}
-	writeJSON(w, http.StatusOK, h.status(langOf(r)))
+	writeJSON(w, http.StatusOK, h.status(readerLang(r)))
 }
 
 // Check forces a fetch. Used by the "check now" button; a failure is reported
@@ -106,11 +118,11 @@ func (h *Update) Check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.svc == nil || !h.svc.Enabled() {
-		writeJSON(w, http.StatusOK, h.status(langOf(r)))
+		writeJSON(w, http.StatusOK, h.status(readerLang(r)))
 		return
 	}
 	_, _ = h.svc.Check(r.Context())
-	writeJSON(w, http.StatusOK, h.status(langOf(r)))
+	writeJSON(w, http.StatusOK, h.status(readerLang(r)))
 }
 
 // Apply installs the pending release. Refused with 409 when the install cannot
@@ -167,6 +179,7 @@ func (h *Update) status(lang string) updateStatusResponse {
 		describeInstall(&resp, inst)
 		describeEffective(&resp, update.EffectiveOf(update.PolicyOff, false, inst.Mode, update.Version{}))
 		resp.CanSelfApply = false // no updater, nothing to apply with
+		sayPolicy(lang, &resp)
 		return resp
 	}
 	st := h.svc.State()
@@ -199,7 +212,38 @@ func (h *Update) status(lang string) updateStatusResponse {
 			resp.Instructions = h.instructions(d)
 		}
 	}
+	sayPolicy(lang, &resp)
 	return resp
+}
+
+// sayPolicy words the policy for lang: its name, the badge and, when the
+// install carries out less than the saved policy asks for, the note saying
+// why (`server.update.policy.*`, `server.update.behavior.*`,
+// `server.update.policy_is`, `server.update.policy_limit.*`). The badge
+// names what the install DOES by itself (Behavior) when that is less than
+// the policy, and the policy otherwise (#72: a Homebrew install set to
+// "patch" read "install patches", which it never does).
+func sayPolicy(lang string, resp *updateStatusResponse) {
+	name := resp.Policy
+	if key := "server.update.policy." + resp.Policy; resp.Policy != "" && srvtext.Has(key) {
+		name = srvtext.Text(lang, key, nil)
+	}
+	resp.PolicyName = name
+	resp.PolicyBadge = srvtext.Text(lang, "server.update.policy_is", srvtext.Vars{"policy": name})
+	if resp.PolicyLimit != "" && resp.Behavior != "" && srvtext.Has("server.update.behavior."+resp.Behavior) {
+		resp.PolicyBadge = srvtext.Text(lang, "server.update.behavior."+resp.Behavior, nil)
+	}
+	resp.PolicyNote = ""
+	if resp.PolicyLimit == "" {
+		return
+	}
+	limit := resp.PolicyLimit
+	if limit == string(update.LimitPackage) && resp.PackageManagerName == "" {
+		limit = "package_unknown"
+	}
+	if key := "server.update.policy_limit." + limit; srvtext.Has(key) {
+		resp.PolicyNote = srvtext.Text(lang, key, srvtext.Vars{"policy": name, "manager": resp.PackageManagerName})
+	}
 }
 
 // describeInstall fills what the page needs to know about how filex was

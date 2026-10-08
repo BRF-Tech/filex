@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -53,9 +54,11 @@ func (e *entryUnavailableError) Error() string {
 
 func (e *entryUnavailableError) Is(target error) bool { return target == errEntryUnavailable }
 
-// body is the 409's JSON.
-func (e *entryUnavailableError) body() map[string]any {
-	return map[string]any{"error": e.Error(), "code": CodeEntryUnavailable, "path": e.Path, "reason": e.Reason}
+// body is the 409's JSON: the code and the sentence in lang (apierr), the
+// entry and the storage's own answer beside them. The English Error() stays
+// the log's.
+func (e *entryUnavailableError) body(lang string) map[string]any {
+	return apierr.Map(lang, "entry_unavailable", nil, map[string]any{"code": CodeEntryUnavailable, "path": e.Path, "reason": e.Reason})
 }
 
 // unavailableIn returns the refusal for rel on s, or nil when rel - and every
@@ -81,7 +84,7 @@ func refuseUnavailable(w http.ResponseWriter, r *http.Request, store db.Store, s
 	}
 	var ue *entryUnavailableError
 	if errors.As(err, &ue) {
-		writeJSON(w, http.StatusConflict, ue.body())
+		writeJSON(w, http.StatusConflict, ue.body(langOf(r)))
 	}
 	return true
 }
@@ -108,7 +111,7 @@ func refuseUnavailableNode(w http.ResponseWriter, r *http.Request, store db.Stor
 	if n.Unavailable {
 		writeJSON(w, http.StatusConflict, (&entryUnavailableError{
 			Path: joinAdapterPath(s.Name, strings.Trim(n.Path, "/")), Reason: n.UnavailableReason,
-		}).body())
+		}).body(langOf(r)))
 		return true
 	}
 	return refuseUnavailable(w, r, store, s, n.Path)

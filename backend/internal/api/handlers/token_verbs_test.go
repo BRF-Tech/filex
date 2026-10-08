@@ -506,8 +506,11 @@ var publicUnderTokenPrefixes = map[string]bool{
 // depends on the request (handlerDecided). A new mutating route therefore
 // defaults to "needs write", and goes red here if it was registered without it.
 var readLevelMutations = map[string]bool{
-	"POST /api/files/ws-ticket":        true,
-	"POST /api/files/search":           true,
+	"POST /api/files/ws-ticket": true,
+	"POST /api/files/search":    true,
+	// The "Filter in this folder" box (#207): which of the names the caller
+	// sent answer the words - it reads no storage and returns indices.
+	"POST /api/files/search/match":     true,
 	"POST /api/files/archive/list":     true,
 	"POST /api/files/archive/download": true,
 	// The editor configuration: view mode unless the token may write.
@@ -528,6 +531,9 @@ var readLevelMutations = map[string]bool{
 	"POST /api/files/e2e/escrow/used":                       true,
 	// The explorer's "may I encrypt here" — a question, like ?action=allowed.
 	"POST /api/files/e2e/allowed": true,
+	// A vault writer's idle time: the person's own setting, like the other
+	// preference documents (docs/E2E-VAULT-FORMAT.md → Lock semantics).
+	"PUT /api/files/e2e/vault/prefs": true,
 	// The account's own credentials (each with its own ceiling). The account
 	// ITSELF — profile, password, two-factor — is NOT here: changing it needs
 	// `write` (a read token must not set a new password or switch two-factor
@@ -569,9 +575,23 @@ var tokenPermRoutes = map[string]string{
 	"DELETE /api/files/comments/{id}": "comments:write",
 }
 
+// sessionOnlyRoutes are the non-GET routes no API key reaches, whatever its
+// verbs: the handler answers 403 session_required before anything else, the
+// service's own state included. Web Push (#191, notification_push.go): a
+// registered device receives the person's whole bell, so a key confined to
+// one folder must not register one.
+var sessionOnlyRoutes = map[string]bool{
+	"POST /api/notifications/push/subscriptions":        true,
+	"DELETE /api/notifications/push/subscriptions/{id}": true,
+	"POST /api/notifications/push/forget":               true,
+	"POST /api/notifications/push/test":                 true,
+}
+
 var deleteRoutes = map[string]bool{
 	"POST /api/files/delete":         true,
 	"DELETE /api/files/drafts/{key}": true,
+	// A vault's garbage collection: packs and index files gone for good.
+	"POST /api/files/e2e/vault/delete": true,
 }
 
 var handlerDecided = map[string]bool{
@@ -611,7 +631,7 @@ func TestTokenSurfaces_EveryRouteAsksItsVerb(t *testing.T) {
 	t.Logf("walked %d token-surface routes", len(table))
 
 	known := map[string]bool{}
-	for _, m := range []map[string]bool{readLevelMutations, deleteRoutes, handlerDecided} {
+	for _, m := range []map[string]bool{readLevelMutations, deleteRoutes, handlerDecided, sessionOnlyRoutes} {
 		for k := range m {
 			known[k] = true
 		}
@@ -663,6 +683,11 @@ func TestTokenSurfaces_EveryRouteAsksItsVerb(t *testing.T) {
 			}
 			if code, body := f.call(t, nil, commenter, e.method, url, probe); missing(body) {
 				t.Errorf("%s: a `read,comments:rw` token got %d %q", key, code, trim(body))
+			}
+		case sessionOnlyRoutes[key]:
+			code, body := f.call(t, nil, allVerbs, e.method, url, probe)
+			if !(code == http.StatusForbidden && strings.Contains(body, "session_required")) {
+				t.Errorf("%s: listed as session-only, but a token with every verb got %d %q", key, code, trim(body))
 			}
 		case readLevelMutations[key]:
 			if code, body := f.call(t, nil, readOnly, e.method, url, probe); missing(body) {

@@ -271,6 +271,17 @@ export function registerPersonalMirror(key: string): void {
 }
 
 /**
+ * A module whose per-person keys are not one fixed name (lib/menuAnswers keeps
+ * one key per person and storage, #196) registers how it forgets them; a
+ * sign-out runs it with the rest. It must not throw; if it does, the others
+ * still run.
+ */
+const personalForgets = new Set<() => void>();
+export function registerPersonalForget(forget: () => void): void {
+  personalForgets.add(forget);
+}
+
+/**
  * The session ended: this browser forgets everything it cached ABOUT THE
  * PERSON.
  *
@@ -297,6 +308,13 @@ export function forgetPersonalPrefs(): void {
       localStorage.removeItem(key);
     } catch {
       /* blocked site data — `hasSession()` already makes the key unreadable */
+    }
+  }
+  for (const forget of personalForgets) {
+    try {
+      forget();
+    } catch {
+      /* one module's failure does not keep the others' data */
     }
   }
   remote = {};
@@ -540,6 +558,17 @@ export async function hydratePrefs(): Promise<UiPrefs | null> {
     // nothing here resurrects what they cleared.
     if (!Object.keys(remote).length) {
       const mine = localPrefs();
+      // ⚠⚠ …except the language. The account's language is the SERVER's
+      // (users.locale; one for every surface, #191), and since 0.54 this
+      // browser's copy of it IS the account's: the sign-in writes it into the
+      // first-paint mirror (web i18n applyAccountLocale). Adopting it wrote
+      // the account's own language back to it on every new account's first
+      // page - a PUT the sign-in's navigation (/admin/login -> /drive/) cut
+      // off or sent from pagehide, which hung the browser suites (0.54 full
+      // run 001b652e: Chromium networkidle, a WebKit navigation error). An
+      // account that holds no language is given one by the server at the
+      // sign-in (handlers/auth.go adoptSignInLanguage).
+      delete mine.locale;
       if (Object.keys(mine).length) {
         remote = mine;
         for (const k of LOOK_KEYS) if (mine[k]) pending[k] = mine[k];
@@ -549,8 +578,15 @@ export async function hydratePrefs(): Promise<UiPrefs | null> {
         }, PREFS_PUT_DEBOUNCE_MS);
       }
     }
-    // The mirror is a cache of THIS answer from here on.
-    for (const k of LOOK_KEYS) setLocalPref(k, remote[k] ?? '');
+    // The mirror is a cache of THIS answer from here on. ⚠ A document with no
+    // language leaves the language's mirror alone: it then caches the
+    // account's users.locale, written at sign-in (web i18n
+    // applyAccountLocale), and clearing it would paint the next cold load in
+    // the browser's language until the account answers.
+    for (const k of LOOK_KEYS) {
+      if (k === 'locale' && !remote[k]) continue;
+      setLocalPref(k, remote[k] ?? '');
+    }
     announce();
     return currentPrefs();
   } catch {

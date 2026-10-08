@@ -97,6 +97,14 @@ export interface PluginActionRow {
    *  and its screen asks where the result should go. */
   output_elsewhere?: boolean;
   /**
+   * The server's answer to "is this action offered on a file of a read-only
+   * storage?" — false where a menu click there would be refused (it writes
+   * its result beside the file, and does not open a screen that asks where
+   * else to put it). Always sent since 0.54; the menu reads it as it comes
+   * (lib/pluginMenu).
+   */
+  read_only_ok?: boolean;
+  /**
    * What the action would ALSO be offered on once a requirement the server
    * lacks is met — sent to administrators only. The menu draws each as a
    * greyed row that says what is missing (lib/pluginMenu).

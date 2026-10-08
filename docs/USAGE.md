@@ -107,6 +107,19 @@ at something it cannot read - a missing storage, a bucket with no reports in it,
 a prefix that matches nothing - rather than an empty report, because an empty
 report reads as "you used nothing".
 
+Everything the page draws is added up by the server, with one source rule (a
+provider's report is never added to filex's own estimate):
+
+| Field | What it is |
+|---|---|
+| `totals` | The window's bucket totals; `totals.account_ops` keeps the account line apart, `totals.account_ops_total` is its sum |
+| `buckets` | The bucket table: one row per bucket and region (`label` names it, "bucket (region)"), with `avg_stored_bytes` (the mean daily reading), `uploaded_bytes`, `downloaded_bytes` and `ops` |
+| `trend` | The daily trend: `{date, stored_bytes}` per day, every bucket together |
+| `notes` | What to know about this answer (no report published yet, served from cache, the default prices), said in the reader's language (`?lang=`, else the account's) |
+
+The page adds nothing up itself (before 0.54 it re-summed `days` in the browser,
+without the source rule).
+
 ## See also
 
 - [STORAGE.md](STORAGE.md) - attaching an S3 storage, and the B2 master-key trap

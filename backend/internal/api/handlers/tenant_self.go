@@ -448,6 +448,7 @@ func (h *TenantSelf) TestProvider(w http.ResponseWriter, r *http.Request) {
 	if checks == nil {
 		checks = []auth.ProbeCheck{}
 	}
+	auth.SayChecks(readerLang(r), checks)
 	writeJSON(w, http.StatusOK, map[string]any{"name": row.Slug, "testable": true, "ok": auth.ProbeOKAll(checks), "checks": checks})
 }
 

@@ -53,7 +53,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { SCENE_CONTEXT, pinTimes, stageClock } from './clock.mjs';
+import { SCENE_CONTEXT, pinTimes, sceneServerEnv, stageClock } from './clock.mjs';
 import { seedFixtures, writeOfficeFile } from './fixtures.mjs';
 import { shotsDir } from './release.mjs';
 
@@ -135,6 +135,8 @@ async function boot() {
       FILEX_DEFAULT_LOCALE: 'en',
       FILEX_PUBLIC_URL: 'https://files.example.com',
       FILEX_SECRET_KEY: 'driveshell-shots-key-not-a-real-secret',
+      // The apps on the scene's clock (clock.mjs, part 5).
+      ...sceneServerEnv(),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -604,6 +606,59 @@ async function run(tokens) {
     const ctx = await newContext(browser, 1440, 900);
     const page = await ctx.newPage();
     await signIn(page, '/drive/', USER);
+
+    // ── the HERO: the shell as somebody LANDS on it ──────────────────────
+    // ⚠ The README captions this picture "The shell - what everybody lands
+    // on", and until 0.54 it was not that: it was taken after this run had
+    // opened My files and switched to the grid - the same moment as
+    // driveshell-grid-1440.png, and the two files were byte for byte the
+    // same (0.53.0). Signing in opens Home (the web router's `home`: the
+    // explorer on the `.home` sentinel, core HomeView) - the person's
+    // storages, what they opened last, what they starred. That is the
+    // picture, and what it claims is measured before the shutter.
+    check(
+      'signing in lands on Home',
+      /\/drive\/home(?:[/?#]|$)/.test(page.url()),
+      page.url(),
+    );
+    await page.waitForSelector('[data-testid="home-view"]', { timeout: 25_000 });
+    await page.waitForFunction(
+      () => {
+        const view = document.querySelector('[data-testid="home-view"]');
+        if (!view || view.querySelector('.fe-home__loading')) return false;
+        const cards = view.querySelectorAll('[data-testid="home-recent"] .fe-grid__card, [data-testid="home-starred"] .fe-grid__card');
+        // ⚠ A card is drawn before its picture arrives: wait for the
+        // pictures themselves, or the hero is a grid of grey boxes.
+        const imgs = [...view.querySelectorAll('.fe-grid__thumb img')];
+        return cards.length >= 4 && imgs.every((i) => i.complete && i.naturalWidth > 0);
+      },
+      null,
+      { timeout: 25_000 },
+    );
+    const homeState = await page.evaluate(() => {
+      const field = document.querySelector('[data-testid="drive-search"] input');
+      return {
+        query: field ? field.value : null,
+        storages: document.querySelectorAll('[data-testid="home-storage-card"]').length,
+        recent: document.querySelectorAll('[data-testid="home-recent"] .fe-grid__card').length,
+        starred: document.querySelectorAll('[data-testid="home-starred"] .fe-grid__card').length,
+        thumbs: document.querySelectorAll('[data-testid="home-view"] .fe-grid__thumb img').length,
+        homeRow: document.querySelector('[data-testid="sidenav"] [aria-current="page"]')?.textContent?.trim() ?? '',
+      };
+    });
+    check(
+      'the hero is Home as somebody lands on it: their storages, what they opened last, what they starred',
+      homeState.query === '' && homeState.storages >= 2 && homeState.recent >= 3 && homeState.starred >= 2,
+      `search ${JSON.stringify(homeState.query)}, ${homeState.storages} storages, ` +
+        `${homeState.recent} recent, ${homeState.starred} starred, panel on "${homeState.homeRow}"`,
+    );
+    check(
+      'the hero carries real thumbnails, not only type tiles',
+      homeState.thumbs >= 1,
+      `${homeState.thumbs} pictures on Home`,
+    );
+    await shot(page, 'driveshell-hero-1440.png');
+
     await page.goto(`${URL}/drive/explore`);
     await waitForExplorer(page);
 
@@ -687,22 +742,22 @@ async function run(tokens) {
       orderOk.dirsAfter === 0,
       `${orderOk.dirsAfter} folder cards under "Files"`,
     );
-    await shot(page, 'driveshell-grid-1440.png');
     check(
       'the grid shows real thumbnails, not a wall of generic icons',
       (await page.locator('.fe-grid__thumb img').count()) >= 3,
       `${await page.locator('.fe-grid__thumb img').count()} tiles with an image`,
     );
 
-    // ── the HERO, and its preconditions asserted BEFORE the shutter ──────
-    // ⚠ This is the picture the README shows for the shell, and the
-    // first version of it was taken later in this run — after the palette test
-    // had typed "brief" into the search field — so the canonical shot of the
-    // shell was a mid-search view of two rows. A screenshot that is wrong is
-    // not missing information, it is false information (docs/CONTRIBUTING.md,
-    // release step 2), so the state it claims to show is measured here rather
-    // than assumed: empty field, no filter set, both sections, enough rows to
-    // read as somebody's drive instead of a fixture.
+    // ── the GRID, and its preconditions asserted BEFORE the shutter ──────
+    // ⚠ This picture used to be the README's hero as well (see the hero
+    // above, now Home), and its first version was taken later in this run —
+    // after the palette test had typed "brief" into the search field — so the
+    // canonical shot of the shell was a mid-search view of two rows. A
+    // screenshot that is wrong is not missing information, it is false
+    // information (docs/CONTRIBUTING.md, release step 2), so the state it
+    // claims to show is measured here rather than assumed: empty field, no
+    // filter set, both sections, enough rows to read as somebody's drive
+    // instead of a fixture.
     const heroState = await page.evaluate(() => {
       const field = document.querySelector('[data-testid="drive-search"] input');
       const headings = [...document.querySelectorAll('.fe-grid__heading')].map((h) =>
@@ -722,12 +777,12 @@ async function run(tokens) {
       };
     });
     check(
-      'the hero shot is the shell as somebody LANDS on it: empty search, no filter',
+      'the grid shot is the folder as somebody opens it: empty search, no filter',
       heroState.query === '' && heroState.chipsSet === 0,
       `search field ${JSON.stringify(heroState.query)}, ${heroState.chipsSet} filter chips set`,
     );
     check(
-      'the hero shot shows a populated drive, not a fixture',
+      'the grid shot shows a populated drive, not a fixture',
       heroState.folders >= 5 &&
         heroState.files >= 5 &&
         heroState.headings.length === 2 &&
@@ -746,7 +801,7 @@ async function run(tokens) {
       `${heroState.trashCards} Trash cards in the listing, ` +
         `${heroState.panelTrash} Trash entry in the panel`,
     );
-    await shot(page, 'driveshell-hero-1440.png');
+    await shot(page, 'driveshell-grid-1440.png');
 
     // ── the "+ New" menu ─────────────────────────────────────────────────
     await page.locator('[data-testid="sidenav-new"]').click();

@@ -35,10 +35,11 @@ import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import { copyText } from '@/lib/clipboard';
 import { fallbackShareUrl } from '@/lib/shareLink';
-import { formatDate, formatRelative } from '@/lib/format';
+import { formatDate } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Badge from '@/components/ui/Badge.vue';
+import DateWithDistance from '@/components/DateWithDistance.vue';
 import Input from '@/components/ui/Input.vue';
 import { DataTable, personName, type ContextAction, type DataColumn } from '@brftech/filex-core';
 import Modal from '@/components/ui/Modal.vue';
@@ -465,21 +466,22 @@ onMounted(load);
       </template>
 
       <template #cell-expires_at="{ row }">
-        <span class="text-xs whitespace-nowrap" :title="shareOf(row).expires_at ? formatDate(shareOf(row).expires_at, locale) : ''">
-          <!-- ⚠ A revoked link's `expires_at` is the moment it was revoked;
-               printed as an expiry it read "21 Eyl 2026 15:55 · 9 saniye
-               önce" — a link that had merely run out. `revoked_at` (00053)
-               says which it is. -->
-          <span v-if="isRevoked(shareOf(row))" class="text-rose-600 dark:text-rose-400" data-testid="share-revoked-on">
-            {{ t('shares.revokedOn', { date: formatDate(shareOf(row).revoked_at || shareOf(row).expires_at, locale) }) }}
-          </span>
-          <template v-else-if="shareOf(row).expires_at">
-            {{ formatDate(shareOf(row).expires_at, locale) }}
-            <span class="text-zinc-400">·</span>
-            {{ formatRelative(shareOf(row).expires_at, locale) }}
-          </template>
-          <template v-else>{{ t('shares.neverExpires') }}</template>
+        <!-- ⚠ A revoked link's `expires_at` is the moment it was revoked;
+             printed as an expiry it read "21 Eyl 2026 15:55 · 9 saniye
+             önce" — a link that had merely run out. `revoked_at` (00053)
+             says which it is. -->
+        <span
+          v-if="isRevoked(shareOf(row))"
+          class="tbl-clamp text-xs text-rose-600 dark:text-rose-400"
+          data-testid="share-revoked-on"
+          :title="t('shares.revokedOn', { date: formatDate(shareOf(row).revoked_at || shareOf(row).expires_at, locale) })"
+        >
+          {{ t('shares.revokedOn', { date: formatDate(shareOf(row).revoked_at || shareOf(row).expires_at, locale) }) }}
         </span>
+        <!-- The date, and how far away it is UNDER it: on one line the
+             distance was cut at the column's edge ("· in 7 day"). -->
+        <DateWithDistance v-else-if="shareOf(row).expires_at" :at="shareOf(row).expires_at!" :locale="locale" />
+        <span v-else class="text-xs">{{ t('shares.neverExpires') }}</span>
       </template>
 
     </DataTable>

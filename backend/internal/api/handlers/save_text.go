@@ -52,6 +52,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"path"
@@ -60,10 +61,12 @@ import (
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
+	"github.com/brf-tech/filex/backend/internal/editkind"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/protocolsync"
+	"github.com/brf-tech/filex/backend/internal/quota"
 	"github.com/brf-tech/filex/backend/internal/realtime"
 	"github.com/brf-tech/filex/backend/internal/search"
 	"github.com/brf-tech/filex/backend/internal/storage"
@@ -186,7 +189,7 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if readOnly {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "storage is read-only"})
+		writeReadOnly(w, r, http.StatusForbidden)
 		return
 	}
 	// No save onto an entry the storage could not answer for, or into one
@@ -288,8 +291,22 @@ func (h *SaveText) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body := []byte(req.Content)
-	if err := checkUploadSize(r.Context(), h.Store, int64(len(body))); err != nil {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error(), "code": "FILE_TOO_LARGE"})
+	// The per-file limit, and the account's ceiling for what the save adds
+	// (an edit adds only what it grows the file by): the upload's question
+	// and its answer, 413 FILE_TOO_LARGE / QUOTA_EXCEEDED.
+	var replacing int64
+	if existing != nil && existing.Type == model.NodeTypeFile {
+		replacing = existing.Size
+	}
+	if err := checkWriteQuota(r.Context(), h.Store, int64(len(body)), replacing); err != nil {
+		switch {
+		case errors.Is(err, quota.ErrFileTooLarge):
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error(), "code": "FILE_TOO_LARGE"})
+		case errors.Is(err, quota.ErrQuotaExceeded):
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "quota exceeded", "code": "QUOTA_EXCEEDED"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 	if err := wr.Write(r.Context(), rel, bytes.NewReader(body), int64(len(body))); err != nil {
@@ -403,57 +420,15 @@ func (h *SaveText) catalogueSaysText(ctx context.Context, storageID int64, rel s
 	return isTextualMime(n.Mime)
 }
 
-// isTextualMime reports whether a media type is text a person edits as text:
-// any text/*, and the structured-text types filed under application/.
-//
-// ⚠ The same list is in packages/core/src/lib/textMime.ts, which decides that
-// the explorer opens such a file in its text editor. The two answer one
-// question — "is this file text?" — from the two ends, and a file the editor
-// opens but save-text refuses is the bug #56 found.
-func isTextualMime(m string) bool {
-	m = strings.ToLower(strings.TrimSpace(m))
-	if i := strings.IndexByte(m, ';'); i >= 0 {
-		m = strings.TrimSpace(m[:i])
-	}
-	if strings.HasPrefix(m, "text/") {
-		return true
-	}
-	switch m {
-	case "application/json", "application/xml", "application/yaml", "application/x-yaml",
-		"application/javascript", "application/x-sh", "application/toml":
-		return true
-	}
-	return false
-}
+// isTextualMime reports whether a media type is text a person edits as text.
+// The rule is internal/editkind's, the one the server publishes to every
+// client (`capabilities.edit_kinds`, filex #211): a file the editor opens but
+// save-text refuses is the bug #56 found.
+func isTextualMime(m string) bool { return editkind.TextualMime(m) }
 
-// isTextSafePath returns true for extensions that round-trip cleanly as
-// UTF-8 plain text — JSON, YAML, code, markdown, config files. Binary
-// formats (images, archives, office docs) are rejected; they have
-// dedicated edit channels (OnlyOffice / explicit upload). A draw.io diagram
-// is XML and is saved here by the draw.io viewer.
-func isTextSafePath(rel string) bool {
-	ext := strings.ToLower(strings.TrimPrefix(path.Ext(rel), "."))
-	switch ext {
-	case "txt", "md", "markdown", "log", "csv", "tsv",
-		"conf", "ini", "env", "toml", "cfg", "properties",
-		"json", "jsonc", "yaml", "yml", "xml", "svg", "html", "htm",
-		"css", "scss", "sass", "less",
-		"js", "mjs", "cjs", "ts", "tsx", "jsx", "vue", "svelte",
-		"php", "py", "rb", "rs", "go", "java", "kt", "swift",
-		"cpp", "c", "h", "hpp", "cs", "dart",
-		"sh", "bash", "zsh", "sql", "lua", "pl", "r",
-		"dockerfile", "gradle", "gitignore", "editorconfig",
-		// A draw.io diagram is XML, and the draw.io viewer saves it here.
-		// Without these, a new diagram (catalogued as
-		// application/vnd.jgraph.mxfile) could be opened and never saved.
-		"drawio", "dio":
-		return true
-	}
-	// Files with no extension OR special filenames.
-	base := strings.ToLower(path.Base(rel))
-	switch base {
-	case "dockerfile", "makefile", ".env", ".gitignore", ".editorconfig":
-		return true
-	}
-	return false
-}
+// isTextSafePath returns true for names that round-trip cleanly as UTF-8
+// plain text (internal/editkind TextEditable): JSON, YAML, code, markdown,
+// config files, and a draw.io or Mermaid diagram, which their viewers save
+// here. Binary formats (images, archives, office docs) are rejected; they
+// have dedicated edit channels (OnlyOffice / explicit upload).
+func isTextSafePath(rel string) bool { return editkind.TextEditable(rel) }

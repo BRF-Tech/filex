@@ -59,6 +59,8 @@ test.describe('Empty trash is an operation', () => {
 
     const posted = page.waitForResponse((r) => r.url().includes('/api/admin/trash/empty') && r.request().method() === 'POST');
     await page.getByTestId('trash-empty').click();
+    // The dialog names the server's count of what the purge deletes (0.54, D1).
+    await expect(page.getByTestId('trash-empty-count')).toContainText(/permanently deletes|kalıcı olarak siler/);
     await page.getByTestId('trash-empty-confirm').click();
     const res = await posted;
     expect(res.status(), 'an ordinary trash is done within the wait').toBe(200);
@@ -66,7 +68,8 @@ test.describe('Empty trash is an operation', () => {
     expect(body.op_id, 'the answer names its ops row').toBeGreaterThan(0);
     expect(body.running).toBe(false);
 
-    await expect(page.getByText(/^(Trash emptied|Çöp kutusu boşaltıldı)$/)).toBeVisible();
+    // How it ended is the server's sentence (0.54, A4).
+    await expect(page.getByText(/^(Trash emptied: \d|Çöp kutusu boşaltıldı: \d)/).first()).toBeVisible();
     for (const n of names) {
       await expect(page.locator('[data-fe-path]').filter({ hasText: n })).toHaveCount(0);
     }
@@ -92,8 +95,9 @@ test.describe('Empty trash is an operation', () => {
     await expect(page.getByText(names[0]).first()).toBeVisible({ timeout: 15_000 });
 
     await page.getByTestId('trash-empty-open').click();
+    await expect(page.getByTestId('trash-empty-count')).toBeVisible();
     await page.getByTestId('trash-empty-confirm').click();
-    await expect(page.getByText(/items? purged|öğe silindi/).first()).toBeVisible();
+    await expect(page.getByText(/items? deleted for good|kalıcı olarak silindi/).first()).toBeVisible();
     await expect(page.getByText(names[0])).toHaveCount(0);
     await expect(page.getByTestId('trash-emptying')).toHaveCount(0);
   });
@@ -114,16 +118,27 @@ test.describe('Empty trash is an operation', () => {
         posted = true;
         await route.fulfill({
           status: 202,
-          json: { ok: true, op_id: 987654, running: true, total: 61844, scanned: 120, purged: 120, failed: 0, bytes: 0, started_at: new Date().toISOString() },
+          json: {
+            ok: true, op_id: 987654, running: true, total: 61844, scanned: 120, purged: 120, failed: 0, bytes: 0,
+            started_at: new Date().toISOString(), summary: 'Emptying the trash… 120 of 61,844',
+          },
         });
         return;
       }
       looks++;
       await route.fulfill({
         status: 200,
+        // The server's sentences ride along (ops say.go).
         json: cancelled
-          ? { ok: true, op_id: 987654, running: false, cancelled: true, total: 61844, scanned: 4000, purged: 4000, failed: 0, bytes: 0, started_at: new Date().toISOString() }
-          : { ok: true, op_id: 987654, running: true, total: 61844, scanned: 3000, purged: 3000, failed: 0, bytes: 0, started_at: new Date().toISOString() },
+          ? {
+              ok: true, op_id: 987654, running: false, cancelled: true, total: 61844, scanned: 4000, purged: 4000, failed: 0,
+              bytes: 0, started_at: new Date().toISOString(),
+              summary: 'Emptying the trash was stopped after 4,000 items; the rest is still in the trash.',
+            }
+          : {
+              ok: true, op_id: 987654, running: true, total: 61844, scanned: 3000, purged: 3000, failed: 0, bytes: 0,
+              started_at: new Date().toISOString(), summary: 'Emptying the trash… 3,000 of 61,844',
+            },
       });
     });
     await page.route('**/api/files/ops/987654/cancel', async (route) => {
@@ -142,7 +157,7 @@ test.describe('Empty trash is an operation', () => {
 
     await page.getByTestId('trash-empty-stop').click();
     await expect(strip).toHaveCount(0, { timeout: 10_000 });
-    await expect(page.getByText(/Stopped after 4[,.]000 items|4[,.]000 öğeden sonra durduruldu/)).toBeVisible();
+    await expect(page.getByText(/stopped after 4,000 items/)).toBeVisible();
     expect(cancelled, 'the stop is the queue\'s cancel').toBe(true);
     expect(looks).toBeGreaterThan(0);
   });

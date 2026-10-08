@@ -250,7 +250,7 @@ Mounted in the authenticated group. Every write requires the caller to be admin
 | Method | Path | Body / query | Notes |
 |--------|------|--------------|-------|
 | GET | `/api/files/permissions?path=<adapter>://<rel>` | - | `{direct[], inherited[], storage_rbac, effective}`; each grant carries `kind`: `user` or `group`. Owner/admin only. |
-| POST | `/api/files/permissions` | `{path, user_id \| group_id, level, is_dir?}` | Upsert a grant, to a person or to a group. 409 if storage RBAC off; 400 if granting a viewer account >viewer (a group takes any level; each member's account still caps it). |
+| POST | `/api/files/permissions` | `{path, user_id \| group_id, level}` | Upsert a grant, to a person or to a group. 409 if storage RBAC off; 400 if granting a viewer account >viewer (a group takes any level; each member's account still caps it). Whether the grant is a folder's (`is_dir`) is read from the item in the catalogue - a path it has not seen counts as a folder; an `is_dir` in the body is not read (since 0.54). |
 | PATCH | `/api/files/permissions/{id}` | `{level}` | Change a person's grant's level. |
 | DELETE | `/api/files/permissions/{id}` | - | Revoke a person's grant. |
 | PATCH | `/api/files/permissions/groups/{id}` | `{level}` | Change a group's grant's level (a `kind: "group"` row; its own id space). |
@@ -259,6 +259,8 @@ Mounted in the authenticated group. Every write requires the caller to be admin
 | GET | `/api/files/permissions/users?q=` | - | `{users[]}` autocomplete of existing accounts. |
 | GET | `/api/files/permissions/groups?q=` | - | `{groups[]}` - up to 10 groups, matched by name, that the caller could grant to. |
 | POST | `/api/files/permissions/invite` | `{path, email, level, create_user?, role?}` | Existing user → grant; admin+`create_user` → new account+grant (temp password); else public share link. `{mode, url?, temp_password?, emailed}`. Mail sent only when SMTP is verified, else the link/password is returned for on-screen display. |
+| POST | `/api/files/permissions/share-mail` | `{share \| share_id, email \| emails[], locale?}` | E-mail a public link the caller manages; the server writes the message from the link and never mails its PIN. At most 20 addresses per send, 100 an hour per account. [SHARING.md → Emailing a link](SHARING.md#emailing-a-link). |
+| GET | `/api/files/permissions/share-message?share=<token>&lang=` | - | The same message, `{subject, body, pin_withheld}`, without sending it (the OS share sheet). |
 
 ## Endpoint - "shared with me" (`/api/files/manager/shared-with-me`)
 

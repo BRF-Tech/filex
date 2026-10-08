@@ -7,9 +7,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/usage"
 )
+
+// noteLang is the language a note is said in when the context names no
+// reader (srvtext.Reader): the instance's.
+var noteLang = srvtext.Pick("")
 
 // fakeSettings is the settings table, as a map.
 type fakeSettings map[string]string
@@ -64,14 +69,15 @@ func TestService_ReadsTheReportAndPricesIt(t *testing.T) {
 
 	// The page must be told the prices are ours, not the operator's contract.
 	require.True(t, rep.Settings.PricingIsDefault)
-	require.Contains(t, rep.Notes[len(rep.Notes)-1], "not your contract")
+	require.Equal(t, srvtext.Text(noteLang, "server.usage.note.default_prices", srvtext.Vars{"source": rep.Settings.Pricing.Note}),
+		rep.Notes[len(rep.Notes)-1], "the server's sentence, in the reader's language")
 
 	// Second call inside the TTL comes from the cache: one lookup, one fetch.
 	rep2, err := svc.Report(context.Background(), day(2026, 9, 10), day(2026, 9, 10))
 	require.NoError(t, err)
 	require.Len(t, rep2.Days, 5)
 	require.Equal(t, 1, look.calls, "the provider is not re-read on every page load")
-	require.Contains(t, rep2.Notes, "served from cache")
+	require.Contains(t, rep2.Notes, srvtext.Text(noteLang, "server.usage.note.cached", nil))
 
 	// …and a settings change drops it.
 	svc.Invalidate()
@@ -93,7 +99,7 @@ func TestService_SaysWhenTheProviderHasPublishedNothing(t *testing.T) {
 	rep, err := svc.Report(context.Background(), day(2026, 9, 1), day(2026, 9, 3))
 	require.NoError(t, err)
 	require.Empty(t, rep.Days)
-	require.Contains(t, rep.Notes[0], "published no report")
+	require.Equal(t, srvtext.Text(noteLang, "server.usage.note.no_report", nil), rep.Notes[0])
 }
 
 // An operator's own price table wins over ours, and is then not labelled as a

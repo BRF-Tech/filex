@@ -24,6 +24,7 @@ import type { LocaleCode, ThemeMode } from '../../types/ExplorerConfig';
 import type { PublicEntry, PublicShareInfo } from '../../types/Public';
 import type { PublicLinkStore } from '../../composables/usePublicLink';
 import { useLocale } from '../../composables/useLocale';
+import { usePublicText } from '../../composables/usePublicText';
 import SurfaceConversation from '../plugin/SurfaceConversation.vue';
 import SurfaceFooterButtons from '../plugin/SurfaceFooterButtons.vue';
 
@@ -41,6 +42,9 @@ const emit = defineEmits<{
 }>();
 
 const { t, formatSize, formatDate } = useLocale(() => props.locale);
+/* The link page's own sentences are the server's (server.public.*), the same
+   ones its no-JavaScript page says (composables/usePublicText). */
+const { pt } = usePublicText(() => String(props.locale));
 
 const info = computed(() => props.link.info.value);
 const kind = computed(() => info.value?.kind ?? 'file');
@@ -121,7 +125,7 @@ const parent = computed(() => {
       <p v-if="!node?.name" class="fe-surface__text">
         <strong>{{ info?.subject }}</strong>
       </p>
-      <p class="fe-surface__text fe-surface__text--muted" role="status">{{ t('public.unavailable') }}</p>
+      <p class="fe-surface__text fe-surface__text--muted" role="status">{{ pt('err_unavailable_body') }}</p>
     </div>
   </template>
 
@@ -134,7 +138,7 @@ const parent = computed(() => {
       </p>
       <nav v-if="info?.path" class="fe-ppage__crumbs" data-testid="public-share-crumbs">
         <button type="button" class="fe-btn fe-btn--sm" @click="emit('navigate', parent ?? '')">
-          {{ t('public.up') }}
+          {{ pt('folder_up') }}
         </button>
         <span class="fe-ppage__crumb">{{ info?.path }}</span>
       </nav>
@@ -170,10 +174,10 @@ const parent = computed(() => {
 
       <div class="fe-ppage__actions">
         <a class="fe-btn fe-btn--primary" :href="link.downloadUrl({ zip: true })" data-testid="public-share-zip">
-          {{ t('public.download_all') }}
+          {{ pt('folder_zip') }}
         </a>
         <a v-if="!entries.length" class="fe-btn" :href="link.noJsUrl()" data-testid="public-share-browse">
-          {{ t('public.browse') }}
+          {{ pt('browse') }}
         </a>
       </div>
     </div>

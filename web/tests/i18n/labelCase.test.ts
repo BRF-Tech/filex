@@ -69,7 +69,8 @@ const NAMES = new Set([
   'Arm', 'Intel', // processor makers, in "For Arm processors (arm64)" (install.dl.other_*)
   'Acme', 'Cloud', 'Bulut', // the placeholder's made-up company name
   // …and its made-up person, in the file-request page's "your name" box
-  // (public.your_name_ph). A sample name is a name.
+  // (public.your_name_ph until 0.54, now the server catalogue's
+  // server.public.drop_name_ph). A sample name is a name.
   'Alex', 'Smith', 'Ahmet', 'Yılmaz',
 ]);
 

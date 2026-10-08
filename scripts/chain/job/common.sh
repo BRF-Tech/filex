@@ -4,7 +4,8 @@
 # /w/run, scripts/chain at /w/chain (read-only) and the caches under /w/cache.
 # JOB is the job's name; what the job keeps (test output, reports) goes to
 # /w/run/out/$JOB. A job ends with one `SUMMARY ...` line, which run.mjs
-# copies into the run's result, and exits non-zero when it is red.
+# copies into the run's result, and exits non-zero when it is red; its
+# `JOBWARN ...` lines (warn, below) are what a green job wants read.
 
 set -u
 set -f
@@ -12,6 +13,11 @@ OUT="/w/run/out/${JOB:?JOB is not set}"
 mkdir -p "$OUT"
 
 summary() { echo "SUMMARY $*"; }
+
+# Something a person must read although the job is green (it exits 0): run.mjs
+# keeps every `JOBWARN ...` line in the job's record (`warnings`), and the
+# nightly morning report lists them and makes the night a warning.
+warn() { echo "JOBWARN $*"; }
 
 # The packages of PKGS (go list patterns) minus those of EXCLUDE, as import
 # paths, one per line. Run from /w/src/backend.

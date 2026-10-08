@@ -20,6 +20,9 @@ import {
   parentOfWire,
   permAllowsWrite,
   splitWire,
+  vaultBlocked,
+  vaultDeadEnd,
+  vaultOfWire,
 } from '@brftech/filex-core/src/lib/destinationTree';
 import type { FileNode } from '@brftech/filex-core/src/types/FileNode';
 
@@ -197,5 +200,42 @@ describe('initialLocation', () => {
   });
   it('falls back to the only storage root when there is just one', () => {
     expect(initialLocation('', ['main'])).toBe('main://');
+  });
+});
+
+// wiring:e2 vault — what is in a vault moves only inside it; nothing goes
+// into one or out of one on the server (docs/E2E-VAULT-FORMAT.md).
+describe('the vault rule', () => {
+  const roots = ['main://A/Kasa'];
+  const of = (p: string) => vaultOfWire(p, roots);
+
+  it('finds the vault a path is in or is', () => {
+    expect(of('main://A/Kasa')).toBe('main://A/Kasa');
+    expect(of('main://A/Kasa/Belgeler/2026')).toBe('main://A/Kasa');
+    expect(of('main://A/Kasa2')).toBeNull();
+    expect(of('main://A')).toBeNull();
+    expect(of('s3://A/Kasa')).toBeNull();
+    expect(of(DRIVES)).toBeNull();
+  });
+
+  it('from outside every vault: no vault is a destination', () => {
+    expect(vaultBlocked('main://A/Kasa', null, of)).toBe('into');
+    expect(vaultBlocked('main://A/Kasa/x', null, of)).toBe('into');
+    expect(vaultBlocked('main://A', null, of)).toBeNull();
+    expect(vaultDeadEnd('main://A/Kasa', null, of)).toBe(true);
+    expect(vaultDeadEnd('main://A', null, of)).toBe(false);
+  });
+
+  it('from inside a vault: only that vault, and the folders that hold it stay open', () => {
+    const from = 'main://A/Kasa';
+    expect(vaultBlocked('main://A/Kasa/Belgeler', from, of)).toBeNull();
+    expect(vaultBlocked('main://A/Kasa', from, of)).toBeNull();
+    expect(vaultBlocked('main://A', from, of)).toBe('out');
+    expect(vaultBlocked('main://B', from, of)).toBe('out');
+    expect(vaultDeadEnd('main://A', from, of), 'the way back in').toBe(false);
+    expect(vaultDeadEnd('main://', from, of), 'the way back in').toBe(false);
+    expect(vaultDeadEnd('main://B', from, of)).toBe(true);
+    expect(vaultDeadEnd('s3://', from, of)).toBe(true);
+    expect(vaultBlocked(DRIVES, from, of)).toBeNull();
   });
 });

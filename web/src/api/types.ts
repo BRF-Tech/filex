@@ -111,6 +111,7 @@ export type {
   StorageFieldType,
 } from '@brftech/filex-core';
 
+import type { EditKinds, EventOff, ServerLimits } from '@brftech/filex-core';
 import type { StorageDriverCapabilities, StorageField } from '@brftech/filex-core';
 
 export interface StorageDriverDescriptor {
@@ -140,7 +141,7 @@ export interface StorageDriverDescriptor {
  * explorer's own copy of the shape — one type for both packages.
  */
 export type { CatalogCoverage } from '@brftech/filex-core';
-import type { CatalogCoverage } from '@brftech/filex-core';
+import type { CatalogCoverage, NotificationE2E } from '@brftech/filex-core';
 
 export interface StorageRef {
   id: number;
@@ -313,6 +314,20 @@ export interface DemoMode {
 export interface Capabilities {
   version: string;
   build: string;
+  /** 0.54 (#211, audit A11): the release (`v0.54.0`), the commit and the
+   *  build time, apart - no page parses `version` any more. `commit` and
+   *  `built` are absent when the build did not stamp them. */
+  release?: string;
+  commit?: string;
+  built?: string;
+  /** 0.54 (#211): how each kind of file is edited, and the numbers an input
+   *  is held to - the server's rules (core lib/serverRules). */
+  edit_kinds?: EditKinds;
+  limits?: ServerLimits;
+  /** 0.54 (#211, audit B16): the notification events that cannot happen on
+   *  this instance, by event - why, whether this caller could change it, and
+   *  the sentence that says so. An event absent here can happen. */
+  event_off?: Record<string, EventOff>;
   ffmpeg: boolean;
   imagemagick: boolean;
   /** That ImageMagick decodes a HEIC photo: measured by the server with a
@@ -459,6 +474,16 @@ export interface ExternalService {
    * container. Only OnlyOffice calls back, so only it shows the field.
    */
   callback_url?: string;
+  /**
+   * ONLYOFFICE only: the editor's language, `auto` (each person's own filex
+   * language) or a fixed one. The server decides with it what every editor
+   * opens in (backend onlyoffice/lang.go); the page only shows and sets it.
+   */
+  editor_lang?: string;
+  /** The languages `editor_lang` may be, named in themselves: the server's list. */
+  editor_languages?: Array<{ code: string; name: string }>;
+  /** FILEX_ONLYOFFICE_LANG pins `editor_lang`: a change here lasts until filex restarts. */
+  editor_lang_env_managed?: boolean;
 }
 
 export interface AuthProvider {
@@ -561,6 +586,10 @@ export interface AuthProviderCheck {
   id: string;
   status: 'ok' | 'fail' | 'unchecked';
   params?: Record<string, string>;
+  /** The step in words, in the screen's language: the server says every
+   *  step of a provider test (backend auth/probe_say.go SayChecks) and every
+   *  page prints it as it is. */
+  text?: string;
 }
 
 /** `POST /api/admin/auth-providers/{name}/test`. */
@@ -588,6 +617,18 @@ export interface AuditEntry {
   /** WHICH thing the row is about, in words — a user's e-mail, a storage's
    *  name, a file's path (backend handlers/audit_targets.go). */
   target_name?: string | null;
+  /** The action in words and the thing it is about in words, said by the
+   *  server in the screen's language (backend handlers/audit_label.go). The
+   *  page prints them as they are; it composes nothing from the wire names. */
+  label?: string | null;
+  target_label?: string | null;
+}
+
+/** One entry of the Audit page's "What" filter, as the server lists it: the
+ *  label in the screen's language and the `<resource>.` prefixes it filters. */
+export interface AuditResourceOption {
+  value: string;
+  label: string;
 }
 
 export interface Share {
@@ -626,7 +667,16 @@ export interface Share {
   revoked?: boolean;
   /** Current backend timestamp; truthy = revoked. */
   revoked_at?: string | null;
+  /**
+   * Where the link stands, as the server judges it (model.Share.StateAt) - on
+   * every LIST of links. The screen shows it; it never works it out from
+   * `expires_at` on the browser's clock (which missed a used-up link).
+   */
+  state?: ShareState;
 }
+
+/** A listed link's state (model.Share.StateAt). */
+export type ShareState = 'active' | 'expired' | 'exhausted' | 'revoked';
 
 export interface DashboardStats {
   storage_count: number;
@@ -725,10 +775,17 @@ export interface NotificationItem {
   id: number;
   event: string;
   severity: Severity;
+  /** The sentence, said by the server in the reader's language (backend
+   *  notify say.go; the language of the reader's account). */
   title: string;
   body: string;
   meta: Record<string, unknown>;
   target?: NotificationTargetRef;
+  /** Where an encrypted item's name stands in title/body, for a screen that
+   *  can name it (core lib/notificationText). */
+  e2e?: NotificationE2E | null;
+  /** Whether a click on the row goes somewhere - the server's verdict. */
+  opens?: boolean | null;
   user_id?: number | null;
   /** Display name of the row's person — admin list only (server fills it). */
   user_name?: string;
@@ -743,7 +800,13 @@ export interface NotificationItem {
   audience?: 'everyone' | 'viewers' | 'admins' | 'nobody';
   read_at?: string | null;
   webhook_status: WebhookStatus;
+  /** A skipped delivery's code (no_destination, digest_unnamed, sibling,
+   *  stopped) or a failed one's error, as stored. */
   webhook_error?: string;
+  /** The webhook cell's second half in the screen's language, said by the
+   *  server (notify.WebhookReason): why it was skipped, or the receiver's
+   *  error for a failed delivery. */
+  webhook_reason?: string;
   created_at: string;
 }
 
@@ -825,6 +888,10 @@ export interface WebhookTarget {
   last_error?: string | null;
   /** Timestamp of the newest delivery attempt (RFC3339, UTC). */
   last_delivery_at?: string | null;
+  /** The language this target's `title` and `body` are said in (#191,
+   *  migration 00105); '' = the server's (FILEX_DEFAULT_LOCALE). The body
+   *  also carries the message untranslated (`i18n`). */
+  lang?: string;
 }
 
 export interface WebhookTargetCreatePayload {
@@ -833,6 +900,7 @@ export interface WebhookTargetCreatePayload {
   secret?: string;
   events?: string[];
   enabled?: boolean;
+  lang?: string;
 }
 
 export interface WebhookTargetPatchPayload {
@@ -841,6 +909,7 @@ export interface WebhookTargetPatchPayload {
   secret?: string; // absent = keep, '' = clear, value = replace
   events?: string[];
   enabled?: boolean;
+  lang?: string; // '' = the server's language
 }
 
 export interface WebhookTargetTestResult {

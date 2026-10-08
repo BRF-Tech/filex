@@ -158,13 +158,13 @@ func (h *S3Keys) Create(w http.ResponseWriter, r *http.Request) {
 		// set FILEX_SECRET_KEY to issue S3 access keys" — and the connections
 		// panel printed it to every regular user who pressed "Create key"
 		// (QA, 2026-09-21): an environment variable is the operator's
-		// business. The client says `no_secret_key` in the person's language
-		// (lib/errorWords); `admin_hint` is added for a caller who can act.
-		body := map[string]string{"error": "no_secret_key"}
+		// business. The server says `no_secret_key` in the person's language
+		// (`message`, apierr); `admin_hint` is added for a caller who can act.
+		var extra []any
 		if callerMayConfigureInstance(r) {
-			body["admin_hint"] = "Set FILEX_SECRET_KEY on the server and restart filex to issue access keys."
+			extra = []any{"admin_hint", "Set FILEX_SECRET_KEY on the server and restart filex to issue access keys."}
 		}
-		writeJSON(w, http.StatusServiceUnavailable, body)
+		writeError(w, r, http.StatusServiceUnavailable, "no_secret_key", nil, extra...)
 		return
 	case errors.Is(err, protocolauth.ErrWidensParent):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

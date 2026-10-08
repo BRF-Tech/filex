@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,6 +79,7 @@ func editorFixture(t *testing.T, root string) (*httptest.Server, db.Store) {
 // first (FILEX_APP_UI_ORIGIN, for the editor's frame - task #92).
 func editorFixtureWith(t *testing.T, root string, cfgMutate func(*config.Config)) (*httptest.Server, db.Store) {
 	t.Helper()
+	ds := newEditorDocServer(t)
 	srv, _, store := testutil.NewTestServerWith(t, cfgMutate, func(d *api.Deps) {
 		d.StorageResolver = func(id int64) (storage.Driver, error) {
 			drv := &local.Driver{}
@@ -88,8 +90,12 @@ func editorFixtureWith(t *testing.T, root string, cfgMutate func(*config.Config)
 		}
 		d.Versions = versioning.New(d.Store, d.StorageResolver)
 		d.OnlyOffice = onlyoffice.New(d.Store, d.StorageResolver,
-			"http://ds.test", "onlyoffice-test-secret", "http://test.local", time.Hour)
+			ds.srv.URL, "onlyoffice-test-secret", "http://test.local", time.Hour)
+		ds.svc = d.OnlyOffice
 	})
+	ds.store = store
+	editorDocServers.Store(srv.URL, ds)
+	t.Cleanup(func() { editorDocServers.Delete(srv.URL) })
 	// ⚠ BuildRouter with a versioning service installs the process-wide
 	// overwrite guard over THIS test's store. Left behind, every later test in
 	// the binary that writes without building its own router snapshots through
@@ -106,17 +112,58 @@ func editorFixtureWith(t *testing.T, root string, cfgMutate func(*config.Config)
 	return srv, store
 }
 
-// editorSave is the document server's save callback for nodeID, signed, with
-// a stand-in document server serving content.
+// editorDocServer is the stand-in document server of one editor fixture: the
+// address its OnlyOffice service is configured with (since 0.54 a saved
+// document is fetched from nowhere else), serving the content of the save in
+// hand at any path.
+type editorDocServer struct {
+	srv   *httptest.Server
+	svc   *onlyoffice.Service
+	store db.Store
+
+	mu      sync.Mutex
+	content string
+}
+
+// editorDocServers maps a fixture's filex URL to its document server.
+var editorDocServers sync.Map
+
+func newEditorDocServer(t *testing.T) *editorDocServer {
+	t.Helper()
+	ds := &editorDocServer{}
+	ds.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		ds.mu.Lock()
+		body := ds.content
+		ds.mu.Unlock()
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(ds.srv.Close)
+	return ds
+}
+
+// editorDocServerOf is the document server of the fixture at base.
+func editorDocServerOf(t *testing.T, base string) *editorDocServer {
+	t.Helper()
+	v, ok := editorDocServers.Load(base)
+	require.True(t, ok, "the rig: no editor fixture at %s", base)
+	return v.(*editorDocServer)
+}
+
+// editorSave is the document server's save callback for nodeID, signed, for
+// the document key filex gives the node (0.54: the callback acts only on a key
+// filex made for the document it names), with the fixture's document server
+// serving content.
 func editorSave(t *testing.T, base string, nodeID int64, content string) (int, string) {
 	t.Helper()
-	ds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(content))
-	}))
-	t.Cleanup(ds.Close)
-	claims := map[string]any{"key": "k", "status": 2, "url": ds.URL + "/saved.docx"}
-	body := map[string]any{"key": "k", "status": 2, "url": ds.URL + "/saved.docx",
-		"token": ooSign(t, "onlyoffice-test-secret", claims)}
+	ds := editorDocServerOf(t, base)
+	ds.mu.Lock()
+	ds.content = content
+	ds.mu.Unlock()
+	node, err := ds.store.GetNode(context.Background(), nodeID)
+	require.NoError(t, err)
+	key := ds.svc.DocumentKey(context.Background(), node)
+	claims := map[string]any{"key": key, "status": 2, "url": ds.srv.URL + "/saved.docx"}
+	body := map[string]any{"token": ooSign(t, "onlyoffice-test-secret", claims)}
 	return fxPost(t, fmt.Sprintf("%s/api/files/onlyoffice/callback?node=%d", base, nodeID), "", body)
 }
 

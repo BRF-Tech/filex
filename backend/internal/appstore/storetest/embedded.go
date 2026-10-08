@@ -190,7 +190,7 @@ func (s *Store) IndexDoc(apps ...map[string]any) map[string]any {
 	return map[string]any{
 		"schema": 1, "serial": 7, "generated_at": time.Now().UTC().Format(time.RFC3339),
 		"expires_at": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
-		"keys": []any{}, "publishers": []any{map[string]any{"id": "acme", "name": "Acme", "github": "acme", "verified": true, "official": false}},
+		"keys":       []any{}, "publishers": []any{map[string]any{"id": "acme", "name": "Acme", "github": "acme", "verified": true, "official": false}},
 		"apps": list,
 	}
 }

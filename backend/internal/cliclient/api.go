@@ -475,12 +475,23 @@ type SearchHit struct {
 // SearchResult is the /api/files/search envelope.
 type SearchResult struct {
 	Results []SearchHit `json:"results"`
-	Raw     []byte      `json:"-"`
+	// Truncated: more matched than came back. Total is how many matched,
+	// exact unless Truncated (then a lower bound).
+	Truncated bool   `json:"truncated"`
+	Total     int    `json:"total"`
+	Raw       []byte `json:"-"`
 }
 
 // Search queries the server-side index. scope is "name", "content" or
 // "all" ("" = server default, all). storageID 0 searches every storage.
 func (c *Client) Search(ctx context.Context, query, scope string, storageID int64, limit int) (*SearchResult, error) {
+	return c.SearchFiltered(ctx, query, scope, storageID, limit, nil)
+}
+
+// SearchFiltered is Search with the server's narrowing (type, mime,
+// modified_after, modified_before, min_size, max_size, under, not_under,
+// owner, hidden - docs/SEARCH.md), applied on the server before the limit.
+func (c *Client) SearchFiltered(ctx context.Context, query, scope string, storageID int64, limit int, filters url.Values) (*SearchResult, error) {
 	switch scope {
 	case "", "name", "content", "all":
 	default:
@@ -496,6 +507,13 @@ func (c *Client) Search(ctx context.Context, query, scope string, storageID int6
 	}
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
+	}
+	for k, vs := range filters {
+		for _, v := range vs {
+			if v != "" {
+				q.Set(k, v)
+			}
+		}
 	}
 	req, err := c.newRequest(ctx, http.MethodGet, "/api/files/search", q, nil)
 	if err != nil {

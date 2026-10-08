@@ -1227,15 +1227,11 @@ func (s *Service) announce(ctx context.Context, r *model.PluginRequest) {
 			}
 		}
 	}
-	verb := "install"
-	if r.Op == model.PluginRequestOpUpgrade {
-		verb = "upgrade to"
-	}
+	// The facts only: the server says the request from them, in each
+	// reader's language (internal/notify say.go, server.notify.plugin_requested).
 	if _, err := s.o.Notify.Send(context.WithoutCancel(ctx), notify.Event{
 		Event: notify.EventPluginRequested, Severity: notify.SeverityInfo,
-		Title: fmt.Sprintf("%s asks to %s %s %s", r.Requester, verb, r.Name, r.Version),
-		Body:  r.Reason,
-		Meta:  meta,
+		Meta: meta,
 	}); err != nil {
 		s.o.Log.Warn("pluginreq: request notice not sent", slog.Int64("request", r.ID), slog.Any("err", err))
 	}

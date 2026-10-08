@@ -64,6 +64,10 @@ import {
   requestBrowserNotifyPermission,
   setBrowserNotifyEnabled,
 } from '@/lib/browserNotify';
+// #191 - push notifications on this device: core's one flow, given this app's
+// service worker and client (lib/webPush). Absent inside the desktop app.
+import { webPushFor } from '@/lib/webPush';
+import type { WebPushController } from '@brftech/filex-core';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -83,6 +87,14 @@ const desktop = useDesktopDownloads();
 // the row here keeps working after that reminder is closed for good.
 const appInstall = useAppInstall();
 
+/** One flow per person signed in (the "on here" note is kept per person). */
+let push: { userId: number | null; ctl: WebPushController | null } | null = null;
+function pushControl(): WebPushController | undefined {
+  const userId = auth.user?.id ?? null;
+  if (!push || push.userId !== userId) push = { userId, ctl: webPushFor(userId) };
+  return push.ctl ?? undefined;
+}
+
 const host: UserSettingsHost = {
   get locale() {
     return String(locale.value);
@@ -101,6 +113,7 @@ const host: UserSettingsHost = {
   },
   api: {
     updateProfile: (patch) => AuthApi.updateProfile(patch as Partial<User>),
+    checkAccount: (q) => AuthApi.checkAccount(q),
     changePassword: (current, next) => AuthApi.changePassword(current, next),
     enrollTotp: () => AuthApi.enrollTotp(),
     verifyTotp: (code) => AuthApi.verifyTotp(code),
@@ -118,6 +131,10 @@ const host: UserSettingsHost = {
     },
     // 0.50 - Default apps: which of the person's choices are still on.
     pluginActions: async () => (await api.get<PluginActionsResponse>('/files/plugins/actions')).data,
+    // wiring:e2 vault - the person's idle time for a vault's write lock.
+    vaultIdle: async () => (await api.get<{ idle_minutes: number }>('/files/e2e/vault/prefs')).data.idle_minutes,
+    setVaultIdle: async (minutes) =>
+      (await api.put<{ idle_minutes: number }>('/files/e2e/vault/prefs', { idle_minutes: minutes })).data.idle_minutes,
   },
   setUser(u: SettingsUser) {
     auth.user = u as User;
@@ -186,6 +203,9 @@ const host: UserSettingsHost = {
     enabled: () => browserNotifyEnabled(auth.user?.id),
     setEnabled: (on) => setBrowserNotifyEnabled(on, auth.user?.id),
     ask: () => requestBrowserNotifyPermission(auth.user?.id),
+  },
+  get webPush() {
+    return pushControl();
   },
 };
 

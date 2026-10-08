@@ -144,6 +144,8 @@ export default defineConfig({
           { text: 'Groups', link: '/GROUPS' },
           { text: 'End-to-end encryption', link: '/E2E-ENCRYPTION' },
           { text: 'End-to-end encryption roadmap', link: '/E2E-ROADMAP' },
+          { text: 'Vault format', link: '/E2E-VAULT-FORMAT' },
+          { text: 'Editing encrypted office documents', link: '/E2E-OFFICE' },
           { text: 'Replication', link: '/REPLICATION' },
           { text: 'Multi-tenancy', link: '/MULTI-TENANCY' },
           { text: 'Tenant self-service & own domains', link: '/TENANT-ADMIN' },
@@ -168,6 +170,7 @@ export default defineConfig({
         collapsed: true,
         items: [
           { text: 'HTTP & component API', link: '/API' },
+          { text: 'API errors', link: '/API-ERRORS' },
           { text: 'Metrics (Prometheus)', link: '/METRICS' },
           { text: 'Architecture', link: '/ARCHITECTURE' },
           { text: 'Backend internals', link: '/BACKEND' },

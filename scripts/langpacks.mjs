@@ -24,17 +24,20 @@
  *            pack is touched.
  *   apply    folds the answered worklists into the packs: checks every
  *            answer first (and touches nothing while one is wrong), then the
- *            pack's own `pack.mjs sync` and `build`, its `validate` script
- *            (validate-output.txt), and with --commit a local commit. A pack
- *            whose validators go red is put back as it was. Nothing is pushed.
+ *            pack's own `pack.mjs sync`, drops from every translation the
+ *            keys filex no longer has, the answers, `pack.mjs build`, its
+ *            `validate` script (validate-output.txt), and with --commit a
+ *            local commit. A pack whose validators go red is put back as it
+ *            was. Nothing is pushed.
  *   pull     brings the nightly translations home: in every pack checkout
  *            with a `nightly` remote (the build host's checkout, where the
  *            nightly translation commits), fetches it and fast-forwards to
  *            it. A checkout with changes of its own, or one both sides moved
  *            on, is left for a person.
- *   release  release day: refreshes every pack from the release's catalogue,
- *            moves its version one patch up, rewrites the README's status
- *            block, validates and commits, then prints the signed tag and the
+ *   release  release day: refreshes every pack from the release's catalogue
+ *            (the keys filex no longer has leave its translations, as in
+ *            apply), moves its version one patch up, rewrites the README's
+ *            status block, validates and commits, then prints the signed tag and the
  *            push commands. It signs, tags and pushes nothing itself, and it
  *            holds back a pack that still lacks a translation, or lacks the
  *            commits its `nightly` remote has (pull first). The template
@@ -75,10 +78,12 @@ import {
   readPack,
   releaseMessage,
   replaceStatusBlock,
+  staleKeys,
   statusBlock,
   syncedTranslation,
   tableCounts,
   templateReadme,
+  withoutStale,
   worklistItems,
   wrap,
 } from './lib/langpacks.mjs';
@@ -95,7 +100,7 @@ export const USAGE = `usage: node scripts/langpacks.mjs <command> [options]
   todo    [--packs a,b] [--catalogue <dir|vX.Y.Z>] [--out <dir>]
           write the translator's worklists, the catalogue, status.json and AGENT.md
   apply   --worklist <dir> [--packs a,b] [--commit] [--trailer "<line>"]
-          fold the answered worklists into the packs, validate, commit locally
+          fold the answered worklists into the packs (the keys filex dropped leave them), validate, commit locally
   pull    [--packs a,b]
           fast-forward every pack to its nightly remote (the build host's nightly translations)
   release <X.Y.Z> [--packs a,b] [--template <dir>] [--catalogue <dir>] [--keep-changed] [--dry-run] [--trailer "<line>"]
@@ -242,6 +247,33 @@ function commit(dir, files, message) {
   } finally {
     fs.rmSync(msgFile, { force: true });
   }
+}
+
+/**
+ * Right after the pack's `pack.mjs sync`: every translation of the pack loses
+ * the keys filex no longer has (`next` is the catalogue sync just wrote).
+ * Through 0.53 every pack's sync kept them, and the packs' own validators
+ * refuse them as UNKNOWN, so `apply` and `release` went red and put the pack
+ * back on the first key filex dropped (0.53: `tenants.modeOff`, deleted by
+ * hand in every pack). Done here, it holds whatever the pack's script does.
+ * Returns { <tag>: [dropped keys] }; a file with none is not rewritten.
+ */
+function dropStale(dir, langs, next) {
+  const dropped = {};
+  for (const tag of langs) {
+    const file = path.join(dir, 'translations', `${tag}.json`);
+    const t = readJSON(file);
+    dropped[tag] = staleKeys(t, next);
+    if (dropped[tag].length) fs.writeFileSync(file, jsonText(withoutStale(t, next)));
+  }
+  return dropped;
+}
+
+/** "dropped 2 key(s) filex no longer has: de a.x, b.y" for what dropStale did, or '' when it dropped nothing. */
+function droppedNote(name, dropped) {
+  const all = Object.entries(dropped).flatMap(([tag, keys]) => keys.map((k) => `${tag} ${k}`));
+  if (!all.length) return '';
+  return `${name}: dropped ${all.length} key(s) filex no longer has: ${all.slice(0, 8).join(', ')}${all.length > 8 ? ', ...' : ''}`;
 }
 
 /* -- the catalogue a run compares with ---------------------------------- */
@@ -481,7 +513,7 @@ function applyOne({ packDir, wl, wlDir, target, vcat, opts }) {
       problems.push({ tag, key: '(language)', code: 'LANGUAGE', msg: `the pack has no translations/${tag}.json` });
       continue;
     }
-    const merged = mergeItems(syncedTranslation(pack.translations[tag], target.strings), l.items ?? [], { next: target.strings });
+    const merged = mergeItems(withoutStale(syncedTranslation(pack.translations[tag], target.strings), target.strings), l.items ?? [], { next: target.strings });
     const found = merged.problems.length ? merged.problems : itemProblems(tag, merged.translation, l.items ?? [], vcat);
     for (const p of found) problems.push({ tag, ...p });
   }
@@ -492,6 +524,11 @@ function applyOne({ packDir, wl, wlDir, target, vcat, opts }) {
   const snap = snapshot(pack.dir, pack.langs);
   try {
     packScript(pack.dir, ['scripts/pack.mjs', 'sync', '--from', path.join(wlDir, 'catalogue')]);
+    // Every language of the pack, not only the worklist's: sync went
+    // through all of them.
+    const dropped = dropStale(pack.dir, pack.langs, target.strings);
+    const note = droppedNote(pack.name, dropped);
+    if (note) say.push(note);
     const counts = { translated: 0, total: 0 };
     for (const [tag, l] of Object.entries(wl.languages)) {
       const file = path.join(pack.dir, 'translations', `${tag}.json`);
@@ -511,8 +548,10 @@ function applyOne({ packDir, wl, wlDir, target, vcat, opts }) {
       return { ok: true, say };
     }
     // What the commit says it did: the worklist's own diff, read again from
-    // the pack as it was (its first language - a pack carries one).
-    const diff = packDiff({ prev: pack.catalogue, next: target.strings, translation: pack.translations[Object.keys(wl.languages)[0]] });
+    // the pack as it was (its first language - a pack carries one), and the
+    // keys it dropped from that translation.
+    const first = Object.keys(wl.languages)[0];
+    const diff = { ...packDiff({ prev: pack.catalogue, next: target.strings, translation: pack.translations[first] }), removed: dropped[first] ?? [] };
     const sha = commit(
       pack.dir,
       files,
@@ -651,6 +690,10 @@ function releaseOne({ pack, target, vcat, version, opts }) {
   const snap = snapshot(pack.dir, pack.langs);
   try {
     packScript(pack.dir, ['scripts/pack.mjs', 'sync', '--from', target.dir]);
+    // The keys the release dropped leave the translations here too: a
+    // release can drop a key the nightly apply never saw (it lands after the
+    // last night, or a night with nothing to translate makes no worklist).
+    const dropped = dropStale(pack.dir, pack.langs, target.strings);
     const manifestPath = path.join(pack.dir, 'filex-app.json');
     const manifest = readJSON(manifestPath);
     const next = bumpPatch(manifest.version);
@@ -662,10 +705,12 @@ function releaseOne({ pack, target, vcat, version, opts }) {
     packScript(pack.dir, ['scripts/pack.mjs', 'build']);
 
     const say = [...note];
+    const droppedSay = droppedNote(pack.name, dropped);
+    if (droppedSay) say.push(droppedSay);
     const readmePath = path.join(pack.dir, 'README.md');
     if (fs.existsSync(readmePath)) {
       // Measured on the manifest, as `validate.mjs filex-app.json` measures
-      // it: a key filex no longer has stays in translations/ but not there.
+      // it: only the non-empty values of keys filex has are there.
       const built = readJSON(manifestPath).ui_locales ?? {};
       const validators = { errors: 0, warnings: 0 };
       const languages = pack.langs.map((tag) => {
@@ -696,7 +741,15 @@ function releaseOne({ pack, target, vcat, version, opts }) {
     const sha = commit(
       pack.dir,
       files,
-      releaseMessage({ pkgName, version: next, filex: version, diff: diffs[first], kept: diffs[first].changed, validate: v.script, trailers: opts.trailers }),
+      releaseMessage({
+        pkgName,
+        version: next,
+        filex: version,
+        diff: { ...diffs[first], removed: dropped[first] ?? [] },
+        kept: diffs[first].changed,
+        validate: v.script,
+        trailers: opts.trailers,
+      }),
     );
     say.push(`${pack.name}: ${pack.version} -> ${next}, committed ${sha}. To publish:`);
     say.push(...pushCommands(pack, tag, `${pkgName} ${next} (for filex ${version})`));
@@ -711,8 +764,8 @@ function releaseOne({ pack, target, vcat, version, opts }) {
  * The template follows the release too: its catalogue is what a new
  * translator starts from, and it went unrefreshed through 0.52 because no
  * checklist named it. Its example language keeps exactly the catalogue's
- * keys (a key filex dropped leaves it when it holds no text, as the 0.51
- * refresh did by hand); no version, no tag.
+ * keys and their plural forms: a key filex dropped leaves it, filled or
+ * empty, the same rule as a pack's (dropStale); no version, no tag.
  */
 function releaseTemplate({ dir, target, version, opts }) {
   const pack = readPack(dir);
@@ -723,11 +776,7 @@ function releaseTemplate({ dir, target, version, opts }) {
   const snap = snapshot(dir, pack.langs);
   try {
     packScript(dir, ['scripts/pack.mjs', 'sync', '--from', target.dir]);
-    for (const tag of pack.langs) {
-      const file = path.join(dir, 'translations', `${tag}.json`);
-      const kept = Object.fromEntries(Object.entries(readJSON(file)).filter(([k, v]) => k in target.strings || (typeof v === 'string' && v.trim())));
-      fs.writeFileSync(file, jsonText(kept));
-    }
+    dropStale(dir, pack.langs, target.strings);
     packScript(dir, ['scripts/pack.mjs', 'build']);
     const readmePath = path.join(dir, 'README.md');
     if (fs.existsSync(readmePath)) {

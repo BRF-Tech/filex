@@ -27,6 +27,14 @@ import '@brftech/filex';
 <script type="module" src="https://cdn.jsdelivr.net/npm/@brftech/filex/dist/filex.js"></script>
 ```
 
+> ⚠ **`@brftech/filex` 0.54 needs a filex 0.54 server.** Which files open for editing
+> (`edit_kinds`), the input limits (`limits`) and the version line
+> (`release`, `commit`, `built`) come from the server's
+> `/api/files/capabilities`; the package keeps no list of its own to fall
+> back on, so against an older server nothing is offered Edit and nothing
+> opens as an office document. Update the server with the package
+> ([API.md](https://github.com/BRF-Tech/filex/blob/main/docs/API.md)).
+
 ## Styles
 
 **No CSS import, no `<link>`.** The bundle carries the explorer's stylesheet
@@ -129,7 +137,7 @@ Simple attributes are auto-parsed into the underlying `config` prop:
 |---|---|
 | `api-base` | `config.apiBase` |
 | `endpoint` | `config.endpoint` (legacy Vuefinder-compat) |
-| `locale` | `config.locale` - `en`, `tr`, or any language the server has a language pack for (`pt-br`, `es`, `ar`, …). A right-to-left language lays **this element** out right to left, from its own locale rather than the host page's. |
+| `locale` | `config.locale` - `en`, `tr`, or any language the server has a language pack for (`es`, `de`, `fr`, …). A right-to-left language lays **this element** out right to left, from its own locale rather than the host page's. |
 | `theme` | `config.theme` (`light` / `dark` / `auto`) |
 | `trash-visible` | `config.trashVisible` |
 | `sidenav` | `config.sideNav` - the navigation panel (the "+ New" menu · Home / Shared with me / My shares / Recent / Starred / Trash · your tags in two groups, personal and team · an Apps section, one row per installed app's own page · the storages this caller can reach). Present or `="true"` is on, `="false"` off; absent keeps the default, which is on. |

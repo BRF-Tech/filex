@@ -45,9 +45,16 @@ vi.mock('@/api/client', () => ({
             storages: [{ id: 8, name: 'thumbfix', driver: 'local', total_files: 18, total_bytes: 1000, last_sync_at: iso(11_000), state: 'ok' }],
             total_users: 4,
             queue_depth: 0,
+            // The server's totals (handlers/dashboard.go), deliberately NOT
+            // the sum of the storage rows above: the cards print these.
+            total_files: 1234,
+            total_bytes: 5000,
+            active_syncs: 3,
+            // The rows' words are the server's (handlers/audit_label.go),
+            // said in the screen's language; the page composes none.
             recent_activity: [
-              { id: 141, user_id: 1, action: 'user.delete', target_type: 'user', target_id: '14', created_at: iso(120_000), target_name: 'gone@example.com' },
-              { id: 142, user_id: 1, action: 'app-plugins.create', target_type: 'app-plugins', target_id: '', created_at: iso(130_000) },
+              { id: 141, user_id: 1, action: 'user.delete', target_type: 'user', target_id: '14', created_at: iso(120_000), target_name: 'gone@example.com', label: 'Kullanıcı: silindi', target_label: 'Kullanıcı “gone@example.com”' },
+              { id: 142, user_id: 1, action: 'app-plugins.create', target_type: 'app-plugins', target_id: '', created_at: iso(130_000), label: 'Uygulama: oluşturuldu', target_label: 'Uygulama' },
             ],
           },
         };
@@ -149,7 +156,9 @@ describe('admin dashboard', () => {
     // `<ul class="divide-y divide-zinc-200 …">`, then the imitation admin
     // table's `<tr>`, and is DataTable now — the explorer's own table, whose
     // row is `.fe-list__row` (role=row) everywhere in the product.
-    const activity = w.findAll('.fe-list__row').find((tr) => tr.text().includes('User: deleted'));
+    // The row's words are the server's `label` as sent (0.54, #208): the page
+    // composes no "User: deleted" of its own any more.
+    const activity = w.findAll('.fe-list__row').find((tr) => tr.text().includes('Kullanıcı: silindi'));
     expect(activity, 'no activity row').toBeTruthy();
     expect(activity!.text()).toMatch(/minutes? ago/);
     // The wire name is what the row used to print; it stays in the title only.
@@ -217,6 +226,15 @@ describe('admin dashboard says things in words', () => {
     const actions = w.findAll('[data-testid="dashboard-activity-action"]').map((x) => x.text());
     expect(actions).toContain('Uygulama: oluşturuldu');
     expect(actions.join(' ')).not.toContain('app plugins');
+  });
+
+  // 0.54 (audit D9): the cards are the server's totals, never the storage
+  // rows added up again in the browser.
+  it("the files card and the active-sync card are the server's numbers", async () => {
+    const w = mount(Dashboard, { global: { plugins: [createPinia(), await router('/dashboard'), i18n()] } });
+    await flushPromises();
+    await flushPromises();
+    expect(w.text()).toContain('1,234');
   });
 
   // The storage card's badge and the Recent syncs chip printed the wire value

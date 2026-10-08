@@ -55,12 +55,27 @@ async function open(existing: string[] = [], types: NewDocType[] = TYPES) {
     size: 0,
     mime: 'text/plain',
   }));
+  // #211 (audit B18): the server's dry run - taken by exact name (the create's
+  // own Stat), and its " (n)" numbering for the free name.
+  const newFileCheck = vi.fn(async (path: string, name: string) => {
+    const taken = existing.includes(name);
+    let suggested: string | undefined;
+    if (taken) {
+      const dot = name.lastIndexOf('.');
+      const stem = dot > 0 ? name.slice(0, dot) : name;
+      const ext = dot > 0 ? name.slice(dot) : '';
+      for (let i = 2; i < 100 && !suggested; i++) {
+        if (!existing.includes(`${stem} (${i})${ext}`)) suggested = `${stem} (${i})${ext}`;
+      }
+    }
+    return { dry_run: true, path: `${path}${name}`, name, taken, ...(taken ? { code: 'NAME_TAKEN', suggested } : {}) };
+  });
   const w = mount(NewDocumentModal, {
     attachTo: document.body,
     props: {
       open: false,
       locale: 'en',
-      api: { index, newFile } as never,
+      api: { index, newFile, newFileCheck } as never,
       types,
       currentPath: 'main://',
       storages: ['main'],
@@ -70,7 +85,7 @@ async function open(existing: string[] = [], types: NewDocType[] = TYPES) {
   mounted = w;
   await w.setProps({ open: true });
   await settle();
-  return { w, newFile, input: () => w.get<HTMLInputElement>('[data-testid="newdoc-name"]') };
+  return { w, newFile, newFileCheck, input: () => w.get<HTMLInputElement>('[data-testid="newdoc-name"]') };
 }
 
 describe('the name field holds the whole name', () => {
@@ -123,6 +138,23 @@ describe('Create sends the whole name', () => {
     await settle();
     expect(newFile).toHaveBeenCalledWith('main://', name, 'txt', { exactName: true });
     expect(w.emitted('created')?.[0]?.[0]).toMatchObject({ name, ext: 'txt' });
+  });
+
+  it('prefills the server’s free name when Untitled is taken', async () => {
+    const { input, newFileCheck } = await open(['Untitled.txt', 'Untitled (2).txt']);
+    expect(input().element.value).toBe('Untitled (3).txt');
+    expect(newFileCheck).toHaveBeenCalledWith('main://', 'Untitled.txt', 'txt');
+  });
+
+  // The server compares names as the store does; the dialog no longer
+  // lower-cases them itself, so a case-sensitive store's free name is free.
+  it('takes the server’s word that another spelling is free', async () => {
+    const { w, input } = await open(['report.md']);
+    await input().setValue('Report.md');
+    await debounce();
+    await settle();
+    expect(w.find('[data-testid="newdoc-collision"]').exists()).toBe(false);
+    expect(w.get('[data-testid="newdoc-create"]').attributes('disabled')).toBeUndefined();
   });
 
   it('warns about a name already in the folder — the name as typed, not with .txt added', async () => {

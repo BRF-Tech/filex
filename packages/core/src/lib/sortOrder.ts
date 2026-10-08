@@ -113,8 +113,11 @@ const SORT_LS_KEY = 'filex.list-sort';
  * The order the listing arrives in when nobody has chosen one.
  *
  * ⚠ `name` / ascending, and NOT the reference build's `modified` / descending,
- * deliberately: the backend answers a listing name-ascending already, so this
- * default moves nothing on screen for an existing user — and our list view
+ * deliberately: it is the order the server answers a folder in (since 0.54,
+ * task #207: internal/listorder - folders first, then by name, numbers as
+ * numbers - on every path; before, the catalogue path answered files first
+ * and this comment claimed otherwise), so this default moves nothing on
+ * screen for an existing user — and our list view
  * draws date group headings whenever the key is `modified`, which the
  * reference has no equivalent of. Making `modified` the default would put a
  * heading on the first paint of every folder that nobody asked for. Changing

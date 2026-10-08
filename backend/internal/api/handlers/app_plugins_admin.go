@@ -733,6 +733,20 @@ func (h *AppPluginsAdmin) PutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Registry.PutSettings(r.Context(), p.Row.ID, req.Values); err != nil {
+		// A value its manifest field does not accept (wrong type, not one of
+		// the options, outside min/max, a required one left empty): nothing
+		// was stored, and the field is named with the reason in the
+		// administrator's language.
+		var se *wasmplugin.SettingError
+		if errors.As(err, &se) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":   "setting_invalid",
+				"field":   se.Key,
+				"reason":  se.Code,
+				"message": se.Say(langOf(r)),
+			})
+			return
+		}
 		h.fail(w, err)
 		return
 	}

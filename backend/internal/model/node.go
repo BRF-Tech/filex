@@ -97,6 +97,17 @@ type Node struct {
 	// the row, so a JSON reader (the AI/MCP answers) has a flag to test.
 	Unavailable bool `json:"unavailable,omitempty"`
 
+	// LinkState is why a symlink row (NodeTypeSymlink) is a link filex will
+	// not follow: the driver's storage.MetaLinkState - outside_root, broken,
+	// unresolved - as the sync last listed it (migration 00098). Empty when no
+	// reason is known: a row catalogued before 0.54 until the next sync of its
+	// folder, or a driver that gives none.
+	//
+	// ⚠ The common node reads (GetNode, ListNodesByParent, ...) leave it
+	// empty. A listing asks Store.NodeLinkStates for its link rows
+	// (handlers hydrateLinkStates); db.NodeLinkStateSQL says why.
+	LinkState string `json:"link_state,omitempty"`
+
 	// OwnerName is the owner's display name, resolved in one batched lookup by
 	// the API layer for the rows it is about to return. Never persisted, and
 	// empty for a system row — the client decides what to call "nobody".

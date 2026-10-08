@@ -33,8 +33,10 @@ import {
 } from './lib/harness.mjs';
 
 const REMOTE = `${STORAGE}://synclock-e2e`;
-const BUSY_EN = 'Another filex on this computer is syncing this folder — this copy takes over when that one stops';
-const BUSY_TR = 'Bu bilgisayardaki başka bir filex bu klasörü eşitliyor — o kapandığında bu kopya devralır';
+// The ENGINE's sentence (server.sync.lock.busy in backend/internal/srvtext),
+// said in the app's language: the window shows it as it is (#213).
+const BUSY_EN = 'Another filex on this computer is syncing this folder - this copy takes over when that one stops';
+const BUSY_TR = 'Bu bilgisayardaki başka bir filex bu klasörü eşitliyor - o kapandığında bu kopya devralır';
 
 const cli = path.join(DESKTOP, 'build', 'bin', process.platform === 'win32' ? 'filex.exe' : 'filex');
 if (!fs.existsSync(cli)) {
@@ -172,7 +174,7 @@ try {
   check('…as a state, not an error', busy.c?.err === false);
   check('…naming the other process in its tooltip', (busy.c?.title ?? '').includes(`process ${other.pid}`), busy.c?.title ?? '');
   check('…without a live word for a folder this copy does not sync', busy.c?.live === null, String(busy.c?.live));
-  const watchers = appWatchers();
+  let watchers = appWatchers();
   check('the app runs exactly one engine for the account', watchers.length === 1, JSON.stringify(watchers));
 
   // While it waits, the folder is still synced — by the other process.
@@ -188,10 +190,17 @@ try {
     `${JSON.stringify(watchers)} → ${JSON.stringify(appWatchers())}`);
 
   // ── the same card in Turkish ────────────────────────────────────────
+  // ⚠ The engine says the sentence (`--lang`, #213): a new language starts
+  // the watcher again, and the new engine reports the folder busy only after
+  // its grace (synclock.go lockGrace, 10 s).
   await win.evaluate(() => document.querySelector('#settings [data-locale="tr"]')?.click());
-  const tr = await until(async () => { const c = await card(win); return { ok: c?.line === BUSY_TR, c }; }, 8000);
+  const tr = await until(async () => { const c = await card(win); return { ok: c?.line === BUSY_TR, c }; }, 30000);
   check('in Turkish, with Turkish letters', tr.ok, tr.c?.line ?? 'no card');
   await win.evaluate(() => document.querySelector('#settings [data-locale="system"]')?.click());
+  const back = await until(async () => { const c = await card(win); return { ok: c?.line === BUSY_EN, c }; }, 30000);
+  check('…and back in English once the engine speaks it again', back.ok, back.c?.line ?? 'no card');
+  // The engine that now holds the account: the takeover below must be ITS.
+  watchers = appWatchers();
 
   // ── the other filex is killed: the app takes the folder over ────────
   other.kill('SIGKILL'); // TerminateProcess on Windows: no graceful stop, nothing released by hand

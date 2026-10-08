@@ -85,6 +85,11 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	// Rows deleted where they stood (issue #74), written once in internal/db.
 	s.VanishedSQL = &db.VanishedSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	s.NodeUnavailableSQL = &db.NodeUnavailableSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Why a link will not open (00098), written once in internal/db.
+	s.NodeLinkStateSQL = &db.NodeLinkStateSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// A page of a person's Recent / Starred, and which rows carry a star
+	// (filex 0.54), written once in internal/db.
+	s.UserMetaPageSQL = &db.UserMetaPageSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// What is at and below a folder (00083), written once in internal/db.
 	// nodes.path has the database's collation here, so the byte range a
 	// subtree is has to be asked for in "C"; and the index holds the first
@@ -99,6 +104,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.LoginThrottleSQL = &db.LoginThrottleSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// Office editing sessions (00092), written once in internal/db.
 	s.OfficeSessionSQL = &db.OfficeSessionSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
+	// Vault write locks and idle times (00096), written once in internal/db.
+	s.VaultLockSQL = &db.VaultLockSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// Replication initial copies (00094), written once in internal/db.
 	s.ReplicaInitialCopySQL = &db.ReplicaInitialCopySQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	// The folder each storage writes into on its target (00095), the same way.
@@ -119,6 +126,8 @@ func (Driver) NewStore(sqlDB *sql.DB) db.Store {
 	s.AppStoreSQL = &db.AppStoreSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
 	// The notification digest (00087), written once in internal/db.
 	s.DigestSQL = &db.DigestSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders, Time: db.PlainTime}
+	// Web Push (task #191), written once in internal/db.
+	s.PushSQL = &db.PushSQL{Pool: sqlDB, Placeholders: db.DollarPlaceholders}
 	return s
 }
 
@@ -146,6 +155,11 @@ type Store struct {
 	// MarkNodeUnavailable, ClearNodeUnavailable, UnavailableAt (internal/db
 	// node_unavailable_sql.go, migration 00078).
 	*db.NodeUnavailableSQL
+	// SetNodeLinkState, NodeLinkStates (internal/db node_link_state_sql.go,
+	// migration 00098).
+	*db.NodeLinkStateSQL
+	// UserNodeMetaPage, UserNodeMetaAt (internal/db user_meta_page_sql.go).
+	*db.UserMetaPageSQL
 	// ListNodesUnder, ListStaleNodesUnder, CountLiveNodesUnder,
 	// HasLiveNodesUnder (internal/db nodes_under_sql.go, migration 00083).
 	*db.NodesUnderSQL
@@ -158,6 +172,9 @@ type Store struct {
 	// The office editing sessions (internal/db office_session_sql.go,
 	// migration 00092).
 	*db.OfficeSessionSQL
+	// The vault write locks and idle times (internal/db vault_lock_sql.go,
+	// migration 00096).
+	*db.VaultLockSQL
 	// The replication initial copies (internal/db replica_initial_copy_sql.go,
 	// migration 00094).
 	*db.ReplicaInitialCopySQL
@@ -179,6 +196,8 @@ type Store struct {
 	*db.E2ERequestSQL
 	// The notification digest (internal/db digest_sql.go, migration 00087).
 	*db.DigestSQL
+	// Web Push devices and the VAPID key (internal/db push_sql.go, task #191).
+	*db.PushSQL
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -4195,9 +4214,9 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 	}
 	var id int64
 	if err := s.conn(ctx).QueryRowContext(ctx,
-		`INSERT INTO webhook_targets (name, url, secret, events, enabled)
-		 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		t.Name, t.URL, t.Secret, t.Events, t.Enabled,
+		`INSERT INTO webhook_targets (name, url, secret, events, enabled, lang)
+		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		t.Name, t.URL, t.Secret, t.Events, t.Enabled, t.Lang,
 	).Scan(&id); err != nil {
 		return nil, fmt.Errorf("postgres: insert webhook target: %w", err)
 	}
@@ -4207,7 +4226,7 @@ func (s *Store) CreateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 // GetWebhookTarget returns a single target by id.
 func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookTarget, error) {
 	row := s.conn(ctx).QueryRowContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at, lang
 		 FROM webhook_targets WHERE id=$1`, id)
 	return pgScanWebhookTarget(row)
 }
@@ -4217,7 +4236,7 @@ func (s *Store) GetWebhookTarget(ctx context.Context, id int64) (*model.WebhookT
 // tiny and the admin list needs disabled rows too.
 func (s *Store) ListWebhookTargets(ctx context.Context) ([]*model.WebhookTarget, error) {
 	rows, err := s.conn(ctx).QueryContext(ctx,
-		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at
+		`SELECT id, name, url, secret, events, enabled, created_at, last_status, last_error, last_delivery_at, lang
 		 FROM webhook_targets ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: list webhook targets: %w", err)
@@ -4245,7 +4264,7 @@ func pgScanWebhookTarget(rs interface {
 		lastErr sql.NullString
 		lastAt  sql.NullTime
 	)
-	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &t.Enabled, &t.CreatedAt, &lastSt, &lastErr, &lastAt); err != nil {
+	if err := rs.Scan(&t.ID, &t.Name, &t.URL, &t.Secret, &t.Events, &t.Enabled, &t.CreatedAt, &lastSt, &lastErr, &lastAt, &t.Lang); err != nil {
 		return nil, err
 	}
 	if lastSt.Valid {
@@ -4269,8 +4288,8 @@ func (s *Store) UpdateWebhookTarget(ctx context.Context, t *model.WebhookTarget)
 		return errors.New("postgres: webhook target missing id/name/url")
 	}
 	res, err := s.conn(ctx).ExecContext(ctx,
-		`UPDATE webhook_targets SET name=$1, url=$2, secret=$3, events=$4, enabled=$5 WHERE id=$6`,
-		t.Name, t.URL, t.Secret, t.Events, t.Enabled, t.ID)
+		`UPDATE webhook_targets SET name=$1, url=$2, secret=$3, events=$4, enabled=$5, lang=$6 WHERE id=$7`,
+		t.Name, t.URL, t.Secret, t.Events, t.Enabled, t.Lang, t.ID)
 	if err != nil {
 		return fmt.Errorf("postgres: update webhook target: %w", err)
 	}

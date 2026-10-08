@@ -126,3 +126,25 @@ func TestWriteRows_WithoutAReadBackTheEtagIsEmptiedNotKept(t *testing.T) {
 		})
 	}
 }
+
+// A NEW row records what landed too, not the size the caller passed in. A
+// protocol write's size is the one its client declared (the S3 gateway's
+// x-amz-decoded-content-length, a WebDAV Content-Length), and the row is what
+// the listing, the quota recount and the search index read.
+func TestWriteRows_ANewRowRecordsWhatLanded(t *testing.T) {
+	installEmitter(t)
+	s, st := newSyncer(t)
+	ctx := context.Background()
+	drv := &etagStore{etags: map[string]string{}}
+	s.WithResolver(func(int64) (storage.Driver, error) { return drv, nil })
+
+	drv.put("docs/new.bin", "etag-of-the-real-bytes")
+	node, _, ok := s.WriteRows(ctx, st, "docs/new.bin", 1, "application/octet-stream")
+	require.True(t, ok)
+
+	got, err := s.Store.GetNode(ctx, node.ID)
+	require.NoError(t, err)
+	assert.EqualValues(t, len("etag-of-the-real-bytes"), got.Size, "the declared size was recorded instead of the stored one")
+	assert.Equal(t, "etag-of-the-real-bytes", got.Etag)
+	require.NotNil(t, got.BackendMtime)
+}

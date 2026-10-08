@@ -12,10 +12,11 @@
  *             a key is its dotted path (`appPlugins.wizard.title`), `|`
  *             separates plural forms, `@` starts a linked message, and a
  *             literal `@ { } | %{` is written `{'@'}` etc.
- *   server    backend/internal/srvtext/locales/en.json + the notification
- *             phrases of packages/core/src/lib/notificationText.ts — every key under
+ *   server    backend/internal/srvtext/locales/en.json - every key under
  *             `server.`: the emails, the no-JavaScript public pages, the
- *             install review's permission sentences and the notifications.
+ *             install review's permission sentences and the notifications
+ *             (`server.notify.*`, which the server says on every channel -
+ *             backend internal/notify say.go - since 2026-10-08).
  *             `{name}` and `<key>_<category>` plurals, nothing else.
  *
  * A pack addresses all three with one flat dotted namespace. That works because
@@ -82,61 +83,32 @@ function tsObjectLiteral(src, name, file) {
 
 /** A value a translator could only copy: the whole string is one
  *  `{placeholder}`. There is no word in it, no order to choose and no
- *  punctuation — ten notification BODIES are just `{path}`, `{reason}` or
- *  `{body}`. Exporting them made every pack carry ten entries it had to
- *  reproduce byte for byte, and one typo lost the path off a bell row. They
- *  are left out; the renderer falls back to the same template. */
+ *  punctuation - ten notification BODIES are just `{path}`, `{reason}` or
+ *  `{body}`. Exporting them made every pack carry entries it had to reproduce
+ *  byte for byte, and one typo lost the path off a bell row. They are left
+ *  out; the server falls back to the same template (srvtext: a key a pack
+ *  lacks is the English one). */
 const BARE_PLACEHOLDER = /^\s*\{[A-Za-z0-9_]+\}\s*$/;
 
 /**
- * The notification phrases as server keys, per language.
+ * The server table of one language as a translator gets it: the server's own
+ * JSON, without the notification phrases that are one bare placeholder.
  *
- * ⚠ Their source stays packages/core/src/lib/notificationText.ts: the bell, the
- * browser pop-up and the desktop app render them from there (one renderer,
- * three surfaces — see that file). They are keys of the SERVER table
- * (`server.notify.<event>.title|body`, a phrase's `one` → `title_one` /
- * `body_one`) because a notification is something the server sends; a pack
- * translates them beside the mails, and the renderer reads the pack's
- * `server.notify.*` strings.
- *
- * ⚠⚠ `WORDS` is NOT read here. The four words a notification falls back on
- * live in the server catalogue itself (`server.notify.word.*` in
- * backend/internal/srvtext/locales/*.json), because two of them — "Someone"
- * and "a file" — are also what a MAIL says when the uploader typed no name
- * or the file has none, and Go cannot read a TypeScript table. They were
- * written twice (`server.mail.drop_received.someone`,
- * `server.mail.share.unnamed_file`) until v0.43.0, so a translator saw one
- * word as two keys and could answer them differently. The table in
- * notificationText.ts stays as the desktop shell's offline fallback and is
- * held to the catalogue by web/tests/lib/notificationText.test.ts.
+ * ⚠ The notification phrases live in this JSON since 2026-10-08 (they were a
+ * TypeScript table, packages/core lib/notificationText.ts NOTIFICATION_PHRASES,
+ * that every screen composed its sentence from). The SERVER says every
+ * notification now (backend internal/notify say.go) - the bell, a push, an
+ * email, a webhook - in the reader's language, reading a pack's
+ * `server.notify.*` strings through srvtext like every mail.
  */
-export function loadNotifyTables(file) {
-  const src = fs.readFileSync(file, 'utf8');
-  const phrases = tsObjectLiteral(src, 'NOTIFICATION_PHRASES', file);
-  const out = { en: {}, tr: {} };
-  const say = (lang, key, value) => {
-    if (typeof value === 'string' && value && !BARE_PLACEHOLDER.test(value)) out[lang][key] = value;
-  };
-  for (const lang of ['en', 'tr']) {
-    for (const [event, byLang] of Object.entries(phrases)) {
-      const p = byLang[lang];
-      if (!p) continue;
-      const base = `server.notify.${event}`;
-      say(lang, `${base}.title`, p.title);
-      say(lang, `${base}.body`, p.body);
-      for (const [f, v] of Object.entries(p.one ?? {})) say(lang, `${base}.${f}_one`, v);
-      // A single encrypted file's wording of the same event (notificationText.ts `file`).
-      for (const [f, v] of Object.entries(p.file ?? {})) say(lang, `${base}.${f}_file`, v);
-      // A NO to an encryption request (notificationText.ts `rejected`).
-      for (const [f, v] of Object.entries(p.rejected ?? {})) say(lang, `${base}.${f}_rejected`, v);
-    }
+export function serverTable(file) {
+  const all = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const out = {};
+  for (const [k, v] of Object.entries(all)) {
+    if (k.startsWith('server.notify.') && typeof v === 'string' && BARE_PLACEHOLDER.test(v)) continue;
+    out[k] = v;
   }
   return out;
-}
-
-/** The words notificationText.ts falls back on, as the catalogue holds them. */
-export function notifyWords(file) {
-  return tsObjectLiteral(fs.readFileSync(file, 'utf8'), 'WORDS', file);
 }
 
 /** All three tables of a filex checkout, English and Turkish. */
@@ -144,14 +116,13 @@ export function loadCatalogue(root) {
   const core = path.join(root, 'packages', 'core', 'src', 'locales');
   const web = path.join(root, 'web', 'src', 'locales');
   const srv = path.join(root, 'backend', 'internal', 'srvtext', 'locales');
-  const notify = loadNotifyTables(path.join(root, 'packages', 'core', 'src', 'lib', 'notificationText.ts'));
   return {
     explorer: loadCoreTable(path.join(core, 'en.ts')),
     explorerTr: loadCoreTable(path.join(core, 'tr.ts')),
     admin: loadAdminTable(path.join(web, 'en.json')),
     adminTr: loadAdminTable(path.join(web, 'tr.json')),
-    server: { ...JSON.parse(fs.readFileSync(path.join(srv, 'en.json'), 'utf8')), ...notify.en },
-    serverTr: { ...JSON.parse(fs.readFileSync(path.join(srv, 'tr.json'), 'utf8')), ...notify.tr },
+    server: serverTable(path.join(srv, 'en.json')),
+    serverTr: serverTable(path.join(srv, 'tr.json')),
   };
 }
 

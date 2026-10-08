@@ -31,8 +31,10 @@ import { tr } from '@brftech/filex-core/src/locales/tr';
 import { COUNT_VARS, useLocale } from '@brftech/filex-core/src/composables/useLocale';
 import { loadCatalogue } from '../../../scripts/lib/i18n-catalogue.mjs';
 
-/** A singular that names the one item rather than counting it. */
-const NAMES_THE_ITEM = new Set(['toast.restore_taken_one']);
+/** A singular that names the one item rather than counting it. (The one
+ *  there was, `toast.restore_taken_one`, is the server's sentence since 0.54:
+ *  server.trash.restore.failed.exists.) */
+const NAMES_THE_ITEM = new Set<string>();
 
 const FORMS = ['zero', 'one', 'two', 'few', 'many'];
 

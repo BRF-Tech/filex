@@ -26,11 +26,13 @@ import (
 	"time"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
+	"github.com/brf-tech/filex/backend/internal/apierr"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/e2epolicy"
 	"github.com/brf-tech/filex/backend/internal/model"
+	"github.com/brf-tech/filex/backend/internal/srvtext"
 )
 
 // E2EPolicyFiles is the handler set.
@@ -103,14 +105,25 @@ func e2eRequestViews(ctx context.Context, store db.Store, rows []*model.E2EReque
 }
 
 // writeE2ERequestError answers a refusal from the request service with the
-// code a client switches on.
-func writeE2ERequestError(w http.ResponseWriter, err error) {
+// code a client switches on and the server's sentence for it, in the reader's
+// language (apierr): `not_requestable` with the rule's reason is that reason's
+// sentence (server.e2e.not_allowed.*), a code the catalogue knows is its
+// `server.error.*`, and anything else keeps the service's own words.
+func writeE2ERequestError(w http.ResponseWriter, r *http.Request, err error) {
 	var re *e2epolicy.RequestError
 	if !errors.As(err, &re) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed", "message": err.Error()})
 		return
 	}
-	body := map[string]any{"error": re.Code, "message": re.Message}
+	lang := langOf(r)
+	message := re.Message
+	switch {
+	case re.Code == "not_requestable" && re.Reason != "" && srvtext.Has("server.e2e.not_allowed."+string(re.Reason)):
+		message = srvtext.Text(lang, "server.e2e.not_allowed."+string(re.Reason), nil)
+	case apierr.Known(re.Code):
+		message = apierr.Text(lang, re.Code, nil)
+	}
+	body := map[string]any{"error": re.Code, "message": message}
 	if re.Answer != "" {
 		body["answer"] = string(re.Answer)
 	}
@@ -195,7 +208,7 @@ func (h *E2EPolicyFiles) CreateRequest(w http.ResponseWriter, r *http.Request) {
 		User: u, Storage: st, Path: rel, Kind: body.Kind, Reason: body.Reason, Who: e2eActorOf(r),
 	})
 	if err != nil {
-		writeE2ERequestError(w, err)
+		writeE2ERequestError(w, r, err)
 		return
 	}
 	status := http.StatusOK
@@ -216,7 +229,7 @@ func (h *E2EPolicyFiles) MyRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.Requests.Mine(r.Context(), u.ID)
 	if err != nil {
-		writeE2ERequestError(w, err)
+		writeE2ERequestError(w, r, err)
 		return
 	}
 	var keep func(storage, rel string) bool

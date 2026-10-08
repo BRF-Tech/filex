@@ -32,7 +32,7 @@ import { goBuild } from '../../scripts/lib/go-build.mjs';
 import { RUN_MARKER } from '../../scripts/lib/procs.mjs';
 import { documentServerFor } from '../../scripts/lib/shot-scripts.mjs';
 import { APP_LOCATIONS, locateApp } from '../helpers/app-locations.mjs';
-import { SCENE_CONTEXT, stageClock } from './clock.mjs';
+import { SCENE_CONTEXT, sceneServerEnv, stageClock } from './clock.mjs';
 import { SHOTS_LDFLAGS, shotsDir } from './release.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -262,6 +262,8 @@ async function bootInContainer({ name, admin, env }) {
       FILEX_DEFAULT_LOCALE: 'en',
       FILEX_PUBLIC_URL: PUBLIC_URL,
       FILEX_SECRET_KEY: `${name}-shots-key-not-a-real-secret`,
+      // The apps on the scene's clock (clock.mjs, part 5).
+      ...sceneServerEnv(),
       ...env,
     },
   });
@@ -328,6 +330,8 @@ async function bootOnHost({ name, admin, env, office = null }) {
       // those features answer "unavailable", which is not what a picture of
       // them should show.
       FILEX_SECRET_KEY: `${name}-shots-key-not-a-real-secret`,
+      // The apps on the scene's clock (clock.mjs, part 5).
+      ...sceneServerEnv(),
       ...env,
       ...officeEnv,
     },
@@ -665,18 +669,40 @@ export async function shootWhole(page, dialog, set, file, { restore = { width: 1
  *
  * `frames` are the test ids of tables (the explorer's DataTable): their cells
  * scroll inside their own frame, so the frame is what must fit.
+ *
+ * `scrollers` are selectors of rows that scroll sideways ON THEMSELVES by
+ * design (the explorer's filter row at 390 px, `.fe-filterbar`): the row must
+ * fit, what is inside it may run past the window and pass under its pinned
+ * end (the sticky "Listing actions"). An element nobody can see (opacity 0 or
+ * visibility hidden - the explorer's off-screen upload input) is neither a
+ * piece of content that sticks out nor a control on another.
  */
-export async function layoutProblems(page, { frames = [] } = {}) {
-  return page.evaluate((frames) => {
+export async function layoutProblems(page, { frames = [], scrollers = [] } = {}) {
+  return page.evaluate(({ frames, scrollers }) => {
     const problems = [];
     const root = document.documentElement;
     if (root.scrollWidth > root.clientWidth + 1) problems.push(`the page scrolls sideways (${root.scrollWidth} > ${root.clientWidth})`);
     const view = window.innerWidth;
     const rtl = getComputedStyle(root).direction === 'rtl';
     const inTable = (el) => el.closest('.fe-list__scroll, .fe-list__body, .fe-list__head');
+    const inScroller = (el) => scrollers.some((sel) => {
+      const box = el.closest(sel);
+      return !!box && box !== el;
+    });
+    const unseen = (el) => {
+      const cs = getComputedStyle(el);
+      return cs.opacity === '0' || cs.visibility === 'hidden';
+    };
+    const exempt = (el) => inTable(el) || inScroller(el) || unseen(el);
+    // What a problem calls an element: its words, else its accessible name,
+    // else its tag and class - an icon button has no words, and two "" in a
+    // report name nothing anybody can find.
+    const said = (el) =>
+      ((el.textContent || '').trim() || el.getAttribute('aria-label') || el.getAttribute('name') || '').slice(0, 24) ||
+      `${el.tagName.toLowerCase()}.${[...el.classList].slice(0, 2).join('.')}`;
     const parts = 'main form, main fieldset, main h1, main h2, main p, main li, main code, main label, main button, main input, main select';
     for (const el of document.querySelectorAll(parts)) {
-      if (inTable(el)) continue;
+      if (exempt(el)) continue;
       const rects = [...el.getClientRects()].filter((r) => r.width > 0 && r.height > 0);
       for (const r of rects) {
         if (r.left < -0.5 || r.right > view + 0.5) {
@@ -690,10 +716,16 @@ export async function layoutProblems(page, { frames = [] } = {}) {
         if (r.right > view + 0.5 || r.left < -0.5) problems.push(`${id} sticks out: ${Math.round(r.left)}..${Math.round(r.right)} of ${view}`);
       }
     }
+    for (const sel of scrollers) {
+      for (const box of document.querySelectorAll(sel)) {
+        const r = box.getBoundingClientRect();
+        if (r.width > 0 && (r.right > view + 0.5 || r.left < -0.5)) problems.push(`${sel} sticks out: ${Math.round(r.left)}..${Math.round(r.right)} of ${view}`);
+      }
+    }
     // A list's hidden form input (core ChoiceSelect) lies exactly under its
     // field by design; it is not a control of its own.
     const boxes = [...document.querySelectorAll('main input:not(.fe-select__native), main select, main button')]
-      .filter((e) => !inTable(e))
+      .filter((e) => !exempt(e))
       .map((e) => ({ e, r: e.getBoundingClientRect() }))
       .filter(({ r }) => r.width > 0 && r.height > 0);
     for (let i = 0; i < boxes.length; i++) {
@@ -703,12 +735,12 @@ export async function layoutProblems(page, { frames = [] } = {}) {
         const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
         const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
         if (w > 2 && h > 2 && !boxes[i].e.contains(boxes[j].e) && !boxes[j].e.contains(boxes[i].e)) {
-          problems.push(`two controls overlap: "${(boxes[i].e.textContent || boxes[i].e.name || '').trim().slice(0, 24)}" and "${(boxes[j].e.textContent || boxes[j].e.name || '').trim().slice(0, 24)}"`);
+          problems.push(`two controls overlap: "${said(boxes[i].e)}" and "${said(boxes[j].e)}"`);
         }
       }
     }
     return problems;
-  }, frames);
+  }, { frames, scrollers });
 }
 
 /**

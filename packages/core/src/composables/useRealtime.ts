@@ -7,7 +7,7 @@
 // navigation, and setFocus() on selection; it binds presenceUsers into the UI.
 
 import { ref, type Ref } from 'vue';
-import { RealtimeClient, type PresenceUser, type PresenceMessage, type AppUpdatedMessage } from '../lib/realtime';
+import { RealtimeClient, type PresenceUser, type PresenceMessage, type AppUpdatedMessage, type VaultMessage } from '../lib/realtime';
 import { burstDebounce } from '../lib/burstDebounce';
 import { announceAppUpdated } from '../lib/appUpdates';
 import { invalidatePluginActions } from './usePluginActions';
@@ -25,7 +25,20 @@ export interface RealtimeApi {
   wsTicket: () => Promise<{ ticket: string; ws_url: string } | null>;
 }
 
-export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
+/**
+ * #196 - the answers a right-click menu depends on may be stale: the server
+ * said so (`access.changed`; `all` when everybody connected heard it), or the
+ * socket was down for a while and could have missed it (`resync`).
+ */
+export interface AccessNews {
+  all: boolean;
+  resync: boolean;
+}
+
+export function useRealtime(
+  api: RealtimeApi,
+  opts: { reload: () => void; onVault?: (msg: VaultMessage) => void; onAccess?: (news: AccessNews) => void },
+) {
   const presenceUsers: Ref<PresenceUser[]> = ref([]);
   const connected = ref(false);
   // True while the live socket is unavailable and the polling fallback is
@@ -37,6 +50,9 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
 
   let client: RealtimeClient | null = null;
   let pendingSubscribe: string | null = null;
+  // #196 - a socket that comes back after a drop may have missed an
+  // access.changed frame: the explorer is told to ask again.
+  let everConnected = false;
   const debouncedReload = burstDebounce(() => opts.reload(), {
     wait: RELOAD_DEBOUNCE_MS,
     maxWait: RELOAD_MAX_WAIT_MS,
@@ -76,9 +92,13 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
         onChange: debouncedReload,
         onPresence,
         onAppUpdated,
+        onVault: (msg) => opts.onVault?.(msg) /* wiring:e2 vault */,
+        onAccessChanged: (ev) => opts.onAccess?.({ all: ev.all, resync: false }) /* #196 */,
         onFallback,
         onStatus: (c) => {
           connected.value = c;
+          if (c && everConnected) opts.onAccess?.({ all: false, resync: true });
+          if (c) everConnected = true;
         },
       },
     });
@@ -102,6 +122,7 @@ export function useRealtime(api: RealtimeApi, opts: { reload: () => void }) {
     }
     client?.close();
     client = null;
+    everConnected = false;
     degraded.value = false;
   }
 

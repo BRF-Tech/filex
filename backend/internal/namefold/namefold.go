@@ -113,6 +113,29 @@ func String(s string) string {
 	return strings.Map(Rune, Canonical(s))
 }
 
+// Loose is String with the accents dropped as well: "Güvenlik" and
+// "guvenlik", "şifre" and "sifre" are one word to it.
+//
+// ⚠ It is NOT how a file name is searched - accents count there (the
+// package comment: "müşteri" is not "musteri"), and the search, the
+// explorer's folder filter (search.NameMatcher) and every store comparison
+// use String. Loose is the rule for words a person types to find a LABEL -
+// a page of the admin panel, a setting, a colleague's name - on whatever
+// keyboard they have (the admin panel's search, handlers/panel_search.go).
+// It lives here, beside String, so the two rules are one package and one
+// definition each (filex 0.54, audit D5: the panel had its own copy).
+func Loose(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range norm.NFD.String(s) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(Rune(r))
+	}
+	return b.String()
+}
+
 // Words is each of words through String, empty results and repeats dropped,
 // in their first order — the words a store compares a folded name with.
 func Words(words []string) []string {

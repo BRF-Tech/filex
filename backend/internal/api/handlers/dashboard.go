@@ -8,6 +8,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/brf-tech/filex/backend/internal/capability"
 	"github.com/brf-tech/filex/backend/internal/db"
@@ -82,16 +83,25 @@ type ActivityRow struct {
 	TargetName string `json:"target_name,omitempty"`
 	// UserName is who acted, as every screen names a person (PersonLabel).
 	UserName string `json:"user_name,omitempty"`
+	// Label and TargetLabel are the action and its target in words, in the
+	// reader's language (audit_label.go) - the same words as the Audit page.
+	Label       string `json:"label,omitempty"`
+	TargetLabel string `json:"target_label,omitempty"`
 }
 
 // Response is the shape returned to the admin UI.
 type Response struct {
-	Storages       []StorageSummary  `json:"storages"`
-	TotalUsers     int64             `json:"total_users"`
-	ActiveSessions int64             `json:"active_sessions"`
-	QueueDepth     int               `json:"queue_depth"`
-	TotalFiles     int64             `json:"total_files"`
-	TotalBytes     int64             `json:"total_bytes"`
+	Storages       []StorageSummary `json:"storages"`
+	TotalUsers     int64            `json:"total_users"`
+	ActiveSessions int64            `json:"active_sessions"`
+	QueueDepth     int              `json:"queue_depth"`
+	TotalFiles     int64            `json:"total_files"`
+	TotalBytes     int64            `json:"total_bytes"`
+	// ActiveSyncs counts the storages whose latest scan is still running, and
+	// LastSyncAt is the newest scan's start across them: the page shows both
+	// as they are (it summed and string-sorted the rows itself before 0.54).
+	ActiveSyncs    int               `json:"active_syncs"`
+	LastSyncAt     *time.Time        `json:"last_sync_at,omitempty"`
 	RecentActivity []ActivityRow     `json:"recent_activity"`
 	Capabilities   CapabilitiesShort `json:"capabilities"`
 }
@@ -107,6 +117,8 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := make([]StorageSummary, 0, len(storages))
 	var aggFiles, aggBytes int64
+	activeSyncs := 0
+	var lastSync *time.Time
 	for _, st := range storages {
 		count, size, _ := h.Store.StorageStats(ctx, st.ID)
 		aggFiles += count
@@ -124,6 +136,10 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		if last, err := h.Store.GetLastSyncRun(ctx, st.ID); err == nil && last != nil {
 			row.LastSyncAt = last.StartedAt
 			row.LastSyncStatus = last.Status
+			if !last.StartedAt.IsZero() && (lastSync == nil || last.StartedAt.After(*lastSync)) {
+				at := last.StartedAt
+				lastSync = &at
+			}
 			// ⚠ The statuses the sync worker actually writes (poll.go). This
 			// compared with "error", which it has never written, so a storage
 			// whose last scan failed showed as "ok" here.
@@ -140,6 +156,9 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			row.State = "stale"
+		}
+		if row.State == "running" {
+			activeSyncs++
 		}
 		rows = append(rows, row)
 	}
@@ -216,11 +235,14 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	activity := make([]ActivityRow, 0, len(recent))
 	namer := newAuditNamer(ctx, h.Store)
+	lang := readerLang(r)
 	for _, e := range recent {
 		if e == nil {
 			continue
 		}
 		row := ActivityRow{AuditEntry: e, TargetName: namer.name(e)}
+		row.Label = auditActionLabel(lang, e.Action)
+		row.TargetLabel = auditTargetLabel(lang, e.TargetType, e.TargetID, row.TargetName)
 		if e.UserID != nil {
 			row.UserEmail = emails[*e.UserID]
 			row.UserName = names[*e.UserID]
@@ -246,6 +268,8 @@ func (h *Dashboard) Get(w http.ResponseWriter, r *http.Request) {
 		QueueDepth:     queueDepth,
 		TotalFiles:     aggFiles,
 		TotalBytes:     aggBytes,
+		ActiveSyncs:    activeSyncs,
+		LastSyncAt:     lastSync,
 		RecentActivity: activity,
 		Capabilities:   capShort,
 	})

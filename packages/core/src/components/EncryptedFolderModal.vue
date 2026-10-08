@@ -16,12 +16,14 @@
  *
  * Crypto scheme + threat model: docs/E2E-ENCRYPTION.md.
  */
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { LocaleCode } from '../types/ExplorerConfig';
 import { useLocale } from '../composables/useLocale';
 import { E2E_DEFAULT_LEVEL, E2E_MIN_PASSWORD_LEN, type ChoosableLevel } from '../lib/e2ecrypto';
+import { VAULT_DEFAULT_PACK_LOG2, VAULT_LARGE_PACK_LOG2 } from '../lib/e2evault/consts';
 import Modal from '../modals/Modal.vue';
 import E2eLevelPicker from './E2eLevelPicker.vue';
+import ChoiceButtons, { type ChoiceOption } from './ChoiceButtons.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -34,6 +36,9 @@ const props = defineProps<{
   escrowKid?: string | null;
   /** Encrypt this existing folder in place (its name as people read it). */
   existing?: string | null;
+  /** wiring:e2 vault — the server has the vault (`capabilities.e2e_vault`).
+   *  Offered for a NEW folder only: an existing one is never converted. */
+  vaultAvailable?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -46,6 +51,8 @@ const emit = defineEmits<{
       level: ChoosableLevel;
       /** `existing` only: remove the versions / trash entries filex holds. */
       cleanup?: { versions: boolean; trash: boolean };
+      /** wiring:e2 vault — level 'vault' only: the pack size, log2 (22 or 24). */
+      packLog2?: number;
     },
   ): void;
 }>();
@@ -65,6 +72,16 @@ const err = ref<string | null>(null);
  * being encrypted. Off is a choice, and it is said what it leaves behind. */
 const dropVersions = ref(true);
 const dropTrash = ref(true);
+/* wiring:e2 vault — the pack size, chosen when the vault is made and never
+ * again: 4 MiB (the default) or 16 MiB. Every pack is that large on the
+ * server, filled up with random bytes, so the choice is what the smallest
+ * change costs against how many files the server sees. */
+const packLog2 = ref<number>(VAULT_DEFAULT_PACK_LOG2);
+const offerVault = computed(() => props.vaultAvailable === true && !props.existing);
+const packOptions = computed<ChoiceOption[]>(() => [
+  { value: String(VAULT_DEFAULT_PACK_LOG2), label: t('e2e.vault.pack_4'), help: t('e2e.vault.pack_4_help') },
+  { value: String(VAULT_LARGE_PACK_LOG2), label: t('e2e.vault.pack_16'), help: t('e2e.vault.pack_16_help') },
+]);
 
 watch(
   () => props.open,
@@ -75,6 +92,7 @@ watch(
       password2.value = '';
       ack.value = false;
       level.value = E2E_DEFAULT_LEVEL;
+      packLog2.value = VAULT_DEFAULT_PACK_LOG2;
       dropVersions.value = true;
       dropTrash.value = true;
       err.value = null;
@@ -106,11 +124,14 @@ function submit() {
     return;
   }
   err.value = null;
+  // An existing folder is never made a vault, whatever the picker held.
+  const chosen: ChoosableLevel = props.existing && level.value === 'vault' ? E2E_DEFAULT_LEVEL : level.value;
   emit('submit', {
     name: clean,
     password: password.value,
-    level: level.value,
+    level: chosen,
     ...(props.existing ? { cleanup: { versions: dropVersions.value, trash: dropTrash.value } } : {}),
+    ...(chosen === 'vault' ? { packLog2: packLog2.value } : {}),
   });
 }
 </script>
@@ -157,8 +178,22 @@ function submit() {
       </label>
       <!-- wiring:e2 — the level: what the server will and will not see. -->
       <div class="fe-e2e-names" data-testid="e2e-create-names">
-        <E2eLevelPicker v-model="level" :locale="locale" :disabled="busy" />
-        <p class="fe-e2e-names__hint">{{ t('e2e.create.names_root_hint') }}</p>
+        <E2eLevelPicker v-model="level" :locale="locale" :disabled="busy" :vault="offerVault" />
+        <p v-if="level !== 'vault'" class="fe-e2e-names__hint">{{ t('e2e.create.names_root_hint') }}</p>
+      </div>
+      <!-- wiring:e2 vault — the pack size, only for a vault. -->
+      <div v-if="offerVault && level === 'vault'" class="fe-field" data-testid="e2e-vault-pack">
+        <span class="fe-field__label" id="fe-e2e-vault-pack-label">{{ t('e2e.vault.pack_label') }}</span>
+        <ChoiceButtons
+          segmented
+          :options="packOptions"
+          :model-value="String(packLog2)"
+          :disabled="busy"
+          aria-labelledby="fe-e2e-vault-pack-label"
+          testid-prefix="e2e-vault-pack"
+          @update:model-value="(v) => (packLog2 = Number(v))"
+        />
+        <p class="fe-e2e-names__hint">{{ t('e2e.vault.pack_hint') }}</p>
       </div>
       <!-- wiring:e2 convert — what encrypting now cannot reach, said before. -->
       <div v-if="existing" class="fe-e2e-convert-past" data-testid="e2e-convert-past">

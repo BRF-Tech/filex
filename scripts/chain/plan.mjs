@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { NIGHTLY_EXTRAS, nightlyExtras } from './nightly-lib.mjs';
+import { DS_EXTRAS, NIGHTLY_EXTRAS, nightlyExtras } from './nightly-lib.mjs';
 
 export const CHAIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -25,7 +25,7 @@ export const PROFILES = ['full', 'targeted', 'nightly'];
 // What the nightly profile adds to the full one (ds-go, s3-live, shots,
 // realenv) is defined next to the nightly run's other decisions, which also
 // need it.
-export { NIGHTLY_EXTRAS, nightlyExtras };
+export { DS_EXTRAS, NIGHTLY_EXTRAS, nightlyExtras };
 
 /** Where the Go and -race jobs come from unless CHAIN_GO_LIST / CHAIN_RACE_LIST say otherwise. */
 export const SHARD_LISTS = {
@@ -34,46 +34,73 @@ export const SHARD_LISTS = {
 };
 
 /**
- * GiB each job is budgeted for: its peak resident memory on the build host
- * (cAdvisor, 15 s samples, the 0.51 and 0.52 rounds), rounded up. Page cache
- * is not counted: the kernel gives it back under pressure, and run.mjs also
- * refuses to start a job while the host's MemAvailable is short (CHAIN_MEM_RESERVE_GB).
+ * GiB each job is budgeted for: the most its container held on the build
+ * host (cAdvisor working set, anonymous memory plus the page cache it keeps
+ * active), rounded up. run.mjs also refuses to start a job while the host's
+ * MemAvailable is short (CHAIN_MEM_RESERVE_GB), and records what each job
+ * really held (result.json `load`): re-read these from there.
  *
- * measured peak RSS (working set):
- *   build 4.24 (4.43) · web 0.68 (2.04) · go full 0.56 (1.26) · race, every
- *   package but two 1.12 (1.83) · race shard 0.36-0.76 (0.37-1.07, the larger
- *   one building the binary) · Cypress 1.07 (1.58) · Playwright, one engine
- *   3.73-3.80 (4.0-4.79) · Document Server 0.46 (0.70) · MySQL 0.67 (0.86)
- *   + PostgreSQL 0.01 (0.15)
- * A Go job is a part of what "go full" ran, so it is budgeted below it; the
- * shard check compiles two test binaries without running them.
+ * ⚠ Task #194: until 0.53 the web job was budgeted at 1 GiB from the 0.51
+ * rounds' 0.68 (2.04). The 0.53 runs measured 2.0-3.03 - vitest's 19 forks
+ * on a 20-core host, and the type-checks after them came to 2.91 - so the web
+ * job, Cypress, the shard check and the first Go job started together beside
+ * the databases, and the host stalled for a minute at the start of three of
+ * five runs (PSI memory "full" 0.55-0.73) while the budget said 8 of 8 GiB.
  *
- * The nightly extras were not measured on the host yet (task #175): ds-go and
- * s3-live are Go test binaries, shots one Playwright engine with its filex
- * instances, realenv a Playwright runner next to Keycloak, OpenLDAP, Pebble
- * and its own Document Server. Re-read them from the first nights' cAdvisor
- * peaks.
+ * measured (the four 0.53 full runs of 2026-10-06/07 and the night of
+ * 2026-10-07; min-max of the per-run peaks):
+ *   build 3.44-4.72 · web 2.00-3.03 · docs 0.31 · shards-check 0.69-0.95 ·
+ *   go 0.13-0.76, go-io-rest 0.57-1.22 · race-db-io/race-rest 0.34-1.22 ·
+ *   race shard 0.12-0.86 · Cypress 0.85-1.39 · Playwright chromium 3.26-3.92,
+ *   firefox 2.91-3.17, webkit 3.83-4.04, nopub 2.07-3.05, nods 1.35-1.45 ·
+ *   Document Server 0.63-0.72 · MySQL 0.68-0.77 + PostgreSQL 0.14 + Redis and
+ *   Samba 0.04 · shots 1.06 (one run)
+ * e2etsc, migrate and race-build end before a sample catches them (4-28 s).
+ * cAdvisor refreshes a container about once a minute, so these are floors:
+ * the -race jobs keep 1.5 for the 1.22 seen (their cgroup's own peak, page
+ * cache included, was 1.8). JOB_WEIGHTS holds the jobs measured above their kind.
+ *
+ * The nightly extras until a night measures them: ds-go and s3-live are Go
+ * test binaries (budgeted as a Go job), realenv a Playwright runner next to
+ * Keycloak, OpenLDAP, Pebble and its own Document Server (as an engine);
+ * shots held 1.06 in its one run and stays at an engine's 4.
  */
 export const WEIGHTS = {
-  build: 4.5,
-  web: 1,
+  build: 5,
+  web: 3.25,
   docs: 0.5,
   e2etsc: 0.5,
   'shards-check': 1,
-  go: 0.75,
+  go: 1,
   migrate: 0.25,
   'race-build': 1,
   race: 1.5,
-  'race-shard': 0.75,
+  'race-shard': 1,
   cypress: 1.5,
-  e2e: 4,
-  ds: 0.5,
-  db: 0.75,
+  e2e: 4.25,
+  ds: 0.75,
+  db: 1,
   'ds-go': 1,
   's3-live': 1,
   shots: 4,
   realenv: 4,
 };
+
+/**
+ * Jobs measured above their kind's weight, by job name (a shard of
+ * scripts/test-shards.json): web/tests/deploy/chainSchedule.test.ts holds
+ * that each still names a job of the full plan, so a renamed shard cannot
+ * silently lose its weight.
+ */
+export const JOB_WEIGHTS = {
+  // internal/io and the rest of the packages: 0.57-1.22 GiB against 0.2-0.76 for the other Go shards.
+  'go-io-rest': 1.25,
+};
+
+/** A job's weight: its own (JOB_WEIGHTS), else its kind's. */
+export function weightOf(name, kind) {
+  return JOB_WEIGHTS[name] ?? WEIGHTS[kind];
+}
 
 /**
  * Minutes a job is expected to take, for `run.mjs --plan` and the scheduling
@@ -84,7 +111,8 @@ export const WEIGHTS = {
  */
 export const EXPECTED_MINUTES = {
   build: 3.5,
-  web: 2,
+  // 2.4-4.7 in the 0.53 runs and the first night: vitest, then four type-checks.
+  web: 4,
   docs: 0.5,
   e2etsc: 3,
   'shards-check': 3,
@@ -293,15 +321,23 @@ function trackMinutes(t, table) {
  *             down on SQLite, PostgreSQL and MySQL; the -race jobs; and the
  *             browser list.
  *   nightly   what full runs, and the NIGHTLY_EXTRAS CHAIN_NIGHTLY_EXTRAS
- *             asks for in the browser round: ds-go right after the last line
- *             with the Document Server, s3-live, shots and realenv at its end.
- *             scripts/chain/nightly.mjs starts it (task #175).
+ *             asks for in the browser round: ds-go and shots (DS_EXTRAS,
+ *             which need the Document Server) right after the last line with
+ *             it, s3-live and realenv at its end. scripts/chain/nightly.mjs
+ *             starts it (task #175).
  *   targeted  the build and its three fast gates, then only what is asked
  *             for: CHAIN_GO_PKGS, CHAIN_RACE_PKGS, CHAIN_MIGRATE=1,
  *             CHAIN_CY_SPECS, CHAIN_E2E_GREP (on CHAIN_E2E_BROWSERS, with
  *             the Document Server unless CHAIN_E2E_DS=0), and the nightly
  *             extras CHAIN_EXTRAS names (targetedExtras: s3-live by hand,
- *             with credentials a person brings - nightly.mjs s3-live).
+ *             with credentials a person brings - nightly.mjs s3-live; shots
+ *             for a release's pictures).
+ *
+ * The shots job takes every scene (`pnpm shots --all`); CHAIN_SHOTS_ONLY
+ * (comma-separated script names) narrows it to those, with `--only`
+ * (shotsOnly). In the nightly profile only, a run whose one failure is a
+ * language pack behind the tree is a warning, not a red job
+ * (SHOTS_PACKS_BEHIND=warn).
  *
  * `src` is the tree under test: the Go and -race jobs' expected minutes are
  * read from its scripts/test-shards.json.
@@ -346,7 +382,7 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
   if (shardsCheck) add({ name: 'shards-check', kind: 'shards-check', prio: 13, weight: WEIGHTS['shards-check'] });
 
   goList.forEach((g, i) =>
-    add({ name: `go-${g.name}`, kind: 'go', prio: 20 + i, weight: WEIGHTS.go, db: true, env: testEnv(g) }),
+    add({ name: `go-${g.name}`, kind: 'go', prio: 20 + i, weight: weightOf(`go-${g.name}`, 'go'), db: true, env: testEnv(g) }),
   );
   if (migrate) add({ name: 'migrate', kind: 'migrate', prio: 35, weight: WEIGHTS.migrate, db: true });
 
@@ -368,12 +404,12 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
         kind: 'race',
         weightKind: 'race-shard',
         prio: 50 + i,
-        weight: WEIGHTS['race-shard'],
+        weight: weightOf(`race-${r.name}`, 'race-shard'),
         needs: ['build', built.get(pkg)],
         env: { ...testEnv(r), BIN: bin },
       });
     } else {
-      add({ name: `race-${r.name}`, kind: 'race', prio: 40, weight: WEIGHTS.race, env: testEnv(r) });
+      add({ name: `race-${r.name}`, kind: 'race', prio: 40, weight: weightOf(`race-${r.name}`, 'race'), env: testEnv(r) });
     }
   });
 
@@ -381,20 +417,41 @@ export function buildPlan({ profile, lists, env = {}, src = path.resolve(CHAIN_D
     ...t,
     name: `e2e-${t.name}`,
     needs: ['build'],
-    weight: t.kind === 'cypress' ? WEIGHTS.cypress : WEIGHTS.e2e,
+    weight: weightOf(`e2e-${t.name}`, t.kind === 'cypress' ? 'cypress' : 'e2e'),
     expect: trackMinutes(t, table),
   }));
   const extra = (name) => {
-    const j = { name, kind: name, engines: [], ds: name === 'ds-go', args: [], shard: null, needs: ['build'], weight: WEIGHTS[name] };
+    const only = name === 'shots' ? shotsOnly(env) : '';
+    const j = {
+      name,
+      kind: name,
+      engines: [],
+      ds: DS_EXTRAS.includes(name),
+      args: [],
+      shard: null,
+      needs: ['build'],
+      weight: WEIGHTS[name],
+      env: {
+        // job/shots.sh: `--only` these scripts instead of `--all`.
+        ...(only ? { SHOTS_ONLY: only } : {}),
+        // A night whose only failed scene is a language pack behind the tree
+        // is a warning in the morning report, not red; a release's run (a
+        // targeted CHAIN_EXTRAS=shots) stays red (the maintainer, 2026-10-08, #187).
+        ...(name === 'shots' && profile === 'nightly' ? { SHOTS_PACKS_BEHIND: 'warn' } : {}),
+      },
+    };
     return { ...j, expect: expectedMinutes(j, table) };
   };
   if (profile === 'targeted') for (const name of targetedExtras(env)) round.push(extra(name));
   if (profile === 'nightly') {
     const extras = nightlyExtras(env);
     // The Document Server is stopped once no later line needs it
-    // (run.mjs runTrack): ds-go goes where it is still up.
-    if (extras.includes('ds-go')) round.splice(round.map((t) => t.ds).lastIndexOf(true) + 1, 0, extra('ds-go'));
-    for (const name of ['s3-live', 'shots', 'realenv']) if (extras.includes(name)) round.push(extra(name));
+    // (run.mjs runTrack): ds-go and shots go where it is still up, right
+    // after the last browser line with it, so it is not kept running through
+    // the lines without it.
+    const withDs = extras.filter((name) => DS_EXTRAS.includes(name));
+    round.splice(round.map((t) => t.ds).lastIndexOf(true) + 1, 0, ...withDs.map(extra));
+    for (const name of extras) if (!DS_EXTRAS.includes(name)) round.push(extra(name));
   }
   // `index` is the line's place in the round: run.mjs gives each line the port
   // CHAIN_E2E_PORT + index.
@@ -415,6 +472,23 @@ export function targetedExtras(env = {}) {
     if (!NIGHTLY_EXTRAS.includes(a)) throw new Error(`CHAIN_EXTRAS: "${a}" is none of ${NIGHTLY_EXTRAS.join(', ')} (or none)`);
   }
   return NIGHTLY_EXTRAS.filter((x) => asked.includes(x));
+}
+
+/**
+ * The shot scripts CHAIN_SHOTS_ONLY narrows the shots job to (comma-separated
+ * names, without .mjs), as one `--only` value, or '' for every scene. A
+ * release whose language packs are behind takes the rest this way, and the
+ * published language pack picture stands (docs/CONTRIBUTING.md → Release
+ * process, step 2). scripts/shots.mjs refuses a name that is no shot script.
+ */
+export function shotsOnly(env = {}) {
+  const v = String(env.CHAIN_SHOTS_ONLY ?? '').trim();
+  if (!v) return '';
+  const names = v.split(/[\s,]+/).filter(Boolean).map((n) => n.replace(/\.mjs$/, ''));
+  for (const n of names) {
+    if (!NAME.test(n)) throw new Error(`CHAIN_SHOTS_ONLY: "${n}" is not a shot script name ([a-z0-9-])`);
+  }
+  return names.join(',');
 }
 
 function testEnv(row) {

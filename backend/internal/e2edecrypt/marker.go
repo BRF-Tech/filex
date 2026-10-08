@@ -9,8 +9,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
+
+	"github.com/brf-tech/filex/backend/internal/e2e"
 )
 
 // The folder marker `.filex-e2e.json` and the three ways it hands back the
@@ -39,7 +42,7 @@ const (
 )
 
 // knownFeatures are the entries of a v3 marker's `req` this build honours.
-var knownFeatures = map[string]bool{"names": true, "rekey": true, "conv": true}
+var knownFeatures = map[string]bool{"names": true, "rekey": true, "conv": true, "vault": true}
 
 var (
 	// ErrWrongPassword: the password does not open the marker's verify blob.
@@ -94,7 +97,13 @@ type Marker struct {
 	// ConvPending: an existing folder is being encrypted in place (feature
 	// "conv"); files it has not reached yet are still plaintext.
 	ConvPending bool
+	// Vault is the `vault` block of a vault's key file (level 3, feature
+	// "vault"; docs/E2E-VAULT-FORMAT.md); nil for levels 1 and 2.
+	Vault *e2e.VaultInfo
 }
+
+// IsVault reports whether the key file is a vault's.
+func (m *Marker) IsVault() bool { return m != nil && m.Vault != nil }
 
 // RekeySlot is the marker's re-key-in-progress slot (v3, feature "rekey").
 type RekeySlot struct {
@@ -127,6 +136,7 @@ type rawMarker struct {
 	Names  json.RawMessage `json:"names"`
 	Rekey  json.RawMessage `json:"rekey"`
 	Conv   json.RawMessage `json:"conv"`
+	Vault  json.RawMessage `json:"vault"`
 }
 
 // ParseMarker reads a marker with the browser's rules (parseMarkerDetailed).
@@ -167,7 +177,7 @@ func ParseMarker(data []byte) (*Marker, error) {
 	present := func(raw json.RawMessage) bool { return len(raw) > 0 && string(raw) != "null" }
 	if m.V != 3 {
 		// A v1/v2 marker carrying v3 fields is not something any filex wrote.
-		if present(r.Req) || present(r.Names) || present(r.Rekey) || present(r.Conv) {
+		if present(r.Req) || present(r.Names) || present(r.Rekey) || present(r.Conv) || present(r.Vault) {
 			return nil, ErrNotMarker
 		}
 		return m, nil
@@ -176,8 +186,11 @@ func ParseMarker(data []byte) (*Marker, error) {
 		return nil, ErrNotMarker
 	}
 	var unknown []string
-	hasNames, hasRekey, hasConv := false, false, false
+	hasNames, hasRekey, hasConv, hasVault := false, false, false, false
 	for _, f := range m.Req {
+		if f == "vault" {
+			hasVault = true
+		}
 		if f == "names" {
 			hasNames = true
 		}
@@ -221,7 +234,35 @@ func ParseMarker(data []byte) (*Marker, error) {
 	if len(unknown) > 0 {
 		return m, &UnsupportedError{Features: unknown}
 	}
+	if hasVault {
+		// A newer vault format is "update filex", not a broken key file.
+		if v, ok := vaultFormatOf(r.Vault); ok && v > e2e.VaultFormat {
+			return m, &UnsupportedError{Features: []string{fmt.Sprintf("vault format %d", v)}}
+		}
+		// req exactly ["vault"], a wrapped FMK, no names/rekey/conv slot,
+		// vault.v/id/pack well-formed: internal/e2e holds the rule, shared
+		// with the server's key-file guard.
+		if present(r.Names) || present(r.Rekey) || present(r.Conv) {
+			return nil, ErrNotMarker
+		}
+		info, isVault, err := e2e.ParseVaultKeyFile(data)
+		if err != nil || !isVault {
+			return nil, ErrNotMarker
+		}
+		m.Vault = &info
+	}
 	return m, nil
+}
+
+// vaultFormatOf reads `vault.v` when it is an integer.
+func vaultFormatOf(raw json.RawMessage) (int, bool) {
+	var v struct {
+		V *float64 `json:"v"`
+	}
+	if json.Unmarshal(raw, &v) != nil || v.V == nil || *v.V != math.Trunc(*v.V) || *v.V < 0 || *v.V > 1e6 {
+		return 0, false
+	}
+	return int(*v.V), true
 }
 
 func validNames(n NamesSlot) bool {

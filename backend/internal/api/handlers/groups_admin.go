@@ -144,11 +144,24 @@ func (h *GroupsAdmin) List(w http.ResponseWriter, r *http.Request) {
 	for _, g := range grants {
 		grantCount[g.GroupID]++
 	}
+	// ?q= narrows by name, description and the directory links' values
+	// (labelMatches), on the server (filex 0.54, audit D5).
+	q := r.URL.Query().Get("q")
 	out := []groupWire{}
 	for _, g := range groups {
-		if visibleGroup(ctx, g) {
-			out = append(out, groupWire{Group: g, MemberCount: memberCount[g.ID], GrantCount: grantCount[g.ID]})
+		if !visibleGroup(ctx, g) {
+			continue
 		}
+		if q != "" {
+			fields := []string{g.Name, g.Description}
+			for _, l := range g.Links {
+				fields = append(fields, l.Value)
+			}
+			if !labelMatches(q, fields...) {
+				continue
+			}
+		}
+		out = append(out, groupWire{Group: g, MemberCount: memberCount[g.ID], GrantCount: grantCount[g.ID]})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
 }
@@ -514,7 +527,7 @@ func (h *GroupsAdmin) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	updated, err := h.Store.GetGroup(ctx, g.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -560,7 +573,7 @@ func (h *GroupsAdmin) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -670,7 +683,7 @@ func (h *GroupsAdmin) AddMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	auth.AddAuditDetail(ctx, "user_ids", req.UserIDs)
 	auth.SetAuditTarget(ctx, strconv.FormatInt(g.ID, 10), g.Name)
 	h.writeGroup(w, r, http.StatusOK, g)
@@ -707,7 +720,7 @@ func (h *GroupsAdmin) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	auth.AddAuditDetail(ctx, "user_id", uid)
 	auth.SetAuditTarget(ctx, strconv.FormatInt(g.ID, 10), g.Name)
 	h.writeGroup(w, r, http.StatusOK, g)
@@ -878,7 +891,7 @@ func (h *GroupsAdmin) syncLinks(w http.ResponseWriter, r *http.Request) bool {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return false
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(r.Context())
 	return true
 }
 

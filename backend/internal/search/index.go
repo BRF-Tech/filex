@@ -470,6 +470,28 @@ type Filter struct {
 	Restrict   bool
 	IncludeIDs []int64
 	ExcludeIDs []int64
+	// Accept, when set, is asked about every candidate BEFORE it is counted
+	// against `limit` (filex 0.54, audit D6): a search's narrowing (kind,
+	// size, date, folder, owner - internal/nodefilter) is a property of the
+	// catalogue row, which the index does not hold, so the caller answers it.
+	// A candidate it refuses is not a result and takes no place in the page.
+	// The candidate window grows to searchMaxFilteredFetch while it is set.
+	Accept func(nodeID int64) bool
+	// AcceptNode is the same narrowing for a caller that already holds the
+	// row (the index-less fallback, a bare `tag:` listing, the MCP name
+	// search): no second lookup. Set together with Accept.
+	AcceptNode func(n *model.Node) bool
+}
+
+// AcceptsNode applies the caller's narrowing to a row in hand (true when
+// there is none).
+func (f *Filter) AcceptsNode(n *model.Node) bool {
+	return f == nil || f.AcceptNode == nil || f.AcceptNode(n)
+}
+
+// accepts applies the caller's per-candidate predicate.
+func (f *Filter) accepts(id int64) bool {
+	return f == nil || f.Accept == nil || f.Accept(id)
 }
 
 // searchOverFetch is how many extra hits are pulled from Bleve so the
@@ -482,6 +504,11 @@ const searchOverFetch = 4
 // any UI shows and keeps a pathological `limit` from turning into a
 // whole-index scan.
 const searchMaxFetch = 500
+
+// searchMaxFilteredFetch is the candidate window while a Filter.Accept
+// narrows the hits: the narrowing turns candidates away after Bleve chose
+// them, so the window has to be wider for `limit` to still be reached.
+const searchMaxFilteredFetch = 2000
 
 // Search returns top-N name/path matches for the query string — the
 // legacy, name-scoped entry point (see SearchScoped for content search).
@@ -517,7 +544,16 @@ func (i *Index) SearchScoped(ctx context.Context, query string, limit int, scope
 // the cheap and the quiet choice: fuzziness is the expensive part of the
 // query, and always-on fuzziness would pad a perfectly good result list
 // with near-misses nobody asked for.
-func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Scope, f *Filter) ([]Hit, error) {
+func (i *Index) SearchFiltered(ctx context.Context, q string, limit int, scope Scope, f *Filter) ([]Hit, error) {
+	hits, _, err := i.SearchPage(ctx, q, limit, scope, f)
+	return hits, err
+}
+
+// SearchPage is SearchFiltered that also says whether more may match than
+// came back: the page was cut at `limit`, or a candidate window Bleve filled
+// held more matches than it returned (so a Filter.Accept that turned rows
+// away may have left matches outside the window unseen).
+func (i *Index) SearchPage(_ context.Context, q string, limit int, scope Scope, f *Filter) ([]Hit, bool, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -532,18 +568,30 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 	defer i.mu.RUnlock()
 	bx := i.bleve
 	if bx == nil || q == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	if f != nil && f.Restrict && len(f.IncludeIDs) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	fetch := limit * searchOverFetch
-	if fetch > searchMaxFetch {
-		fetch = searchMaxFetch
+	maxFetch := searchMaxFetch
+	if f != nil && f.Accept != nil {
+		fetch = limit * searchOverFetch * 4
+		maxFetch = searchMaxFilteredFetch
+	}
+	if fetch > maxFetch {
+		fetch = maxFetch
 	}
 	if fetch < limit {
 		fetch = limit
+	}
+	// more: a window Bleve filled held more matches than it handed back.
+	more := false
+	windowFull := func(res *bleve.SearchResult) {
+		if res != nil && res.Total > uint64(len(res.Hits)) {
+			more = true
+		}
 	}
 	// The documents are composed (docFor); so is the query, whichever form
 	// it was typed or pasted in.
@@ -579,7 +627,14 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 					// thing that found it. Keep it, ranked last.
 					sc = NameScore{OK: true, Tier: TierFuzzy}
 				}
+				// The caller's narrowing, asked only of a real match (it may
+				// read the catalogue row): a refused row is never a result,
+				// and the content pass must not bring it back either.
 				id, _ := strconv.ParseInt(h.ID, 10, 64)
+				if !f.accepts(id) {
+					seen[h.ID] = -1
+					continue
+				}
 				seen[h.ID] = len(out)
 				out = append(out, ranked{
 					Hit: Hit{
@@ -594,8 +649,9 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 		}
 		res, err := runNameSearch(bx, applyFilter(nameQuery(q), f), fetch)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		windowFull(res)
 		collect(res, false)
 		// ⚠ The gate counts SURVIVORS, not candidates, and that is a
 		// deliberate change: the reporter of issue #15 pointed out that
@@ -607,7 +663,7 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 			if fq := fuzzyNameQuery(q); fq != nil {
 				res, err := runNameSearch(bx, applyFilter(fq, f), fetch)
 				if err != nil {
-					return nil, err
+					return nil, false, err
 				}
 				collect(res, true)
 			}
@@ -630,14 +686,18 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 		req.Highlight.AddField("content")
 		res, err := bx.Search(req)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
+		windowFull(res)
 		for _, h := range res.Hits {
 			snippet := ""
 			if frags, ok := h.Fragments["content"]; ok && len(frags) > 0 {
 				snippet = plainSnippet(frags[0])
 			}
 			if pos, ok := seen[h.ID]; ok {
+				if pos < 0 {
+					continue
+				}
 				out[pos].Matched = MatchedBoth
 				if out[pos].Snippet == "" {
 					out[pos].Snippet = snippet
@@ -645,6 +705,9 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 				continue
 			}
 			id, _ := strconv.ParseInt(h.ID, 10, 64)
+			if !f.accepts(id) {
+				continue
+			}
 			out = append(out, ranked{
 				Hit:     Hit{NodeID: id, Score: h.Score, Snippet: snippet, Matched: MatchedContent, Tier: TierContent},
 				pathLen: len(hitField(h, "path")),
@@ -669,13 +732,14 @@ func (i *Index) SearchFiltered(_ context.Context, q string, limit int, scope Sco
 		return out[a].NodeID < out[b].NodeID
 	})
 	if len(out) > limit {
+		more = true
 		out = out[:limit]
 	}
 	hits := make([]Hit, len(out))
 	for i, r := range out {
 		hits[i] = r.Hit
 	}
-	return hits, nil
+	return hits, more, nil
 }
 
 // ranked is a Hit plus the sort keys that are not part of the wire

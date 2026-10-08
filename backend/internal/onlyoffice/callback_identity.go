@@ -40,7 +40,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/perm"
 	"github.com/brf-tech/filex/backend/internal/srvtext"
@@ -183,7 +182,7 @@ func (s *Service) mayCreate(ctx context.Context, node *model.Node, uid int64, re
 			}
 		}
 	}
-	set, err := acl.New(s.Store).LoadSet(ctx, u, st)
+	set, err := s.aclResolver().LoadSet(ctx, u, st)
 	if err != nil || set == nil {
 		return false
 	}

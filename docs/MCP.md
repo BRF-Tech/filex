@@ -304,7 +304,7 @@ held to the router by a test ([BACKEND.md](BACKEND.md)).
 | GET | `/api/ai/files?path=` | `read` | → `{entries:[…]}` - an entry inside an end-to-end encrypted folder (or a `.fxe`) says `encrypted: true` and `e2e_root` ([below](#encrypted-folders-and-fxe)) |
 | GET | `/api/ai/info?path=` | `read` | → `{entry:{…}}` |
 | GET | `/api/ai/download?path=` | `read` | → raw bytes (stream); `409 E2E_ENCRYPTED` for an end-to-end encrypted file ([below](#encrypted-folders-and-fxe)) |
-| GET | `/api/ai/search?path=&q=` | `read` | → `{entries:[…]}` - names and `tag:` filters only; content search is the MCP `file_search` tool |
+| GET | `/api/ai/search?path=&q=` | `read` | → `{entries:[…]}` - names and `tag:` filters, plus the [narrowing parameters](SEARCH.md#narrowing-a-search) (`type`, `min_size`, `modified_after`, `under`, `owner`…); content search is the MCP `file_search` tool |
 | GET | `/api/ai/tags?path=` | `read` | → `{path, tags:[{name, kind}], can_edit_team}` - the file's tags **as the token's user sees them** ([Tags](SEARCH.md#tags---personal-and-team)) |
 | POST | `/api/ai/tags` | `write` | `{path, tags:[{name, kind}]}` - the tags that user can see become exactly this list (`[]` clears them); every item names its `kind` |
 | POST | `/api/ai/upload` | `write` | `{path, content}` / `{path, content_base64}` / multipart `file`; `allow_plaintext` (JSON field or form field) to write into an encrypted folder |
@@ -376,7 +376,11 @@ Notes:
   free name (`code: NO_FREE_NAME`), `409` with a `code` for end-to-end
   encryption (`E2E_ENCRYPTED`, `E2E_PLAINTEXT_REFUSED`, `E2E_BOUNDARY`,
   [below](#encrypted-folders-and-fxe)), `413` an upload too large for this
-  endpoint (use an upload ticket), `423` an app has locked the path (the
+  endpoint (use an upload ticket), or over the account's per-file upload limit
+  (`code: FILE_TOO_LARGE`) or its quota (`code: QUOTA_EXCEEDED`) - a write
+  through `/api/ai/upload`, `file_write`, ShareX or an upload ticket asks both,
+  as the explorer's upload does ([QUOTAS.md](QUOTAS.md#where-it-is-enforced));
+  `423` an app has locked the path (the
   message names the app, e.g. a document out for signature), `501`
   unsupported by the driver, `503` no storage configured or a transient
   refusal (a version of the file it would replace could not be kept, the
@@ -464,7 +468,7 @@ user's role + grants + confinement):
 | Tool | What it does |
 |------|--------------|
 | `file_root` | Report your access scope: confinement root (if any) + addressable storages. **Call this first.** |
-| `file_list` | List a directory (`adapter://dir`; empty = first storage root). Entries say `encrypted` and `e2e_root` ([below](#encrypted-folders-and-fxe)); an encrypted folder's key file is never listed. |
+| `file_list` | List a directory (`adapter://dir`; empty = first storage root). Entries say `encrypted` and `e2e_root` ([below](#encrypted-folders-and-fxe)); an encrypted folder's key file is never listed. Entries come in the server's one order - folders first, then by name (numbers as numbers) - the same order the explorer and the CLI get; `sort` picks another (`modified`, `size`, `type`, a leading `-` reverses it). |
 | `file_info` | Metadata (size, mime, type, modified time) for one path. |
 | `file_read` | Read a file. UTF-8 text when the bytes are valid UTF-8, else base64. **Rejects files > 8 MiB** - use the REST `download` stream for those. An end-to-end encrypted file is refused with `E2E_ENCRYPTED`. |
 | `file_write` | Create/overwrite a file (`content` text or `content_base64` binary). Content you generate - never a file off your disk. Into an encrypted folder only with `allow_plaintext` (else `E2E_PLAINTEXT_REFUSED`). |
@@ -472,9 +476,9 @@ user's role + grants + confinement):
 | `file_delete` | Soft-delete to filex trash (recoverable from the UI). |
 | `file_move` | Move or rename a file/folder. **Never overwrites**: a destination that is already taken gets a free name beside it (`rapor-copy.txt`), so read the returned `entry.path` rather than assuming the one you asked for; the entry's `size`, `mime` and `last_modified` are read off the storage where the item landed (until 0.50 every file came back `size: 0`). When every candidate name is taken too, nothing moves and the tool's error starts with `NO_FREE_NAME:`. Works across storages: the bytes are copied and verified, then the source is removed - unless something was left behind (`entry.source_kept`, [below](#links-that-cannot-travel)). |
 | `file_mkdir` | Create a directory (`files.create` in the folder that gains it). |
-| `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and, with the search index, may be answered by a folder (`main code` finds `Code/main.go`; without the index, or with `content=false`, every word has to be in the file's own name); supports `tag:` / `-tag:` filters (your personal and your team's tag of that name both count); `content=false` restores name-only. |
+| `file_search` | Search file/folder names **and** (by default) extracted file contents in a storage. Forgiving on separators and typos; words may be in any order and, with the search index, may be answered by a folder (`main code` finds `Code/main.go`; without the index, or with `content=false`, every word has to be in the file's own name); supports `tag:` / `-tag:` filters (your personal and your team's tag of that name both count); `content=false` restores name-only. Narrow with `type` (`file`, `dir`, `image`, `spreadsheet`…), `mime`, `modified_after` / `modified_before`, `min_size` / `max_size`, `under` / `not_under`, `owner` (`me`, `system`, an id) and `hidden` - applied before the result count is cut ([SEARCH.md → Narrowing a search](SEARCH.md#narrowing-a-search)). |
 | `file_tags` | Read a file's tags (`{path}`), or set them (`{path, set:[{name, kind}]}`). Every tag says its **kind**: `personal` (only the token's user sees it) or `team` (everyone in the tenant who can see the file; adding or removing one needs edit permission - `can_edit_team` says whether you have it). There is **no default kind** on this surface: an agent names the kind of every tag it writes. Other people's personal tags and other tenants' tags are never shown or touched. |
-| `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Needs **edit** permission on the item and the account's `share.links` permission, as in the explorer - and the link answers only while the account keeps them ([PERMISSIONS.md](PERMISSIONS.md#public-links-follow-their-creator)). Use this to hand a file to someone instead of streaming it back. Never for an encrypted folder or anything in it (`E2E_ENCRYPTED`); a `.fxe` is shared as it is and the answer says `encrypted: true`. |
+| `file_share` | Public share link for a file/folder (folders → ZIP); optional PIN/expiry/max-downloads. Needs **edit** permission on the item and the account's `share.links` permission, as in the explorer - and the link answers only while the account keeps them ([PERMISSIONS.md](PERMISSIONS.md#public-links-follow-their-creator)). Use this to hand a file to someone instead of streaming it back. The answer carries `download_command` - the ready `curl` and `powershell` lines that fetch the link (PIN, folder ZIP and an S3 redirect already handled by the server); pass them on as they are. Never for an encrypted folder or anything in it (`E2E_ENCRYPTED`); a `.fxe` is shared as it is and the answer says `encrypted: true`. |
 | `file_unshare` | Revoke a public link or a file request by its token: your own (any for an admin), inside your tenant and your token's root. |
 | `file_zip` | Pack files/folders into a `.zip` **on the server** (dest lands in storage; share it to download). Needs `files.download` on every source, as a download does. |
 | `file_unzip` | Extract a stored `.zip` into a directory **on the server** (zip-slip protected, stays within your root). Into an encrypted folder only with `allow_plaintext`. |
@@ -498,7 +502,9 @@ A tool answers `{status, result}`: the HTTP status of its REST twin and that
 route's JSON answer, the very body `/api/ai/<route>` returns. A refusal is a
 tool error whose text starts with the code - the answer's `code`, or its
 one-word `error` (`READ_ONLY: …`, `PERMISSION_DENIED: …`,
-`APP_PLUGINS_DISABLED`) - and ends with the status (`(HTTP 403)`).
+`APP_PLUGINS_DISABLED`) - followed by the server's sentence (`message`) and
+ends with the status (`(HTTP 403)`). A failed operation's row carries
+`error_code` and `error_text` ([API-ERRORS.md](API-ERRORS.md)).
 
 Work that takes time is a job on the **operations queue**: the tool answers
 `202` with `{op: {id, …}}` and the job runs on the server. Follow it with
@@ -516,8 +522,8 @@ answers `404`, as an id that never existed.
 | `ops_list` | `GET /api/ai/ops` | Your operations, newest first (`status` filters). |
 | `op_get` | `GET /api/ai/ops/{id}` | One operation's state. |
 | `op_cancel` | `POST /api/ai/ops/{id}/cancel` | Stop a pending or running operation: `FINISHED` once it has ended, `NOT_CANCELLABLE` for one that finishes what it starts (a rename, a restore, a permanent delete). |
-| `trash_list` | `GET /api/ai/trash` | What you can bring back: `{entries: [{id, path, name, deleted_at, deleted_by_self, …}], total}`, only entries you could see where they were, inside your root ([TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints)). |
-| `trash_restore` | `POST /api/ai/trash/restore` | Bring entries back (`node_ids` = their `id`, at most 1000), on the queue: every entry is judged first (`files.create` where it came from, app locks) and nothing is queued unless all pass. `202 {ops}`, one per storage. |
+| `trash_list` | `GET /api/ai/trash` | What you can bring back: `{entries: [{id, path, name, deleted_at, deleted_by_self, …}], total, total_bytes, storages, summary}`, only entries you could see where they were, inside your root. `total`, `total_bytes` and `storages` (per storage: count, bytes, newest deletion) count every entry, not the page; `summary` says it in the token user's language (since 0.54, [TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints)). |
+| `trash_restore` | `POST /api/ai/trash/restore` | Bring entries back (`node_ids` = their `id`, at most 1000), on the queue: every entry is judged first (`files.create` where it came from, app locks) and nothing is queued unless all pass. `202 {ops, done, summary}`, one op per storage; `summary` is the server's sentence for what is on its way, and each op's row (`op_get`) carries its own `summary` once it ends - how many came back, how many did not and why. |
 | `file_versions` | `GET /api/ai/versions?path=` | A file's version history. |
 | `file_version_restore` | `POST /api/ai/versions/restore` | Replace the file's content with a version (`files.modify`); the content it replaces is kept as a version first. |
 | `file_snapshot` | `POST /api/ai/versions/snapshot` | Keep the current content as a version now (`files.modify`). |
@@ -536,7 +542,7 @@ keeps what hangs off a file:
 
 | Tool | REST twin | What it does |
 |------|-----------|--------------|
-| `notifications_list` | `GET /api/ai/notifications` | Your bell, newest first (`unread`, `limit`, `offset`): your notices and the broadcasts you may see. A token confined to a folder reads only the notices about files inside it, and the ones that name no file - as `/api/notifications` ([NOTIFICATIONS.md](NOTIFICATIONS.md#in-app-bell-endpoints)). |
+| `notifications_list` | `GET /api/ai/notifications` | Your bell, newest first (`unread`, `limit`, `offset`): your notices and the broadcasts you may see, each said in your account's language as the bell says it ([What a notification says](NOTIFICATIONS.md#what-a-notification-says)). A token confined to a folder reads only the notices about files inside it, and the ones that name no file - as `/api/notifications` ([NOTIFICATIONS.md](NOTIFICATIONS.md#in-app-bell-endpoints)). |
 | `notification_read` | `POST /api/ai/notifications/read` | Mark a notice read (`id`), or all you can see (`all: true`). Your own bookkeeping: `read` is enough and no audit row is written, as in the bell. |
 | `file_star` | `POST /api/ai/star` | Star a file or folder for yourself (`star: false` takes it off); it is listed under **Starred**. |
 | `file_comments` | `GET /api/ai/comments?path=` | The comments on an item; everyone who can see it reads them. |
@@ -643,7 +649,9 @@ tenants (`admin_tenants_*`, the platform operator's,
 [TENANT-ADMIN.md](TENANT-ADMIN.md#mcp-tools)), external services (and their
 test, `admin_external_test`, which takes the form's unsaved
 `{enabled, url, secret, callback_url}` and measures ONLYOFFICE's way back to
-filex through the door a document uses), replica,
+filex through the door a document uses; `admin_external_update` also sets
+ONLYOFFICE's [editor language](ONLYOFFICE.md#the-editors-language),
+`editor_lang`), replica,
 replication targets, queue, notifications and webhook targets, audit, RBAC
 grants, protection and archive settings, the files apps have locked, and
 sign-in security (the [attempt limits](CONFIGURATION.md#sign-in-attempt-limits):
@@ -689,7 +697,12 @@ and the operator's addresses as the panel does.
   `queued: true` to run as a job of the operations queue - a restore then
   takes a batch, `body: {node_ids: [...]}` (at most 1000) - and answer `202`
   with the operation(s), which `op_get` follows and `op_cancel` stops
-  ([TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints)).
+  ([TRASH-VERSIONING.md](TRASH-VERSIONING.md#trash-endpoints)). Since 0.54
+  `admin_trash_purge_batch` (`body: {node_ids: [...]}`, `queued` optional)
+  deletes a selection in one call and `admin_trash_empty_preview` (`filters:
+  {storage_id?, older_than_days?}`) is the dry run of `admin_trash_empty`:
+  `{count, bytes, summary}`, counted the way the purge counts. Every answer
+  about the trash carries `summary`, the server's sentence for it.
 - **Replica** (0.50): `admin_replica_failures_count`, `admin_replica_fix`
   (every unresolved failure) and `admin_replica_fix_one`
   (`{storage_id, path, op}`; 0.53 names the storage, a failure's path is
@@ -919,8 +932,8 @@ reaction differs and a bare code cannot express it:
 | 410 | `ticket_expired` | Mint a new ticket and upload to the new URL. |
 | 409 | `ticket_in_use` | Another transfer is in flight - wait, don't start a second one. |
 | 411 | `content_length_required` | The body came chunked; use `curl -T`, which always sends a length. The ticket survives. |
-| 413 | `file_too_large` | **The ticket is still valid** - retry the *same* URL with a file within `max_bytes`. The reply also echoes `sent_bytes`. |
-| 503 / 507 | `storage_unavailable` / `quota_exceeded` | The storage backend refused, not your request: retry later, or free space. |
+| 413 | `file_too_large` | **The ticket is still valid** - retry the *same* URL with a file within `max_bytes` (the reply also echoes `sent_bytes`), or, since 0.54.0, within the ticket owner's per-file upload limit. |
+| 503 / 507 | `storage_unavailable` / `quota_exceeded` | The storage backend refused, or the ticket owner is out of quota (asked before a byte is written, as every write door asks it): retry later, or free space. |
 
 Minting refuses in the caller's own terms too: pointing `path` at a folder
 answers `"…" already exists as a FOLDER. …`path` must be the full destination

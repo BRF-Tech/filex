@@ -51,6 +51,17 @@ func (h *Users) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// ?q= narrows by e-mail, display name and username (labelMatches), on
+	// the server: the page used to filter with the browser's own rules.
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		kept := users[:0]
+		for _, u := range users {
+			if u != nil && labelMatches(q, u.Email, u.DisplayName, u.Username) {
+				kept = append(kept, u)
+			}
+		}
+		users = kept
+	}
 	writeJSON(w, http.StatusOK, users)
 }
 
@@ -247,6 +258,14 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A password the administrator typed passes the one rule
+	// (local.CheckPassword); an invitation makes its own, and ignores this one.
+	if !req.SendInvite && req.Password != "" {
+		if p := passwordProblem(req.Password); p != nil {
+			p.write(w, r)
+			return
+		}
+	}
 	hash := ""
 	invitePw := ""
 	if req.SendInvite {
@@ -309,7 +328,8 @@ func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	if req.SendInvite {
 		// The same letter a folder invitation that makes an account sends
 		// (grants.go): where to sign in, the address, a first password.
-		lang := srvtext.Pick(u.Locale, userLang(r))
+		// The new account's own language (translated at the last stop).
+		lang := srvtext.Pick(u.Locale)
 		subject, body := accountCreatedText(lang, h.Tenants.FromRequest(r)+"/admin/", u.Email, invitePw)
 		emailed := h.Mailer != nil && h.Mailer.Send(mailer.WithLanguage(r.Context(), lang), u.Email, subject, body) == nil
 		out.Invite = &userInvite{Emailed: emailed}
@@ -437,6 +457,14 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Password != nil && refuseTakeover(w, r, h.ACL, target) {
 		return
 	}
+	// The one password rule (local.CheckPassword), as the person's own change
+	// and an administrator's create ask it. Before any field is written.
+	if req.Password != nil {
+		if p := passwordProblem(*req.Password); p != nil {
+			p.write(w, r)
+			return
+		}
+	}
 	// Disabling the final admin locks everyone out of the admin surface just
 	// as surely as deleting or demoting them, both of which are already
 	// refused above.
@@ -506,7 +534,7 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		perm.Invalidate()
+		perm.InvalidateFor(r.Context(), id)
 	}
 	if req.SSOUnlink {
 		had, err := h.Store.ClearUserOIDCIdentity(r.Context(), id)
@@ -535,7 +563,7 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 		// (PutUserRoles is how a custom role is given.)
 		if target == nil || target.Role != *req.Role {
 			_ = h.Store.SetUserCustomRole(r.Context(), id, 0)
-			perm.Invalidate()
+			perm.InvalidateFor(r.Context(), id)
 		}
 		// As on the Role field (PutUserRoles): the level picked here is the
 		// account's own now — forget the one kept from before a group's role,
@@ -554,7 +582,7 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		perm.Invalidate()
+		perm.InvalidateFor(r.Context(), id)
 	}
 	if req.Enabled != nil {
 		if err := h.Store.SetUserEnabled(r.Context(), id, *req.Enabled); err != nil {
@@ -578,6 +606,10 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 			tz = *req.Timezone
 		}
 		_ = h.Store.UpdateUserLocale(r.Context(), id, l, tz)
+		// One language per person, whichever surface reads it (#191).
+		if req.Locale != nil {
+			syncSurfaceLocales(r.Context(), h.Store, id, l)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

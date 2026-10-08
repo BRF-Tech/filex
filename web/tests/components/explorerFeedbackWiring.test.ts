@@ -35,7 +35,10 @@ describe('explorer feedback wiring', () => {
     expect(fn('submitRename')).toMatch(/refuseInDialog\(renameReq, ticket, err, \{ op: 'rename' \}, words\)/);
     expect(fn('submitNewFolder')).toMatch(/refuseInDialog\(newFolderReq, ticket, err, \{ op: 'newfolder' \}\)/);
     expect(fn('confirmDelete')).toMatch(/refuseInDialog\(deleteReq, ticket, err, \{ op: 'delete' \}\)/);
-    expect(fn('purgeSelection')).toMatch(/refuseInDialog\(deleteReq, ticket, firstError, \{ op: 'purge' \}/);
+    // A purge is one batch call now (#206): a refused request, and a batch the
+    // server took none of - said in the server's own summary.
+    expect(fn('purgeSelection')).toMatch(/refuseInDialog\(deleteReq, ticket, err, \{ op: 'purge' \}\)/);
+    expect(fn('purgeSelection')).toMatch(/refuseInDialog\(deleteReq, ticket, new Error\(said\.summary\), \{ op: 'purge' \}, said\.summary\)/);
     // The copy path no longer prints the raw message beside it.
     expect(fn('transferItems')).not.toMatch(/flashToast\(\(err as Error\)\.message\)/);
   });
@@ -82,12 +85,23 @@ describe('explorer feedback wiring', () => {
     expect(explorer).toMatch(/<DeleteConfirmModal[\s\S]*?:busy="deleteBusy"[\s\S]*?:error="deleteError"/);
   });
 
-  it('says a restore is running, and what did not come back', () => {
+  it("says what came back and what did not - one request, the server's words", () => {
     const restore = fn('restoreSelection');
     expect(restore).toMatch(/if \(restoreBusy\.value\) return;/);
-    expect(restore).toMatch(/t\('toast\.restoring'/);
-    // What did not come back, and why (lib/restoreWords).
-    expect(restore).toMatch(/sayRestore\(\{ restored, taken, failed,/);
+    // 0.54 (finding A15): one request for the selection, and the server's
+    // sentence for what came back, what did not and why - it was one request
+    // per item and a summary composed here (lib/restoreWords, gone).
+    expect(restore).toMatch(/await api\.restoreBatch\(ids\)/);
+    expect(restore).toMatch(/showToast\(\{ message: said\.summary \}/);
+    expect(restore).toMatch(/const \{ ops, summary \} = await api\.restoreQueued\(ids\)/);
+    expect(restore).not.toMatch(/restoreIds|sayRestore|toast\.restoring/);
+  });
+
+  it("deletes a selection for good in one request, said in the server's words", () => {
+    const purge = fn('purgeSelection');
+    expect(purge).toMatch(/await api\.purgeBatch\(ids, \{ queued \}\)/);
+    expect(purge).toMatch(/showToast\(\{ message: said\.summary \}/);
+    expect(purge).not.toMatch(/for \(const id of ids\)|purgeTrash|sayPurge/);
   });
 
   it('frees a dialog as soon as it closes, not after the listing read behind it', () => {

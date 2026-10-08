@@ -19,7 +19,7 @@ line under every page saying what it is for:
 
 | Panel | Section | Pages |
 |---|---|---|
-| **Files & storage** | Files | Files (the file manager), File history, Shares, Trash, Tagged files, Duplicates, Search index - see [Sharing](SHARING.md), [Trash & versioning](TRASH-VERSIONING.md), [Search](SEARCH.md) |
+| **Files & storage** | Files | Files (the file manager), File history, Shares, Trash, Tagged files, Duplicates (its cards are the whole report's totals, `total_groups` / `total_copies` / `total_waste` from `GET /api/admin/duplicates`, beside the 100 largest groups), Search index - see [Sharing](SHARING.md), [Trash & versioning](TRASH-VERSIONING.md), [Search](SEARCH.md) |
 | | Apps | One row per installed app that has a screen of its own - see [Apps](APP-PLUGINS.md). The section is not shown when no app has one. |
 | | Storage | Storages, Connections, Sync runs, Replica, Usage & cost - see [Storage](STORAGE.md), [Protocols](PROTOCOLS.md), [Replication](REPLICATION.md), [Usage & cost](USAGE.md) |
 | **People & security** | People & access | Users, Groups, Roles, Folder access, Tenants or My tenant - see [Roles & permissions](PERMISSIONS.md), [Groups](GROUPS.md), [RBAC & folder access](RBAC.md), [Tenant self-service](TENANT-ADMIN.md) |
@@ -30,7 +30,7 @@ line under every page saying what it is for:
 
 | | |
 |---|---|
-| ![The People & security panel open over Admin → Users](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) | ![The System panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/system-dark-tr-1440.232f4348962d.png) |
+| ![The People & security panel open over Admin → Users](https://filex.sh/shots/megamenu/people-panel-1440.2efdcb9a685a.png) | ![The System panel in Turkish, in the dark theme](https://filex.sh/shots/megamenu/system-dark-tr-1440.377bdbee42e6.png) |
 | *People & security* open over *Users*: two sections, a line under every page, the page you are on marked. | The same menu in Turkish and in the dark theme: *System*, three sections. |
 
 Every page is two clicks away: the panel's button, then the page. The

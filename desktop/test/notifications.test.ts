@@ -7,16 +7,23 @@
 // wrong and every launch throws ten notifications at the user. (2) The
 // destination: it must come from the SHARED resolver, because the whole point
 // of the field is that the bell, the browser toast and this one land in the
-// same place. (3) The SENTENCE: same shared catalogue, same reason — and it
-// must never be the raw event id, which is what a native toast actually showed
-// before this was wired (`{title: "file.uploaded"}`, measured 2026-09-12).
+// same place. (3) The SENTENCE: the server's, exactly as `GET
+// /api/notifications` says it (backend notify say.go, the code a push and an
+// email take too) - this process composes nothing (2026-10-08: the words are
+// built on the server and nowhere else).
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DesktopNotifier, isUnauthorized, newRows, opensInWindow, type NotificationRow } from '../src/notifications.ts';
+import {
+  DesktopNotifier,
+  isUnauthorized,
+  newRows,
+  opensInWindow,
+  type NotificationRow,
+  type NotificationText,
+} from '../src/notifications.ts';
 import type { NotificationDestination } from '../../packages/core/src/lib/notificationTarget.ts';
-import type { NotificationText } from '../../packages/core/src/lib/notificationText.ts';
 
 const ACC = { id: 'a1', serverUrl: 'https://files.example.com', token: 't' };
 
@@ -26,7 +33,7 @@ function page(rows: NotificationRow[], total = rows.length) {
   return { items: rows, total };
 }
 
-function rig(pages: NotificationRow[][], locale: 'en' | 'tr' = 'en') {
+function rig(pages: NotificationRow[][]) {
   const shown: NotificationRow[] = [];
   const texts: NotificationText[] = [];
   const opened: unknown[] = [];
@@ -38,7 +45,6 @@ function rig(pages: NotificationRow[][], locale: 'en' | 'tr' = 'en') {
     onOpen: (_id, dest) => opened.push(dest),
     fetchRows: async () => page(pages[Math.min(at++, pages.length - 1)]),
     onUnread: (_id, count) => unread.push(count),
-    locale: () => locale,
     show: (row, text, onClick) => {
       shown.push(row);
       texts.push(text);
@@ -138,42 +144,43 @@ test('newRows is > baseline, never >=', () => {
 
 // ── the sentence ─────────────────────────────────────────────────────────
 
-test('the toast says a sentence in the reader language, never the event id', async () => {
+test('the toast says the words of the server for the row, as they are', async () => {
+  // ⚠ What the server answers now: the sentence said in the language of the
+  // account (backend notify PersonLang), the facts beside it. Red before: the main
+  // process composed its own sentence from `meta` and ignored these words.
   const row: NotificationRow = {
     id: 1,
     event: 'file.uploaded',
-    // ⚠ Exactly what the server stores for this event: no real title (Send
-    // substitutes the event id) and a bare path for a body.
-    title: 'file.uploaded',
+    title: 'Yeni dosya: rapor.pdf',
     body: 'Documents/rapor.pdf',
-    meta: { origin: 'manager', node: { path: 'Documents/rapor.pdf', name: 'rapor.pdf' } },
+    meta: { origin: 'manager', node: { path: 'Documents/rapor.pdf', name: 'some-other-name.pdf' } },
   };
-
-  const en = rig([[], [row]]);
-  await en.n.poll();
-  await en.n.poll();
-  assert.deepEqual(en.texts, [{ title: 'New file: rapor.pdf', body: 'Documents/rapor.pdf' }]);
-
-  const tr = rig([[], [row]], 'tr');
-  await tr.n.poll();
-  await tr.n.poll();
-  assert.deepEqual(tr.texts, [{ title: 'Yeni dosya: rapor.pdf', body: 'Documents/rapor.pdf' }]);
-
-  // The property that matters more than either string: whatever it says, it is
-  // not the wire format.
-  for (const t of [...en.texts, ...tr.texts]) {
-    assert.ok(!t.title.includes('file.uploaded'), `raw event id leaked: ${t.title}`);
-  }
+  const { n, texts } = rig([[], [row]]);
+  await n.poll();
+  await n.poll();
+  assert.deepEqual(texts, [{ title: 'Yeni dosya: rapor.pdf', body: 'Documents/rapor.pdf' }]);
 });
 
-test('an unknown event falls back to the server title, not to the id', async () => {
-  const { n, texts } = rig([
-    [],
-    [{ id: 2, event: 'disk_full', title: 'Disk almost full', body: '/data at 96%' }],
-  ]);
+test('an encrypted item reads as the server says it - this process has no key', async () => {
+  const row = {
+    id: 2,
+    event: 'file.uploaded',
+    title: 'New file: 🔒 Encrypted item',
+    body: 'Kasa/🔒 Encrypted item',
+    e2e: { title: [{ text: 'New file: ' }, { name: 0 }], body: [{ name: 1 }], names: [] },
+  } as NotificationRow;
+  const { n, texts } = rig([[], [row]]);
   await n.poll();
   await n.poll();
-  assert.deepEqual(texts, [{ title: 'Disk almost full', body: '/data at 96%' }]);
+  assert.deepEqual(texts, [{ title: 'New file: 🔒 Encrypted item', body: 'Kasa/🔒 Encrypted item' }]);
+});
+
+test('the source composes no sentence: no phrase table, no renderer', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../src/notifications.ts', import.meta.url), 'utf8');
+  for (const gone of ['renderNotification', 'notificationText.ts', 'NOTIFICATION_PHRASES', 'NotifyLocale']) {
+    assert.ok(!src.includes(gone), `desktop/src/notifications.ts still names ${gone}`);
+  }
 });
 
 // ── the count on the icon ──────────────────────────────────────────

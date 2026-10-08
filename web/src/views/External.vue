@@ -28,6 +28,7 @@ import { formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import Select from '@/components/ui/Select.vue';
 import Toggle from '@/components/ui/Toggle.vue';
 import Badge from '@/components/ui/Badge.vue';
 import Spinner from '@/components/ui/Spinner.vue';
@@ -44,6 +45,8 @@ interface Draft {
   enabled: boolean;
   /** Only OnlyOffice calls back, so only its card shows this. */
   callback_url: string;
+  /** ONLYOFFICE's editor language: 'auto' or a code from the row's list. */
+  editor_lang: string;
 }
 
 const drafts = reactive<Record<string, Draft>>({});
@@ -57,9 +60,25 @@ function ensureDraft(s: ExternalService): Draft {
       jwt_secret: '',
       enabled: s.enabled,
       callback_url: s.callback_url ?? '',
+      editor_lang: s.editor_lang ?? 'auto',
     };
   }
   return drafts[s.id];
+}
+
+/**
+ * The editor language list: automatic first, then the languages the SERVER
+ * says the editor offers, each named in itself (the server's list - this page
+ * keeps no copy of it). Only the ONLYOFFICE row carries one.
+ */
+function hasEditorLang(s: ExternalService): boolean {
+  return Array.isArray(s.editor_languages) && s.editor_languages.length > 0;
+}
+function editorLangOptions(s: ExternalService): Array<{ value: string; label: string }> {
+  return [
+    { value: 'auto', label: t('external.fields.editorLangAuto') },
+    ...(s.editor_languages ?? []).map((l) => ({ value: l.code, label: l.name })),
+  ];
 }
 
 async function load() {
@@ -92,6 +111,7 @@ async function save(s: ExternalService) {
       enabled: d.enabled,
       jwt_secret: d.jwt_secret || undefined,
       ...(callsBack(s) ? { callback_url: d.callback_url } : {}),
+      ...(hasEditorLang(s) ? { editor_lang: d.editor_lang } : {}),
     });
     d.jwt_secret = ''; // never echo back
     toast.success(t('external.savedOk'));
@@ -540,6 +560,20 @@ function envVarOf(id: string): string {
           monospace
           :placeholder="publicUrlDisplay"
           :hint="t('external.fields.callbackUrlHint')"
+        />
+        <!-- The editor's language (GitHub Discussion #93): saved with the
+             card; the server decides with it what every editor opens in. -->
+        <Select
+          v-if="hasEditorLang(s)"
+          v-model="ensureDraft(s).editor_lang"
+          :options="editorLangOptions(s)"
+          :label="t('external.fields.editorLang')"
+          :hint="
+            s.editor_lang_env_managed
+              ? t('external.fields.editorLangEnvHint', { env: 'FILEX_ONLYOFFICE_LANG' })
+              : t('external.fields.editorLangHint')
+          "
+          :data-testid="`external-editor-lang-${s.id}`"
         />
 
         <Toggle v-model="ensureDraft(s).enabled" :label="t('common.enabled')" />

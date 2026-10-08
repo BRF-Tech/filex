@@ -66,7 +66,9 @@ test.describe('public drop page', () => {
     const list = page.getByTestId('public-request-uploads');
     await expect(list.locator('[data-state="done"]')).toHaveCount(2);
     await expect(list.locator('[data-state="refused"]')).toHaveCount(1);
-    await expect(list.locator('[data-state="refused"]')).toContainText(/type of file|türde dosya/);
+    // The SERVER's sentence for it (server.public.drop_err_ext, #210): the one
+    // its no-JavaScript page and its own refusal say.
+    await expect(list.locator('[data-state="refused"]')).toContainText(/file type that is not allowed|izin verilmeyen dosya türü/);
     await expect(list).not.toContainText(/app returned an error|Uygulama hata döndürdü/i);
     expect(uploads).toHaveLength(1);
 

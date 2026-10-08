@@ -90,7 +90,7 @@ import {
 } from './login-item.js';
 import { DesktopNotifier, opensInWindow, type NotificationRow } from './notifications.js';
 // ⚠⚠ The badge's rule comes from the WEB package, exactly as the click
-// destination (notificationTarget) and the sentence (notificationText) do:
+// destination (notificationTarget) does (the sentence is the server's):
 // "exact to 99, `99+` above" is a product rule, and a counter written twice is
 // a counter that disagrees with itself. Same boundary, same reason.
 import { unreadBadgeCount, unreadBadgeLabel } from '../../packages/core/src/lib/unreadBadge.ts';
@@ -146,6 +146,7 @@ import {
 import {
   SyncSupervisor,
   addPair,
+  checkWindow,
   cliPath,
   confirmHeld,
   discardHeld,
@@ -161,7 +162,7 @@ import {
   answerHold,
   heldItems,
   normLimit,
-  normWindow,
+  storedWindow,
   folderView,
   removeFolder,
   trayTooltip,
@@ -173,6 +174,7 @@ import { SleepGuard, quietMomentForUpdate, syncBusy } from './power.js';
 import { CANCELLED, DownloadTally, downloadEnding } from './download-guard.js';
 import { anyError } from './syncstatus.js';
 import { isServerApiUrl, serverUrl } from './server-url.js';
+import { accountLocaleOf, pinToAdopt, prefsWithLocale, uiLocaleFor } from './account-locale.js';
 import { PORTABLE_DATA_DIRNAME, portableMode } from './portable.js';
 
 // ─────────────────────────── portable build ───────────────────────────
@@ -589,6 +591,10 @@ function openMainWindow(): void {
     webPreferences: { preload: preload('preload-app.cjs'), contextIsolation: true, sandbox: true },
   });
   mainWindow.once('ready-to-show', () => showWindow(mainWindow));
+  // The account's language may have been changed on another surface (the web
+  // panel, another computer): read it again when the window comes forward, at
+  // most once a minute.
+  mainWindow.on('focus', () => void syncAccountLocale({ throttleMs: 60_000 }));
 
   // Closing the window parks the app in the tray instead of killing it. A sync
   // client that stops syncing the moment its window is shut is not a sync
@@ -723,6 +729,12 @@ function startNotifier(): void {
       const url = serverUrl(acc.serverUrl, '/api/notifications');
       url.searchParams.set('unread', 'true');
       url.searchParams.set('limit', String(limit));
+      // ⚠ No language is named: the server says every row in the language
+      // of the ACCOUNT (backend notify PersonLang) - the app's language is
+      // the account's (src/account-locale.ts), and the toast says what the
+      // phone and the web bell of the same person say. It may be a language
+      // pack's: the app itself draws only English and Turkish, its
+      // notifications need not.
       const res = await net.fetch(url.toString(), { headers: { Authorization: `Bearer ${acc.token}` } });
       // The status travels as a property: isUnauthorized() reads that, not
       // the wording.
@@ -745,21 +757,15 @@ function startNotifier(): void {
       if (!res.ok) throw Object.assign(new Error(`server said ${res.status}`), { status: res.status });
     },
     onUnauthorized: (accountId) => markSignedOut(accountId, 'the bell was refused twice in a row (HTTP 401)'),
-    // The reader's language, read per row — see DesktopNotifierOptions.locale.
-    locale: () => effectiveLocale(),
     show: (row, text, onClick) => {
       if (!Notification.isSupported()) return;
       const n = new Notification({
-        // ⚠ Composed from the row's event + metadata by the SHARED renderer
-        // (packages/core/src/lib/notificationText.ts), in this window's language — not
-        // taken from the server's `title`, which is written once in whatever
-        // language the server was configured with and, for most file events,
-        // is not written at all (`row.title` is then the literal event id).
+        // ⚠ The server's words for the row (backend notify say.go), in the
+        // account's language - the same the window's bell and a push
+        // to the person's phone say. Nothing is composed here.
         title: text.title,
-        // ⚠ A notification carries a name, a count and a target — never file
-        // content, never a credential. The renderer interpolates only paths,
-        // names, counts and a comment excerpt, all of which the row already
-        // carries in plain sight.
+        // ⚠ A notification carries a name, a count and a target - never file
+        // content, never a credential, never an encrypted item's name.
         body: text.body,
       });
       n.on('click', onClick);
@@ -814,15 +820,98 @@ function buildTray(): void {
 function accountsChanged(): void {
   refreshTray();
   wireAuthHeaderInjection();
+  // Another account on screen is another person's language (#191).
+  void syncAccountLocale();
 }
 
-/** The chosen language, or what the OS says when the choice is 'system'.
- *  One resolver for the tray, the window and the explorer — three places
- *  deciding this for themselves is how a Turkish menu ends up on an English
- *  window. */
+/** The language the app draws: the ACTIVE ACCOUNT's (#191 - the app's
+ *  language is the account's, src/account-locale.ts), the system's with
+ *  nobody signed in or in a language the window does not draw. One resolver
+ *  for the tray, the window and the explorer — three places deciding this for
+ *  themselves is how a Turkish menu ends up on an English window. */
 function effectiveLocale(): 'en' | 'tr' {
-  if (state.locale === 'en' || state.locale === 'tr') return state.locale;
-  return app.getLocale().toLowerCase().startsWith('tr') ? 'tr' : 'en';
+  return uiLocaleFor(activeAccount(state)?.locale, app.getLocale());
+}
+
+/** users.locale of an account, from the server; null when it could not be read. */
+async function readAccountLocale(acc: Account): Promise<string | null> {
+  try {
+    const res = await net.fetch(serverUrl(acc.serverUrl, '/api/auth/me').toString(), {
+      headers: { Authorization: `Bearer ${acc.token}`, Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    return accountLocaleOf(await res.json());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets an account's language ON THE SERVER: the desktop surface's preference
+ * document with `locale` (the server mirrors it into users.locale, which the
+ * web panel, every notification and the sync engine read). GET first - the
+ * PUT replaces the whole document. true when the server took it.
+ */
+async function writeAccountLocale(acc: Account, code: string): Promise<boolean> {
+  const url = serverUrl(acc.serverUrl, '/api/me/prefs');
+  url.searchParams.set('surface', 'desktop');
+  const auth = { Authorization: `Bearer ${acc.token}`, Accept: 'application/json' };
+  try {
+    const got = await net.fetch(url.toString(), { headers: auth });
+    if (!got.ok) return false;
+    const body = JSON.stringify(prefsWithLocale(await got.json(), code));
+    const put = await net.fetch(url.toString(), {
+      method: 'PUT',
+      headers: { ...auth, 'Content-Type': 'application/json' },
+      body,
+    });
+    return put.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The account's language arrived (or changed): remember it, relabel the tray
+ * and every window, and restart that account's watchers - the sync engine,
+ * started without `--lang`, says its messages in the account's language as
+ * it read it at start (backend cmd/filex syncevents.go).
+ */
+function applyAccountLocale(acc: Account, lang: string): void {
+  const was = acc.locale;
+  if (was === lang) return;
+  const uiBefore = effectiveLocale();
+  acc.locale = lang;
+  saveState(state);
+  if (effectiveLocale() !== uiBefore) refreshTray();
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('sync:changed');
+  // A first read (nothing cached yet) changes nothing the engine said: it
+  // read the same account language itself when it started.
+  if (was !== undefined) {
+    log('sync', 'account language changed; restarting its watchers', { account: acc.id, lang });
+    supervisor?.stop(acc.id);
+    void refreshPairs();
+  }
+}
+
+let accountLocaleReadAt = 0;
+
+/** Read the active account's language again (start, a switch, a focus). */
+async function syncAccountLocale(opts: { throttleMs?: number } = {}): Promise<void> {
+  const acc = activeAccount(state);
+  if (!acc || acc.signedOut) return;
+  if (opts.throttleMs && Date.now() - accountLocaleReadAt < opts.throttleMs) return;
+  accountLocaleReadAt = Date.now();
+  let lang = await readAccountLocale(acc);
+  if (lang === null) return;
+  // An older install's pinned language goes to its account once (pinToAdopt).
+  const adopt = pinToAdopt(state.locale, lang);
+  if (adopt && (await writeAccountLocale(acc, adopt))) lang = adopt;
+  if (state.locale !== 'system') {
+    state.locale = 'system';
+    saveState(state);
+  }
+  applyAccountLocale(acc, lang);
 }
 
 /** The tray's own strings. Tiny on purpose: the window has the real catalogue,
@@ -1495,6 +1584,10 @@ function migrateLegacyLinuxNames(): void {
  */
 const rootMoves = new Set<string>();
 
+/** The engine's reason for refusing the last window Settings asked for (its
+ *  sentence, `filex sync window --json`), until a window is accepted. */
+let syncWindowProblem: string | null = null;
+
 function publicState() {
   const keychainNow = keychain();
   return {
@@ -1520,7 +1613,7 @@ function publicState() {
         signedOut: !!state.accounts.find((a) => a.id === p.account)?.signedOut,
         moving: rootMoves.has(p.account ?? ''),
         status: supervisor?.statuses().find((st) => st.accountId === p.account) ?? null,
-        minuteOfDay: new Date().getHours() * 60 + new Date().getMinutes(),
+        now: Date.now(),
       }),
     })),
     syncStatuses: supervisor?.statuses() ?? [],
@@ -1528,13 +1621,19 @@ function publicState() {
     // (one list, here, rather than a copy in the page).
     limitDownKiB: normLimit(state.limitDownKiB),
     limitUpKiB: normLimit(state.limitUpKiB),
-    syncWindow: normWindow(state.syncWindow),
+    syncWindow: storedWindow(state.syncWindow),
+    // The engine's words when it refused the window asked for (null: none).
+    syncWindowProblem,
     limitPresets: LIMIT_PRESETS_KIB,
     windowPresets: WINDOW_PRESETS,
     syncEngine: cliPath() ? 'bundled' : 'missing',
     runInBackground: state.runInBackground,
     launchAtLogin: state.launchAtLogin,
     locale: state.locale,
+    // The active account's language as the server said it ('' = none, or not
+    // read yet) - the app's language (#191); effectiveLocale is how this
+    // window draws it.
+    accountLocale: activeAccount(state)?.locale ?? '',
     notifications: state.notifications !== false,
     syncPaused: state.syncPaused === true,
     // The sign-in waiting in the browser. The URL carries the state and the
@@ -1547,8 +1646,8 @@ function publicState() {
       pendingAuth ? { serverUrl: pendingAuth.serverUrl, authUrl: pendingAuth.authUrl } : null,
       signInFailure,
     ),
-    // What 'system' currently resolves to, so the window does not have to
-    // re-derive it from navigator.language and disagree with the tray.
+    // The language the window draws (the account's, else the system's), so
+    // the window does not re-derive it and disagree with the tray.
     effectiveLocale: effectiveLocale(),
     // What the OS actually did with the request, not what we asked for. Login
     // items are refused often enough (policy, sandboxing, a user unticking it
@@ -1609,9 +1708,42 @@ async function refreshPairs(): Promise<void> {
   );
 }
 
-/** The limits and window every watcher is started with (Settings). */
+/**
+ * The limits and window every watcher is started with.
+ *
+ * ⚠ No language (#191): the engine is started without `--lang` and says its
+ * messages in the language of the ACCOUNT it syncs, which it asks the server
+ * for itself (backend cmd/filex syncevents.go: --lang, then $FILEX_LANG, then
+ * the account's language on the server, then English). One copy of the rule,
+ * the engine's - and each account's watcher speaks that account's language.
+ * An account language that changes restarts that account's watchers
+ * (applyAccountLocale).
+ */
 function currentWatchPrefs(): WatchPrefs {
   return { limitDownKiB: state.limitDownKiB, limitUpKiB: state.limitUpKiB, syncWindow: state.syncWindow };
+}
+
+/**
+ * The stored sync window as the engine reads it. Checked once at start: a
+ * state file from an older app, or one edited by hand, may hold a window the
+ * engine refuses — and a watcher that will not start is worse than one with
+ * no window. Settings checks every new value the same way (settings:set).
+ */
+async function checkStoredWindow(): Promise<void> {
+  const stored = storedWindow(state.syncWindow);
+  if (!stored) return;
+  const ans = await checkWindow(stored, effectiveLocale()).catch((e: unknown) => {
+    log('sync', 'could not ask the engine about the sync window', String((e as Error)?.message ?? e));
+    return null;
+  });
+  if (!ans) return;
+  const next = ans.ok ? ans.window : '';
+  if (next === stored) return;
+  log('sync', ans.ok ? 'the stored sync window is rewritten as the engine reads it' : 'the engine refuses the stored sync window; it is cleared', { stored, next, code: ans.code });
+  state.syncWindow = next;
+  syncWindowProblem = ans.ok ? null : ans.message;
+  saveState(state);
+  await restartWatchers();
 }
 
 /** Restarts every watcher, so a changed limit or window takes effect now. A
@@ -4274,12 +4406,25 @@ function wireIpc(): void {
 
   ipcMain.handle('settings:set', async (_e, patch: Partial<DesktopState>) => {
     if (typeof patch.syncPaused === 'boolean') await setSyncPaused(patch.syncPaused);
-    // Limits and the window are engine flags: a change restarts the watchers.
+    // Limits, the window and the language are engine flags: a change
+    // restarts the watchers (watchChanged, below).
     const watchBefore = watchPrefsKey(currentWatchPrefs());
     if ('limitDownKiB' in patch) state.limitDownKiB = normLimit(patch.limitDownKiB);
     if ('limitUpKiB' in patch) state.limitUpKiB = normLimit(patch.limitUpKiB);
-    if ('syncWindow' in patch) state.syncWindow = normWindow(patch.syncWindow);
-    const watchChanged = watchPrefsKey(currentWatchPrefs()) !== watchBefore;
+    if ('syncWindow' in patch) {
+      // ⚠ The engine judges the window and this stores its answer (B17): a
+      // parser of the app's own disagreed with it. A refused window leaves
+      // the stored one as it was, and the page shows the engine's reason.
+      const ans = await checkWindow(typeof patch.syncWindow === 'string' ? patch.syncWindow : '', effectiveLocale()).catch(
+        (e: unknown) => ({ ok: false, window: '', code: 'engine', message: String((e as Error)?.message ?? e) }),
+      );
+      if (ans.ok) {
+        state.syncWindow = ans.window;
+        syncWindowProblem = null;
+      } else {
+        syncWindowProblem = ans.message;
+      }
+    }
     if (typeof patch.runInBackground === 'boolean') state.runInBackground = patch.runInBackground;
     if (typeof patch.notifications === 'boolean') state.notifications = patch.notifications;
     if (typeof patch.launchAtLogin === 'boolean') {
@@ -4291,16 +4436,24 @@ function wireIpc(): void {
     if (typeof patch.themeBg === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(patch.themeBg)) {
       state.themeBg = patch.themeBg;
     }
-    if (patch.locale === 'system' || patch.locale === 'en' || patch.locale === 'tr') {
-      state.locale = patch.locale;
-      // The tray is drawn by the main process and would otherwise keep the
-      // language it was built with until the next restart — a menu in the old
-      // language next to a window in the new one.
-      refreshTray();
+    // ⚠⚠ The language is the ACCOUNT's (#191): a pick here is written to the
+    // account on the server - the web panel, every notification and the sync
+    // engine follow it - and only then drawn here (applyAccountLocale relabels
+    // the tray and the window and restarts that account's watchers). With
+    // nobody signed in there is no account to write to: the app speaks the
+    // system's language and the choice is not offered (app.html).
+    if (patch.locale === 'en' || patch.locale === 'tr') {
+      const acc = activeAccount(state);
+      if (acc && !acc.signedOut && (await writeAccountLocale(acc, patch.locale))) {
+        applyAccountLocale(acc, patch.locale);
+      } else {
+        log('app', 'the account language could not be written', { account: acc?.id ?? null, lang: patch.locale });
+      }
     }
+    const watchChanged = watchPrefsKey(currentWatchPrefs()) !== watchBefore;
     saveState(state);
     if (watchChanged) {
-      log('sync', 'limits or window changed; restarting the watchers', currentWatchPrefs());
+      log('sync', 'limits, window or language changed; restarting the watchers', currentWatchPrefs());
       await restartWatchers();
     }
     return publicState();
@@ -5060,6 +5213,8 @@ if (!app.requestSingleInstanceLock()) {
     // with the app rather than with the window: the point is to reach somebody
     // who is NOT looking at filex.
     startNotifier();
+    // The app's language is the account's (#191): read it from the server.
+    void syncAccountLocale();
     // Whether this build can swap itself decides WHICH updater to wire, so it
     // runs first.
     void detectManualUpdates().then(wireAutoUpdate);
@@ -5104,6 +5259,9 @@ if (!app.requestSingleInstanceLock()) {
     // document inside a synced folder would have taken the copy-and-write-back
     // route for a file that needed neither.
     void refreshPairs().finally(() => {
+      // The stored window as the engine reads it (B17); restarts the
+      // watchers only when it had to change it.
+      void checkStoredWindow();
       queueOpenWith(launch.files);
       armOpenWith();
       // What a previous run left on the server: copies to remove, and edits

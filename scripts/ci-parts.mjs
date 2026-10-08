@@ -67,6 +67,7 @@ export const DS_SPECS = [
   '199-csv-onlyoffice',
   '200-office-saved-beside',
   '116-admin-says-which',
+  '215-oo-callback-trust',
 ];
 
 /** The Playwright --grep of the Document Server parts. */

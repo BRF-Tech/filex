@@ -277,17 +277,25 @@ func (s *Syncer) WriteRows(ctx context.Context, st *model.Storage, rel string, s
 		s.warn("parent chain", slog.String("path", clean), slog.String("err", err.Error()))
 		return nil, writehook.Created, false
 	}
+	// ⚠ What landed for a new row too, not the caller's number: a protocol
+	// write's size is the one its client declared, and the row is what the
+	// listing, the quota recount and the search index read. The replace branch
+	// above has asked the storage since the etag fix; a new file kept the
+	// declared size until 0.54.
+	size, etag, mtime := s.landed(ctx, st.ID, rel, size)
 	node, err := s.Store.CreateNode(ctx, &model.Node{
-		StorageID:  st.ID,
-		ParentID:   parentID,
-		Name:       path.Base(clean),
-		Path:       clean,
-		PathHash:   hash,
-		StorageKey: clean,
-		Type:       model.NodeTypeFile,
-		Size:       size,
-		Mime:       mime,
-		SyncState:  model.SyncStateSynced,
+		StorageID:    st.ID,
+		ParentID:     parentID,
+		Name:         path.Base(clean),
+		Path:         clean,
+		PathHash:     hash,
+		StorageKey:   clean,
+		Type:         model.NodeTypeFile,
+		Size:         size,
+		Mime:         mime,
+		Etag:         etag,
+		BackendMtime: &mtime,
+		SyncState:    model.SyncStateSynced,
 	})
 	if err != nil || node == nil {
 		if err != nil {

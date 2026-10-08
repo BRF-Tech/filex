@@ -15,7 +15,8 @@ import {
   WINDOW_PRESETS,
   answerHold,
   normLimit,
-  normWindow,
+  engineLangTag,
+  storedWindow,
   heldItems,
   removeFolder,
   folderView,
@@ -28,7 +29,6 @@ import {
   watcherAccounts,
   wantedWatchers,
   watchersWanted,
-  windowContains,
 } from '../src/sync-policy.ts';
 
 const A = { id: 'a' };
@@ -75,24 +75,38 @@ test('an account the server signed out gets no watcher until it reconnects', () 
 // else on that server slowed down. Settings offers presets; they become the
 // engine's --limit-down / --limit-up (KiB/s) and --window HH:MM-HH:MM.
 
-test('with nothing chosen the watcher is started exactly as before', () => {
-  // ⚠ No flag at all rather than `--limit-down 0`: an engine that predates the
-  // flags refuses unknown ones and would not start.
-  assert.deepEqual(watchArgs('acc-1', {}, '30s'), ['sync', 'run', '--account', 'acc-1', '--watch', '30s', '--quiet']);
+// #213: the engine reports in events (`--json`) — the app reads no English
+// line any more. #191: the app names no language (`--lang` stays a flag
+// watchArgs passes on verbatim when given one); the engine says each
+// sentence in the language of the account it syncs (account-locale.test.ts).
+test('with nothing chosen the watcher gets only the event stream', () => {
+  // ⚠ No other flag rather than `--limit-down 0`.
+  assert.deepEqual(watchArgs('acc-1', {}, '30s'), ['sync', 'run', '--account', 'acc-1', '--watch', '30s', '--quiet', '--json']);
   assert.deepEqual(
-    watchArgs('acc-1', { limitDownKiB: 0, limitUpKiB: 0, syncWindow: '' }, '30s'),
-    ['sync', 'run', '--account', 'acc-1', '--watch', '30s', '--quiet'],
+    watchArgs('acc-1', { limitDownKiB: 0, limitUpKiB: 0, syncWindow: '', lang: '' }, '30s'),
+    ['sync', 'run', '--account', 'acc-1', '--watch', '30s', '--quiet', '--json'],
   );
 });
 
-test('limits and a window become the engine flags, verbatim', () => {
+test('the language, limits and a window become the engine flags, verbatim', () => {
   assert.deepEqual(
-    watchArgs('acc-1', { limitDownKiB: 10240, limitUpKiB: 1024, syncWindow: '22:00-07:00' }, '30s'),
+    watchArgs('acc-1', { limitDownKiB: 10240, limitUpKiB: 1024, syncWindow: '22:00-07:00', lang: 'tr' }, '30s'),
     [
-      'sync', 'run', '--account', 'acc-1', '--watch', '30s', '--quiet',
-      '--limit-down', '10240', '--limit-up', '1024', '--window', '22:00-07:00',
+      'sync', 'run', '--account', 'acc-1', '--watch', '30s', '--quiet', '--json',
+      '--lang', 'tr', '--limit-down', '10240', '--limit-up', '1024', '--window', '22:00-07:00',
     ],
   );
+  // A language the app itself does not draw goes through as well: the engine
+  // asks the server for a language pack that adds it.
+  assert.deepEqual(watchArgs('acc-1', { lang: 'es-ES' }, '30s').slice(-2), ['--lang', 'es-ES']);
+});
+
+test('a language is passed only when it looks like one', () => {
+  assert.equal(engineLangTag('tr'), 'tr');
+  assert.equal(engineLangTag(' pt_BR '), 'pt_BR');
+  for (const bad of ['', '--json', 'tr; rm', 'x', 42, null, undefined]) {
+    assert.equal(engineLangTag(bad), '', String(bad));
+  }
 });
 
 test('a limit is a whole, non-negative KiB/s; anything else means no limit', () => {
@@ -103,40 +117,33 @@ test('a limit is a whole, non-negative KiB/s; anything else means no limit', () 
   }
 });
 
-test('a window is HH:MM-HH:MM that does not start where it ends; anything else is "any time"', () => {
-  assert.equal(normWindow('22:00-07:00'), '22:00-07:00');
-  assert.equal(normWindow(' 19:00-08:00 '), '19:00-08:00');
-  for (const bad of ['', '22:00-22:00', '24:00-07:00', '22:60-07:00', '7:00-8:00', '22:00', 42, null]) {
-    assert.equal(normWindow(bad), '', String(bad));
-  }
-});
-
-test('every preset Settings offers survives its own normalisation', () => {
+// ⚠ B17: the app's own HH:MM parser was stricter than the engine's — "7:00-9:00"
+// and spaces were "any time" here while the engine ran with them. The engine
+// judges a window now (`filex sync window --json`); the app passes on what it
+// stored without reading it.
+test('a stored window is passed on as stored; the app reads no HH:MM', () => {
+  assert.equal(storedWindow(' 07:00-09:00 '), '07:00-09:00');
+  assert.equal(storedWindow('22:00-07:00'), '22:00-07:00');
+  for (const none of ['', '   ', 42, null, undefined]) assert.equal(storedWindow(none), '', String(none));
   for (const v of LIMIT_PRESETS_KIB) assert.equal(normLimit(v), v);
-  for (const w of WINDOW_PRESETS) assert.equal(normWindow(w), w);
-});
-
-test('a window may wrap midnight, and its end is exclusive', () => {
-  const at = (h: number, m = 0) => h * 60 + m;
-  assert.equal(windowContains('22:00-07:00', at(23)), true);
-  assert.equal(windowContains('22:00-07:00', at(6, 59)), true);
-  assert.equal(windowContains('22:00-07:00', at(7)), false);
-  assert.equal(windowContains('22:00-07:00', at(12)), false);
-  assert.equal(windowContains('09:00-17:00', at(9)), true);
-  assert.equal(windowContains('09:00-17:00', at(17)), false);
-  assert.equal(windowContains('', at(12)), true, 'no window is any time');
+  for (const w of WINDOW_PRESETS) assert.equal(storedWindow(w), w);
+  const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'sync-policy.ts'), 'utf8');
+  assert.doesNotMatch(src, /\\d\{2\}\):\(\\d\{2\}\)/, 'no HH:MM regular expression in the app');
+  assert.doesNotMatch(src, /export function (normWindow|windowContains)\b/);
 });
 
 test('only a change the engine would see restarts the watchers', () => {
-  assert.equal(watchPrefsKey({}), watchPrefsKey({ limitDownKiB: 0, limitUpKiB: 0, syncWindow: '' }));
+  assert.equal(watchPrefsKey({}), watchPrefsKey({ limitDownKiB: 0, limitUpKiB: 0, syncWindow: '', lang: '' }));
   assert.notEqual(watchPrefsKey({}), watchPrefsKey({ limitDownKiB: 1024 }));
   assert.notEqual(watchPrefsKey({ limitUpKiB: 1024 }), watchPrefsKey({ limitUpKiB: 5120 }));
   assert.notEqual(watchPrefsKey({}), watchPrefsKey({ syncWindow: '22:00-07:00' }));
+  // The engine says its messages in the language it was started with.
+  assert.notEqual(watchPrefsKey({ lang: 'en' }), watchPrefsKey({ lang: 'tr' }));
 });
 
 // ── the line under each folder in Settings ──
 
-const NOON = 12 * 60;
+const NOW = Date.parse('2026-10-08T12:00:00Z');
 // A status shaped exactly as the supervisor keeps it (src/syncstatus.ts):
 // errors live per pair, the engine's own in lastError.
 const running = (over: Partial<SyncStatus> = {}): SyncStatus => ({ ...newStatus('acc'), ...over });
@@ -146,77 +153,98 @@ const passed = { error: null, line: 'already in step', local: null, busy: null, 
 
 test('the folder line: pause and sign-out come first', () => {
   const st = running({ pairs: failing('pair-1', 'boom'), lastError: 'boom' });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: true, signedOut: true, status: st, minuteOfDay: NOON }), { kind: 'paused' });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: true, status: st, minuteOfDay: NOON }), { kind: 'signed-out' });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: null, minuteOfDay: NOON }), { kind: 'starting' });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: true, signedOut: true, status: st, now: NOW }), { kind: 'paused' });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: true, status: st, now: NOW }), { kind: 'signed-out' });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: null, now: NOW }), { kind: 'starting' });
 });
 
 test('the folder line: the pair being worked on says what is happening; the others are watching', () => {
-  const st = running({ active: { pairId: 'pair-2', phase: 'transfer', done: 3, total: 9 }, pairs: { 'pair-1': passed } });
-  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
-    kind: 'active', phase: 'transfer', done: 3, total: 9,
+  const st = running({
+    active: { pairId: 'pair-2', phase: 'transfer', done: 3, total: 9, message: 'moving files - 3/9' },
+    pairs: { 'pair-1': passed },
   });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'watching' });
+  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, now: NOW }), {
+    kind: 'active', phase: 'transfer', done: 3, total: 9, message: 'moving files - 3/9',
+  });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW }), { kind: 'watching' });
 });
 
 test('the folder line: an error is shown on ITS folder; the engine\'s own on every folder', () => {
   const st = running({ pairs: { ...failing('pair-1', 'list docs://a: HTTP 502'), 'pair-2': passed } });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW }), {
     kind: 'error', message: 'list docs://a: HTTP 502',
   });
-  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'watching' });
+  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, now: NOW }), { kind: 'watching' });
   const proc = running({ running: false, lastError: 'sync stopped unexpectedly (exit 1)' });
-  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: proc, minuteOfDay: NOON }), {
+  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: proc, now: NOW }), {
     kind: 'error', message: 'sync stopped unexpectedly (exit 1)',
   });
 });
 
-test('the folder line: "waiting for the window" only while the clock is outside it', () => {
-  const st = running({ waitingWindow: '22:00-07:00', pairs: { 'pair-1': passed } });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
-    kind: 'window', window: '22:00-07:00',
+// B17: the engine says when the window opens (opens_at); the app compares a
+// moment with a moment and does no clock arithmetic on the window.
+test('the folder line: "waiting for the window" only until the engine said it opens', () => {
+  const opensAt = NOW + 10 * 3600_000;
+  const message = 'waiting for the sync window, 22:00-07:00';
+  const st = running({ waitingWindow: { window: '22:00-07:00', opensAt, message }, pairs: { 'pair-1': passed } });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW }), {
+    kind: 'window', window: '22:00-07:00', message,
   });
   // Inside the window a quiet watcher may print nothing at all: the stale
   // "waiting" line must not outlive the opening of the window.
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: 23 * 60 }), { kind: 'watching' });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: opensAt }), { kind: 'watching' });
 });
 
 test('the folder line: a watcher that is gone without a word is "stopped"', () => {
   const st = running({ running: false });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'stopped' });
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW }), { kind: 'stopped' });
 });
 
 // Another filex on this computer holds the folder (the other copy of this
 // app, or the CLI): the folder is being synced — not by this copy — and that is
 // what its line says, not an error left from before, and not "watching".
+const BUSY = 'Another filex on this computer is syncing this folder - this copy takes over when that one stops';
 test('the folder line: a folder another filex syncs says so, ahead of an old error', () => {
   const detail = 'another filex on this computer is syncing this pair (process 42)';
   const st = running({
-    pairs: { 'pair-1': { error: 'list docs://a: HTTP 502', line: null, local: null, busy: { detail } }, 'pair-2': passed },
+    pairs: { 'pair-1': { error: 'list docs://a: HTTP 502', line: null, local: null, busy: { detail, message: BUSY } }, 'pair-2': passed },
   });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
-    kind: 'busy', detail,
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW }), {
+    kind: 'busy', detail, message: BUSY,
   });
-  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'watching' },
+  assert.deepEqual(folderView({ pairId: 'pair-2', paused: false, signedOut: false, status: st, now: NOW }), { kind: 'watching' },
     'only that folder');
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: true, signedOut: false, status: st, minuteOfDay: NOON }), { kind: 'paused' },
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: true, signedOut: false, status: st, now: NOW }), { kind: 'paused' },
     'a pause still comes first');
   const gone = running({ running: false, pairs: st.pairs });
-  assert.notEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: gone, minuteOfDay: NOON }).kind, 'busy',
+  assert.notEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: gone, now: NOW }).kind, 'busy',
     'a watcher that is gone is not waiting for anything');
 });
 
-test("the folder line carries the transfer's bytes and estimate through", () => {
+test("the folder line carries the transfer's figures and the engine's sentence through", () => {
+  const message = 'moving files - 120/11,704, 1.2 GB of 52.6 GB - about 8 h 10 min left';
   const st = running({
     active: {
       pairId: 'pair-1', phase: 'transfer', done: 120, total: 11704,
-      bytesDone: '1.2 GiB', bytesTotal: '52.6 GiB', eta: '8h 10m', etaSeconds: 29400,
+      bytesDone: 1_200_000_000, bytesTotal: 52_600_000_000, etaSeconds: 29400, message,
     },
   });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW }), {
     kind: 'active', phase: 'transfer', done: 120, total: 11704,
-    bytesDone: '1.2 GiB', bytesTotal: '52.6 GiB', eta: '8h 10m', etaSeconds: 29400,
+    bytesDone: 1_200_000_000, bytesTotal: 52_600_000_000, etaSeconds: 29400, message,
   });
+});
+
+// An engine that never wrote one event (older than this app: it refused
+// `--json`) says so, with its own words.
+test('the folder line: an engine that never spoke the stream is told apart', () => {
+  const st = running();
+  st.lastError = 'Error: unknown flag: --json';
+  markExited(st, 1, false);
+  const v = folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW });
+  assert.equal(v.kind, 'error');
+  assert.equal(v.kind === 'error' ? v.noStream : undefined, true);
+  assert.equal(v.kind === 'error' ? v.reason : undefined, 'Error: unknown flag: --json');
 });
 
 // ── held items ──
@@ -274,11 +302,11 @@ test('…and a failed answer still restarts the watcher, and says so', async () 
 // the others for its first sync — read "watching for changes" in green, the
 // line of a folder that is in step (Y11).
 test('the folder line: a folder no pass has finished yet waits for its first check', () => {
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: running(), minuteOfDay: NOON }), {
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: running(), now: NOW }), {
     kind: 'pending',
   });
   const st = running({ pairs: { 'pair-1': passed } });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, minuteOfDay: NOON }), {
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: st, now: NOW }), {
     kind: 'watching',
   });
 });
@@ -287,7 +315,7 @@ test('the folder line: a folder no pass has finished yet waits for its first che
 // at its accounts again, and the one trace was an English line (Y9).
 test('the folder line: an engine that stopped on its own is said in a code, with when it comes back', () => {
   const proc = running({ running: false, lastError: 'sync stopped unexpectedly (exit 1)', exited: '1', restartAt: 1_000 });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: proc, minuteOfDay: NOON }), {
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: proc, now: NOW }), {
     kind: 'error', message: 'sync stopped unexpectedly (exit 1)', exited: '1', restartAt: 1_000,
   });
 });
@@ -298,14 +326,14 @@ test('the folder line: an engine that stopped on its own is said in a code, with
 test("the folder line: an engine that stopped on its own keeps the engine's own reason", () => {
   const why = 'filex: open C:\\Users\\ada\\.filex\\sync\\pairs.json: Access is denied.';
   const proc = running({ running: false, lastError: why, exited: '1', restartAt: 1_000 });
-  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: proc, minuteOfDay: NOON }), {
+  assert.deepEqual(folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: proc, now: NOW }), {
     kind: 'error', message: why, exited: '1', reason: why, restartAt: 1_000,
   });
   // The line the app writes itself when the engine said nothing is no reason:
   // the page says that in its own language already.
   const silent = running({ running: false, exited: '2' });
   markExited(silent, 2, false);
-  const v = folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: silent, minuteOfDay: NOON });
+  const v = folderView({ pairId: 'pair-1', paused: false, signedOut: false, status: silent, now: NOW });
   assert.equal(v.kind === 'error' ? v.reason : 'not an error', undefined);
 });
 
@@ -383,7 +411,7 @@ test('an account whose folder is being moved gets no watcher', () => {
 test('the folder line: a folder being moved says so, not "stopped"', () => {
   const st = running({ running: false, pairs: { 'pair-1': passed } });
   assert.deepEqual(
-    folderView({ pairId: 'pair-1', paused: false, signedOut: false, moving: true, status: st, minuteOfDay: NOON }),
+    folderView({ pairId: 'pair-1', paused: false, signedOut: false, moving: true, status: st, now: NOW }),
     { kind: 'moving' },
   );
 });

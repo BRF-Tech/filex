@@ -177,8 +177,6 @@ func TestInternalDirs_PeopleCannotWriteThere(t *testing.T) {
 	notes, err := os.ReadFile(filepath.Join(f.RootA, ".versions", "7", "notes.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "the old notes", string(notes), "save-text rewrote a version snapshot")
-	status, body = fxPost(t, f.URL+"/api/files/upload/init", tok, map[string]any{"storage_id": f.StA.ID, "path": "alpha://.versions", "filename": "x.txt", "size": 3})
-	assertReserved(t, "chunked upload into .versions", status, body)
 	status, body = fxPost(t, f.URL+"/api/files/upload/begin", tok, map[string]any{"path": "alpha://.filex-trash", "name": "x.txt", "size": 3})
 	assertReserved(t, "staged upload into the trash folder", status, body)
 

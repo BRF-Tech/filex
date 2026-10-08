@@ -112,10 +112,16 @@ test.describe('#103 - a file opened between two listings', () => {
     await storageRow.click();
     await expect(row()).toBeVisible();
 
-    // Starred: entering it forgets the folder's level.
+    // Starred: entering it forgets the folder's level. Its first page is the
+    // view's own answer (0.54, #207: `?limit=<page>&offset=0`; the page size
+    // is the explorer's, not this spec's).
     const starred = page.getByTestId('sidenav-view-starred');
     await Promise.all([
-      page.waitForResponse((r) => /\/api\/files\/manager\/star\/list\?limit=200\b/.test(r.url()) && r.ok()),
+      page.waitForResponse((r) => {
+        if (!r.ok()) return false;
+        const u = new URL(r.url());
+        return u.pathname.endsWith('/api/files/manager/star/list') && u.searchParams.get('offset') === '0';
+      }),
       starred.click(),
     ]);
     await expect(starred).toHaveAttribute('aria-current', 'page');

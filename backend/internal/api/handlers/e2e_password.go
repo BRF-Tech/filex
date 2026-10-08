@@ -3,53 +3,46 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"path"
-	"strconv"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
-	"github.com/brf-tech/filex/backend/internal/auth"
-	"github.com/brf-tech/filex/backend/internal/model"
-	"github.com/brf-tech/filex/backend/internal/notify"
-	"github.com/brf-tech/filex/backend/internal/pathkey"
 )
 
 // wiring:e2 password — "the password of an encrypted folder was changed".
 //
-// The change itself happens entirely in the browser: the client re-wraps the
-// folder key under the new password and writes a new `.filex-e2e.json`. The
-// server never sees either password and cannot tell a new key file from any
-// other upload. So, as with the escrow report, the web UI ANNOUNCES the change
-// once the key file is written, and this handler turns the announcement into
-// the two records a person relies on: an audit-log row, and a notification to
-// the folder's owner (`e2e.password_changed`) — the "your password was
-// changed" message every account system sends, because a change you did not
-// make is how you learn someone else holds your password or recovery key.
+// Since 0.54 the SERVER says it, from what it saw change: the key file's
+// rewrite (e2e/keyfilewatch) or the `.fxe` header's (e2e/fxewatch) is compared
+// with the version the overwrite kept, and a changed password or recovery slot
+// is recorded (`e2e.password_change`) and told to the owner
+// (`e2e.password_changed`) by e2e/slotchange - whichever surface wrote it, and
+// whether or not any client says so.
 //
-// ⚠ An announcement, not a gate, and docs/E2E-ENCRYPTION.md says so: a client
-// that rewrites the key file some other way is not announced. What the
-// handler does make sure of is that the announcement is not free: the caller
-// must be able to WRITE the folder (the same right rewriting its key file
-// takes), and the path must be an encrypted folder.
+// Up to 0.53 both records came from HERE: the web UI announced the change once
+// the key file was written, and this handler turned the announcement into the
+// audit row and the owner's notification. `via` and `rekey` were whatever the
+// client sent, and nothing had to have changed, so a person who could write a
+// folder could have its owner told, as often as they liked, that its password
+// had been reset with the recovery key.
 //
-// wiring:e2 fxe — or a single encrypted file (`.fxe`), whose password lives in
-// its own header: the same announcement, the same audit action, the owner of
-// the FILE told. The server also sees the header rewrite itself, announced or
-// not (e2e/fxewatch → e2e.fxe_header_rewritten).
+// The door stays for clients older than 0.54 (a desktop app or an embed still
+// calls it after a password change, and would show an error otherwise). It
+// answers and records nothing; its checks stay, so it says no more than it
+// used to about a path the caller cannot write. The explorer no longer calls
+// it. To be removed in a later release (docs/E2E-ENCRYPTION.md → Who is told).
 
 type e2ePasswordChangedReq struct {
 	Path string `json:"path"` // wire path of the encrypted folder (or a path inside it), or of a `.fxe`
-	// Via is how the person proved they could change it: "password" (the
-	// current one) or "recovery_key" (a reset — worth a warning).
-	Via string `json:"via"`
-	// Rekey is true when the folder key was replaced too (every file's key
-	// re-wrapped), not only the password slot.
-	Rekey bool `json:"rekey"`
+	// Via and Rekey are what a client before 0.54 sends. Read and ignored:
+	// the server knows which slots changed from the key file itself.
+	Via   string `json:"via"`
+	Rekey bool   `json:"rekey"`
 }
 
-// PasswordChanged records a folder's (or a single encrypted file's) password
-// change and tells the owner.
+// PasswordChanged answers an older client's announcement and records nothing.
 //
-//	POST /api/files/e2e/password-changed {path, via, rekey} → {ok, notified}
+//	POST /api/files/e2e/password-changed {path, via, rekey} → {ok}
+//
+// Kept for older clients only: the server records a password change itself
+// (e2e/slotchange).
 func (h *E2E) PasswordChanged(w http.ResponseWriter, r *http.Request) {
 	var req e2ePasswordChangedReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -64,85 +57,15 @@ func (h *E2E) PasswordChanged(w http.ResponseWriter, r *http.Request) {
 	if st == nil {
 		return
 	}
-	root, file, ok := h.encryptedSubject(r.Context(), st.ID, rel)
+	root, _, ok := h.encryptedSubject(r.Context(), st.ID, rel)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": notEncrypted(rel)})
 		return
 	}
-	// Rewriting the key file takes write access to the folder; announcing that
-	// it was rewritten takes the same.
 	if !aclAllowID(r.Context(), h.ACL, h.Store, st.ID, root, acl.LevelEditor) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission"})
 		return
 	}
-
-	actor := auth.UserFrom(r.Context())
-	ownerID := h.folderOwner(r, st.ID, root)
-	name := path.Base(root)
-	if name == "." || name == "/" || name == "" {
-		name = root
-	}
-
-	meta := map[string]any{
-		"storage": st.Name,
-		"folder":  root,
-		"via":     req.Via,
-		"rekey":   req.Rekey,
-	}
-	if file {
-		delete(meta, "folder")
-		meta["file"] = root
-		meta["kind"] = "file"
-	}
-	var actorID *int64
-	if actor != nil {
-		actorID = &actor.ID
-		meta["actor_email"] = actor.Email
-	}
-	target := ""
-	if n, err := h.Store.GetNodeByPath(r.Context(), st.ID, pathkey.Hash(st.ID, root)); err == nil && n != nil {
-		target = strconv.FormatInt(n.ID, 10)
-	}
-	_ = h.Store.InsertAuditEntry(r.Context(), &model.AuditEntry{
-		UserID:     actorID,
-		Action:     "e2e.password_change",
-		TargetType: "node",
-		TargetID:   target,
-		Metadata:   meta,
-		IP:         clientIP(r),
-	})
-
-	title := "Encrypted folder password changed"
-	severity := notify.SeverityInfo
-	if req.Via == "recovery_key" {
-		title = "Encrypted folder password reset with its recovery key"
-		severity = notify.SeverityWarning
-	}
-	if file {
-		title = "Encrypted file password changed"
-		if req.Via == "recovery_key" {
-			title = "Encrypted file password reset with its recovery key"
-		}
-	}
-	ev := notify.Event{
-		Event:    notify.EventE2EPasswordChanged,
-		Severity: severity,
-		Title:    title,
-		Body:     root,
-		Node:     &notify.NodeRef{StorageID: st.ID, Path: root, Name: name},
-		Target:   notify.DirTarget(root),
-		Meta:     meta,
-	}
-	if file {
-		ev.Target = notify.FileTarget(root)
-	}
-	if ownerID != nil {
-		ev.UserID = ownerID
-	}
-	// Same delivery rule as the escrow report: to the OWNER (who may not be
-	// the person who changed it), or to administrators when nobody owns it —
-	// never scoped to the actor by default.
-	emitEscrowEvent(r.Context(), ev, ownerID != nil)
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "notified": ownerID != nil})
+	// No audit row, no notification: a client's word is not a record.
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

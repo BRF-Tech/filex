@@ -32,7 +32,7 @@ features:
     linkText: Apps docs
   - icon: 🌍
     title: Your language, right to left included
-    details: English and Turkish are built in; any other language is a language pack - a manifest of strings, no code and no release - which joins every picker and translates the explorer, the admin panel, the public pages and the text the server writes, with its coverage of this version shown beside it. Plural forms follow CLDR. Arabic, Hebrew, Persian and Urdu lay the whole interface out right to left, and stop where mirroring would be wrong.
+    details: English and Turkish are built in; any other language is a language pack - a manifest of strings, no code and no release - which joins every picker and translates the explorer, the admin panel, the public pages and the text the server writes, with its coverage of this version shown beside it. Plural forms follow CLDR. Arabic, Hebrew, Persian and Urdu lay the whole interface out right to left, and stop where mirroring would be wrong. A person has one language - the account's - in the web app, the desktop app and every notification, and the ONLYOFFICE editor opens in it too.
     link: /RTL
     linkText: Right-to-left docs
   - icon: 🎨
@@ -142,7 +142,7 @@ features:
     linkText: How the limit works
   - icon: 🔐
     title: End-to-end encrypted folders
-    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data - and an operator can optionally hold an escrow key, with the limits stated rather than implied. Who may encrypt is the organisation's call: nobody, administrators, everyone whose role allows it, or anyone after an administrator's approval."
+    details: "Encrypted in the browser with WebCrypto: the server stores ciphertext and never receives a key. A folder encrypts its contents, or its contents and its names; a folder you already have, or a single file, is encrypted where it is. Each gets a recovery key, shown once, so a forgotten password is not automatically lost data - and an operator can optionally hold an escrow key, with the limits stated rather than implied. Who may encrypt is the organisation's call: nobody, administrators, everyone whose role allows it, or anyone after an administrator's approval. A third level, the vault, hides the shape of the tree as well - built, and off until the server turns it on."
     link: /E2E-ENCRYPTION
     linkText: How it works
   - icon: 🏙️
@@ -162,7 +162,7 @@ features:
     linkText: Realtime docs
   - icon: 🔔
     title: Webhooks
-    details: Any number of webhook targets, each with its own signing secret and its own list of events, plus a persistent in-app bell - all filled from the same single call. An optional digest tells a busy folder in one notification - thirty files added is one badge step, not thirty - while every webhook still hears each event at once. A file that arrived and a file somebody replaced are different events, and an infected upload, a failed one or an encrypted folder opened with its recovery key can each be subscribed to on their own.
+    details: Any number of webhook targets, each with its own signing secret and its own list of events, plus a persistent in-app bell - all filled from the same single call. An optional digest tells a busy folder in one notification - thirty files added is one badge step, not thirty - while every webhook still hears each event at once. A file that arrived and a file somebody replaced are different events, and an infected upload, a failed one or an encrypted folder opened with its recovery key can each be subscribed to on their own. The server says every notification, in each reader's own language, and Web Push brings them to a phone or a browser with filex closed.
     link: /NOTIFICATIONS
     linkText: Notifications docs
   - icon: 🦠

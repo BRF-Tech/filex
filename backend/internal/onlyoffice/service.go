@@ -41,6 +41,7 @@ import (
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/editkind"
 	"github.com/brf-tech/filex/backend/internal/filebody"
 	"github.com/brf-tech/filex/backend/internal/memcache"
 	"github.com/brf-tech/filex/backend/internal/model"
@@ -77,7 +78,15 @@ type Service struct {
 	// be — which is why a document opened and its save never came back with
 	// nothing in filex's log to show for it (issue #17).
 	LiveCallbackURL func(ctx context.Context) string
-	FetchTTL        time.Duration
+	// LiveEditorLang, when non-nil, returns the administrator's editor
+	// language: "auto" (each person's own) or a fixed language (External
+	// services → ONLYOFFICE, FILEX_ONLYOFFICE_LANG). Read on every editor
+	// config, like the URL. Nil means "auto" (lang.go).
+	LiveEditorLang func(ctx context.Context) string
+	// DefaultLocale is the instance's language (FILEX_DEFAULT_LOCALE): the
+	// editor's language for a person who named none (lang.go).
+	DefaultLocale string
+	FetchTTL      time.Duration
 
 	// probeReg holds the one-shot tokens VerifyReversePath hands the document
 	// server. Lazily built (see probes) so a zero Service still works.
@@ -142,6 +151,50 @@ type Service struct {
 	// syncer), so a save still announces itself and is still scanned — only
 	// the re-index is skipped. Wire it with AttachSync at boot.
 	Sync *protocolsync.Syncer
+
+	// ACL is the one ACL resolver every write door hands writegate
+	// (api.Deps.ACL, AttachACL): the save is checked against the lock view it
+	// builds, and the person a save is written beside the document for against
+	// the request set it builds.
+	//
+	// ⚠⚠ It has to be THAT resolver, not a fresh acl.New: the vault rule
+	// (inside a vault only the vault API writes, docs/E2E-VAULT-FORMAT.md →
+	// Writes from anywhere else) is attached to it alone
+	// (acl.Resolver.AttachVaults), and a fresh one answers "in no vault" for
+	// every path. The save gates here used acl.New until the vault's last
+	// review (#94), so a document planted inside a vault folder could be
+	// saved over from the editor. Nil only for a Service built by hand
+	// (tests): then a fresh resolver over Store answers, without the vault
+	// rule.
+	ACL *acl.Resolver
+}
+
+// AttachACL wires the shared ACL resolver (see ACL). BuildRouter calls it with
+// the router's, the one every other door uses.
+func (s *Service) AttachACL(r *acl.Resolver) { s.ACL = r }
+
+// aclResolver is the resolver the save gates ask: the attached one, else a
+// fresh one over the store (a Service built by hand).
+func (s *Service) aclResolver() *acl.Resolver {
+	if s.ACL != nil {
+		return s.ACL
+	}
+	return acl.New(s.Store)
+}
+
+// gateRefusal is the callback's answer to a save writegate refused. The
+// message is a constant plus, for an app's lock, the app's name - never the
+// path: see the guard in HandleCallback for why this route does not echo
+// paths.
+func gateRefusal(gerr error) map[string]any {
+	var le *writegate.LockedError
+	switch {
+	case errors.As(gerr, &le):
+		return map[string]any{"error": 1, "message": "locked by app " + le.Lock.PluginName}
+	case errors.Is(gerr, writegate.ErrVaultPath), errors.Is(gerr, writegate.ErrVaultKeyFile):
+		return map[string]any{"error": 1, "message": writegate.ErrVaultPath.Error()}
+	}
+	return map[string]any{"error": 1, "message": syspath.ErrReserved.Error()}
 }
 
 // AttachBody wires the byte-source resolver, the one the fetch endpoint reads
@@ -269,7 +322,8 @@ type EditorConfig struct {
 type ConfigOption func(*configExtras)
 
 type configExtras struct {
-	head []byte
+	head           []byte
+	acceptLanguage string
 }
 
 // WithHead hands over the first bytes of the document (CSVSniffBytes is
@@ -279,11 +333,20 @@ func WithHead(head []byte) ConfigOption {
 	return func(x *configExtras) { x.head = head }
 }
 
+// WithAcceptLanguage hands over the request's Accept-Language header: the
+// language on the person's screen, which the viewer sends with the request.
+// One of the things the editor's language is chosen from (lang.go).
+func WithAcceptLanguage(h string) ConfigOption {
+	return func(x *configExtras) { x.acceptLanguage = h }
+}
+
 // BuildConfigForNode resolves the node, presigns the fetch URL, and signs
 // the JSON descriptor with HS256. `mode` selects "edit" or "view"; any
 // value other than "edit" is treated as read-only and toggles the
 // permissions block so OnlyOffice renders the document with toolbars
-// disabled.
+// disabled. `lang` is the language the request names, if any: the editor's
+// language and region are the server's choice (EditorLocale, lang.go), of
+// which that is one input.
 func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user *model.User, lang, mode string, opts ...ConfigOption) (*EditorConfig, error) {
 	var extras configExtras
 	for _, o := range opts {
@@ -305,7 +368,9 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 		return nil, fmt.Errorf("onlyoffice: unsupported file type %q", fileType)
 	}
 
-	key := s.keyFor(node)
+	// Sealed with the document's id (callback_trust.go): the callback acts only
+	// on a key filex made for the document it names.
+	key := s.keyFor(ctx, node)
 
 	exp := time.Now().Add(s.FetchTTL).Unix()
 	base := s.callbackBase(ctx)
@@ -345,6 +410,9 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 			document["options"] = o
 		}
 	}
+	// The editor's language and regional setting: the server's choice, for
+	// every screen that opens it (lang.go, GitHub Discussion #93).
+	loc := s.EditorLocale(ctx, user, lang, extras.acceptLanguage)
 	body := map[string]any{
 		"document":     document,
 		"documentType": docType,
@@ -354,9 +422,12 @@ func (s *Service) BuildConfigForNode(ctx context.Context, node *model.Node, user
 				"id":   userID,
 				"name": userName,
 			},
-			"lang": fallback(lang, "en"),
+			"lang": loc.Lang,
 			"mode": effectiveMode,
 		},
+	}
+	if ec, ok := body["editorConfig"].(map[string]any); ok && loc.Region != "" {
+		ec["region"] = loc.Region
 	}
 
 	token, err := signHS256(body, secret)
@@ -440,14 +511,25 @@ func fetchSignature(nodeID, exp int64, secret string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// CallbackPayload is the body the document server posts on save / status
+// CallbackPayload is what the document server says on save / status
 // transitions. See https://api.onlyoffice.com/editors/callback for the
 // full schema; we use the fields filex actually needs.
+//
+// ⚠⚠ Read from the callback's VERIFIED token only (callbackFromToken,
+// callback_trust.go), never from the body posted beside it: the route is
+// public, and a body can say anything next to a token it was not built from.
 type CallbackPayload struct {
 	Key    string `json:"key"`
 	Status int    `json:"status"`
-	URL    string `json:"url"`
-	Token  string `json:"token,omitempty"`
+	// URL is the saved document, on the document server: downloaded only from
+	// its origin (callback_trust.go).
+	URL   string `json:"url"`
+	Token string `json:"token,omitempty"`
+	// ChangesURL and History describe the session's changes. filex keeps
+	// neither and never downloads ChangesURL; they are here so that whatever
+	// reads them later reads the signed ones.
+	ChangesURL string          `json:"changesurl,omitempty"`
+	History    json.RawMessage `json:"history,omitempty"`
 	// FileType is the type of the document at URL ("csv", "xlsx", ...). The
 	// server saves in the document's own type by default
 	// (`assemblyFormatAsOrigin`), in OOXML when that is off (filex 0.51,
@@ -472,9 +554,17 @@ const (
 // it back to storage.
 //
 // Returns the OnlyOffice expected JSON envelope.
+//
+// ⚠⚠ What it acts on is the signed callback and nothing else
+// (callback_trust.go): the fields come from the verified token, the token has
+// to be a callback (not an editor configuration, which every person who opens
+// a document is handed, signed with the same secret), its key has to be one
+// filex made for the document `?node=` names, and the saved document is
+// fetched only from the document server's own origin. Until 0.54 the token's
+// signature was the only check, and the fields came from the body.
 func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any, error) {
-	_, secret := s.settings(r.Context())
-	if !s.EnabledCtx(r.Context()) {
+	docURL, secret := s.settings(r.Context())
+	if docURL == "" || secret == "" {
 		return nil, errors.New("onlyoffice: not configured")
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1*1024*1024))
@@ -483,58 +573,62 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	}
 	defer r.Body.Close()
 
-	var p CallbackPayload
-	if err := json.Unmarshal(body, &p); err != nil {
-		return nil, fmt.Errorf("bad json: %w", err)
-	}
-
-	// JWT verification — token may live in body or Authorization header.
-	tok := p.Token
-	if tok == "" {
-		auth := r.Header.Get("Authorization")
-		if strings.HasPrefix(auth, "Bearer ") {
-			tok = strings.TrimPrefix(auth, "Bearer ")
-		}
-	}
-	if tok != "" {
-		claims, err := verifyHS256(tok, secret)
-		if err != nil {
+	// ⚠⚠ An UNSIGNED callback is refused (since 0.43.0): this route is public,
+	// and anybody who could reach it could otherwise POST
+	// {"status":2,"url":<their file>} with any node id. A document server with
+	// JWT enabled always signs its callbacks (body `token`, or the
+	// Authorization header); one without JWT cannot open filex's signed config
+	// in the first place, so no working setup sends unsigned ones.
+	tok, err := callbackToken(r, body)
+	if err != nil {
+		if errors.Is(err, errNotSigned) {
 			return nil, fmt.Errorf("token: %w", err)
 		}
-		// The editors as the SIGNED payload names them, not the body: a body
-		// can be changed beside a token it was not built from
-		// (callback_identity.go).
-		if users, ok := claimUsers(claims); ok {
-			p.Users = users
+		return nil, err
+	}
+	// The editors (`users`) are the SIGNED payload's too (callback_identity.go).
+	p, err := callbackFromToken(tok, secret, time.Now())
+	if err != nil {
+		slog.Warn("onlyoffice callback refused: token", slog.Int64("node", nodeID), slog.String("why", err.Error()))
+		return nil, fmt.Errorf("token: %w", err)
+	}
+
+	node, err := s.Store.GetNode(r.Context(), nodeID)
+	if err != nil || node == nil {
+		if p.Status != StatusReadyForSaving && p.Status != StatusForceSave {
+			return map[string]any{"error": 0}, nil
 		}
-	} else if secret != "" {
-		// ⚠⚠ With a secret configured, an UNSIGNED callback is refused. It
-		// used to be accepted — the check above ran only when a token was
-		// there — and this route is public: anybody who could reach it could
-		// POST {"status":2,"url":<their file>} with any node id and have filex
-		// overwrite that file with bytes of their choosing, the one thing the
-		// JWT exists to prevent (found 2026-09-21 while adding the reserved-
-		// path guard to the handler in front of this). A document server with
-		// JWT enabled always signs its callbacks (body `token`, or the
-		// Authorization header); one without JWT cannot open filex's signed
-		// config in the first place, so no working setup sends these.
-		return nil, errors.New("token: the callback is not signed")
+		return map[string]any{"error": 1, "message": "node not found"}, nil
+	}
+	// The key is the document's (callback_trust.go): a callback for another
+	// document's session acts on nothing here.
+	bound := s.KeyBelongsTo(r.Context(), keyOf(p), node)
+	if !bound {
+		slog.Warn("onlyoffice callback refused: the key is not this document's",
+			slog.Int64("node", node.ID), slog.Int("status", p.Status))
 	}
 
 	// Status 1 (being edited) and 4 (closed no change) are no-ops - 4 ends
-	// the session, and its record goes with it (session_base.go).
+	// the session, and its record goes with it (session_base.go). Answered
+	// {"error":0} whatever the key: the document server is not asked to retry
+	// a status nothing is done for.
 	if p.Status != StatusReadyForSaving && p.Status != StatusForceSave {
 		answer := map[string]any{"error": 0}
-		s.sessionOver(r.Context(), p, answer)
+		if bound {
+			s.sessionOver(r.Context(), p, answer)
+		}
 		return answer, nil
+	}
+	if !bound {
+		return map[string]any{"error": 1, "message": "the save is not for this document"}, nil
 	}
 	if p.URL == "" {
 		return map[string]any{"error": 1, "message": "missing url"}, nil
 	}
-
-	node, err := s.Store.GetNode(r.Context(), nodeID)
-	if err != nil {
-		return map[string]any{"error": 1, "message": "node not found"}, nil
+	if !sameOrigin(p.URL, docURL) {
+		slog.Warn("onlyoffice callback refused: "+errForeignSave.Error(),
+			slog.Int64("storage", node.StorageID), slog.String("path", node.Path))
+		return map[string]any{"error": 1, "message": errForeignSave.Error()}, nil
 	}
 	// writegate, before a byte is fetched: a save is a write like any other.
 	//
@@ -554,20 +648,20 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	// session was opened with is handed out only to the draft's owner (their
 	// ACL level on it is editor, everybody else's none — acl.Set), and this
 	// callback is signed by the document server for that session's node.
+	//
+	// Inside a vault folder nothing is saved either (writegate.ErrVaultPath):
+	// the lock view comes from the shared resolver, which knows the vaults
+	// (see Service.ACL).
 	target := writegate.Writes(node.Path).As(syspath.PutWorkCopy)
 	if owner, ok := syspath.DraftOwner(node.Path); ok {
 		target = writegate.Writes(node.Path).As(syspath.OwnDraft).By(owner)
 	}
-	if gerr := writegate.Check(acl.New(s.Store).Locks(r.Context(), node.StorageID), 0, target); gerr != nil {
+	if gerr := writegate.Check(s.aclResolver().Locks(r.Context(), node.StorageID), 0, target); gerr != nil {
 		slog.Warn("onlyoffice callback refused",
 			slog.Int64("storage", node.StorageID),
 			slog.String("path", node.Path),
 			slog.String("why", gerr.Error()))
-		var le *writegate.LockedError
-		if errors.As(gerr, &le) {
-			return map[string]any{"error": 1, "message": "locked by app " + le.Lock.PluginName}, nil
-		}
-		return map[string]any{"error": 1, "message": syspath.ErrReserved.Error()}, nil
+		return gateRefusal(gerr), nil
 	}
 	drv, err := s.StorageResolver(node.StorageID)
 	if err != nil {
@@ -588,10 +682,17 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 		return answer, nil
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	req, _ := http.NewRequestWithContext(r.Context(), "GET", p.URL, nil)
-	resp, err := client.Do(req)
+	req, err := http.NewRequestWithContext(r.Context(), "GET", p.URL, nil)
 	if err != nil {
+		return map[string]any{"error": 1, "message": "fetch saved doc: bad url"}, nil
+	}
+	resp, err := savedClient(docURL).Do(req)
+	if err != nil {
+		if errors.Is(err, errForeignSave) {
+			slog.Warn("onlyoffice callback refused: a redirect off the document server",
+				slog.Int64("storage", node.StorageID), slog.String("path", node.Path))
+			return map[string]any{"error": 1, "message": errForeignSave.Error()}, nil
+		}
 		return map[string]any{"error": 1, "message": "fetch saved doc: " + err.Error()}, nil
 	}
 	defer resp.Body.Close()
@@ -658,8 +759,7 @@ func (s *Service) HandleCallback(r *http.Request, nodeID int64) (map[string]any,
 	// ⚠⚠ The message handed back to the document server is a CONSTANT, never
 	// the guard error itself. That error wraps the driver error and the
 	// storage-relative path, and this callback sits on the PUBLIC route block
-	// with its JWT checked only when a token is configured -- so an
-	// unauthenticated caller could otherwise walk ?node=1,2,3... and read path
+	// -- a caller should never be able to walk ?node=1,2,3... and read path
 	// fragments back out of every tenant's storage. The detail still has to
 	// reach an operator, so it goes to the log, the same shape every other
 	// guarded site uses.
@@ -750,22 +850,7 @@ func (s *Service) announceSave(ctx context.Context, node *model.Node, size int64
 // DocumentType returns "word", "cell", "slide", or "" for an extension.
 //
 // Matches the official OnlyOffice mapping. If the extension is unknown we
-// return "" so callers can 415.
-func DocumentType(ext string) string {
-	switch strings.ToLower(strings.TrimPrefix(ext, ".")) {
-	case "doc", "docm", "docx", "dot", "dotm", "dotx", "epub", "fodt", "htm", "html", "mht", "mhtml", "odt", "ott", "pdf", "rtf", "stw", "sxw", "txt", "wps", "wpt", "xml", "xps":
-		return "word"
-	case "csv", "et", "ett", "fods", "ods", "ots", "sxc", "xls", "xlsb", "xlsm", "xlsx", "xlt", "xltm", "xltx":
-		return "cell"
-	case "dps", "dpt", "fodp", "odp", "otp", "pot", "potm", "potx", "pps", "ppsm", "ppsx", "ppt", "pptm", "pptx", "sxi":
-		return "slide"
-	}
-	return ""
-}
-
-func fallback(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
-}
+// return "" so callers can 415. The table is internal/editkind's, where the
+// rule "which files open in the document server" is decided once and
+// published to the clients (`capabilities.edit_kinds`, filex #211).
+func DocumentType(ext string) string { return editkind.DocumentType(ext) }

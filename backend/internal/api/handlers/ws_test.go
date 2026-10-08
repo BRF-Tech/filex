@@ -380,11 +380,40 @@ func TestWSTicketIdentity(t *testing.T) {
 
 	// HTTP headers are latin-1 territory — proxies RFC 2047-encode non-ASCII
 	// names (Turkish characters) and the mint must decode them.
-	encoded := mintVia(t, admin, tok, "", map[string]string{
+	encoded := mintVia(t, admin, named, "", map[string]string{
 		"X-Filex-Presence-Name": mime.BEncoding.Encode("utf-8", "Ayşe Zoë"),
 		"X-Filex-Presence-Key":  "work-8",
 	})
-	require.Equal(t, "Ayşe Zoë (work-panel)", encoded.Name)
+	require.Equal(t, "Ayşe Zoë (work)", encoded.Name)
+}
+
+// TestWSTicketIdentity_APersonalTokenCannotStampSomebodyElse: the
+// X-Filex-Presence-* stamp is a host proxy's (a token with a username
+// allow-list, serving many people under one account). A personal token — the
+// desktop app, a CLI, a script — IS its owner: its stamp is not read, so it
+// cannot show another person's name or face on the owner's connection.
+func TestWSTicketIdentity_APersonalTokenCannotStampSomebodyElse(t *testing.T) {
+	ada := &model.User{ID: 3, DisplayName: "Ada", Email: "ada@example.com", AvatarURL: testAvatarURI}
+	personal := &model.APIToken{ID: 12, UserID: 3, Label: "filex desktop — Win32"}
+
+	got := mintVia(t, ada, personal, "", map[string]string{
+		"X-Filex-Presence-Name":   "Grace",
+		"X-Filex-Presence-Avatar": "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+		"X-Filex-Presence-Key":    "grace-1",
+	})
+	require.Equal(t, "Ada (filex desktop)", got.Name, "a personal token's presence stamp is not read")
+	require.Equal(t, testAvatarURI, got.Avatar, "the owner keeps their own face")
+	require.Equal(t, "tok-12-filex desktop — Win32", got.PresenceKey,
+		"nor its presence key: the connection stays the token's own identity")
+
+	// The same stamp from a shared proxy token is read, as before.
+	shared := &model.APIToken{ID: 6, UserID: 3, Label: "shared", Usernames: "work,fishapp"}
+	stamped := mintVia(t, ada, shared, "work", map[string]string{
+		"X-Filex-Presence-Name": "Grace",
+		"X-Filex-Presence-Key":  "grace-1",
+	})
+	require.Equal(t, "Grace (work)", stamped.Name)
+	require.Equal(t, "grace-1", stamped.PresenceKey)
 }
 
 // TestWSDesktopClientPresence locks the case that sent us here: the desktop app

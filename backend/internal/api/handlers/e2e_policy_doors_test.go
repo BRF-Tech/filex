@@ -51,7 +51,6 @@ import (
 	"github.com/brf-tech/filex/backend/internal/srvtext"
 	"github.com/brf-tech/filex/backend/internal/storage"
 	"github.com/brf-tech/filex/backend/internal/storage/drivers/local"
-	"github.com/brf-tech/filex/backend/internal/testutil"
 )
 
 // e2eKeyFile is an encrypted folder's key file (e2e.MarkerName).
@@ -306,35 +305,6 @@ func TestE2EPolicy_StagedUploadRefusesAtBegin(t *testing.T) {
 	assert.Empty(t, staged, "a refused begin reserved a staging directory")
 	code, out := f.begin(t, map[string]any{"path": "main://", "name": "buyuk.bin", "size": 7})
 	require.Equal(t, http.StatusOK, code, "an ordinary file: %v", out)
-}
-
-// The presigned multipart path (upload.go Init) exists only on a storage that
-// hands out part URLs, so it gets a server of its own over an S3-shaped fake
-// (partStore, overwrite_guard_test.go). The rule is asked before the driver
-// starts an upload, and not again at Finalize.
-func TestE2EPolicy_PresignedMultipartInitRefuses(t *testing.T) {
-	ps := newPartStore()
-	srv, _, store := testutil.NewTestServerWith(t, nil, func(d *api.Deps) {
-		d.StorageResolver = func(int64) (storage.Driver, error) { return ps, nil }
-	})
-	ctx := context.Background()
-	st, err := store.CreateStorage(ctx, &model.Storage{Name: "bulut", Driver: "partstore", MountPath: "/bulut", Enabled: true, ConfigJSON: json.RawMessage(`{}`)})
-	require.NoError(t, err)
-	adminID, _ := testutil.SeedAdminUser(t, store)
-	tok := issueToken(t, store, adminID, fullScopes, nil)
-	encryptionOff(t, store)
-
-	for _, target := range []string{"Kasa/" + e2eKeyFile, "rapor.pdf.fxe"} {
-		status, body := fxPost(t, srv.URL+"/api/files/upload/init", tok, map[string]any{"storage_id": st.ID, "path": target, "size": 6 << 20})
-		assertE2ERefused(t, "a presigned upload of "+target, status, body)
-	}
-	ps.mu.Lock()
-	started := ps.nextID
-	ps.mu.Unlock()
-	assert.Zero(t, started, "the driver was asked to start a multipart upload")
-
-	status, body := fxPost(t, srv.URL+"/api/files/upload/init", tok, map[string]any{"storage_id": st.ID, "path": "yedek.bin", "size": 6 << 20})
-	require.Equal(t, http.StatusOK, status, "an ordinary file: %s", body)
 }
 
 // The MCP surface builds a fresh ops core for every request (getServer) and

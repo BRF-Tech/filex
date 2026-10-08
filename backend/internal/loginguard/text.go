@@ -61,6 +61,19 @@ func (v Verdict) Message(lang string) string {
 	return lockedText(lang, v.Scope, v.RetryAfter)
 }
 
+// Countdown is the lock's sentence in lang with its `{wait}` left for the
+// reader's clock: the sign-in form counts the lock down second by second
+// (a sentence worded once would say "1 minute" for a whole minute), and
+// fills `{wait}` with what is left - the words stay the server's (0.54 audit
+// A8; the form used to keep its own copy of them).
+func Countdown(lang, scope string) string {
+	key := "server.login.locked"
+	if scope == model.LoginThrottleIP {
+		key = "server.login.locked_ip"
+	}
+	return srvtext.Template(lang, key)
+}
+
 func lockedText(lang, scope string, d time.Duration) string {
 	key := "server.login.locked"
 	if scope == model.LoginThrottleIP {

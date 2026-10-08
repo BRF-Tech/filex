@@ -1,0 +1,26 @@
+{
+  "_about": "What a pdf-fields text box's rule accepts. Read by backend/internal/wasmplugin/surface_values_test.go (the host's judge, which refuses at submit) and web/tests/lib/pdfFieldRules.test.ts (the browser's hint under the box), so the two cannot drift apart. `want` is the browser's code: '' accepted, 'min'/'max' a length (the host says too_short/too_long), 'number', 'email'. `rule` is the raw prop as an app may write it; both sides normalise it first.",
+  "cases": [
+    { "value": "", "rule": { "kind": "number" }, "want": "" },
+    { "value": "  ", "rule": { "kind": "email", "min": 5 }, "want": "" },
+    { "value": "abc", "rule": { "kind": "number" }, "want": "number" },
+    { "value": "12,5", "rule": { "kind": "number" }, "want": "" },
+    { "value": "-12.5", "rule": { "kind": "number" }, "want": "" },
+    { "value": "1.2.3", "rule": { "kind": "number" }, "want": "number" },
+    { "value": "12a", "rule": { "kind": "number" }, "want": "number" },
+    { "value": "nope", "rule": { "kind": "email" }, "want": "email" },
+    { "value": "a@b.co", "rule": { "kind": "email" }, "want": "" },
+    { "value": "a@b.c", "rule": { "kind": "email" }, "want": "email" },
+    { "value": "a b@c.co", "rule": { "kind": "email" }, "want": "email" },
+    { "value": "ab", "rule": { "kind": "any", "min": 3 }, "want": "min" },
+    { "value": "abcd", "rule": { "kind": "any", "max": 3 }, "want": "max" },
+    { "value": "abc", "rule": { "kind": "any", "min": 3, "max": 3 }, "want": "" },
+    { "value": " abc ", "rule": { "kind": "any", "max": 3 }, "want": "" },
+    { "value": "12345", "rule": { "kind": "number", "max": 4 }, "want": "max" },
+    { "value": "1", "rule": { "kind": "number", "min": "2" }, "want": "min" },
+    { "value": "31/02/2026", "rule": { "kind": "date", "max": 10 }, "want": "" },
+    { "value": "anything at all", "rule": { "kind": "nonsense" }, "want": "" },
+    { "value": "anything at all", "rule": null, "want": "" },
+    { "value": "çğış", "rule": { "kind": "any", "max": 4 }, "want": "" }
+  ]
+}

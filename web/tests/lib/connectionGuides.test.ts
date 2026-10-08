@@ -1,6 +1,6 @@
 // The generated "how to connect" instructions.
 //
-// ⚠ Same reasoning as shareCli.test.ts: the builder lives in
+// ⚠ The builder lives in
 // @brftech/filex-core (the desktop app, the admin panel and the explorer
 // overlay all render it, and the point of putting it there is that they
 // cannot drift), the core package has no test runner of its own, and this

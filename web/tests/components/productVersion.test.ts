@@ -10,12 +10,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import ProductVersion from '@brftech/filex-core/src/components/ProductVersion.vue';
-import {
-  PRODUCT_NAME,
-  parseServerVersion,
-  productVersionLine,
-  shortCommit,
-} from '@brftech/filex-core/src/lib/productVersion';
+import * as productVersion from '@brftech/filex-core/src/lib/productVersion';
+import { PRODUCT_NAME, productVersionLine, shortCommit } from '@brftech/filex-core/src/lib/productVersion';
 
 let open: VueWrapper | null = null;
 afterEach(() => {
@@ -34,16 +30,14 @@ describe('productVersionLine — one spelling of the line', () => {
     expect(productVersionLine('  0.43.0 ')).toBe('filex 0.43.0');
   });
 
-  /* ⚠ The server's REAL string (version.String): the release, then the
-     commit and the build time in brackets. The line printed it whole — 40
-     hex digits and a timestamp — and the avatar menu grew a sideways scroll
-     bar for it (the maintainer, 2026-09-26). The tests above only ever fed it a bare
-     number, which is why nobody saw it. */
-  const REAL = 'v0.46.0 (a2d7e34d1971707c638a5a44756685f1cd010bd6, 2026-09-26T03:41:30Z)';
-
-  it('names the release only, not the commit and build time the server adds', () => {
-    expect(productVersionLine(REAL)).toBe('filex v0.46.0');
-    expect(productVersionLine('0.1.0-dev (2026-09-26T03:41:30Z)')).toBe('filex 0.1.0-dev');
+  /* ⚠ The server's one-line string (version.String) is the release, then the
+     commit and the build time in brackets; printed whole, the avatar menu
+     grew a sideways scroll bar (the maintainer, 2026-09-26). Since 0.54
+     (#211, audit A11) the server sends `release` apart, and the line is built
+     from that: nothing on the client parses the one-line string any more. */
+  it('is built from the release the server sends apart, and parses nothing', () => {
+    expect(productVersionLine('v0.46.0')).toBe('filex v0.46.0');
+    expect('parseServerVersion' in productVersion, 'the parser is gone').toBe(false);
   });
 
   it('says nothing while the version is not known — never the client’s placeholder', () => {
@@ -55,27 +49,7 @@ describe('productVersionLine — one spelling of the line', () => {
   });
 });
 
-describe('parseServerVersion — the parts of the server’s string', () => {
-  it('splits release, commit and build time', () => {
-    expect(parseServerVersion('v0.46.0 (a2d7e34d1971707c638a5a44756685f1cd010bd6, 2026-09-26T03:41:30Z)')).toEqual({
-      release: 'v0.46.0',
-      commit: 'a2d7e34d1971707c638a5a44756685f1cd010bd6',
-      built: '2026-09-26T03:41:30Z',
-    });
-  });
-
-  it('leaves out what the build did not stamp', () => {
-    // version.String drops an unknown commit or date rather than printing it.
-    expect(parseServerVersion('0.1.0-dev')).toEqual({ release: '0.1.0-dev', commit: '', built: '' });
-    expect(parseServerVersion('0.1.0-dev (2026-09-26T03:41:30Z)')).toEqual({
-      release: '0.1.0-dev',
-      commit: '',
-      built: '2026-09-26T03:41:30Z',
-    });
-    expect(parseServerVersion('v0.46.0 (abc1234)')).toEqual({ release: 'v0.46.0', commit: 'abc1234', built: '' });
-    expect(parseServerVersion(null)).toEqual({ release: '', commit: '', built: '' });
-  });
-
+describe('shortCommit', () => {
   it('shortens a commit to the seven characters git itself shows', () => {
     expect(shortCommit('a2d7e34d1971707c638a5a44756685f1cd010bd6')).toBe('a2d7e34');
     expect(shortCommit('abc1234')).toBe('abc1234');
@@ -106,7 +80,7 @@ describe('where a person finds it', () => {
   for (const f of ['TopNav.vue']) {
     it(`${f} draws ProductVersion from the server’s capabilities`, () => {
       const src = readFileSync(path.join(SRC, f), 'utf8');
-      expect(src, `${f} does not draw the version line`).toMatch(/<ProductVersion\b[^>]*:version="caps\.data\.version"/);
+      expect(src, `${f} does not draw the version line`).toMatch(/<ProductVersion\b[^>]*:version="caps\.data\.release"/);
       expect(src, `${f} spells the line out itself`).not.toMatch(/filex \{\{\s*caps\.data\.version/);
     });
   }
@@ -116,7 +90,7 @@ describe('where a person finds it', () => {
      version, and core draws the line with the same piece. */
   it('the avatar hands core the server’s version, and core draws ProductVersion from it', () => {
     const web = readFileSync(path.join(SRC, 'AccountMenu.vue'), 'utf8');
-    expect(web).toMatch(/<AccountMenu\b[^>]*:version="caps\.data\.version"/);
+    expect(web).toMatch(/<AccountMenu\b[^>]*:version="caps\.data\.release"/);
     expect(web).not.toMatch(/filex \{\{/);
     const core = readFileSync(path.resolve(__dirname, '../../../packages/core/src/components/AccountMenu.vue'), 'utf8');
     expect(core).toMatch(/<ProductVersion\b[^>]*:version="version"/);
@@ -130,7 +104,7 @@ describe('where a person finds it', () => {
     const web = readFileSync(path.join(SRC, 'UserSettingsModal.vue'), 'utf8');
     expect(web).toMatch(/get capabilities\(\) \{\s*return caps\.data;/);
     const core = readFileSync(path.resolve(__dirname, '../../../packages/core/src/components/UserSettingsDialog.vue'), 'utf8');
-    expect(core).toMatch(/<ProductVersion\b[^>]*:version="host\.capabilities\?\.version"/);
+    expect(core).toMatch(/<ProductVersion\b[^>]*:version="host\.capabilities\?\.release"/);
     expect(core).not.toMatch(/filex \{\{/);
   });
 
@@ -139,13 +113,14 @@ describe('where a person finds it', () => {
   it('the sign-in page draws the same line, not the server’s whole string', () => {
     const src = readFileSync(path.resolve(__dirname, '../../src/views/Login.vue'), 'utf8');
     expect(src).not.toMatch(/filex \{\{\s*caps\.data\.version/);
-    expect(src).toMatch(/productVersionLine\(caps\.data\.version\)/);
+    expect(src).toMatch(/productVersionLine\(caps\.data\.release\)/);
   });
 
   it('the About page shows the release, and the commit short', () => {
     const src = readFileSync(path.resolve(__dirname, '../../src/views/About.vue'), 'utf8');
     expect(src).not.toMatch(/\{\{\s*data\.version\s*\}\}/);
-    expect(src).toMatch(/parseServerVersion\(/);
+    expect(src).not.toMatch(/parseServerVersion\(/);
+    expect(src).toMatch(/data\.value\.release/);
     expect(src).toMatch(/shortCommit\(/);
   });
 

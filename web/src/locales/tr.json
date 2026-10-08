@@ -247,9 +247,6 @@
     "errOidc": "SSO ile oturum açılamadı. Tekrar deneyin ya da parolayla oturum açın.",
     "noProviders": "Etkin kimlik doğrulama sağlayıcısı yok. Ortam değişkenlerinde {env} ayarlayın.",
     "signedOut": "Oturumunuz kapatıldı.",
-    "errRemaining": "E-posta, kullanıcı adı veya parola hatalı. Kilitlenmeden önce kalan deneme: {n}.",
-    "errLockedAccount": "Bu hesap için çok fazla hatalı deneme yapıldı. {time} sonra tekrar deneyin.",
-    "errLockedIp": "Bu adresten çok fazla hatalı deneme yapıldı. {time} sonra tekrar deneyin.",
     "retryIn": "{time} sonra tekrar deneyin",
     "realm": "Realm",
     "realmHint": "Kurumunuzun oturum açma adı. Bu sunucunun kendi hesaplarıyla oturum açmak için boş bırakın.",
@@ -689,7 +686,11 @@
       "jwtSecret": "JWT secret",
       "jwtSecretHint": "Boş bırakırsanız mevcut gizli anahtar korunur",
       "callbackUrl": "Geri dönüş adresi (doküman sunucusunun filex'e ulaştığı adres)",
-      "callbackUrlHint": "Boş bırakılırsa filex'in genel adresi kullanılır. Doküman sunucusu o adresi çözemiyorsa burayı doldurun - http://filex:5212 gibi bir konteyner adı buraya yazılır, genel adrese asla: paylaşım bağlantıları da ondan üretiliyor."
+      "callbackUrlHint": "Boş bırakılırsa filex'in genel adresi kullanılır. Doküman sunucusu o adresi çözemiyorsa burayı doldurun - http://filex:5212 gibi bir konteyner adı buraya yazılır, genel adrese asla: paylaşım bağlantıları da ondan üretiliyor.",
+      "editorLang": "Editör dili",
+      "editorLangAuto": "Otomatik - herkesin kendi filex dili",
+      "editorLangHint": "Otomatik seçiliyken ONLYOFFICE editörü herkese filex'i kullandığı dilde açılır. Bir dil seçerseniz herkese o dilde açılır.",
+      "editorLangEnvHint": "{env} ile ayarlanmış. Buradaki değişiklik hemen uygulanır ve filex yeniden başlayana kadar sürer; açılışta ortamdaki değer geri yazılır."
     },
     "states": {
       "healthy": "Sağlıklı",
@@ -860,164 +861,6 @@
       "ok": "Etkin",
       "disabled": "Kapalı",
       "misconfigured": "Hatalı yapılandırma"
-    },
-    "reasons": {
-      "refused": "bağlantı reddedildi (adres ya da port yanlış olabilir)",
-      "timeout": "yanıt gelmedi (güvenlik duvarı ya da ağ)",
-      "dns": "sunucu adı çözülemedi",
-      "tls": "TLS sertifikası doğrulanamadı",
-      "other": "beklenmeyen bir hata",
-      "credentials": "ad ya da parola kabul edilmedi",
-      "no_such_object": "dizinde böyle bir kayıt yok",
-      "access": "bu hesabın okuma izni yok",
-      "bad_url": "adres geçerli değil",
-      "status": "sunucu {status} yanıtı verdi",
-      "not_json": "yanıt bir keşif belgesi değil",
-      "account_locked_out": "hesap kilitlenmiş",
-      "account_disabled": "hesap devre dışı",
-      "account_expired": "hesabın süresi dolmuş",
-      "password_expired": "parolanın süresi dolmuş",
-      "password_must_change": "bir sonraki oturum açmadan önce parola değiştirilmeli",
-      "account_restriction": "hesabın oturum açma kısıtı var",
-      "logon_hours": "hesap bu saatte oturum açamaz",
-      "workstation_restriction": "hesap bu makinede oturum açamaz",
-      "network_logon_not_granted": "bu makine hesabın ağ üzerinden oturum açmasına izin vermiyor (ilke: Bu bilgisayara ağ üzerinden eriş)",
-      "invalid": "ayarlar geçerli değil",
-      "invalid_name": "bu, filex'in bir hesap için kullanabileceği bir ad değil",
-      "forbidden_account": "sistem, hizmet ve yerleşik hesaplar (Administrator, Guest, NT AUTHORITY…) asla oturum açamaz",
-      "missing": "deneme hesabı verilmedi",
-      "no_password": "deneme hesabının parolası yok",
-      "no_group_source": "grupların okunacağı bir kaynak tanımlayın: rol/grup claim'i (OIDC), grup niteliği (LDAP) ya da roller başlığı",
-      "public": "gizli anahtarı olmayan bir istemci ancak biri oturum açtığında doğrulanabilir",
-      "unclear": "sağlayıcının yanıtı ({status}) kesin bir sonuç vermiyor",
-      "no_people": "base DN’i ve kullanıcı filtresini denetleyin"
-    },
-    "checks": {
-      "required": {
-        "ok": "Zorunlu alanlar dolu.",
-        "fail": "Zorunlu ama boş: {fields}."
-      },
-      "first_login_open": {
-        "ok": "İlk kez oturum açan herkese hesap açılır."
-      },
-      "first_login_closed": {
-        "ok": "Oturum açarak hesap açılmaz: yalnızca hesabı olanlar girebilir."
-      },
-      "first_login_groups": {
-        "ok": "İlk oturum açmada yalnızca {groups} üyelerine hesap açılır (gruplar {from} üzerinden okunur)."
-      },
-      "first_login": {
-        "fail": "İlk oturum açmaya yalnızca bazı gruplar izinli, ama bu sağlayıcı grup bildirmiyor - yeni kimse giremez: {reason}."
-      },
-      "address": {
-        "fail": "“{url}” bir LDAP adresi değil: ldap:// ya da ldaps:// ile başlamalı."
-      },
-      "connect": {
-        "ok": "{host} adresindeki dizin yanıt verdi.",
-        "fail": "{host} adresine bağlanılamadı: {reason}."
-      },
-      "starttls": {
-        "ok": "StartTLS ile bağlantı TLS’e geçti.",
-        "fail": "{host} adresinde StartTLS başarısız: {reason}."
-      },
-      "bind": {
-        "ok": "Hizmet hesabı ({dn}) parolasıyla bağlandı.",
-        "fail": "Hizmet hesabı ({dn}) bağlanamadı: {reason}."
-      },
-      "bind_anonymous": {
-        "ok": "Hizmet hesabı yok: dizine anonim olarak bağlanıldı."
-      },
-      "base": {
-        "ok": "Temel DN ({dn}) var ve okunabiliyor.",
-        "fail": "Temel DN ({dn}) okunamadı: {reason}."
-      },
-      "discovery": {
-        "ok": "Keşif belgesi alındı: {url}",
-        "fail": "Keşif belgesi alınamadı ({url}): {reason}."
-      },
-      "issuer": {
-        "ok": "Sağlayıcı aynı yayıncı adını bildiriyor.",
-        "fail": "Yayıncı adı uyuşmuyor: burada {configured}, sağlayıcının bildirdiği {announced}."
-      },
-      "endpoints": {
-        "ok": "Oturum açma, token ve anahtar uçları tanımlı.",
-        "fail": "Keşif belgesinde eksik: {missing}."
-      },
-      "client": {
-        "ok": "İstemci kimliği ({client}) ve gizli anahtarı kabul edildi.",
-        "fail": "İstemci ({client}) reddedildi: {reason}.",
-        "unchecked": "İstemci ({client}) buradan doğrulanamıyor: {reason}."
-      },
-      "redirect": {
-        "unchecked": "Dönüş adresini ({url}) sağlayıcı ancak gerçek bir oturum açmada denetler."
-      },
-      "trusted_proxies": {
-        "ok": "Güvenilen vekil adresleri geçerli.",
-        "fail": "Güvenilen vekil listesinde adres ya da aralık olmayan bir giriş var."
-      },
-      "via_proxy": {
-        "ok": "Bu istek güvenilen bir vekilden ({peer}) geldi.",
-        "unchecked": "Bu istek vekilden değil, doğrudan {peer} adresinden geldi; başlıkla oturum açma buradan görülemez."
-      },
-      "header": {
-        "ok": "Vekil {header} başlığını gönderiyor: {user}.",
-        "fail": "Vekil {header} başlığını göndermiyor."
-      },
-      "config": {
-        "ok": "Ayarlar biçim olarak doğru.",
-        "fail": "Yapılandırma geçerli değil: {detail}"
-      },
-      "pamtester": {
-        "ok": "pamtester kurulu ve çalıştırılabiliyor ({path})."
-      },
-      "pam_service": {
-        "ok": "PAM hizmet dosyası var ({file})."
-      },
-      "sudo": {
-        "ok": "sudo, filex'in o tek komutu parolasız çalıştırmasına izin veriyor."
-      },
-      "unknown_user": {
-        "ok": "PAM, var olmayan bir girişe olması gerektiği gibi net bir hayır diyor."
-      },
-      "unsupported_os": {
-        "fail": "Bu sunucu Windows üzerinde çalışmıyor; Windows hesaplarıyla oturum açtıramaz."
-      },
-      "platform": {
-        "ok": "Bu makine Windows hesaplarını doğrulayabilir."
-      },
-      "test_account": {
-        "ok": "Bir deneme hesabı verildi.",
-        "fail": "Deneme gerçek bir hesapla oturum açtırır ve başlayamıyor: {reason}. Bu makinenin (ya da etki alanının) bir hesabını ve parolasını verin - bir kez kullanılır, saklanmaz."
-      },
-      "logon": {
-        "ok": "Deneme hesabı ({account}) oturum açtı.",
-        "fail": "Deneme hesabı oturum açamadı: {reason} (kod {code})."
-      },
-      "account": {
-        "ok": "Deneme hesabı sıradan bir hesap: filex kabul eder.",
-        "fail": "filex bu hesabı asla kabul etmez: {reason}."
-      },
-      "secret": {
-        "fail": "Bu sağlayıcı için saklanan gizli değer açılamıyor - {env} değişmiş olabilir. Onu yeniden yazın."
-      },
-      "people": {
-        "ok": "{filter} ile {n} kişi bulundu; {mail} tanesinin e-postası ({attr}) var.",
-        "fail": "{filter} ile e-postası ({attr}) olan kimse bulunamadı: {reason}."
-      },
-      "groups": {
-        "ok": "{of} kişiden {n} tanesi gruplarını {attr} içinde listeliyor.",
-        "unchecked": "Kimse gruplarını {attr} içinde listelemiyor. Dizininizde gruplar varsa bir grup arama filtresi ayarlayın."
-      },
-      "groups_search": {
-        "ok": "Grup araması {who} için {n} grup buluyor.",
-        "fail": "{filter} grup araması başarısız: {reason}.",
-        "unchecked": "{filter} grup araması {who} için grup bulmuyor."
-      },
-      "sync_groups": {
-        "ok": "Dizin senkronu {n} grup getirir.",
-        "fail": "Getirilecek grupların araması ({filter}) başarısız: {reason}.",
-        "unchecked": "{filter} ile eşleşen grup yok: dizin senkronu hiç grup getirmez."
-      }
     },
     "lockoutNote": "Parolayla oturum açmayı ve kurulum yöneticisinin kurtarma amaçlı oturum açmasını bu sayfa değil ortam belirler - bu yüzden burada yapılan hiçbir şey sizi dışarıda bırakamaz. Burada açılan sağlayıcılar ortamınkilerden sonra eklenir ve kaydedildikleri anda geçerli olur.",
     "passwordOn": "Parolayla oturum açma açık ({from}).",
@@ -1227,213 +1070,6 @@
       "to": "Bitiş"
     },
     "noResults": "Eşleşen olay yok",
-    "phrase": "{resource}: {verb}",
-    "resource": {
-      "permission_gap": "Eksik izin",
-      "archives": "Arşiv ayarları",
-      "ai_file": "Dosya (AI)",
-      "ai_share": "Paylaşım bağlantısı (AI)",
-      "ai_tokens": "API anahtarı",
-      "audit": "Denetim kaydı",
-      "auth": "Oturum",
-      "auth_provider": "Kimlik sağlayıcısı",
-      "duplicates": "Kopyalar",
-      "embed": "Gömme",
-      "external": "Harici servis",
-      "file": "Dosya",
-      "grants": "Klasör erişimi",
-      "notifications": "Bildirim",
-      "plugins": "Eklenti",
-      "profile": "Profil",
-      "protection": "Koruma",
-      "providers": "Kiracı",
-      "queue": "İş kuyruğu",
-      "replica": "Kopya",
-      "replication_targets": "Çoğaltma hedefi",
-      "rules": "Çoğaltma kuralı",
-      "search": "Arama dizini",
-      "settings": "Ayarlar",
-      "share": "Paylaşım bağlantısı",
-      "shares": "Paylaşım bağlantısı",
-      "sharex": "ShareX yüklemesi",
-      "smtp_test": "E-posta testi",
-      "storage": "Depo",
-      "storages": "Depo",
-      "sync": "Senkron",
-      "totp": "İki adımlı doğrulama",
-      "trash": "Çöp kutusu",
-      "update": "Güncelleme",
-      "usage": "Kullanım raporu",
-      "user": "Kullanıcı",
-      "users": "Kullanıcı",
-      "version": "Dosya sürümü",
-      "versions": "Dosya sürümü",
-      "webhook_config": "Webhook ayarları",
-      "webhooks": "Webhook",
-      "app_plugins": "Uygulama",
-      "app_plugin": "Uygulama",
-      "plugin_request": "Eklenti isteği",
-      "plugin_requests": "Eklenti isteği",
-      "auth_providers": "Giriş sağlayıcısı",
-      "quota": "Kota",
-      "themes": "Tema",
-      "permissions": "Yerleşik rol",
-      "roles": "Rol",
-      "permission_rule": "Rol",
-      "e2e": "Şifreleme",
-      "e2e_policy": "Şifreleme politikası",
-      "e2e_tenant": "Kiracı şifrelemesi",
-      "e2e_request": "Şifreleme isteği",
-      "login": "Oturum açma",
-      "login_security": "Giriş güvenliği",
-      "group": "Grup",
-      "groups": "Grup",
-      "group_grant": "Grubun klasör erişimi",
-      "thumbnail": "Küçük resimler",
-      "tools": "Araçlar",
-      "tenant": "Kiracı",
-      "tenant_domain": "Kendi alan adı",
-      "file_association": "Varsayılan uygulamalar",
-      "file_types": "Varsayılan uygulamalar",
-      "app_store": "Uygulama mağazası",
-      "tenancy": "Çok kiracılı mod"
-    },
-    "verb": {
-      "dismiss": "yok sayıldı",
-      "action": "değiştirildi",
-      "archive_add": "arşive eklendi",
-      "archive_create": "arşiv oluşturuldu",
-      "archive_extract": "arşiv açıldı",
-      "comment_add": "yorum eklendi",
-      "comment_delete": "yorum silindi",
-      "copy": "kopyalandı",
-      "create": "oluşturuldu",
-      "delete": "silindi",
-      "disable": "kapatıldı",
-      "enable": "açıldı",
-      "empty": "boşaltıldı",
-      "enroll": "kuruldu",
-      "entry_available": "öğe yeniden kullanılabilir",
-      "entry_unavailable": "öğe kullanılamıyor",
-      "grant_revoke": "erişim kaldırıldı",
-      "grant_set": "erişim verildi",
-      "mkdir": "klasör oluşturuldu",
-      "move": "taşındı",
-      "op_cancel": "işlem durduruldu",
-      "password_change": "parola değiştirildi",
-      "password_reset": "parola sıfırlandı",
-      "quota_recompute": "kota yeniden hesaplandı",
-      "quota_set": "kota ayarlandı",
-      "rebuild": "yeniden oluşturuldu",
-      "restore": "geri yüklendi",
-      "revoke": "iptal edildi",
-      "star": "yıldızlandı",
-      "sync_trigger": "senkron başlatıldı",
-      "tags_set": "etiketler değiştirildi",
-      "test": "test edildi",
-      "unzip": "arşivden çıkarıldı",
-      "update": "güncellendi",
-      "upload": "yüklendi",
-      "upload_abort": "yükleme iptal edildi",
-      "verify": "doğrulandı",
-      "version_restore": "sürümü geri yüklendi",
-      "version_snapshot": "sürümü kaydedildi",
-      "zip": "sıkıştırıldı",
-      "action_run": "eylem çalıştırıldı",
-      "page_job": "bağlantısından iş başlatıldı",
-      "share_create": "bağlantı oluşturuldu",
-      "unlock": "kilidi açıldı",
-      "signing_ca_import": "imza sertifikası içe aktarıldı",
-      "pin_locked": "PIN denemeleri kilitlendi",
-      "pin_revealed": "PIN gösterildi",
-      "tags": "etiketler değiştirildi",
-      "download_link": "dışarı sürüklenerek indirildi",
-      "download_link_refused": "dışarı sürükleyerek indirme reddedildi",
-      "cross_origin_refused": "başka bir siteden gelen istek reddedildi",
-      "account_pending": "hesap açıldı, onay bekliyor",
-      "ui_save": "arayüzünden kaydedildi",
-      "upgrade": "yükseltildi",
-      "rollback": "önceki sürüme döndürüldü",
-      "permissions_set": "istisnaları değiştirildi",
-      "defaults_set": "izinleri değiştirildi",
-      "roles_set": "rolü değiştirildi",
-      "approve": "onaylandı",
-      "reject": "reddedildi",
-      "expire": "süresi doldu",
-      "supersede": "kaynağı değiştiği için kapatıldı",
-      "use": "kullanıldı",
-      "folder_cleanup": "klasör temizlendi",
-      "fxe_header_rewritten": "dosya başlığı yeniden yazıldı",
-      "key_file_rewritten": "anahtar dosyası yeniden yazıldı",
-      "unlocked": "kilit açıldı",
-      "members_add": "üye eklendi",
-      "member_remove": "üye çıkarıldı",
-      "sync": "dizin senkronize edildi",
-      "detach": "filex grubu olarak tutuldu",
-      "repair": "onarıldı",
-      "settings_update": "sınırlar değiştirildi",
-      "storage_link": "depo bağlandı",
-      "storage_unlink": "depo bağı kaldırıldı",
-      "tenants_set": "kiracılar değiştirildi",
-      "check": "denetlendi",
-      "certificate_set": "sertifika yüklendi",
-      "certificate_delete": "sertifika kaldırıldı",
-      "insecure_auth_set": "güvensiz sağlayıcı izni değiştirildi",
-      "reset": "varsayılana döndürüldü",
-      "thumbnail_limits": "küçük resim sınırları değiştirildi",
-      "thumbnail_sent": "küçük resim çizerken dışarıya dosya gönderdi",
-      "office_saved_beside": "başka biçimde yanına kaydedildi (ONLYOFFICE)",
-      "office_save_refused": "kayıt yazılmadı (ONLYOFFICE)",
-      "office_saved_conflict": "düzenlenirken değiştiği için yanına kaydedildi (ONLYOFFICE)",
-      "trust": "güvenildi",
-      "untrust": "artık güvenilmiyor",
-      "install": "kuruldu",
-      "cancel": "iptal edildi",
-      "license_set": "lisans anahtarı girildi",
-      "license_held": "lisansı nedeniyle bekletiliyor",
-      "license_released": "lisansı yeniden geçerli",
-      "connect": "bağlandı",
-      "disconnect": "bağlantısı kesildi",
-      "view": "mağaza ekranı değiştirildi",
-      "intent_request": "kurulum bağlantısı istendi"
-    },
-    "target": {
-      "permission_gap": "Eksik izin",
-      "auth_provider": "Kimlik sağlayıcısı",
-      "external": "Harici servis",
-      "comment": "Yorum",
-      "grant": "Klasör erişimi",
-      "node": "Dosya",
-      "op": "İşlem",
-      "profile": "Profil",
-      "search": "Arama dizini",
-      "setting": "Ayar",
-      "share": "Paylaşım bağlantısı",
-      "storage": "Depo",
-      "sync_run": "Senkron",
-      "trash": "Çöp kutusu",
-      "upload": "Yükleme",
-      "user": "Kullanıcı",
-      "version": "Sürüm",
-      "app_plugin": "Uygulama",
-      "file": "Dosya",
-      "permissions": "Yerleşik rol",
-      "permission_rule": "Rol",
-      "plugin_request": "Eklenti isteği",
-      "e2e_policy": "Şifreleme politikası",
-      "login": "Oturum açma",
-      "login_security": "Giriş güvenliği",
-      "group": "Grup",
-      "group_grant": "Grubun klasör erişimi",
-      "settings": "Ayarlar",
-      "providers": "Kiracı",
-      "e2e_request": "Şifreleme isteği",
-      "tenant_domain": "Kendi alan adı",
-      "file_type": "Dosya türü",
-      "app_store": "Mağaza",
-      "tenancy": "Çok kiracılı mod"
-    },
-    "viaAi": "{resource} (AI)",
     "filterResource": "Ne",
     "rawRecord": "Ham kayıt"
   },
@@ -1524,6 +1160,7 @@
     "revokedOk": "Bağlantı iptal edildi",
     "neverExpires": "Süresiz",
     "expired": "Süresi doldu",
+    "exhausted": "Kullanım hakkı doldu",
     "copyFailed": "Tarayıcı bu sayfanın panoyu kullanmasına izin vermedi",
     "pinReason": {
       "no_pin": "Bu bağlantıda PIN yok.",
@@ -1549,6 +1186,7 @@
     "queryPlaceholder": "Dosya ara… ada göre ya da tag:etiket",
     "noResults": "Eşleşme yok",
     "resultCount": "{n} sonuç | {n} sonuç",
+    "moreThanShown": "Gösterilenden daha fazla eşleşme var - aramayı daraltın",
     "scope": "Nerede arasın",
     "scopeAll": "Tümü",
     "scopeName": "Ad",
@@ -1677,20 +1315,15 @@
     "row_busy": "Bu öğe üzerinde zaten bir iş sürüyor",
     "empty_modal_title": "Çöpü boşalt",
     "empty_modal_body": "Bu işlem geri alınamaz. Tek bir depoyu seçtiyseniz yalnızca o etkilenir.",
+    "empty_counting": "Çöp kutusundakiler sayılıyor…",
     "older_than_days": "Şundan eski (gün)",
     "all_ages": "tümü (boş bırak)",
-    "empty_done": "{count} öğe silindi",
     "older_than_days_invalid": "Tam bir gün sayısı yazın ya da her yaş için boş bırakın.",
     "empty_running": "Çöp kutusu boşaltılıyor…",
-    "emptying_progress": "{done} / {total}",
     "emptying_freed": "Şimdiye dek {size} boşaldı",
     "emptying_note": "Bu sayfadan ayrılsanız da sürer.",
     "empty_busy": "Çöp kutusu zaten boşaltılıyor.",
-    "empty_failed": "{count} öğe silinemedi - sunucu günlüğüne bakın",
-    "empty_stopped": "Çöp kutusunu boşaltma durdu: {error}",
-    "emptying_queued": "Çöp kutusu boşaltılıyor… başka bir temizliğin bitmesi bekleniyor",
     "empty_stop": "Durdur",
-    "stopped_after": "{count} öğeden sonra durduruldu; kalanlar hâlâ çöp kutusunda.",
     "total_count": "Toplam: {n}"
   },
   "tools": {
@@ -2020,7 +1653,6 @@
       "skipped": "Gönderilmedi",
       "pending": "Bekliyor"
     },
-    "webhookNone": "tanımlı webhook yok",
     "webhooksMoved": "Olayların nereye gönderileceği - varsayılan webhook ve tüm hedefler - Webhook'lar sayfasında ayarlanır.",
     "webhooksLink": "Webhook'ları aç",
     "unreadHere": "Bu listede {n} okunmamış",
@@ -2043,6 +1675,19 @@
       "saved": "Özet ayarları kaydedildi",
       "invalidWindow": "1 ile 15 dakika arasında bir değer seçin.",
       "allUrgent": "Varsayılan: her tür hemen bildirilir. Özet için hiçbir şey bekletilmez."
+    },
+    "push": {
+      "title": "Anlık bildirimler",
+      "intro": "Bir kişinin zilinin söyledikleri, kişi kendi bildirim ayarlarından bir cihaz için açtığında filex kapalıyken de telefonuna ve tarayıcılarına ulaşır. Her bildirim bu sunucunun anahtarıyla imzalanır.",
+      "on": "Açık. Anlık bildirim alan cihaz sayısı: {count}",
+      "keyCreated": "Anahtar oluşturuldu: {date}",
+      "offDisabled": "Kapalı: FILEX_PUSH_ENABLED false.",
+      "offNoSecretKey": "Kapalı: bu sunucuda FILEX_SECRET_KEY yok. Bildirimleri imzalayan anahtar onunla şifrelenerek saklanır - tanımlayıp sunucuyu yeniden başlatın.",
+      "offKeyUnreadable": "Kapalı: kayıtlı anahtar bu FILEX_SECRET_KEY ile açılmıyor. Yeni bir anahtar için yenileyin.",
+      "offError": "Kapalı: anahtar okunamadı.",
+      "rotate": "Anahtarı yenile",
+      "rotateConfirm": "Yeni bir anlık bildirim anahtarı oluşturulsun mu? Her cihaz, filex o cihazda yeniden açılana kadar anlık bildirim alamaz.",
+      "rotated": "Yeni anahtar oluşturuldu. Yeniden abone olacak cihaz sayısı: {count}"
     }
   },
   "replica": {
@@ -2328,20 +1973,14 @@
       "secret": "Secret",
       "lastStatus": "Son gönderim",
       "enabled": "Etkin",
-      "actions": "İşlemler"
+      "actions": "İşlemler",
+      "lang": "Dil"
     },
+    "langServer": "Sunucunun dili",
+    "langHint": "Bu adrese giden başlık ve gövdenin yazıldığı dil. Her gönderim iletiyi ayrıca çevrilmemiş hâliyle de taşır (i18n: anahtarlar ve değerler); kendi çevirisini yapan alıcı bunu kullanabilir.",
     "global": {
       "title": "Varsayılan webhook",
       "hint": "Her olayı alır; bir token belirlerseniz Bearer ile gönderilir. Aşağıdaki hedefler olaylarını ayrı ayrı seçebilir ve gönderimleri bir sırla imzalayabilir."
-    },
-    "errName": "Webhook’a bir ad verin.",
-    "errUrl": "Olayların gönderileceği adresi yazın.",
-    "errUrlScheme": "Adres http:// ya da https:// ile başlamalı.",
-    "offReason": {
-      "antivirus": "Virüs taraması kapalı (Koruma).",
-      "escrow": "Şifreli klasörler için emanet anahtarı kurulmamış.",
-      "appPlugins": "Bu sunucuda uygulamalar kapalı.",
-      "e2eApproval": "Yalnız şifreleme politikası onay istediğinde."
     }
   },
   "protection": {
@@ -2353,30 +1992,26 @@
       "title": "Çöp kutusu saklama",
       "desc": "Silinen dosyalar çöp kutusunda burada belirtilen gün sayısı kadar tutulur, süre dolunca kalıcı olarak temizlenir.",
       "label": "Saklama süresi (gün)",
-      "hint": "En az 1 gün",
-      "errMin": "1 veya daha büyük bir tam sayı girin"
+      "hint": "En az 1 gün"
     },
     "versions": {
       "title": "Sürüm politikası",
       "desc": "Dosya başına saklanacak sürüm sayısı. Limit aşıldığında en eski sürümler günlük temizlik işiyle silinir.",
       "label": "Saklanacak sürüm sayısı",
-      "hint": "0 = sınırsız (temizlik yapılmaz)",
-      "errMin": "0 veya daha büyük bir tam sayı girin"
+      "hint": "0 = sınırsız (temizlik yapılmaz)"
     },
     "share": {
       "title": "Paylaşım bağlantıları",
       "desc": "Yeni bir paylaşım bağlantısına verilebilecek en uzun süre. Süresiz oluşturulan bağlantı bu süreyi alır; daha uzun istenen süre buna kırpılır. Paylaşımlar için üretilen klasör arşivleri de aynı süre sonunda silinir. Var olan bağlantılara dokunulmaz.",
       "label": "En uzun bağlantı süresi (gün)",
       "hint": "0 = sınırsız. Varsayılan 7.",
-      "errMin": "0 veya daha büyük bir tam sayı girin",
       "overMax": "Mevcut {n} bağlantı bu sınırı aşıyor. Çalışmaya devam ederler - kaldırmak isterseniz Paylaşımlar sayfasından iptal edin."
     },
     "drafts": {
       "title": "Taslaklar",
       "desc": "Yeni bir belge, ilk kaydına kadar bir taslaktır: onu oluşturan kişinin, başka kimsenin göremediği Taslaklar’ında bekler ve kaydedilene kadar klasöründe hiçbir şey oluşturulmaz. Bir kişinin tutabileceği en fazla taslak sayısı budur; sınıra gelindiğinde Yeni belge önce bazılarının kaydedilmesini ya da silinmesini ister.",
       "label": "Kişi başına taslak",
-      "hint": "{min} ile {max} arasında. Varsayılan 50. Yeniden başlatma gerekmeden hemen geçerli olur.",
-      "errRange": "{min} ile {max} arasında tam sayı girin."
+      "hint": "{min} ile {max} arasında. Varsayılan 50. Yeniden başlatma gerekmeden hemen geçerli olur."
     },
     "av": {
       "title": "Antivirüs",
@@ -2387,15 +2022,13 @@
         "title": "Taranan en büyük dosya",
         "desc": "Bundan büyük dosyalar engellenmez, atlanır - normal şekilde saklanır ve sunulur, yalnızca ClamAV'a hiç verilmez. Komut kipinde her dosya tarayıcı çalışmadan önce geçici bir kopyaya yazıldığı için bu ayar orada aynı zamanda bir disk ve süre bütçesidir; servis kipinde baytlar doğrudan clamd'ye akıtılır.",
         "label": "Megabayt",
-        "hint": "{min} ile {max} MB arasında. Yeniden başlatma gerekmeden, taranacak ilk dosyadan itibaren geçerli olur.",
-        "errRange": "{min} ile {max} arasında tam sayı girin."
+        "hint": "{min} ile {max} MB arasında. Yeniden başlatma gerekmeden, taranacak ilk dosyadan itibaren geçerli olur."
       },
       "window": {
         "title": "Düzenleyici kayıt tarama penceresi",
         "desc": "Yerleşik metin düzenleyicide oluşturulan dosya hemen taranır. Zaten var olan bir dosyaya kaydetme, taramayı bu kadar dakika sonrasına planlar; pencere içindeki diğer kaydetmeler yeni tarama açmak yerine aynı taramaya katılır - böylece art arda Ctrl+S tek bir taramaya mal olur ve o tarama dosyanın son hâlini okur. Karşılığı: kaydedilen dosya, son kaydetmeden sonra bu süre kadar taranmamış kalabilir.",
         "label": "Dakika",
-        "hint": "{min} ile {max} dakika arasında. Yeniden başlatma gerekmeden hemen geçerli olur; planlanmış taramalar özgün zamanlarını korur.",
-        "errRange": "{min} ile {max} arasında tam sayı girin."
+        "hint": "{min} ile {max} dakika arasında. Yeniden başlatma gerekmeden hemen geçerli olur; planlanmış taramalar özgün zamanlarını korur."
       },
       "reachable": "Erişilebilir",
       "unreachable": "Yanıt vermiyor",
@@ -2676,27 +2309,7 @@
       "package": "{manager} kurulumu",
       "packageUnknown": "paket yöneticisi kurulumu"
     },
-    "policyName": {
-      "off": "kapalı",
-      "manual": "yalnızca duyur",
-      "patch": "yamaları kur",
-      "minor": "ara sürümleri kur"
-    },
-    "policyIs": "Politika: {policy}",
-    "checkedAtWhen": "Son kontrol: {when}",
-    "behavior": {
-      "off": "Kontrol kapalı",
-      "announce": "Yalnızca duyurur",
-      "patch": "Yamaları kurar",
-      "minor": "Ara sürümleri kurar"
-    },
-    "policyLimit": {
-      "disabled": "Kayıtlı politika (“{policy}”) etkisiz: bu sunucuda sürüm kontrolü kapalı, bu yüzden filex yeni sürüm aramaz ve kurmaz.",
-      "container": "Kayıtlı politika (“{policy}”) bu kurulumda etkisiz: bir container kendi imajını değiştiremez, bu yüzden filex yeni sürümleri yalnızca duyurur. Yükseltmek için yeni imajı çekin ya da bunu harici bir güncelleyiciye bırakın.",
-      "package": "Kayıtlı politika (“{policy}”) bu kurulumda etkisiz: ikili dosyanın sahibi {manager}, bu yüzden filex yeni sürümleri yalnızca duyurur; yükseltmeyi {manager} yapar:",
-      "packageUnknown": "Kayıtlı politika (“{policy}”) bu kurulumda etkisiz: ikili dosyanın sahibi bir paket yöneticisi, bu yüzden filex yeni sürümleri yalnızca duyurur. Paket yöneticinizle yükseltin.",
-      "zero_major": "Kayıtlı politika (“{policy}”) filex 0.x sürümündeyken yalnızca yamaları kurar: 0.x ara sürümleri uyumluluğu bozabilir, bu yüzden duyurulur ve onayınızı bekler."
-    }
+    "checkedAtWhen": "Son kontrol: {when}"
   },
   "desktop": {
     "handoff": "Masaüstü uygulamasına dönebilirsiniz - yetkilendirme tamamlandı.",
@@ -2921,20 +2534,6 @@
       "clear": "Denetimi durdurmak için boş bırakın.",
       "saved": "Kaydedildi: {name}, {source} kaynağını izliyor.",
       "cleared": "{name} için artık güncelleme kaynağı yok."
-    }
-  },
-  "account": {
-    "errors": {
-      "emailRequired": "Bir e-posta adresi yazın.",
-      "emailInvalid": "Bu bir e-posta adresi değil. ad{'@'}ornek.com biçiminde yazın.",
-      "usernameEmpty": "Bir kullanıcı adı yazın.",
-      "usernameAt": "Kullanıcı adında {'@'} olamaz; {'@'} e-posta adresine aittir.",
-      "usernameShort": "Kullanıcı adı en az {min} karakter olmalı.",
-      "usernameLong": "Kullanıcı adı en çok {max} karakter olabilir.",
-      "usernameDigit": "Kullanıcı adı rakamla başlayamaz.",
-      "usernameChar": "Kullanıcı adında “{char}” kullanılamaz. a-z, 0-9, nokta, tire ya da alt çizgi kullanın.",
-      "usernameSpace": "Kullanıcı adında boşluk olamaz. a-z, 0-9, nokta, tire ya da alt çizgi kullanın.",
-      "usernameReserved": "“{name}” ayrılmış bir ad; başka bir kullanıcı adı seçin."
     }
   },
   "appPlugins": {
@@ -3606,11 +3205,6 @@
   },
   "editor": {
     "missingPath": "{param} sorgu parametresi eksik."
-  },
-  "appLock": {
-    "refused": "{app} bu dosyayı kilitledi - uygulama bırakana kadar değiştirilemez.",
-    "refusedReason": "{app} bu dosyayı kilitledi ({reason}) - uygulama bırakana kadar değiştirilemez.",
-    "someApp": "Bir uygulama"
   },
   "forms": {
     "required": "Bu alanı doldurun.",

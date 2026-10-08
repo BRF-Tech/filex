@@ -26,6 +26,12 @@
 // the browser uses, so neither side can be talked into a different answer by a
 // crafted request.
 //
+// ⭐ Since 0.54 (#212) the same gate also judges the ANSWERS against the
+// screen's declarations — a field's type, options and bounds, a PIN's
+// length, a PDF box's rule — with wasmplugin/surface_values.go, the one
+// judge every door shares (PutSettings included). Those rules have no
+// browser twin to port: the browser only draws them, the host decides.
+//
 // ⚠ It strips the VALUES, not the job's params. The params are the plugin's
 // own map — it may compute, rename or default anything in there — and dropping
 // keys out of it would delete the plugin's own work. The values are the
@@ -35,11 +41,10 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/srvtext"
+	"github.com/brf-tech/filex/backend/internal/wasmplugin"
 	"github.com/brf-tech/filex/backend/pkg/pluginkit/wire"
 )
 
@@ -58,23 +63,13 @@ func surfaceEventCanQueue(event string) bool {
 }
 
 // surfaceHasAnswer mirrors `hasAnswer`: is there anything in this value at
-// all? `false` and `0` count as answers — an unticked box IS an answer.
-func surfaceHasAnswer(v any) bool {
-	switch t := v.(type) {
-	case nil:
-		return false
-	case string:
-		return strings.TrimSpace(t) != ""
-	case []any:
-		return len(t) > 0
-	case []string:
-		return len(t) > 0
-	}
-	return true
-}
+// all? `false` and `0` count as answers — an unticked box IS an answer. The
+// host's one reading is wasmplugin.Answered (the value judge asks the same).
+func surfaceHasAnswer(v any) bool { return wasmplugin.Answered(v) }
 
 // surfaceValueStrings mirrors `valueStrings`: every string a value holds — one
-// for a scalar, several for a multi-select.
+// for a scalar, several for a multi-select — spelt the way the browser spells
+// them (wasmplugin.ValueString).
 func surfaceValueStrings(v any) []string {
 	switch t := v.(type) {
 	case nil:
@@ -82,42 +77,13 @@ func surfaceValueStrings(v any) []string {
 	case []any:
 		out := make([]string, 0, len(t))
 		for _, x := range t {
-			out = append(out, surfaceScalarString(x))
+			out = append(out, wasmplugin.ValueString(x))
 		}
 		return out
 	case []string:
 		return append([]string(nil), t...)
 	}
-	return []string{surfaceScalarString(v)}
-}
-
-// surfaceScalarString is JavaScript's `String(v)` for the shapes JSON can
-// produce. ⚠ A number arrives as float64 through encoding/json, and `%v` would
-// print `3` as `3` but `1e+06` for a round million — `strconv` with precision
-// -1 is what gives the browser's own spelling back.
-func surfaceScalarString(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return "null"
-	case string:
-		return t
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	case float64:
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case float32:
-		return strconv.FormatFloat(float64(t), 'f', -1, 32)
-	case int:
-		return strconv.Itoa(t)
-	case int64:
-		return strconv.FormatInt(t, 10)
-	case json.Number:
-		return t.String()
-	}
-	return fmt.Sprint(v)
+	return []string{wasmplugin.ValueString(v)}
 }
 
 // surfaceConditionMet mirrors `conditionMet`.
@@ -320,61 +286,180 @@ func missingRequiredSurfaceFields(fields []wire.Field, values map[string]any) []
 	return out
 }
 
+// surfaceVerdict is what the gate decided about an event's values: the
+// visible, required fields nobody answered, or the answers that do not fit
+// the field, PIN box or PDF box that asked for them. Empty means the event
+// may go.
+type surfaceVerdict struct {
+	Missing []string
+	Invalid []wasmplugin.FieldProblem
+}
+
+func (v surfaceVerdict) refused() bool { return len(v.Missing) > 0 || len(v.Invalid) > 0 }
+
 // gateSurfaceValues is the whole promise in one call, shared by the view
 // handler and the public page handler so the two cannot enforce different
 // rules.
 //
 // It draws the screen these values belong to (`draw`), and then either
 //
-//   - returns the keys of the visible, required fields that are empty — the
-//     caller refuses the event, so no job is queued; or
-//   - rewrites `data["values"]` with the hidden fields' values dropped, and
-//     the caller carries on into the real event.
+//   - refuses: the visible, required fields that are empty (Missing), or the
+//     answers the screen's own declarations do not accept (Invalid: a type,
+//     an option, min/max, a PIN's length, a PDF text box's rule) — the
+//     caller answers 422, so no job is queued; or
+//   - rewrites `data["values"]` with the hidden fields' values dropped and
+//     a `pdf-fields` fill answer reduced to the signer's own boxes (with the
+//     node's labels and rules), and the caller carries on into the real
+//     event.
 //
-// A screen with no form fields, an event that cannot queue a job, or an event
-// carrying no values all cost nothing: `draw` is not called at all.
+// An event that cannot queue a job or one carrying no values costs nothing:
+// `draw` is not called at all.
 //
 // ⚠ The redraw is asked with the RAW values, because that is what the browser
 // was holding when the person pressed the button. A plugin whose field LIST
 // differs between the raw and the stripped values would see one extra pass of
 // the cascade here; the visibility answer itself is the browser's, computed by
 // the shared cascade above.
-func gateSurfaceValues(event string, state, data map[string]any, draw func(wire.ViewEventInput) (*wire.Surface, error)) ([]string, error) {
+func gateSurfaceValues(event string, state, data map[string]any, draw func(wire.ViewEventInput) (*wire.Surface, error)) (surfaceVerdict, error) {
 	if !surfaceEventCanQueue(event) || data == nil {
-		return nil, nil
+		return surfaceVerdict{}, nil
 	}
 	values, ok := data["values"].(map[string]any)
 	if !ok || len(values) == 0 {
-		return nil, nil
+		return surfaceVerdict{}, nil
 	}
 	screen, err := draw(wire.ViewEventInput{Event: surfaceRedrawEvent, State: state, Data: data})
 	if err != nil {
-		return nil, err
+		return surfaceVerdict{}, err
 	}
 	if screen == nil {
-		return nil, nil
+		return surfaceVerdict{}, nil
 	}
 	fields := surfaceFormFields(screen.Nodes)
-	if len(fields) == 0 {
-		return nil, nil
-	}
 	if missing := missingRequiredSurfaceFields(fields, values); len(missing) > 0 {
 		keys := make([]string, 0, len(missing))
 		for _, f := range missing {
 			keys = append(keys, f.Key)
 		}
-		return keys, nil
+		return surfaceVerdict{Missing: keys}, nil
 	}
-	data["values"] = stripHiddenSurfaceValues(fields, values)
-	return nil, nil
+	kept, invalid := judgeSurfaceValues(screen.Nodes, fields, stripHiddenSurfaceValues(fields, values))
+	if len(invalid) > 0 {
+		return surfaceVerdict{Invalid: invalid}, nil
+	}
+	data["values"] = kept
+	return surfaceVerdict{}, nil
 }
 
-// writeSurfaceRequired is the refusal a `required_when` field earns: 422 with
-// the field keys, so a client can point at them rather than say "no".
-func writeSurfaceRequired(w http.ResponseWriter, keys []string) {
+// judgeSurfaceValues measures values (hidden fields already dropped) against
+// the screen they belong to: every visible form field by its declaration
+// (wasmplugin.CheckFieldValue), every `pin-input` by its length, every
+// `pdf-fields` node in fill mode by its boxes (wasmplugin.JudgePdfFill). It
+// answers the values as the app may receive them — a copy; the fill answer
+// rewritten — and the problems. Values that belong to nothing on this screen
+// are left as they came: the rules are about the screen's own questions.
+func judgeSurfaceValues(nodes []wire.Node, fields []wire.Field, values map[string]any) (map[string]any, []wasmplugin.FieldProblem) {
+	out := make(map[string]any, len(values))
+	for k, v := range values {
+		out[k] = v
+	}
+	var problems []wasmplugin.FieldProblem
+	for _, f := range visibleSurfaceFields(fields, out) {
+		if p := wasmplugin.CheckFieldValue(f, out[f.Key]); p != nil {
+			problems = append(problems, *p)
+		}
+	}
+	var walk func([]wire.Node)
+	walk = func(ns []wire.Node) {
+		for _, n := range ns {
+			if n.ID != "" {
+				switch n.Type {
+				case "pin-input":
+					if p := wasmplugin.CheckPin(n.ID, wasmplugin.PinLength(n.Props["length"]), out[n.ID]); p != nil {
+						problems = append(problems, *p)
+					}
+				case "pdf-fields":
+					if mode, _ := n.Props["mode"].(string); mode == "fill" {
+						if raw, has := out[n.ID]; has {
+							clean, probs := wasmplugin.JudgePdfFill(n.ID, n.Props, raw)
+							out[n.ID] = clean
+							problems = append(problems, probs...)
+						}
+					}
+				}
+			}
+			if len(n.Children) > 0 {
+				walk(n.Children)
+			}
+		}
+	}
+	walk(nodes)
+	return out, problems
+}
+
+// markSurfaceProblems puts the host's verdict on the answer to a `change`:
+// every value the person sent that the redrawn screen's declarations do not
+// accept gets its reason under its key in `surface.errors`, in the reader's
+// language — unless the app already said something there (its words win).
+//
+// ⚠ This is what lets the browser stop judging. A form posts `change` as it
+// is edited, and the answer to every change is redrawn here, so a number
+// outside min/max or an option the screen does not offer is marked while
+// the person is still on the field, in the server's words; the submit is
+// refused by gateSurfaceValues with the same words. An empty required field
+// is not marked here — a person who has not reached it yet is not wrong.
+//
+// ⚠ ONLY a `change`: that answer is the same screen the values were typed
+// into. The answer to a submit or a row action is usually the NEXT step,
+// and judging the last step's answers against its fields would mark boxes
+// the person has not touched yet (a step that reuses a key with other
+// options). Those values were judged by the gate, against their own screen.
+func markSurfaceProblems(event string, s *wire.Surface, data map[string]any, lang string) {
+	if event != surfaceRedrawEvent || s == nil || data == nil {
+		return
+	}
+	values, ok := data["values"].(map[string]any)
+	if !ok || len(values) == 0 {
+		return
+	}
+	fields := surfaceFormFields(s.Nodes)
+	_, problems := judgeSurfaceValues(s.Nodes, fields, stripHiddenSurfaceValues(fields, values))
+	for _, p := range problems {
+		if s.Errors == nil {
+			s.Errors = map[string]wire.Text{}
+		}
+		if len(s.Errors[p.Key]) > 0 {
+			continue
+		}
+		s.Errors[p.Key] = wire.Text{lang: p.Say(lang)}
+	}
+}
+
+// writeSurfaceRefused is the 422 a refused event earns, in the reader's
+// language: `required` with the empty fields' keys, or `invalid` with every
+// refused answer's key and reason (`invalid[key]` is the sentence the screen
+// marks the field with), so a client points at the fields rather than says
+// "no".
+func writeSurfaceRefused(w http.ResponseWriter, lang string, v surfaceVerdict) {
+	if len(v.Missing) > 0 {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error":   "required",
+			"message": srvtext.Text(lang, "server.field.required_fields", nil),
+			"fields":  v.Missing,
+		})
+		return
+	}
+	keys := make([]string, 0, len(v.Invalid))
+	said := make(map[string]string, len(v.Invalid))
+	for _, p := range v.Invalid {
+		keys = append(keys, p.Key)
+		said[p.Key] = p.Say(lang)
+	}
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-		"error":   "required",
-		"message": "these fields are required and empty: " + strings.Join(keys, ", "),
+		"error":   "invalid",
+		"message": srvtext.Text(lang, "server.field.invalid", nil),
 		"fields":  keys,
+		"invalid": said,
+		"reasons": v.Invalid,
 	})
 }

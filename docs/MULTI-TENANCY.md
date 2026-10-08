@@ -418,7 +418,7 @@ the form has no field):
 
 | The platform's page: the Realm field empty and free | A tenant's own address: the field filled in and read-only |
 |---|---|
-| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.0df0913e40f3.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.00d83a01c149.png) |
+| ![The platform's sign-in page with an empty Realm field](https://filex.sh/shots/realm/login-realm-1440.fc8fe2eb62ab.png) | ![A tenant's own sign-in page, its realm filled in](https://filex.sh/shots/realm/login-realm-locked-1440.bfa74fec70e7.png) |
 
 **The handoff to a tenant's own address.** The session cookie belongs to the
 host it was set on. A realm typed on the platform's page for a tenant that has
@@ -512,7 +512,10 @@ Two ways in, because not every URL is minted while a browser waits:
 
 Scheme is `https` (TLS-terminating proxy assumed) unless the proxy sends
 `X-Forwarded-Proto: http`, or `FILEX_PUBLIC_URL` itself is `http://` (a
-TLS-less dev install). **Single-tenant installs are unchanged**: the request is
+TLS-less dev install). The header is read only from a **trusted proxy**
+([CONFIGURATION.md → Trusted proxies](CONFIGURATION.md#trusted-proxies)),
+the same rule `X-Forwarded-For` follows; from any other peer the links stay
+`https`. **Single-tenant installs are unchanged**: the request is
 never consulted and `PublicURL` is always the answer.
 
 ### Callback redirects & session cookie (multi-tenant)
@@ -524,7 +527,7 @@ never consulted and `PublicURL` is always the answer.
   request host - **only when that host resolves to an enabled provider row**
   (same trusted-host model as tenant resolution, §13); any other host falls
   back to `PublicURL`. Scheme is `https` (TLS-terminating proxy assumed, as
-  for the per-tenant OIDC redirect default) unless the proxy sends
+  for the per-tenant OIDC redirect default) unless a trusted proxy sends
   `X-Forwarded-Proto: http`. Single-tenant behaviour is unchanged.
 - **Session-cookie `Domain` resolves per tenant** so each tenant can share
   its session across its own subdomains (`files.` / `webmail.` / `portal.`):

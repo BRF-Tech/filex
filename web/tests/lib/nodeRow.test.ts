@@ -96,4 +96,14 @@ describe('nodeRowToFileNode', () => {
     // The server's URL, signature and all — never one rebuilt from the id.
     expect(ready?.thumb_url).toBe(url);
   });
+
+  it('keeps the server\'s starred flag, so Starred and Home rows read as starred (#207)', () => {
+    // ⚠ 0.54 full run (001b652e, e2e 106): the explorer stopped matching ids
+    // against a star list of its own and reads the row's `starred`; dropped
+    // here, a file in Starred offered "Star" instead of "Unstar".
+    const on = nodeRowToFileNode({ id: 90, path: 'kept.txt', storage: 'drive', starred: true }, multi);
+    expect((on as unknown as Record<string, unknown>)?.starred).toBe(true);
+    const off = nodeRowToFileNode({ id: 91, path: 'plain.txt', storage: 'drive' }, multi);
+    expect('starred' in (off ?? {})).toBe(false);
+  });
 });

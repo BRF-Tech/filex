@@ -21,9 +21,23 @@ export interface TrashEntry {
 
 export interface TrashList {
   entries: TrashEntry[];
+  /** Every entry this admin may see, not the page's. */
   total: number;
+  /** The bytes of every entry, not the page's. */
+  total_bytes?: number;
+  /** How much the trash holds, said by the server. */
+  summary?: string;
   limit: number;
   offset: number;
+}
+
+/** "Empty trash" asked as a dry run: what it would delete, counted the way
+ *  the purge counts, and the dialog's sentence for it. */
+export interface TrashEmptyPreview {
+  dry_run: true;
+  count: number;
+  bytes: number;
+  summary: string;
 }
 
 /**
@@ -53,6 +67,9 @@ export interface TrashEmptyStatus {
   error?: string;
   started_at?: string;
   finished_at?: string;
+  /** Where the run stands, said by the server in the admin's language
+   *  ("Emptying the trash… 120 of 61,844", "Trash emptied: …"). */
+  summary?: string;
 }
 
 export const trashApi = {
@@ -99,6 +116,16 @@ export const trashApi = {
    */
   async empty(opts: { storage_id?: number; older_than_days?: number } = {}): Promise<TrashEmptyStatus> {
     const res = await api.post<TrashEmptyStatus>('/admin/trash/empty', opts);
+    return res.data;
+  },
+
+  /**
+   * What `empty` would delete with the same `storage_id` / `older_than_days`,
+   * nothing deleted: the server's count over everything the purge reaches,
+   * and the confirmation's sentence for it.
+   */
+  async emptyPreview(opts: { storage_id?: number; older_than_days?: number } = {}): Promise<TrashEmptyPreview> {
+    const res = await api.get<TrashEmptyPreview>('/admin/trash/empty/preview', { params: opts });
     return res.data;
   },
 

@@ -176,11 +176,10 @@ func (s *Service) ReconcileAll(ctx context.Context) (Reconciled, error) {
 	}
 	queued := out.Queued
 	if queued > 0 && s.notifier != nil {
+		// The facts only: the server says it (notify say.go).
 		_, _ = s.notifier.Send(ctx, notify.Event{
 			Event:    notify.EventReplicaReconcileDone,
 			Severity: notify.SeverityInfo,
-			Title:    "Replica reconciliation queued",
-			Body:     fmt.Sprintf("Queued %d replica_retry ops; check the queue page for progress", queued),
 			Meta:     map[string]any{"queued": queued},
 		})
 	}
@@ -329,12 +328,10 @@ func (s *Service) GenerateReport(ctx context.Context) error {
 			// helper) — caller has already opted-in by configuring
 			// FILEX_WEBHOOK_URL. In-app body stays terse.
 			full, _, _ := s.store.ListReplicaFailures(ctx, true, 100000, 0)
-			body := fmt.Sprintf("Cron report: %d unresolved failures, %d repaired in last 24h", failed, repaired)
+			// The facts only: the server says the report (notify say.go).
 			_, _ = s.notifier.Send(ctx, notify.Event{
 				Event:    notify.EventReplicaStatusReport,
 				Severity: notify.SeverityInfo,
-				Title:    "Replica status report",
-				Body:     body,
 				Meta: map[string]any{
 					"failed_count":   failed,
 					"repaired_count": repaired,

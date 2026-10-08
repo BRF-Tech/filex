@@ -361,3 +361,12 @@ does with it by itself - `off`, `announce`, `patch` or `minor` - and
 a `0.x` version). `policy_limit` is absent when the policy is in force. A
 client shows these; it does not work them out from `mode` and `policy` (see
 [What the policy badge says](#what-the-policy-badge-says)).
+
+The server also says them, in the reader's language (`?lang=` first, then the
+account's language, then `Accept-Language`): `policy_name` is the saved policy
+by its name ("install patches"), `policy_badge` the badge (what the install does
+by itself when that is less than the policy, "Policy: install patches"
+otherwise), and `policy_note` - present only with a `policy_limit` - why the
+saved policy has less or no effect on this install, naming the package manager
+when there is one. The admin page prints these three as they are; since 0.54 it
+keeps no words of its own for a policy.

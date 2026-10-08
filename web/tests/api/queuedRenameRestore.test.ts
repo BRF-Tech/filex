@@ -53,7 +53,8 @@ describe('api.restoreQueued', () => {
     const calls = answers([202, { ops: [{ id: 9, kind: 'restore', status: 'pending', total: 2 }] }]);
     const out = await useFileApi({ apiBase: '', locale: 'en' }).restoreQueued([11, 12]);
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toMatch(/\/api\/files\/manager\/restore\?queued=1$/);
+    // The screen's language rides along: the answer's `summary` is said in it.
+    expect(calls[0].url).toMatch(/\/api\/files\/manager\/restore\?queued=1&lang=en$/);
     expect(calls[0].body).toEqual({ node_ids: [11, 12] });
     expect(out.ops.map((o) => o.id)).toEqual([9]);
   });

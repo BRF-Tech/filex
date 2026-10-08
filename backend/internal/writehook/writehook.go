@@ -259,12 +259,10 @@ func EmitWrittenFor(ctx context.Context, storageID int64, node *model.Node, orig
 }
 
 // OnUploadFailedFor is OnUploadFailed for several people: one bell row each,
-// the webhook once (with the first). title is the row's own title (the
-// webhook and the admin history read it); "" keeps "Upload failed".
+// the webhook once (with the first). title is the row's own stored title, its
+// fallback ("" leaves it to the server); what every reader is told is said by
+// the server from the facts (internal/notify say.go).
 func OnUploadFailedFor(ctx context.Context, storageID int64, userIDs []int64, p, name, origin, title, reason string, meta ...map[string]any) {
-	if title == "" {
-		title = "Upload failed"
-	}
 	for i, uid := range userIDs {
 		m := mergeMeta(origin, meta)
 		m["reason"] = reason
@@ -302,10 +300,11 @@ func OnUploadFailedFor(ctx context.Context, storageID int64, userIDs []int64, p,
 func OnUploadFailed(ctx context.Context, storageID int64, userID int64, p, name, origin, reason string, meta ...map[string]any) {
 	m := mergeMeta(origin, meta)
 	m["reason"] = reason
+	// The facts only (the reason is in meta): the server says the notice,
+	// in each reader's language (internal/notify say.go).
 	e := notify.Event{
 		Event:    notify.EventFileUploadFailed,
 		Severity: notify.SeverityError,
-		Title:    "Upload failed",
 		Body:     p,
 		Meta:     m,
 		Node:     &notify.NodeRef{StorageID: storageID, Path: p, Name: name},

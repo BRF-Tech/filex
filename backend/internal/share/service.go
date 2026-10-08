@@ -178,6 +178,10 @@ func (s *Service) Create(ctx context.Context, opts CreateOpts) (*model.Share, er
 	if opts.NodeID == 0 {
 		return nil, errors.New("share: missing node_id")
 	}
+	// One PIN rule for every door (pinrule.go).
+	if err := CheckPINLength(opts.PIN); err != nil {
+		return nil, err
+	}
 	opts.ExpiresAt, _ = ClampExpiry(opts.ExpiresAt, s.MaxTTLDays(ctx), time.Now())
 	tok := strings.ToLower(strings.TrimSpace(opts.Token))
 	if tok == "" {

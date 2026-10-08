@@ -266,7 +266,9 @@ func TestDecryptTree_UnsupportedFeatureIsRefusedBeforeThePassword(t *testing.T) 
 	require.NoError(t, err)
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(b, &m))
-	m["req"] = []string{"names", "vault"}
+	// "vault" was the stand-in for an unknown feature until level 3 made it
+	// a known one (#94).
+	m["req"] = []string{"names", "x-future"}
 	b, err = json.Marshal(m)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(mp, b, 0o600))
@@ -274,7 +276,7 @@ func TestDecryptTree_UnsupportedFeatureIsRefusedBeforeThePassword(t *testing.T) 
 	_, err = Open(in, OpenOptions{Out: filepath.Join(t.TempDir(), "plain")})
 	var ue *UnsupportedError
 	require.ErrorAs(t, err, &ue)
-	require.Equal(t, []string{"vault"}, ue.Features)
+	require.Equal(t, []string{"x-future"}, ue.Features)
 	require.Contains(t, err.Error(), "newer filex")
 }
 

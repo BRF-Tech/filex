@@ -39,6 +39,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/brf-tech/filex/backend/internal/clientip"
 	"github.com/brf-tech/filex/backend/internal/db"
 	"github.com/brf-tech/filex/backend/internal/model"
 )
@@ -222,8 +223,13 @@ func (rv Resolver) basePath() string {
 //     (dev, docker-compose without a proxy);
 //  3. else https — multi-tenant hosts sit behind the TLS-terminating reverse
 //     proxy (docs/MULTI-TENANCY.md §13).
+//
+// ⚠ "The trusted proxy" is a peer internal/clientip trusts, the same rule
+// X-Forwarded-For follows. A link minted here goes into e-mails to other
+// people (an invitation, a drop notice), so how it is spelled is the
+// proxy's claim to make, never the sender's.
 func (rv Resolver) scheme(r *http.Request) string {
-	if r != nil && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") {
+	if r != nil && clientip.PeerTrusted(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") {
 		return "http"
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(rv.PublicURL)), "http://") {

@@ -5,11 +5,13 @@ import { useI18n } from 'vue-i18n';
 import { Plus, Trash2, Pencil, KeyRound, RefreshCcw, Eye, EyeOff, Wand2 } from 'lucide-vue-next';
 
 import { useUsersStore } from '@/stores/users';
+import { UsersApi } from '@/api/users';
 import { useCapabilitiesStore } from '@/stores/capabilities';
 import { useToastStore } from '@/stores/toast';
 import { extractError } from '@/api/client';
 import type { User, UserRole } from '@/api/types';
-import { emailProblem, normalizeUsername, refusalField, usernameProblem } from '@brftech/filex-core';
+import { accountChecker, foreignText, refusalField, type AccountCheckAnswer } from '@brftech/filex-core';
+import { AuthApi } from '@/api/auth';
 import { formatRelative } from '@/lib/format';
 
 import Button from '@/components/ui/Button.vue';
@@ -69,6 +71,7 @@ const showPassword = ref(false);
 const newGroups = ref<number[]>([]);
 const handGroups = ref<Group[]>([]);
 /** Suggestions follow the address until a box is typed into by hand. */
+const SUGGEST_DELAY_MS = 250;
 const nameTouched = ref(false);
 const usernameTouched = ref(false);
 /** An address an LDAP directory owns: said, with a way to go on anyway. */
@@ -84,8 +87,9 @@ const deleting = ref(false);
  * still refuses is said INSIDE the dialog. An empty submit used to reach the
  * server and come back as "email required" — English, in a toast drawn
  * BEHIND the dialog's backdrop, so nobody read it (release-candidate sweep,
- * 2026-09-21). The address is judged by lib/accountRules.ts, the same rules
- * the profile form and the server use.
+ * 2026-09-21). The address and the username are judged by the SERVER while
+ * they are typed (POST /api/auth/account/check, core lib/accountRules): its
+ * rules and its words, the ones the save refuses with (0.54 audit B15/A12).
  */
 const createTried = ref(false);
 const createRefusal = ref<{ field: string; message: string } | null>(null);
@@ -94,32 +98,48 @@ watch(newEmail, (email) => {
   createRefusal.value = null;
   createFailure.value = '';
   directoryRefusal.value = null;
-  if (!nameTouched.value) newName.value = suggestName(email);
-  if (!usernameTouched.value) newUsername.value = suggestUsername(email);
+  scheduleSuggest(email);
 });
 
-/** "jane.doe@corp.com" → "Jane Doe". */
-function suggestName(email: string): string {
-  const local = email.trim().split('@')[0] ?? '';
-  return local
-    .split(/[._\-+]+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toLocaleUpperCase() + w.slice(1))
-    .join(' ');
+/*
+ * The name and username follow the address: the SERVER's suggestion (#211,
+ * audit B4, GET /api/admin/users/suggest), so the username is the one
+ * identity.Suggest gives - the one this address would get from a first SSO
+ * sign-in. The copy that stood here turned the letters a name actually
+ * contains into dots ("gözlük" → "g.zl.k") and had no length limit. Asked a
+ * moment after typing stops; an answer for an address that has since changed
+ * is dropped.
+ */
+let suggestTimer: ReturnType<typeof setTimeout> | null = null;
+let suggestSeq = 0;
+function scheduleSuggest(email: string) {
+  if (suggestTimer) clearTimeout(suggestTimer);
+  if (nameTouched.value && usernameTouched.value) return;
+  const seq = ++suggestSeq;
+  suggestTimer = setTimeout(async () => {
+    try {
+      const s = await UsersApi.suggest(email.trim());
+      if (seq !== suggestSeq) return;
+      if (!nameTouched.value) newName.value = s.name;
+      if (!usernameTouched.value) newUsername.value = s.username;
+    } catch {
+      /* no suggestion: the boxes stay as they are, and the person types */
+    }
+  }, SUGGEST_DELAY_MS);
 }
-/** "Jane.Doe+x@corp.com" → "jane.doe": what identity allows, from the
- *  address's own name. */
-function suggestUsername(email: string): string {
-  const local = normalizeUsername(email.split('@')[0] ?? '').split('+')[0];
-  let name = local.replace(/[^a-z0-9._-]+/g, '.').replace(/^[._-]+|[._-]+$/g, '');
-  if (/^[0-9]/.test(name)) name = `u${name}`;
-  return name;
-}
+const checkedNew = ref<AccountCheckAnswer>({});
+const checkNewAccount = accountChecker((q) => AuthApi.checkAccount(q));
+watch([newEmail, newUsername], ([email, username]) => {
+  void checkNewAccount({ email, username, for: 'new' }).then((ans) => {
+    if (ans) checkedNew.value = ans;
+  });
+});
+/** The server's sentence, isolated for the reader's direction. */
+const serverSentence = (text: string | undefined): string => (text ? foreignText(String(locale.value), text) : '');
 const newUsernameError = computed(() => {
-  if (createRefusal.value?.field === 'username') return createRefusal.value.message;
+  if (createRefusal.value?.field === 'username') return serverSentence(createRefusal.value.message);
   if (!newUsername.value.trim()) return '';
-  const p = usernameProblem(newUsername.value);
-  return p ? t(`account.errors.${p.key}`, p.params ?? {}) : '';
+  return serverSentence(checkedNew.value.username?.message);
 });
 watch(newUsername, () => {
   if (createRefusal.value?.field === 'username') createRefusal.value = null;
@@ -144,12 +164,11 @@ const newRoleHint = computed(() => {
   return t(`users.add.roleHint.${picked}`);
 });
 const newEmailError = computed(() => {
-  if (createRefusal.value?.field === 'email') return createRefusal.value.message;
+  if (createRefusal.value?.field === 'email') return serverSentence(createRefusal.value.message);
   // Said while typing once something is typed, and for an empty box only
   // after a submit — an error on a box nobody has reached yet is noise.
   if (!createTried.value && !newEmail.value.trim()) return '';
-  const p = emailProblem(newEmail.value);
-  return p ? t(`account.errors.${p.key}`, p.params ?? {}) : '';
+  return serverSentence(checkedNew.value.email?.message);
 });
 
 function resetCreate() {
@@ -277,10 +296,21 @@ async function loadCustom() {
   customRules.value = roles.rules;
 }
 
-// Search and the role filter narrow the rows already here (visibleRows):
-// the server answers every account and reads neither, so asking it again
-// on each keystroke only fetched the same list.
-watch([q, role, groupFilter], () => {
+// The search box is the SERVER's (`GET /admin/users?q=`, task #207): it
+// matches e-mail, name and username by the panel's own rule (accents, case and
+// the four i's folded - namefold.Loose), which the browser's locale-dependent
+// `toLocaleLowerCase` did not. Asked once typing pauses; the role and group
+// filters still narrow the rows already here (visibleRows).
+let qTimer: ReturnType<typeof setTimeout> | undefined;
+watch(q, () => {
+  if (qTimer) clearTimeout(qTimer);
+  qTimer = setTimeout(() => {
+    qTimer = undefined;
+    page.value = 1;
+    void users.fetch({ q: q.value.trim() || undefined, role: undefined, page: 1, page_size: pageSize });
+  }, 250);
+});
+watch([role, groupFilter], () => {
   page.value = 1;
 });
 
@@ -305,12 +335,8 @@ const createRoleOptions = computed(() => [
 const visibleRows = computed(() => {
   const f = role.value;
   const gf = groupFilter.value === '' ? null : Number(groupFilter.value);
-  const needle = q.value.trim().toLocaleLowerCase();
-  if (!f && !needle && gf === null) return users.page.items;
+  if (!f && gf === null) return users.page.items;
   return users.page.items.filter((u) => {
-    if (needle && ![u.email, u.display_name, u.username].some((x) => (x ?? '').toLocaleLowerCase().includes(needle))) {
-      return false;
-    }
     if (gf !== null && !(groupsOf.value.get(u.id) ?? []).some((g) => g.id === gf)) return false;
     if (!f) return true;
     const held = u.role !== 'admin' ? roleIdOf.value.get(u.id) : undefined;
@@ -415,7 +441,12 @@ async function submitCreate(another = false, anyway = false) {
   createTried.value = true;
   createFailure.value = '';
   if (newEmailError.value || newUsernameError.value || creating.value) return;
-  if (newAccess.value === 'password' && !newPassword.value) {
+  // The address is the server's to judge: an empty one is sent and comes
+  // back as its `email_required`, under the box, with nothing made (the
+  // address is checked before anything else, handlers/users.go Create). The
+  // password is this form's own question - the server takes an account with
+  // none (issue #25) - asked once there is an address to make it for.
+  if (newAccess.value === 'password' && !newPassword.value && newEmail.value.trim()) {
     createFailure.value = t('users.add.passwordNeeded');
     return;
   }

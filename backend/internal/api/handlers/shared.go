@@ -3,7 +3,7 @@
 // "Shared with me": everything the caller reaches through a per-item grant
 // somebody else gave them, rather than through their own role on a storage.
 //
-//	GET /api/files/manager/shared-with-me?limit=&offset=
+//	GET /api/files/manager/shared-with-me?limit=&offset=&sort=
 //
 // The data has always existed in `file_grants`, but nothing could answer this
 // question: Grants.List is path-scoped ("who can see THIS folder") and
@@ -15,12 +15,12 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"sort"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/auth"
 	"github.com/brf-tech/filex/backend/internal/confine"
 	"github.com/brf-tech/filex/backend/internal/db"
+	"github.com/brf-tech/filex/backend/internal/listorder"
 	"github.com/brf-tech/filex/backend/internal/model"
 	"github.com/brf-tech/filex/backend/internal/pathkey"
 	"github.com/brf-tech/filex/backend/internal/syspath"
@@ -85,6 +85,12 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := parseLimit(r.URL.Query().Get("limit"), 100, 500)
 	offset := parseLimit(r.URL.Query().Get("offset"), 0, 1_000_000)
+	// The newest grant first unless ?sort= asks otherwise (listorder; "when"
+	// is `shared_at`).
+	order, ok := listOrderFrom(w, r, listorder.Newest)
+	if !ok {
+		return
+	}
 
 	storages, err := h.Store.ListEnabledStorages(r.Context())
 	if err != nil {
@@ -178,7 +184,14 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].at > rows[j].at })
+	entries := make([]map[string]any, len(rows))
+	for i := range rows {
+		entries[i] = rows[i].entry
+	}
+	listorder.SortEntries(entries, order, "shared_at")
+	for i := range rows {
+		rows[i].entry = entries[i]
+	}
 
 	total := len(rows)
 	if offset > total {
@@ -194,13 +207,16 @@ func (h *Shared) SharedWithMe(w http.ResponseWriter, r *http.Request) {
 	for _, rw := range rows[offset:end] {
 		files = append(files, rw.entry)
 	}
+	annotateStarred(r.Context(), h.Store, files)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"files":    files,
-		"storages": sharedStorages,
-		"total":    total,
-		"limit":    limit,
-		"offset":   offset,
+		"files":     files,
+		"storages":  sharedStorages,
+		"total":     total,
+		"limit":     limit,
+		"offset":    offset,
+		"truncated": end < total,
+		"sort":      order.String(),
 	})
 }
 
@@ -240,6 +256,7 @@ func (h *Shared) project(ctx context.Context, st *model.Storage, g *model.FileGr
 	hash := pathkey.Hash(st.ID, normalizeDBPath(rel))
 	if node, err := h.Store.GetNodeByPath(ctx, st.ID, hash); err == nil && node != nil {
 		hydrateThumbs(ctx, h.Store, h.ThumbRefresh, []*model.Node{node})
+		hydrateLinkStates(ctx, h.Store, []*model.Node{node})
 		// set=nil: the caller's visibility is already decided — they hold the
 		// grant. Passing an acl.Set here would re-derive the same answer and
 		// stamp `perm` from it; the grant's own level is the more precise

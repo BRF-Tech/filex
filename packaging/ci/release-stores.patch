@@ -1,0 +1,791 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 8fa6f6564a0cb309f3e2b1c351ccab3b0c3a8f38..33c7e087b128d19566d8c765a4f66a2c49b91fc8 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -136,14 +136,42 @@ name: Release
+ #       (v0.52.0: the release was published from a PC, and snapcraft cannot
+ #       cross-build an arm64 snap.)
+ #
++#   gh workflow run release.yml -R BRF-Tech/filex -f tag=v0.53.0 -f only=stores [-f publish=true]
++#       The stores a release's desktop packages go to, for a release whose
++#       tag run never sent them: the amd64 snap to the Snap Store, the
++#       desktop app's winget pull request (BRFTech.filex-app) and the
++#       Microsoft Store bundle. It builds nothing that is on the Release: the
++#       windows and linux rows download the Release's own
++#       filex-desktop-x64.exe, filex-desktop-arm64.exe and
++#       filex-desktop-amd64.snap by name - the winget manifest hashes the
++#       very files its URLs name - and the store row takes the bundle the dry
++#       run of the tag's commit kept (release-files-store, checked against
++#       its sums as a tag run checks it). No Release carries a Store
++#       package, so when that dry run kept none (a commit gated on CircleCI,
++#       or one past its 14 days) the store row builds the bundle from THAT
++#       tag, as a full run's store row does. Nothing is attached to the
++#       Release, and no binaries, images, npm, cask or AUR, no CLI smoke test
++#       and no desktop-arm64-check. Without publish, a dry run: the files
++#       downloaded and checked, the winget manifests written and validated,
++#       the store row building the bundle (verify asks nothing in a dry run,
++#       so it finds no kept one), nothing sent. With it, `verify` asks of
++#       THAT tag's commit what it asks for only=arm64.
++#       (The Homebrew casks: the CLI's goes with goreleaser, the desktop
++#       app's with only=macos, which writes it from the .dmg it builds.)
++#       (v0.53.0: GitHub failed to create the tag run's desktop jobs - an
++#       internal error, and a run that could not be retried - after the
++#       binaries, images and npm were out. Windows and Linux were packaged
++#       from a PC, macOS and the arm64 snap with only=macos and
++#       only=snap-arm64.)
++#
+ # A FULL release publishes from its tag push and nothing else: `plan` refuses
+-# publish=true without only=arm64, only=macos or only=snap-arm64 (goreleaser
+-# cannot recreate a Release, and a half-rerun release is how v0.34.0's tag had
+-# to be moved). And the tag push publishes only a commit that passed ci.yml's
+-# full matrix and a dry run first (`verify`), and publishes that dry run's
+-# images and desktop files rather than its own builds - or, when GitHub lacks
+-# them, a commit CircleCI's `ci` workflow passed, and then its own builds
+-# (#181).
++# publish=true without only=arm64, only=macos, only=snap-arm64 or only=stores
++# (goreleaser cannot recreate a Release, and a half-rerun release is how
++# v0.34.0's tag had to be moved). And the tag push publishes only a commit
++# that passed ci.yml's full matrix and a dry run first (`verify`), and
++# publishes that dry run's images and desktop files rather than its own
++# builds - or, when GitHub lacks them, a commit CircleCI's `ci` workflow
++# passed, and then its own builds (#181).
+ #
+ # ⚠ In a run on a tag the workflow file comes from the branch it was started
+ # on and the code from the tag. The tag's tree has the tag's
+@@ -158,7 +186,9 @@ name: Release
+ # v1.2.3 <commit>" are the ARM-only runs, "dry run macos v1.2.3 <commit>" and
+ # "publish macos v1.2.3 <commit>" the macOS-only ones, "dry run snap-arm64
+ # v1.2.3 <commit>" and "publish snap-arm64 v1.2.3 <commit>" the arm64 snap
+-# alone; a tag push is "Release v1.2.3".
++# alone, "dry run stores v1.2.3 <commit>" and "publish stores v1.2.3
++# <commit>" the stores alone (the release tool's Microsoft Store check reads
++# that one when the tag run has no Store job); a tag push is "Release v1.2.3".
+ # scripts/release/checks.mjs (dryRunTitle) spells the same name.
+ run-name: ${{ github.event_name == 'workflow_dispatch' && format('{0} {1} {2}{3}', inputs.publish && 'publish' || 'dry run', inputs.only, inputs.tag && format('{0} ', inputs.tag) || '', github.sha) || format('Release {0}', github.ref_name) }}
+ 
+@@ -172,9 +202,9 @@ on:
+         type: string
+         default: ""
+       only:
+-        description: "all: every package. arm64: only the ARM packages (needs a tag). macos: only the macOS desktop packages (needs a tag). snap-arm64: only the Linux arm64 snap, to the Snap Store (needs a tag)."
++        description: "all: every package. arm64: only the ARM packages (needs a tag). macos: only the macOS desktop packages (needs a tag). snap-arm64: only the Linux arm64 snap, to the Snap Store (needs a tag). stores: the Release's desktop packages to the Snap Store (amd64), winget and the Microsoft Store, nothing built or attached (needs a tag)."
+         type: choice
+-        options: [all, arm64, macos, snap-arm64]
++        options: [all, arm64, macos, snap-arm64, stores]
+         default: all
+       publish:
+         description: "Attach to the tag's Release and send to the stores. Off: build, test and keep artifacts only."
+@@ -213,10 +243,10 @@ jobs:
+   #   version  1.2.3 (a branch: desktop/package.json's)
+   #   stamp    what the images and binaries report (the tag, or v<version>-dryrun)
+   #   publish  true on a tag push, or when asked for (only=arm64, only=macos,
+-  #            only=snap-arm64)
++  #            only=snap-arm64, only=stores)
+   #   full     false when only the ARM packages, the macOS packages or the
+-  #            arm64 snap are built
+-  #   only     all, arm64, macos or snap-arm64 (a tag push: all)
++  #            arm64 snap are built, or only the stores are sent to
++  #   only     all, arm64, macos, snap-arm64 or stores (a tag push: all)
+   #   desktop  the desktop matrix
+   #   candidate  true for the dry run a tag run promotes: by hand, everything,
+   #            nothing published, on a version no tag has yet. It stamps
+@@ -274,8 +304,11 @@ jobs:
+           if [ "$only" = snap-arm64 ] && [ -z "$tag" ]; then
+             echo "::error::only=snap-arm64 adds to a release: give its tag (-f tag=v1.2.3)"; exit 1
+           fi
++          if [ "$only" = stores ] && [ -z "$tag" ]; then
++            echo "::error::only=stores adds to a release: give its tag (-f tag=v1.2.3)"; exit 1
++          fi
+           if [ "$EVENT" != push ] && [ "$publish" = true ]; then
+-            [ "$only" = snap-arm64 ] || [ "$only" = macos ] || [ "$only" = arm64 ] || { echo "::error::a full release publishes from its tag push only. To add the ARM packages to $tag, run with only=arm64; the macOS packages, with only=macos; the arm64 snap alone, with only=snap-arm64."; exit 1; }
++            [ "$only" = stores ] || [ "$only" = snap-arm64 ] || [ "$only" = macos ] || [ "$only" = arm64 ] || { echo "::error::a full release publishes from its tag push only. To add the ARM packages to $tag, run with only=arm64; the macOS packages, with only=macos; the arm64 snap alone, with only=snap-arm64; to send its desktop packages to the stores, with only=stores."; exit 1; }
+             gh release view "$tag" -R "$GITHUB_REPOSITORY" --json tagName >/dev/null || { echo "::error::$tag has no GitHub Release to add to"; exit 1; }
+           fi
+           # The desktop rows. `script` is the package.json script for the
+@@ -319,6 +352,15 @@ jobs:
+           if [ "$only" = snap-arm64 ]; then
+             desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label == "linux-arm64") | .script = ""]}')
+           fi
++          # only=stores: the rows of the full matrix that send to a store -
++          # windows (winget), linux (the amd64 snap) and store (the Microsoft
++          # Store) - and nothing else. windows and linux build nothing: their
++          # scripts are emptied, and desktop downloads the Release's files
++          # instead. store keeps dist:store: it promotes the bundle the dry
++          # run kept, or builds it when there is none (verify: store_files).
++          if [ "$only" = stores ]; then
++            desktop=$(echo "$desktop" | jq -c '{include: [.include[] | select(.label == "windows" or .label == "linux" or .label == "store") | if .label == "store" then . else .script = "" end]}')
++          fi
+           # -f macos=false: a run of everything without the macos row, while
+           # GitHub has no macOS runner (the macOS-less release; only=macos adds
+           # the packages later). Never in a tag run: a tag run's rows are the
+@@ -397,10 +439,13 @@ jobs:
+   # `verify` lets it through without asking.
+   #
+   # A run that adds the ARM packages to a release (only=arm64), its macOS
+-  # packages (only=macos) or its arm64 snap (only=snap-arm64), builds THAT
+-  # tag's code, and with publish=true `verify` asks of the tag's commit
+-  # exactly what it asks on a tag push. So every job that publishes anything
+-  # waits for `verify`, a partial run's included.
++  # packages (only=macos) or its arm64 snap (only=snap-arm64), or sends its
++  # desktop packages to the stores (only=stores), works on THAT tag's code,
++  # and with publish=true `verify` asks of the tag's commit exactly what it
++  # asks on a tag push. So every job that publishes anything waits for
++  # `verify`, a partial run's included. For only=stores it also finds the
++  # Store bundle that tag's dry run kept (store_files), since no Release
++  # carries one.
+   #
+   # #181: when GitHub Actions is down, the release tool gates a commit on
+   # CircleCI's `ci` workflow instead (`--gate circleci`), and no dry run
+@@ -435,6 +480,10 @@ jobs:
+       # `false` and this run builds the images and the desktop packages.
+       evidence: ${{ steps.v.outputs.evidence }}
+       promote: ${{ steps.v.outputs.promote }}
++      # only=stores: the dry run whose release-files-store the store row
++      # sends to the Microsoft Store, or empty and the store row builds the
++      # bundle itself.
++      store_files: ${{ steps.v.outputs.store_files }}
+     steps:
+       # The CircleCI reader, this commit's copy (see the note on runs on a tag
+       # above). Not in a dry run: verify asks nothing there.
+@@ -536,7 +585,7 @@ jobs:
+               # images over the ones published, nor attach files over the
+               # ones the feeds and winget pin by hash: it publishes nothing.
+               if rel=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .html_url 2>&1); then
+-                echo "::error::$TAG has a GitHub Release already ($rel): it was packaged off GitHub, and this run publishes nothing. Add what it lacks with only=macos or only=snap-arm64 (docs/CONTRIBUTING.md, When GitHub Actions is down)."
++                echo "::error::$TAG has a GitHub Release already ($rel): it was packaged off GitHub, and this run publishes nothing. Add what it lacks with only=macos or only=snap-arm64, and send it to the stores with only=stores (docs/CONTRIBUTING.md, When GitHub Actions is down)."
+                 exit 1
+               elif ! grep -q 'HTTP 404' <<< "$rel"; then
+                 echo "::error::could not ask whether $TAG has a GitHub Release ($rel): unknown does not pass"
+@@ -559,6 +608,19 @@ jobs:
+             exit 0
+           fi
+           echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
++          if [ "$ONLY" = stores ]; then
++            # The Store bundle is on no Release: the dry run of the tag's
++            # commit kept it with its sums (release-files-store, 14 days).
++            # Gone, the store row builds it from the tag instead.
++            have=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$dry/artifacts" -f per_page=100 --paginate \
++              --jq '.artifacts[] | select(.expired == false) | .name')
++            if grep -qx release-files-store <<< "$have"; then
++              echo "store_files=$dry" >> "$GITHUB_OUTPUT"
++              echo "- the Microsoft Store gets the bundle the dry run kept: $runs/$dry" >> "$GITHUB_STEP_SUMMARY"
++            else
++              echo "::notice title=Microsoft Store::the dry run $runs/$dry kept no Store bundle (release-files-store): the store row builds it from $TAG"
++            fi
++          fi
+           if [ "$EVENT" = push ]; then
+             # What the tag run promotes (#174): both images, by digest, and
+             # each desktop row's files. A plain dry run (its version was
+@@ -764,11 +826,12 @@ jobs:
+   # Published binaries come from the Release (what users download), a dry
+   # run's from the artifact `binaries` kept. Not in a run that adds only the
+   # macOS desktop packages (only=macos) or only the arm64 snap
+-  # (only=snap-arm64): neither adds a CLI to the Release.
++  # (only=snap-arm64), or sends to the stores alone (only=stores): none adds
++  # a CLI to the Release.
+   cli-smoke:
+     name: CLI + server (${{ matrix.label }})
+     needs: [plan, binaries]
+-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
++    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.plan.outputs.only != 'stores' && (needs.plan.outputs.full != 'true' || needs.binaries.result == 'success') }}
+     strategy:
+       fail-fast: false
+       matrix:
+@@ -1235,8 +1298,9 @@ jobs:
+   # the images are not an input to the installers, and waiting for them cost
+   # every release ~25 minutes of idle (v0.20.2 measurement in the header).
+   # (When packages are added to an existing release - only=arm64, macos or
+-  # snap-arm64 - `binaries` does not run and is not waited for: the Release
+-  # exists. `verify` is waited for in every run: it is what lets a publishing
++  # snap-arm64 - or it is sent to the stores (only=stores), `binaries` does
++  # not run and is not waited for: the Release exists. `verify` is waited
++  # for in every run: it is what lets a publishing
+   # run publish.)
+   #
+   # ⚠ macOS ships UNSIGNED but ad-hoc SEALED (desktop/scripts/adhoc-sign.cjs).
+@@ -1280,6 +1344,14 @@ jobs:
+   # A tag run with nothing to promote (#181: `verify` took CircleCI's word,
+   # and no dry run ran) builds every row of the plan here, as a dry run does,
+   # and publishes what it built: PROMOTE is verify's `promote`, not the event.
++  #
++  # ── only=stores ──
++  # Builds nothing that is on the Release (PROMOTE): the windows and linux
++  # rows download the Release's installers and amd64 snap by name and send
++  # them to winget and the Snap Store, the store row promotes the bundle the
++  # dry run kept (verify: store_files) - or, with none kept, builds it as a
++  # full run's store row does - and sends it to the Microsoft Store. Nothing
++  # is attached to the Release: winget and the update feeds pin its files.
+   desktop:
+     name: Desktop packages (${{ matrix.label }})
+     needs: [plan, verify, binaries]
+@@ -1298,8 +1370,9 @@ jobs:
+     env:
+       # A tag run with a dry run promotes the files it built (verify:
+       # promote); a release candidate keeps them for that (see the note
+-      # above the job).
+-      PROMOTE: ${{ needs.verify.outputs.promote == 'true' }}
++      # above the job). only=stores builds nothing that is on the Release,
++      # and the Store bundle only when the dry run kept none.
++      PROMOTE: ${{ needs.verify.outputs.promote == 'true' || (needs.plan.outputs.only == 'stores' && (matrix.label != 'store' || needs.verify.outputs.store_files != '')) }}
+       CANDIDATE: ${{ needs.plan.outputs.candidate }}
+       # Partner Center → an Entra ID app with the Manager role
+       # (desktop/store/microsoft/listing.md). Mapped to env because a step's
+@@ -1541,9 +1614,10 @@ jobs:
+       # Nothing above ran (`PROMOTE`). Every step below reads desktop/release,
+       # so the dry run's files go there, and are checked before any of them is
+       # published: exactly the files it kept, byte for byte, and feeds that
+-      # offer this version.
++      # offer this version. (only=stores: the store row's bundle alone; the
++      # other rows take the Release's own files, below.)
+       - name: The files the dry run built
+-        if: env.PROMOTE == 'true'
++        if: env.PROMOTE == 'true' && (env.ONLY != 'stores' || matrix.label == 'store')
+         uses: actions/download-artifact@v4
+         with:
+           name: release-files-${{ matrix.label }}
+@@ -1551,12 +1625,37 @@ jobs:
+           run-id: ${{ needs.verify.outputs.dry_run }}
+           github-token: ${{ github.token }}
+       - name: They are the files the dry run kept, for this version
+-        if: env.PROMOTE == 'true'
++        if: env.PROMOTE == 'true' && (env.ONLY != 'stores' || matrix.label == 'store')
+         shell: bash
+         run: |
+           set -euo pipefail
+           node "$CI_SCRIPTS"/release-files.mjs check desktop/release --version "$VER"
+           rm desktop/release/release-files.sha256
++      # only=stores: what the stores get from the windows and linux rows is
++      # what the Release has, downloaded by name - the installers the winget
++      # manifest hashes and points at, the amd64 snap - never a build of this
++      # run and never a glob.
++      - name: The Release's files for the stores
++        if: env.ONLY == 'stores' && matrix.label != 'store'
++        shell: bash
++        env:
++          GH_TOKEN: ${{ github.token }}
++        run: |
++          set -euo pipefail
++          case "$LABEL" in
++            windows) files=(filex-desktop-x64.exe filex-desktop-arm64.exe) ;;
++            linux) files=(filex-desktop-amd64.snap) ;;
++            *) echo "only=stores takes nothing from the Release for the $LABEL row" >&2; exit 1 ;;
++          esac
++          mkdir -p desktop/release
++          for f in "${files[@]}"; do
++            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$f" -D desktop/release
++            [ -s "desktop/release/$f" ] || { echo "$TAG has no $f" >&2; exit 1; }
++            want=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq ".assets[] | select(.name == \"$f\") | .digest")
++            have="sha256:$(sha256sum "desktop/release/$f" | cut -d' ' -f1)"
++            [ "$have" = "$want" ] || { echo "$f is $have here, and the Release says ${want:-nothing}" >&2; exit 1; }
++            echo "$f $have"
++          done
+       # Listed before uploading so a build that produced nothing is visible in
+       # the log as an empty directory rather than as a silently short release.
+       # (After every build step: the Store row builds its arm64 package late.)
+@@ -1689,8 +1788,9 @@ jobs:
+         shell: bash
+         run: |
+           echo "::warning title=Microsoft Store::Not submitted — MSSTORE_* secrets or the MSSTORE_PRODUCT_ID variable are not set. Upload the msix-${TAG} artifact in Partner Center by hand."
++      # (Not in only=stores: the files it sends are the Release's own.)
+       - name: Attach to the release
+-        if: matrix.label != 'store' && env.PUBLISH == 'true' && env.ONLY != 'snap-arm64'
++        if: matrix.label != 'store' && env.PUBLISH == 'true' && env.ONLY != 'snap-arm64' && env.ONLY != 'stores'
+         shell: bash
+         env:
+           GH_TOKEN: ${{ github.token }}
+@@ -1734,9 +1834,11 @@ jobs:
+       # of that release alone: its winget pull request is already open.
+       # Adding the macOS packages (only=macos) writes the Homebrew cask from
+       # the .dmg just built, as the tag push would have, and commits it below;
+-      # winget is left alone, Windows is not built.)
++      # winget is left alone, Windows is not built. only=stores writes the
++      # winget manifest from the Release's own installers and submits it as a
++      # tag run would have.)
+       - name: Package-manager manifests
+-        if: (matrix.label == 'windows' && env.FULL == 'true') || (matrix.label == 'macos' && (env.FULL == 'true' || env.ONLY == 'macos'))
++        if: (matrix.label == 'windows' && (env.FULL == 'true' || env.ONLY == 'stores')) || (matrix.label == 'macos' && (env.FULL == 'true' || env.ONLY == 'macos'))
+         shell: bash
+         run: |
+           set -euo pipefail
+@@ -1755,7 +1857,7 @@ jobs:
+       # failed, so BRFTech.filex-app was never submitted. Warnings are shown
+       # as an annotation; only a failed validation stops the release.
+       - name: Validate the winget manifests
+-        if: matrix.label == 'windows' && env.FULL == 'true'
++        if: matrix.label == 'windows' && (env.FULL == 'true' || env.ONLY == 'stores')
+         shell: pwsh
+         run: |
+           $dir = (Get-ChildItem pkg-out/winget/manifests -Recurse -Filter '*.installer.yaml' | Select-Object -First 1).Directory.FullName
+@@ -1772,7 +1874,7 @@ jobs:
+           # run 36182595696 — the desktop winget PR was never opened).
+           exit 0
+       - name: Submit to winget
+-        if: matrix.label == 'windows' && env.PUBLISH == 'true' && env.FULL == 'true' && env.WINGET_TOKEN != ''
++        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != ''
+         shell: pwsh
+         run: |
+           $ErrorActionPreference = 'Stop'
+@@ -1782,7 +1884,7 @@ jobs:
+       # The CLA bot asks on every pull request, not once per account
+       # (scripts/winget-cla.sh). Same script as the CLI's step.
+       - name: Sign the CLA on the winget pull request
+-        if: matrix.label == 'windows' && env.PUBLISH == 'true' && env.FULL == 'true' && env.WINGET_TOKEN != ''
++        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != ''
+         shell: bash
+         env:
+           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+@@ -1792,7 +1894,7 @@ jobs:
+       # Only the newest version's pull request stays open (the maintainer, 2026-09-28),
+       # and only once it exists (scripts/winget-supersede.sh).
+       - name: Close the superseded winget pull requests
+-        if: matrix.label == 'windows' && env.PUBLISH == 'true' && env.FULL == 'true' && env.WINGET_TOKEN != ''
++        if: matrix.label == 'windows' && env.PUBLISH == 'true' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN != ''
+         shell: bash
+         env:
+           GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+@@ -1817,14 +1919,14 @@ jobs:
+           git push origin HEAD
+       # Not a silent skip: a release that did not reach a store says so.
+       - name: Package-manager submission skipped
+-        if: env.PUBLISH == 'true' && ((matrix.label == 'windows' && env.FULL == 'true' && env.WINGET_TOKEN == '') || (matrix.label == 'macos' && (env.FULL == 'true' || env.ONLY == 'macos') && env.HOMEBREW_TAP_DEPLOY_KEY == ''))
++        if: env.PUBLISH == 'true' && ((matrix.label == 'windows' && (env.FULL == 'true' || env.ONLY == 'stores') && env.WINGET_TOKEN == '') || (matrix.label == 'macos' && (env.FULL == 'true' || env.ONLY == 'macos') && env.HOMEBREW_TAP_DEPLOY_KEY == ''))
+         shell: bash
+         run: |
+           echo "::warning title=${{ matrix.label == 'windows' && 'winget' || 'Homebrew' }}::Not submitted — the ${{ matrix.label == 'windows' && 'WINGET_TOKEN' || 'HOMEBREW_TAP_DEPLOY_KEY' }} secret is not set. The manifests are in the pkg-${{ matrix.label }} artifact."
+       # always(): a failed validation or submission is exactly when the
+       # manifests are needed, to submit them by hand.
+       - name: Keep the manifests
+-        if: always() && ((matrix.label == 'windows' && env.FULL == 'true') || (matrix.label == 'macos' && (env.FULL == 'true' || env.ONLY == 'macos')))
++        if: always() && ((matrix.label == 'windows' && (env.FULL == 'true' || env.ONLY == 'stores')) || (matrix.label == 'macos' && (env.FULL == 'true' || env.ONLY == 'macos')))
+         uses: actions/upload-artifact@v4
+         with:
+           name: pkg-${{ matrix.label }}-${{ needs.plan.outputs.tag || format('run-{0}', github.run_id) }}
+@@ -1840,7 +1942,8 @@ jobs:
+       # is the same build the .deb is, and the Store's own review runs first.
+       # Each Linux row uploads its own architecture's revision to the same
+       # channel: amd64 from `linux`, arm64 from `linux-arm64` (with
+-      # only=snap-arm64, that one alone).
++      # only=snap-arm64, that one alone; with only=stores, the amd64 snap the
++      # Release has).
+       - name: Upload to the Snap Store
+         if: startsWith(matrix.label, 'linux') && env.PUBLISH == 'true'
+         shell: bash
+@@ -1910,13 +2013,14 @@ jobs:
+   # on an x64 machine (linux-x64), since the launcher is in every Linux package.
+   #
+   # Not in a run that adds only the macOS packages (only=macos) or only the
+-  # arm64 snap (only=snap-arm64): neither builds the .deb, the AppImage or the
+-  # Windows installers checked here, and each row would fail for want of its
+-  # artifact.
++  # arm64 snap (only=snap-arm64), or sends to the stores alone (only=stores):
++  # none builds the .deb, the AppImage or the Windows installers checked
++  # here, and each row would fail for want of its artifact (only=stores
++  # sends the Release's files, which their own run checked).
+   desktop-arm64-check:
+     name: Desktop packages on a real ${{ matrix.label }} machine
+     needs: [plan, desktop]
+-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.desktop.result != 'skipped' }}
++    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.only != 'macos' && needs.plan.outputs.only != 'snap-arm64' && needs.plan.outputs.only != 'stores' && needs.desktop.result != 'skipped' }}
+     strategy:
+       fail-fast: false
+       matrix:
+diff --git a/web/tests/deploy/releasePromote.test.ts b/web/tests/deploy/releasePromote.test.ts
+index 228cdeeaab25e95bb6514fcb68389d61cabf56f6..e63e3a5203db50cad49b0263b27ed4cb0e4af265 100644
+--- a/web/tests/deploy/releasePromote.test.ts
++++ b/web/tests/deploy/releasePromote.test.ts
+@@ -32,7 +32,7 @@ import path from 'node:path';
+ import { describe, expect, it } from 'vitest';
+ 
+ import { completeName } from '../../../scripts/ci-parts.mjs';
+-import { DIR, KEYS, TAG_SHA, bash, code, desktopEnv, desktopRuns, job, jobIf, jobNames, jq, matrices, stepsOf, verify, verifyRun, verifyScript, type Row } from '../helpers/releaseWorkflow';
++import { DIR, KEYS, TAG_SHA, bash, builds, code, desktopEnv, desktopRuns, job, jobIf, jobNames, jq, matrices, stepsOf, verify, verifyRun, verifyScript, type Row } from '../helpers/releaseWorkflow';
+ 
+ const hasJq = !spawnSync('jq', ['--version'], { encoding: 'utf8' }).error;
+ 
+@@ -42,25 +42,6 @@ const tagRun = (rows: Row[] = []) => ({ EVENT: 'push', SHA: TAG_SHA, ONLY: 'all'
+ /** The full run's desktop rows, as plan writes them. */
+ const fullRows = () => matrices(job(code(), 'plan'))[1].rows;
+ 
+-/** The steps of the desktop job that BUILD something (a tag run runs none of them). */
+-const BUILDS = [
+-  /actions\/setup-go@/,
+-  /pnpm install --frozen-lockfile/,
+-  /pnpm -r --filter='\.\/packages\/\*' build/,
+-  /npm version "\$VER"/,
+-  /apt-get install -y -qq rpm/,
+-  /gem install --no-document fpm/,
+-  /pnpm --filter \.\/desktop run/,
+-  /electron-builder/,
+-  /fetch-cli\.mjs/,
+-  /merge-latest-yml\.mjs/,
+-  /--channel=8\.x\/stable/,
+-  /AllowDevelopmentWithoutDevLicense/,
+-  /makeappx/,
+-  /arch-of\.mjs/,
+-];
+-const builds = (text: string) => BUILDS.some((re) => re.test(text));
+-
+ /** Runs release-files.mjs (from the public checkout) with `args`. */
+ function releaseFiles(...args: string[]) {
+   const r = spawnSync(process.execPath, [path.join(DIR!, 'scripts', 'release-files.mjs'), ...args], { encoding: 'utf8' });
+@@ -159,7 +140,11 @@ describe('a tag run promotes what the dry run of its commit built', () => {
+     const release = code();
+     const desktop = job(release, 'desktop');
+     // verify's word, not the event: a tag run with no dry run builds (#181).
+-    expect(desktop).toContain("PROMOTE: ${{ needs.verify.outputs.promote == 'true' }}");
++    // (A run of only=stores builds nothing the Release has either:
++    // releaseStoresOnly.test.ts.)
++    expect(desktop).toContain(
++      "PROMOTE: ${{ needs.verify.outputs.promote == 'true' || (needs.plan.outputs.only == 'stores' && (matrix.label != 'store' || needs.verify.outputs.store_files != '')) }}",
++    );
+     expect(desktop).toContain('CANDIDATE: ${{ needs.plan.outputs.candidate }}');
+     expect(desktop).toContain('matrix: ${{ fromJSON(needs.verify.outputs.desktop || needs.plan.outputs.desktop) }}');
+     const steps = stepsOf(desktop);
+diff --git a/web/tests/deploy/releaseStoresOnly.test.ts b/web/tests/deploy/releaseStoresOnly.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..70f4be657a1537556e13e579ffe7a55399925bf7
+--- /dev/null
++++ b/web/tests/deploy/releaseStoresOnly.test.ts
+@@ -0,0 +1,281 @@
++// A release whose tag run never sent its desktop packages to the stores gets
++// them sent by a run started by hand, and that run sends what the Release has
++// and builds nothing the Release has:
++//
++//   gh workflow run release.yml -R BRF-Tech/filex -f tag=v1.2.3 -f only=stores -f publish=true
++//
++// ⚠ Why (v0.53.0, 2026-10-07): GitHub failed to create the tag run's desktop
++// jobs ("Release: Internal server error") after goreleaser, the images and
++// npm were out, and the run could not be retried. The Windows and Linux
++// packages were built on a PC and attached, macOS and the arm64 snap came
++// from only=macos and only=snap-arm64 - and the amd64 snap, the desktop
++// app's winget pull request and the Microsoft Store were left to the job that
++// never ran, whose tokens live in GitHub alone.
++//
++// What such a run must and must not do, each one careless edit away:
++//   - it keeps the windows, linux and store rows of a full run, and nothing
++//     else; windows and linux build nothing (their scripts emptied, PROMOTE):
++//     they download the Release's own installers and amd64 snap by name and
++//     check them against the digests the Release gives, because the winget
++//     manifest pins the files its URLs name;
++//   - the store row sends the bundle the dry run of the tag's commit kept
++//     (verify: store_files), checked against its sums; with none kept it
++//     builds the bundle as a full run's store row does - no Release carries
++//     a Store package;
++//   - winget gets the manifest written from those installers, with its CLA
++//     and the superseded pull requests closed; the Snap Store the amd64 snap;
++//     the Microsoft Store the bundle;
++//   - nothing is attached to the Release, and no binaries, images, npm, cask
++//     or AUR, no CLI smoke test and no desktop-arm64-check;
++//   - with publish=true, `verify` asks of the tag's commit what it asks for
++//     only=arm64, and then looks for the kept bundle.
++//
++// The workflows live in the PUBLIC checkout only (see
++// releaseGatesImages.test.ts), and the release tool names these titles in its
++// workflow guards (scripts/release/plan.mjs, WORKFLOW_GUARDS), so a skip there
++// is red. The change reaches the public checkout as its own commit
++// (packaging/ci/release-stores.patch). The readers are shared with
++// releaseMacosOnly.test.ts and releaseSnapArm64Only.test.ts
++// (tests/helpers/releaseWorkflow.ts).
++import { describe, expect, it } from 'vitest';
++
++import {
++  DIR,
++  KEYS,
++  TAG_SHA,
++  bash,
++  builds,
++  code,
++  desktopEnv,
++  desktopRuns,
++  expectAddsToARelease,
++  expectDryRunLetThrough,
++  holds,
++  job,
++  jobIf,
++  jobsThatRun,
++  jq,
++  matrices,
++  narrowing,
++  stepNamed,
++  topLevelTerms,
++  verify,
++  verifyRun,
++  type Row,
++} from '../helpers/releaseWorkflow';
++
++const RUN = { publish: true, full: false, only: 'stores' };
++const FETCH = "The Release's files for the stores";
++const KEPT = 'The files the dry run built';
++const KEPT_CHECK = 'They are the files the dry run kept, for this version';
++
++/** The full run's rows, as plan writes them. */
++const fullRows = () => matrices(job(code(), 'plan'))[1].rows;
++const row = (label: string) => fullRows().find((r) => r.label === label)!;
++/** The rows of only=stores: windows and linux without their own build, store as it is. */
++const storesRows = (): Row[] => ['windows', 'linux', 'store'].map((l) => (l === 'store' ? row(l) : { ...row(l), script: '' }));
++
++/**
++ * The desktop job's PROMOTE for one row, read from the workflow and evaluated
++ * with what plan and verify said: verify's `promote` (a tag run) and
++ * `store_files` (the dry run that kept the Store bundle, or '').
++ */
++function promote(r: Row, only: string, said: { promote?: string; storeFiles?: string } = {}) {
++  const line = /\n {6}PROMOTE: \$\{\{\s*(.+?)\s*\}\}\n/.exec(job(code(), 'desktop'));
++  expect(line, 'the desktop job sets PROMOTE').not.toBeNull();
++  const cond = line![1]
++    .replace(/needs\.verify\.outputs\.promote/g, `'${said.promote ?? ''}'`)
++    .replace(/needs\.verify\.outputs\.store_files/g, `'${said.storeFiles ?? ''}'`)
++    .replace(/needs\.plan\.outputs\.only/g, `'${only}'`);
++  return String(holds(cond, {}, r));
++}
++
++/** The desktop steps of one row of only=stores. */
++function storesRun(r: Row, said: { storeFiles?: string } = {}, run = RUN, keys: Record<string, string> = KEYS) {
++  const release = code();
++  return desktopRuns(release, { ...desktopEnv(run, r, keys), PROMOTE: promote(r, run.only, said) }, r);
++}
++
++describe('a run that sends a release to the stores (only=stores)', () => {
++  it.runIf(!!DIR)('only=stores needs a tag, may publish, and is no full run', () => {
++    expectAddsToARelease(code(), 'stores');
++  });
++
++  it.runIf(!!DIR)('only=stores keeps the windows, linux and store rows of a full run, and empties the scripts of the two whose files the Release has', () => {
++    const plan = job(code(), 'plan');
++    const found = matrices(plan);
++    expect(found, 'plan writes two desktop matrices (only=arm64, then all)').toHaveLength(2);
++    const full = found[1];
++    const pick = narrowing(plan, 'stores');
++    expect(pick, 'plan narrows the full matrix for only=stores').not.toBeNull();
++    expect(pick!.filter).toBe(
++      '{include: [.include[] | select(.label == "windows" or .label == "linux" or .label == "store") | if .label == "store" then . else .script = "" end]}',
++    );
++    expect(pick!.at).toBeGreaterThan(full.at);
++    expect(pick!.at).toBeLessThan(plan.indexOf('echo "desktop=$(echo "$desktop" | jq -c .)"'));
++    expect(storesRows().map((r) => [r.label, r.script])).toEqual([
++      ['windows', ''],
++      ['linux', ''],
++      ['store', 'dist:store'],
++    ]);
++    // Where jq is at hand (GitHub's runners), the filter itself runs on the full matrix.
++    const out = jq(pick!.filter, { include: full.rows });
++    if (out !== undefined) expect(out).toEqual({ include: storesRows() });
++  });
++
++  it.runIf(!!DIR)('only=stores runs plan, verify and desktop, and no other job', () => {
++    const release = code();
++    expect(jobsThatRun(release, 'stores')).toEqual(['plan', 'verify', 'desktop']);
++    for (const j of ['cli-smoke', 'desktop-arm64-check']) {
++      expect(topLevelTerms(jobIf(job(release, j))), j).toContain("needs.plan.outputs.only != 'stores'");
++    }
++  });
++
++  it.runIf(!!DIR)("only=stores builds nothing on the windows and linux rows: it downloads the Release's files by name and checks them against the Release's digests", () => {
++    const desktop = job(code(), 'desktop');
++    for (const label of ['windows', 'linux']) {
++      const r = storesRows().find((x) => x.label === label)!;
++      for (const said of [{}, { storeFiles: '2' }]) expect(promote(r, 'stores', said), label).toBe('true');
++      const { runs, steps, publishing } = storesRun(r);
++      expect(steps.filter((s) => builds(s.text)).map((s) => s.name), `${label}: built`).toEqual([]);
++      // Never the dry run's files, never the Release's files back onto it.
++      for (const s of [KEPT, KEPT_CHECK, 'Attach to the release', 'Attach the arm64 snap to the release']) expect(runs, `${label}: ${s}`).not.toContain(s);
++      const fetch = runs.indexOf(FETCH);
++      expect(fetch, label).toBeGreaterThanOrEqual(0);
++      for (const p of publishing) expect(runs.indexOf(p), `${label}: ${p} before the files were fetched`).toBeGreaterThan(fetch);
++    }
++    const fetch = stepNamed(desktop, FETCH);
++    expect(fetch.cond).toBe("env.ONLY == 'stores' && matrix.label != 'store'");
++    expect(fetch.text).toMatch(/\n\s+windows\) files=\(filex-desktop-x64\.exe filex-desktop-arm64\.exe\) ;;\n/);
++    expect(fetch.text).toMatch(/\n\s+linux\) files=\(filex-desktop-amd64\.snap\) ;;\n/);
++    expect(fetch.text).toContain('gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$f" -D desktop/release');
++    const lists = fetch.text.split('\n').filter((l) => /files=\(|gh release download/.test(l));
++    expect(lists, 'the files are named').toHaveLength(3);
++    for (const l of lists) expect(l, 'by name: no glob').not.toMatch(/\*/);
++    // Each file is the one the Release serves: its sha256 is the asset's digest.
++    expect(fetch.text).toMatch(/--jq "\.assets\[\] \| select\(\.name == \\"\$f\\"\) \| \.digest"/);
++    expect(fetch.text).toMatch(/\n\s+\[ "\$have" = "\$want" \] \|\| \{ echo .*>&2; exit 1; \}\n/);
++    // A full run and a tag run that promotes take no file from the Release.
++    for (const r of fullRows()) {
++      for (const p of ['', 'true']) {
++        const full = desktopRuns(code(), { ...desktopEnv({ publish: true, full: true, only: 'all' }, r, KEYS), PROMOTE: p }, r);
++        expect(full.runs, `${r.label} PROMOTE=${p}`).not.toContain(FETCH);
++      }
++    }
++  });
++
++  it.runIf(!!DIR)("only=stores sends the Release's installers to winget and its amd64 snap to the Snap Store, and attaches nothing", () => {
++    const desktop = job(code(), 'desktop');
++    const [win, linux] = storesRows();
++    const w = storesRun(win);
++    expect(w.publishing).toEqual(['Submit to winget', 'Sign the CLA on the winget pull request', 'Close the superseded winget pull requests']);
++    const order = [FETCH, 'Package-manager manifests', 'Validate the winget manifests', 'Submit to winget', 'Keep the manifests'];
++    const at = order.map((s) => w.runs.indexOf(s));
++    for (const [i, a] of at.entries()) expect(a, order[i]).toBeGreaterThanOrEqual(0);
++    expect([...at].sort((a, b) => a - b)).toEqual(at);
++    // The manifest is written from the two installers the Release has.
++    expect(stepNamed(desktop, 'Package-manager manifests').text).toMatch(
++      /--windows desktop\/release\/filex-desktop-x64\.exe \\\n\s+--windows-arm64 desktop\/release\/filex-desktop-arm64\.exe --out pkg-out/,
++    );
++    // No token: nothing submitted, and the run says so.
++    const noToken = storesRun(win, {}, RUN, { ...KEYS, WINGET_TOKEN: '' });
++    expect(noToken.publishing).toEqual([]);
++    expect(noToken.runs).toContain('Package-manager submission skipped');
++
++    const l = storesRun(linux);
++    expect(l.publishing).toEqual(['Upload to the Snap Store']);
++    const snap = stepNamed(desktop, 'Upload to the Snap Store');
++    expect(snap.text).toMatch(/\n\s+snap=desktop\/release\/filex-desktop-amd64\.snap\n/);
++    expect(snap.text).toMatch(/snapcraft upload --release=stable "\$snap"/);
++
++    // A full release and the other partial runs are what they were.
++    const fullWin = row('windows');
++    expect(desktopRuns(code(), desktopEnv({ publish: true, full: true, only: 'all' }, fullWin, KEYS), fullWin).publishing).toEqual([
++      'Attach to the release',
++      'Submit to winget',
++      'Sign the CLA on the winget pull request',
++      'Close the superseded winget pull requests',
++    ]);
++    for (const only of ['arm64', 'macos', 'snap-arm64']) {
++      const r = desktopRuns(code(), desktopEnv({ publish: true, full: false, only }, { ...fullWin, script: '' }, KEYS), { ...fullWin, script: '' });
++      expect(r.runs, only).not.toContain('Package-manager manifests');
++      expect(r.runs, only).not.toContain(FETCH);
++    }
++  });
++
++  it.runIf(!!DIR)('only=stores sends the bundle the dry run kept to the Microsoft Store, or builds it when none was kept', () => {
++    const store = storesRows()[2];
++    const STORE = ['Microsoft Store CLI', 'Submit to the Microsoft Store'];
++    // Kept: promoted, checked against its sums, sent; nothing built.
++    expect(promote(store, 'stores', { storeFiles: '2' })).toBe('true');
++    const kept = storesRun(store, { storeFiles: '2' });
++    expect(kept.steps.filter((s) => builds(s.text)).map((s) => s.name)).toEqual([]);
++    expect(kept.publishing).toEqual(STORE);
++    const order = [KEPT, KEPT_CHECK, 'Keep the Store package for Partner Center', ...STORE];
++    const at = order.map((s) => kept.runs.indexOf(s));
++    for (const [i, a] of at.entries()) expect(a, order[i]).toBeGreaterThanOrEqual(0);
++    expect([...at].sort((a, b) => a - b)).toEqual(at);
++    expect(kept.runs).not.toContain(FETCH);
++    // None kept: the store row of a full run, built from the tag and sent.
++    expect(promote(store, 'stores')).toBe('false');
++    const built = storesRun(store);
++    for (const s of ['Build installer', 'Install the Store package and check it as a Store copy', 'Build the arm64 Store package', 'Bundle the Store packages']) {
++      expect(built.runs, s).toContain(s);
++    }
++    expect(built.runs).not.toContain(KEPT);
++    expect(built.publishing).toEqual(STORE);
++    expect(built.runs.indexOf('Bundle the Store packages')).toBeLessThan(built.runs.indexOf('Submit to the Microsoft Store'));
++    // Only the store row ever builds in only=stores, and a tag run's PROMOTE is verify's word alone.
++    for (const r of fullRows()) {
++      expect(promote(r, 'all', { promote: 'true' }), r.label).toBe('true');
++      expect(promote(r, 'all', { storeFiles: '2' }), r.label).toBe('false');
++    }
++  });
++
++  it.runIf(!!DIR)('a dry run of only=stores publishes nothing, and writes and validates the winget manifest', () => {
++    const dry = { ...RUN, publish: false };
++    for (const r of storesRows()) {
++      const d = storesRun(r, {}, dry);
++      expect(d.publishing, r.label).toEqual([]);
++    }
++    const w = storesRun(storesRows()[0], {}, dry);
++    for (const s of [FETCH, 'Package-manager manifests', 'Validate the winget manifests', 'Keep the manifests']) expect(w.runs, s).toContain(s);
++  });
++});
++
++describe('verify, for a run that sends a release to the stores', () => {
++  it.runIf(!!DIR && !!bash)("verify asks the tag's commit for CI and a dry run of everything, for only=stores as for only=arm64, and finds the Store bundle it kept", () => {
++    const arm = verify(verifyRun('arm64', true), { ci: true, dry: true, artifacts: ['release-files-store'] });
++    expect(arm.code, arm.out).toBe(0);
++    expect(arm.outputs.store_files).toBeUndefined();
++    const kept = verify(verifyRun('stores', true), { ci: true, dry: true, artifacts: ['release-files-windows', 'release-files-store'] });
++    expect(kept.code, kept.out).toBe(0);
++    // What only=arm64 asks, then the artifacts of that dry run (run 2).
++    expect(kept.calls.slice(0, -1)).toEqual(arm.calls);
++    expect(kept.calls.at(-1)).toMatch(/^api -X GET repos\/BRF-Tech\/filex\/actions\/runs\/2\/artifacts /);
++    expect(kept.calls.at(-1)).toContain(`|SHA=${TAG_SHA}`);
++    expect(kept.outputs.dry_run).toBe('2');
++    expect(kept.outputs.store_files).toBe('2');
++    expect(kept.summary).toContain('was tested before it was tagged');
++    // No bundle kept: verify passes, and the store row builds it.
++    const none = verify(verifyRun('stores', true), { ci: true, dry: true, artifacts: ['release-files-windows'] });
++    expect(none.code, none.out).toBe(0);
++    expect(none.outputs.store_files).toBeUndefined();
++    expect(none.out).toMatch(/::notice title=Microsoft Store::the dry run \S+ kept no Store bundle/);
++    // A commit CircleCI passed has no dry run: nothing kept, the store row builds.
++    const cc = verify(verifyRun('stores', true), { circleci: 'green' });
++    expect(cc.code, cc.out).toBe(0);
++    expect(cc.outputs.evidence).toBe('circleci');
++    expect(cc.outputs.store_files).toBeUndefined();
++    // Untested: red, as for only=arm64.
++    for (const answers of [{ ci: true }, { dry: true }, {}]) {
++      const r = verify(verifyRun('stores', true), answers);
++      expect(r.code, JSON.stringify(answers)).not.toBe(0);
++      expect(r.out).toMatch(/::error::v1\.2\.3 publishes nothing/);
++    }
++  });
++
++  it.runIf(!!DIR && !!bash)('a dry run of only=stores is let through without asking, like one of only=arm64', () => {
++    expectDryRunLetThrough('stores');
++  });
++});
+diff --git a/web/tests/deploy/releaseVerifyCircleci.test.ts b/web/tests/deploy/releaseVerifyCircleci.test.ts
+index 0283d3c3f61fd8a29ad187145cfde9053ed248b1..bbae145e70a47e2867fef27e15099d641b593a86 100644
+--- a/web/tests/deploy/releaseVerifyCircleci.test.ts
++++ b/web/tests/deploy/releaseVerifyCircleci.test.ts
+@@ -72,17 +72,20 @@ interface Run {
+   event: string;
+   outputs: Record<string, Record<string, string>>;
+   results: Record<string, string>;
++  /** The desktop row a job-level env expression is read for (only=stores' PROMOTE names its label). */
++  matrix?: Record<string, string>;
+ }
+ 
+ /**
+  * A job's condition (or an env expression) for one run: the references these
+  * conditions use - github.event_name, needs.<job>.outputs.<name>,
+- * needs.<job>.result, cancelled() - and nothing else. Anything more fails the
+- * test instead of being guessed at.
++ * needs.<job>.result, matrix.<key>, cancelled() - and nothing else. Anything
++ * more fails the test instead of being guessed at.
+  */
+ function evaluate(cond: string, run: Run): boolean {
+   let js = cond
+     .replace(/\bgithub\.event_name\b/g, () => JSON.stringify(run.event))
++    .replace(/\bmatrix\.(\w+)/g, (_m, k: string) => JSON.stringify(run.matrix?.[k] ?? ''))
+     .replace(/\bneeds\.([\w-]+)\.outputs\.(\w+)/g, (_m, j: string, o: string) => JSON.stringify(run.outputs[j]?.[o] ?? ''))
+     .replace(/\bneeds\.([\w-]+)\.result\b/g, (_m, j: string) => JSON.stringify(run.results[j] ?? 'skipped'))
+     .replace(/\bcancelled\(\)/g, 'false');
+diff --git a/web/tests/helpers/releaseWorkflow.ts b/web/tests/helpers/releaseWorkflow.ts
+index 6eb9988b1036ced71d902b1415128577f5f410bf..5ac472e505daa730984ea82301b1803096468715 100644
+--- a/web/tests/helpers/releaseWorkflow.ts
++++ b/web/tests/helpers/releaseWorkflow.ts
+@@ -124,6 +124,29 @@ export function holds(cond: string, env: Record<string, string>, matrix: Row): b
+ /** Whatever makes something public from the desktop job. */
+ export const PUBLISHES = /gh release upload|snapcraft upload|msstore-submit|microsoft-store-apppublisher|wingetcreate|winget-cla\.sh|winget-supersede\.sh|git push/;
+ 
++/**
++ * What marks a step of the desktop job that BUILDS something: a tag run that
++ * promotes runs none of them (releasePromote.test.ts), and neither do the
++ * windows and linux rows of only=stores (releaseStoresOnly.test.ts).
++ */
++export const BUILDS = [
++  /actions\/setup-go@/,
++  /pnpm install --frozen-lockfile/,
++  /pnpm -r --filter='\.\/packages\/\*' build/,
++  /npm version "\$VER"/,
++  /apt-get install -y -qq rpm/,
++  /gem install --no-document fpm/,
++  /pnpm --filter \.\/desktop run/,
++  /electron-builder/,
++  /fetch-cli\.mjs/,
++  /merge-latest-yml\.mjs/,
++  /--channel=8\.x\/stable/,
++  /AllowDevelopmentWithoutDevLicense/,
++  /makeappx/,
++  /arch-of\.mjs/,
++];
++export const builds = (text: string) => BUILDS.some((re) => re.test(text));
++
+ /** The desktop job's env for one run, as plan's outputs set it. */
+ export function desktopEnv(run: { publish: boolean; full: boolean; only: string }, row: Row, secrets: Record<string, string> = {}) {
+   return {

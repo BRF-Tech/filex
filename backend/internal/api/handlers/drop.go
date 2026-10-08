@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/brf-tech/filex/backend/internal/acl"
 	"github.com/brf-tech/filex/backend/internal/basepath"
@@ -179,21 +180,6 @@ func normalizeExts(in []string) []string {
 	return out
 }
 
-// dropTokenFromURL extracts the {token} from a /d/{token} link (strips any
-// query/fragment + trailing slash). Used by share-mail to look a drop link's
-// configured limits back up for the invite body.
-func dropTokenFromURL(link string) string {
-	s := strings.TrimSpace(link)
-	if i := strings.IndexAny(s, "?#"); i >= 0 {
-		s = s[:i]
-	}
-	s = strings.TrimRight(s, "/")
-	if i := strings.LastIndex(s, "/"); i >= 0 {
-		return s[i+1:]
-	}
-	return s
-}
-
 // extAllowed reports whether name's extension is in the (already-normalized)
 // allowlist. An empty allowlist allows everything.
 func extAllowed(name string, allow []string) bool {
@@ -302,6 +288,7 @@ var dropRefusalText = map[string]string{
 	"storage_error":       "server.public.drop_err_storage",
 	"storage_unavailable": "server.public.drop_err_storage",
 	"quota_exceeded":      "server.public.drop_err_quota",
+	"name_too_long":       "server.public.drop_err_name_long",
 	// A key file or `.fxe` the link creator may not create (refusesE2E): to
 	// the visitor, a file the link does not take.
 	"e2e_not_allowed": "server.public.drop_err_ext_any",
@@ -325,6 +312,8 @@ func (h *Drop) refuse(w http.ResponseWriter, r *http.Request, status int, body m
 		body["message"] = srvtext.Plural(lang, key, n, nil)
 	case "file_too_large":
 		body["message"] = srvtext.Text(lang, key, srvtext.Vars{"mb": fmt.Sprint(body["max_file_size_mb"])})
+	case "name_too_long":
+		body["message"] = srvtext.Text(lang, key, srvtext.Vars{"max": fmt.Sprint(body["name_max"])})
 	default:
 		body["message"] = srvtext.Text(lang, key, nil)
 	}
@@ -486,6 +475,15 @@ func (h *Drop) handleDrop(w http.ResponseWriter, r *http.Request, tok string) {
 	// One subfolder per submission: <YYYY-MM-DD_HHMMSS>_<name|anon>, with a
 	// random suffix on the rare same-second collision. Keeps submissions from
 	// overwriting each other and shows the owner who sent what.
+	//
+	// ⚠ A name longer than dropNameMax is REFUSED, not cut. The page's box
+	// stops at the same number (`limits.name_max`), so only a client that
+	// ignored it gets here - and it used to get a different name saved than
+	// the one it sent, without a word.
+	if utf8.RuneCountInString(strings.TrimSpace(r.FormValue("uploader_name"))) > dropNameMax {
+		h.refuse(w, r, http.StatusBadRequest, map[string]any{"error": "name_too_long", "name_max": dropNameMax})
+		return
+	}
 	uploaderName := sanitizeSubName(r.FormValue("uploader_name"))
 	stamp := time.Now().Format("2006-01-02_150405")
 	who := uploaderName
@@ -624,32 +622,36 @@ func (h *Drop) notifyOwner(r *http.Request, sh *model.Share, node *model.Node, c
 	}
 	title, body := dropNotifyText(locale, who, node.Name, count, sub)
 
+	/* bag:b3 event */
+	// Canonical webhook-v2 event name (was the ad-hoc "file_dropped") with the
+	// structured node/share payload. Title and Body are only the row's
+	// fallback: what the owner reads - in the bell, on a phone, in the email -
+	// is said from the facts by notify say.go, in their language.
+	ev := notify.Event{
+		Event:    notify.EventDropReceived,
+		Severity: notify.SeverityInfo,
+		Title:    title,
+		Body:     body,
+		Meta:     map[string]any{"folder": node.Name, "count": count, "submission": sub, "uploader": uploaderName},
+		TS:       time.Now(),
+		Node:     &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name},
+		Share:    &notify.ShareRef{Token: sh.Token, Path: node.Path},
+		UserID:   sh.CreatedBy,
+		// ⚠ The FOLDER, not the drop link. The owner is being told files
+		// arrived; what they want is the files, and a drop can carry several
+		// of them, so there is no single file to select.
+		Target: notify.DirTarget(node.Path),
+	}
+
 	if h.Notify != nil {
-		/* bag:b3 event */
-		// Canonical webhook-v2 event name (was the ad-hoc "file_dropped")
-		// with the structured node/share payload. Delivered off the request
-		// path: the anonymous uploader's response must not wait on (or
-		// cancel) the owner notification + webhook fan-out.
-		ev := notify.Event{
-			Event:    notify.EventDropReceived,
-			Severity: notify.SeverityInfo,
-			Title:    title,
-			Body:     body,
-			Meta:     map[string]any{"folder": node.Name, "count": count, "submission": sub, "uploader": uploaderName},
-			TS:       time.Now(),
-			Node:     &notify.NodeRef{StorageID: node.StorageID, Path: node.Path, Name: node.Name},
-			Share:    &notify.ShareRef{Token: sh.Token, Path: node.Path},
-			UserID:   sh.CreatedBy,
-			// ⚠ The FOLDER, not the drop link. The owner is being told files
-			// arrived; what they want is the files, and a drop can carry
-			// several of them, so there is no single file to select.
-			Target: notify.DirTarget(node.Path),
-		}
+		// Delivered off the request path: the anonymous uploader's response
+		// must not wait on (or cancel) the owner notification + webhook
+		// fan-out.
 		if sh.CreatedBy != nil {
 			// The owner's email rides the event: when they hold file-request
 			// notices for their digest (internal/notify digest.go) it waits
 			// too and comes once for the window, as the digest's; otherwise
-			// it goes at once, these words and this link, as it always did.
+			// it goes at once - the bell's words, and this link under them.
 			link := ""
 			if base := h.Tenants.FromRequest(r); base != "" {
 				link = base + "/admin/"
@@ -661,14 +663,16 @@ func (h *Drop) notifyOwner(r *http.Request, sh *model.Share, node *model.Node, c
 		return
 	}
 	// Without notifications (FILEX_NOTIFY_ENABLED off) the owner still gets
-	// the email.
+	// the email - in the same words the notification would have said
+	// (notify.SayEvent, the one code path a notification's words come from).
 	if h.Mailer != nil && sh.CreatedBy != nil {
 		if u, err := h.Store.GetUser(ctx, *sh.CreatedBy); err == nil && u != nil && strings.TrimSpace(u.Email) != "" {
-			mailBody := body
+			said := notify.SayEvent(locale, ev)
+			mailBody := strings.Join(said.Lines, "\n")
 			if base := h.Tenants.FromRequest(r); base != "" {
 				mailBody += "\n\n" + base + "/admin/"
 			}
-			_ = h.Mailer.Send(mailer.WithLanguage(ctx, locale), u.Email, title, mailBody)
+			_ = h.Mailer.Send(mailer.WithLanguage(ctx, locale), u.Email, said.Title, mailBody)
 		}
 	}
 }
@@ -729,6 +733,7 @@ func (h *Drop) renderUploader(w http.ResponseWriter, r *http.Request, tok string
 		"Dir":       pageDir(lang),
 		"T":         t,
 		"Folder":    folderName,
+		"NameMax":   dropNameMax,
 		"Config":    template.JS(cfgJSON),
 		"BrandCSS":  chrome.BrandCSS,
 		"BrandHead": chrome.BrandHead,
@@ -821,10 +826,18 @@ func (h *Drop) renderDropError(w http.ResponseWriter, r *http.Request, status in
 	}
 }
 
-// sanitizeSubName reduces a free-text uploader name to a safe, short folder
-// segment: letters (any script), digits, combining marks, dash, underscore and
-// space only, trimmed, at most 40 characters. The same name is what the owner
-// reads in the notice, the mail and NOT.txt.
+// dropNameMax is the longest name a file request's uploader may give, in
+// characters. ONE number: the JavaScript page's box and the no-JavaScript
+// form stop at it (`limits.name_max`, the uploader template), and handleDrop
+// refuses a longer one (`name_too_long`) instead of cutting it short.
+const dropNameMax = 40
+
+// sanitizeSubName reduces a free-text uploader name to a safe folder segment:
+// letters (any script), digits, combining marks, dash, underscore and space
+// only, trimmed, at most dropNameMax characters (a longer name never gets
+// here - handleDrop refuses it; the cap stays as the last guard on a folder
+// name). The same name is what the owner reads in the notice, the mail and
+// NOT.txt.
 //
 // ⚠ Letters of ANY script, not "ASCII plus the Turkish ones": the old list
 // turned "Lucía" into "Luca", "François" into "Franois" and an Arabic name
@@ -845,8 +858,8 @@ func sanitizeSubName(s string) string {
 	}
 	out := strings.TrimSpace(b.String())
 	out = strings.Trim(out, "-_ ")
-	if rs := []rune(out); len(rs) > 40 {
-		out = strings.TrimSpace(string(rs[:40]))
+	if rs := []rune(out); len(rs) > dropNameMax {
+		out = strings.TrimSpace(string(rs[:dropNameMax]))
 	}
 	return out
 }
@@ -870,16 +883,25 @@ func newIPLimiter(limit int, window time.Duration) *ipLimiter {
 }
 
 // allow reports whether ip may perform another action within the window.
-func (l *ipLimiter) allow(ip string) bool {
-	if ip == "" {
+func (l *ipLimiter) allow(ip string) bool { return l.allowN(ip, 1) }
+
+// allowN reports whether key may perform n more actions within the window,
+// and counts them when it may: all n fit in what is left, or none is counted
+// (a share mail to twenty people is twenty mails — share_mail.go keys it by
+// account rather than by address).
+func (l *ipLimiter) allowN(key string, n int) bool {
+	if key == "" || n <= 0 {
 		return true
+	}
+	if n > l.limit {
+		return false
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	w := l.hits[ip]
+	w := l.hits[key]
 	if w == nil || now.After(w.reset) {
-		l.hits[ip] = &ipWindow{count: 1, reset: now.Add(l.window)}
+		l.hits[key] = &ipWindow{count: n, reset: now.Add(l.window)}
 		// Opportunistic prune so the map can't grow unbounded.
 		if len(l.hits) > 4096 {
 			for k, v := range l.hits {
@@ -890,10 +912,10 @@ func (l *ipLimiter) allow(ip string) bool {
 		}
 		return true
 	}
-	if w.count >= l.limit {
+	if w.count+n > l.limit {
 		return false
 	}
-	w.count++
+	w.count += n
 	return true
 }
 
@@ -958,7 +980,7 @@ textarea { resize: vertical; min-height: 64px; }
 
   <div class="field" id="nameField" style="display:none">
     <label for="uploaderName">{{.T.drop_name_label}}</label>
-    <input type="text" id="uploaderName" maxlength="60" placeholder="{{.T.drop_name_ph}}">
+    <input type="text" id="uploaderName" maxlength="{{.NameMax}}" placeholder="{{.T.drop_name_ph}}">
   </div>
   <div class="field">
     <label for="note">{{.T.drop_note_label}}</label>

@@ -85,6 +85,16 @@ export interface ProtectionSettings {
   trash_retention_days: number;
   /** Versions kept per node by the daily cleanup. 0 = unlimited (no cleanup). */
   versions_keep_n: number;
+  /** The bounds the API enforces for the three numbers around them, shipped
+   *  with the values (absent on a server older than 0.54). A value outside
+   *  them is refused with the server's sentence (`message`), which the page
+   *  shows under the field - it has no range rule of its own. */
+  trash_retention_days_min?: number;
+  trash_retention_days_max?: number;
+  versions_keep_n_min?: number;
+  versions_keep_n_max?: number;
+  share_max_ttl_days_min?: number;
+  share_max_ttl_days_max?: number;
   /** Longest life a NEW share link may be given, in days. 0 = no ceiling.
    *  Applies to links created from now on — existing links are never touched. */
   share_max_ttl_days: number;

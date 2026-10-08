@@ -32,13 +32,16 @@ const (
 	ProbeUnchecked = "unchecked"
 )
 
-// ProbeCheck is one step of a provider test. ID names the step (the panel
-// words it in the reader's language); Params carries what the sentence
-// needs — a host, a field list, a reason, the technical detail.
+// ProbeCheck is one step of a provider test. ID names the step; Params
+// carries what the sentence needs — a host, a field list, a reason, the
+// technical detail; Text is the step in words, in the reader's language
+// (SayChecks, probe_say.go), which every reader of a test - the panel, a
+// tenant's own page, the admin MCP tool - prints as it is.
 type ProbeCheck struct {
 	ID     string            `json:"id"`
 	Status string            `json:"status"`
 	Params map[string]string `json:"params,omitempty"`
+	Text   string            `json:"text,omitempty"`
 }
 
 // Prober is a driver that can test a configuration without anyone signing

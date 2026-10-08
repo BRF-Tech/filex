@@ -108,6 +108,20 @@ func TestHasEncryptedPrefixAndFxeNames(t *testing.T) {
 	if HasMagicPrefix([]byte("filexfxe\x01")) {
 		t.Fatal("HasMagicPrefix stays the folder-file magic only")
 	}
+	// The vault's packs and index files (docs/E2E-VAULT-FORMAT.md) are
+	// ciphertext too: a 4 MiB pack must never reach a thumbnailer or the
+	// content indexer as "some binary file".
+	for _, b := range [][]byte{[]byte("filexvlt\x01P\x16\x00\x00\x00\x00\x00"), []byte("filexvlt\x01I\x00\x00\x00\x00\x00\x00")} {
+		if !HasEncryptedPrefix(b) {
+			t.Fatalf("a vault object %q must count as encrypted", b)
+		}
+	}
+	if HasEncryptedPrefix([]byte("filexvl")) {
+		t.Fatal("a short buffer must not count as a vault object")
+	}
+	if HasMagicPrefix([]byte("filexvlt\x01")) {
+		t.Fatal("HasMagicPrefix stays the folder-file magic only")
+	}
 	for name, want := range map[string]bool{
 		"Rapor.pdf.fxe": true, "encrypted-3fa2c1d0.fxe": true, "A.FXE": true,
 		".fxe": false, "a.fxe.txt": false, "fxe": false,

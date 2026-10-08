@@ -187,6 +187,58 @@ describe('ci.yml: the full matrix', () => {
     expect(shards).toContain('node scripts/test-shards.mjs e2e-check --shards "$E2E_SHARDS" --browsers "$E2E_ENGINES"');
   });
 
+  // v0.53.0's first full matrix (run 37596680800, lesson #1236): GitHub runs
+  // a `run:` block as `bash -e`, and `set -uo pipefail` left -e on. A green
+  // shard's grep for failure lines found none and ended the step red (handlers-5:
+  // "ok 735s", exit 1); a red go test ended it before rc was read. The step runs
+  // here as GitHub runs it, with a stand-in `go`.
+  it.runIf(!!DIR && !!bash)('the -race step under bash -e: a green shard ends 0, a red one with its own code and its summary line, an empty one red', () => {
+    const lines = job(ciCode(), 'race').split('\n');
+    const named = lines.findIndex((l) => l.trim() === '- name: The shard, under -race');
+    expect(named, 'the -race step').toBeGreaterThanOrEqual(0);
+    const at = lines.findIndex((l, i) => i > named && /^\s+run: \|\s*$/.test(l));
+    const body = lines.slice(at + 1);
+    const indent = body[0].length - body[0].trimStart().length;
+    const end = body.findIndex((l) => !!l.trim() && l.length - l.trimStart().length < indent);
+    const step = body.slice(0, end < 0 ? undefined : end).map((l) => l.slice(indent)).join('\n');
+    const fakeGo = [
+      'go() {',
+      '  case "${FAKE_GO:-}" in',
+      '    red) echo "--- FAIL: TestRace (0.01s)"; echo FAIL; return 1 ;;',
+      '    none) echo "ok    example.com/x    0.01s [no tests to run]" ;;',
+      '    *) echo "--- PASS: TestRace (0.01s)"; echo PASS ;;',
+      '  esac',
+      '}',
+    ].join('\n');
+    const shard = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts', 'test-shards.json'), 'utf8')).profiles.race[0].name as string;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-race-'));
+    try {
+      fs.writeFileSync(path.join(tmp, 'race.sh'), `${fakeGo}\n${step}\n`);
+      const summary = path.join(tmp, 'summary.md');
+      const run = (fake: string) => {
+        fs.rmSync(summary, { force: true });
+        const r = spawnSync(bash!, ['--noprofile', '--norc', '-e', path.join(tmp, 'race.sh')], {
+          cwd: REPO,
+          encoding: 'utf8',
+          env: { ...process.env, FAKE_GO: fake, SHARD: shard, RUNNER_TEMP: slash(tmp), GITHUB_STEP_SUMMARY: slash(summary) },
+        });
+        return { ...r, summary: fs.existsSync(summary) ? fs.readFileSync(summary, 'utf8') : '' };
+      };
+      const green = run('green');
+      expect(green.status, `${green.stdout}\n${green.stderr}`).toBe(0);
+      expect(green.summary).toContain(`### -race ${shard}: 1 tests, exit 0`);
+      const red = run('red');
+      expect(red.status).toBe(1);
+      expect(red.stdout).toContain('--- FAIL: TestRace');
+      expect(red.summary, 'a red shard still writes its line').toContain(`### -race ${shard}: 1 tests, exit 1`);
+      const none = run('none');
+      expect(none.status).toBe(1);
+      expect(none.stdout).toContain(`::error::shard ${shard} ran no test`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it.runIf(!!DIR)('splits Playwright into parts of each engine, and runs the Document Server specs again with one, on every engine', () => {
     const ci = ciCode();
     const pw = job(ci, 'playwright');
@@ -372,7 +424,10 @@ describe('ci.yml: the full matrix', () => {
     expect(build).toContain('pnpm run build:all');
     expect(build).toContain('bash scripts/build-wasm-fixture.sh');
     expect(build).toContain('node scripts/check-embed.mjs --binary bin/filex');
-    expect(build).toMatch(/name: e2e-build\n\s+path: \|\n\s+bin\/filex\n\s+backend\/internal\/wasmplugin\/testdata\/echo\/echo\.wasm/);
+    // packages/core/dist rides along: 173 builds a real .fxe with the
+    // product's own library (v0.53.0's first full matrix: "Cannot find module
+    // packages/core/dist/filex-core.js" in Playwright chromium 2/4).
+    expect(build).toMatch(/name: e2e-build\n\s+path: \|\n\s+bin\/filex\n\s+backend\/internal\/wasmplugin\/testdata\/echo\/echo\.wasm\n\s+packages\/core\/dist\n/);
     // The font map is the build host's, family for family.
     const aliases = (t: string) => [...t.matchAll(/<alias binding="strong"><family>([^<]+)<\/family><prefer><family>([^<]+)<\/family><\/prefer><\/alias>/g)].map((m) => `${m[1]}=${m[2]}`);
     const chain = aliases(fs.readFileSync(path.join(REPO, 'scripts', 'chain', 'run.mjs'), 'utf8'));

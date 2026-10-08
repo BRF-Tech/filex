@@ -288,6 +288,10 @@ func (h *E2EPolicyAdmin) Patch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed", "message": err.Error()})
 		return
 	}
+	// #196 - open explorers ask "may I encrypt here?" again: the tenant's
+	// own, or everybody's when it is the platform's policy (a frame with no
+	// path and no tenant in it).
+	emitAccessChangedIn(r.Context())
 	// Stored and recorded: a read back that fails now answers 500, and the
 	// change it could not show is in the audit log all the same.
 	v, err := h.view(r.Context(), pid)
@@ -468,6 +472,7 @@ func (h *E2EPolicyAdmin) PatchTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if before != *body.Allowed {
+		emitTenantAccessChanged(id) // #196 - that tenant's explorers only
 		e2epolicy.Audit(r.Context(), h.Store, e2epolicy.AuditRow{
 			Action: e2epolicy.AuditActionTenantUpdate, TargetType: e2epolicy.AuditTargetTenant,
 			TargetID: strconv.FormatInt(id, 10), TargetName: p.Name, Who: e2eActorOf(r),
@@ -507,7 +512,7 @@ func (h *E2EPolicyAdmin) writeCeiling(ctx context.Context, providerID int64, all
 func (h *E2EPolicyAdmin) ListRequests(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Requests.List(r.Context(), e2eRequestTenant(r.Context()), strings.TrimSpace(r.URL.Query().Get("status")))
 	if err != nil {
-		writeE2ERequestError(w, err)
+		writeE2ERequestError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -558,8 +563,12 @@ func (h *E2EPolicyAdmin) decide(w http.ResponseWriter, r *http.Request, approve 
 		Note: note, Who: e2eActorOf(r),
 	})
 	if err != nil {
-		writeE2ERequestError(w, err)
+		writeE2ERequestError(w, r, err)
 		return
+	}
+	// #196 - the requester's menus offer what the decision opened or closed.
+	if req != nil {
+		emitAccessChanged(req.UserID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"request": e2eRequestViews(r.Context(), h.Store, []*model.E2ERequest{req}, nil, e2eDecidable(r.Context()))[0],

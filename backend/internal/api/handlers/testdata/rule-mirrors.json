@@ -1,0 +1,66 @@
+{
+  "about": "Cases a server rule decides and a client copy of it must decide the same way (filex #211, audit B20): the rules a client cannot be sent as a value, because it applies them while a person types or picks. The server side checks itself against this file (backend/internal/api/handlers/rule_vectors_internal_test.go, backend/internal/onlyoffice/rule_vectors_internal_test.go); the clients check theirs (web/tests/lib/serverRuleVectors.test.ts). `edit_kinds` and `limits` are what /api/files/capabilities publishes (editkind.Published, capabilities_rules.go); the web tests seed lib/serverRules with them (web/tests/setup.ts), so a component test sees the server's real lists. Change a rule here first: both sides must then agree with the file, or their tests fail.",
+  "edit_kinds": {"office": ["doc", "docm", "docx", "dot", "dotm", "dotx", "dps", "dpt", "et", "ett", "fodp", "fods", "fodt", "mht", "mhtml", "odp", "ods", "odt", "otp", "ots", "ott", "pot", "potm", "potx", "pps", "ppsm", "ppsx", "ppt", "pptm", "pptx", "rtf", "stw", "sxc", "sxi", "sxw", "wps", "wpt", "xls", "xlsb", "xlsm", "xlsx", "xlt", "xltm", "xltx"], "text": ["bash", "c", "cfg", "cjs", "conf", "cpp", "cs", "css", "csv", "dart", "dio", "dockerfile", "drawio", "editorconfig", "env", "gitignore", "go", "gql", "gradle", "graphql", "h", "hpp", "htm", "html", "ini", "java", "js", "json", "jsonc", "jsx", "kt", "less", "log", "lua", "markdown", "md", "mermaid", "mjs", "mmd", "php", "pl", "properties", "py", "r", "rb", "rs", "sass", "scss", "sh", "sql", "svelte", "svg", "swift", "toml", "ts", "tsv", "tsx", "txt", "vue", "xml", "yaml", "yml", "zsh"], "text_names": [".editorconfig", ".env", ".gitignore", "dockerfile", "makefile"], "text_mime_prefixes": ["text/"], "text_mimes": ["application/javascript", "application/json", "application/toml", "application/x-sh", "application/x-yaml", "application/xml", "application/yaml"]},
+  "limits": {"tag_max_runes": 64, "comment_max_runes": 5000, "e2e_request_reason_max_runes": 2000, "app_state_max_bytes": 16384, "app_ui_save_chunk_bytes": 8388608},
+  "theme_key": {
+    "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
+    "ok": ["a", "dark-2", "0x", "abcdefghijabcdefghijabcdefghijabcdefghij"],
+    "bad": ["", "-a", "Dark", "a_b", "a b", "abcdefghijabcdefghijabcdefghijabcdefghijk", "şık"]
+  },
+  "accent_hex": {
+    "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$",
+    "ok": ["#fff", "#2f6ceb", "#ABCDEF"],
+    "bad": ["fff", "#ffff", "#ggg", "#2f6ceb0", " #fff", ""]
+  },
+  "store_token": {
+    "pattern": "^[A-Za-z0-9._~-]{8,512}$",
+    "ok": ["abcdefgh", "A1._~-zz9"],
+    "bad": ["abcdefg", "abc def gh", "abcdefg/", "ünicode12", ""]
+  },
+  "zip_password": {
+    "printable_from": 32,
+    "printable_to": 126,
+    "ok": ["", "secret pass ~!", " ", "~"],
+    "bad": ["şifre123", "é", "€uro"]
+  },
+  "beside_formats": ["docm", "docx", "odp", "ods", "odt", "pptm", "pptx", "xlsm", "xlsx"],
+  "ui_save_chunk_bytes": 8388608,
+  "applies": [
+    { "rule": { "kind": "file", "ext": ["pdf"] }, "items": [{ "kind": "file", "ext": "pdf", "mime": "application/pdf" }], "match": true },
+    { "rule": { "kind": "file", "ext": ["pdf"] }, "items": [{ "kind": "file", "ext": "docx", "mime": "application/octet-stream" }], "match": false },
+    { "rule": { "kind": "file", "mime": ["image/*"] }, "items": [{ "kind": "file", "ext": "heic", "mime": "image/heic" }], "match": true },
+    { "rule": { "kind": "file", "ext": ["pdf"] }, "items": [{ "kind": "file", "ext": "pdf", "mime": "" }, { "kind": "file", "ext": "pdf", "mime": "" }], "match": false },
+    { "rule": { "kind": "file", "ext": ["pdf"], "multi": true, "max": 2 }, "items": [{ "kind": "file", "ext": "pdf", "mime": "" }, { "kind": "file", "ext": "pdf", "mime": "" }], "match": true },
+    { "rule": { "kind": "file", "ext": ["pdf"], "multi": true, "max": 2 }, "items": [{ "kind": "file", "ext": "pdf", "mime": "" }, { "kind": "file", "ext": "pdf", "mime": "" }, { "kind": "file", "ext": "pdf", "mime": "" }], "match": false },
+    { "rule": { "kind": "file", "ext": ["pdf"], "multi": true, "min": 2 }, "items": [{ "kind": "file", "ext": "pdf", "mime": "" }], "match": false },
+    { "rule": { "kind": "dir" }, "items": [{ "kind": "file", "ext": "pdf", "mime": "" }], "match": false },
+    { "rule": { "kind": "dir" }, "items": [{ "kind": "dir", "ext": "", "mime": "" }], "match": true },
+    { "rule": { "kind": "any", "ext": ["pdf"], "state": ["pending"] }, "items": [{ "kind": "file", "ext": "pdf", "mime": "", "state": ["pending"] }], "match": true },
+    { "rule": { "kind": "any", "ext": ["pdf"], "state": ["pending"] }, "items": [{ "kind": "file", "ext": "pdf", "mime": "" }], "match": false },
+    { "rule": { "kind": "file", "no_state": ["pending"] }, "items": [{ "kind": "file", "ext": "pdf", "mime": "", "state": ["pending"] }], "match": false },
+    { "rule": { "kind": "file", "no_state": ["pending"] }, "items": [{ "kind": "file", "ext": "pdf", "mime": "" }], "match": true }
+  ],
+  "action_need": [
+    { "min_role": "", "output_mode": "sibling", "need": "editor" },
+    { "min_role": "", "output_mode": "version", "need": "editor" },
+    { "min_role": "", "output_mode": "download", "need": "viewer" },
+    { "min_role": "owner", "output_mode": "download", "need": "owner" },
+    { "min_role": "editor", "output_mode": "download", "need": "editor" },
+    { "min_role": "viewer", "output_mode": "sibling", "need": "editor" },
+    { "min_role": "owner", "output_mode": "version", "need": "owner" }
+  ],
+  "conditions": [
+    { "cond": null, "values": {}, "met": true },
+    { "cond": { "key": "mode" }, "values": {}, "met": false },
+    { "cond": { "key": "mode" }, "values": { "mode": "  " }, "met": false },
+    { "cond": { "key": "mode" }, "values": { "mode": false }, "met": true },
+    { "cond": { "key": "mode" }, "values": { "mode": 0 }, "met": true },
+    { "cond": { "key": "mode", "equals": ["a", "b"] }, "values": { "mode": "b" }, "met": true },
+    { "cond": { "key": "mode", "equals": ["a"] }, "values": { "mode": ["x", "a"] }, "met": true },
+    { "cond": { "key": "mode", "equals": ["a"] }, "values": { "mode": [] }, "met": false },
+    { "cond": { "key": "n", "equals": ["3"] }, "values": { "n": 3 }, "met": true },
+    { "cond": { "key": "n", "equals": ["1000000"] }, "values": { "n": 1000000 }, "met": true },
+    { "cond": { "key": "flag", "equals": ["true"] }, "values": { "flag": true }, "met": true },
+    { "cond": { "key": "flag", "equals": ["true"] }, "values": { "flag": false }, "met": false }
+  ]
+}

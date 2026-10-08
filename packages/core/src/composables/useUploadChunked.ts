@@ -50,6 +50,7 @@ import {
   defaultResumeStorage,
   listResume,
   loadResume,
+  resumeExpiry,
   saveResume,
   uploadFingerprint,
   type ResumeRecord,
@@ -143,6 +144,9 @@ interface BeginResponse {
   chunkSize?: number;
   offset?: number;
   total_size?: number;
+  /** When the server sweeps this upload's staging (RFC 3339) - the life of
+   *  the resume bookmark (lib/uploadResume `expiresAt`). */
+  expires_at?: string | null;
 }
 
 interface StatusResponse {
@@ -157,6 +161,9 @@ interface StatusResponse {
   error?: string;
   op_id?: number;
   node_id?: number;
+  /** When the server sweeps this staging if nothing more arrives (RFC 3339):
+   *  the last write + FILEX_UPLOAD_STAGING_TTL. On a chunk's answer too. */
+  expires_at?: string | null;
 }
 
 /** Only a session still taking chunks can be continued. */
@@ -259,6 +266,10 @@ export function useUploadChunked(
 
     let cancelled = false;
     let inFlight: XMLHttpRequest | null = null;
+    // The sweep time the server said with its last chunk answer (epoch ms):
+    // its staging lives FILEX_UPLOAD_STAGING_TTL past the LAST write, so each
+    // acknowledged chunk moves it (lib/uploadResume `expiresAt`).
+    let chunkExpiry: number | undefined;
     job.cancel = () => {
       cancelled = true;
       inFlight?.abort();
@@ -286,6 +297,11 @@ export function useUploadChunked(
       const base = stagedBase();
       let uploadId = '';
       let chunkSize = opts.chunkSize ?? DEFAULT_CHUNK;
+      // The server's sweep time for this upload's staging, carried into
+      // every bookmark write (lib/uploadResume): fixed at `begin`, so a
+      // resumed upload keeps the moment its bookmark already holds.
+      let expiresAt: number | undefined;
+      chunkExpiry = undefined;
 
       // ── resume, or begin ────────────────────────────────────────────────
       const bookmark = loadResume(bookmarks, key);
@@ -294,6 +310,7 @@ export function useUploadChunked(
           const st = await status(bookmark.uploadId);
           if (resumableState(st.state) && (st.total_size ?? 0) === total) {
             uploadId = bookmark.uploadId;
+            expiresAt = resumeExpiry(st.expires_at) ?? bookmark.expiresAt;
             chunkSize = st.chunk_size ?? st.chunkSize ?? bookmark.chunkSize;
             acked = st.offset ?? 0;
             job.resumedFrom = acked;
@@ -335,6 +352,7 @@ export function useUploadChunked(
         }
         if (!begun?.id) throw new Error('begin returned no upload id');
         uploadId = begun.id;
+        expiresAt = resumeExpiry(begun.expires_at);
         chunkSize = begun.chunk_size ?? begun.chunkSize ?? chunkSize;
         acked = begun.offset ?? 0;
       }
@@ -351,6 +369,7 @@ export function useUploadChunked(
         lastModified: opts.file.lastModified,
         chunkSize,
         offset: acked,
+        expiresAt,
       });
       report();
 
@@ -407,6 +426,7 @@ export function useUploadChunked(
           throw new Error(wordsIn(resolveLocale(config.locale))('err.upload_stalled'));
         }
         acked = next;
+        if (chunkExpiry !== undefined) expiresAt = chunkExpiry;
         report();
         saveResume(bookmarks, key, {
           uploadId,
@@ -416,6 +436,7 @@ export function useUploadChunked(
           lastModified: opts.file.lastModified,
           chunkSize,
           offset: acked,
+          expiresAt,
         });
       }
 
@@ -504,6 +525,7 @@ export function useUploadChunked(
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               const body = JSON.parse(xhr.responseText) as StatusResponse;
+              chunkExpiry = resumeExpiry(body.expires_at) ?? chunkExpiry;
               resolve(body.offset ?? end);
             } catch {
               // A 2xx we cannot parse still means the bytes landed; the offset

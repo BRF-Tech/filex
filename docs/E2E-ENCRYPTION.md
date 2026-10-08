@@ -82,7 +82,7 @@ These are deliberate, and they are all still true today:
 | The encrypted folder's **own** name | It lives in a folder that is not encrypted | Visible - name it neutrally |
 | Name length | A stored name is as long as its name, plus a fixed overhead ([the scheme](#the-scheme)) | Roughly how long each name is. Equal names in **different** folders are two different stored names ([folder ids](#folder-ids)) |
 | File sizes (approximate) | Ciphertext ≈ plaintext + 97-byte header + 16-byte tag (+ 16 bytes per MiB for a [STREAM](#streaming-content-stream) file) | Visible |
-| Folder structure / file count | The tree is not encrypted | Visible. Hiding it is the vault level - designed, not built ([roadmap](E2E-ROADMAP.md#3-the-vault-level)) |
+| Folder structure / file count | The tree is not encrypted | Visible. Hiding it is the vault level ([format](E2E-VAULT-FORMAT.md)), where the server has it on (`FILEX_E2E_VAULT`) |
 | Access times / audit trail | Normal audit logging continues | Visible |
 | Keys in the memory of an open tab | The key lives in RAM for the session | XSS and malicious extensions are the host's problem |
 | The JavaScript the server serves you | A hostile server can serve hostile JS | Inherent to browser-based E2E |
@@ -262,7 +262,7 @@ a separate area or a "vault" tab: an encrypted folder is a folder.
 |---|---|---|---|
 | **1 · Contents only** - the default | File contents. File and folder names stay readable to the server | v2 | Every filex since 0.31. WebDAV, the CLI and desktop sync see the names |
 | **2 · Contents and names** | Contents, and every file and folder name inside | v3, `req: ["names"]` | filex 0.48 and later. WebDAV, the CLI and desktop sync see scrambled names |
-| 3 · Vault | Also the shape of the tree: counts, sizes, structure | - | Designed, not built ([roadmap](E2E-ROADMAP.md#3-the-vault-level)). It is not offered anywhere until it works |
+| 3 · Vault | Also the shape of the tree: counts, sizes, structure. The server sees only equal packs (4 MiB, or 16 MiB chosen at creation) and an encrypted index | v3, `req: ["vault"]` | Built, off by default: offered only where the server has `FILEX_E2E_VAULT` on (`capabilities.e2e_vault`; [format](E2E-VAULT-FORMAT.md), [roadmap](E2E-ROADMAP.md#3-the-vault-level)). Only a new, empty folder becomes a vault; one person writes at a time, under a lock the server keeps; the filex web and desktop apps, `filex decrypt` and `filex vault mount` open it, and WebDAV, the CLI and sync see blocks |
 
 Level 1 is the default because it keeps everything that works with names
 working and costs nothing; level 2 is a deliberate choice, made in the create
@@ -479,7 +479,7 @@ A folder with encrypted names has a v3 marker - the v2 fields plus:
 
 | Field | Meaning |
 |---|---|
-| `req` | **Required features.** A client must understand every entry or refuse the folder - the rule ext4 uses for incompatible features. Today: `names` (level 2), `rekey` (a re-key under way), `conv` (an in-place conversion under way); the vault level would be the next ([roadmap](E2E-ROADMAP.md#3-the-vault-level)). |
+| `req` | **Required features.** A client must understand every entry or refuse the folder - the rule ext4 uses for incompatible features. Today: `names` (level 2), `rekey` (a re-key under way), `conv` (an in-place conversion under way). `vault` is level 3, the vault: exactly `["vault"]`, never beside another feature ([format](E2E-VAULT-FORMAT.md#the-key-file)). |
 | `names.alg` / `enc` / `long` | The recipe, fixed when names were turned on. |
 | `names.key` | The name key, sealed under the FMK. |
 | `names.root_id` | The encrypted root's [folder id](#folder-ids) - the associated data of every name directly inside the root. |
@@ -553,7 +553,8 @@ its backups, still sees:
   ([below](#ways-plaintext-still-reaches-the-server)).
 
 Hiding the count, the sizes and the structure as well is the **vault**
-level. It is designed, not built: [roadmap](E2E-ROADMAP.md#3-the-vault-level).
+level ([format](E2E-VAULT-FORMAT.md)), on a server that has it on
+(`FILEX_E2E_VAULT`).
 
 ### Prior art
 
@@ -663,11 +664,11 @@ and still opened, in any filex or offline with
 - **Change password…** - the current password or the recovery key, and a new
   one. Only the header changes: a new salt, verify blob and password slot; the
   recovery key and any escrow slot keep working, and the body is re-sent byte
-  for byte. The change is [announced](#who-is-told) like a folder's - the
-  audit log and the file's owner are told - and the server records every
-  rewrite of a `.fxe` itself, and deletes the versions that hold the file's
-  current key under the old password. ⚠ A backup, or a copy someone
-  downloaded, still opens with the **old** password.
+  for byte. The server sees the header rewritten and [records and tells
+  it](#who-is-told) like a folder's - the audit log and the file's owner -
+  and, when the file's owner or an administrator changed it, deletes the
+  versions that hold the file's current key under the old password. ⚠ A
+  backup, or a copy someone downloaded, still opens with the **old** password.
 - **Remove encryption…** - says first that the plaintext goes back to the
   server; then decrypts, uploads the plaintext under the original name (as
   `name (2).ext` if that is taken), and moves the `.fxe` to the trash.
@@ -829,7 +830,14 @@ in the browser:
    is the plaintext being removed - and only for a write it has checked is
    one: inside an encrypted folder whose key file says a conversion is under
    way, plaintext replaced by ciphertext (`e2e_convert`, anything else keeps
-   its version as always). Each write is conditional on the file being the one
+   its version as always), written by somebody who may delete the folder's
+   versions anyway - its **owner** or an **administrator**, with
+   `files.purge` there (and, with an API token, the `delete` verb), the same
+   right the clean-up below asks. The key file's "conversion under way" is the
+   client's word - anybody who may write the folder may write a key file that
+   says it - so it never gives that right by itself: anyone else's conversion
+   write keeps a version of the plaintext like any overwrite, which the owner
+   can remove afterwards. Each write is conditional on the file being the one
    that was listed, so a file edited meanwhile is not overwritten with its
    older self;
 3. at level 2 the [names pass](#changing-the-level) renames what is there;
@@ -956,41 +964,46 @@ escrow unlock does not trigger this; escrow is not the owner's credential.
 ### Who is told
 
 The change happens in the browser, where the password is; the server never
-sees either password and cannot tell a new key file from any other upload. So
-the web UI **announces** the change once the key file is written
-(`POST /api/files/e2e/password-changed {path, via, rekey}`), and the server
-turns that into two records:
+sees either password. What it does see is the key file being rewritten -
+whichever surface wrote it (web, WebDAV, the CLI, an AI tool) - and, from the
+version the overwrite kept, **which slots changed**. Since 0.54 that is what
+every record of a password change comes from:
 
-- an **audit-log** row, action `e2e.password_change`, naming the folder, who
-  changed it, `via` (`password` or `recovery_key`) and whether it re-keyed;
-- a **notification** `e2e.password_changed` to the folder's **owner** - who may
-  not be the person who changed it - a warning when it was a reset with the
-  recovery key, and subscribable on its own by a webhook
-  ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
+- an **audit-log** row `e2e.key_file_rewritten` for every rewrite, with the
+  folder, the surface (`origin`), who wrote it, and `changes` - any of
+  `password`, `recovery_key`, `escrow`, `level`, `rekey`, `conversion`,
+  `other`;
+- when the password or the recovery slot changed, an **audit-log** row
+  `e2e.password_change` (the folder, who changed it, `changes`, `rekey`, and
+  how many earlier key files were deleted or kept), and a **notification**
+  `e2e.password_changed` to the folder's **owner** - who may not be the person
+  who changed it - a warning when somebody other than the owner made the
+  change; to the administrators when nobody owns the folder. Subscribable on
+  its own by a webhook ([NOTIFICATIONS.md](NOTIFICATIONS.md)).
 
-⚠ Like the escrow report, this is an announcement, not a gate: a client that
-rewrites the key file some other way is not announced. The announcement needs
-write access to the folder, the same right rewriting its key file takes.
+A client's word is not a record. Up to 0.53 the web UI announced a change
+(`POST /api/files/e2e/password-changed {path, via, rekey}`) and the audit row
+and the notification came from that announcement; since 0.54 they come from
+the rewrite the server sees. The explorer no longer announces anything; the
+endpoint is kept for older clients, answers `200` and records nothing. What the server cannot know is HOW the person proved they
+could change it (the current password or the recovery key): the record says
+which slots changed, not which secret was typed.
 
-What does not depend on the client: the server records **every** rewrite of a
-key file itself, whichever surface it came through (web, WebDAV, the CLI, an
-AI tool). It cannot read the slots, but it can see which of them changed, and
-it writes an audit row `e2e.key_file_rewritten` with the folder, the surface
-(`origin`), who wrote it, and `changes` - any of `password`, `recovery_key`,
-`escrow`, `level`, `rekey`, `other`. A password change made outside the web UI
-still shows up there as `password`.
+⚠ The server compares with the version the overwrite kept. On an installation
+with versioning switched off (`FILEX_VERSIONS_ON_OVERWRITE=0`) there is
+nothing to compare with: the rewrite is audited (`compared: false`) and
+nobody is told.
 
-A **single encrypted file** is announced the same way (the same endpoint with
-the `.fxe`'s path): the audit row `e2e.password_change` names the `file`, and
-the file's owner gets *Encrypted file password changed*. And because an
-announcement is only as good as the client that makes it, the server also
-watches for itself: every rewrite of a `.fxe`, on any surface, is compared with
-the version the overwrite kept, and recorded as `e2e.fxe_header_rewritten` with
-what changed (`password`, `recovery_key`, `escrow`, `content`, `name`,
-`other`). When the password or the recovery slot changed, the versions that
-hold the file's **current** key under the **old** secret are deleted - each
-would open today's contents with the old password. A version of different
-content under a different key is history, and stays.
+A **single encrypted file** follows the same rules: every rewrite of a `.fxe`,
+on any surface, is compared with the version the overwrite kept and recorded
+as `e2e.fxe_header_rewritten` with what changed (`password`, `recovery_key`,
+`escrow`, `content`, `name`, `other`). A new password over the same file key is
+recorded as `e2e.password_change` naming the `file`, and the file's owner gets
+*Encrypted file password changed*. The versions that hold the file's
+**current** key under the **old** secret are deleted - each would open today's
+contents with the old password - by the same rule as a folder's key files
+([next section](#what-a-password-change-does-not-undo)). A version of
+different content under a different key is history, and stays.
 
 ### What a password change does not undo
 
@@ -998,7 +1011,24 @@ content under a different key is history, and stays.
   rewrites `.filex-e2e.json`, and the server **deletes the key file's earlier
   versions** as it sees the password (or recovery) slot change: each of them
   would still open the folder with the old password for anyone who could
-  restore one (the audit row says how many, `versions_deleted`). A backup, a
+  restore one (the audit row says how many, `versions_deleted`).
+
+  It deletes them only when the change was made by the folder's **owner** or
+  an **administrator**. Deleting them cannot be undone, and the bytes of a key
+  file prove nothing: anybody who may write the folder may upload a file under
+  its name, and before 0.54 such an upload - `{"v":3,"salt":"x"}` was enough -
+  erased every key file that opened the folder. The server cannot check a
+  password (it never sees one, and a key file holds nothing to check one
+  against), so ownership is the proof it asks for. Anyone else's change keeps
+  every earlier version (`versions_kept` in the audit rows), and the owner is
+  told with a warning. If the change was not theirs, the previous key file is
+  restored from its versions: the `e2e.key_file_rewritten` audit row names
+  the key file (`target_id`), then `GET /api/files/versions?node_id=…` and
+  `POST /api/files/versions/restore {node_id, version_id}`. If it was, the
+  owner's own password change - or an administrator's - deletes the old ones. The same rule holds
+  for a single encrypted file's old headers.
+
+  A backup, a
   replica, a synced or downloaded copy is out of its reach and still has the
   OLD password slot - and, for a folder with its own key, that slot unwraps
   the same folder key that opens every file today. Someone holding the old
@@ -1171,7 +1201,12 @@ kept), and the tenant's administrators answer under Admin → Encryption.
 - **The explorer says what the server does.** The explorer asks for the kind it
   would use (`POST /api/files/e2e/allowed` with `kind`), and the server answers
   it from the same list of approvals a create door spends, so the menu offers
-  exactly what the write then accepts.
+  exactly what the write then accepts. The answers are asked when a folder is
+  listed and remembered per person (an approval decided or spent, or a policy
+  changed, tells the open explorers to ask again), so a row's menu opens on
+  its answer at once; an answer still on its way after 40 ms adds its row at
+  the end of the open menu, so no row moves under the pointer
+  ([Menus that hold still](INTEGRATION.md#menus-that-hold-still)).
 - **Whom it covers.** An approval is for the person who asked, and is spent
   **once**, at whichever door creates the name - never by a file request
   ([Where it is asked](#where-it-is-asked)). A write that fails after the
@@ -1249,8 +1284,8 @@ failure:
 
 | Door | Refused | Could not be decided |
 |---|---|---|
-| HTTP | `403 e2e_not_allowed` | `500 {"error":"could not check the encryption policy"}` |
-| Agent REST API | `403 e2e_not_allowed` (`403 RESERVED_NAME` for a key file) | `500`, in the same words |
+| HTTP | `403 e2e_not_allowed` | `500 e2e_policy_undecided`, with the server's sentence in `message` ([API-ERRORS.md](API-ERRORS.md)) |
+| Agent REST API | `403 e2e_not_allowed` (`403 RESERVED_NAME` for a key file) | `500 {"error":"could not check the encryption policy"}` |
 | MCP | an error result naming the reason | an error result: "could not check the encryption policy" |
 | Upload ticket | `403 e2e_not_allowed` | `503 storage_unavailable`; the ticket stays valid |
 | File request | `403 e2e_not_allowed` | `503 storage_unavailable` |
@@ -1789,11 +1824,11 @@ entry with a readable (and meaningless) name, shown as such.
 
 | | |
 |---|---|
-| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.83f4e4a875bd.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.a3d1cc0f4832.png) |
+| ![Creating an encrypted folder](https://filex.sh/shots/e2e-recovery/create-encrypted-folder.83f4e4a875bd.png) | ![The recovery key, shown once](https://filex.sh/shots/e2e-recovery/recovery-key-shown-once.3ccf13ec7486.png) |
 | Creating the folder. The escrow notice appears only when the installation has escrow on. | The recovery key, shown once. The dialog will not close until you tick that you saved it. |
 | ![The lock screen](https://filex.sh/shots/e2e-recovery/locked-folder.ab407a10763a.png) | ![Unlocking with a recovery key](https://filex.sh/shots/e2e-recovery/unlock-with-recovery-key.24da26a5d602.png) |
 | A wrong password, and the way out underneath it. | The recovery-key dialog. The **Escrow key** tab appears only when both the installation and the folder have escrow. |
-| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.d8ce75c37582.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.0230e9658c97.png) |
+| ![The escrow tab](https://filex.sh/shots/e2e-recovery/unlock-with-escrow-key.446c79dbb6c6.png) | ![The offer to a pre-v0.31 folder](https://filex.sh/shots/e2e-recovery/legacy-folder-upgrade-offer.0230e9658c97.png) |
 | Escrow says up front that the owner will be told. | A folder from before v0.31, just opened by password: the offer is visible, and it discloses the escrow consequence. |
 
 Retake them with
@@ -1945,11 +1980,14 @@ stop doing pointless - and potentially leaky - work:
     is refused instead of being given a `-copy` name nobody could decrypt. The
     server cannot tell an encrypted name from a plaintext one that looks like
     it, so this only ever refuses; it never reads anything.
-12. **Password changes** (`internal/api/handlers/e2e_password.go`) - records
-    the web UI's announcement of a password change in the audit log and
-    notifies the folder's owner. It receives the folder path, how the change
-    was proved (`password`/`recovery_key`) and whether it re-keyed - no key
-    material.
+12. **Password changes** (`internal/e2e/slotchange`, called by
+    `internal/e2e/keyfilewatch` and `internal/e2e/fxewatch`) - when a rewrite
+    of a key file or a `.fxe` header changes its password or recovery slot,
+    records it in the audit log and notifies the owner, and deletes the
+    earlier versions that open it with the old secret only when the owner or
+    an administrator wrote it. It reads which slots changed - public fields,
+    no key material. (`POST /api/files/e2e/password-changed`, the web UI's
+    announcement up to 0.53, now answers and records nothing.)
 13. **Single encrypted files** (`internal/e2e` → `FileMagicPrefix`,
     `HasEncryptedPrefix`, `LooksEncryptedFile`) - the `filexfxe` magic is
     treated like `filexe2e` wherever content is sniffed: the content indexer
@@ -1968,6 +2006,32 @@ stop doing pointless - and potentially leaky - work:
 15. **Public links** (`internal/api/handlers/public_link_rule.go`) - one
     rule for every door that mints one: never for an encrypted folder or
     anything in it. A `.fxe` is linked as it is.
+16. **The vault** (encryption level 3, [format](E2E-VAULT-FORMAT.md); off
+    unless `FILEX_E2E_VAULT` is set; the browser, the desktop app,
+    `filex decrypt` and `filex vault mount` all open it) -
+    `internal/e2e/vault.go`, `internal/vaultlock`,
+    `internal/api/handlers/e2e_vault.go`. The server orders the commits and
+    keeps everything else out; it reads only what is in the clear: the key
+    file's `v`, `req` and `vault` block (`ParseVaultKeyFile`), the names of
+    packs and index files, their sizes, and their plaintext headers (magic,
+    version, kind, pack size, pack id, generation - `CheckVaultPackHeader`,
+    `CheckVaultIndexHeader`, a Padmé size for an index). It keeps the
+    **write lock** in the database (`vault_locks`, migration 00096): who
+    holds it, from which client, since when, when it was last active, and
+    which generations were committed under it; the token only as its
+    SHA-256. It writes an index file through a temporary file renamed into
+    place and refuses any generation but latest + 1. Inside a vault folder
+    only that API writes: `writegate` refuses every other door (the
+    explorer, the queue, the agent API and MCP, archives, apps, the document
+    server's save, WebDAV, S3, SFTP, FTPS, NFS) - each asking the server's
+    one ACL resolver, the only one that knows the vaults
+    (`acl.Resolver.AttachVaults`) - and the key file keeps its `v`, `req` and `vault`
+    (`KeepsVaultBlock`) and is never removed on its own. The `filexvlt`
+    magic joins the content sniff (`HasEncryptedPrefix`). The audit log
+    records `vault.create`, `vault.lock`, `vault.unlock` (with the reason
+    and the generations) and `vault.lock_break`. It never sees how many
+    files or folders a vault holds, their names, sizes or dates, or which
+    pack holds which file.
 
 Every one of these is in the category "don't do useless work, and don't open a
 leak" - none of them can read a byte of your content.
@@ -1979,9 +2043,11 @@ leak" - none of them can read a byte of your content.
 These are known gaps, not scheduled work. They are listed because each one is a
 limitation you can hit today:
 
-- **Hiding the number, the sizes and the shape of the files.** Names are
-  encrypted; the tree is not. The **vault** level that would hide it is
-  designed, not built - [roadmap](E2E-ROADMAP.md#3-the-vault-level).
+- **Hiding the number, the sizes and the shape of the files, by default.**
+  At levels 1 and 2 the tree is not encrypted. The **vault** level hides it,
+  but only on a server where `FILEX_E2E_VAULT` is on (off by default), only
+  for a new, empty folder, and an existing folder is never converted to it -
+  [format](E2E-VAULT-FORMAT.md), [roadmap](E2E-ROADMAP.md#3-the-vault-level).
 - **Its owner purging the original after "Encrypt with E2EE…".** It goes to
   the trash, and its versions stay in its history; only an administrator can
   delete either for good - the encrypt dialog offers it to one
@@ -2015,6 +2081,9 @@ limitation you can hit today:
 - **Detecting offline escrow use.** The notification covers the supported path
   only. See [what escrow can and cannot do](#what-escrow-can-and-cannot-do).
 - **Editing files in place.** Preview is read-only inside an encrypted folder.
+  Editing office documents there with ONLYOFFICE, in the browser and without
+  the server reading them, is designed and has a protocol prototype
+  ([E2E-OFFICE.md](E2E-OFFICE.md)); nothing offers it yet.
 - **A server-side guard against plaintext writes over DAV / CLI.** Copy and
   move are guarded, and so (since v0.50) are the AI surface and ShareX; a
   direct *write* over WebDAV or the CLI is not - see [Ways plaintext still
@@ -2171,6 +2240,9 @@ file header and content encryption. A folder's `names`, `rekey` and marker
 versioning are folder-specific; a new container gets its own magic and version
 byte rather than reusing `filexe2e` with a different meaning - which is what
 the `.fxe` above does (`filexfxe`).
+
+**The vault** (level 3, built, behind `FILEX_E2E_VAULT`) has its own
+reference, with its own magic (`filexvlt`): [E2E-VAULT-FORMAT.md](E2E-VAULT-FORMAT.md).
 
 ---
 

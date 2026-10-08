@@ -24,10 +24,12 @@ import (
 )
 
 // notice puts one notice in a person's bell; node names the file it is about
-// ("" = none).
-func (f *doorFix) notice(t *testing.T, userID int64, title, node string) int64 {
+// ("" = none). ⚠ The row is said where it is read (#191): an admin_test row
+// reads as the server's test sentence, whatever title it was stored with, so
+// a notice is told apart by its id, not its words.
+func (f *doorFix) notice(t *testing.T, userID int64, node string) int64 {
 	t.Helper()
-	in := &model.NotificationInput{Event: "admin_test", Severity: "info", Title: title, UserID: &userID}
+	in := &model.NotificationInput{Event: "admin_test", Severity: "info", Title: "admin_test", UserID: &userID}
 	if node != "" {
 		meta, err := json.Marshal(map[string]any{"node": map[string]any{"storage_id": f.Main.ID, "path": node, "name": node[strings.LastIndex(node, "/")+1:]}})
 		require.NoError(t, err)
@@ -38,45 +40,62 @@ func (f *doorFix) notice(t *testing.T, userID int64, title, node string) int64 {
 	return id
 }
 
+// bellIDs are the ids of the notices a notifications_list answer lists.
+func bellIDs(t *testing.T, structured json.RawMessage) []int64 {
+	t.Helper()
+	var out struct {
+		Result struct {
+			Items []struct {
+				ID int64 `json:"id"`
+			} `json:"items"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(structured, &out), "%s", structured)
+	ids := make([]int64, 0, len(out.Result.Items))
+	for _, it := range out.Result.Items {
+		ids = append(ids, it.ID)
+	}
+	return ids
+}
+
 // TestAIDoors_TheBellIsTheCallersAndItsRoots - notifications_list is the
 // caller's own bell, narrowed to a `root:` token's folder as /api/notifications
 // is; notification_read marks one read and writes no audit row.
 func TestAIDoors_TheBellIsTheCallersAndItsRoots(t *testing.T) {
 	f := newDoorFix(t)
-	genel := f.notice(t, f.MemberID, "Genel duyuru", "")
-	f.notice(t, f.MemberID, "Kutudaki dosya", "/kutu/ic.txt")
-	f.notice(t, f.MemberID, "Disaridaki dosya", "/disari/gizli.txt")
-	f.notice(t, f.Member2, "Baskasinin bildirimi", "")
+	genel := f.notice(t, f.MemberID, "")
+	kutu := f.notice(t, f.MemberID, "/kutu/ic.txt")
+	disari := f.notice(t, f.MemberID, "/disari/gizli.txt")
+	baskasi := f.notice(t, f.Member2, "")
 
 	tl := f.tool(t, f.Tok, "notifications_list", map[string]any{})
 	require.False(t, tl.IsError, tl.Text)
-	bell := string(tl.Structured)
-	for _, want := range []string{"Genel duyuru", "Kutudaki dosya", "Disaridaki dosya"} {
-		assert.Contains(t, bell, want)
-	}
-	assert.NotContains(t, bell, "Baskasinin bildirimi", "another person's notice is never in the bell")
+	bell := bellIDs(t, tl.Structured)
+	assert.ElementsMatch(t, []int64{genel, kutu, disari}, bell, "the caller's own bell, whole")
+	assert.NotContains(t, bell, baskasi, "another person's notice is never in the bell")
 
 	confined := testutil.NewAPIToken(t, f.Store, f.MemberID, "read,mcp,root:main://kutu")
 	tl = f.tool(t, confined, "notifications_list", map[string]any{})
 	require.False(t, tl.IsError, tl.Text)
-	bell = string(tl.Structured)
-	assert.Contains(t, bell, "Genel duyuru", "a notice that names no file stays readable")
-	assert.Contains(t, bell, "Kutudaki dosya")
-	assert.NotContains(t, bell, "Disaridaki dosya", "a confined token reads only the notices about its folder")
+	bell = bellIDs(t, tl.Structured)
+	assert.Contains(t, bell, genel, "a notice that names no file stays readable")
+	assert.Contains(t, bell, kutu)
+	assert.NotContains(t, bell, disari, "a confined token reads only the notices about its folder")
+	assert.NotContains(t, string(tl.Structured), "gizli.txt", "nothing of the notice outside the folder is in the answer")
 
 	before := len(mcpAuditRows(t, f.Store))
 	tl = f.tool(t, f.Tok, "notification_read", map[string]any{"id": genel})
 	require.False(t, tl.IsError, tl.Text)
 	tl = f.tool(t, f.Tok, "notifications_list", map[string]any{"unread": true})
 	require.False(t, tl.IsError, tl.Text)
-	assert.NotContains(t, string(tl.Structured), "Genel duyuru", "marked read")
-	assert.Contains(t, string(tl.Structured), "Kutudaki dosya", "only the one asked for")
+	assert.NotContains(t, bellIDs(t, tl.Structured), genel, "marked read")
+	assert.Contains(t, bellIDs(t, tl.Structured), kutu, "only the one asked for")
 	// The twin answers what the bell's own route answers: 204, no body.
 	code, out := f.rest(t, f.Tok, http.MethodPost, "/api/ai/notifications/read", map[string]any{"all": true})
 	require.Equal(t, http.StatusNoContent, code, "%v", out)
 	tl = f.tool(t, f.Tok, "notifications_list", map[string]any{"unread": true})
 	require.False(t, tl.IsError, tl.Text)
-	assert.NotContains(t, string(tl.Structured), "Kutudaki dosya", "all: true marked the rest read too")
+	assert.Empty(t, bellIDs(t, tl.Structured), "all: true marked the rest read too")
 	assert.Empty(t, newRows(t, f.Store, before), "marking one's own notices read is not audited, on either door")
 
 	// Nothing to mark is the caller's mistake.

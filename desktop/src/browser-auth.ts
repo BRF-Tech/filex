@@ -82,12 +82,15 @@ export async function exchangeCode(
   });
   if (!res.ok) {
     const body = (await res.text().catch(() => '')).trim();
-    // The server answers `{"error": "…"}`; the person reads the sentence, not
-    // the JSON around it (it is shown on the sign-in window, issue #36).
+    // The server answers `{"error": <code>, "message": <its sentence>}`; the
+    // person reads the sentence, not the JSON around it (it is shown on the
+    // sign-in window, issue #36) - the server's `message` first, in the
+    // reader's language (0.54, docs/API-ERRORS.md), else an older `error`.
     let reason = body;
     try {
-      const parsed = JSON.parse(body) as { error?: unknown };
-      if (typeof parsed?.error === 'string' && parsed.error) reason = parsed.error;
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+      if (typeof parsed?.message === 'string' && parsed.message.trim()) reason = parsed.message.trim();
+      else if (typeof parsed?.error === 'string' && parsed.error) reason = parsed.error;
     } catch {
       /* not JSON — keep the text */
     }

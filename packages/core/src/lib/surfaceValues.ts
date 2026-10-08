@@ -176,13 +176,6 @@ export function storageFieldOf(f: PluginField, locale: string): StorageField {
   };
 }
 
-/** A `pin-input`'s length: 4..8, default 6 — the contract's bounds. */
-export function pinLength(raw: unknown): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 6;
-  return Math.min(8, Math.max(4, Math.trunc(n)));
-}
-
 /** Good enough for "this looks like an address" — the server validates. */
 export function looksLikeEmail(s: string): boolean {
   const v = s.trim();

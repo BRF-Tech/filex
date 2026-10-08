@@ -61,19 +61,19 @@ describe('api/client', () => {
   });
 
   // The queue's doors name their refusal in a `code` (NOT_CANCELLABLE,
-  // FINISHED, TOO_MANY, BAD_KIND, READ_ONLY); their `error` is English. The
-  // panel says the code's words (core lib/errorWords `codeWords`), the same
-  // ones the explorer says — never the English sentence.
-  it('extractError says a queue refusal by its code, not its English', async () => {
+  // FINISHED, TOO_MANY, BAD_KIND, READ_ONLY). ⚠⚠ 0.54 (#209, audit A1/A2): the
+  // SERVER says it (`message`, backend internal/apierr) and the panel shows
+  // that sentence through the same helper the explorer uses (core
+  // lib/errorWords `serverSaid`) - it no longer words a code of its own.
+  it('extractError says a queue refusal in the server’s sentence, the explorer’s words', async () => {
     const { extractError } = await freshClient();
-    const refused = {
-      isAxiosError: true,
-      response: {
-        status: 409,
-        data: { error: 'this operation cannot be stopped once it has started; it finishes on its own', code: 'NOT_CANCELLABLE' },
-      },
-    };
-    expect(extractError(refused as never)).toBe(coreEn['err.not_cancellable']);
+    const { requestFailure } = await import('@brftech/filex-core/src/lib/errorWords');
+    const said = 'Bu iş başladıktan sonra durdurulamaz - kendiliğinden tamamlanır.';
+    const data = { error: 'not_cancellable', code: 'NOT_CANCELLABLE', message: said };
+    const refused = { isAxiosError: true, response: { status: 409, data } };
+    expect(extractError(refused as never)).toBe(said);
+    // One sentence on both surfaces.
+    expect(extractError(refused as never)).toBe(requestFailure(409, JSON.stringify(data), 'en').message);
   });
 
   it('extractError returns a string from various error shapes', async () => {
@@ -136,23 +136,25 @@ describe('api/client', () => {
     expect(english).toEqual([]);
   });
 
-  // A 423 is an app's freeze (handlers.lockedAnswer): the person reads which
-  // app holds the file and why, not the server's English `message` with a path.
-  it('extractError says which app froze the file on a 423', async () => {
+  // A 423 is an app's freeze (handlers.lockedAnswer). ⚠⚠ 0.54 (#209, audit
+  // A3): the SERVER composes the sentence - the app's label, its reason, the
+  // end of the lock, in the reader's language - and the panel shows it, the
+  // same words the explorer's toast shows. It used to word the lock itself,
+  // with the app's bare id.
+  it('extractError says the server’s sentence for an app’s freeze (423)', async () => {
     const { extractError } = await freshClient();
     const locked = (data: unknown) =>
       extractError({ isAxiosError: true, response: { status: 423, data } } as never, 'fallback');
+    const sentence = 'e-İmza bu dosyayı 2026-10-03 14:00 tarihine kadar kilitledi: imzalar toplanıyor';
     const said = locked({
       error: 'locked',
-      message: 'locked by app sign: Sozlesmeler/NDA.docx',
+      message: sentence,
       plugin: 'sign',
       reason: 'imzalar toplanıyor',
       path: 'Sozlesmeler/NDA.docx',
     });
-    expect(said).toContain('sign');
-    expect(said).toContain('imzalar toplanıyor');
+    expect(said).toBe(sentence);
     expect(said).not.toContain('locked by app');
-    expect(locked({})).not.toBe('fallback');
   });
 
   it('request interceptor sets X-CSRF-Token from cookie on POST', async () => {

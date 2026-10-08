@@ -60,12 +60,14 @@ async function openTagEditor(page: Page, explorePath: string) {
   // ⚠⚠ Aim at the entry only once the menu has stopped moving. The menu asks
   // the server whether this file may be encrypted (POST
   // /api/files/e2e/allowed) and draws "Encrypt with E2EE…" only when the
-  // answer lands (FileExplorer.vue e2eAnswerAt), which pushes every entry
-  // below it one row down. In the 0.53 full chain run (Firefox, 2026-10-07)
-  // the answer took 101 ms and landed between the press and the release of
-  // the click on Tags: the pointer ended on Star, the menu stayed open and
-  // nothing opened. `settled` waits for the same node in the same place over
-  // several reads and clicks exactly that node.
+  // answer lands (FileExplorer.vue e2eAnswerAt). Until 0.53 that pushed every
+  // entry below it one row down: in the 0.53 full chain run (Firefox,
+  // 2026-10-07) the answer took 101 ms and landed between the press and the
+  // release of the click on Tags, the pointer ended on Star, the menu stayed
+  // open and nothing opened. Since #196 the answer is asked when the folder
+  // is listed and remembered, the menu opens on it, and an open menu never
+  // moves a row (e2e 213); `settled` stays as the guard that waits for the
+  // same node in the same place and clicks exactly that node.
   const entry = await settled(page.getByRole('menuitem', { name: /^(tags|etiketler)…?/i }), {
     samples: 5,
     interval: 150,
@@ -176,7 +178,9 @@ test.describe('Tags — personal and team', () => {
     // and the Team choice disabled with the reason written under it.
     const viewerApi = await newAuthedRequest(playwright, baseURL!, VIEWER.email, VIEWER.password);
     const seen = await viewerApi.get('/api/files/manager/tags/all');
-    expect((await seen.json()).items).toEqual([{ name: 'Rapor', kind: 'team' }]);
+    // 0.54 (#211): every tag item carries the server's `key` - the tag's
+    // identity (internal/tagname Key), which the clients no longer compute.
+    expect((await seen.json()).items).toEqual([{ name: 'Rapor', kind: 'team', key: 'rapor' }]);
     const id = await findNodeIdByBasename(viewerApi, `${STORAGE}://`, FILE_NAME);
     expect(id).toBeTruthy();
     const refused = await viewerApi.post('/api/files/manager/tags', { data: { node_id: id, items: [] } });

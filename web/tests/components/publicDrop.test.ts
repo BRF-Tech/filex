@@ -15,6 +15,10 @@ import { flushPromises, mount } from '@vue/test-utils';
 import PublicLink from '@/views/public/PublicLink.vue';
 import { resetLocales } from '@brftech/filex-core';
 import { en } from '@brftech/filex-core/src/locales/en';
+import { fillPublic, isPublicStrings, publicStringsAnswer, publicTable } from '../helpers/publicStrings';
+
+/** The server's public sentences (server.public.*): what the page says. */
+const pub = publicTable('en');
 
 function answer(status: number, body: unknown) {
   return { ok: status >= 200 && status < 300, status, statusText: '', json: async () => body, text: async () => JSON.stringify(body) };
@@ -49,6 +53,7 @@ function dropInfo(limits: Record<string, unknown>) {
   fetchMock.mockImplementation(async (url: string) => {
     if (url === '/api/public/d/tok123')
       return answer(200, { kind: 'drop', folder: 'Invoices', needs_pin: false, unlocked: true, uploads_left: null, limits });
+    if (isPublicStrings(url)) return answer(200, publicStringsAnswer('en'));
     return answer(404, { error: 'not_found' });
   });
 }
@@ -87,7 +92,7 @@ describe('the name the link asks for', () => {
     dropInfo({ max_files: 5, max_file_size_mb: 5, allowed_ext: ['pdf'], ask_name: true });
     const w = await openDrop();
     const field = w.get('[data-testid="public-request-name"]');
-    expect(field.text()).toContain(en['public.your_name']);
+    expect(field.text()).toContain(pub.drop_name_label);
     // Above the drop area: dropping a file sends it, so the name has to come first.
     const html = w.html();
     expect(html.indexOf('public-request-name')).toBeLessThan(html.indexOf('public-request-drop'));
@@ -117,7 +122,7 @@ describe('one drop, one submission', () => {
     await flushPromises();
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ url: '/api/public/d/tok123/upload', files: ['a.pdf', 'b.pdf', 'c.pdf'] });
-    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain(en['public.upload_done']);
+    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain(pub.upload_done);
   });
 });
 
@@ -131,7 +136,9 @@ describe('refused before it is sent, in words', () => {
     expect(sent[0].files).toEqual(['invoice.pdf']);
     const list = w.get('[data-testid="public-request-uploads"]').text();
     expect(list).toContain('notes.txt');
-    expect(list).toContain(en['public.refused_ext']);
+    // ⚠ The SERVER's sentence for the same refusal (drop_err_ext), not a
+    // second wording of the page's own.
+    expect(list).toContain(fillPublic(pub.drop_err_ext, { name: 'notes.txt' }));
     expect(list).not.toContain(en['plugin.view.error']);
   });
 
@@ -143,7 +150,7 @@ describe('refused before it is sent, in words', () => {
     await pick(w, [justUnder, over]);
     await flushPromises();
     expect(sent[0].files).toEqual(['ok.bin']);
-    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain('Not sent - larger than 1 MB.');
+    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain('big.bin is too big (max 1 MB).');
   });
 
   it('more files than the submission may carry: the first ones go, the rest say why', async () => {
@@ -152,9 +159,7 @@ describe('refused before it is sent, in words', () => {
     await pick(w, [pdf('a.pdf'), pdf('b.pdf'), pdf('c.pdf')]);
     await flushPromises();
     expect(sent[0].files).toEqual(['a.pdf', 'b.pdf']);
-    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain(
-      'Not sent - at most 2 files can be sent now.',
-    );
+    expect(w.get('[data-testid="public-request-uploads"]').text()).toContain('You can send at most 2 files.');
   });
 });
 
@@ -175,7 +180,7 @@ describe('a refusal the server makes', () => {
     await pick(w, [pdf('a.pdf')]);
     await flushPromises();
     const list = w.get('[data-testid="public-request-uploads"]').text();
-    expect(list).toContain(en['public.upload_failed']);
+    expect(list).toContain(pub.drop_err_generic);
     expect(list).not.toContain(en['plugin.view.error']);
   });
 });
@@ -185,4 +190,24 @@ it('names the folder once — the heading is already its name', async () => {
   const w = await openDrop();
   expect(w.find('[data-testid="public-request-folder"]').exists()).toBe(false);
   expect(w.text()).toContain('Invoices');
+});
+
+describe('the server says this page (#210)', () => {
+  it('fetches the server catalogue for the page language and shows its sentence', async () => {
+    dropInfo({ max_files: 5, max_file_size_mb: 5, allowed_ext: [], ask_name: false });
+    const w = await openDrop();
+    expect(fetchMock.mock.calls.some(([u]) => String(u) === '/api/public/strings?lang=en')).toBe(true);
+    // The no-JavaScript drop page opens on the same sentence (drop_sub).
+    expect(w.get('[data-testid="public-request-lead"]').text()).toBe(pub.drop_sub);
+  });
+
+  it('has no words of its own: core no longer carries a public.* key', () => {
+    expect(Object.keys(en).filter((k) => k.startsWith('public.'))).toEqual([]);
+  });
+
+  it('the name box stops where the server stops (limits.name_max), not at a number of its own', async () => {
+    dropInfo({ max_files: 5, max_file_size_mb: 5, allowed_ext: [], ask_name: true, name_max: 40 });
+    const w = await openDrop();
+    expect(w.get('[data-testid="public-request-name-input"]').attributes('maxlength')).toBe('40');
+  });
 });

@@ -22,12 +22,12 @@ import { fileURLToPath } from 'node:url';
 import en from '@/locales/en.json';
 import tr from '@/locales/tr.json';
 import { WEBHOOK_EVENTS, userEventKey, webhookEventKey } from '@brftech/filex-core/src/lib/webhookEvents';
-import { NOTIFICATION_PHRASES, renderNotification } from '@brftech/filex-core/src/lib/notificationText';
 import { en as coreEn } from '@brftech/filex-core/src/locales/en';
 import { tr as coreTr } from '@brftech/filex-core/src/locales/tr';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const EVENT_GO = path.resolve(here, '../../../backend/internal/notify/event.go');
+const SERVER_TEXT = path.resolve(here, '../../../backend/internal/srvtext/locales');
 
 /**
  * The dotted `EventType` constants declared in event.go — the backend's
@@ -221,60 +221,24 @@ describe('webhook event catalogue', () => {
   // ── the third catalogue: what a notification SAYS ──────────────────────
   //
   // ⚠⚠ This is the one that was reaching real people as wire format. A row is
-  // written once, on the server, in one language, and eight of the eleven file
-  // events set no title at all — `notify.Service.Send` substitutes the event
-  // id, so the bell showed `share.created` and a browser notification came out
-  // as `{title: "file.uploaded", body: "/Documents/measure-me.txt"}` (measured
-  // 2026-09-12). The sentence is composed by the reader now; these tests make
-  // it impossible for a NEW event to arrive without one.
-  for (const lang of ["en", "tr"] as const) {
-    it(`phrases every backend event in ${lang}`, () => {
-      const missing = fromGo.filter((e) => !NOTIFICATION_PHRASES[e]?.[lang]);
+  // written once, on the server, and eight of the eleven file events set no
+  // title at all - the bell showed `share.created` and a browser notification
+  // came out as `{title: "file.uploaded", body: "/Documents/measure-me.txt"}`
+  // (measured 2026-09-12). Since 2026-10-08 the SERVER says every notification
+  // (backend notify say.go) from its catalogue's `server.notify.<event>.*`
+  // keys; this makes it impossible for a NEW event to arrive without one. What
+  // the sentence says for every event is the Go test's
+  // (say_test.go TestSay_EveryEventIsPhrasedAndNoneSaysItsWireID).
+  for (const lang of ['en', 'tr'] as const) {
+    it(`phrases every backend event in ${lang} (the server catalogue)`, () => {
+      const table = JSON.parse(fs.readFileSync(path.join(SERVER_TEXT, `${lang}.json`), 'utf8')) as Record<string, string>;
+      const missing = fromGo.filter((e) => !String(table[`server.notify.${e}.title`] ?? '').trim());
       expect(
         missing,
-        `emitted by the backend with no ${lang} phrasing: ${missing.join(", ")} — ` +
-          "add it to packages/core/src/lib/notificationText.ts, or the bell, the browser " +
-          "toast and the desktop app will all show the raw event id",
+        `emitted by the backend with no ${lang} phrasing: ${missing.join(', ')} - ` +
+          `add server.notify.<event>.title (and .body) to backend/internal/srvtext/locales/${lang}.json, or the ` +
+          'bell, a push, an email and the desktop app will all say the raw event id',
       ).toEqual([]);
-    });
-
-    it(`never renders a raw event id in ${lang}`, () => {
-      // A realistic row: what the server actually stores for a file event —
-      // no usable title, a bare path for a body, the facts in meta.
-      const problems: string[] = [];
-      for (const ev of fromGo) {
-        const { title, body } = renderNotification(
-          {
-            event: ev,
-            title: ev,
-            body: "Belgeler/rapor.pdf",
-            meta: {
-              origin: "manager",
-              node: { path: "Belgeler/rapor.pdf", name: "rapor.pdf", size: 12 },
-              reason: "driver refused the write",
-              signature: "Eicar-Test-Signature",
-              from: "Belgeler/eski.pdf",
-              to: "Belgeler/rapor.pdf",
-              folder: "Gelen",
-              count: 3,
-              uploader: "",
-              body: "looks good to me",
-              storage: "team",
-            },
-            target: { kind: "file", storage: "team", path: "Belgeler/rapor.pdf" },
-          },
-          lang,
-        );
-        if (!title.trim()) problems.push(`${ev}: empty title`);
-        if (title.includes(ev)) problems.push(`${ev}: the title is the event id (${title})`);
-        if (/\{\w+\}/.test(title) || /\{\w+\}/.test(body)) {
-          problems.push(`${ev}: an unresolved placeholder survived (${title} / ${body})`);
-        }
-        // A dangling separator is what a missing field leaves behind, and it
-        // reads as a bug to the person looking at it.
-        if (/(^\s*[-:]|[-:]\s*$)/.test(title)) problems.push(`${ev}: dangling punctuation (${title})`);
-      }
-      expect(problems, problems.join('\n')).toEqual([]);
     });
   }
 

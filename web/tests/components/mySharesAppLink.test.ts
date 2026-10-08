@@ -60,6 +60,8 @@ const revokedSigningLink = {
     token: '1123456789abcdef0123456789abcdef',
     expires_at: '2026-09-21T10:05:00Z',
     revoked_at: '2026-09-21T10:05:00Z',
+    // The server's word for where it stands (#210, model.Share.StateAt).
+    state: 'revoked',
   },
   url: 'https://files.example.com/s/1123456789abcdef0123456789abcdef',
 };

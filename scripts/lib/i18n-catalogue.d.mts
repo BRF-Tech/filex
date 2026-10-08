@@ -26,8 +26,7 @@ export interface ServerNotes {
 export declare function loadCoreTable(file: string): Record<string, string>;
 export declare function flatten(obj: object, prefix?: string, out?: Record<string, string>): Record<string, string>;
 export declare function loadAdminTable(file: string): Record<string, string>;
-export declare function loadNotifyTables(file: string): { en: Record<string, string>; tr: Record<string, string> };
-export declare function notifyWords(file: string): Record<'en' | 'tr', Record<string, string>>;
+export declare function serverTable(file: string): Record<string, string>;
 export declare function loadCatalogue(root: string): Catalogue;
 export declare function loadServerNotes(root: string): ServerNotes;
 export declare function serverNote(

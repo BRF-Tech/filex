@@ -6,13 +6,13 @@
 // catalogue a translator starts from: scripts/i18n-export.mjs (and the release
 // asset / the running server's /admin/i18n/filex-catalogue-en.json, both built
 // by scripts/lib/i18n-catalogue.mjs, which these tests exercise directly).
+import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildCatalogue,
   loadCatalogue,
   loadServerNotes,
-  notifyWords,
   plainTokens,
   pluralCategories,
   tableOf,
@@ -127,7 +127,8 @@ describe('the server table', () => {
        `{body}`: no word in them, no order to choose, no punctuation. A pack
        had to carry ten entries it could only reproduce byte for byte, and one
        typo lost the path off a bell row. They are not exported any more; the
-       renderer falls back to the same template (scripts/lib/i18n-catalogue.mjs). */
+       server falls back to the same template (scripts/lib/i18n-catalogue.mjs
+       serverTable; backend notify say.go). */
     const bare = server.filter((k) => /^\s*\{[A-Za-z0-9_]+\}\s*$/.test(cat.server[k]));
     expect(bare).toEqual([]);
     expect(cat.server['server.notify.file.uploaded.title'], 'the events are still exported').toBeTruthy();
@@ -149,16 +150,16 @@ describe('the server table', () => {
     }
   });
 
-  it('…and the desktop shell’s offline copy of those words says the same thing', () => {
-    /* packages/core/src/lib/notificationText.ts keeps a `WORDS` table because the
-       desktop main process has no catalogue to read. Two copies of a string
-       drift; this is what stops them. */
-    const words = notifyWords(path.join(ROOT, 'packages/core/src/lib/notificationText.ts'));
-    for (const lang of ['en', 'tr'] as const) {
-      const table = lang === 'en' ? cat.server : cat.serverTr;
-      for (const [w, v] of Object.entries(words[lang])) {
-        expect(table[`server.notify.word.${w}`], `${lang} ${w}`).toBe(v);
-      }
+  it('…and no client keeps a copy of them: the server says every notification', () => {
+    /* packages/core/src/lib/notificationText.ts kept a `WORDS` table (and the
+       whole phrase table) until 2026-10-08, because every screen composed its
+       own sentence. The server says it now (backend notify say.go); a copy on
+       a screen is a second answer. */
+    const src = fs.readFileSync(path.join(ROOT, 'packages/core/src/lib/notificationText.ts'), 'utf8');
+    expect(src).not.toMatch(/\bWORDS\b|NOTIFICATION_PHRASES|DIGEST_PARTS/);
+    for (const k of ['server.notify.file.uploaded.title', 'server.notify.word.locked']) {
+      expect(cat.server[k], k).toBeTruthy();
+      expect(cat.serverTr[k], k).toBeTruthy();
     }
   });
 

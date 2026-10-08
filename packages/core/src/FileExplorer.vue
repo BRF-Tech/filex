@@ -14,7 +14,7 @@
  * (PWA / OIDC) / CSRF (panel) / basic / none — `useFileApi` swallows
  * the difference.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, reactive, ref, watch, watchEffect } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, reactive, ref, watch, watchEffect } from 'vue';
 import type { ExplorerConfig, SearchAccount, ThemeMode } from './types/ExplorerConfig';
 import type {
   FileNode,
@@ -25,9 +25,10 @@ import type {
   ArchiveCreateFormat,
   E2eAnswer,
   E2eRequestKind,
+  TrashEntry,
 } from './types/FileNode';
 import { isExternalUsable } from './types/FileNode';
-import { useFileApi, type GlobalSearchHit, type ManagerResponse, type PendingOpDto, type QuotaSnapshot } from './composables/useFileApi';
+import { useFileApi, type GlobalSearchHit, type ManagerResponse, type PendingOpDto, type QuotaSnapshot, type TrashBatchAnswer, type TrashEmptyPreview } from './composables/useFileApi';
 import {
   useUploadChunked,
   isStagedUnsupported,
@@ -61,6 +62,7 @@ import {
   defaultFolderView,
   folderIsRemembered,
   folderKey as makeFolderKey,
+  folderPrefs,
   onViewPrefsApplied,
   rememberFolder,
   resolveFolderView,
@@ -71,11 +73,12 @@ import {
 import { attachViewPrefsHttp } from './lib/viewPrefsHttp';
 import { underApiBase } from './lib/appBase';
 import { provideTableEnv } from './lib/tableEnv';
-import { gateOnService, isOfficeExt } from './lib/serviceGate';
+import { gateOnService } from './lib/serviceGate';
+import { isOfficeExt } from './lib/serverRules';
 import { canShareAny, sharingHeld, type SharingHeld } from './lib/sharingHeld';
 import { appStoreAsks, appStoreRowShown } from './lib/appStoreRow';
 import { publicLinksOff } from './lib/e2eLinks';
-import { opFailure, sayFailure } from './lib/errorWords';
+import { opFailure, sayFailure, serverWords } from './lib/errorWords';
 import { jobOpenOf } from './lib/jobOpen'; /* filex #78 - a finished job's `open` */
 import { resolveUiProfile } from './lib/uiProfile';
 import RecentlyOpened from './components/RecentlyOpened.vue';
@@ -96,9 +99,8 @@ import DraftsView from './components/DraftsView.vue'; /* Drafts, issue #71 */
 import ConnectionsPanel from './components/ConnectionsPanel.vue'; /* gezinti:g1 */
 import TokensPanel from './components/TokensPanel.vue'; /* gezinti:g1 */
 /* cila:c wiring */
-import CommandPalette from './components/CommandPalette.vue';
-import AdvancedSearch from './components/AdvancedSearch.vue' /* gorunum:v1-advsearch */;
 import {
+  advFilterParams,
   advQueryString,
   advSearchTruncated,
   type AdvCountResult,
@@ -109,6 +111,8 @@ import ShortcutsHelp from './components/ShortcutsHelp.vue';
 /* /cila:c wiring */
 import { coverageByStorage, coverageNotice, type CatalogCoverage } from './lib/catalogCoverage';
 import { listingTickets } from './lib/listingTickets';
+import { pendingAnswers } from './lib/pendingAnswers'; /* #196 — a row's menu opens on its answers */
+import { menuAnswerStore, type MenuQuestion } from './lib/menuAnswers'; /* #196 — remembered before the menu opens */
 import { needsMeasuredDrives, storageLine, type MeasuredDrive } from './lib/storageLine'; /* surucu:d1 — which number the storage line prints */
 /* wiring:c1 — tema galerisi */
 import ThemeGallery from './components/ThemeGallery.vue';
@@ -121,19 +125,15 @@ import {
 } from './lib/themes';
 /* /wiring:c1 */
 /* zaman:z3 — the embed's own time-zone setting + this instance's tiers */
-import TimeZoneDialog from './components/TimeZoneDialog.vue';
 import { useExplorerTimeZone } from './composables/useExplorerTimeZone';
 import { connectionsBase } from './composables/useConnections';
 /* wiring:c2 — shortcut settings modal + Space quick-look overlay */
-import ShortcutSettings from './components/ShortcutSettings.vue';
-import QuickLook from './components/QuickLook.vue';
 /* /wiring:c2 */
 /* wiring:c3 — unified operations center */
 import OperationsCenter from './components/OperationsCenter.vue';
 import { useOperations } from './composables/useOperations';
 /* /wiring:c3 */
 /* wiring:c4 */
-import OnboardingTour from './components/OnboardingTour.vue';
 import { markTourSeen, offerTourOnce } from './lib/tour'; /* the tour is offered to a person once */
 import { orderStorages, saveStorageOrder, useStorageOrder } from './lib/storageOrder'; /* #57 — the person's storage order */
 /* /wiring:c4 */
@@ -143,16 +143,14 @@ import FilePane from './components/FilePane.vue';
 import { useTabs, type TabState } from './composables/useTabs';
 /* /wiring:d1 */
 /* wiring:e2 — end-to-end encrypted folders (docs/E2E-ENCRYPTION.md) */
-import EncryptedFolderModal from './components/EncryptedFolderModal.vue';
-import RecoveryKeyModal from './components/RecoveryKeyModal.vue';
-import E2eRecoveryUnlockModal from './components/E2eRecoveryUnlockModal.vue';
-import E2eChangePasswordModal, { type E2eChangePasswordPayload } from './components/E2eChangePasswordModal.vue';
-import E2eSettingsModal from './components/E2eSettingsModal.vue';
+import type { E2eChangePasswordPayload } from './components/E2eChangePasswordModal.vue';
 import E2eLockScreen from './components/E2eLockScreen.vue';
 import { E2E_LOCK } from './composables/useE2eLock';
 import {
   createKeyRing,
   createEncryptedFolder,
+  createVault /* wiring:e2 vault */,
+  markerIsVault /* wiring:e2 vault */,
   upgradeMarkerV1,
   addEscrowSlot,
   declineEscrowSlot,
@@ -209,10 +207,14 @@ import { runConversion, type ConvertProgress } from './lib/e2econvert';
 import { registerE2eNameResolver } from './lib/e2eNameRegistry';
 /* wiring:e2 fxe — single encrypted files, and the streamed paths of encrypted
    folders (composables/useE2eFiles). */
-import E2eFileEncryptModal from './components/E2eFileEncryptModal.vue';
-import E2eFileUnlockModal from './components/E2eFileUnlockModal.vue';
 import E2eTooBigModal from './components/E2eTooBigModal.vue';
 import { useE2eFiles, isFxeActionKey, isFxeRow, fxeEncryptTarget } from './composables/useE2eFiles';
+/* wiring:e2 vault — level 3, the vault (docs/E2E-VAULT-FORMAT.md): its tree
+   lives in an encrypted index and exists only in this tab. ⚠ Only the light
+   half here: the vault's code (composables/e2eVaultEngine + lib/e2evault) and
+   its strip are loaded when a vault is opened or made, never with the
+   explorer (web/tests/quality/vaultLazy.test.ts). */
+import { useE2eVault } from './composables/useE2eVault';
 /* wiring:e2 policy — asking an administrator to allow one encryption */
 import E2eRequestModal from './components/E2eRequestModal.vue';
 import { e2eMimeForExt } from './lib/e2emime';
@@ -251,7 +253,7 @@ import type { PluginActionRow, PluginSurface, PluginViewRow } from './types/Plug
 import type { NavApp } from './components/SideNav.vue';
 import { setNodeStarred } from './lib/star';
 import { emptyTrashAndFollow, TrashEmptyBusy, type TrashEmptyStatus } from './lib/trashEmpty';
-import { fetchAllTags, fetchTaggedRows, onTagsChanged, type TagItem, type TagKind } from './lib/tags';
+import { fetchAllTags, fetchTaggedPage, onTagsChanged, type TagItem, type TagKind } from './lib/tags';
 import { resolveTransfer, type TransferIntent } from './lib/transfer';
 import { downloadArchive, requestFileLink } from './lib/downloadSelection'; /* tasi:m1, #71 */
 import { hitItem, hitRelPath, hitStorageName, hitToNode, type HitDriveContext } from './lib/searchHit'; /* #47 */
@@ -272,10 +274,8 @@ import {
 } from './lib/dragOut';
 
 import NewFolderModal from './modals/NewFolderModal.vue';
-import ArchiveCreateModal from './modals/ArchiveCreateModal.vue';
 import ArchiveExtractModal from './modals/ArchiveExtractModal.vue';
 import ArchivePasswordModal from './modals/ArchivePasswordModal.vue';
-import NewDocumentModal from './modals/NewDocumentModal.vue'; /* belge:n1 */
 import DraftConflictModal from './modals/DraftConflictModal.vue'; /* Drafts, issue #71 */
 import { draftFolderLabel, type DraftDto } from './lib/drafts';
 import { draftKeyOf } from './lib/internalPaths';
@@ -286,10 +286,7 @@ import Modal from './modals/Modal.vue'; /* tablo:t1 — the empty-trash confirma
 import { type UndoOutcome } from './lib/undoWords';
 import { afterActionWords, slotTakenBy, type ToastAfter, type ToastSource } from './lib/toastSlot';
 import { useDialogRequest, type DialogRequest } from './composables/useDialogRequest';
-import { createPurgeBatches, sayPurge } from './lib/purgeWords';
-import { sayRestore } from './lib/restoreWords';
 import { createStorageWatch, type StorageWatch, type WatchedStorageRow } from './lib/storageWatch';
-import PreviewModal from './modals/PreviewModal.vue';
 import PluginViewModal from './components/plugin/PluginViewModal.vue'; /* App plugins */
 import AppFrameModal from './components/plugin/AppFrameModal.vue'; /* App plugins — an app's own interface */
 import { appliesItemOf, appliesMatches } from './lib/pluginApplies';
@@ -302,11 +299,11 @@ import {
   ONLYOFFICE_VIEWER,
   type OpenHandler,
   type OpenHandlerOptions,
+  type OpenHandlers,
 } from './lib/appViewer';
 import { followOpenWithChoices, openWithChoice, setOpenWithChoice } from './lib/openWith';
 import OpenWithDialog from './modals/OpenWithDialog.vue';
 import PluginConfirmModal from './components/plugin/PluginConfirmModal.vue';
-import PermissionsModal from './modals/PermissionsModal.vue';
 import DestinationPickerModal from './modals/DestinationPickerModal.vue'; /* tasi:m1 */
 import { resolveLocale } from './locales/resolve';
 /* The bell, the full list and the avatar — the web's own components, drawn here
@@ -314,7 +311,6 @@ import { resolveLocale } from './locales/resolve';
 import NotificationBell from './components/NotificationBell.vue';
 import NotificationsPanel from './components/NotificationsPanel.vue';
 import AccountMenu from './components/AccountMenu.vue';
-import UserSettingsDialog from './components/UserSettingsDialog.vue';
 import { accountZoneControl } from './lib/timezone';
 import {
   userSettingsApi,
@@ -347,6 +343,39 @@ import {
   type ExplorerMenuRow,
 } from './lib/accountMenu';
 import { newId } from './lib/uid';
+import { lazySurface } from './lib/lazySurface';
+
+/* wiring:e2 vault — the vault strip, loaded with the vault (see the import
+   of useE2eVault above). */
+const loadVaultStrip = () => import('./components/E2eVaultStrip.vue');
+const E2eVaultStrip = defineAsyncComponent(loadVaultStrip);
+/* ⚠ The surfaces a person OPENS - the viewer, sharing, settings, search, the
+   encryption dialogs - load when the explorer mounts them, not with it: the
+   web app's main chunk carries the explorer and has to fit workbox's 2 MiB
+   precache limit (web/pwa.config.ts), or the build fails (0.54, lesson
+   #1276). Same components, same template; their code is a chunk of its own.
+   The list is packages/core/lazySurfaces.ts (the library build gives each
+   its own chunk there), and web/tests/quality/lazySurfaces.test.ts fails
+   when one of them is imported statically again. A new dialog of this kind
+   goes here, not into the imports above. */
+const PreviewModal = lazySurface(() => import('./modals/PreviewModal.vue'));
+const QuickLook = lazySurface(() => import('./components/QuickLook.vue'));
+const UserSettingsDialog = lazySurface(() => import('./components/UserSettingsDialog.vue'));
+const TimeZoneDialog = lazySurface(() => import('./components/TimeZoneDialog.vue'));
+const PermissionsModal = lazySurface(() => import('./modals/PermissionsModal.vue'));
+const AdvancedSearch = lazySurface(() => import('./components/AdvancedSearch.vue'));
+const CommandPalette = lazySurface(() => import('./components/CommandPalette.vue'));
+const NewDocumentModal = lazySurface(() => import('./modals/NewDocumentModal.vue'));
+const ArchiveCreateModal = lazySurface(() => import('./modals/ArchiveCreateModal.vue'));
+const OnboardingTour = lazySurface(() => import('./components/OnboardingTour.vue'));
+const ShortcutSettings = lazySurface(() => import('./components/ShortcutSettings.vue'));
+const EncryptedFolderModal = lazySurface(() => import('./components/EncryptedFolderModal.vue'));
+const E2eSettingsModal = lazySurface(() => import('./components/E2eSettingsModal.vue'));
+const E2eChangePasswordModal = lazySurface(() => import('./components/E2eChangePasswordModal.vue'));
+const RecoveryKeyModal = lazySurface(() => import('./components/RecoveryKeyModal.vue'));
+const E2eRecoveryUnlockModal = lazySurface(() => import('./components/E2eRecoveryUnlockModal.vue'));
+const E2eFileEncryptModal = lazySurface(() => import('./components/E2eFileEncryptModal.vue'));
+const E2eFileUnlockModal = lazySurface(() => import('./components/E2eFileUnlockModal.vue'));
 
 const props = defineProps<{
   config: ExplorerConfig;
@@ -434,9 +463,12 @@ const heldPermissions = computed<string[] | undefined>(
 const heldByFolder = computed<string[] | undefined>(() =>
   props.config.permissions ? props.config.permissionsByFolder : fetchedPermissions.value?.byFolder,
 );
+/* #196 - settled once the account's own permissions are in (or will not
+ * come): the remembered menu answers are read under them (attachMenuAnswers). */
+let ownPermissionsAsked: Promise<void> = Promise.resolve();
 function loadOwnPermissions(): void {
   if (props.config.permissions) return;
-  api.myPermissions().then(
+  ownPermissionsAsked = api.myPermissions().then(
     (res) => {
       fetchedPermissions.value = res && !res.admin ? { permissions: res.permissions, byFolder: res.byFolder } : null;
     },
@@ -449,8 +481,18 @@ onMounted(loadOwnPermissions);
 
 // Locale up-front: the pendingOps onSettled callback below (and the undo-toast
 // helpers) need `t()` at runtime, so the catalogue must be constructed before
-// they are wired. Depends only on props — safe this early.
-const locale = computed(() => resolveLocale(props.config.locale));
+// they are wired. Depends only on props and one ref — safe this early.
+//
+// ⚠⚠ #191 (the maintainers' rule, 2026-10-08): the explorer speaks the
+// language of the ACCOUNT behind its credential - the same one its
+// notifications, the person's phone and their emails speak. The host's
+// `locale` is what it draws until the account answers, what a page with
+// nobody signed in keeps (a public link), and the starting value an account
+// with no language of its own takes (`adoptAccountLocale`, below). A host that
+// changes its language while mounted (the web panel, the desktop app - both
+// write the account first) is followed.
+const accountLocale = ref('');
+const locale = computed(() => resolveLocale(accountLocale.value || props.config.locale));
 // Every dialog under this explorer speaks its language (EXPLORER_LOCALE).
 provide(EXPLORER_LOCALE, () => locale.value);
 /* surucu:d1-sort — the alphabet the `type` key sorts in (lib/sortOrder sorts
@@ -463,7 +505,7 @@ provide(EXPLORER_LOCALE, () => locale.value);
  * either would leave the comparator on a stale alphabet exactly when they are
  * not mounted. */
 watch(locale, (l) => setSortLocale(l), { immediate: true });
-const { t, formatSize, formatDate, dir } = useLocale(locale); /* tablo:t1 — the empty-trash confirmation names the space; `formatDate` reads an app lock's end on the user's clock */
+const { t, formatDate, dir } = useLocale(locale); /* `formatDate` reads an app lock's end on the user's clock */
 // ⚠ RTL — `dir` goes on the root: the explorer's direction is its OWN locale's,
 // never the host page's (lib/direction has the rule and why).
 
@@ -472,7 +514,117 @@ const { t, formatSize, formatDate, dir } = useLocale(locale); /* tablo:t1 — th
 // gets it. Auth is a short-lived ticket fetched through the same API (works
 // same-origin and proxied cross-origin); it degrades to polling when no live
 // socket is available.
-const realtime = useRealtime(api, { reload: () => load() });
+/* wiring:e2 vault — the explorer's vault mode (composables/useE2eVault). Made
+   here, before the realtime layer that hands it `vault.*` events; everything
+   it calls back is read when it calls, not now. */
+const vault = useE2eVault({
+  http: {
+    endpoints: api.endpoints,
+    authHeaders: (extra) => api.authHeaders(extra),
+    credentialsMode: () => api.credentialsMode(),
+    downloadUrl: (p) => api.downloadUrl(p),
+    acceptLanguage: () => localeTag(locale.value),
+  },
+  headersNow: () => api.authHeadersSync(),
+  t: (key, vars) => t(key, vars),
+  toast: (message, error) => showToast({ message }, error ? ERROR_TOAST_MS : FLASH_TOAST_MS),
+  emitError: (message, op) => emit('error', { message, context: { op } }),
+  // The lock's holder says which client: the desktop app is the explorer that
+  // was handed the shell's hooks.
+  clientKind: () => (props.config.desktopSync || props.config.dragOut ? 'desktop' : 'web'),
+  dropKeys: (root) => vaultDropKeys(root),
+  formatCount: (n) => new Intl.NumberFormat(localeTag(locale.value)).format(n),
+  onLocked: (root, why) => vaultLocked(root, why),
+  onChanged: (root) => vaultChanged(root),
+  askName: (q) => askVaultName(q),
+});
+/** wiring:e2 vault — an upload's name is taken in the vault: the explorer's
+ *  "already there" dialog (DraftConflictModal, kind upload) asks whether it
+ *  goes up under the free name. One question at a time, in order. */
+const vaultNameQuestion = ref<{ name: string; folder: string; suggested: string; resolve: (ok: boolean) => void } | null>(null);
+function askVaultName(q: { name: string; folder: string; suggested: string }): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    vaultNameQuestion.value = { ...q, resolve };
+  });
+}
+function answerVaultName(ok: boolean): void {
+  const q = vaultNameQuestion.value;
+  vaultNameQuestion.value = null;
+  q?.resolve(ok);
+}
+/** wiring:e2 vault — a path inside a vault is asked about as the vault folder:
+ *  the server never hears of a path below it (permissions, policy answers). */
+function vaultAskPath(wire: string): string {
+  return vault.rootOf(wire) ?? wire;
+}
+/** wiring:e2 vault — the rows of a folder inside an open vault, answered as a
+ *  listing would be. Null when `wire` is not in an open vault. */
+function vaultListing(wire: string): ManagerResponse | null {
+  const w = String(wire ?? '').replace(/\/+$/, '');
+  const root = vault.rootOf(w);
+  if (!root || !vault.isOpen(root)) return null;
+  const at = vault.rows(w) ? w : root;
+  const perm = vault.permOf(root) as ManagerResponse['perm'];
+  return {
+    adapter: at.slice(0, at.indexOf('://')),
+    storages: [],
+    dirname: at,
+    read_only: false,
+    ...(perm ? { perm } : {}),
+    e2e_root: root,
+    e2e_vault_root: root,
+    files: filterListing(vault.rows(at) ?? []),
+  };
+}
+/** wiring:e2 vault — a server listing of a folder in a vault (the server says
+ *  so, `e2e_vault_root`, or this browser knows it) is the vault's own layout
+ *  on the storage - `v/`, packs, index files - and nothing to show: no row of
+ *  it is a folder a person opens or chooses. */
+function withoutVaultLayout(resp: ManagerResponse): ManagerResponse {
+  const dir = String(resp.dirname ?? '').replace(/\/+$/, '');
+  const named = typeof resp.e2e_vault_root === 'string' && resp.e2e_vault_root ? resp.e2e_vault_root : vault.rootOf(dir);
+  return named ? { ...resp, e2e_vault_root: named, files: [] } : resp;
+}
+/** wiring:e2 vault — the panes list through this, the main one's folder
+ *  previews included: a folder inside an open vault comes from its index, and
+ *  one inside a vault that is locked here is its vault folder (the lock
+ *  screen). */
+const paneApi: typeof api = {
+  ...api,
+  index: async (path: string) => {
+    const listed = vaultListing(path);
+    if (listed) return listed;
+    const root = vault.rootOf(String(path ?? ''));
+    return withoutVaultLayout(await api.index(root ?? path));
+  },
+};
+/** wiring:e2 vault — the details panel asks the server about the item it
+ *  shows (links, people); about an item inside a vault it asks nothing. */
+const vaultRefused = () => Promise.reject(new Error('vault: not asked'));
+const inspectorApi: typeof api = {
+  ...api,
+  listShares: (path: string) => (vault.rootOf(path) ? vaultRefused() : api.listShares(path)),
+  listPermissions: (path: string) => (vault.rootOf(path) ? vaultRefused() : api.listPermissions(path)),
+  createShare: (payload: Parameters<typeof api.createShare>[0]) => (vault.rootOf(payload.path) ? vaultRefused() : api.createShare(payload)),
+};
+function vaultOnVisible(): void {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') vault.onVisible();
+}
+onMounted(() => {
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', vaultOnVisible);
+  if (typeof window !== 'undefined') window.addEventListener('pagehide', vault.onPageHide);
+});
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', vaultOnVisible);
+  if (typeof window !== 'undefined') window.removeEventListener('pagehide', vault.onPageHide);
+  vault.closeAll('manual');
+});
+/* /wiring:e2 vault */
+const realtime = useRealtime(api, {
+  reload: () => load(),
+  onVault: (m) => vault.onEvent(m) /* wiring:e2 vault */,
+  onAccess: (news) => onAccessChanged(news) /* #196 */,
+});
 const presenceUsers = realtime.presenceUsers;
 // True while the live socket is unavailable and the explorer runs on the
 // polling fallback — drives the small "no live connection" badge. Healthy
@@ -490,7 +642,9 @@ function realtimeRoom(vp: string): string | null {
   // drives list (no adapter yet) has none.
   const wire = qualify(p);
   if (!wire || !wire.includes('://') || wire.startsWith('://')) return null;
-  return wire;
+  // wiring:e2 vault — inside a vault, the vault folder's room: a path below
+  // it is never sent.
+  return vault.rootOf(wire) ?? wire;
 }
 onMounted(() => {
   realtime.start();
@@ -521,26 +675,19 @@ const pendingOps = usePendingOps(props.config, api, {
       void load();
       return;
     }
-    /* A permanent delete this explorer queued: its row stops saying
-     * "Deleting…", and the batch says ONE summary and reads the trash ONCE
-     * when its last job ends (lib/purgeWords) — not a toast, a reading of the
-     * trash and a probe of the trash policy per job. */
-    if (purgeBatches.owns(op.id)) {
-      const row = purgeJobRow.get(op.id);
-      purgeJobRow.delete(op.id);
-      if (row !== undefined) markPurging([row], false);
-      const summary = purgeBatches.settle({
-        id: op.id,
-        ok: op.status === 'done',
-        ...(op.status === 'done' ? {} : { reason: opFailure(op, t).text }),
-      });
-      if (summary) {
-        showToast(
-          { message: sayPurge({ queued: false, ...summary }, t) },
-          summary.failed ? ERROR_TOAST_MS : FLASH_TOAST_MS,
-        );
-        if (trashMode.value) void loadTrash();
+    /* A permanent delete this explorer queued (one job per storage): its
+     * rows stop saying "Deleting…", the job's own summary — the server's
+     * sentence for what it deleted, what it did not and why (ops say.go) — is
+     * said once, and the trash is read once (#69, finding A15). */
+    const purgedRows = purgeJobRows.get(op.id);
+    if (purgedRows) {
+      purgeJobRows.delete(op.id);
+      markPurging(purgedRows, false);
+      const words = op.summary || (op.status === 'error' ? opFailure(op, t).text : '');
+      if (words && op.status !== 'cancelled') {
+        showToast({ message: words }, op.status === 'done' ? FLASH_TOAST_MS : ERROR_TOAST_MS);
       }
+      if (trashMode.value) void loadTrash();
       return;
     }
     if (op.status === 'cancelled') {
@@ -548,16 +695,10 @@ const pendingOps = usePendingOps(props.config, api, {
         ? t('archive.extraction_cancelled', { count: op.progress_done })
         : t('opc.status.aborted');
       flashToast(message);
-    } else if (op.status === 'error' && op.op_type === 'restore' && op.progress_done > 0) {
-      // A restore that brought some entries back says how many, and why the
-      // rest did not come.
-      flashToast(
-        t('toast.restore_partial', {
-          n: op.progress_done,
-          failed: op.progress_total - op.progress_done,
-          reason: opFailure(op, t).text,
-        }),
-      );
+    } else if (op.op_type === 'restore' && op.summary) {
+      // A restore job says how it ended: how many came back, how many did not
+      // and why — the server's sentence (ops say.go), not one built here.
+      showToast({ message: op.summary }, op.status === 'done' ? FLASH_TOAST_MS : ERROR_TOAST_MS);
     } else if (op.status === 'error') {
       // Said, not printed: the server's error text is English and sometimes
       // plumbing ("engine libreoffice is not installed on this host").
@@ -751,6 +892,18 @@ const navViewOrigin = ref<string>('');
  */
 const crossFolderView = computed(
   () => navView.value !== '' && navView.value !== 'trash' && navView.value !== 'home',
+);
+/**
+ * #207 (audit D3) — Recent, Starred, Shared with me and a tag are in the
+ * SERVER's order: the person's own time on each row (opened_at, starred_at,
+ * shared_at) newest first, or the order they chose for that view, which is
+ * sent to the server as `sort` (navSortParam) so it orders the whole set and
+ * not the page in hand. The pane keeps the rows as they came (`relevance`).
+ * Before 0.54 the pane re-sorted them, and Recent was seeded "modified ↓":
+ * the files' modification order, which is not "what I opened last".
+ */
+const serverOrderedView = computed(
+  () => navView.value === 'recent' || navView.value === 'starred' || navView.value === 'shared' || navView.value === 'tag',
 );
 
 /* === tablo:t1 — per-folder view memory ==================================
@@ -1174,7 +1327,8 @@ watch(
     // ⚠ wiring:e2 names — presence is broadcast by the SERVER to everyone in
     // the folder: the stored name, never the plaintext one.
     const focusFiles = selection.nodes.value.filter((n) => n.type === 'file');
-    realtime.setFocus(focusFiles.length === 1 ? storedName(focusFiles[0]) : null);
+    // wiring:e2 vault — a vault's names never leave this tab.
+    realtime.setFocus(focusFiles.length === 1 && !vault.isVaultRow(focusFiles[0]) ? storedName(focusFiles[0]) : null);
   },
 );
 
@@ -1286,6 +1440,7 @@ const tzOwner = useExplorerTimeZone({
 const notifFeed: NotificationFeed | null = props.config.notifications
   ? (reactive(
       createNotificationFeed({
+        // The server says each row in the language on screen (`lang=`).
         transport: notificationsTransport(api.jsonFetch, connectionsBase(props.config)),
         errorText: (e) => (e as Error)?.message || t('inspector.error'),
         onRead: () => props.config.notifications?.onRead?.(),
@@ -1307,6 +1462,14 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (notifTimer) clearInterval(notifTimer);
   notifTimer = null;
+});
+// The words are the server's, said in the ACCOUNT's language: a host that
+// changes the language changes the account's (the web panel, the desktop app),
+// so another language on screen asks again and every row is said anew.
+watch(locale, () => {
+  if (!notifFeed) return;
+  void notifFeed.refreshFeed();
+  if (notifFeed.panelOpen) void notifFeed.fetchMine();
 });
 
 /**
@@ -1398,6 +1561,67 @@ function onNotificationOpen(item: NotificationRowData) {
 }
 
 /* ── the avatar ─────────────────────────────────────────────────────────── */
+
+/* ── the account's language (#191) ─────────────────────────────────────── */
+
+/**
+ * Takes the language of the account behind this credential (`users.locale`,
+ * from `/api/auth/me`). Nobody signed in (a public link, a refused
+ * credential): the host's stays. An account that holds NO language takes the
+ * host's as its own - written to the account, so its notifications and every
+ * other surface agree with what this explorer shows (the desktop's
+ * pinToAdopt does the same; the web panel's sign-in has the server do it,
+ * handlers/auth.go adoptSignInLanguage).
+ */
+function adoptAccountLocale(): void {
+  fetchMeOnce()
+    .then((body) => {
+      const user = body?.user as { locale?: unknown } | null | undefined;
+      if (!user) return;
+      const own = typeof user.locale === 'string' ? user.locale.trim() : '';
+      if (own) {
+        accountLocale.value = own;
+        return;
+      }
+      const seed = String(props.config.locale ?? '').trim();
+      if (!seed) return;
+      userSettingsApi(api.jsonFetch, connectionsBase(props.config))
+        .updateProfile({ locale: seed })
+        .catch(() => {
+          /* an account that may not edit its profile keeps none; the host's
+             language stays on screen */
+        });
+    })
+    .catch(() => {
+      /* nobody signed in: the host's language */
+    });
+}
+// Only for a PERSON's credential - the same question the account's time zone
+// asks (useExplorerTimeZone): an app's token is nobody's account, and its
+// host's language stays.
+let accountLocaleAsked = false;
+watch(
+  () => (props.config.callerKind ?? capabilitiesData.value?.caller_kind) === 'user',
+  (person) => {
+    if (!person) {
+      accountLocale.value = '';
+      return;
+    }
+    if (accountLocaleAsked) return;
+    accountLocaleAsked = true;
+    adoptAccountLocale();
+  },
+  { immediate: true },
+);
+// The host moved to another language while mounted: follow it (a host that
+// binds its language to the account - the web panel, the desktop app - has
+// written the account already).
+watch(
+  () => props.config.locale,
+  () => {
+    accountLocale.value = '';
+  },
+);
 
 /** Who is signed in — the host's word, or `/api/auth/me` with this credential. */
 const accountPerson = ref<(AccountPerson & SettingsUser) | null>(props.config.account?.person ?? null);
@@ -1533,7 +1757,11 @@ const settingsHost: UserSettingsHost = {
 };
 // Longest life a new share link may be given (server setting, days; 0 = no
 // ceiling). Both share dialogs derive their expiry choices from it.
-const shareMaxTtlDays = computed(() => capabilitiesData.value?.share_max_ttl_days ?? 0);
+// THIS person's ceiling (the install's or their permission rules'); an older
+// server says only the install's.
+const shareMaxTtlDays = computed(
+  () => capabilitiesData.value?.share_link_max_days ?? capabilitiesData.value?.share_max_ttl_days ?? 0,
+);
 
 /* === App plugins (docs/APP-PLUGINS-API.md) ==============================
  * Rows a WebAssembly plugin adds to the file menu, run as ops jobs. The
@@ -1648,8 +1876,15 @@ const openOpts = computed<OpenHandlerOptions>(() => ({ onlyOffice: !!effectiveOn
 /** The handlers that open a file (lib/appViewer): on, in the administrator's
  *  order, and off. Inside an encrypted folder only filex's own (decrypting)
  *  viewer opens anything. */
+/** Only filex's own viewer opens it: an encrypted folder's file, a vault's. */
+function builtinOpenOnly(n: FileNode | null | undefined): OpenHandlers {
+  return { on: n && n.type === 'file' ? [{ id: 'builtin', view: null }] : [], off: [], custom: false };
+}
 function openHandlersOf(n: FileNode | null | undefined) {
-  if (e2eActive.value) return { on: n && n.type === 'file' ? [{ id: 'builtin', view: null }] : [], off: [], custom: false };
+  if (e2eActive.value) return builtinOpenOnly(n);
+  /* wiring:e2 vault — a row of a vault (also seen from the other pane): the
+     same, only filex's own viewer, which reads it from the tab. */
+  if (vault.isVaultRow(n)) return builtinOpenOnly(n);
   return openHandlersFor(pluginViewList.value, n, pluginOpenRules.value, openOpts.value);
 }
 
@@ -1666,7 +1901,7 @@ function personalOpenChoice(n: FileNode | null | undefined): string | null {
  */
 const previewAppChoice = ref<string | null>(null);
 const previewHandler = computed<OpenHandler | null>(() =>
-  e2eActive.value
+  e2eActive.value || vaultPreviewing.value /* wiring:e2 vault — an app would ask the server for the file by its path */
     ? null
     : pickOpenHandler(
         pluginViewList.value,
@@ -1800,8 +2035,8 @@ const pluginConfirm = ref<{ action: PluginActionRow; targets: FileNode[] } | nul
 
 /** Menu rows for a selection — hidden in the trash, inside an encrypted
  *  folder and (through `selectionActionList`'s early return) on storage rows.
- *  On a read-only storage the actions that write their result are left out
- *  (`pluginActionWrites`): the folder's own flag for rows listed in it, each
+ *  On a read-only storage the actions the server says a click would be
+ *  refused there (`read_only_ok: false`) are left out: the folder's own flag for rows listed in it, each
  *  row's storage for Recent / Starred / a tag / Home, where no folder is. */
 function pluginActionRows(sel: FileNode[]): ContextAction[] {
   if (!pluginsEnabled.value) return [];
@@ -2168,47 +2403,44 @@ async function onOpenOpOutput(_id: number, path: string) {
 // helpers (StarButton, TagPicker, RecentlyOpened) handle their own
 // API calls — the explorer just tracks the cross-row state needed to
 // render inline stars and keep the recents tray in sync.
-const starredIds = ref(new Set<number>());
+//
+// ⚠⚠ 0.54 (task #207, audit D4): whether a row is starred is the ROW's own
+// fact - every listing and search row the server sends carries
+// `starred: true` (one query per answer on the server). The explorer used to
+// fetch `star/list?limit=500` once and match ids, so a person's 501st star
+// was never drawn and a star set on another device or by an agent appeared
+// only after a reload. What is left here is the optimistic part: a star the
+// person just toggled, until the next answer says it itself.
+const starOverrides = ref(new Map<number, boolean>());
 const showRecents = ref(false);
 const showTagPicker = ref(false);
 const tagPickerNode = ref<FileNode | null>(null);
 const recentRefreshKey = ref(0);
 
-async function loadStarred() {
-  try {
-    const headers = await buildAuthHeaders();
-    const base = props.config.apiBase ?? '';
-    const res = await fetch(`${base}/api/files/manager/star/list?limit=500`, {
-      headers,
-      // ⚠ NOT 'include'. With a bearer token the request is cross-origin for
-      // every embedder that serves the UI from a different origin to the API
-      // (the desktop app is one), and a credentialed request may not be
-      // answered with `Access-Control-Allow-Origin: *` — which is what filex
-      // sends. This one line made starred files fail silently in every such
-      // install while the rest of the explorer worked.
-      credentials: api.credentialsMode(),
-    });
-    if (!res.ok) return;
-    const body = await res.json();
-    const rows: { id?: number }[] = Array.isArray(body)
-      ? body
-      : Array.isArray(body?.entries)
-        ? body.entries
-        : Array.isArray(body?.nodes)
-          ? body.nodes
-          : [];
-    starredIds.value = new Set(rows.map((n) => n.id).filter((id): id is number => typeof id === 'number'));
-  } catch {
-    // Silent — backend may be older without the meta routes.
-  }
+/** Starred, as the person last set it here, else as the row says. */
+function isStarred(n: FileNode): boolean {
+  if (typeof n.id !== 'number') return false;
+  const o = starOverrides.value.get(n.id);
+  return o ?? (n as Record<string, unknown>).starred === true;
 }
+
+function setStarOverride(id: number, value: boolean) {
+  const next = new Map(starOverrides.value);
+  next.set(id, value);
+  starOverrides.value = next;
+}
+
+/** The main pane's starred ids, for the views (FilePane adds its own rows'). */
+const starredIds = computed(() => {
+  const out = new Set<number>();
+  for (const n of files.value) if (isStarred(n)) out.add(n.id as number);
+  for (const [id, on] of starOverrides.value) if (on) out.add(id);
+  return out;
+});
 
 function onStarChange(n: FileNode, value: boolean) {
   if (typeof n.id !== 'number') return;
-  const next = new Set(starredIds.value);
-  if (value) next.add(n.id);
-  else next.delete(n.id);
-  starredIds.value = next;
+  setStarOverride(n.id, value);
 }
 
 /* === yildiz:s1 — starring as an ACTION ================================
@@ -2240,7 +2472,7 @@ function starableNodes(targets: FileNode[]): FileNode[] {
  *  behaviour that needs no explanation. */
 function selectionAllStarred(targets: FileNode[]): boolean {
   const list = starableNodes(targets);
-  return list.length > 0 && list.every((n) => starredIds.value.has(n.id as number));
+  return list.length > 0 && list.every((n) => isStarred(n));
 }
 
 /**
@@ -2257,12 +2489,7 @@ async function toggleStar(targets: FileNode[]) {
     authHeaders: () => buildAuthHeaders(),
     authCredentials: api.credentialsMode(),
   };
-  const set = new Set(starredIds.value);
-  for (const n of list) {
-    if (next) set.add(n.id as number);
-    else set.delete(n.id as number);
-  }
-  starredIds.value = set;
+  for (const n of list) setStarOverride(n.id as number, next);
   let failed = 0;
   await Promise.all(
     list.map(async (n) => {
@@ -2270,10 +2497,7 @@ async function toggleStar(targets: FileNode[]) {
         await setNodeStarred(n.id as number, next, opts);
       } catch {
         failed += 1;
-        const rollback = new Set(starredIds.value);
-        if (next) rollback.delete(n.id as number);
-        else rollback.add(n.id as number);
-        starredIds.value = rollback;
+        setStarOverride(n.id as number, !next);
       }
     }),
   );
@@ -2706,6 +2930,18 @@ const permTarget = ref<FileNode | null>(null);
 const showDestPicker = ref(false);
 const destPickerMode = ref<'move' | 'copy'>('move');
 const destPickerTargets = ref<FileNode[]>([]);
+/* wiring:e2 vault — what the folder chooser knows of vaults: the ones this
+   tab knows, and the vault the chosen items are in (null: outside every
+   vault). Inside a vault only that vault is a destination; outside, none is. */
+const destPickerVaultRoots = computed(() => {
+  void vault.version.value;
+  void showDestPicker.value;
+  return vault.roots();
+});
+const destPickerVaultFrom = computed(() => {
+  const first = destPickerTargets.value[0];
+  return first ? vault.rootOf(first.path) : null;
+});
 const destPickerBusy = ref(false);
 
 /* === koru:k1 — inspector (details) panel ===
@@ -3039,7 +3275,9 @@ const advScope = ref<AdvScope>('name');
  * pane only ever lists (`SecondaryPane.loadPane` calls `index`), so a global
  * "we are searching" would silently unsort the pane that is not.
  */
-const listingOrder = computed<ListingOrder>(() => (searchQuery.value ? 'relevance' : 'sort'));
+const listingOrder = computed<ListingOrder>(() =>
+  searchQuery.value || serverOrderedView.value ? 'relevance' : 'sort',
+);
 /* pane:p1 — `filtersOn` and `displayFiles` USED TO LIVE HERE, and they are the
  * clearest example of what this refactor is for: they compose the filter row's
  * narrowing, the advanced dialog's narrowing and the sort into the rows a
@@ -3141,29 +3379,47 @@ const advContentAvailable = computed(() => true);
  *  uses 250 internally; matching it keeps the two scopes comparable. */
 const ADV_CONTENT_LIMIT = 250;
 
-/** Run one advanced search and hand back the rows, unfiltered — and whether
- *  the answer was cut. The name scope has the server's own word for that
- *  (`truncated`); /api/files/search's flag does not survive `globalSearch`,
- *  which returns hits only, so the content scope keeps the full-page guess. */
+/**
+ * #207 (audit D6) — the narrowing that travels WITH a search: the advanced
+ * dialog's choices (type, dates, sizes, folder, owner) and the "show hidden
+ * files" choice, as the server's parameters (lib/advSearch advFilterParams).
+ * The server applies them before it cuts its page, so the rows that come
+ * back are already the answer; the browser narrows nothing after them.
+ */
+function searchNarrow(f: DriveFilters | null = advFilters.value): Record<string, string> {
+  return advFilterParams(f ?? EMPTY_FILTERS, Date.now(), { showHidden: showHiddenFiles.value });
+}
+
+/** True while the rows on screen are a search the BROWSER ran (inside an
+ *  encrypted-names folder the server cannot read the names): only then is
+ *  the advanced narrowing still the pane's to apply. */
+const searchRanLocally = ref(false);
+
+/** Run one advanced search and hand back the rows - narrowed by the server -
+ *  and whether the answer was cut, in the server's own word (`truncated`). */
 async function advFetchRows(
   scope: AdvScope,
   query: string,
   target: string,
-): Promise<{ rows: FileNode[]; truncated: boolean }> {
+  narrow: Record<string, string> = searchNarrow(),
+): Promise<{ rows: FileNode[]; truncated: boolean; local: boolean }> {
   if (scope === 'name') {
     /* wiring:e2 names — inside an encrypted-names folder the name search is
        the browser's own (the server cannot read the names). */
-    const resp = (await e2eSearchInside(target, query)) ?? (await api.search(target, query));
+    const local = await e2eSearchInside(target, query);
+    const resp = local ?? (await api.search(target, query, narrow));
     return {
       rows: filterListing(await e2eNames.decorate(resp.files, { root: resp.e2e_root || null })),
       truncated: advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated),
+      local: !!local,
     };
   }
-  const hits = await api.globalSearch(query, { limit: ADV_CONTENT_LIMIT, scope });
+  const page = await api.globalSearchPage(query, { limit: ADV_CONTENT_LIMIT, scope, narrow });
   const storageName = adapter.value || (props.config.storages ?? [])[0]?.name || '';
   return {
-    rows: filterListing(await e2eNames.decorate(hits.map((h) => hitToNode(h, storageName)))),
-    truncated: advSearchTruncated(hits.length, ADV_CONTENT_LIMIT),
+    rows: filterListing(await e2eNames.decorate(page.hits.map((h) => hitToNode(h, storageName)))),
+    truncated: advSearchTruncated(page.hits.length, ADV_CONTENT_LIMIT, page.truncated),
+    local: false,
   };
 }
 
@@ -3187,9 +3443,13 @@ function advTarget(): string {
  */
 async function advSearchCount(req: AdvSearchRequest): Promise<AdvCountResult> {
   const query = advQueryString(req);
-  const { rows, truncated } = await advFetchRows(req.scope, query, advTarget());
+  // The dialog's choices go to the server with the query (#207): the rows
+  // that come back ARE the count. Only a search the browser ran itself (an
+  // encrypted-names folder) is narrowed here, by the same choices.
+  const { rows, truncated, local } = await advFetchRows(req.scope, query, advTarget(), searchNarrow(req.filters));
+  const shown = local && filtersActive(req.filters) ? applyFilters(rows, req.filters) : rows;
   return {
-    count: applyFilters(rows, req.filters).length,
+    count: shown.length,
     capped: truncated,
   };
 }
@@ -3345,37 +3605,106 @@ function nodeRowToFileNode(row: Record<string, unknown>): FileNode | null {
   });
 }
 
-/** GET one of the view endpoints. Returns rows already in listing shape. */
-async function fetchNavRows(kind: 'recent' | 'starred' | 'shared'): Promise<FileNode[]> {
+/** How many rows one page of a per-person view asks for. */
+const NAV_PAGE = 100;
+
+/**
+ * #207 — what the server said about the view on screen: how many rows it has
+ * in all and whether more are left than were loaded. Null for every other
+ * place. The strip under the listing reads it (`nav-more`).
+ */
+const navMore = ref<{
+  kind: 'recent' | 'starred' | 'shared' | 'tag';
+  total: number;
+  truncated: boolean;
+  /** The server offset of the next page (rows the browser drops - an
+   *  encrypted folder's key file - must not shift it). */
+  next: number;
+} | null>(null);
+const navMoreBusy = ref(false);
+
+/** The order the person chose for the view on screen, as the server's
+ *  `sort` (`-modified`, `name`...); '' = the server's own (their time,
+ *  newest first). Read from the view's memory (lib/viewPrefs). */
+const navSortParam = computed(() => {
+  if (!serverOrderedView.value) return '';
+  const key = currentFolderKey.value;
+  if (!key || !folderIsRemembered(key)) return '';
+  const p = folderPrefs(key);
+  if (!p?.k) return '';
+  return `${p.d === 'desc' ? '-' : ''}${p.k}`;
+});
+watch(navSortParam, (now, before) => {
+  if (now === before || !serverOrderedView.value) return;
+  if (navView.value === 'tag' && navTag.value) void loadTagView(navTag.value, navTagKind.value);
+  else if (navView.value === 'recent' || navView.value === 'starred' || navView.value === 'shared') void loadNavView(navView.value);
+});
+
+/** GET one page of one of the view endpoints. Returns rows already in listing
+ *  shape, with the server's total and whether more are left. */
+async function fetchNavRows(
+  kind: 'recent' | 'starred' | 'shared',
+  offset = 0,
+): Promise<{ rows: FileNode[]; total: number; truncated: boolean }> {
   const base = props.config.apiBase ?? '';
+  const params = new URLSearchParams({ limit: String(NAV_PAGE), offset: String(offset) });
+  if (navSortParam.value) params.set('sort', navSortParam.value);
   const url =
     kind === 'shared'
-      ? `${base}/api/files/manager/shared-with-me?limit=200`
+      ? `${base}/api/files/manager/shared-with-me?${params}`
       : kind === 'starred'
-        ? `${base}/api/files/manager/star/list?limit=200`
-        : `${base}/api/files/manager/recent?limit=50`;
+        ? `${base}/api/files/manager/star/list?${params}`
+        : `${base}/api/files/manager/recent?${params}`;
   // ⚠ await. `buildAuthHeaders` is async because a token may be a function the
   // desktop shell resolves per call; spreading the un-awaited promise sends the
   // request with no Authorization header and it fails silently with a 401.
   const res = await fetch(url, {
     headers: await buildAuthHeaders(),
-    // ⚠ NOT 'include' — same reason as loadStarred: a credentialed
+    // ⚠ NOT 'include' — with a bearer token this is cross-origin for every
+    // embedder serving the UI from another origin (the desktop app): a credentialed
     // cross-origin request cannot be answered with `ACAO: *`.
     credentials: api.credentialsMode(),
   });
   if (!res.ok) throw new Error(String(res.status));
   const body = await res.json();
+  const page = (rows: FileNode[]) => ({
+    rows,
+    total: typeof body?.total === 'number' ? body.total : offset + rows.length,
+    truncated: body?.truncated === true,
+  });
   if (kind === 'shared') {
     // The shared endpoint already answers in the listing shape, and reports
     // which storages are grant-only in the same call.
     sharedStorageNames.value = Array.isArray(body?.storages) ? body.storages : [];
-    return e2eNames.decorate((Array.isArray(body?.files) ? body.files : []) as FileNode[]);
+    return page(await e2eNames.decorate((Array.isArray(body?.files) ? body.files : []) as FileNode[]));
   }
   const rows: Record<string, unknown>[] = Array.isArray(body?.nodes) ? body.nodes : [];
   /* wiring:e2 names — Recent, Starred and Home name an item inside an
      encrypted folder by its plaintext while that folder is unlocked, and as
      "🔒 Encrypted item" while it is not (rows carry `e2e_root`). */
-  return e2eNames.decorate(rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null));
+  return page(await e2eNames.decorate(rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null)));
+}
+
+/** #207 — the next page of the view on screen, appended in the server's
+ *  order. The strip offers it while the server says more are left. */
+async function loadMoreNav() {
+  const more = navMore.value;
+  if (!more || !more.truncated || navMoreBusy.value) return;
+  navMoreBusy.value = true;
+  const at = currentPath.value;
+  try {
+    const next =
+      more.kind === 'tag'
+        ? await fetchTagRows(navTag.value, navTagKind.value, more.next)
+        : await fetchNavRows(more.kind, more.next);
+    if (currentPath.value !== at) return;
+    files.value = [...files.value, ...next.rows];
+    navMore.value = { kind: more.kind, total: next.total, truncated: next.truncated, next: more.next + NAV_PAGE };
+  } catch (err) {
+    flashToast(err instanceof Error ? err.message : String(err));
+  } finally {
+    navMoreBusy.value = false;
+  }
 }
 
 /* === gorunum:v3-shell — the Home view's own state ========================
@@ -3436,8 +3765,8 @@ async function loadHome() {
     // ⚠ Both at once and neither fatal on its own: a server without the
     // starred endpoint must still be able to show somebody their recents.
     const [r, st] = await Promise.all([
-      fetchNavRows('recent').catch(() => [] as FileNode[]),
-      fetchNavRows('starred').catch(() => [] as FileNode[]),
+      fetchNavRows('recent').then((p) => p.rows).catch(() => [] as FileNode[]),
+      fetchNavRows('starred').then((p) => p.rows).catch(() => [] as FileNode[]),
     ]);
     homeRecent.value = r;
     homeStarred.value = st;
@@ -3531,10 +3860,12 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
   // reason (its note above).
   dirname.value = NAV_VIEW_DIRNAME[kind];
   currentPath.value = NAV_VIEW_DIRNAME[kind];
+  navMore.value = null;
   try {
-    const rows = await fetchNavRows(kind);
+    const got = await fetchNavRows(kind);
     if (!isNewestLoad(ticket)) return;
-    files.value = rows;
+    files.value = got.rows;
+    navMore.value = { kind, total: got.total, truncated: got.truncated, next: NAV_PAGE };
     // These three span every storage, so the crumb reads "/ > Starred", not
     // "/ > My files > Starred", which would name a storage half the rows are
     // not in. Trash keeps its storage crumb: trash IS per-storage.
@@ -3548,6 +3879,25 @@ async function loadNavView(kind: Exclude<NavView, ''>) {
   } finally {
     if (isNewestLoad(ticket)) loading.value = false;
   }
+}
+
+/** One page of a tag's rows, in the server's order (#207). */
+async function fetchTagRows(
+  name: string,
+  kind: TagKind | '',
+  offset: number,
+): Promise<{ rows: FileNode[]; total: number; truncated: boolean }> {
+  const got = await fetchTaggedPage(
+    name,
+    {
+      apiBase: props.config.apiBase ?? '',
+      authHeaders: () => buildAuthHeaders(),
+      authCredentials: api.credentialsMode(),
+    },
+    { limit: NAV_PAGE, offset, kind, sort: navSortParam.value },
+  );
+  const rows = await e2eNames.decorate(got.rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null));
+  return { rows, total: got.total, truncated: got.truncated };
 }
 
 /* === etiket:t1 — the tag view ==========================================
@@ -3582,22 +3932,12 @@ async function loadTagView(tag: string, kind: TagKind | '' = '') {
   const seg = makeTagSegment(name, kind);
   dirname.value = seg;
   currentPath.value = seg;
+  navMore.value = null;
   try {
-    const rows = await fetchTaggedRows(
-      name,
-      {
-        apiBase: props.config.apiBase ?? '',
-        authHeaders: () => buildAuthHeaders(),
-        authCredentials: api.credentialsMode(),
-      },
-      200,
-      kind,
-    );
-    const shown = await e2eNames.decorate(
-      rows.map(nodeRowToFileNode).filter((n): n is FileNode => n !== null),
-    );
+    const got = await fetchTagRows(name, kind, 0);
     if (!isNewestLoad(ticket)) return;
-    files.value = shown;
+    files.value = got.rows;
+    navMore.value = { kind: 'tag', total: got.total, truncated: got.truncated, next: NAV_PAGE };
     // Spans every storage, like Starred/Recent/Shared — so no storage crumb.
     adapter.value = '';
   } catch (err) {
@@ -3822,6 +4162,49 @@ function selPerm(sel: FileNode[]): string | undefined {
 function selReadOnly(sel: FileNode[]): boolean {
   return sel.some(nodeReadOnly);
 }
+/* #196 — every question a menu row waits on (the folder permissions here, the
+ * encryption answer below, the desktop's keep state) is counted, so a row's
+ * menu opens once they are answered instead of drawing rows late under the
+ * pointer (`openCtxMenu`). */
+const rowAnswers = pendingAnswers();
+/* #196 - the answers themselves, asked BEFORE a menu opens and remembered per
+ * person and storage (lib/menuAnswers): a listing asks every row's questions
+ * in one batched request per question (prefetchMenuAnswers), the live socket
+ * says when they went stale (`access.changed`, onAccessChanged), and a menu
+ * reads them at once. Only a question nothing is known about yet holds a menu
+ * that is about to open (rowAnswers, at most MENU_ANSWER_WAIT_MS). They only
+ * shape the menu: the server decides every action again. */
+const menuAnswers = menuAnswerStore();
+onBeforeUnmount(() => menuAnswers.dispose());
+/** The rule set each family of answers is asked under: a change drops that
+ *  family's remembered answers (lib/menuAnswers `sign`). */
+function menuSig(): { p: string; e: string } {
+  const policy = capabilitiesData.value?.e2e_policy;
+  return {
+    p: [...(heldByFolder.value ?? [])].sort().join(','),
+    e: policy ? `${policy.available}|${policy.policy}` : '',
+  };
+}
+/** Whose remembered answers these are: this server, this account, its tenant
+ *  and the root this explorer is confined to. Asked once there is something
+ *  to remember (an encryption policy, or permissions that differ from folder
+ *  to folder) and the rule sets are known. Until then, and when the account
+ *  cannot be told, the answers live in memory for the page. */
+async function attachMenuAnswers(): Promise<void> {
+  await Promise.all([loadCapabilities(), ownPermissionsAsked]);
+  if (!capabilitiesData.value?.e2e_policy && !heldByFolder.value?.length) return;
+  let who: { id?: unknown; provider_id?: unknown } | null | undefined;
+  try {
+    who = (await fetchMeOnce())?.user as { id?: unknown; provider_id?: unknown } | null | undefined;
+  } catch {
+    who = null;
+  }
+  const origin = connectionsBase(props.config) || (typeof location !== 'undefined' ? location.origin : '');
+  const scope = who && typeof who.id === 'number' ? [origin, who.id, who.provider_id ?? '', rootFloor].join('|') : null;
+  menuAnswers.attach(scope, menuSig());
+  prefetchMenuAnswers();
+}
+onMounted(() => void attachMenuAnswers());
 /* Permissions that differ from folder to folder (`config.permissionsByFolder`
  * — a role allowing Delete only in Scratch) are asked of the server per path
  * and remembered here: path → the permissions held there. Until a path is
@@ -3838,36 +4221,58 @@ watch(
     folderGen++;
     folderAsking.clear();
     folderAllowed.value = {};
+    menuAnswers.sign('p', menuSig().p); /* #196 */
   },
 );
 function askFolderAllowed(paths: string[]): void {
   const byFolder = heldByFolder.value;
   if (!byFolder?.length) return;
-  const missing = paths.filter((p) => !(p in folderAllowed.value) && !folderAsking.has(p));
+  // #196 - asked again when it is not fresh (another era, or old); a
+  // remembered answer is shown meanwhile (folderHeldAt).
+  const missing = paths.filter((p) => !menuAnswers.fresh('p', p) && !folderAsking.has(p));
   if (!missing.length) return;
   missing.forEach((p) => folderAsking.add(p));
   const perms = [...byFolder];
   const gen = folderGen;
-  const settle = (answers: string[][]) => {
+  const settle = (answers: string[][], ok: boolean) => {
     if (gen !== folderGen) return;
     const next = { ...folderAllowed.value };
     missing.forEach((p, i) => {
       next[p] = answers[i] ?? [];
+      // A failed question offers every action (the server decides), for this
+      // page only: it is not remembered as the answer.
+      menuAnswers.put('p', p, next[p], ok);
       folderAsking.delete(p);
     });
     folderAllowed.value = next;
   };
-  api.allowedAt(missing, perms).then(settle, () => settle(missing.map(() => perms)));
+  // #196 - only a question nothing is known about yet holds a menu that is
+  // about to open; one with a remembered answer is asked in the background.
+  const answered = missing.some((p) => folderHeldAt(p) === undefined) ? rowAnswers.start() : () => {};
+  api
+    .allowedAt(missing, perms)
+    .then(
+      (answers) => settle(answers, true),
+      () => settle(missing.map(() => perms), false),
+    )
+    .finally(answered);
+}
+/** The per-folder permissions held at `path`: this page's answer, else the
+ *  remembered one (#196), else undefined (never answered). */
+function folderHeldAt(path: string): string[] | undefined {
+  return folderAllowed.value[path] ?? (menuAnswers.peek('p', path) as string[] | undefined);
 }
 /** permHeld for an action on `paths`: every one of them must allow it. */
-function permHeldAt(p: string, paths: string[]): boolean {
+function permHeldAt(p: string, pathsIn: string[]): boolean {
+  /* wiring:e2 vault — asked as the vault folder (vaultAskPath). */
+  const paths = [...new Set(pathsIn.map(vaultAskPath))];
   if (!heldPermissions.value || !paths.length || !heldByFolder.value?.includes(p)) {
     return permHeld(p);
   }
   // ⚠ Starts a request from inside a computed; the answer lands later in
   // `folderAllowed`, which re-runs it. Nothing reactive is written now.
   askFolderAllowed(paths);
-  return paths.every((x) => folderAllowed.value[x]?.includes(p) ?? false);
+  return paths.every((x) => folderHeldAt(x)?.includes(p) ?? false);
 }
 /* wiring:e2 policy — may this account START encrypting here? The server's
  * answer per path (`POST /api/files/e2e/allowed`, backend internal/e2epolicy):
@@ -3898,6 +4303,7 @@ function forgetE2eAnswers(): void {
   e2eGen++;
   e2eAsking.clear();
   e2eAnswers.value = {};
+  menuAnswers.sign('e', menuSig().e); /* #196 */
 }
 watch(
   () => [
@@ -3914,30 +4320,133 @@ function e2eAskKey(path: string, kind: E2eRequestKind): string {
   return `${kind}:${path}`;
 }
 async function askE2eAnswers(asks: { path: string; kind: E2eRequestKind }[]): Promise<void> {
+  // #196 - asked again when it is not fresh (another era, or old); the
+  // remembered answer is shown meanwhile (e2eAnswerAt).
   const missing = asks.filter((a) => {
     const k = e2eAskKey(a.path, a.kind);
-    return !(k in e2eAnswers.value) && !e2eAsking.has(k);
+    return !menuAnswers.fresh(`e:${a.kind}`, a.path) && !e2eAsking.has(k);
   });
   if (!missing.length) return;
   for (const a of missing) e2eAsking.add(e2eAskKey(a.path, a.kind));
   const gen = e2eGen;
-  const answers = await api.e2eAllowedAt(missing);
-  if (gen !== e2eGen) return;
-  const next = { ...e2eAnswers.value };
-  missing.forEach((a, i) => {
-    const k = e2eAskKey(a.path, a.kind);
-    next[k] = answers[i] ?? 'allowed';
-    e2eAsking.delete(k);
-  });
-  e2eAnswers.value = next;
+  // #196 — counted until the answer is in the cache, and only when nothing is
+  // known about it yet: a menu waiting on it (`openCtxMenu`) then opens with
+  // the row already in its place. A question with a remembered answer holds
+  // no menu.
+  const unknown = missing.some((a) => e2eKnownAt(a.path, a.kind) === undefined);
+  const answered = unknown ? rowAnswers.start() : () => {};
+  let failed = false;
+  try {
+    const answers = await api.e2eAllowedAt(missing, {
+      onFailed: () => {
+        failed = true;
+      },
+    });
+    if (gen !== e2eGen) return;
+    const next = { ...e2eAnswers.value };
+    missing.forEach((a, i) => {
+      const k = e2eAskKey(a.path, a.kind);
+      next[k] = answers[i] ?? 'allowed';
+      // The fallback of a failed question ("allowed", the server decides) is
+      // this page's only: it is not remembered as the answer.
+      menuAnswers.put(`e:${a.kind}`, a.path, next[k], !failed);
+      e2eAsking.delete(k);
+    });
+    e2eAnswers.value = next;
+  } finally {
+    answered();
+  }
 }
+/** #196 - the encryption answer known for a path and kind: this page's, else
+ *  the remembered one, else undefined (never answered). */
+function e2eKnownAt(path: string, kind: E2eRequestKind): E2eAnswer | undefined {
+  return e2eAnswers.value[e2eAskKey(path, kind)] ?? (menuAnswers.peek(`e:${kind}`, path) as E2eAnswer | undefined);
+}
+
+/* #196 - the hot tier. Rows asked for at once when a folder is listed: more
+ * than the server takes in one question (1000) would be several requests,
+ * and a menu on a row past these asks for itself. */
+const MENU_PREFETCH_MAX = 500;
+/**
+ * #196 - ask, before any menu opens, every question the rows of this folder's
+ * menus depend on, in one batched request per question: the folder's own (New
+ * folder, Upload: `new_folder`, its permissions) and each row's (`file` or
+ * `folder`, its permissions); and, from what is remembered, the same questions
+ * around it - the storage's root and its first level, the parent's level and
+ * the level below (lib/menuAnswers `around`). Only what is not fresh goes out
+ * (askFolderAllowed, askE2eAnswers). Nothing below a vault's folder: those
+ * rows are asked about as the vault folder, by the menu itself.
+ */
+function prefetchMenuAnswers(): void {
+  if (trashMode.value || navView.value || notFoundPath.value || loadError.value) return;
+  const here = qualify(currentPath.value ?? '');
+  if (!here.includes('://') || vault.rootOf(here)) return;
+  const e2eOn = !!capabilitiesData.value?.e2e_policy && !e2eActive.value;
+  const permsOn = !!heldPermissions.value && !!heldByFolder.value?.length;
+  if (!e2eOn && !permsOn) return;
+  const perms = new Set<string>();
+  const e2e = new Map<string, { path: string; kind: E2eRequestKind }>();
+  const add = (q: MenuQuestion, path: string) => {
+    if (q === 'p') {
+      if (permsOn) perms.add(path);
+    } else if (e2eOn) {
+      const kind = q.slice(2) as E2eRequestKind;
+      e2e.set(e2eAskKey(path, kind), { path, kind });
+    }
+  };
+  add('p', here);
+  add('e:new_folder', here);
+  for (const n of files.value.slice(0, MENU_PREFETCH_MAX)) {
+    if (!n || typeof n.path !== 'string' || !n.path.includes('://') || isStorageRow(n) || vault.isVaultRow(n)) continue;
+    add('p', n.path);
+    // The encryption rows show only on rows this person can write (`w`), and
+    // never on what is already encrypted.
+    if (!nodeCanEdit(n) || n.e2e || n.e2e_root) continue;
+    if (n.type === 'dir') add('e:folder', n.path);
+    else if (!isFxeRow(n)) add('e:file', n.path);
+  }
+  for (const a of menuAnswers.around(here)) add(a.q, a.path);
+  if (perms.size) askFolderAllowed([...perms].slice(0, 1000));
+  if (e2e.size) void askE2eAnswers([...e2e.values()].slice(0, 1000));
+}
+
+/* #196 - the server said what this person may do may have changed
+ * (`access.changed`), or the socket was down long enough to miss it. Every
+ * remembered answer becomes stale (still shown, asked again when hot), the
+ * account's own permissions are read again, and the folder is listed again -
+ * its rows carry their own level - which asks the hot tier again. A change
+ * everybody connected heard is spread over ACCESS_SPREAD_MS so a role edit
+ * does not make every open explorer ask in the same instant. */
+const ACCESS_SPREAD_MS = 2_000;
+let accessTimer: ReturnType<typeof setTimeout> | null = null;
+function onAccessChanged(news: { all: boolean; resync: boolean }): void {
+  menuAnswers.stale();
+  if (news.resync) {
+    prefetchMenuAnswers();
+    return;
+  }
+  if (accessTimer) return;
+  accessTimer = setTimeout(
+    () => {
+      accessTimer = null;
+      loadOwnPermissions();
+      void load();
+    },
+    news.all ? Math.random() * ACCESS_SPREAD_MS : 0,
+  );
+}
+onBeforeUnmount(() => {
+  if (accessTimer) clearTimeout(accessTimer);
+  accessTimer = null;
+});
 /** The encryption answer for one wire path and one kind of encryption:
  *  `new_folder` - a new encrypted folder made IN this folder (the New folder
  *  dialog); `folder` - this folder encrypted where it is; `file` - this file.
  *  ⚠ The kind is the server's too (operator decision 2026-10-03): an approval
  *  opens only the kind it was asked for, so asking without one would show
  *  "allowed" where the server then refuses. */
-function e2eAnswerAt(path: string, kind: E2eRequestKind): E2eAnswer {
+function e2eAnswerAt(pathIn: string, kind: E2eRequestKind): E2eAnswer {
+  const path = vaultAskPath(pathIn); /* wiring:e2 vault */
   const policy = capabilitiesData.value?.e2e_policy;
   if (!policy) return 'allowed';
   // ⚠ Nothing is answered from the capabilities' row itself — not even "the
@@ -3948,9 +4457,11 @@ function e2eAnswerAt(path: string, kind: E2eRequestKind): E2eAnswer {
   // ⚠ Starts a request from inside a computed, as permHeldAt does; the answer
   // lands in `e2eAnswers`, which re-runs it.
   void askE2eAnswers([{ path, kind }]);
-  // 'denied' while the question is on its way: a row that appears a moment
-  // late is better than one that appears and is taken back.
-  return e2eAnswers.value[e2eAskKey(path, kind)] ?? 'denied';
+  // The remembered answer while a fresh one is asked (#196); 'denied' while
+  // nothing is known: a row that appears a moment late is better than one
+  // that appears and is taken back. A row's menu waits, briefly, only for an
+  // answer nothing is known about (`openCtxMenu`).
+  return e2eKnownAt(path, kind) ?? 'denied';
 }
 // Can the current user write into the directory being viewed? Gates the
 // toolbar New Folder / Upload / Paste + drag-drop upload.
@@ -4277,9 +4788,14 @@ async function loadListing(path?: string) {
   // answered yet (the "more results than shown" strip reads this).
   searchTruncated.value = false;
   const { ticket, want } = tickets.begin(path, currentPath.value ?? '');
-  // wiring:e2 policy — who may encrypt where is asked again for this
-  // listing: an approval granted meanwhile shows at the next read.
-  forgetE2eAnswers();
+  // wiring:e2 policy — who may encrypt where, and the per-folder permissions,
+  // are not forgotten here any more (#196): they stay the menu's answers and
+  // this listing's rows are asked again once it is in (prefetchMenuAnswers)
+  // where they are stale. The live socket says when they went stale (an
+  // approval granted meanwhile, a grant, a role); without one nothing would,
+  // so every read starts a new era - the old "asked again at every read",
+  // without a menu that waits for it.
+  if (!realtime.connected.value) menuAnswers.stale();
   /* === etiket:t1 — a sentinel is a VIEW, not a folder ===================
    * A restored tab, a reload on `#.trash` / `#.starred` / `#.tag~invoices`,
    * or the breadcrumb crumb for the view you are standing in all arrive here
@@ -4388,6 +4904,34 @@ async function loadListing(path?: string) {
       ? virtualToWire(requested)
       : qualify(requested);
 
+    /* wiring:e2 vault — inside an open vault the listing is its index, read
+       in this tab (a search too: the index, by name). A folder below a vault
+       that is not open here is its vault folder, where the lock screen is:
+       the server never hears of a path below a vault. */
+    const vaultRoot = vault.rootOf(target);
+    if (vaultRoot) {
+      const tgt = String(target).replace(/\/+$/, '');
+      if (vault.isOpen(vaultRoot)) {
+        const here = vault.rows(tgt) ? tgt : vaultRoot;
+        const rowsHere = searchQuery.value ? vault.search(here, searchQuery.value) : vault.rows(here);
+        if (!isNewestLoad(ticket)) return;
+        vault.touch(here);
+        searchTruncated.value = false;
+        adapter.value = here.slice(0, here.indexOf('://'));
+        dirname.value = here;
+        dirPerm.value = vault.permOf(vaultRoot) || '';
+        dirReadOnly.value = !!vault.strips[vaultRoot]?.readOnly;
+        e2eRoot.value = vaultRoot;
+        const arrivedVault = paneToUser(here);
+        arriveAt(arrivedVault);
+        files.value = filterListing(rowsHere ?? []);
+        currentPath.value = arrivedVault;
+        return;
+      }
+      if (tgt !== vaultRoot) return await load(paneToUser(vaultRoot));
+    }
+    /* /wiring:e2 vault */
+
     /* gorunum:v1-advsearch — a content-scoped search cannot come from the
        manager's search action (it hardcodes `search.ScopeName`), so it is
        fetched from /api/files/search and projected onto the listing shape
@@ -4395,6 +4939,7 @@ async function loadListing(path?: string) {
        sees ordinary rows, which is the point: one results surface. */
     const advContent = !!searchQuery.value && advScope.value !== 'name';
     const adv = advContent ? await advFetchRows(advScope.value, searchQuery.value, target) : null;
+    let ranLocally = false;
     const resp: ManagerResponse = adv
       ? {
           adapter: adapter.value,
@@ -4405,8 +4950,24 @@ async function loadListing(path?: string) {
           truncated: adv.truncated,
         }
       : searchQuery.value
-        ? ((await e2eSearchInside(target, searchQuery.value)) ?? (await api.search(target, searchQuery.value)))
+        ? await (async () => {
+            const local = await e2eSearchInside(target, searchQuery.value);
+            ranLocally = !!local;
+            return local ?? (await api.search(target, searchQuery.value, searchNarrow()));
+          })()
         : await api.index(target);
+    /* wiring:e2 vault — the server says this folder is in a vault that is not
+       open in this tab (one this browser may never have opened): a folder
+       below it is its vault folder, where the lock screen is, and the vault
+       folder's own listing is its layout on the storage (`v/`), not rows. */
+    if (!adv && !searchQuery.value && typeof resp.e2e_vault_root === 'string' && resp.e2e_vault_root) {
+      const vr = resp.e2e_vault_root.replace(/\/+$/, '');
+      if (String(resp.dirname ?? '').replace(/\/+$/, '') !== vr) {
+        if (!isNewestLoad(ticket)) return;
+        return await load(paneToUser(vr));
+      }
+      resp.files = [];
+    }
     /* wiring:e2 names — stored names become plaintext here, BEFORE the hidden
        -file filter, which judges the plaintext (`.gitignore` is a dotfile,
        its ciphertext is not). Content-only folders come back untouched.
@@ -4432,6 +4993,7 @@ async function loadListing(path?: string) {
     // it leaves the full-page guess the advanced search count always made.
     searchTruncated.value =
       !!searchQuery.value && advSearchTruncated(resp.files.length, MANAGER_SEARCH_PAGE, resp.truncated);
+    searchRanLocally.value = !!searchQuery.value && (adv ? adv.local : ranLocally);
     if (Array.isArray(resp.storage_info)) coverageMap.value = coverageByStorage(resp.storage_info);
     adapter.value = resp.adapter;
     dirname.value = resp.dirname;
@@ -4440,6 +5002,13 @@ async function loadListing(path?: string) {
     /* wiring:e2 — backend tells us when this dir sits inside an encrypted
        subtree; '' resets on every plain folder. Drives the lock screen. */
     e2eRoot.value = typeof resp.e2e_root === 'string' ? resp.e2e_root : '';
+    /* wiring:e2 vault — a folder remembered as a vault that is not an
+       encrypted root any more (removed, replaced) is forgotten. */
+    {
+      const listedDir = String(resp.dirname ?? '').replace(/\/+$/, '');
+      const listedRoot = typeof resp.e2e_root === 'string' ? resp.e2e_root.replace(/\/+$/, '') : '';
+      if (vault.rootOf(listedDir) === listedDir && listedRoot !== listedDir) vault.forget(listedDir);
+    }
     /* /wiring:e2 */
     // currentPath is the user-facing form: `s3-test/example` in
     // multi-storage mode, the bare relative path otherwise.
@@ -4461,6 +5030,8 @@ async function loadListing(path?: string) {
       void hydrateTrashRowShared(files.value, resp.adapter, api);
     }
     currentPath.value = arrived;
+    // #196 - this folder's menu answers, before any menu is opened on it.
+    prefetchMenuAnswers();
   } catch (err) {
     // A failure of a superseded load is not the person's folder failing.
     if (!isNewestLoad(ticket)) return;
@@ -4592,49 +5163,61 @@ const trashBannerText = computed(() =>
     : t('trash.retention_unknown'),
 );
 
-/** How much is about to go. The confirmation names both, because "empty the
- *  trash?" with no quantity is a question nobody can answer. */
-const trashTotalBytes = computed(() =>
-  files.value.reduce((sum, n) => {
-    const v = typeof n.size === 'number' ? n.size : (n as Record<string, unknown>).file_size;
-    return sum + (typeof v === 'number' ? v : 0);
-  }, 0),
-);
-/** ⚠ A total of zero is reported as "we do not know", not as "0 B". A server
- *  that does not send sizes would otherwise have us telling somebody that
- *  deleting their files frees nothing, on the last screen before it happens.
- *  A genuinely empty set never reaches here — the button is disabled. */
-const trashSizeKnown = computed(() => trashTotalBytes.value > 0);
-/** Which sentence the confirmation uses: with or without a size. Singular or
- *  plural is `t()`'s business (composables/useLocale → countedKey). */
-const trashConfirmKey = computed(() =>
-  trashSizeKnown.value ? 'trash.empty_confirm_body' : 'trash.empty_confirm_body_nosize',
-);
+/* ⚠⚠ What "Empty trash" deletes is counted by the SERVER (finding D1, 0.54).
+ * The confirmation said "This permanently deletes 50 items (2 MB)" — the rows
+ * this view had loaded, the first page of the listing — and the purge took
+ * every entry the caller reaches: other people's deletes and the desktop
+ * app's swept working copies too, 61,844 items on one install. The dialog now
+ * asks the purge's own dry run (GET /api/admin/trash/empty/preview) and shows
+ * its sentence; the button waits for it. */
+const trashPreview = ref<TrashEmptyPreview | null>(null);
+const trashPreviewError = ref('');
+let trashPreviewAsk = 0;
 
-/** "Emptying the trash… 120 of 61,844" while a purge is followed. */
+async function openTrashConfirm() {
+  trashPreview.value = null;
+  trashPreviewError.value = '';
+  showTrashConfirm.value = true;
+  const ask = ++trashPreviewAsk;
+  try {
+    const preview = await api.trashEmptyPreview();
+    if (ask === trashPreviewAsk) trashPreview.value = preview;
+  } catch (err) {
+    if (ask === trashPreviewAsk) trashPreviewError.value = serverWords(err, locale.value);
+  }
+}
+
+/** Where a followed purge stands — the server's own sentence
+ *  ("Emptying the trash… 120 of 61,844"). */
 const trashEmptyProgress = computed(() => {
   const run = trashEmptyRun.value;
-  if (!run?.running) return '';
-  if (run.queued) return t('trash.emptying_queued');
-  const nf = new Intl.NumberFormat(localeTag(locale.value));
-  return t('trash.emptying', { done: nf.format(run.scanned ?? 0), total: nf.format(run.total ?? 0) });
+  return run?.running ? run.summary ?? '' : '';
 });
 
 /* ⚠⚠ A 2xx is not "emptied" any more. The endpoint used to purge inside the
  * request, so a large trash never answered — nginx's 504 at sixty seconds
  * became a toast reading "504". It now answers within seconds: the final
  * counts, or 202 while the purge goes on in the background, which
- * lib/trashEmpty follows on GET until the run ends. */
+ * lib/trashEmpty follows on GET until the run ends. How it ended is the
+ * server's sentence (`summary`, finding A4): never a status code, never "see
+ * the server log". */
 async function emptyTrash() {
   showTrashConfirm.value = false;
   if (!trashCanEmpty.value || trashEmptying.value) return;
+  const url = api.endpoints.trashEmpty;
+  if (!url) return;
   trashEmptying.value = true;
-  const url = `${props.config.apiBase ?? ''}/api/admin/trash/empty`;
   try {
     const end = await emptyTrashAndFollow({
       start: async () =>
-        fetch(url, { method: 'POST', headers: await buildAuthHeaders(), credentials: api.credentialsMode() }),
-      status: async () => fetch(url, { headers: await buildAuthHeaders(), credentials: api.credentialsMode() }),
+        fetch(api.withScreenLang(url), {
+          method: 'POST',
+          headers: await buildAuthHeaders(),
+          credentials: api.credentialsMode(),
+        }),
+      status: async () =>
+        fetch(api.withScreenLang(url), { headers: await buildAuthHeaders(), credentials: api.credentialsMode() }),
+      locale: locale.value,
       /* The run is an ops row: it goes into the operations centre (progress,
        * Cancel) the moment the server names it — a run done within the wait
        * as well, like any other operation the person started. */
@@ -4651,35 +5234,101 @@ async function emptyTrash() {
       onProgress: (run) => {
         trashEmptyRun.value = run;
       },
-      onBusy: () => flashToast(t('trash.empty_busy')),
+      onBusy: (said) => {
+        if (said) flashToast(said);
+      },
       stopped: () => trashEmptyUnwatched,
     });
     if (end === null) return;
-    if (end.error) throw new Error(t('trash.empty_stopped', { error: end.error }));
     /* Only the view that is still showing the trash is redrawn: somebody who
      * went on to a folder while it ran is not pulled back into the trash. */
     if (trashMode.value) await loadTrash();
     /* `{running: false}` with no start is a run the server no longer knows —
      * it restarted under it. The listing just reloaded says what is left, and
      * nothing is claimed about the rest. */
-    if (!end.started_at) return;
-    if (end.cancelled) {
-      flashToast(t('trash.empty_cancelled', { count: end.purged ?? 0 }));
-      return;
-    }
-    flashToast(end.failed ? t('trash.emptied_partly', { count: end.failed }) : t('trash.emptied'));
+    if (!end.started_at || !end.summary) return;
+    showToast({ message: end.summary }, end.error || end.failed ? ERROR_TOAST_MS : FLASH_TOAST_MS);
   } catch (err) {
     if (err instanceof TrashEmptyBusy) {
-      flashToast(t('trash.empty_busy'));
+      flashToast(err.message);
       return;
     }
-    const msg = err instanceof Error ? err.message : String(err);
-    emit('error', { message: msg, context: { op: 'trash:empty' } });
+    const msg = serverWords(err, locale.value);
+    emit('error', { message: (err as Error)?.message ?? String(err), context: { op: 'trash:empty' } });
     flashToast(msg);
   } finally {
     trashEmptyRun.value = null;
     trashEmptying.value = false;
   }
+}
+
+/* ⚠⚠ The Trash view is paged (finding D1, 0.54). It read the listing once,
+ * with no limit — the server's default page of 50 — and ignored the `total`
+ * beside it: entries older than the newest 50 could not be seen or restored,
+ * and sorting by name hid that the list was cut. A page of TRASH_PAGE now,
+ * the server's count and size above it (`summary`), and "Show more" reads the
+ * next page until every entry is on screen. */
+const TRASH_PAGE = 200;
+/** The server's count of every entry the caller may see in the trash. */
+const trashTotal = ref(0);
+/** Entries read so far (the pages on screen). */
+const trashLoaded = ref(0);
+/** The server's sentence for the whole trash ("61,844 items in the trash,
+ *  12.3 GB in all"). */
+const trashSummary = ref('');
+const trashMoreBusy = ref(false);
+const trashShownText = computed(() => {
+  const nf = new Intl.NumberFormat(localeTag(locale.value));
+  return t('trash.shown_of', { shown: nf.format(trashLoaded.value), total: nf.format(trashTotal.value) });
+});
+
+/** Trash entries as explorer rows. Each row keeps its node `id` so restore
+ *  and purge can target it. */
+function trashRowsOf(entries: TrashEntry[]): FileNode[] {
+  return entries.map(
+    (e) =>
+      ({
+        type: 'file',
+        id: e.id,
+        /* Which storage's trash it is in: a permanent delete is one job per
+           storage, and each job's rows are the ones it deletes. */
+        storage_id: e.storage_id,
+        /* ⚠ The ORIGINAL path, which the server sends with its leading
+           slash: `depo:///x.txt` put an empty segment in the Location
+           column ("depo/"), so it is dropped here. */
+        path: e.storage_name ? `${e.storage_name}://${e.path.replace(/^\/+/, '')}` : e.path,
+        basename: e.name,
+        extension: e.name.includes('.') ? e.name.split('.').pop() || '' : '',
+        storage: e.storage_name || '',
+        visibility: 'private',
+        /* tablo:t1 — ⚠ BOTH. Every view reads `size` (the Size column, the
+           info panel); only the upload code reads `file_size`. Setting one of
+           the two left every trashed row with a blank Size cell. */
+        size: e.size,
+        file_size: e.size,
+        mime_type: e.mime || '',
+        /* The date the Trash's date column prints and sorts by — WHEN it was
+           deleted. A trashed row has no modification date to show, and the
+           column read "—" for every row. */
+        last_modified: Date.parse(e.deleted_at) || undefined,
+        extra_metadata: {
+          deleted_at: e.deleted_at,
+          ttl_days: e.ttl_days ?? null,
+          /* A permanent delete is on its way for it (purgeSelection). */
+          purging: trashPurging.value.has(e.id),
+          /* #71 — a discarded draft of the asker's: its Location reads
+             "Drafts" (ListView), which is where Restore puts it back. */
+          ...(e.draft ? { draft: true } : {}),
+        },
+        /* Who put it here — the Trash draws it where a folder draws the
+           owner. Keys absent when nobody is named, as the listing sends. */
+        ...(e.deleted_by_id !== undefined ? { deleted_by_id: e.deleted_by_id } : {}),
+        ...(e.deleted_by_name ? { deleted_by_name: e.deleted_by_name } : {}),
+        ...(e.deleted_by_self ? { deleted_by_self: true } : {}),
+        /* wiring:e2 names — the encrypted folder it was deleted from. */
+        ...((e as { e2e_root?: string }).e2e_root ? { e2e_root: (e as { e2e_root?: string }).e2e_root } : {}),
+      }) as unknown as FileNode,
+  );
 }
 
 async function loadTrash() {
@@ -4690,55 +5339,15 @@ async function loadTrash() {
   e2eRoot.value = ''; /* wiring:e2 — the trash view is outside the encrypted context */
   selection.clear();
   try {
-    const { entries } = await api.listTrash();
-    const trashRows = entries.map(
-      (e) =>
-        ({
-          type: 'file',
-          id: e.id,
-          /* ⚠ The ORIGINAL path, which the server sends with its leading
-             slash: `depo:///x.txt` put an empty segment in the Location
-             column ("depo/"), so it is dropped here. */
-          path: e.storage_name ? `${e.storage_name}://${e.path.replace(/^\/+/, '')}` : e.path,
-          basename: e.name,
-          extension: e.name.includes('.') ? e.name.split('.').pop() || '' : '',
-          storage: e.storage_name || '',
-          visibility: 'private',
-          /* tablo:t1 — ⚠ BOTH. Every view reads `size` (the Size column, the
-             info panel, the empty-trash confirmation); only the upload code
-             reads `file_size`. Setting one of the two left every trashed row
-             with a blank Size cell and made "this permanently deletes 2 items
-             (0 B)" a false statement about two real files. */
-          size: e.size,
-          file_size: e.size,
-          mime_type: e.mime || '',
-          /* The date the Trash's date column prints and sorts by — WHEN it was
-             deleted. A trashed row has no modification date to show, and the
-             column read "—" for every row. */
-          last_modified: Date.parse(e.deleted_at) || undefined,
-          extra_metadata: {
-            deleted_at: e.deleted_at,
-            ttl_days: e.ttl_days ?? null,
-            /* A permanent delete is on its way for it (purgeSelection). */
-            purging: trashPurging.value.has(e.id),
-            /* #71 — a discarded draft of the asker's: its Location reads
-               "Drafts" (ListView), which is where Restore puts it back. */
-            ...(e.draft ? { draft: true } : {}),
-          },
-          /* Who put it here — the Trash draws it where a folder draws the
-             owner. Keys absent when nobody is named, as the listing sends. */
-          ...(e.deleted_by_id !== undefined ? { deleted_by_id: e.deleted_by_id } : {}),
-          ...(e.deleted_by_name ? { deleted_by_name: e.deleted_by_name } : {}),
-          ...(e.deleted_by_self ? { deleted_by_self: true } : {}),
-          /* wiring:e2 names — the encrypted folder it was deleted from. */
-          ...((e as { e2e_root?: string }).e2e_root ? { e2e_root: (e as { e2e_root?: string }).e2e_root } : {}),
-        }) as unknown as FileNode,
-    );
+    const page = await api.listTrash(undefined, { limit: TRASH_PAGE });
     /* wiring:e2 names — a trashed item keeps its stored name; decrypt it the
        way its folder would, and keep the long-name sidecars out of sight. */
-    const shown = await e2eNames.decorate(trashRows);
+    const shown = await e2eNames.decorate(trashRowsOf(page.entries));
     if (!isNewestLoad(ticket)) return;
     files.value = shown;
+    trashLoaded.value = page.entries.length;
+    trashTotal.value = page.total;
+    trashSummary.value = page.summary ?? '';
     dirname.value = '.trash';
     currentPath.value = '.trash';
   } catch (err) {
@@ -4748,6 +5357,27 @@ async function loadTrash() {
     flashToast(msg);
   } finally {
     if (isNewestLoad(ticket)) loading.value = false;
+  }
+}
+
+/** The next page of the trash, appended under the ones on screen. A reload
+ *  of the trash (or leaving it) meanwhile drops the answer. */
+async function loadMoreTrash() {
+  if (trashMoreBusy.value || trashLoaded.value >= trashTotal.value) return;
+  const at = trashLoaded.value;
+  trashMoreBusy.value = true;
+  try {
+    const page = await api.listTrash(undefined, { limit: TRASH_PAGE, offset: at });
+    const shown = await e2eNames.decorate(trashRowsOf(page.entries));
+    if (!trashMode.value || trashLoaded.value !== at) return;
+    files.value = [...files.value, ...shown];
+    trashLoaded.value = at + page.entries.length;
+    trashTotal.value = page.total;
+    trashSummary.value = page.summary ?? '';
+  } catch (err) {
+    showToast({ message: failureText(err) }, ERROR_TOAST_MS);
+  } finally {
+    trashMoreBusy.value = false;
   }
 }
 
@@ -4969,8 +5599,12 @@ function onHashChange() {
 }
 
 watch(currentPath, (p) => {
-  writePersistedPath(p);
-  emit('navigate', { path: p });
+  /* wiring:e2 vault — a path inside a vault exists only in this tab: the
+     address kept (hash, local storage) and told to the host is the vault
+     folder, so a reload never sends a path below it. */
+  const kept = vault.rootOf(qualify(p)) ? paneToUser(vault.rootOf(qualify(p))!) : p;
+  writePersistedPath(kept);
+  emit('navigate', { path: kept });
   realtime.subscribe(realtimeRoom(p));
 });
 
@@ -5002,10 +5636,7 @@ onMounted(async () => {
   }
   await nextTick();
   rootEl.value?.focus();
-  // Best-effort initial fetch — silent if the older backend doesn't
-  // expose /api/files/manager/starred. Without this stars never light
-  // up on first render even when the row IS starred server-side.
-  void loadStarred();
+  // (0.54: no star list is fetched here any more - every row says `starred`.)
   /* gezinti:g1 — which storages are grant-only, so the panel can mark them
      before anybody opens the shared view. */
   void loadSharedStorages();
@@ -5407,23 +6038,9 @@ function activeTargets(): FileNode[] {
 // Actions
 // --------------------------------------------------------------------
 
-const OFFICE_EXTS = new Set([
-  'docx', 'xlsx', 'pptx',
-  'doc', 'xls', 'ppt',
-  'odt', 'ods', 'odp',
-]);
-const TEXT_CODE_EXTS = new Set([
-  'txt', 'md', 'markdown', 'log', 'csv', 'tsv', 'conf', 'ini',
-  'env', 'toml', 'cfg',
-  'json', 'jsonc', 'yaml', 'yml', 'xml', 'svg',
-  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
-  'css', 'scss', 'sass', 'less',
-  'html', 'htm', 'vue', 'svelte',
-  'php', 'py', 'rb', 'rs', 'go', 'java', 'kt', 'swift',
-  'cpp', 'c', 'h', 'hpp', 'cs', 'dart',
-  'sh', 'bash', 'zsh', 'sql', 'lua', 'pl', 'r',
-  'dockerfile', 'gradle', 'gitignore',
-]);
+/* Which files are office documents is the server's answer (lib/serverRules,
+ * `capabilities.edit_kinds`, #211): the second list that stood here, and an
+ * unused list of text types beside it, are gone. */
 
 function openNode(n: FileNode) {
   // The virtual `.trash` row opens the backend trash listing, not a real dir.
@@ -5473,6 +6090,12 @@ function openNode(n: FileNode) {
       ? wireToVirtual(n.path)
       : stripAdapter(n.path);
     void load(target);
+    return;
+  }
+  /* wiring:e2 vault — a file of an open vault (from either pane): decrypted
+     here, from its packs, into the read-only preview. */
+  if (vault.isVaultRow(n) && n.type === 'file') {
+    void e2eOpenPreview(n);
     return;
   }
   /* wiring:e2 fxe — a single encrypted file: its password, then the viewers. */
@@ -5553,7 +6176,6 @@ function openNode(n: FileNode) {
 }
 
 const VIEW_DEFAULT_EXTS = new Set<string>([
-  ...OFFICE_EXTS,
   'drawio', 'dio',
   'pdf', 'epub', 'ipynb', 'tiff', 'tif', 'psd',
   'mmd', 'mermaid',
@@ -5565,13 +6187,13 @@ const VIEW_DEFAULT_EXTS = new Set<string>([
 ]);
 
 function previewModeForExt(ext: string): 'view' | 'edit' {
-  if (VIEW_DEFAULT_EXTS.has(ext)) return 'view';
+  if (isOfficeExt(ext) || VIEW_DEFAULT_EXTS.has(ext)) return 'view';
   return 'edit';
 }
 
-/** A restore on its way. It is one request per item, and a folder is moved
- *  back object by object on an object store: minutes, with nothing on screen,
- *  and a second press met "something already has that name". */
+/** A restore on its way. A folder is moved back object by object on an
+ *  object store: minutes, and a second press met "something already has that
+ *  name". */
 const restoreBusy = ref(false);
 
 async function restoreSelection(targets?: FileNode[]) {
@@ -5589,18 +6211,17 @@ async function restoreSelection(targets?: FileNode[]) {
         // One request for the selection, answered at once with its jobs: the
         // operations centre follows them, and the trash listing, with what did
         // not come back and why, comes when each ends (onSettled).
-        const { ops } = await api.restoreQueued(ids);
+        const { ops, summary } = await api.restoreQueued(ids);
         for (const op of ops) pendingOps.register(op);
-        flashToast(t('toast.restoring', { n: ids.length }));
+        if (summary) flashToast(summary);
         selection.clear();
         return;
       }
-      showToast({ message: t('toast.restoring', { n: ids.length }) }, STICKY_TOAST_MS);
-      const { restored, taken, failed, failure } = await api.restoreIds(ids);
-      // ⚠ Everything said (lib/restoreWords): what did not come back used to
-      // vanish from the count, and a taken name hid a failure beside it.
-      const said = sayRestore({ restored, taken, failed, reason: failure === undefined ? undefined : failureText(failure) }, t);
-      showToast({ message: said.message }, said.failure ? ERROR_TOAST_MS : FLASH_TOAST_MS);
+      // ⚠ One request for the selection (finding A15): it was one per item,
+      // tallied and worded here. The server restores each and says what came
+      // back, what did not and why.
+      const said = await api.restoreBatch(ids);
+      showToast({ message: said.summary }, said.failed ? ERROR_TOAST_MS : FLASH_TOAST_MS);
       selection.clear();
       await loadTrash();
       return;
@@ -5621,6 +6242,11 @@ async function restoreSelection(targets?: FileNode[]) {
 }
 
 function previewNode(n: FileNode) {
+  /* wiring:e2 vault */
+  if (vault.isVaultRow(n) && n.type === 'file') {
+    void e2eOpenPreview(n);
+    return;
+  }
   /* wiring:e2 fxe */
   if (isFxeRow(n) && !e2eActive.value && !n.e2e_root) {
     void e2eFiles.open(n);
@@ -5741,12 +6367,21 @@ async function onToolbarAction(key: string) {
 const desktopSync = computed(() => props.config.desktopSync ?? null);
 const keptPairs = ref<Array<{ remote: string; local: string }>>([]);
 
+/* #196 - the shell has answered at least once. */
+let keptKnown = false;
 async function refreshKept(): Promise<void> {
   if (!desktopSync.value) return;
+  // #196 — the menu's keep rows follow this answer. Only the FIRST one holds a
+  // menu that is about to open (`openCtxMenu`); after that the menu opens on
+  // the kept set it has and this refresh lands behind it.
+  const answered = keptKnown ? () => {} : rowAnswers.start();
   try {
     keptPairs.value = await desktopSync.value.kept();
+    keptKnown = true;
   } catch {
     // Shell went away mid-call; a stale entry only mislabels a menu item.
+  } finally {
+    answered();
   }
 }
 
@@ -5902,6 +6537,56 @@ function keepActionsFor(sel: FileNode[]): ContextAction[] {
  */
 const ctxUnlistedTargets = ref<FileNode[]>([]);
 
+/* #196 - how long a row's menu waits for an answer NOTHING is known about yet
+ * before it opens anyway. Answers are asked when a folder is listed and
+ * remembered (lib/menuAnswers), so a menu normally waits on nothing; this is
+ * the first right-click in a folder faster than its listing's questions came
+ * back. The maintainers' bound (2026-10-08): a menu that waits 400 ms is a
+ * menu that does not open; about 40 ms is not seen. An answer slower than this
+ * is added at the menu's end when it lands (lib/heldMenuRows), never in the
+ * middle. */
+const MENU_ANSWER_WAIT_MS = 40;
+/* #196 - the newest menu asked for. An opening still waiting is dropped when a
+ * later one came first: another right-click, a press anywhere, Esc. */
+let ctxOpenSeq = 0;
+
+/**
+ * #196 - open the explorer's menu. A menu on rows first lists them, which asks
+ * what some of them depend on (the encryption answer, a folder's permissions,
+ * the desktop's keep state - `rowAnswers`). An answer asked before (the
+ * listing asks them, lib/menuAnswers remembers them) is read at once; only one
+ * nothing is known about holds the menu, at most MENU_ANSWER_WAIT_MS. The rows
+ * are then in their places from the first frame. They used to be drawn when an
+ * answer landed, with the menu already open: "Encrypt with E2EE..." pushed
+ * every row below it down while the person was aiming, and in the 0.53 release
+ * run (e2e 115, Firefox) a click pressed on "Tags" was released on "Star".
+ * What lands after the menu is open moves nothing either (ContextMenu holds
+ * its rows). A menu with nothing selected waits on nothing.
+ */
+async function openCtxMenu(at: { clientX: number; clientY: number }, targets: FileNode[]): Promise<void> {
+  const seq = ++ctxOpenSeq;
+  if (targets.length > 0) {
+    // Listing the rows is what asks their questions.
+    void contextActions.value;
+    if (rowAnswers.count > 0 && typeof window !== 'undefined') {
+      const drop = (e: Event) => {
+        if (e.type === 'keydown' && (e as KeyboardEvent).key !== 'Escape') return;
+        if (seq === ctxOpenSeq) ctxOpenSeq++;
+      };
+      window.addEventListener('pointerdown', drop, true);
+      window.addEventListener('keydown', drop, true);
+      try {
+        await rowAnswers.settled(MENU_ANSWER_WAIT_MS);
+      } finally {
+        window.removeEventListener('pointerdown', drop, true);
+        window.removeEventListener('keydown', drop, true);
+      }
+    }
+  }
+  if (seq !== ctxOpenSeq) return;
+  ctxRef.value?.show(at, targets);
+}
+
 async function onContextTarget(node: FileNode, ev: MouseEvent) {
   ctxMode.value = 'selection';
   void refreshKept(); // menu labels react if the kept set changed since last look
@@ -5933,7 +6618,7 @@ async function onContextTarget(node: FileNode, ev: MouseEvent) {
   // correct and the menu still empty, which looks identical to the bug.
   ctxUnlistedTargets.value = selection.nodes.value.length ? [] : [node];
   const targets = selection.nodes.value.length ? selection.nodes.value : [node];
-  ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, targets);
+  await openCtxMenu({ clientX: ev.clientX, clientY: ev.clientY }, targets);
 }
 
 function onContextCanvas(ev: MouseEvent) {
@@ -5943,14 +6628,14 @@ function onContextCanvas(ev: MouseEvent) {
   // Blank canvas has no target — drop any node left over from a card menu, or
   // the next right-click on empty space would offer that file's actions.
   ctxUnlistedTargets.value = [];
-  ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, []);
+  void openCtxMenu({ clientX: ev.clientX, clientY: ev.clientY }, []);
 }
 
 function onCrumbContext(payload: { x: number; y: number; adapterPath: string; label: string }) {
   ctxMode.value = 'breadcrumb';
   breadcrumbCtxPath.value = payload.adapterPath;
   breadcrumbCtxLabel.value = payload.label;
-  ctxRef.value?.show({ clientX: payload.x, clientY: payload.y }, []);
+  void openCtxMenu({ clientX: payload.x, clientY: payload.y }, []);
 }
 
 /**
@@ -5974,14 +6659,14 @@ async function onPaneMenu(pane: 'main' | 'split', node: FileNode | null, ev: Mou
     const after = splitSelection.nodes.value;
     paneCtxTargets.value = node ? (after.length > 0 ? after : (sel.length > 0 ? sel : [node])) : [];
     ctxMode.value = 'pane';
-    ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, paneCtxTargets.value);
+    await openCtxMenu({ clientX: ev.clientX, clientY: ev.clientY }, paneCtxTargets.value);
     return;
   }
   activePane.value = 'main';
   ctxMode.value = 'selection';
   if (!node) {
     selection.clear();
-    ctxRef.value?.show({ clientX: ev.clientX, clientY: ev.clientY }, []);
+    void openCtxMenu({ clientX: ev.clientX, clientY: ev.clientY }, []);
     return;
   }
   await onContextTarget(node, ev);
@@ -6121,6 +6806,9 @@ function sharingAt(paths: string[]): SharingHeld {
 }
 function gateByPermissions(list: ContextAction[], sel: FileNode[]): ContextAction[] {
   if (!heldPermissions.value) return list;
+  /* wiring:e2 vault — a vault's rows are gated at the vault folder, the only
+     place the server knows (vaultActionList). */
+  if (sel.length > 0 && sel.every((n) => vault.isVaultRow(n))) return list;
   const paths = sel.map((n) => n.path);
   return list.map((a) => {
     // Share opens a dialog with three kinds of sharing in it; it is offered
@@ -6152,7 +6840,41 @@ function selectionActionList(sel: FileNode[]): ContextAction[] {
   return list;
 }
 
+/**
+ * wiring:e2 vault — the actions on rows of a vault: open (the decrypted
+ * preview), download (decrypted), details, and the changes the vault makes
+ * itself - rename, cut / copy / paste inside the vault, delete (for good: a
+ * vault keeps no trash). Nothing that would hand the server a path or a
+ * plaintext: no links, no tags, no versions, no apps, no "open in a new tab".
+ * Writable as a whole or not at all: the vault folder's level, and not while
+ * the vault is read-only for a reason (damaged, older than seen, newer filex).
+ */
+function vaultActionList(sel: FileNode[]): ContextAction[] {
+  const root = String(sel[0].vault_root ?? '');
+  const single = sel.length === 1;
+  const isFile = single && sel[0].type === 'file';
+  const w =
+    permCanEdit(vault.permOf(root) as FileNode['perm']) &&
+    !vault.strips[root]?.readOnly &&
+    permHeldAt('files.create', [root]) &&
+    permHeldAt('files.delete', [root]);
+  return [
+    { key: 'preview', label: t('ctx.preview'), hidden: !single, disabled: !isFile },
+    { key: 'download', label: t('ctx.download'), disabled: sel.length === 0 },
+    { key: 'details', label: t('ctx.details') },
+    { divider: true, key: 'sep1', label: '', hidden: !w },
+    { key: 'rename', label: t('ctx.rename'), hidden: !single || !w },
+    { key: 'cut', label: t('ctx.cut'), hidden: !w },
+    { key: 'copy', label: t('ctx.copy') },
+    { key: 'paste', label: t('ctx.paste'), hidden: !w, disabled: !clipboard.value.mode },
+    { divider: true, key: 'sep2', label: '', hidden: !w },
+    { key: 'delete', label: t('ctx.delete'), danger: true, hidden: !w },
+  ];
+}
+
 function selectionActionListAll(sel: FileNode[]): ContextAction[] {
+  /* wiring:e2 vault — inside a vault only what a vault does. */
+  if (sel.length > 0 && sel.every((n) => vault.isVaultRow(n))) return vaultActionList(sel);
   const any = sel.length > 0;
   const single = sel.length === 1;
   /* pane:p1 — a STORAGE row is a mount point, not a file: rename, delete, cut,
@@ -6611,6 +7333,18 @@ async function paste() {
     }
 
     const targetWire = qualify(currentPath.value);
+    /* wiring:e2 vault — inside a vault, the vault moves and copies; between a
+       vault and anything outside it, nothing is moved on the server. */
+    const vk = vaultTransferKind(items, targetWire);
+    if (vk === 'cross') {
+      flashToast(t('e2e.vault.cross'));
+      return;
+    }
+    if (vk === 'inside') {
+      const ok = cb.mode === 'cut' ? await vault.move(items, targetWire) : await vault.copy(items, targetWire);
+      if (ok && cb.mode === 'cut') clipboard.value = { mode: null, items: [], sourcePath: null };
+      return;
+    }
     // A different storage only changes the message: cut still CUTS
     // and copy still COPIES, even when the target lives on another storage.
     // The server does the transfer (the ops queue carries both the source
@@ -6663,6 +7397,11 @@ async function duplicate(n: FileNode) {
 }
 
 function downloadFile(n: FileNode) {
+  /* wiring:e2 vault */
+  if (vault.isVaultRow(n)) {
+    void vault.download([n]);
+    return;
+  }
   /* wiring:e2 — downloading inside an encrypted folder: fetch the bytes,
      decrypt them, save under the original name (handing the user raw
      ciphertext would be pointless). */
@@ -6701,6 +7440,11 @@ async function downloadSelection(targets: FileNode[], opts: { encrypted?: boolea
   /* wiring:e2 fxe — decrypted in this tab where there is a key for it (a
      `.fxe`, an unlocked encrypted folder or a selection inside one);
      `encrypted` is "Download encrypted copy": the bytes the server has. */
+  /* wiring:e2 vault — decrypted in this tab: one file as itself, else a zip. */
+  if (targets.every((n) => vault.isVaultRow(n))) {
+    await vault.download(targets);
+    return;
+  }
   if (!opts.encrypted && (await e2eDownloadDecrypted(targets))) return;
   if (targets.length === 1 && targets[0].type === 'file') {
     if (opts.encrypted) {
@@ -7027,6 +7771,14 @@ async function submitNewFolder(name: string) {
   const inPane = mutationInPane.value; /* ui-fix — new folder in the side pane */
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
+    /* wiring:e2 vault — a folder in the vault's index, not on the server. */
+    if (vault.rootOf(dirWire)) {
+      if (await vault.mkdir(dirWire, name)) {
+        showNewFolder.value = false;
+        newFolderReq.end(ticket);
+      }
+      return;
+    }
     /* wiring:e2 names — inside an encrypted-names folder the server gets the
        stored name only (and a long name's sidecar first). */
     const wireName = await e2eWireName(dirWire, name, { isDir: true });
@@ -7058,6 +7810,15 @@ async function submitRename(name: string) {
   try {
     const dirWire = inPane ? qualify(splitPaneRef.value?.getPath() ?? '') : qualify(currentPath.value);
     const oldPath = target.path; // qualified
+    /* wiring:e2 vault — renamed in the vault's index. */
+    if (vault.rootOf(oldPath)) {
+      if (await vault.rename(oldPath, name)) {
+        showRename.value = false;
+        renameTarget.value = null;
+        renameReq.end(ticket);
+      }
+      return;
+    }
     /* wiring:e2 names — both ends of a rename, and its undo, travel as STORED
        names: the plaintext never reaches the server. */
     const oldName = storedName(target);
@@ -7127,10 +7888,9 @@ async function submitRename(name: string) {
  * and are dimmed, and no second purge is sent for them.
  */
 const trashPurging = ref<Set<number>>(new Set());
-/** A queued purge's job → the trash entry it deletes. */
-const purgeJobRow = new Map<number, number>();
-/** The queued purges this explorer started, said once each (lib/purgeWords). */
-const purgeBatches = createPurgeBatches();
+/** A queued purge's job → the trash entries it deletes (one job per
+ *  storage). */
+const purgeJobRows = new Map<number, number[]>();
 
 function markPurging(ids: number[], on: boolean): void {
   const next = new Set(trashPurging.value);
@@ -7148,15 +7908,14 @@ function markPurging(ids: number[], on: boolean): void {
 }
 
 /**
- * Purges the selected trash entries (`api.purgeTrash`), as jobs of the queue on
- * a server that runs purges there (`capabilities.queued`): a folder is purged
- * object by object, which outlasts a request.
+ * Purges the selected trash entries in ONE request (`api.purgeBatch`), as jobs
+ * of the queue on a server that runs purges there (`capabilities.queued`): a
+ * folder is purged object by object, which outlasts a request.
  *
- * ⚠ One word per press. #69 said a toast, read the trash and probed the trash
- * policy once per JOB that ended; the jobs are followed as one batch now
- * (lib/purgeWords `createPurgeBatches`): "Deleting N items permanently…" at
- * once, one summary — what was deleted, what was not and why — when the last
- * job ends, and one reading of the trash.
+ * ⚠ One request and the server's words (finding A15). It was one DELETE per
+ * entry and a summary composed here (lib/purgeWords, gone); the answer now
+ * says what was deleted (or is on its way) and what was not and why, and each
+ * job's row says how it ended (onSettled).
  */
 async function purgeSelection() {
   const all = selection.nodes.value
@@ -7178,47 +7937,42 @@ async function purgeSelection() {
   if (ticket === null) return;
   const queued = serverQueues('purge');
   markPurging(ids, true);
-  let purged = 0;
-  let failed = 0;
-  let reason: string | undefined;
-  let firstError: unknown;
-  const jobs: number[] = [];
-  for (const id of ids) {
-    try {
-      const { op } = await api.purgeTrash(id, { queued });
-      if (op) {
-        pendingOps.register(op);
-        jobs.push(op.id);
-        purgeJobRow.set(op.id, id);
-      } else {
-        markPurging([id], false);
-      }
-      purged++;
-    } catch (err) {
-      // Said in the server's words (requestFailure), kept with the count.
-      failed++;
-      if (reason === undefined) {
-        reason = failureText(err);
-        firstError = err;
-      }
-      markPurging([id], false);
-    }
-  }
-  deleteReq.end(ticket);
-  if (purged === 0) {
+  let said: TrashBatchAnswer;
+  try {
+    said = await api.purgeBatch(ids, { queued });
+  } catch (err) {
+    markPurging(ids, false);
+    deleteReq.end(ticket);
     // In the dialog while it is on screen, a toast once it is not — and the
     // host hears it, like every refused change (reportMutationError).
-    refuseInDialog(deleteReq, ticket, firstError, { op: 'purge' }, reason ?? t('toast.failed'));
+    refuseInDialog(deleteReq, ticket, err, { op: 'purge' });
+    return;
+  }
+  deleteReq.end(ticket);
+  const jobs = said.ops ?? [];
+  if (jobs.length === 0) markPurging(ids, false);
+  const storageOf = (id: number) =>
+    (files.value.find((n) => (n as { id?: number }).id === id) as unknown as { storage_id?: number } | undefined)
+      ?.storage_id;
+  const handed = new Set<number>();
+  for (const op of jobs) {
+    pendingOps.register(op);
+    // Which rows a job deletes: its storage's (one job per storage).
+    const sid = (op as unknown as { storage_id?: number }).storage_id;
+    const rows = jobs.length === 1 ? ids : ids.filter((id) => storageOf(id) === sid);
+    for (const id of rows) handed.add(id);
+    purgeJobRows.set(op.id, rows);
+  }
+  // A row no job took (the server refused it) stops saying "Deleting…" now.
+  if (jobs.length > 1) markPurging(ids.filter((id) => !handed.has(id)), false);
+  if (said.done === 0) {
+    refuseInDialog(deleteReq, ticket, new Error(said.summary), { op: 'purge' }, said.summary);
     return;
   }
   showDelete.value = false;
   selection.clear();
-  showToast(
-    { message: sayPurge({ queued: jobs.length > 0, purged, failed, reason }, t) },
-    failed ? ERROR_TOAST_MS : FLASH_TOAST_MS,
-  );
-  if (jobs.length) purgeBatches.start(jobs, { refused: failed, reason });
-  else if (trashMode.value) await loadTrash();
+  showToast({ message: said.summary }, said.failed ? ERROR_TOAST_MS : FLASH_TOAST_MS);
+  if (jobs.length === 0 && trashMode.value) await loadTrash();
 }
 
 async function confirmDelete() {
@@ -7246,6 +8000,21 @@ async function confirmDelete() {
     showDelete.value = false;
     return;
   }
+  /* wiring:e2 vault — deleted from the vault's index, for good (the dialog
+     says so: `permanent`). Its packs go when the collection runs. */
+  if (vault.rootOf(items[0])) {
+    const vt = deleteReq.begin();
+    if (vt === null) return;
+    try {
+      if (await vault.remove(items)) {
+        showDelete.value = false;
+        if (!inPane) selection.clear();
+      }
+    } finally {
+      deleteReq.end(vt);
+    }
+    return;
+  }
   // Trash-delete is invertible via node-id restore — but only when EVERY
   // selected node carries a backend id and the restore endpoint exists.
   // A partial-undo offer would be a lie, so all-or-nothing.
@@ -7255,9 +8024,9 @@ async function confirmDelete() {
   const restoreUndo =
     api.endpoints.trashRestore && nodeIds.length === targets.length
       ? async () => {
-          const { restored } = await api.restoreIds(nodeIds);
-          if (restored === 0) throw new Error('restore failed');
-          return { done: restored, total: nodeIds.length };
+          const said = await api.restoreBatch(nodeIds);
+          if (said.done === 0) throw new Error(said.summary);
+          return { summary: said.summary };
         }
       : null;
   const ticket = deleteReq.begin();
@@ -7318,6 +8087,17 @@ async function uploadFiles(list: File[]) {
   // when its turn came — so browsing while the first file was on its way sent
   // the rest of the batch into whatever folder was open by then.
   const target = qualify(currentPath.value);
+  /* wiring:e2 vault — into the vault: encrypted here, file by file, into its
+     packs, and committed as one change. No 200 MB limit: the contents are
+     read and encrypted a chunk at a time. */
+  if (vault.rootOf(target)) {
+    if (!vault.isOpen(vault.rootOf(target))) {
+      flashToast(t('e2e.upload.locked'));
+      return;
+    }
+    await vault.upload(target, list);
+    return;
+  }
   /* wiring:e2 - uploads into an encrypted folder are encrypted transparently.
      No upload while locked (that would be a plaintext-leak door); a file over
      200 MB is encrypted as a STREAM (0x02) while it is sent. */
@@ -7889,6 +8669,8 @@ watch(
     // A folder's size isn't known from the listing; rather than guess it, we
     // leave it to the first drag.
     if (nodes.some((n) => n.type !== 'file')) return;
+    // wiring:e2 vault — nothing in a vault is handed to the shell by path.
+    if (nodes.some((n) => vault.isVaultRow(n))) return;
     const total = nodes.reduce((sum, n) => sum + (n.size ?? 0), 0);
     if (total > DRAGOUT_PREFETCH_MAX_BYTES) return;
     const items = nodes.map((n) => ({ path: n.path, basename: n.basename, type: n.type }));
@@ -8859,6 +9641,19 @@ async function transferItems(
   );
   // Nothing to send is not a success: "Move to…" must not report one.
   if (list.length === 0 || !targetWire) return 'nothing';
+  /* wiring:e2 vault — inside a vault, the vault moves and copies (a drop on a
+     folder, the other pane, a crumb); in or out of one, nothing is moved on
+     the server: that is an upload or a download. */
+  const vk = vaultTransferKind(list, targetWire);
+  if (vk === 'cross') {
+    flashToast(t('e2e.vault.cross'));
+    return 'refused';
+  }
+  if (vk === 'inside') {
+    const ok = intent === 'copy' ? await vault.copy(list, targetWire) : await vault.move(list, targetWire);
+    void splitPaneRef.value?.reload();
+    return ok ? 'done' : 'refused';
+  }
   const plan = resolveTransfer(list, targetWire, intent);
   let outcome: TransferOutcome;
   if (plan.kind === 'copy') {
@@ -9134,7 +9929,9 @@ async function e2eUnlockRoot(root: string, password: string): Promise<string | n
   if ('error' in opened) {
     return opened.error === 'damaged' ? t('e2e.unlock.damaged') : t('e2e.unlock.wrong');
   }
-  if (!(await e2eAdoptKeys(root, marker, opened.fmk))) return t('e2e.names.key_failed');
+  if (!(await e2eAdoptKeys(root, marker, opened.fmk))) {
+    return markerIsVault(marker) ? t('e2e.vault.open_failed') : t('e2e.names.key_failed');
+  }
   if (here) {
     /* wiring:e2 recovery — a folder from before recovery existed has no way
      * back in but its password. This is the ONE moment we hold that password,
@@ -9202,6 +9999,25 @@ provide(E2E_LOCK, {
  * would then show and write garbage names, so it is not opened at all.
  */
 async function e2eAdoptKeys(root: string, marker: E2eMarker, fmk: CryptoKey): Promise<boolean> {
+  /* wiring:e2 vault — a vault's FMK is an HKDF key (it opens nothing itself);
+     the vault opens here: its state, its latest generation, its clocks. The
+     key stays in the ring only while the vault is open. */
+  if (markerIsVault(marker)) {
+    e2eRing.set(root, fmk, null, null);
+    e2eNames.setMarker(root, marker);
+    e2eRingVer.value++;
+    // The strip's code alongside the vault's (both loaded on first use).
+    void loadVaultStrip().catch(() => undefined);
+    try {
+      await vault.open(root, marker, fmk, { perm: root === e2eRoot.value ? dirPerm.value || undefined : undefined });
+    } catch (err) {
+      e2eRing.lock(root);
+      e2eRingVer.value++;
+      emit('error', { message: (err as Error)?.message ?? String(err), context: { op: 'e2e-vault-open' } });
+      return false;
+    }
+    return true;
+  }
   let names = null;
   if (markerHasNames(marker)) {
     names = await unlockNameKey(marker, fmk);
@@ -9224,6 +10040,8 @@ async function e2eAdoptKeys(root: string, marker: E2eMarker, fmk: CryptoKey): Pr
 function e2eLock() {
   if (!e2eRoot.value) return;
   const root = e2eRoot.value;
+  /* wiring:e2 vault — the write lock goes back, the clocks stop. */
+  if (vault.isOpen(root)) vault.close(root, 'manual');
   e2eRing.lock(root);
   // Plaintext names leave memory with the key.
   e2eNames.forget(root);
@@ -9253,6 +10071,12 @@ function e2eMimeFor(n: FileNode): string {
 async function e2eFetchDecrypted(n: FileNode): Promise<string | null> {
   const cached = e2eUrls.get(n.path);
   if (cached) return cached;
+  /* wiring:e2 vault — from the vault's packs, by byte ranges. */
+  if (vault.isVaultRow(n)) {
+    const url = await vault.readUrl(n.path, e2eMimeFor(n));
+    e2eUrls.set(n.path, url);
+    return url;
+  }
   const kek = e2eKek();
   if (!kek) return null;
   const buf = await api.fetchArrayBuffer(n.path);
@@ -9288,6 +10112,11 @@ async function e2eOpenPreview(n: FileNode) {
  *  browser has (lib/e2esave): either header version, any size where the
  *  browser can write a stream to disk. */
 async function e2eDownload(n: FileNode) {
+  /* wiring:e2 vault */
+  if (vault.isVaultRow(n)) {
+    await vault.download([n]);
+    return;
+  }
   const kek = e2eKek();
   if (!kek) {
     flashToast(t('e2e.download.failed'));
@@ -9348,10 +10177,17 @@ async function e2eEncryptUploads(
 }
 
 /** EncryptedFolderModal submit: create the folder + upload the marker + leave it unlocked. */
-async function submitEncryptedFolder(payload: { name: string; password: string; level?: ChoosableLevel }) {
+async function submitEncryptedFolder(payload: { name: string; password: string; level?: ChoosableLevel; packLog2?: number }) {
   if (e2eActive.value) {
     // Nested encrypted folders blur root detection — not in the MVP.
     flashToast(t('e2e.create.nested'));
+    return;
+  }
+  /* wiring:e2 vault — a vault is made whole by the server (`POST
+     .../vault/create`): the folder, its key file and generation 1, or
+     nothing. Offered only where the server has vaults. */
+  if (payload.level === 'vault') {
+    await submitVault(payload);
     return;
   }
   e2eCreateBusy.value = true;
@@ -9403,6 +10239,108 @@ async function submitEncryptedFolder(payload: { name: string; password: string; 
   } finally {
     e2eCreateBusy.value = false;
   }
+}
+
+/* --- wiring:e2 vault ---------------------------------------------------- */
+
+/** EncryptedFolderModal submit at level 3: make the vault, leave it open. */
+async function submitVault(payload: { name: string; password: string; packLog2?: number }) {
+  if (capabilitiesData.value?.e2e_vault !== true) {
+    showToast({ message: t('e2e.create.failed') }, ERROR_TOAST_MS);
+    return;
+  }
+  e2eCreateBusy.value = true;
+  try {
+    const dirWire = qualify(currentPath.value);
+    const vaultPath = wireJoin(dirWire, payload.name);
+    const made = await createVault(payload.password, {
+      escrowPublicKey: e2eEscrowPub.value,
+      packLog2: payload.packLog2,
+    });
+    await vault.create(vaultPath, made.marker, made.index);
+    // It starts unlocked in the creating session (they just typed the password).
+    e2eRing.set(vaultPath, made.fmk, null, null);
+    e2eNames.setMarker(vaultPath, made.marker);
+    e2eRingVer.value++;
+    void loadVaultStrip().catch(() => undefined);
+    await vault.open(vaultPath, made.marker, made.fmk, { justMade: true, perm: dirPerm.value || undefined });
+    showEncFolder.value = false;
+    // ⚠ The key only after the vault exists on the server (as for a folder).
+    recoveryKeyValue.value = made.recoveryKey;
+    recoveryKeyFolder.value = payload.name;
+    recoveryKeyVariant.value = 'created';
+    showRecoveryKey.value = true;
+    await load();
+  } catch (err) {
+    emit('error', { message: (err as Error).message, context: { op: 'e2e-vault-create' } });
+    showToast({ message: failureText(err, t('e2e.create.failed')) }, ERROR_TOAST_MS);
+  } finally {
+    e2eCreateBusy.value = false;
+  }
+}
+
+/** Where a transfer goes, as far as vaults are concerned. */
+function vaultTransferKind(sources: string[], targetWire: string): 'none' | 'inside' | 'cross' {
+  const to = vault.rootOf(targetWire);
+  const from = sources.map((p) => vault.rootOf(p));
+  if (!to && from.every((r) => !r)) return 'none';
+  if (to && vault.isOpen(to) && from.every((r) => r === to)) return 'inside';
+  return 'cross';
+}
+
+/** The strip of the vault the main pane is in, or null. */
+const vaultStrip = computed(() => {
+  void vault.version.value;
+  const root = e2eRoot.value;
+  return root ? (vault.strips[root] ?? null) : null;
+});
+
+/** The preview shows a file of a vault: nothing goes back to the server. */
+const vaultPreviewing = computed(() => !!previewTarget.value && vault.isVaultRow(previewTarget.value));
+
+/** The Delete dialog is about rows of a vault: deleted for good, no trash. */
+const vaultDeleting = computed(() => [...selection.nodes.value, ...paneCtxTargets.value].some((n) => vault.isVaultRow(n)));
+
+function vaultUnder(path: string | undefined | null, root: string): boolean {
+  return !!path && (path === root || path.startsWith(root + '/'));
+}
+
+/** Decrypted blobs of a vault leave memory (all of them, or all but the one
+ *  on screen, which a newer generation does not take away). */
+function vaultForgetUrls(root: string, all: boolean): void {
+  for (const [p, url] of [...e2eUrls]) {
+    if (!vaultUnder(p, root)) continue;
+    if (all || p !== previewTarget.value?.path) URL.revokeObjectURL(url);
+    e2eUrls.delete(p);
+  }
+}
+
+/** The vault locked (or was locked): its keys leave the ring, and what this
+ *  explorer shows of it closes. */
+function vaultDropKeys(root: string): void {
+  e2eRing.lock(root);
+  e2eNames.forget(root);
+  e2eRingVer.value++;
+  if (vaultUnder(previewTarget.value?.path, root)) showPreview.value = false;
+  if (vaultUnder(quickLookTarget.value?.path, root)) quickLookOpen.value = false;
+  vaultForgetUrls(root, true);
+}
+
+function vaultLocked(root: string, why: 'idle' | 'manual'): void {
+  if (why === 'idle') {
+    showToast({ message: t('e2e.vault.locked_idle_toast', { name: wireBasename(root) }) }, 8000);
+  }
+  if (e2eRoot.value === root || vaultUnder(qualify(currentPath.value), root)) {
+    showE2eSettings.value = false;
+    void load(paneToUser(root));
+  }
+  void splitPaneRef.value?.reload();
+}
+
+function vaultChanged(root: string): void {
+  vaultForgetUrls(root, false);
+  if (e2eRoot.value === root) void load();
+  void splitPaneRef.value?.reload();
 }
 
 /* --- wiring:e2 recovery ------------------------------------------------
@@ -10266,18 +11204,6 @@ function e2eClosePasswordChange() {
   showPwChange.value = false;
 }
 
-/** Tell the server (audit log + the folder owner's notification). A failure
- *  is said, not thrown: the password HAS changed, and saying otherwise would
- *  be the lie. */
-async function e2eAnnouncePassword(root: string, via: 'password' | 'recovery_key', rekey: boolean) {
-  try {
-    await api.e2ePasswordChanged({ path: root, via, rekey });
-  } catch (err) {
-    emit('error', { message: (err as Error).message, context: { op: 'e2e-password-announce' } });
-    showToast({ message: t('e2e.password.announce_failed') }, ERROR_TOAST_MS);
-  }
-}
-
 async function e2eSubmitPassword(payload: E2eChangePasswordPayload) {
   const root = e2eRoot.value;
   const marker = e2eMarker.value;
@@ -10297,7 +11223,8 @@ async function e2eSubmitPassword(payload: E2eChangePasswordPayload) {
       await e2eWriteMarker(next);
       e2eRecoveryInHand = null;
       showPwChange.value = false;
-      await e2eAnnouncePassword(root, via, false);
+      /* Nothing to announce: the server sees the key file rewritten, records
+         the change and tells the folder's owner itself (e2e/slotchange). */
       flashToast(t('e2e.password.done'));
       return;
     }
@@ -10323,7 +11250,6 @@ async function e2eSubmitPassword(payload: E2eChangePasswordPayload) {
       recoveryKeyVariant.value = 'replaced';
       showRecoveryKey.value = true;
     }
-    await e2eAnnouncePassword(root, via, true);
     await e2eRunRekey();
   } catch (err) {
     if (err instanceof E2eDecryptError) {
@@ -10612,7 +11538,7 @@ function closeRecoveryKey() {
           v-if="config.account"
           :actions="accountRows"
           :user="accountPerson"
-          :version="capabilitiesData?.version"
+          :version="capabilitiesData?.release"
           :locale="locale"
           :fallback-label="t('explore.account')"
           @select="onAccountSelect"
@@ -10730,7 +11656,7 @@ function closeRecoveryKey() {
     <FilePane
       pane-id="main"
       ref="mainPaneRef"
-      :api="api"
+      :api="paneApi /* wiring:e2 vault — folder previews inside a vault come from its index */"
       :locale="locale"
       :theme="themeMode"
       :focused="mainPaneFocus"
@@ -10761,6 +11687,7 @@ function closeRecoveryKey() {
       :trash="trashActive"
       :clipped="clippedPaths"
       :extra-filters="advFilters"
+      :extra-filters-on-server="!searchRanLocally"
       :can-write="canWriteHere && !trashActive"
       :can-paste="!!clipboard.mode"
       :selected="selection.selected.value"
@@ -10769,6 +11696,7 @@ function closeRecoveryKey() {
       :folder-previews="capabilitiesData?.folder_previews !== false"
       :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
       :starred-ids="starredIds"
+      :star-overrides="starOverrides"
       :star-enabled="identitySurfaces"
       :api-base="props.config.apiBase ?? ''"
       :auth-headers="() => buildAuthHeaders()"
@@ -10822,6 +11750,25 @@ function closeRecoveryKey() {
       class="fe-search-cut"
       role="status"
     >{{ t('search.truncated') }}</div>
+    <!-- #207 — a per-person view (Recent, Starred, Shared, a tag) holds more
+         rows than the page loaded: said, with the server's total, and the
+         rest one press away instead of silently out of reach. -->
+    <div
+      v-if="navMore && navMore.truncated && serverOrderedView && !searchQuery"
+      class="fe-search-cut fe-nav-more"
+      role="status"
+      data-testid="nav-more"
+    >
+      <span>{{ t('nav.more_shown', { shown: files.length, total: navMore.total }) }}</span>
+      <button
+        type="button"
+        class="fe-coverage__action"
+        data-testid="nav-more-load"
+        :disabled="navMoreBusy"
+        :aria-busy="navMoreBusy ? 'true' : undefined"
+        @click="loadMoreNav"
+      >{{ t('nav.load_more') }}</button>
+    </div>
 
     <!-- The catalog does not cover all of this storage yet (a first sync, a
          lazily cataloged storage): search, folder sizes and usage leave part
@@ -11059,7 +12006,19 @@ function closeRecoveryKey() {
         </button>
       </div>
     </div>
-    <div v-if="e2eUnlocked" class="fe-e2e-strip" role="status">
+    <!-- wiring:e2 vault — an unlocked vault: who writes, and the two clocks
+         (the write lock's idle time, then the vault lock). -->
+    <E2eVaultStrip
+      v-if="e2eUnlocked && vaultStrip"
+      :locale="locale"
+      :state="vaultStrip"
+      @settings="showE2eSettings = true"
+      @lock="e2eLock"
+      @take-over="vault.takeOver(e2eRoot)"
+      @continue="vault.continueFromShown(e2eRoot)"
+      @dismiss="vault.dismiss(e2eRoot)"
+    />
+    <div v-if="e2eUnlocked && !vaultStrip" class="fe-e2e-strip" role="status">
       <!-- eslint-disable-next-line vue/no-v-html — static markup from lib/actionIcons -->
       <span class="fe-e2e-strip__icon" aria-hidden="true" v-html="actionIconSvg('lock')"></span>
       <span class="fe-e2e-strip__label">{{ t('e2e.strip.label') }}</span>
@@ -11093,6 +12052,21 @@ function closeRecoveryKey() {
          view rather than of the rows. -->
     <div v-if="trashMode && !loading" class="fe-trashbar">
       <p class="fe-trashbar__text">{{ trashBannerText }}</p>
+      <!-- The server's count and size of the WHOLE trash, and how much of it
+           is on screen (finding D1): the list is paged. -->
+      <p v-if="trashSummary" class="fe-trashbar__count" data-testid="trash-summary">
+        {{ trashSummary }}<span v-if="trashLoaded < trashTotal" class="fe-trashbar__shown"> · {{ trashShownText }}</span>
+      </p>
+      <button
+        v-if="trashLoaded < trashTotal"
+        type="button"
+        class="fe-btn fe-trashbar__more"
+        data-testid="trash-more"
+        :disabled="trashMoreBusy"
+        @click="loadMoreTrash"
+      >
+        {{ t('trash.show_more') }}
+      </button>
       <p v-if="trashEmptyProgress" class="fe-trashbar__progress" role="status" aria-live="polite">
         {{ trashEmptyProgress }}
       </p>
@@ -11105,7 +12079,7 @@ function closeRecoveryKey() {
         class="fe-btn fe-btn--danger fe-trashbar__action"
         :disabled="files.length === 0 || trashEmptying"
         data-testid="trash-empty"
-        @click="showTrashConfirm = true"
+        @click="openTrashConfirm"
       >
         {{ t('trash.empty_action') }}
       </button>
@@ -11130,6 +12104,7 @@ function closeRecoveryKey() {
         :starred="homeStarred"
         :loading="homeLoading"
         :locale="locale"
+        :match-names="api.matchNames"
         :name-filter="driveFilters.name ?? '' /* surucu:d1-scope — Home's filter
                row is the name box alone, and this is what it narrows. The same
                `DriveFilters.name` the listing's own box writes, so the value is
@@ -11151,6 +12126,7 @@ function closeRecoveryKey() {
         :limit="draftLimit"
         :locale="locale"
         :name-filter="driveFilters.name ?? ''"
+        :match-names="api.matchNames"
         :busy-key="draftBusyKey"
         @open="(d: DraftDto) => openDraft(d)"
         @save="saveDraftFromList"
@@ -11341,7 +12317,7 @@ function closeRecoveryKey() {
       pane-id="split"
       self-driven
       closable
-      :api="api"
+      :api="paneApi /* wiring:e2 vault — a vault lists from its index in this pane too */"
       :locale="locale"
       :theme="themeMode"
       :focused="paneIsActive"
@@ -11368,6 +12344,7 @@ function closeRecoveryKey() {
       :folder-previews="capabilitiesData?.folder_previews !== false"
       :keep-badge-for="desktopSync ? keepBadgeFor : undefined"
       :starred-ids="starredIds"
+      :star-overrides="starOverrides"
       :star-enabled="identitySurfaces"
       :api-base="props.config.apiBase ?? ''"
       :auth-headers="() => buildAuthHeaders()"
@@ -11404,7 +12381,7 @@ function closeRecoveryKey() {
          free of any DOM. Narrow mode renders it as a full-size overlay. -->
     <InspectorPanel
       v-if="showInspector"
-      :api="api"
+      :api="inspectorApi /* wiring:e2 vault — asks nothing about an item in a vault */"
       :nodes="inspectorNodes /* pane:p1 — the FOCUSED pane's selection, through
              the same `activeTargets()` the selection bar reads. It was
              `selection.nodes` (the main pane's, always), which is why clicking
@@ -11653,7 +12630,9 @@ function closeRecoveryKey() {
          choosers start disagreeing about what a writable folder is. -->
     <DestinationPickerModal
       :open="showDestPicker"
-      :api="api"
+      :api="paneApi /* wiring:e2 vault — an open vault lists from its index */"
+      :vault-roots="destPickerVaultRoots /* wiring:e2 vault */"
+      :vault-from="destPickerVaultFrom /* wiring:e2 vault */"
       :locale="locale"
       :mode="destPickerMode"
       :busy="destPickerBusy"
@@ -11674,6 +12653,7 @@ function closeRecoveryKey() {
       :busy="e2eCreateBusy"
       :escrow-kid="e2eEscrowKid"
       :existing="e2eConvTarget ? e2eConvTarget.basename : null"
+      :vault-available="capabilitiesData?.e2e_vault === true /* wiring:e2 vault — a new folder only (the modal checks) */"
       @close="showEncFolder = false; e2eConvTarget = null"
       @submit="(p) => (e2eConvTarget ? submitConvertFolder(p) : submitEncryptedFolder(p))"
     />
@@ -11722,6 +12702,7 @@ function closeRecoveryKey() {
       :locale="locale"
       :mode="pwMode"
       :needs-rekey="e2ePwNeedsRekey"
+      :vault="e2eLevel === 'vault' /* wiring:e2 vault — never re-keyed */"
       :has-recovery="markerHasRecovery(e2eMarker)"
       :has-escrow="markerHasEscrow(e2eMarker)"
       :busy="pwBusy"
@@ -11815,10 +12796,12 @@ function closeRecoveryKey() {
       size="sm"
       @close="showTrashConfirm = false"
     >
-      <!-- ⚠ A singular form exists (`…_one`) and `t()` picks it from `count`:
-           this is the last screen before an irreversible bulk delete, and
-           "1 items" is not a sentence anybody should have to read there. -->
-      <p>{{ t(trashConfirmKey, { count: files.length, size: formatSize(trashTotalBytes) }) }}</p>
+      <!-- ⚠⚠ The last screen before an irreversible bulk delete names the
+           SERVER's count of what the purge takes (its dry run), never the
+           rows this view has loaded (finding D1). The button waits for it. -->
+      <p v-if="trashPreview" data-testid="trash-empty-count">{{ trashPreview.summary }}</p>
+      <p v-else-if="trashPreviewError" class="fe-form__error" role="alert">{{ trashPreviewError }}</p>
+      <p v-else role="status">{{ t('trash.empty_counting') }}</p>
       <template #actions>
         <button type="button" class="fe-btn" @click="showTrashConfirm = false">
           {{ t('modal.delete.cancel') }}
@@ -11827,6 +12810,7 @@ function closeRecoveryKey() {
           type="button"
           class="fe-btn fe-btn--danger"
           data-testid="trash-empty-confirm"
+          :disabled="!trashPreview || trashPreview.count === 0"
           @click="emptyTrash"
         >
           {{ t('trash.empty_action') }}
@@ -11837,7 +12821,7 @@ function closeRecoveryKey() {
       :open="showDelete"
       :locale="locale"
       :count="selection.size.value"
-      :permanent="trashMode"
+      :permanent="trashMode || vaultDeleting /* wiring:e2 vault — a vault keeps no trash */"
       :busy="deleteBusy"
       :error="deleteError"
       @close="showDelete = false"
@@ -11849,13 +12833,13 @@ function closeRecoveryKey() {
       :file="previewTarget"
       :theme="themeMode"
       :preview-url="(p) => e2ePreviewSrc(p) /* wiring:e2 — decrypted blob > raw URL */"
-      :download-url="(p) => (e2eUnlocked || fxePreviewing ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 (+ fxe) */"
-      :only-office-base="e2eActive || fxePreviewing ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO cannot open ciphertext */"
+      :download-url="(p) => (e2eUnlocked || fxePreviewing || !!vault.rootOf(p) ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 (+ fxe, vault) */"
+      :only-office-base="e2eActive || fxePreviewing || vaultPreviewing ? null : effectiveOnlyOfficeBase /* wiring:e2 — OO cannot open ciphertext */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
       :can-configure="callerAdmin"
-      :new-tab-enabled="!e2eActive && !fxePreviewing /* wiring:e2 — the standalone route pulls raw bytes */"
-      :save-text-endpoint="e2eActive || fxePreviewing ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
-      :archive-list-endpoint="api.endpoints.archiveList || null"
+      :new-tab-enabled="!e2eActive && !fxePreviewing && !vaultPreviewing /* wiring:e2 — the standalone route pulls raw bytes */"
+      :save-text-endpoint="e2eActive || fxePreviewing || vaultPreviewing ? null : api.endpoints.saveText || null /* wiring:e2 — a plaintext save would be a leak */"
+      :archive-list-endpoint="vaultPreviewing ? null : api.endpoints.archiveList || null /* wiring:e2 vault — the server cannot list a zip it cannot read */"
       :open-mode="previewMode"
       :open-as="previewOpenAsExt /* #56 — a New document opens as its type */"
       :auth-headers="() => buildAuthHeaders({ 'Content-Type': 'application/json' })"
@@ -11867,7 +12851,7 @@ function closeRecoveryKey() {
       :index="previewPosition.index /* gorunum:v1 — the 3-of-9 counter */"
       :total="previewPosition.total"
       :nav-enabled="previewPosition.total > 1"
-      :share-enabled="!e2eActive && !fxePreviewing /* gorunum:v2 — the viewer's share icon opens the
+      :share-enabled="!e2eActive && !fxePreviewing && !vaultPreviewing /* gorunum:v2 — the viewer's share icon opens the
            SAME dialog the menu opens. It shipped disabled because nothing was
            listening; an icon that does nothing is worse than no icon. Off inside
            an encrypted folder, where a link would serve ciphertext. */"
@@ -11906,6 +12890,19 @@ function closeRecoveryKey() {
       :remembered="openWithTarget ? personalOpenChoice(openWithTarget) : null"
       @cancel="openWithTarget = null"
       @open="openWithChosen"
+    />
+    <!-- wiring:e2 vault — an upload into a vault whose name is taken: the same
+         "already there" dialog, asked before anything is written. -->
+    <DraftConflictModal
+      :open="!!vaultNameQuestion"
+      kind="upload"
+      :locale="locale"
+      :theme="themeMode"
+      :name="vaultNameQuestion?.name ?? ''"
+      :suggested="vaultNameQuestion?.suggested ?? ''"
+      :folder="vaultNameQuestion?.folder ?? ''"
+      @cancel="answerVaultName(false)"
+      @confirm="answerVaultName(true)"
     />
     <!-- Drafts (issue #71): the Drafts view's Save, when the name is taken. -->
     <DraftConflictModal
@@ -11977,7 +12974,6 @@ function closeRecoveryKey() {
       :api="api"
       :path="permTarget.path"
       :is-dir="permTarget.type === 'dir'"
-      :size="typeof permTarget.size === 'number' ? permTarget.size : undefined"
       :locale="locale"
       :share-max-ttl-days="shareMaxTtlDays"
       :initial-tab="permInitialTab /* surucu:d1 */"
@@ -12190,7 +13186,7 @@ function closeRecoveryKey() {
       :file="quickLookTarget"
       :theme="themeMode"
       :preview-url="(p: string) => e2ePreviewSrc(p) /* wiring:e2 */"
-      :download-url="(p: string) => (e2eUnlocked ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 */"
+      :download-url="(p: string) => (e2eUnlocked || !!vault.rootOf(p) ? e2ePreviewSrc(p) : api.downloadUrl(p)) /* wiring:e2 (+ vault) */"
       :only-office-base="e2eActive ? null : effectiveOnlyOfficeBase /* wiring:e2 */"
       :only-office-config-endpoint="effectiveOnlyOfficeConfigEndpoint"
       :can-configure="callerAdmin"

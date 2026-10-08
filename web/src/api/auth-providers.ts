@@ -1,4 +1,5 @@
 import { api } from './client';
+import { langParam } from './screenLang';
 import type {
   AuthProvider,
   AuthProviderCheck,
@@ -265,7 +266,10 @@ export const AuthProvidersApi = {
     testAccount?: AuthProviderTestAccount,
   ): Promise<AuthProviderTestResult> {
     const body = testAccount ? { config: draft, test_account: testAccount } : draft;
-    const { data } = await api.post<Partial<AuthProviderTestResult>>(`/admin/auth-providers/${id}/test`, body);
+    // The steps come back said in the screen's language (`lang=`).
+    const { data } = await api.post<Partial<AuthProviderTestResult>>(`/admin/auth-providers/${id}/test`, body, {
+      params: langParam(),
+    });
     return {
       testable: data.testable === true,
       ok: data.ok === true,

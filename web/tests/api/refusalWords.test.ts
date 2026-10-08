@@ -1,9 +1,14 @@
-// What a refusal SAYS. A read-only storage answers in two shapes — `409
+// What a refusal SAYS. A read-only storage answered in two shapes — `409
 // {"error":"read_only"}` from the app and public-API paths, `403 {"error":
 // "storage is read-only"}` from the manager's mutating verbs — and by status
 // alone they read "Already exists / conflict" and "You are not allowed to do
 // this": a conflict that is not there and a permission problem the person
 // does not have (QA, 2026-09-21: "Dönüştür…" on a read-only drive).
+//
+// ⚠⚠ 0.54 (#209, audit A1/A2): both doors now answer one envelope, `{"error":
+// "read_only", "message": "<the reader's sentence>"}` (backend
+// internal/apierr), and the explorer shows the server's sentence. It no
+// longer recognises "read-only" in the server's English (CODE_WORDS is gone).
 //
 // Exercised through the real `useFileApi`, with `fetch` answering as the
 // server does, because every caller — a menu action, an app dialog's submit —
@@ -31,25 +36,29 @@ async function refusal(locale: 'en' | 'tr'): Promise<Error & { status?: number }
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('a read-only storage is said as one', () => {
+describe('a read-only storage is said in the server’s sentence', () => {
   it('409 read_only — the app path', async () => {
-    answer(409, '{"error":"read_only","message":"this storage is read-only"}');
-    expect((await refusal('tr')).message).toBe('Bu depo salt okunur');
-    expect((await refusal('en')).message).toBe('This storage is read-only');
+    answer(409, '{"error":"read_only","message":"Bu depo salt okunur."}');
+    expect((await refusal('tr')).message).toBe('Bu depo salt okunur.');
+    answer(409, '{"error":"read_only","message":"This storage is read-only."}');
+    expect((await refusal('en')).message).toBe('This storage is read-only.');
   });
 
-  it('403 "storage is read-only" — the manager path, which is NOT a permission problem', async () => {
-    answer(403, '{"error":"storage is read-only"}');
+  it('403 read_only — the manager path, which is NOT a permission problem', async () => {
+    answer(403, '{"error":"read_only","message":"Bu depo salt okunur."}');
     const err = await refusal('tr');
-    expect(err.message).toBe('Bu depo salt okunur');
+    expect(err.message).toBe('Bu depo salt okunur.');
     // The status still travels, for callers that branch on it.
     expect(err.status).toBe(403);
   });
 
-  it('any other refusal keeps its status words', async () => {
+  it('a refusal with no sentence keeps its status words - nothing is read out of its English', async () => {
     answer(409, '{"error":"exists"}');
     expect((await refusal('en')).message).toBe('Already exists / conflict');
     answer(403, 'not json at all');
+    expect((await refusal('en')).message).toBe('You are not allowed to do this');
+    // RED before 0.54: the English "storage is read-only" was matched.
+    answer(403, '{"error":"storage is read-only"}');
     expect((await refusal('en')).message).toBe('You are not allowed to do this');
   });
 });

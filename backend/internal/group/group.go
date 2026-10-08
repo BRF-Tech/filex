@@ -173,7 +173,7 @@ func syncLinked(ctx context.Context, store db.Store, u *model.User, kind string,
 	if err := SyncLevels(ctx, store, []int64{u.ID}); err != nil {
 		return true, err
 	}
-	perm.Invalidate()
+	perm.InvalidateFor(ctx, u.ID)
 	return true, nil
 }
 
@@ -341,7 +341,7 @@ func SyncLevels(ctx context.Context, store db.Store, userIDs []int64) error {
 		}
 	}
 	if changed {
-		perm.Invalidate()
+		perm.InvalidateFor(ctx, userIDs...)
 	}
 	return nil
 }
