@@ -180,10 +180,15 @@ rev2=$(rev)
 snap list filex-app
 [ "$rev2" != "$rev1" ] || fail "this build's snap did not install as a new revision (still $rev1)"
 [ "$(ver)" = "$(app_version "$newv")" ] || fail "after the update the snap says $(ver), this build is $newv"
-[ "$(readlink "$sdir/current")" = "$rev2" ] || fail "$sdir/current leads to $(readlink "$sdir/current"), not $rev2"
+# ~/snap/<name>/current is moved by `snap run`, the next time the person
+# starts the app, not by the refresh (v0.55.0 dry run: still the old revision
+# right after it, on both Linux machines). The link and the data are read once
+# the updated app has started, as the person finds them.
+echo "right after the refresh $sdir/current leads to $(readlink "$sdir/current")"
+look --exe /snap/bin/filex-app --out "$shots/$label-upgrade-snap-updated.png" --port 9343 --timeout 150 --expect-snap-confinement
+[ "$(readlink "$sdir/current")" = "$rev2" ] || fail "after the updated app started, $sdir/current leads to $(readlink "$sdir/current"), not $rev2"
 [ "$(cat "$sdir/$rev2/$rel/$MARK" 2>/dev/null)" = "$token" ] || fail "the refresh did not carry \$SNAP_USER_DATA over: no $sdir/$rev2/$rel/$MARK"
 [ "$(cat "$sdir/common/$MARK" 2>/dev/null)" = "$token" ] || fail "the refresh lost \$SNAP_USER_COMMON: no $sdir/common/$MARK"
-look --exe /snap/bin/filex-app --out "$shots/$label-upgrade-snap-updated.png" --port 9343 --timeout 150 --expect-snap-confinement
 now=$(user_data_dirs "$sdir/$rev2")
 [ "$now" = "$sdir/$rev2/$rel" ] || fail "the updated snap keeps its user data elsewhere: ${now:-none} (the previous revision used \$SNAP_USER_DATA/$rel)"
 [ "$(cat "$sdir/$rev2/$rel/$MARK" 2>/dev/null)" = "$token" ] || fail "the updated app lost $sdir/$rev2/$rel/$MARK"
